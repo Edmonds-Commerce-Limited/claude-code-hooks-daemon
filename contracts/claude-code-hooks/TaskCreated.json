@@ -24,7 +24,6 @@
     "session_id": "abc123",
     "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
     "cwd": "/Users/...",
-    "permission_mode": "default",
     "hook_event_name": "TaskCreated",
     "task_id": "task-001",
     "task_subject": "Implement user authentication",

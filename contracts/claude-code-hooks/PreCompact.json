@@ -27,6 +27,6 @@
     "cwd": "/Users/...",
     "hook_event_name": "PreCompact",
     "trigger": "manual",
-    "custom_instructions": ""
+    "custom_instructions": null
   }
 }

@@ -4,6 +4,9 @@
 # checker FAILS on an entry whose drift disappears — delete it with the
 # change that closes the gap.
 entries:
+  - id: "missing-refusal-claim:PreModelSwitch:deny"
+    reason: "KEPT (v2.1.252 refresh): PreModelSwitch is newly documented (Claude Code v2.1.251) and catalogued with wired=False — the daemon has no forwarder, dispatch or serialiser for it yet, so a REFUSAL_CAPABLE_EVENTS DENY claim would assert a wire capability nothing can exercise. Add the DENY (and ASK) claim in the same change that wires the event; the gap is tracked in EXPECTED_UNWIRED."
+    link: "tests/integration/test_hook_coverage_completeness.py EXPECTED_UNWIRED (Plan 00170 tracked-gap rule)"
   - id: "dead-letter-field:ConfigChange:systemMessage"
     reason: "KEPT (Plan 00271 Task 3.1): the docs say Claude Code accepts but DISCARDS systemMessage on this event; the daemon's advisory path still emits it, which is documented-valid. Removing the emission would silently drop handler context with no replacement channel."
     link: "Plan 00271 Task 3.1"

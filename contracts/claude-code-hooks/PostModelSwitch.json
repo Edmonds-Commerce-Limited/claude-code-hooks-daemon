@@ -1,0 +1,33 @@
+{
+  "event": "PostModelSwitch",
+  "block_mechanism": null,
+  "can_block": false,
+  "ask_capable": false,
+  "top_level_output_fields": [
+    "continue",
+    "stopReason",
+    "suppressOutput",
+    "systemMessage",
+    "terminalSequence",
+    "additionalContext"
+  ],
+  "top_level_decision_enum": null,
+  "hook_specific_output_fields": null,
+  "discarded_fields": [],
+  "notes": "New in Claude Code v2.1.251. Cannot block -- the model has already changed. Plain-text stdout on exit 0, or additionalContext from JSON output, is delivered to Claude with the next request after the switch (the docs list additionalContext as a returnable field 'in addition to the JSON output fields available to all hooks', i.e. top level, not hookSpecificOutput). If the hook hasn't finished within five seconds after the next prompt is sent, the output is attached to the following request instead; multiple switches before the next request deliver only the last switch's output. Runs for requested switches, automatic model fallback, opusplan entering/leaving plan mode, and session-resume restore -- but NOT for a one-turn fallback-chain substitution. Input: same fields as PreModelSwitch with hook_event_name 'PostModelSwitch' and two more source values: 'auto' (automatic fallback or other self-made change; requested_model is null) and 'resume' (requested_model is the saved model setting restored).",
+  "input_example": {
+    "session_id": "abc123",
+    "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
+    "cwd": "/Users/...",
+    "hook_event_name": "PostModelSwitch",
+    "from_model": "claude-sonnet-5",
+    "to_model": "claude-opus-5",
+    "requested_model": "opus",
+    "source": "command",
+    "context_tokens": 182340,
+    "prompt_cache_warm": true,
+    "cache_ttl": "5m",
+    "estimated_cache_write_usd": 1.1396,
+    "pricing": "catalog"
+  }
+}

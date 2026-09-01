@@ -11,11 +11,13 @@
     "terminalSequence"
   ],
   "top_level_decision_enum": null,
-  "hook_specific_output_fields": {
-    "additionalContext": {}
-  },
-  "discarded_fields": [],
-  "notes": "Cannot block; execution continues on any exit code.",
+  "hook_specific_output_fields": null,
+  "discarded_fields": [
+    "systemMessage",
+    "continue",
+    "hookSpecificOutput.additionalContext"
+  ],
+  "notes": "Cannot block; execution continues on any exit code. On every exit code, Claude Code discards a Setup hook's JSON output fields, such as systemMessage, continue, and hookSpecificOutput.additionalContext.",
   "input_example": {
     "session_id": "abc123",
     "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",

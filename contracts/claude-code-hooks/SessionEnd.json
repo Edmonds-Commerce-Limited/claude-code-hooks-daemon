@@ -13,11 +13,9 @@
   "top_level_decision_enum": null,
   "hook_specific_output_fields": null,
   "discarded_fields": [
-    "systemMessage",
-    "continue",
-    "stopReason"
+    "systemMessage"
   ],
-  "notes": "No decision control; JSON output fields discarded.",
+  "notes": "No decision control. The docs say Claude Code discards its JSON output fields, 'such as systemMessage' -- only systemMessage is named verbatim; the discard is open-ended over all JSON output fields.",
   "input_example": {
     "session_id": "abc123",
     "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",

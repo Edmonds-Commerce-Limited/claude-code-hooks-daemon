@@ -506,6 +506,33 @@ class EventID:
         category="mcp",
     )
 
+    PRE_MODEL_SWITCH = EventIDMeta(
+        enum_value="PRE_MODEL_SWITCH",
+        config_key="pre_model_switch",
+        bash_key="pre-model-switch",
+        json_key="PreModelSwitch",
+        can_block=True,
+        category="model",
+        # Documented in Claude Code v2.1.251 (exit 2, top-level decision: block,
+        # or permissionDecision allow/deny/ask cancels a requested model switch)
+        # but not yet wired end-to-end; tracked in EXPECTED_UNWIRED per this
+        # file's tracked-gap rule.
+        wired=False,
+    )
+
+    POST_MODEL_SWITCH = EventIDMeta(
+        enum_value="POST_MODEL_SWITCH",
+        config_key="post_model_switch",
+        bash_key="post-model-switch",
+        json_key="PostModelSwitch",
+        can_block=False,
+        category="model",
+        # Documented in Claude Code v2.1.251 (context-only, runs after the
+        # session's model changes) but not yet wired end-to-end; tracked in
+        # EXPECTED_UNWIRED per this file's tracked-gap rule.
+        wired=False,
+    )
+
 
 # StatusLine dual-naming — the single source of truth shared by the input and
 # response schema builders. Its catalogue json_key is "StatusLine", but its
@@ -591,4 +618,6 @@ EventKey = Literal[
     "post_compact",
     "elicitation",
     "elicitation_result",
+    "pre_model_switch",
+    "post_model_switch",
 ]

@@ -14,10 +14,9 @@
   "hook_specific_output_fields": null,
   "discarded_fields": [
     "systemMessage",
-    "continue",
-    "stopReason"
+    "continue"
   ],
-  "notes": "JSON output fields discarded except terminalSequence.",
+  "notes": "Cannot block or modify notifications. systemMessage and continue are discarded; terminalSequence is still emitted. Intended for side effects such as forwarding the notification to an external service.",
   "input_example": {
     "session_id": "abc123",
     "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",

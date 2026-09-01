@@ -20,7 +20,7 @@
     "systemMessage",
     "continue"
   ],
-  "notes": "Path return, not allow/block: a command hook prints the path as the last non-empty line of stdout (it cannot return JSON at all); an HTTP hook returns hookSpecificOutput.worktreePath. Hook failure or missing path fails creation.",
+  "notes": "Path return, not allow/block: a command hook prints the path as the last non-empty line of stdout, redirecting any other hook output to stderr; an HTTP hook returns hookSpecificOutput.worktreePath. Hook failure or missing path fails creation.",
   "input_example": {
     "session_id": "abc123",
     "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",

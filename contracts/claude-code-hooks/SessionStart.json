@@ -19,13 +19,17 @@
     "reloadSkills": {}
   },
   "discarded_fields": [],
-  "notes": "Context-only: no blocking or decision control. additionalContext is injected into Claude's context before the first prompt; systemMessage is a user-facing warning, not Claude context.",
+  "notes": "Context-only: no blocking or decision control. additionalContext is injected into Claude's context before the first prompt; systemMessage is a user-facing warning, not Claude context. Input also optionally carries agent_type (with claude --agent <name>) and session_title. When source is 'resume' or 'fork' and the transcript has at least one Claude response, four resume-cost fields are added (Claude Code v2.1.251+): seconds_since_last_response, context_tokens, prompt_cache_likely_expired, estimated_cache_write_usd.",
   "input_example": {
     "session_id": "abc123",
     "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
     "cwd": "/Users/...",
     "hook_event_name": "SessionStart",
-    "source": "startup",
-    "model": "claude-sonnet-5"
+    "source": "resume",
+    "model": "claude-opus-5",
+    "seconds_since_last_response": 5400,
+    "context_tokens": 182340,
+    "prompt_cache_likely_expired": true,
+    "estimated_cache_write_usd": 1.1396
   }
 }

@@ -74,6 +74,8 @@ CLAUDE_CODE_HOOK_EVENTS: frozenset[str] = frozenset(
         "Elicitation",
         "ElicitationResult",
         "SessionEnd",
+        "PreModelSwitch",
+        "PostModelSwitch",
     }
 )
 
@@ -92,7 +94,15 @@ _STATUS_EVENTTYPE_VALUE = "Status"
 # SDK register_repo_root) and catalogued with wired=False; wiring it end-to-end
 # (forwarder + settings + dispatch) is a follow-up. Remove from BOTH places in
 # the same change when wired.
-EXPECTED_UNWIRED: frozenset[str] = frozenset({"DirectoryAdded"})
+#
+# PreModelSwitch / PostModelSwitch (Claude Code v2.1.251): documented and
+# catalogued with wired=False; wiring them end-to-end (forwarder + settings +
+# dispatch + schemas, plus a REFUSAL_CAPABLE_EVENTS DENY/ASK claim for
+# PreModelSwitch) is a follow-up. Remove from BOTH places in the same change
+# when wired.
+EXPECTED_UNWIRED: frozenset[str] = frozenset(
+    {"DirectoryAdded", "PreModelSwitch", "PostModelSwitch"}
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOKS_DIR = _REPO_ROOT / ".claude" / "hooks"
