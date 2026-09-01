@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00299: multi plan goal support](00299-multi-plan-goal-support/PLAN.md) - Not Started (the `/goal` Stop-hook condition is a single session-scoped slot that concurrent worktree plans overwrite last-writer-wins, while the daemon's goal ledger already tracks multiple In-Progress plans — make the ledger authoritative and the goal signal a per-plan-additive view of it)
+
 - [00298: failsafe cron blockage cadence](00298-failsafe-cron-blockage-cadence/PLAN.md) - Not Started (design/brainstorm: a session stably blocked only on human input burns a full model turn per hourly failsafe-cron tick — recommends a daemon-side blocked-state marker + zero-token `UserPromptSubmit` suppression, with a bounded expiry so a stale marker cannot mask a real rate-limit recovery)
 
 - [00297: supervisor drop anchor safety net](00297-supervisor-drop-anchor-safety-net/PLAN.md) - Not Started (read-back-verified hard stop whenever the session is observed running Fable above low effort)
@@ -1297,7 +1299,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Completed**: 244 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
