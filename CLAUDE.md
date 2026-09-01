@@ -502,10 +502,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - hook_registration_checker — hooks configuration policy
 
-<!-- handler: model-fallback-detector -->
-
-- model_fallback_detector — silent model substitution is surfaced
-
 <!-- handler: plan-qa-sweep -->
 
 - plan_qa_sweep — plan-tree drift report at session start
@@ -529,6 +525,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: docs-qa-sweep -->
 
 - docs_qa_sweep — documentation drift report at session start
+
+<!-- handler: model-fallback-detector -->
+
+- model_fallback_detector — silent model substitution is surfaced
 
 <!-- handler: idle-housekeeping-advisory -->
 
