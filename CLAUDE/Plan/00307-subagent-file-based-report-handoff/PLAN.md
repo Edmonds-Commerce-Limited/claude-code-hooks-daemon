@@ -31,9 +31,9 @@ threshold/steering design thinking where it fits.
 
 ## Goals
 
-- Measure the real problem before choosing defaults: distribution of subagent
-  final-message sizes across recorded transcripts, and how often truncation
-  actually occurred.
+- Prove the problem with a live reproduction (owner-ruled, replacing an
+  earlier measure-first phase): dispatch a subagent instructed to return an
+  oversized final message and record what the coordinator actually receives.
 - Prevention at dispatch: the Agent-tool prompt carries the file-handoff
   contract so agents know the rule before they start.
 - Enforcement at return: a subagent whose final message exceeds the threshold
@@ -51,13 +51,16 @@ threshold/steering design thinking where it fits.
 
 ## Tasks
 
-### Phase 1: Measure and verify the surfaces
+### Phase 1: Reproduce and verify the surfaces
 
-- [ ] ⬜ **Task 1.1**: Transcript analysis (Plan 00293-style analyser or a
-  one-off script): across available session transcripts, report the
-  distribution of subagent final-message sizes, the frequency of truncated
-  returns, and typical report shapes. Output: a findings doc in this plan
-  folder that pins the threshold recommendation (block vs advise, size).
+- [ ] ⬜ **Task 1.1**: Live reproduction (RED): dispatch a subagent
+  explicitly instructed to return an oversized final message (well past the
+  suspected ~16k-token cap; e.g. generate long structured filler and return
+  it ALL inline, writing nothing to disk). Record in a findings doc in this
+  plan folder: what the coordinator received (truncated? garbled? errored?),
+  the observed size limit, and the exact dispatch prompt so the run is
+  repeatable verbatim as the Phase 4 acceptance check. This same evidence
+  pins the enforcement threshold.
 - [ ] ⬜ **Task 1.2**: Verify the hook surfaces against the vendored
   contract (contracts/claude-code-hooks/, now at v2.1.252): confirm what
   SubagentStop receives (transcript path? final message?), whether the
@@ -87,12 +90,17 @@ threshold/steering design thinking where it fits.
   wiring status in `constants/events.py` — if the event is currently
   unwired, wiring it is part of this task.
 
-### Phase 4: Dogfood, then default
+### Phase 4: Prove the fix, dogfood, then default
 
-- [ ] ⬜ **Task 4.1**: Dogfood both handlers in this repo across real
+- [ ] ⬜ **Task 4.1**: Re-run the Task 1.1 reproduction VERBATIM (GREEN):
+  the same oversized-return dispatch must now be caught — the dispatch-time
+  contract injected, and the oversized final message blocked at
+  SubagentStop until the agent re-routes the report through a file and
+  returns summary + path. Record the before/after in the findings doc.
+- [ ] ⬜ **Task 4.2**: Dogfood both handlers in this repo across real
   multi-agent work; journal observed fires, false positives, and agent
   compliance. Tune thresholds/wording from the journal evidence.
-- [ ] ⬜ **Task 4.2**: Decide per-handler client defaults
+- [ ] ⬜ **Task 4.3**: Decide per-handler client defaults
   (`get_default_enabled`) from the dogfood evidence; update docs and
   CHANGELOG for release.
 
