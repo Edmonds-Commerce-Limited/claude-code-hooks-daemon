@@ -4,11 +4,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00309: lint on edit per language timeout](00309-lint-on-edit-per-language-timeout/PLAN.md) - Not Started (make lint_on_edit's hardcoded 15s extended-lint timeout configurable per language — php-qa-ci phpstan is ~5s warm but cold/lock-contended runs exceed 15s and silently allow)
+- [00309: lint on edit per language timeout](00309-lint-on-edit-per-language-timeout/PLAN.md) - In Progress (per-language `options.timeouts` delivered at 373db1f9; success-criteria confirmation pending)
 
-- [00308: post upgrade config optimisation autorun](00308-post-upgrade-config-optimisation-autorun/PLAN.md) - Not Started (formalise "enable all relevant handlers and optimise config" as a first-class step and autorun it after every daemon upgrade, with session-start reinforcement when skipped)
+- [00308: post upgrade config optimisation autorun](00308-post-upgrade-config-optimisation-autorun/PLAN.md) - Not Started (formalise "enable all relevant handlers and optimise config" and autorun it post-upgrade)
 
-- [00307: subagent file based report handoff](00307-subagent-file-based-report-handoff/PLAN.md) - Not Started (field report: subagent final reports truncated by the harness tool-result cap; establish and enforce "large data travels by file, the message is summary + path" — measure first, then PreToolUse dispatch-contract injection + SubagentStop oversized-return blocking, dogfooded here)
+- [00307: subagent file based report handoff](00307-subagent-file-based-report-handoff/PLAN.md) - In Progress (subagents hand over large data by file, never inline; both enforcement handlers live at 5f674028, GREEN acceptance re-run pending)
 
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 
