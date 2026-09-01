@@ -1,6 +1,6 @@
 # Plan 00308: post upgrade config optimisation autorun
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: Medium
@@ -118,4 +118,15 @@ you" pass instead of silence.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00308-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- `022dbcea` (worktree delivery) merged at `d29c0c15`'s successor merge
+  commit — /optimise promoted with manifest-diff Step 0 + run-recording,
+  upgrade/install flow wiring with `--skip-config-optimisation`,
+  `config_optimisation_reminder` SessionStart safety net.
+- Coordinator live verification post-merge: daemon restarted with
+  `config_optimisation_reminder` registered;
+  `record-config-optimisation-run` CLI writes
+  `untracked/config_optimisation_state.json` at the installed version
+  (clearing the advisory). The end-to-end `scripts/upgrade.sh` run is
+  deferred to the next real release upgrade — running it against this live
+  dogfood installation mid-session would upgrade the running daemon; the
+  script-path flag plumbing is test-covered.

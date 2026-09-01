@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00308: post upgrade config optimisation autorun](00308-post-upgrade-config-optimisation-autorun/PLAN.md) - In Progress (formalise "enable all relevant handlers and optimise config" and autorun it post-upgrade)
-
 - [00307: subagent file based report handoff](00307-subagent-file-based-report-handoff/PLAN.md) - In Progress (subagents hand over large data by file, never inline; both enforcement handlers live at 5f674028, GREEN acceptance re-run pending)
 
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
@@ -172,6 +170,8 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00309: lint on edit per language timeout](Completed/00309-lint-on-edit-per-language-timeout/PLAN.md) - Complete at 373db1f9, merged at 6ca8bf79 (per-language `options.timeouts.<Language>` for lint_on_edit; fail-open kept, fired timeouts now name the language, budget and config key)
 
+- [00308: post upgrade config optimisation autorun](Completed/00308-post-upgrade-config-optimisation-autorun/PLAN.md) - Complete at 022dbcea (merged) (/optimise promoted as the canonical config-optimisation step with manifest-diff + run recording; upgrade/install flows invoke it with `--skip-config-optimisation` opt-out; `config_optimisation_reminder` SessionStart safety net)
+
 - [00310: plan readme completed row ageout](Completed/00310-plan-readme-completed-row-ageout/PLAN.md) - Complete (Completed rows now age out: main README retains the 30 highest-numbered; older rows archived verbatim in Completed/README.md, enforced by test_plan_index_navigability.py)
 
 - [00306: secret bash mention overbroad matching](Completed/00306-secret-bash-mention-overbroad-matching/PLAN.md) - Complete at 49befa8b (secret_file_guard Bash-mention false positives fixed, `git rm --cached` exempted, plus four same-subsystem review findings)
@@ -228,8 +228,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00275: github auto-close keyword blocker](Completed/00275-github-auto-close-keyword-blocker/PLAN.md) - Complete at merge `2bdafe05` (PreToolUse guard denying GitHub auto-closing keyword references in git commit/merge/tag and `gh pr` messages, inline or via `-F`/`--body-file`; enabled by default, `MUST_AUTO_CLOSE_BECAUSE` hatch)
 
-- [00273: hook input payload validation](Completed/00273-hook-input-payload-validation/PLAN.md) - Complete at merge `e0f3dee9` + review fold `02957cb4` (input_contract QA check over the daemon's AST-derived read surface vs vendored input examples; Phase 2 runtime validation ruled NO-GO; Phase 3 channel question answered sentinel-free from transcript attachment typing — both SessionStart channels kept, each serving its own audience)
-
 ## Blocked / On Hold Plans
 
 - **00032, 00034, 00035** - On hold pending upstream Claude Code delegate mode fix (GitHub #23447, #25037)
@@ -269,9 +267,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 310 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 255 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 256 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 38 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 

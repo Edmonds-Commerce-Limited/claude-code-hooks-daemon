@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00273: hook input payload validation](00273-hook-input-payload-validation/PLAN.md) - Complete at merge `e0f3dee9` + review fold `02957cb4` (input_contract QA check over the daemon's AST-derived read surface vs vendored input examples; Phase 2 runtime validation ruled NO-GO; Phase 3 channel question answered sentinel-free from transcript attachment typing — both SessionStart channels kept, each serving its own audience)
+
 - [00272: secret file read blocker](00272-secret-file-read-blocker/PLAN.md) - Complete at merges `4c7c5e53` + `0419b22a` + the archiving commit (deny-by-default `secret_file_guard`, `secret-meta` metadata helper, hygiene advisory, no escape hatch; read-route research classifies every route (b)/(c)/(d), class-(d) residuals closed only by OS-level controls)
 
 - [00271: hook contract alignment](00271-hook-contract-alignment/PLAN.md) - Complete at merge `18d35ba2` + the commit that archives it (DBF-first: vendored hook contracts + network-free `hook_contract` QA check landed RED against 59 findings, all 9 load-bearing drifts fixed, allowlist burned to 29 reasoned KEPT gaps; follow-ups in Plan 00273)
