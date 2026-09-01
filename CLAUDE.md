@@ -383,6 +383,8 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 
 <!-- handler: validate-eslint-on-write -->
 
+<!-- handler: failsafe-cron-blockage-suppressor -->
+
 | ID                                 | Blocked                                                                                              | Why                                                                                                                             | Fix                                                                                                              |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | R-GIT-RESET-HARD                   | `git reset --hard`                                                                                   | Permanently destroys all uncommitted changes                                                                                    | Ask the user to run it manually                                                                                  |
@@ -445,6 +447,7 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 | R-ESLINT-ERRORS                    | a written/authored TS/TSX file with reported ESLint errors                                           | The write has already landed on disk; this is a failure report, not a rollback                                                  | Fix the reported problems with Edit (`npx eslint <file> --fix` clears most)                                      |
 | R-ESLINT-TIMEOUT                   | an ESLint run that did not finish within the configured timeout                                      | This handler DENIES on a timeout — unlike lint_on_edit, which allows                                                            | Investigate why ESLint is slow (config, project size); retry the edit                                            |
 | R-ESLINT-RUN-FAILURE               | an ESLint invocation that failed to run at all                                                       | ESLint could not be launched (exception raised invoking it)                                                                     | Check the ESLint wrapper/tsx setup, then retry the edit                                                          |
+| R-FAILSAFE-CRON-SUPPRESSED         | A delivered failsafe-cron tick, while a 'blocked only on human input' marker is live                 | Every tick against a session blocked only on human input is a guaranteed no-op model turn                                       | Nothing to do -- this is expected. Send a real message to clear the marker and resume ticks                      |
 
 ## Advisories and other active handlers
 
@@ -482,13 +485,13 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - markdown_table_formatter — markdown tables are auto-aligned
 
-<!-- handler: recovery-cron-advisor -->
-
-- recovery_cron_advisor — failsafe recovery cron lifecycle advisory
-
 <!-- handler: goal-injection -->
 
 - goal_injection — plan-start goal signal for the ccy supervisor
+
+<!-- handler: recovery-cron-advisor -->
+
+- recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
 <!-- handler: ccy-supervisor-integrity -->
 
