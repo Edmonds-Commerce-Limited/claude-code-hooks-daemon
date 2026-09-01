@@ -899,6 +899,36 @@
       "function": "_find_manifest_dirs",
       "rule": "return-none-on-error",
       "reason": "Plan 00296 T3.4: the manifest walk is advisory-only session-start detection, never a decision path -- an unreadable directory during the walk (permissions, a race with a concurrent delete) is logged at DEBUG and that subtree is skipped, so the advisory it feeds still fires for every reachable manifest instead of aborting the whole scan over one unlistable directory."
+    },
+    {
+      "file": "handlers/stop/auto_continue_stop.py",
+      "function": "_maybe_record_human_blocked_marker",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00298: recording the blocked-on-human-input marker is a documented fail-open enrichment of an ALLOWed Stop -- the marker write is best-effort so a RuntimeError from an uninitialised ProjectContext (unit tests, degraded startup) must never affect the Stop decision itself. Logged at debug; the caller simply proceeds without a marker, which fails open to full hourly cron coverage (the safe default)."
+    },
+    {
+      "file": "utils/blockage_marker.py",
+      "function": "write_marker",
+      "rule": "log-and-continue",
+      "reason": "Plan 00298: the marker write is best-effort by contract -- it runs inside Stop handling, and an unwritable untracked dir (permissions, disk full, a blocked parent) must never break the Stop event. The OSError is logged at warning; the caller degrades to 'no marker recorded', which fails open to full hourly cron coverage."
+    },
+    {
+      "file": "utils/blockage_marker.py",
+      "function": "read_marker",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00298: standard tolerant-JSON-record pattern (same shape as goal_ledger._parse_entry). A missing, unreadable, or corrupt marker file all map to None -- the documented fail-open outcome consumed by failsafe_cron_blockage_suppressor as 'do not suppress', never a reason to raise out of a UserPromptSubmit handler."
+    },
+    {
+      "file": "utils/blockage_marker.py",
+      "function": "clear_marker",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00298: clearing a marker that is already absent (FileNotFoundError) is not an error -- it is the exact state the caller wanted. An OSError removing an existing marker is logged at debug and swallowed: clear_marker is a best-effort cleanup helper, and a stale marker left behind only means suppression stays live until its own expiry, never an incorrect suppression."
+    },
+    {
+      "file": "utils/blockage_marker.py",
+      "function": "clear_marker",
+      "rule": "log-and-continue",
+      "reason": "Plan 00298: same site as the return-none-on-error entry immediately above -- clear_marker's OSError branch is both 'returns without raising' and 'logs and continues' under this audit's classification. An unwritable marker file degrades to 'the marker stays present until its own expiry', which is the documented fail-open outcome, not a concealed failure."
     }
   ]
 }

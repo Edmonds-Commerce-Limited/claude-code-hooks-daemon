@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.core.transcript_reader import (
     TranscriptMessage,
     TranscriptReader,
 )
+from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
 from claude_code_hooks_daemon.utils.goal_ledger import (
     LEDGER_FILENAME,
     GoalLedger,
@@ -122,6 +123,22 @@ _TOOL_ERROR_RECOVERY_REASON = (
 
 # Prefix an assistant message uses to signal an intentional, explained stop.
 _STOP_EXPLANATION_PREFIX = "STOPPING BECAUSE:"
+
+# Plan 00298: narrow "blocked only on human input" shapes. Deliberately a
+# short, enumerated set -- NOT a broad "input" substring match -- because a
+# stop reason that merely MENTIONS human input without being stably blocked
+# on it (e.g. "waiting for human review of this PR, but background polling
+# continues") must not arm cron-tick suppression. Matched case-insensitively
+# against the resolved current-turn message text.
+_HUMAN_BLOCKED_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"blocked only on human input", re.IGNORECASE),
+    re.compile(r"blocked only on (?:the )?(?:owner|user)('s)? input", re.IGNORECASE),
+    re.compile(r"need(?:s|ed)? user input", re.IGNORECASE),
+    re.compile(
+        r"waiting (?:on|for) (?:the )?(?:owner|user)(?:'s)? (?:decision|input|response|answer)",
+        re.IGNORECASE,
+    ),
+)
 
 # SINGLE SOURCE OF TRUTH for get_rules() / the disclosure ladder (Plan 00116,
 # Phase 3): one Rule per DENY-branch CONCEPT, not per historical reason
@@ -508,6 +525,7 @@ class AutoContinueStopHandler(StopHandlerBase):
                     self._log_stop_event(hook_input, Decision.DENY, reason)
                     return result
                 logger.info("STOPPING BECAUSE: prefix detected - allowing stop")
+                self._maybe_record_human_blocked_marker(hook_input, text)
                 result = BlockingResult(decision=Decision.ALLOW)
                 self._log_stop_event(hook_input, Decision.ALLOW, "")
                 return result
@@ -611,6 +629,29 @@ class AutoContinueStopHandler(StopHandlerBase):
         if not live:
             return None
         return _GOAL_LEDGER_CHALLENGE_TEMPLATE.format(plans=", ".join(live))
+
+    def _maybe_record_human_blocked_marker(self, hook_input: dict[str, Any], text: str) -> None:
+        """Record the Plan 00298 blockage marker when ``text`` matches a
+        narrow 'blocked only on human input' shape. Best-effort: any failure
+        to resolve project context or write the marker is logged and
+        swallowed -- this must never affect the Stop decision itself.
+
+        Args:
+            hook_input: The Stop event's hook input (for session_id).
+            text: The current turn's full STOPPING BECAUSE: message text.
+        """
+        if not any(pattern.search(text) for pattern in _HUMAN_BLOCKED_PATTERNS):
+            return
+        session_id = hook_input.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            logger.debug("human-blocked marker: no session_id, skipping")
+            return
+        try:
+            marker_path = ProjectContext.daemon_untracked_dir() / MARKER_FILENAME
+        except RuntimeError as e:
+            logger.debug("human-blocked marker: no project context, skipping: %s", e)
+            return
+        write_marker(marker_path, session_id)
 
     def _is_qa_failure(self, reader: TranscriptReader) -> bool:
         """Return True if the last QA Bash command's OWN result indicates failure.

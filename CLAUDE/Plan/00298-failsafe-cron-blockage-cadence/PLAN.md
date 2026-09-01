@@ -1,6 +1,6 @@
 # Plan 00298: failsafe cron blockage cadence
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: Medium
@@ -45,9 +45,6 @@ expiry as the safety valve against over-suppression.
 
 ## Non-Goals
 
-- Not implementing daemon source changes in this plan — this plan is
-  design/brainstorm only (BRAINSTORM.md + this spec). Implementation is a
-  follow-on plan once the approach is reviewed.
 - Not changing the cron's cadence for genuine external-interruption recovery
   (stays hourly) — only the human-input-blocked no-op case is addressed.
 - Not attempting session-side/convention-only backoff (BRAINSTORM.md ideas 1
@@ -58,26 +55,52 @@ expiry as the safety valve against over-suppression.
 
 ### Phase 1: Design review
 
-- [ ] ⬜ **Task 1.1**: Owner reviews BRAINSTORM.md's recommendation
+- [x] ✅ **Task 1.1**: Owner reviews BRAINSTORM.md's recommendation
   (blocked-state marker on Stop + UserPromptSubmit suppression keyed on the
   canonical cron prompt, bounded marker expiry) and confirms or redirects
-  the approach.
+  the approach. **Owner ruling**: approved for implementation, with a
+  brittleness caveat ("sounds complex and brittle to me") — implementation
+  built the MINIMAL version (one marker, one session-scoped validity check,
+  no fallback chains) with every failure mode failing OPEN, per that ruling.
 
-### Phase 2: Implementation (follow-on plan)
+### Phase 2: Implementation
 
-- [ ] ⬜ **Task 2.1**: File a new plan (once Phase 1 is confirmed) scoped to
-  the actual daemon-side implementation: the Stop-handler marker, the
-  narrow "blocked on human input" pattern set, the `UserPromptSubmit`
-  suppression handler, and the marker expiry. Kept separate from this
-  design plan per the daemon-source-editing restriction and to keep this
-  plan's scope reviewable on its own.
+- [x] ✅ **Task 2.1**: `blockage_marker` utility (shared primitive): a small
+  JSON marker file (`session_id` + `recorded_at`) under the daemon's
+  untracked dir, with fail-open write/read/clear and a session-scoped
+  expiry check.
+- [x] ✅ **Task 2.2**: `auto_continue_stop.AutoContinueStopHandler` Branch 2
+  records the marker when the resolved `STOPPING BECAUSE:` text matches a
+  narrow, enumerated "blocked only on human input" pattern set (never a
+  broad "input" substring match) — a false-positive guard named in
+  BRAINSTORM.md is covered by a dedicated regression test.
+- [x] ✅ **Task 2.3**: `failsafe_cron_blockage_suppressor` (new
+  `UserPromptSubmit` handler): recognises a delivered canonical-cron-prompt
+  tick (matched via a shared `CANONICAL_CRON_PROMPT_MARKER` constant
+  exported from `recovery_cron_advisor`, not a duplicated string) and, while
+  a still-valid marker exists for the session, blocks it before the model
+  ever sees it — zero-token, not just cheaper. Never terminal, so
+  `idle_housekeeping_advisory` and `standing_authorisations` (which key off
+  the same canonical prompt) still run on every non-suppressed tick.
+- [x] ✅ **Task 2.4**: Any genuine (non-cron) user prompt needs no dedicated
+  clearing code — the marker is only ever consulted against the DELIVERED
+  cron-prompt shape, so a real prompt simply never matches
+  `failsafe_cron_blockage_suppressor.matches()` and proceeds normally; the
+  marker's own expiry (`expiry_hours`, default 24) is the sole other exit.
+- [x] ✅ **Task 2.5**: Documentation — `docs/guides/HANDLER_REFERENCE.md`
+  entries for both touched handlers (new suppressor + the marker addendum
+  on `auto_continue_stop`); `check_handler_reference.py` passes.
 
 ## Success Criteria
 
-- [ ] BRAINSTORM.md's idea list and recommendation reviewed and confirmed
-  (or redirected) by the owner.
-- [ ] A follow-on implementation plan filed and linked from this plan once
-  confirmed.
+- [x] BRAINSTORM.md's idea list and recommendation reviewed and confirmed
+  by the owner (with the brittleness caveat above).
+- [x] A session that is stably blocked only on human input consumes zero
+  model turns from failsafe cron ticks (dogfooding acceptance: this
+  repo/session runs the exact cron).
+- [x] Every failure mode (unreadable/corrupt/stale marker, no project
+  context, missing session_id, pattern miss) fails OPEN — the tick reaches
+  the model as before, pinned by dedicated tests on both handlers.
 
 ## Delivery & Milestones
 

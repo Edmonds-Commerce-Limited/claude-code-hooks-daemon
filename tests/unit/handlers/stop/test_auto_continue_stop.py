@@ -3044,3 +3044,197 @@ class TestAutoContinueStopDisclosureLadder:
         assert first.reason is not None and second.reason is not None
         assert "DO NOT STOP because the context window" in first.reason
         assert "DO NOT STOP because the context window" in second.reason
+
+
+class TestHumanBlockedMarker:
+    """Plan 00298: a narrow subset of Branch 2 (STOPPING BECAUSE:) ALLOWs
+    records a 'blocked only on human input' marker, consumed by
+    failsafe_cron_blockage_suppressor to short-circuit a delivered cron tick
+    before the model runs. Fail-open throughout: any failure to resolve
+    project context or write the marker must never turn an ALLOW into
+    anything else."""
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        return AutoContinueStopHandler()
+
+    def _write_assistant_text(self, path: Path, text: str) -> None:
+        msg = {
+            "type": "message",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
+        }
+        with path.open("w") as f:
+            f.write(json.dumps(msg) + "\n")
+
+    def _marker_path(self, tmp_path: Path) -> Path:
+        from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME
+
+        return tmp_path / MARKER_FILENAME
+
+    def test_narrow_pattern_writes_marker_and_still_allows(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript,
+            "STOPPING BECAUSE: failsafe cron tick, nothing to resume, "
+            "blocked only on human input. Waiting.",
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-1",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+
+        from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, read_marker
+
+        marker = read_marker(marker_dir / MARKER_FILENAME)
+        assert marker is not None
+        assert marker.session_id == "sess-1"
+
+    def test_ordinary_stopping_because_does_not_write_marker(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript, "STOPPING BECAUSE: all tasks complete and QA passes."
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-1",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert not self._marker_path(marker_dir).exists()
+
+    def test_a_stop_mentioning_human_input_but_not_narrow_shape_does_not_write_marker(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """False-positive guard named in BRAINSTORM.md: mentioning human input
+        inside an otherwise-normal stop must NOT arm suppression."""
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript,
+            "STOPPING BECAUSE: waiting for human review of this PR before "
+            "merging, but background polling continues.",
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-1",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert not self._marker_path(marker_dir).exists()
+
+    def test_need_user_input_shape_writes_marker(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript, "STOPPING BECAUSE: need user input on which approach to take."
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-1",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert self._marker_path(marker_dir).exists()
+
+    def test_waiting_on_owner_decision_shape_writes_marker(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript, "STOPPING BECAUSE: waiting on the owner's decision about deployment."
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-1",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert self._marker_path(marker_dir).exists()
+
+    def test_no_project_context_still_allows(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Fail-open: a RuntimeError resolving project context must not turn
+        the ALLOW into anything else -- the marker write is best-effort."""
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript, "STOPPING BECAUSE: blocked only on human input. Waiting."
+        )
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-1",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            side_effect=RuntimeError("no project context"),
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+
+    def test_missing_session_id_still_allows_and_skips_marker(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript, "STOPPING BECAUSE: blocked only on human input. Waiting."
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {"transcript_path": str(transcript), "stop_hook_active": False}
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert not self._marker_path(marker_dir).exists()

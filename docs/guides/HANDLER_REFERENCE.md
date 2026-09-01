@@ -3054,6 +3054,8 @@ These handlers run when Claude stops generating a response.
 
 **Goal-ledger Stop defence (Plan 00276):** on the default explain-or-continue denial, the handler consults the daemon-side goal ledger (`goal-ledger.json`, written by `goal_injection`) and appends a challenge naming EVERY ledgered plan still `In Progress` — including plans whose `/goal` condition was displaced by a later goal (the upstream slot is last-writer-wins). Entries retire when their plan reaches a terminal status or is archived, after which stops are no longer challenged on their behalf. Fail-open: a missing or unreadable ledger leaves the default message unchanged.
 
+**Human-input blockage marker (Plan 00298):** when the explicit-stop-explanation branch ALLOWs a stop whose `STOPPING BECAUSE:` text matches a narrow "blocked only on human input" shape (e.g. "blocked only on human input", "need user input", "waiting on the owner's decision" — a short enumerated set, never a broad "input" substring match), the handler records a session-scoped marker (`human-input-blockage-marker.json` under the daemon's untracked dir). `failsafe_cron_blockage_suppressor` reads it to drop the next delivered failsafe-cron tick before it reaches the model. Fail-open: a missing `session_id` or unresolvable project context skips the write silently and never affects the Stop decision.
+
 **Options:**
 
 | Option               | Type   | Default | Description                                                                                                                                                                                                            |
@@ -3122,6 +3124,43 @@ handlers:
       enabled: true
       priority: 20
 ```
+
+---
+
+#### failsafe_cron_blockage_suppressor
+
+| Property       | Value                               |
+| -------------- | ----------------------------------- |
+| **Config key** | `failsafe_cron_blockage_suppressor` |
+| **Priority**   | 37                                  |
+| **Type**       | Blocking                            |
+| **Event**      | UserPromptSubmit                    |
+
+**Description:** Zero-token cadence for a session that is stably blocked only on human input (Plan 00298). When `auto_continue_stop` allows a Stop whose `STOPPING BECAUSE:` text matches a narrow "blocked only on human input" shape, it records a session-scoped marker (`human-input-blockage-marker.json` under the daemon's untracked dir). This handler recognises a DELIVERED failsafe-cron tick — the canonical prompt from `recovery_cron_advisor` — and, while a still-valid marker exists for the session, blocks the prompt before it ever reaches the model (Claude Code's documented `UserPromptSubmit` block behaviour). This is genuinely zero-token, unlike a convention/prompt-text backoff that still costs a full turn to read and act on.
+
+**Fails open everywhere:** no marker, a marker for a different session, an expired marker, a corrupt/unreadable marker, or no resolvable project context all ALLOW the tick through unchanged — suppression is a positive assertion made only when every condition is individually verified, never the default. Any genuine (non-cron) user prompt clears the marker immediately (a different handler-independent behaviour of `auto_continue_stop`'s narrow write conditions never re-arming outside a new matching stop).
+
+**Never terminal:** `idle_housekeeping_advisory` and `standing_authorisations` also key off the same canonical cron prompt and must keep running on every non-suppressed tick. A non-terminal DENY still survives later handlers regardless of registration order.
+
+**Options:**
+
+| Option         | Type  | Default | Description                                                                                                                                          |
+| -------------- | ----- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `expiry_hours` | float | `24`    | How long a recorded marker stays valid without re-confirmation. Past this, cron ticks resume normally even if the session never sent another prompt. |
+
+**Config example:**
+
+```yaml
+handlers:
+  user_prompt_submit:
+    failsafe_cron_blockage_suppressor:
+      enabled: true
+      priority: 37
+      options:
+        expiry_hours: 24
+```
+
+**On by default** (dogfooding purpose, Plan 00298). Set `enabled: false` to restore unconditional hourly cron delivery.
 
 ---
 

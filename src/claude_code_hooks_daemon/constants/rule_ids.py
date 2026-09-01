@@ -458,3 +458,11 @@ class RuleID:
 
     #: A verifier's result is never consumed before a mutator runs.
     VERIFICATION_RESULT_NOT_CONSUMED: str = "R-VERIFICATION-RESULT-NOT-CONSUMED"
+
+    # ------------------------------------------------------------------
+    # failsafe_cron_blockage_suppressor handler (Plan 00298)
+    # ------------------------------------------------------------------
+
+    #: A delivered failsafe-cron tick suppressed by a still-valid
+    #: blocked-only-on-human-input marker.
+    FAILSAFE_CRON_SUPPRESSED: str = "R-FAILSAFE-CRON-SUPPRESSED"

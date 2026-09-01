@@ -456,6 +456,11 @@ class HandlerID:
         config_key="goal_injection",
         display_name="goal-injection",
     )
+    FAILSAFE_CRON_BLOCKAGE_SUPPRESSOR = HandlerIDMeta(
+        class_name="FailsafeCronBlockageSuppressorHandler",
+        config_key="failsafe_cron_blockage_suppressor",
+        display_name="failsafe-cron-blockage-suppressor",
+    )
 
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = HandlerIDMeta(
