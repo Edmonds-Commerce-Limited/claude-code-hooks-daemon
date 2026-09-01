@@ -1,6 +1,6 @@
 # Plan 00309: lint on edit per language timeout
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: Medium
@@ -69,10 +69,10 @@ its toolchain is slower, it does not change fail-open semantics.
 
 ## Success Criteria
 
-- [ ] `handlers.post_tool_use.lint_on_edit.options.timeouts.PHP: 30` gives
+- [x] `handlers.post_tool_use.lint_on_edit.options.timeouts.PHP: 30` gives
   PHP extended lints a 30s budget while other languages keep 15s, pinned
   by tests; full QA green; daemon restart verified.
-- [ ] A fired timeout names itself and the config key in its output.
+- [x] A fired timeout names itself and the config key in its output.
 
 ## Delivery & Milestones
 
@@ -80,4 +80,8 @@ its toolchain is slower, it does not change fail-open semantics.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00309-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- `373db1f9` (worktree delivery) merged at `6ca8bf79` — per-language
+  `options.timeouts` with visible timeout advisory; 69/69 handler tests,
+  post-merge daemon restart verified, and the live `explain-handler`
+  output now shows the new option text (closing the worktree shared-venv
+  caveat from the implementing agent's journal).

@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00272: secret file read blocker](00272-secret-file-read-blocker/PLAN.md) - Complete at merges `4c7c5e53` + `0419b22a` + the archiving commit (deny-by-default `secret_file_guard`, `secret-meta` metadata helper, hygiene advisory, no escape hatch; read-route research classifies every route (b)/(c)/(d), class-(d) residuals closed only by OS-level controls)
+
 - [00271: hook contract alignment](00271-hook-contract-alignment/PLAN.md) - Complete at merge `18d35ba2` + the commit that archives it (DBF-first: vendored hook contracts + network-free `hook_contract` QA check landed RED against 59 findings, all 9 load-bearing drifts fixed, allowlist burned to 29 reasoned KEPT gaps; follow-ups in Plan 00273)
 
 - [00116: CLAUDE.md Token Compression via Stateful Progressive Disclosure](00116-claude-md-token-compression/PLAN.md) - Complete at `ba8860ed` + the archiving commit (two-tier injected block live at 63.6% shrink; 46 handlers on Rule/DisclosureTracker; block-report data-driven promotion; explain-rule CLI+skill)

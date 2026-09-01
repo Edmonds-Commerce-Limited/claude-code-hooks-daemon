@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00309: lint on edit per language timeout](00309-lint-on-edit-per-language-timeout/PLAN.md) - In Progress (per-language `options.timeouts` delivered at 373db1f9; success-criteria confirmation pending)
-
 - [00308: post upgrade config optimisation autorun](00308-post-upgrade-config-optimisation-autorun/PLAN.md) - Not Started (formalise "enable all relevant handlers and optimise config" and autorun it post-upgrade)
 
 - [00307: subagent file based report handoff](00307-subagent-file-based-report-handoff/PLAN.md) - In Progress (subagents hand over large data by file, never inline; both enforcement handlers live at 5f674028, GREEN acceptance re-run pending)
@@ -172,6 +170,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00309: lint on edit per language timeout](Completed/00309-lint-on-edit-per-language-timeout/PLAN.md) - Complete at 373db1f9, merged at 6ca8bf79 (per-language `options.timeouts.<Language>` for lint_on_edit; fail-open kept, fired timeouts now name the language, budget and config key)
+
 - [00310: plan readme completed row ageout](Completed/00310-plan-readme-completed-row-ageout/PLAN.md) - Complete (Completed rows now age out: main README retains the 30 highest-numbered; older rows archived verbatim in Completed/README.md, enforced by test_plan_index_navigability.py)
 
 - [00306: secret bash mention overbroad matching](Completed/00306-secret-bash-mention-overbroad-matching/PLAN.md) - Complete at 49befa8b (secret_file_guard Bash-mention false positives fixed, `git rm --cached` exempted, plus four same-subsystem review findings)
@@ -222,8 +222,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00274: skill opportunity detector](Completed/00274-skill-opportunity-detector/PLAN.md) - Complete at the archiving commit (transcript mining → redacted digest → report embedding a judging rubric; an in-session subagent judges it — the model shell-out was removed per Decision 9; TTL-gated SessionStart advisory, report-only, ships disabled upstream)
 
-- [00272: secret file read blocker](Completed/00272-secret-file-read-blocker/PLAN.md) - Complete at merges `4c7c5e53` + `0419b22a` + the archiving commit (deny-by-default `secret_file_guard`, `secret-meta` metadata helper, hygiene advisory, no escape hatch; read-route research classifies every route (b)/(c)/(d), class-(d) residuals closed only by OS-level controls)
-
 - [00276: goal stack concurrent tracking](Completed/00276-goal-stack-concurrent-tracking/PLAN.md) - Complete at merge `74fa6e50` + the archiving commit (daemon-side goal ledger: every emission recorded, displacement advisory, Stop-time defence naming all still-live ledgered plans; live-verified by the production ledger's six-emission displacement history)
 
 - [00277: release acceptance findings v3 55 0](Completed/00277-release-acceptance-findings-v3-55-0/PLAN.md) - Complete at `ebf7016a` + the archiving commit (all v3.55.0 gate findings closed: per-session block_once with session-attributed HandlerDecisionRecord, isolation-advisor test precondition, lint-clean error-hiding samples, validate_eslint_on_write deny branch verified live in the client fixture)
@@ -271,9 +269,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 310 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 254 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 255 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
