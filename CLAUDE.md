@@ -465,6 +465,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - plan_workflow — PLAN.md, supporting docs and JOURNAL/ obey DIFFERENT contracts
 
+<!-- handler: dispatch-declaration -->
+
+- dispatch_declaration — declare where a subagent's reports go
+
 <!-- handler: flaggable-work-advisor -->
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
@@ -544,6 +548,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: auto-approve-reads -->
 
 - auto_approve_reads — gated on bypassPermissions mode
+
+<!-- handler: subagent-report-size-blocker -->
+
+- subagent_report_size_blocker — write large reports to a file
 
 <!-- handler: worktree-create -->
 
