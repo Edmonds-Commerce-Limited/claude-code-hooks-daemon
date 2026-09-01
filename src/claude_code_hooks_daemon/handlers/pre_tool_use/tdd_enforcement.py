@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
+from claude_code_hooks_daemon.core.workspace import resolve_workspace
 from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
 from claude_code_hooks_daemon.utils.path_exclusion import (
@@ -35,7 +36,6 @@ logger = logging.getLogger(__name__)
 _TEST_DIR = "tests"
 _TEST_UNIT_DIR = "unit"
 _SRC_DIR = "src"
-_DEFAULT_WORKSPACE = "/workspace"
 
 # Test location style constants (Plan 00076: collocated test support)
 _TEST_LOCATION_SEPARATE = "separate"
@@ -98,11 +98,15 @@ class DeclaredTestDir:
         source_glob: Gitignore-style glob selecting the source files this applies
             to, matched with the same dialect as ``exclude_paths`` so a project
             learns one glob syntax rather than two.
-        test_dir: Directory holding those files' tests. Project-root-relative, or
-            absolute. NOT mirrored — the test filename is placed directly in this
-            directory, because that is what a flat PSR-4 test namespace looks
-            like. Mirroring is already available for ``src/`` layouts via the
-            built-in ``separate`` resolvers.
+        test_dir: Directory holding those files' tests. Repository-root-relative
+            -- an absolute ``test_dir`` is rejected by :func:`_parse_test_path_map`
+            per the zero-absolute-paths config ruling (Plan 00296): a repository
+            is mounted at different places on different machines, so an absolute
+            path in committed config is correct on exactly one of them. NOT
+            mirrored — the test filename is placed directly in this directory,
+            because that is what a flat PSR-4 test namespace looks like.
+            Mirroring is already available for ``src/`` layouts via the built-in
+            ``separate`` resolvers.
     """
 
     source_glob: str
@@ -131,6 +135,13 @@ def _parse_test_path_map(raw: Any) -> list[DeclaredTestDir]:
     the author is already looking, because the deny message lists every location
     that WAS searched, and a mapping that did not take is conspicuous by its
     absence from that list.
+
+    An absolute ``test_dir`` is rejected the same way, per the owner's
+    zero-absolute-paths config ruling (Plan 00296): a repository is mounted at
+    different places on different machines, so an absolute path in committed
+    config is correct on exactly one of them and silently wrong everywhere
+    else. Rejecting is a config-boundary decision — it degrades gracefully
+    rather than raising, consistent with every other malformed entry here.
     """
     if not raw:
         return []
@@ -151,6 +162,15 @@ def _parse_test_path_map(raw: Any) -> list[DeclaredTestDir]:
                 index,
                 _KEY_SOURCE_GLOB,
                 _KEY_TEST_DIR,
+            )
+            continue
+        if Path(test_dir).is_absolute():
+            logger.warning(
+                "tdd_enforcement: test_path_map[%d] test_dir %r is absolute; config paths "
+                "must be repository-root-relative (Plan 00296 zero-absolute-paths ruling); "
+                "skipped",
+                index,
+                test_dir,
             )
             continue
         parsed.append(DeclaredTestDir(source_glob=source_glob, test_dir=test_dir))
@@ -418,10 +438,21 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
     def _map_declared_test_paths(self, source_path: str, test_filename: str) -> list[Path]:
         """Candidate test paths from the project's declared ``test_path_map``.
 
-        Each matching mapping contributes exactly one candidate — the test
-        filename placed FLAT in the declared directory, not mirrored under it.
-        Returns them in config order, so a project controls which of several
-        matching declarations the deny message suggests first.
+        Each matching mapping contributes up to TWO candidates, most specific
+        first: a workspace-anchored candidate (the source file's DECLARED
+        project, resolved via the injected ``_project_registry`` — Plan 00296)
+        ahead of the project-root-anchored candidate. In a single-project repo
+        (no registry injected, or nothing declared) the two resolve to the same
+        path and only one is added — resolution stays byte-identical to before
+        this task. Test filenames are placed FLAT in the declared directory,
+        never mirrored under it. Mappings are returned in config order, so a
+        project controls which of several matching declarations the deny
+        message suggests first.
+
+        ``test_dir`` is always repository-root-relative by the time it reaches
+        here: :func:`_parse_test_path_map` rejects an absolute entry at the
+        config boundary (Plan 00296 zero-absolute-paths ruling), so this method
+        never needs to special-case one.
         """
         mappings = self._declared_test_dirs()
         if not mappings:
@@ -434,22 +465,30 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
                 source_path, [mapping.source_glob], project_root=project_root
             ):
                 continue
+            if project_root is None:
+                # Nothing to anchor a relative dir against. Degrade to the
+                # inferred candidates rather than guessing a root — a guessed
+                # root would produce a path that silently never exists, which
+                # reads as "your test is missing" rather than "your mapping
+                # could not be resolved".
+                logger.warning(
+                    "tdd_enforcement: test_path_map test_dir %r is relative but the "
+                    "project root is unresolvable; skipped",
+                    mapping.test_dir,
+                )
+                continue
+
             test_dir = Path(mapping.test_dir)
-            if not test_dir.is_absolute():
-                if project_root is None:
-                    # Nothing to anchor a relative dir against. Degrade to the
-                    # inferred candidates rather than guessing a root — a guessed
-                    # root would produce a path that silently never exists, which
-                    # reads as "your test is missing" rather than "your mapping
-                    # could not be resolved".
-                    logger.warning(
-                        "tdd_enforcement: test_path_map test_dir %r is relative but the "
-                        "project root is unresolvable; skipped",
-                        mapping.test_dir,
-                    )
-                    continue
-                test_dir = Path(project_root) / test_dir
-            candidates.append(test_dir / test_filename)
+            project_root_path = Path(project_root)
+            workspace = resolve_workspace(
+                self._project_registry, Path(source_path), project_root_path
+            )
+            workspace_candidate = workspace.root / test_dir / test_filename
+            project_candidate = project_root_path / test_dir / test_filename
+
+            candidates.append(workspace_candidate)
+            if project_candidate != workspace_candidate:
+                candidates.append(project_candidate)
         return candidates
 
     @staticmethod
@@ -467,7 +506,11 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
 
         # Workspace root is everything before src/
         workspace_parts = path_parts[:src_idx]
-        workspace_root = Path(*workspace_parts) if workspace_parts else Path(_DEFAULT_WORKSPACE)
+        # No parts before src/ (a bare "src/..." relative path): anchor on the
+        # daemon's own cwd rather than a hardcoded repo-root guess, matching
+        # the fallback npm_command uses when neither a leading `cd` nor a
+        # resolvable project root is available (Plan 00296).
+        workspace_root = Path(*workspace_parts) if workspace_parts else Path.cwd()
 
         # Parts after src/: {package}/{subdir}/.../file.ext
         # Keep ALL subdirs (don't strip package)
@@ -490,7 +533,11 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
 
         # Workspace root is everything before src/
         workspace_parts = path_parts[:src_idx]
-        workspace_root = Path(*workspace_parts) if workspace_parts else Path(_DEFAULT_WORKSPACE)
+        # No parts before src/ (a bare "src/..." relative path): anchor on the
+        # daemon's own cwd rather than a hardcoded repo-root guess, matching
+        # the fallback npm_command uses when neither a leading `cd` nor a
+        # resolvable project root is available (Plan 00296).
+        workspace_root = Path(*workspace_parts) if workspace_parts else Path.cwd()
 
         # Parts after src/: {package}/{subdir}/.../file.ext
         after_src = path_parts[src_idx + 1 :]
@@ -559,10 +606,10 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
             "— the project needs to DECLARE the directory (below), not move the test.\n\n"
             "**A layout the resolvers cannot infer is declarable** via "
             "`handlers.pre_tool_use.tdd_enforcement.options.test_path_map` — a list of "
-            "`{source_glob, test_dir}` entries. `test_dir` is project-root-relative (or "
-            "absolute) and FLAT: the test filename is placed directly in it, not mirrored "
-            "under it. This keeps enforcement ON and is the preferred fix, because a test "
-            "that exists is worth more than an exemption:\n\n"
+            "`{source_glob, test_dir}` entries. `test_dir` is repository-root-relative "
+            "(an absolute path is rejected) and FLAT: the test filename is placed directly "
+            "in it, not mirrored under it. This keeps enforcement ON and is the preferred "
+            "fix, because a test that exists is worth more than an exemption:\n\n"
             "```yaml\n"
             "test_path_map:\n"
             '  - source_glob: "**/qaConfig/PHPStan/Rules/**"\n'

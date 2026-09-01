@@ -111,7 +111,7 @@ the affected handlers through it.
 - [x] ✅ **Task 2.3**: `validate_eslint_on_write` per-file workspace — cwd,
   PATH and the mode probe all derive from the authored file's workspace; an
   explicit `workspace_root` still pins every file (test seam preserved).
-- [ ] ⬜ **Task 2.4**: `tdd_enforcement` workspace-relative `test_path_map`
+- [x] ✅ **Task 2.4**: `tdd_enforcement` workspace-relative `test_path_map`
   and removal of the hardcoded `/workspace` fallback.
 - [ ] ⬜ **Task 2.5**: `markdown_organization` automatic resolution with
   `monorepo_subproject_patterns` as override.
