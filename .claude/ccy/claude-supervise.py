@@ -1375,6 +1375,12 @@ class TickOutcome:
     # rather than the AWAIT_COMPACTING flush's escape-count bookkeeping.
     # False for every other decision and for legacy replies without the field.
     is_anchor_escape: bool = False
+    # Plan 00299: the raw combined /goal text THIS tick decided to inject
+    # (None for every other decision), so the HOST can record it as the
+    # multi-plan thrash guard (`mark_goal_injection`) on a successful
+    # injection only -- a failed PTY write must not update the guard while
+    # the signal survives for retry.
+    goal_line: str | None = None
 
 
 def _coerce_float(value: object) -> float:
@@ -2364,6 +2370,12 @@ class CompactStateMachine:
         # signals are consumed on injection, so this only ever matters under a
         # signal storm; per-process lifetime, never reset.
         self._goal_injections = 0
+        # Plan 00299: the exact combined /goal text last SUCCESSFULLY
+        # injected (None until the first injection). Compared verbatim (not
+        # hashed -- the text is already length-capped) against the next
+        # tick's candidate to suppress a re-type of an identical combined
+        # goal caused by an unrelated ledgered plan's status flip.
+        self._last_goal_text: str | None = None
         # Plan 00283: standing-authorisation reinforcement injections this process
         # has fired. Runaway backstop only (see _MAX_STANDING_AUTH_INJECTIONS).
         self._standing_auth_injections = 0
@@ -2829,9 +2841,21 @@ class CompactStateMachine:
         """How many goal injections this process has fired (Plan 00269)."""
         return self._goal_injections
 
-    def mark_goal_injection(self) -> None:
-        """Count one goal injection against the family cap (Plan 00269)."""
+    def mark_goal_injection(self, goal_line: str | None = None) -> None:
+        """Count one goal injection against the family cap (Plan 00269).
+
+        ``goal_line`` (Plan 00299) records the injected text as the thrash
+        guard for the NEXT tick's candidate; omitted/None leaves the guard
+        unchanged (legacy callers, and tests exercising the cap alone).
+        """
         self._goal_injections += 1
+        if goal_line is not None:
+            self._last_goal_text = goal_line
+
+    @property
+    def last_goal_text(self) -> str | None:
+        """The combined /goal text last successfully injected (Plan 00299)."""
+        return self._last_goal_text
 
     @property
     def standing_auth_injections(self) -> int:
@@ -2869,6 +2893,7 @@ class CompactStateMachine:
             "await_is_human": self._await_is_human,
             "dry_run_fired": self._dry_run_fired,
             "goal_injections": self._goal_injections,
+            "last_goal_text": self._last_goal_text,
             "standing_auth_injections": self._standing_auth_injections,
             "last_model_session": self._last_model_session,
             "last_model_family": self._last_model_family,
@@ -2913,6 +2938,9 @@ class CompactStateMachine:
             self._dry_run_fired = bool(state["dry_run_fired"])
         if "goal_injections" in state:
             self._goal_injections = _coerce_int(state["goal_injections"])
+        if "last_goal_text" in state:
+            raw = state["last_goal_text"]
+            self._last_goal_text = None if raw is None else str(raw)
         if "standing_auth_injections" in state:
             self._standing_auth_injections = _coerce_int(state["standing_auth_injections"])
         if "last_model_session" in state:
@@ -3662,6 +3690,11 @@ def decide_once(
     # anchor's own ESC cooldown (`mark_anchor_esc`) rather than treating it
     # like a normal `/effort` injection.
     is_anchor_escape = False
+    # Plan 00299: populated only by the goal branch below when this tick
+    # decides WOULD_GOAL, so the HOST can record the injected text's hash
+    # (`mark_goal_injection`) as the multi-plan thrash guard -- an identical
+    # combined /goal never re-types on a later tick.
+    goal_line_for_hash: str | None = None
     # ── DROP ANCHOR: fable-above-low invariant (Plan 00297) ─────────────────
     # HIGHEST subordinate priority -- checked even ahead of the coupled-effort
     # correction below -- because fable observed running above low effort is
@@ -3885,6 +3918,15 @@ def decide_once(
                     noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal signal pending but session busy"
             elif machine.goal_injections >= _MAX_GOAL_INJECTIONS:
                 noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal injection cap reached"
+            elif goal_line == machine.last_goal_text:
+                # Plan 00299 thrash guard: the daemon re-renders the combined
+                # multi-plan /goal on every ledgered status flip (not just
+                # this session's own), so an unrelated plan's edit can
+                # rewrite an IDENTICAL signal file. Re-typing the same
+                # /goal condition teaches nothing new -- skip it. The stale
+                # duplicate file is left for the TTL reaper, mirroring how a
+                # completed plan's now-stale signal already ages out today.
+                noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal signal identical to last injection"
             else:
                 # The cap is counted by the HOST only after a SUCCESSFUL
                 # injection (see the callers of _apply_decision) — a PTY
@@ -3900,6 +3942,7 @@ def decide_once(
                 else:
                     payload = f"{_GOAL_COMMAND} {goal_line}"
                 submit = True
+                goal_line_for_hash = goal_line
                 # Consumed in dry-run too — the demonstration episode is spent
                 # either way, so a goal can never flood the session.
                 consume_signal_path = str(goal_path)
@@ -4124,6 +4167,7 @@ def decide_once(
         is_flag_compact=is_flag_compact,
         is_anchor_injection=is_anchor_injection,
         is_anchor_escape=is_anchor_escape,
+        goal_line=goal_line_for_hash,
     )
 
 
@@ -4211,7 +4255,7 @@ def _apply_post_injection_bookkeeping(
     # host restart (import_state merges by present key, so an older host
     # never clobbers the worker's audit backlog; it merely doesn't carry it).
     if outcome.decision_value == Decision.WOULD_GOAL.value:
-        machine.mark_goal_injection()
+        machine.mark_goal_injection(outcome.goal_line)
     elif outcome.decision_value == Decision.WOULD_STANDING_AUTH.value:
         machine.mark_standing_auth_injection()
     elif outcome.decision_value == Decision.WOULD_EFFORT.value:

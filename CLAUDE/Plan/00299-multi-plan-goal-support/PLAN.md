@@ -1,6 +1,6 @@
 # Plan 00299: multi plan goal support
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: Medium
@@ -102,25 +102,25 @@ of clobbering whichever wrote last.
 
 ### Phase 1: Investigation confirmations
 
-- [ ] ⬜ **Task 1.1**: Re-derive and confirm the exact overwrite mechanism in
+- [x] ✅ **Task 1.1**: Re-derive and confirm the exact overwrite mechanism in
   `write_goal_signal()` (`goal_injection.py:304-334`) — verify the
   `<session_id>.goal-intent` filename truly has no plan-number component,
   and check whether `_SIGNAL_SUFFIX`/`target_dir` resolution
   (goal_injection.py:68-71, 317) offers any existing per-plan hook point
   to build on rather than replace.
-- [ ] ⬜ **Task 1.2**: Confirm upstream Claude Code's native `/goal` command
+- [x] ✅ **Task 1.2**: Confirm upstream Claude Code's native `/goal` command
   is genuinely single-valued (not a stack/queue) by reading its
   documented behaviour and/or testing `/goal` twice in one session;
   record the citation. This determines whether Phase 3's "combined goal"
   design is the only viable shape or whether per-plan set/clear verbs
   against multiple upstream slots are possible.
-- [ ] ⬜ **Task 1.3**: Trace `GoalLedger.record_emission()`
+- [x] ✅ **Task 1.3**: Trace `GoalLedger.record_emission()`
   (goal_ledger.py:290-339) and `live_plan_numbers()` (lines 341-358) end
   to end against a synthetic two-plan scenario (two `PLAN.md` files both
   `**Status**: In Progress` in the same session) to confirm displacement
   marking (lines 306-317) behaves as described and does not lose either
   plan's entry.
-- [ ] ⬜ **Task 1.4**: Read `PlanDoc.parse()` / `PlanStatus` /
+- [x] ✅ **Task 1.4**: Read `PlanDoc.parse()` / `PlanStatus` /
   `TERMINAL_STATUSES` (`claude_code_hooks_daemon.plan_qa.model`) to
   confirm the exact set of terminal statuses the ledger and stop-hook
   challenge treat as "not live", and confirm `_plan_state()`
@@ -129,22 +129,22 @@ of clobbering whichever wrote last.
 
 ### Phase 2: Daemon-side design (ledger as source of truth)
 
-- [ ] ⬜ **Task 2.1**: Design a `render_combined_goal_signal()` (or similar)
+- [x] ✅ **Task 2.1**: Design a `render_combined_goal_signal()` (or similar)
   function that reads `live_plan_numbers()`/ledger entries and produces
   one `/goal` payload naming every live plan, replacing the current
   single-plan `write_goal_signal()` call in
   `GoalInjectionHandler.handle()` (goal_injection.py:396).
-- [ ] ⬜ **Task 2.2**: Design per-plan clear semantics: when a plan's status
+- [x] ✅ **Task 2.2**: Design per-plan clear semantics: when a plan's status
   flips to a terminal status, its ledger entry is retired
   (`retired_at`/`retired_reason`, per existing fields referenced in
   Finding #5) and the combined goal signal is re-rendered to drop that
   plan without touching others' entries.
-- [ ] ⬜ **Task 2.3**: Decide whether `_goal_ledger_challenge()`
+- [x] ✅ **Task 2.3**: Decide whether `_goal_ledger_challenge()`
   (auto_continue_stop.py:595-613) needs to change at all, given it
   already enforces "block until every live ledgered plan is
   done/blocked" — or whether Phase 2/3 changes are purely on the
   injection side and this stays as-is.
-- [ ] ⬜ **Task 2.4**: Define backward-compatibility behaviour for the
+- [x] ✅ **Task 2.4**: Define backward-compatibility behaviour for the
   single-plan case explicitly (one entry in `live_plan_numbers()` ⇒
   combined-goal rendering degenerates to today's single-plan text
   byte-for-byte, so existing acceptance tests/snapshots do not need
@@ -152,45 +152,45 @@ of clobbering whichever wrote last.
 
 ### Phase 3: Supervisor-side design
 
-- [ ] ⬜ **Task 3.1**: Design how `.claude/ccy/claude-supervise.py`'s
+- [x] ✅ **Task 3.1**: Design how `.claude/ccy/claude-supervise.py`'s
   `load_goal_signal()` (line 1991-2024) and the injection call site
   consume a combined multi-plan signal payload without needing to know
   about plan numbers itself (keep the supervisor a dumb consumer, per
   the Overview's existing division of responsibility).
-- [ ] ⬜ **Task 3.2**: Design thrash avoidance — the supervisor's hot-reload
+- [x] ✅ **Task 3.2**: Design thrash avoidance — the supervisor's hot-reload
   / re-injection cadence must not re-type the full combined `/goal` on
   every tick if the ledger hasn't changed; reuse whatever staleness/hash
   check already gates re-injection (per the ccy-supervisor hot-reload
   contract in `/root/.claude/CLAUDE.md`) rather than inventing a new one.
-- [ ] ⬜ **Task 3.3**: Confirm the design does not require changes to the
+- [x] ✅ **Task 3.3**: Confirm the design does not require changes to the
   two-tier PTY-host/worker split or the `--worker` subprocess hot-reload
   mechanism itself — only to what payload the worker types.
 
 ### Phase 4: Docs and acceptance
 
-- [ ] ⬜ **Task 4.1**: Update `goal_injection.py`'s module docstring/comment
+- [x] ✅ **Task 4.1**: Update `goal_injection.py`'s module docstring/comment
   at lines 2-3, 53-55 (currently documents last-writer-wins as the
   model) to describe the combined-signal model once implemented.
-- [ ] ⬜ **Task 4.2**: Add/extend acceptance coverage for: two concurrent
+- [x] ✅ **Task 4.2**: Add/extend acceptance coverage for: two concurrent
   In-Progress plans both appearing in one combined goal signal; one
   plan reaching a terminal status while the other stays live (goal
   signal drops only the finished plan); a single-plan session
   (regression: unchanged output).
-- [ ] ⬜ **Task 4.3**: Update any HOOKS-DAEMON.md / handler-guidance text
+- [x] ✅ **Task 4.3**: Update any HOOKS-DAEMON.md / handler-guidance text
   that currently describes `/goal` as single-plan-only.
 
 ## Success Criteria
 
-- [ ] Two concurrent In-Progress plans each keep a live representation in
+- [x] Two concurrent In-Progress plans each keep a live representation in
   the goal signal — neither is silently dropped by the other's write.
-- [ ] Finishing (or fully blocking) one plan does not clear or displace the
+- [x] Finishing (or fully blocking) one plan does not clear or displace the
   other plan's goal representation.
-- [ ] The Stop hook allows a stop only when every plan tracked by the goal
+- [x] The Stop hook allows a stop only when every plan tracked by the goal
   ledger is done or fully blocked — unchanged from today's ledger
   behaviour, now backed by injection that actually reflects all of them.
-- [ ] A single-plan session's `/goal` text and Stop-hook behaviour are
+- [x] A single-plan session's `/goal` text and Stop-hook behaviour are
   byte-for-byte unchanged from pre-plan behaviour.
-- [ ] No change to plan lifecycle/status semantics or to the supervisor's
+- [x] No change to plan lifecycle/status semantics or to the supervisor's
   two-tier hot-reload architecture.
 
 ## Delivery & Milestones

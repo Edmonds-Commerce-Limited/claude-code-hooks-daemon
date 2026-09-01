@@ -198,6 +198,40 @@ class TestFailOpen:
         assert ledger.live_plan_numbers(plan_dir) == [_PLAN_A]
 
 
+class TestLivePlanRefs:
+    """Plan 00299: resolved (folder, PLAN.md text) per live plan, for the
+    combined-goal renderer."""
+
+    def test_resolves_folder_and_text_for_each_live_plan(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        _make_plan(plan_dir, _PLAN_B, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        ledger.record_emission(_SESSION, _PLAN_B, _GOAL_LINE, plan_dir)
+        refs = ledger.live_plan_refs(plan_dir)
+        assert [r.plan_number for r in refs] == [_PLAN_A, _PLAN_B]
+        assert refs[0].plan_folder == f"{_PLAN_A}-example-plan"
+        assert f"**Status**: {_STATUS_IN_PROGRESS}" in refs[0].plan_text
+
+    def test_excludes_terminal_plans(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        folder = _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        _make_plan(plan_dir, _PLAN_B, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        ledger.record_emission(_SESSION, _PLAN_B, _GOAL_LINE, plan_dir)
+        (folder / "PLAN.md").write_text(
+            f"# Plan {_PLAN_A}: example plan\n\n**Status**: Complete\n", encoding="utf-8"
+        )
+        refs = ledger.live_plan_refs(plan_dir)
+        assert [r.plan_number for r in refs] == [_PLAN_B]
+
+    def test_empty_ledger_yields_no_refs(self, tmp_path: Path) -> None:
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        assert ledger.live_plan_refs(tmp_path / "CLAUDE" / "Plan") == []
+
+
 class TestBoundedGrowth:
     def test_retired_entries_are_pruned_beyond_cap(self, tmp_path: Path) -> None:
         plan_dir = tmp_path / "CLAUDE" / "Plan"

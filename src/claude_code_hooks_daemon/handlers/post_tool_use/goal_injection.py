@@ -28,6 +28,18 @@ the handler observes single writes and its once-per-``(plan, session)`` latch
 is in-memory, so the first qualifying write in a NEW session re-fires — which
 is what re-establishes the goal after a session restart.
 
+**Multi-plan combined signal (Plan 00299)**: the upstream `/goal` slot is a
+single, last-writer-wins value, so under concurrent plans the goal ledger
+(``goal_ledger.GoalLedger``, per ``(plan_number, session_id)``) is the SOURCE
+OF TRUTH, and the signal this handler writes is a RENDERED VIEW of every
+still-live ledgered plan for the session (``render_combined_goal_line``): one
+live plan renders byte-for-byte identically to the pre-00299 single-plan
+text; two or more render one combined work line naming every live plan
+number. A plan reaching a terminal status re-renders the signal to drop it
+(``_maybe_refresh_on_retirement``), without disturbing any other still-live
+plan's contribution. The supervisor's own thrash guard (``last_goal_text``)
+skips re-typing an unchanged combined `/goal`.
+
 Opt-in (``get_default_enabled() -> False``); never blocks.
 """
 
@@ -47,7 +59,8 @@ from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_file_path
-from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger
+from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc
+from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger, LivePlanRef
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +144,21 @@ _QA_REVIEW_LINE_ID: Final[str] = "qa-review-subagents"
 _QA_REVIEW_LINE_TEXT: Final[str] = (
     "Use specialist QA and code-review sub-agents; they log their reports "
     "directly into the plan folder."
+)
+
+# ── Combined multi-plan rendering (Plan 00299) ──────────────────────────────
+# The upstream /goal slot is last-writer-wins (single value), so with two or
+# more ledgered plans live at once the per-plan work line (which names ONE
+# plan_number/title/path) is replaced by a single line naming every live
+# plan number instead. One live plan renders byte-for-byte identically to
+# ``render_goal_line`` — see ``render_combined_goal_line``.
+_PLACEHOLDER_PLAN_NUMBERS: Final[str] = "plan_numbers"
+_MULTI_WORK_LINE_TEXT: Final[str] = (
+    "Work on Plan(s) {plan_numbers} until each is complete or totally blocked "
+    "(on human input, or an external blocker you cannot clear). A total "
+    "block on one plan is a valid stop for THAT plan: state which plan(s) "
+    "are done or blocked; do not re-loop a done or blocked plan while "
+    "others remain live."
 )
 
 # ── Trigger detection ──────────────────────────────────────────────────────
@@ -302,6 +330,78 @@ def render_goal_line(
     return joined[:_MAX_JOINED_CHARS]
 
 
+@dataclass(frozen=True)
+class LivePlan:
+    """One live plan's rendering identity for the combined `/goal` payload."""
+
+    plan_number: str
+    plan_title: str
+    plan_path: str
+
+
+def render_combined_goal_line(
+    live_plans: list[LivePlan],
+    *,
+    mode: str = _DEFAULT_MODE,
+    raw_lines: Any = None,
+) -> str | None:
+    """Render ONE `/goal` payload naming every live plan (Plan 00299).
+
+    Exactly one live plan renders BYTE-FOR-BYTE identical output to
+    :func:`render_goal_line` — the single-plan session's `/goal` text and
+    Stop-hook behaviour must be unchanged from before this feature existed.
+    Two or more live plans render a single combined work line naming every
+    plan number instead of the per-plan work line (which cannot express
+    more than one plan/title/path); every other configured line (built-in
+    or project-added) still applies, since none of them reference a
+    per-plan placeholder. Returns None for an empty list or an invalid
+    plan number, mirroring :func:`render_goal_line`'s failure contract.
+    """
+    if not live_plans:
+        return None
+    ordered = sorted(live_plans, key=lambda plan: plan.plan_number)
+    if len(ordered) == 1:
+        only = ordered[0]
+        return render_goal_line(
+            only.plan_number, only.plan_title, only.plan_path, mode=mode, raw_lines=raw_lines
+        )
+    for plan in ordered:
+        if not _PLAN_NUMBER_RE.match(plan.plan_number):
+            logger.error(
+                "goal_injection: invalid plan_number %r in combined render; skipped",
+                plan.plan_number,
+            )
+            return None
+
+    plan_numbers_text = _sanitise_value(
+        ", ".join(plan.plan_number for plan in ordered), max_chars=_MAX_JOINED_CHARS
+    )
+    multi_work = _MULTI_WORK_LINE_TEXT.replace(
+        "{" + _PLACEHOLDER_PLAN_NUMBERS + "}", plan_numbers_text
+    )
+    logical: list[str] = [_HEADER_TEXT, _sanitise_value(multi_work, max_chars=_MAX_JOINED_CHARS)]
+
+    for line in resolve_goal_lines(mode, raw_lines):
+        if line.id == _WORK_LINE_ID or not line.enabled:
+            continue
+        # Every other built-in/project line is plan-agnostic text (no
+        # {plan_number}/{plan_title}/{plan_path} tokens), so it renders with
+        # an empty placeholder set; an accidental per-plan token skips the
+        # line, same as the single-plan renderer.
+        rendered = _substitute_placeholders(line.text, {})
+        if rendered is None or not rendered.strip():
+            continue
+        logical.append(_sanitise_value(rendered, max_chars=_MAX_JOINED_CHARS))
+        if len(logical) >= _MAX_LOGICAL_LINES:
+            break
+
+    joined = _LOGICAL_LINE_SEPARATOR.join(logical)
+    while len(joined) > _MAX_JOINED_CHARS and len(logical) > 1:
+        logical.pop()
+        joined = _LOGICAL_LINE_SEPARATOR.join(logical)
+    return joined[:_MAX_JOINED_CHARS]
+
+
 def write_goal_signal(
     session_id: str, plan_number: str, joined_line: str, source: str
 ) -> Path | None:
@@ -399,7 +499,16 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         return self._plan_path_pattern().search(normalized) is not None
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
-        """Render and write the goal-intent signal; always ALLOW."""
+        """Render and write the goal-intent signal; always ALLOW.
+
+        An In-Progress flip renders+records this plan then writes the
+        COMBINED signal for every live ledgered plan (Plan 00299) — a
+        single live plan degrades byte-for-byte to the pre-00299 text. A
+        flip to a TERMINAL status for a plan this session already ledgered
+        re-renders the combined signal too, so a completing plan drops out
+        of the `/goal` text promptly rather than only on the next
+        UNRELATED plan's write.
+        """
         file_path = get_file_path(hook_input) or ""
         normalized = file_path.replace("\\", "/")
         match = self._plan_path_pattern().search(normalized)
@@ -409,10 +518,15 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         plan_number = folder.split("-", 1)[0].zfill(5)
 
         plan_text = self._read_plan(Path(file_path))
-        if plan_text is None or not _STATUS_IN_PROGRESS_RE.search(plan_text):
+        if plan_text is None:
             return BlockingResult(decision=Decision.ALLOW)
 
         session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or "")
+
+        if not _STATUS_IN_PROGRESS_RE.search(plan_text):
+            self._maybe_refresh_on_retirement(session_id, plan_number, Path(file_path), plan_text)
+            return BlockingResult(decision=Decision.ALLOW)
+
         latch_key = (session_id, plan_number)
         if self._once_per_plan_per_session and self._fired.get(latch_key):
             return BlockingResult(decision=Decision.ALLOW)
@@ -426,12 +540,16 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         )
         if joined is None:
             return BlockingResult(decision=Decision.ALLOW)
-        written = write_goal_signal(session_id, plan_number, joined, _SOURCE_STATUS_FLIP)
-        if written is None:
-            return BlockingResult(decision=Decision.ALLOW)
-        self._record_latch(latch_key)
 
         displaced = self._ledger_record(session_id, plan_number, joined, Path(file_path))
+        self._record_latch(latch_key)
+
+        written = self._write_combined_signal(
+            session_id, Path(file_path), fallback=joined, fallback_plan_number=plan_number
+        )
+        if written is None:
+            return BlockingResult(decision=Decision.ALLOW)
+
         if displaced:
             plans = ", ".join(displaced)
             verb = "it is" if len(displaced) == 1 else "they are"
@@ -440,6 +558,74 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             )
             return BlockingResult(decision=Decision.ALLOW, context=[advisory])
         return BlockingResult(decision=Decision.ALLOW)
+
+    def _maybe_refresh_on_retirement(
+        self, session_id: str, plan_number: str, plan_md_path: Path, plan_text: str
+    ) -> None:
+        """Re-render the combined signal when a LEDGERED plan just retired.
+
+        Retirement itself is detected lazily inside the ledger (every
+        ``live_plan_refs`` call re-reads each live plan's current PLAN.md),
+        so this only decides whether re-rendering is worthwhile: a terminal
+        write for a plan this session never emitted a goal for has nothing
+        to refresh, so it is skipped fast without touching the ledger.
+        """
+        if not session_id or not self._fired.get((session_id, plan_number)):
+            return
+        doc = PlanDoc.parse(plan_text)
+        if doc.status is None or doc.status not in TERMINAL_STATUSES:
+            return
+        self._write_combined_signal(
+            session_id, plan_md_path, fallback=None, fallback_plan_number=plan_number
+        )
+
+    def _write_combined_signal(
+        self,
+        session_id: str,
+        plan_md_path: Path,
+        *,
+        fallback: str | None,
+        fallback_plan_number: str,
+    ) -> Path | None:
+        """Render the ledger's live-plan set and write it as the signal.
+
+        ``fallback`` is written verbatim (single-plan compatibility path)
+        when the ledger is unreachable or every live plan is unresolvable;
+        ``fallback=None`` (the retirement-refresh caller) means write
+        nothing in that case rather than re-asserting a goal for a plan
+        that just went terminal.
+        """
+        try:
+            ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
+        except RuntimeError as e:
+            logger.warning("goal_injection: combined signal skipped (no project context): %s", e)
+            return self._write_fallback(session_id, fallback, fallback_plan_number)
+
+        plan_dir = plan_md_path.parent.parent
+        refs: list[LivePlanRef] = GoalLedger(ledger_path).live_plan_refs(plan_dir)
+        if not refs:
+            return self._write_fallback(session_id, fallback, fallback_plan_number)
+
+        live_plans = [
+            LivePlan(
+                plan_number=ref.plan_number,
+                plan_title=extract_plan_title(ref.plan_text),
+                plan_path=f"{self._plan_dir()}/{ref.plan_folder}",
+            )
+            for ref in refs
+        ]
+        combined = render_combined_goal_line(live_plans, mode=self._mode, raw_lines=self._lines)
+        if combined is None:
+            return self._write_fallback(session_id, fallback, fallback_plan_number)
+
+        plan_numbers_field = ",".join(sorted(plan.plan_number for plan in live_plans))
+        return write_goal_signal(session_id, plan_numbers_field, combined, _SOURCE_STATUS_FLIP)
+
+    @staticmethod
+    def _write_fallback(session_id: str, fallback: str | None, plan_number: str) -> Path | None:
+        if fallback is None:
+            return None
+        return write_goal_signal(session_id, plan_number, fallback, _SOURCE_STATUS_FLIP)
 
     @staticmethod
     def _ledger_record(
@@ -489,14 +675,20 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             "machine-origin marker and a 'NOT human authorisation' clause, and can "
             "never satisfy any human-gated rule (release publishing, artefact "
             "publishing, unproven branch deletion).\n\n"
-            "**Concurrent plans are tracked in a goal ledger** (Plan 00276): the "
-            "/goal slot holds ONE condition (last writer wins), so every emission "
-            "is recorded in `goal-ledger.json` under the daemon untracked dir. "
-            "Emitting a goal while another ledgered plan is still In Progress "
-            "injects a displacement advisory naming that plan, and the Stop hook "
-            "challenges unexplained stops on behalf of EVERY still-live ledgered "
-            "plan. Entries retire when their plan reaches a terminal status or is "
-            "archived.\n\n"
+            "**Concurrent plans are tracked in a goal ledger** (Plan 00276) that is "
+            "the SOURCE OF TRUTH: the /goal slot holds ONE condition (last writer "
+            "wins), so every emission is recorded in `goal-ledger.json` under the "
+            "daemon untracked dir. Since Plan 00299 the signal this handler writes "
+            "is a COMBINED VIEW of every still-live ledgered plan for the session — "
+            "one live plan renders byte-for-byte identically to the single-plan "
+            "text; two or more render one line naming every live plan number. A "
+            "plan reaching a terminal status re-renders the signal to drop it "
+            "without disturbing any other live plan's contribution. Emitting a "
+            "goal while another ledgered plan is still In Progress also injects a "
+            "displacement advisory naming it, and the Stop hook challenges "
+            "unexplained stops on behalf of EVERY still-live ledgered plan — the "
+            "combined `/goal` text now agrees with that check. Entries retire when "
+            "their plan reaches a terminal status or is archived.\n\n"
             "**Configure** via `handlers.post_tool_use.goal_injection.options`: "
             "`mode: additive` (default) merges your `lines` "
             "(`{id, text, enabled}`) onto the built-in set — a matching `id` "

@@ -396,6 +396,74 @@ def test_failed_injection_keeps_signal_and_cap(tmp_path: Path) -> None:
 # ── Reaper covers goal signals ───────────────────────────────────────────────
 
 
+# ── Plan 00299: multi-plan thrash guard ──────────────────────────────────────
+
+
+def test_identical_goal_text_is_not_reinjected(tmp_path: Path) -> None:
+    """The daemon re-renders the combined /goal on every ledgered status
+    flip -- including an UNRELATED plan's edit -- so a byte-identical
+    signal can be rewritten with a fresh timestamp. Re-typing it teaches
+    the session nothing new and must be suppressed."""
+    sidecar_dir = tmp_path / "context-sidecar"
+    machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+    machine.import_state({"last_goal_text": _JOINED})
+    _write_goal(sidecar_dir)
+    outcome = _decide(sidecar_dir, machine=machine)
+    assert outcome.payload is None
+    assert outcome.noop_reason_log is not None
+    assert "identical" in outcome.noop_reason_log
+
+
+def test_different_goal_text_still_injects(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "context-sidecar"
+    machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+    machine.import_state({"last_goal_text": "some other previously-injected text"})
+    _write_goal(sidecar_dir)
+    outcome = _decide(sidecar_dir, machine=machine)
+    assert outcome.decision_value == "would-goal"
+    assert outcome.payload == f"/goal {_JOINED}"
+
+
+def test_first_ever_goal_injects_with_no_prior_text(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "context-sidecar"
+    machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+    assert machine.last_goal_text is None
+    _write_goal(sidecar_dir)
+    outcome = _decide(sidecar_dir, machine=machine)
+    assert outcome.decision_value == "would-goal"
+
+
+def test_successful_injection_records_last_goal_text(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "context-sidecar"
+    _write_goal(sidecar_dir)
+    machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+    writes: list[bytes] = []
+    _poll(sidecar_dir, machine, writes.append)
+    assert machine.last_goal_text == _JOINED
+
+
+def test_failed_injection_does_not_record_last_goal_text(tmp_path: Path) -> None:
+    import pytest
+
+    sidecar_dir = tmp_path / "context-sidecar"
+    _write_goal(sidecar_dir)
+    machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+
+    def _broken_writer(_: bytes) -> None:
+        raise OSError("pty gone")
+
+    with pytest.raises(OSError):
+        _poll(sidecar_dir, machine, _broken_writer)
+    assert machine.last_goal_text is None
+
+
+def test_last_goal_text_round_trips(tmp_path: Path) -> None:
+    policy = _mod.CompactPolicy()
+    machine = _mod.CompactStateMachine(policy)
+    machine.import_state({"last_goal_text": "previously injected text"})
+    assert machine.export_state()["last_goal_text"] == "previously injected text"
+
+
 def test_reaper_reaps_dead_goal_signals(tmp_path: Path) -> None:
     import os
 
