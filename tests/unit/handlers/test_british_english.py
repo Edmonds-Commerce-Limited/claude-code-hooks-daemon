@@ -631,3 +631,19 @@ color here is detected again
                 },
             }
             assert handler.matches(hook_input) is True, f"Should check: {ext}"
+
+
+class TestWorkspaceScopeIsRepo:
+    """Plan 00301 follow-up: british_english declares WorkspaceScope.REPO.
+
+    ``ProjectLayout.for_project`` always sources ``agent_docs_dir``/
+    ``human_docs_dir`` from the ROOT project's ``documentation.trees``
+    config, even when composing a declared sub-project's layout -- there is
+    no per-project override, so this handler's true axis (doc-tree names)
+    is repository-singular by design, despite matching per file.
+    """
+
+    def test_declares_repo_scope(self) -> None:
+        from claude_code_hooks_daemon.core.handler import WorkspaceScope
+
+        assert BritishEnglishHandler.workspace_scope is WorkspaceScope.REPO

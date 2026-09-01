@@ -4,7 +4,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext, get_data_layer
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import (
@@ -199,6 +200,10 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
     Additionally intercepts Claude Code planning mode writes (~/.claude/plans/)
     and redirects them to project CLAUDE/Plan/ structure when enabled.
     """
+
+    # PROJECT-scoped: resolves per-file workspace via resolve_workspace()
+    # (see CLAUDE/Code/WorkspaceResolution.md).
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
 
     def __init__(self) -> None:
         """Initialize handler.

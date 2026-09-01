@@ -15,10 +15,11 @@ Policy comes from ``documentation`` via the registry's DOCUMENTATION-tag
 injection (``_documentation``) — zero per-handler options.
 """
 
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.docs_qa.context import sweep_context
@@ -48,6 +49,10 @@ def _cli_hint() -> str:
 
 class DocsQaSweepHandler(SessionStartHandlerBase):
     """Advisory SessionStart sweep over the documentation corpus (silent when clean)."""
+
+    # REPO-scoped: the documentation corpus is repository-singular, swept as
+    # a whole (see CLAUDE/Code/WorkspaceResolution.md).
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.REPO
 
     def __init__(self) -> None:
         super().__init__(

@@ -11,6 +11,7 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 
@@ -29,6 +30,14 @@ _DEFAULT_EXTRA_CHECK_DIRECTORIES: Final[tuple[str, ...]] = ("private_html",)
 
 class BritishEnglishHandler(PreToolUseHandlerBase):
     """Warn about American English spellings in content files (non-blocking)."""
+
+    # REPO-scoped (Plan 00301 follow-up): agent_docs_dir/human_docs_dir are
+    # sourced from the ROOT project's `documentation.trees` config even when
+    # composing a declared sub-project's ProjectLayout (see
+    # ProjectLayout.for_project / CLAUDE/Code/WorkspaceResolution.md) --
+    # there is no per-project override, so per-file resolution would be a
+    # no-op. The doc-tree axis is repository-singular by design.
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.REPO
 
     # Common American -> British spelling patterns
     SPELLING_CHECKS: ClassVar[dict[str, str]] = {

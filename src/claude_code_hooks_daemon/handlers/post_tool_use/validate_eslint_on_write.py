@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.core import (
     ProjectContext,
     get_data_layer,
 )
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
@@ -86,6 +87,10 @@ _ESLINT_RUN_FAILURE_RULE = Rule(
 
 class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
     """Run ESLint validation on TypeScript/TSX files after write."""
+
+    # PROJECT-scoped: resolves the file's workspace via resolve_workspace()
+    # (see CLAUDE/Code/WorkspaceResolution.md).
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
 
     VALIDATE_EXTENSIONS: ClassVar[list[str]] = [".ts", ".tsx"]
     # Plan 00288 Task 3.2: core (11 names) plus this handler's own extra,

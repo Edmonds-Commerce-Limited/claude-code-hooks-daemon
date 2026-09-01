@@ -389,6 +389,32 @@ class TestWorktreeFileCopyHandler:
         }
         assert handler.matches(hook_input) is True
 
+    def test_matches_honours_a_declared_projects_own_source_dir(self, handler, tmp_path):
+        """Plan 00301 follow-up: a Bash command can name ANY declared
+        project's code dirs, not just the root's -- "main repo code dirs"
+        must aggregate across every declared project (`iter_layouts`), not
+        resolve one owning project for a single file."""
+        from claude_code_hooks_daemon.config.models import LayoutConfig
+        from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegistry
+
+        handler._project_registry = ProjectRegistry(
+            project_root=tmp_path,
+            projects=(
+                DeclaredProject(
+                    name="api",
+                    root=tmp_path / "apps" / "api",
+                    layout=LayoutConfig(source_dirs=["backend"]),
+                ),
+            ),
+        )
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "cp untracked/worktrees/feature-branch/backend/test.py backend/"
+            },
+        }
+        assert handler.matches(hook_input) is True
+
 
 class TestGetRules:
     @pytest.fixture
