@@ -8,9 +8,15 @@ validator (hard error) and a runtime resolver (skip + warn, never raise) can
 share it instead of growing their own copies.
 """
 
+from pathlib import Path
+
 import pytest
 
-from claude_code_hooks_daemon.utils.repo_relative_path import normalise_repo_relative_path
+from claude_code_hooks_daemon.utils.repo_relative_path import (
+    REPO_ROOT_TOKEN,
+    expand_repo_root_token,
+    normalise_repo_relative_path,
+)
 
 
 class TestNormaliseRepoRelativePath:
@@ -42,3 +48,53 @@ class TestNormaliseRepoRelativePath:
     def test_error_message_includes_the_label(self) -> None:
         with pytest.raises(ValueError, match="my thing"):
             normalise_repo_relative_path("/abs", "my thing")
+
+    def test_token_prefixed_path_is_stripped(self) -> None:
+        assert normalise_repo_relative_path(f"{REPO_ROOT_TOKEN}/web", "label") == "web"
+
+    def test_token_alone_normalises_to_repo_root(self) -> None:
+        assert normalise_repo_relative_path(REPO_ROOT_TOKEN, "label") == "."
+
+    def test_token_followed_by_trailing_slash_normalises(self) -> None:
+        assert normalise_repo_relative_path(f"{REPO_ROOT_TOKEN}/", "label") == "."
+
+    def test_token_not_at_start_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="start"):
+            normalise_repo_relative_path(f"web/{REPO_ROOT_TOKEN}/x", "label")
+
+    def test_token_without_following_slash_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="start"):
+            normalise_repo_relative_path(f"{REPO_ROOT_TOKEN}suffix", "label")
+
+    def test_token_prefixed_escape_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must not escape"):
+            normalise_repo_relative_path(f"{REPO_ROOT_TOKEN}/../elsewhere", "label")
+
+    def test_bare_relative_path_still_valid_without_token(self) -> None:
+        assert normalise_repo_relative_path("web", "label") == "web"
+
+
+class TestExpandRepoRootToken:
+    def test_token_alone_expands_to_project_root(self) -> None:
+        root = Path("/repo")
+        assert expand_repo_root_token(REPO_ROOT_TOKEN, root) == str(root)
+
+    def test_token_prefixed_path_expands_against_project_root(self) -> None:
+        root = Path("/repo")
+        assert expand_repo_root_token(f"{REPO_ROOT_TOKEN}/plugins/foo", root) == str(
+            root / "plugins/foo"
+        )
+
+    def test_leading_slash_is_returned_unchanged(self) -> None:
+        assert expand_repo_root_token("/opt/plugins", Path("/repo")) == "/opt/plugins"
+
+    def test_plain_relative_path_is_returned_unchanged(self) -> None:
+        assert expand_repo_root_token("plugins/foo", Path("/repo")) == "plugins/foo"
+
+    def test_token_not_at_start_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="start"):
+            expand_repo_root_token(f"plugins/{REPO_ROOT_TOKEN}/foo", Path("/repo"))
+
+    def test_token_prefixed_escape_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must not escape"):
+            expand_repo_root_token(f"{REPO_ROOT_TOKEN}/../elsewhere", Path("/repo"))

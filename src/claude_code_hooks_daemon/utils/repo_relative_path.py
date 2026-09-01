@@ -22,7 +22,45 @@ pydantic import. Two different call sites need it:
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+
+#: Canonical notation for "the repository root" in documented and configured
+#: paths (owner ruling, Plan 00302 extension). It is optional sugar on any
+#: repo-relative field -- a bare relative path stays valid without it -- and
+#: it is the portable alternative to a genuine absolute path on the handful
+#: of fields that are exempt from the repo-relative-only rule (plugin/project
+#: handler paths). It must appear only as the very first path segment.
+REPO_ROOT_TOKEN = "{REPO_ROOT}"
+
+_TOKEN_PREFIX = REPO_ROOT_TOKEN + "/"
+
+
+def _strip_repo_root_token(value: str, label: str) -> str:
+    """Strip a leading ``{REPO_ROOT}`` token, if present, from ``value``.
+
+    Args:
+        value: The raw configured path, possibly token-prefixed.
+        label: What is being validated, for the error message.
+
+    Returns:
+        ``value`` with the token and its following ``/`` removed, or
+        ``value`` unchanged if it carries no token at all.
+
+    Raises:
+        ValueError: If the token appears anywhere other than at the very
+            start of ``value`` (either alone, or immediately followed by
+            ``/``).
+    """
+    if value == REPO_ROOT_TOKEN:
+        return ""
+    if value.startswith(_TOKEN_PREFIX):
+        return value[len(_TOKEN_PREFIX) :]
+    if REPO_ROOT_TOKEN in value:
+        raise ValueError(
+            f"{label} may only use {REPO_ROOT_TOKEN!r} at the very start of the path, "
+            f"followed by '/' (or alone, for the repository root itself), got {value!r}"
+        )
+    return value
 
 
 def normalise_repo_relative_path(value: str, label: str) -> str:
@@ -34,7 +72,9 @@ def normalise_repo_relative_path(value: str, label: str) -> str:
 
     Normalisation makes ``web/``, ``./web`` and ``web`` one declaration, and
     an empty string normalises to ``.`` (the repository root itself) rather
-    than staying a special-cased empty string.
+    than staying a special-cased empty string. A leading ``{REPO_ROOT}``
+    token is optional sugar -- ``{REPO_ROOT}/web`` normalises the same as
+    ``web`` -- see :data:`REPO_ROOT_TOKEN`.
 
     Args:
         value: The raw configured path.
@@ -46,6 +86,8 @@ def normalise_repo_relative_path(value: str, label: str) -> str:
     Raises:
         ValueError: If the path is absolute or escapes the repository.
     """
+    value = _strip_repo_root_token(value, label)
+
     if value.startswith("/") or PurePosixPath(value).is_absolute():
         raise ValueError(
             f"{label} must be repository-relative, got absolute {value!r}. "
@@ -64,3 +106,41 @@ def normalise_repo_relative_path(value: str, label: str) -> str:
         raise ValueError(f"{label} must not escape the repository, got {value!r}")
 
     return normalised
+
+
+def expand_repo_root_token(value: str, project_root: Path) -> str:
+    """Expand a leading ``{REPO_ROOT}`` token against ``project_root``.
+
+    For config surfaces that are EXEMPT from the repo-relative-only rule
+    (e.g. ``PluginConfig.path``, ``ProjectHandlersConfig.path``), an absolute
+    path is a deliberate, machine-specific override and a plain relative
+    path keeps whatever meaning the surface's own loader already gives it.
+    The ``{REPO_ROOT}`` token is the third, portable option: it names the
+    project root explicitly without hardcoding a machine-specific absolute
+    path.
+
+    Args:
+        value: The raw configured path.
+        project_root: The resolved project root to expand the token against.
+
+    Returns:
+        An absolute path string when ``value`` is token-prefixed; ``value``
+        unchanged (leading ``/`` or plain relative) otherwise.
+
+    Raises:
+        ValueError: If the token appears somewhere other than the start, or
+            the token-prefixed remainder escapes the repository via ``..``.
+    """
+    if value != REPO_ROOT_TOKEN and not value.startswith(_TOKEN_PREFIX):
+        if REPO_ROOT_TOKEN in value:
+            raise ValueError(
+                f"path may only use {REPO_ROOT_TOKEN!r} at the very start of the path, "
+                f"followed by '/' (or alone, for the repository root itself), got {value!r}"
+            )
+        return value
+
+    remainder = "" if value == REPO_ROOT_TOKEN else value[len(_TOKEN_PREFIX) :]
+    if ".." in PurePosixPath(remainder).parts:
+        raise ValueError(f"path must not escape the repository, got {value!r}")
+
+    return str(project_root / remainder) if remainder else str(project_root)

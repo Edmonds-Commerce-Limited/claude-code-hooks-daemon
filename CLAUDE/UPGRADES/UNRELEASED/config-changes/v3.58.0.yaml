@@ -26,6 +26,26 @@ config_changes:
         as before -- pinned by tests. Add `layout:` to a `projects:` entry
         only if that sub-project's own source/test dir names differ from the
         root project's or from the built-in defaults.
+    - key: "{REPO_ROOT} path token"
+      recommended: false
+      dormant: true
+      description: >-
+        NEW (Plan 00302 extension, owner ruling): the literal token
+        `{REPO_ROOT}` is now accepted as a canonical, portable notation for
+        "the repository root" in any repository-relative config path field
+        (`projects[].root`, `plan_workflow.directory`, and the rest of the
+        Plan 00303 hard-error surfaces) -- `{REPO_ROOT}/web` normalises
+        identically to `web`, and a bare relative path stays valid without
+        it. On the two path fields exempt from the repo-relative-only rule
+        (`plugins.paths`/`plugins.plugins[].path`, `project_handlers.path`),
+        the token expands against the project root at load time -- the
+        portable alternative to a genuine machine-specific absolute path,
+        which a leading `/` still means unchanged.
+      migration_note: >-
+        Purely additive -- no existing config changes meaning. Adopt the
+        token in new/edited config where the "repository root" framing reads
+        more clearly than a bare relative path, or where a plugin/project-
+        handler path previously needed a machine-specific absolute value.
   renamed: []
   removed:
     - key: handlers.pre_tool_use.markdown_organization.options.monorepo_subproject_patterns

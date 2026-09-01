@@ -1670,8 +1670,9 @@ def _load_project_handlers(config: "Config", project_path: Path) -> list[Any]:
         return []
 
     from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
+    from claude_code_hooks_daemon.utils.repo_relative_path import expand_repo_root_token
 
-    handlers_path = Path(config.project_handlers.path)
+    handlers_path = Path(expand_repo_root_token(config.project_handlers.path, project_path))
     if not handlers_path.is_absolute():
         handlers_path = project_path / handlers_path
     if not handlers_path.exists():
@@ -3764,7 +3765,9 @@ def cmd_validate_project_handlers(args: argparse.Namespace) -> int:
         print(f"⚠️  Could not load {config_path}, using defaults: {exc}", file=sys.stderr)
         config = Config()
 
-    handlers_path = Path(config.project_handlers.path)
+    from claude_code_hooks_daemon.utils.repo_relative_path import expand_repo_root_token
+
+    handlers_path = Path(expand_repo_root_token(config.project_handlers.path, project_path))
     if not handlers_path.is_absolute():
         handlers_path = project_path / handlers_path
 
@@ -3891,7 +3894,9 @@ def cmd_test_project_handlers(args: argparse.Namespace) -> int:
         print(f"⚠️  Could not load {config_path}, using defaults: {exc}", file=sys.stderr)
         config = Config()
 
-    handlers_path = Path(config.project_handlers.path)
+    from claude_code_hooks_daemon.utils.repo_relative_path import expand_repo_root_token
+
+    handlers_path = Path(expand_repo_root_token(config.project_handlers.path, project_path))
     if not handlers_path.is_absolute():
         handlers_path = project_path / handlers_path
 

@@ -659,6 +659,76 @@ class TestLoadFromPluginsConfig:
         assert len(handlers) == 1
         assert handlers[0].name == "test-custom"
 
+    def test_load_from_plugins_config_repo_root_token_in_global_paths(
+        self, plugin_dir: Path
+    ) -> None:
+        """A {REPO_ROOT}-prefixed global search path expands against workspace_root."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        workspace_root = plugin_dir.parent.parent
+        relative_plugin_dir = plugin_dir.relative_to(workspace_root)
+
+        plugins_config = PluginsConfig(
+            paths=[f"{{REPO_ROOT}}/{relative_plugin_dir.as_posix()}"],
+            plugins=[
+                PluginConfig(path="custom_handler", event_type="pre_tool_use", enabled=True),
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(
+            plugins_config, workspace_root=workspace_root
+        )
+
+        assert len(handlers) == 1
+        assert handlers[0].name == "test-custom"
+
+    def test_load_from_plugins_config_repo_root_token_in_plugin_path(
+        self, plugin_dir: Path
+    ) -> None:
+        """A {REPO_ROOT}-prefixed plugin.path expands against workspace_root."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        workspace_root = plugin_dir.parent.parent
+        relative_handler = (plugin_dir / "custom_handler.py").relative_to(workspace_root)
+
+        plugins_config = PluginsConfig(
+            paths=[],
+            plugins=[
+                PluginConfig(
+                    path=f"{{REPO_ROOT}}/{relative_handler.as_posix()}",
+                    event_type="pre_tool_use",
+                    enabled=True,
+                ),
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(
+            plugins_config, workspace_root=workspace_root
+        )
+
+        assert len(handlers) == 1
+        assert handlers[0].name == "test-custom"
+
+    def test_load_from_plugins_config_repo_root_token_without_workspace_root_raises(
+        self, plugin_dir: Path
+    ) -> None:
+        """A {REPO_ROOT} token cannot be resolved without workspace_root."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        plugins_config = PluginsConfig(
+            paths=[],
+            plugins=[
+                PluginConfig(
+                    path="{REPO_ROOT}/fixtures/plugins/custom_handler.py",
+                    event_type="pre_tool_use",
+                    enabled=True,
+                ),
+            ],
+        )
+
+        with pytest.raises(RuntimeError, match="REPO_ROOT"):
+            PluginLoader.load_from_plugins_config(plugins_config, workspace_root=None)
+
     def test_load_from_plugins_config_multiple_paths_first_wins(
         self, plugin_dir: Path, tmp_path: Path
     ) -> None:

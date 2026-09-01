@@ -134,6 +134,25 @@ class TestLoadProjectHandlers:
             expected_path = tmp_path / ".claude" / "project-handlers"
             mock_discover.assert_called_once_with(expected_path)
 
+    def test_load_project_handlers_expands_repo_root_token(self, tmp_path: Path) -> None:
+        """A leading {REPO_ROOT} token expands against workspace_root."""
+        controller = DaemonController()
+
+        project_config = ProjectHandlersConfig(
+            enabled=True, path="{REPO_ROOT}/.claude/project-handlers"
+        )
+
+        with patch(_DISCOVER) as mock_discover:
+            mock_discover.return_value = ProjectHandlerDiscovery(handlers=[])
+
+            controller._load_project_handlers(
+                project_handlers_config=project_config,
+                workspace_root=tmp_path,
+            )
+
+            expected_path = tmp_path / ".claude" / "project-handlers"
+            mock_discover.assert_called_once_with(expected_path)
+
     def test_load_project_handlers_uses_absolute_path_as_is(self, tmp_path: Path) -> None:
         """Test that absolute paths are used directly."""
         controller = DaemonController()

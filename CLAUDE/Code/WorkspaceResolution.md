@@ -62,7 +62,7 @@ The returned `Workspace` is frozen and carries four facts:
 # Omitted entirely == one project at the repo root == today's behaviour.
 projects:
   - name: web
-    root: web
+    root: "{REPO_ROOT}/web"
   - name: service
     root: service
   - name: infra
@@ -80,6 +80,22 @@ containing the file wins when two nest.
 different machines — a container bind mount, a desktop checkout, CI — so an
 absolute path in committed config is correct on exactly one of them and
 silently wrong everywhere else.
+
+**Path notation: `{REPO_ROOT}`.** Documented path examples across this repo
+use the literal token `{REPO_ROOT}` to mean "the repository root" (owner
+ruling, Plan 00302 extension) — e.g. `{REPO_ROOT}/web`. In config it is
+optional sugar accepted anywhere a repository-relative path is:
+`normalise_repo_relative_path` (`utils/repo_relative_path.py`) strips a
+leading `{REPO_ROOT}/` before validating, so `{REPO_ROOT}/web` and `web` declare the
+same thing, and a bare relative path stays valid without it. On the handful
+of fields EXEMPT from the repo-relative-only rule (a plugin path,
+`project_handlers.path`) it is the portable alternative to a genuine
+absolute path: `expand_repo_root_token` resolves it against the project root
+at load time, while a leading `/` still means a deliberate, machine-specific
+override. The token is valid only as the very first path segment —
+`{REPO_ROOT}` alone means the repository root itself, `{REPO_ROOT}/../x`
+still escapes and is rejected, and the token appearing anywhere else in the
+string is a validation error.
 
 **A declared project need not contain a manifest.** That is the case
 declaration exists for: a config-driven toolchain directory, or a docs site

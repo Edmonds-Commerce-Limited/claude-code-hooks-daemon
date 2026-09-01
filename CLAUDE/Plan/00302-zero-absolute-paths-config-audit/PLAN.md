@@ -104,6 +104,17 @@ to it.
   summary entry.
 - [x] ✅ **Task 5.3**: `docs/guides/CONFIGURATION.md` updated with a pointer.
 
+### Phase 6: extension — `{REPO_ROOT}` canonical path notation
+
+- [x] ✅ **Task 6.1**: owner ruling extension. `utils/repo_relative_path.py`:
+  `REPO_ROOT_TOKEN` constant + `normalise_repo_relative_path` support (TDD
+  first); `expand_repo_root_token(value, project_root)` shared helper for
+  the two exempted absolute-allowed surfaces (`plugins/loader.py`,
+  `daemon/controller.py` + `daemon/cli.py` project-handler call sites);
+  `config/models.py` field descriptions updated; canonical notation defined
+  in `CLAUDE/Code/WorkspaceResolution.md`, cross-linked + examples updated
+  in `docs/guides/CONFIGURATION.md`; upgrade manifest entry added.
+
 ## Success Criteria
 
 - [x] Every surface in the audit table has an explicit decision + action.
