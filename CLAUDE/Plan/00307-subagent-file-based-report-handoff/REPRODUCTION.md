@@ -89,3 +89,15 @@ Tuning inputs for Task 4.2 (dogfood):
 2. The markdown-location handler rejected its first write location; the
    size-blocker's remediation should name a location that is always
    writable, so the two handlers never argue.
+
+## Third run (post-tuning verification) — PASS with full convention compliance
+
+Same dispatch verbatim, after the Task 4.2 tuning (`e2729470`) made the
+block reason prescribe the exact fallback path:
+
+- 86,719-character return blocked; the probe wrote the complete payload to
+  `untracked/agent-reports/260901-general-purpose-haiku.md` — precisely the
+  prescribed fallback directory AND the `{yymmdd}-{agent-name}-{model}.md`
+  convention with the agent-name and model placeholders correctly filled —
+  and returned a three-line summary + path. No location-handler friction,
+  no self-chosen path. Both Task 4.2 tuning findings verified closed.
