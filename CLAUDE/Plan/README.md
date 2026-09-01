@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00313: venv resolver cross-view reuse](00313-venv-resolver-cross-view-reuse/PLAN.md) - In Progress (host-level Claude in this repo folder picks the container-built venv — slug-mismatched `venv-*` candidates must be ineligible in the metadata and scan fallback steps so each root view builds its own venv; pre-release fix for v3.59.0)
-
 - [00312: supervisor ctrl c double press guard](00312-supervisor-ctrl-c-double-press-guard/PLAN.md) - In Progress (a single accidental ^C kills background agents; the supervisor's PTY position lets it swallow a lone 0x03 and forward on rapid double-press — escape hatch always wins, visibly hinted, dogfooded here)
 
 - [00311: v3.59.0 release review followups](00311-v3590-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.59.0 code review: dispatch_declaration's hardcoded plan path, the secret_file_matching glob-heuristic maintenance surface, and the git rm --cached looseness verification)
@@ -172,6 +170,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00313: venv resolver cross-view reuse](Completed/00313-venv-resolver-cross-view-reuse/PLAN.md) - Complete at 3d71ff84, shipped in v3.59.0 (slug-mismatched `venv-*` candidates are now ineligible in the metadata and scan fallback resolution steps, so host and container views of the same repo each build their own venv; bash resolvers inherit via the Python SSOT)
+
 - [00307: subagent file based report handoff](Completed/00307-subagent-file-based-report-handoff/PLAN.md) - Complete (dispatch_declaration + subagent_report_size_blocker handlers, both enabled by default; three live probe runs proved RED truncation, GREEN blocked+re-routed, third-run full convention compliance; owner called time on passive multi-session soak)
 
 - [00309: lint on edit per language timeout](Completed/00309-lint-on-edit-per-language-timeout/PLAN.md) - Complete at 373db1f9, merged at 6ca8bf79 (per-language `options.timeouts.<Language>` for lint_on_edit; fail-open kept, fired timeouts now name the language, budget and config key)
@@ -230,8 +230,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00277: release acceptance findings v3 55 0](Completed/00277-release-acceptance-findings-v3-55-0/PLAN.md) - Complete at `ebf7016a` + the archiving commit (all v3.55.0 gate findings closed: per-session block_once with session-attributed HandlerDecisionRecord, isolation-advisor test precondition, lint-clean error-hiding samples, validate_eslint_on_write deny branch verified live in the client fixture)
 
-- [00275: github auto-close keyword blocker](Completed/00275-github-auto-close-keyword-blocker/PLAN.md) - Complete at merge `2bdafe05` (PreToolUse guard denying GitHub auto-closing keyword references in git commit/merge/tag and `gh pr` messages, inline or via `-F`/`--body-file`; enabled by default, `MUST_AUTO_CLOSE_BECAUSE` hatch)
-
 ## Blocked / On Hold Plans
 
 - **00032, 00034, 00035** - On hold pending upstream Claude Code delegate mode fix (GitHub #23447, #25037)
@@ -271,9 +269,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 313 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 257 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 258 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 

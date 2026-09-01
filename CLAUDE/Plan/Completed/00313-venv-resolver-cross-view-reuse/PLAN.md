@@ -1,6 +1,6 @@
 # Plan 00313: venv resolver cross-view reuse
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: High (pre-release, v3.59.0)
@@ -76,14 +76,20 @@ resolver's fallback steps defeat the slug:
 
 ## Success Criteria
 
-- [ ] Host-level invocation in a repo carrying a container-built venv
-  refuses the mismatched venv and (via ensure_venv) builds its own.
-- [ ] Container behaviour unchanged (fingerprint match still first hit).
-- [ ] QA 25/25.
+- [x] Host-level invocation in a repo carrying a container-built venv
+  refuses the mismatched venv and (via ensure_venv) builds its own —
+  pinned by unit tests replicating the exact field shape (slug
+  `workspace` venv, daemon_dir resolving elsewhere); live host re-test is
+  the owner's next host-level launch.
+- [x] Container behaviour unchanged (fingerprint match still first hit;
+  daemon ran the whole v3.59.0 acceptance suite on the container venv
+  post-fix).
+- [x] QA 25/25.
 
 ## Delivery & Milestones
 
 <!-- Curated milestones + delivery commit hashes only. Activity log lives
      in JOURNAL/. -->
 
-- <!-- delivery commit hash -->
+- 3d71ff84 — slug-eligibility fix in daemon/paths.py + 12 unit tests
+- 92c64dff / tag v3.59.0 — shipped in the v3.59.0 release
