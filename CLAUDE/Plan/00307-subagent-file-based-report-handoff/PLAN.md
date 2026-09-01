@@ -53,7 +53,8 @@ threshold/steering design thinking where it fits.
 
 ### Phase 1: Reproduce and verify the surfaces
 
-- [ ] ⬜ **Task 1.1**: Live reproduction (RED): dispatch a subagent
+- [x] ✅ **Task 1.1** (findings: `REPRODUCTION.md`): Live reproduction
+  (RED): dispatch a subagent
   explicitly instructed to return an oversized final message (well past the
   suspected ~16k-token cap; e.g. generate long structured filler and return
   it ALL inline, writing nothing to disk). Record in a findings doc in this
@@ -70,12 +71,18 @@ threshold/steering design thinking where it fits.
 
 ### Phase 2: Prevention at dispatch (PreToolUse on Agent)
 
-- [ ] ⬜ **Task 2.1**: TDD a PreToolUse handler on the `Agent` tool that
-  checks the dispatch prompt for the file-handoff contract and injects
-  guidance when absent (advisory additionalContext by default; optional
-  strict mode denies until the prompt names a report-file location).
-  Configurable report directory (default `untracked/agent-reports/`) and
-  threshold wording. Enable in this repo (dogfood).
+- [ ] ⬜ **Task 2.1**: TDD a PreToolUse handler on the `Agent` tool
+  enforcing a dispatch declaration (owner-ruled): every dispatch prompt
+  must EITHER name the plan folder the agent is working in — which then IS
+  the canonical location for its reports and other artefacts — OR
+  explicitly declare it is not plan work AND name where any files it
+  creates must go. A prompt declaring neither gets the contract injected
+  (advisory additionalContext by default; optional strict mode denies until
+  a declaration is present). The same declaration carries the file-handoff
+  rule: long-form output goes to a file in the declared location, the final
+  message is summary + path. Fallback location for genuinely plan-less
+  work: configurable, default `untracked/agent-reports/`. Enable in this
+  repo (dogfood).
 
 ### Phase 3: Enforcement at return (SubagentStop)
 
