@@ -136,7 +136,7 @@ byte-identical to today's behaviour.
 ```yaml
 projects:
   - name: web
-    root: web
+    root: "{REPO_ROOT}/web"
   - name: service
     root: service
   - name: infra
@@ -166,6 +166,13 @@ across every project uses `ProjectRegistry.iter_layouts()`/`all_source_dirs()`
 | `bin_dirs` | no       | Root-relative tool bin dirs. Unset infers from `kind`; `[]` explicitly declares none.                                                                                |
 | `layout`   | no       | This project's own `layout:` block (source/test/config/vendor dirs). Unset uses built-in defaults for this project's root — never the root project's declared lists. |
 
+**Path notation: `{REPO_ROOT}`.** Documented paths use the literal token
+`{REPO_ROOT}` for "the repository root" (e.g. `{REPO_ROOT}/web`) — optional
+sugar accepted anywhere a repository-relative path is, and on a handful of
+exempt fields (a plugin path, `project_handlers.path`) the portable
+alternative to a genuine absolute path. Full semantics:
+[../../CLAUDE/Code/WorkspaceResolution.md](../../CLAUDE/Code/WorkspaceResolution.md).
+
 **Every path is repository-root-relative — zero absolute paths.** `root` and
 each `bin_dirs` entry reject absolute paths, `~`, and `..` escapes. `name`
 values must be unique within the block; duplicates are rejected at load. A
@@ -192,7 +199,10 @@ absolute value is logged and the built-in default is used. Plugin paths,
 `project_handlers.path`, `daemon.socket_path`/`pid_file_path`, and
 `transport.relay_binary` are documented exemptions — see
 `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.58.0.yaml` for the full list and
-rationale.
+rationale. On the two exemptions that resolve against the project (plugin
+paths, `project_handlers.path`), a leading `{REPO_ROOT}` token is the
+portable alternative to a genuine absolute path — see the path notation
+paragraph above.
 
 ---
 

@@ -470,8 +470,12 @@ class DaemonController:
             self._persist_project_handler_health(ProjectHandlerDiscovery())
             return 0
 
-        # Resolve path: relative paths are resolved against workspace_root
-        handlers_path = Path(project_handlers_config.path)
+        # Resolve path: a leading {REPO_ROOT} token expands against
+        # workspace_root; otherwise relative paths are resolved against
+        # workspace_root and an absolute path is used as-is.
+        from claude_code_hooks_daemon.utils.repo_relative_path import expand_repo_root_token
+
+        handlers_path = Path(expand_repo_root_token(project_handlers_config.path, workspace_root))
         if not handlers_path.is_absolute():
             handlers_path = workspace_root / handlers_path
 

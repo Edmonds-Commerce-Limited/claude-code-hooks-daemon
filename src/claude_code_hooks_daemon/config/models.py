@@ -303,8 +303,10 @@ class PluginConfig(BaseModel):
             "code that may legitimately live outside the repository -- the "
             "same category as TransportConfig.relay_binary -- and the "
             "loader's absolute-path resolution is an explicitly tested "
-            "feature (tests/unit/test_plugin_loader.py). Prefer a "
-            "repository-relative path when the plugin ships inside the repo."
+            "feature (tests/unit/test_plugin_loader.py). A leading "
+            "{REPO_ROOT} token (Plan 00302 extension) expands against the "
+            "project root at load time -- the portable alternative to a "
+            "genuine absolute path when the plugin ships inside the repo."
         )
     )
     event_type: Literal[
@@ -330,7 +332,8 @@ class PluginsConfig(BaseModel):
     Attributes:
         paths: Additional paths to search for plugins. EXEMPT from the
             repository-relative rule for the same reason as
-            ``PluginConfig.path`` -- see that field's docstring.
+            ``PluginConfig.path`` -- see that field's docstring. Also
+            supports the ``{REPO_ROOT}`` token.
         plugins: List of plugin configurations
     """
 
@@ -390,7 +393,10 @@ class ProjectHandlersConfig(BaseModel):
             "controller explicitly supports and tests an absolute override "
             "(tests/unit/daemon/test_controller_project_handlers.py) for a "
             "project-owned handler directory that may legitimately live "
-            "outside the repository, the same category as a plugin path."
+            "outside the repository, the same category as a plugin path. A "
+            "leading {REPO_ROOT} token (Plan 00302 extension) expands "
+            "against the workspace root at load time -- the portable "
+            "alternative to a genuine absolute path."
         ),
     )
 
