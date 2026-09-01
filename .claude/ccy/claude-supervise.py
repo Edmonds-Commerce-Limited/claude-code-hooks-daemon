@@ -1025,6 +1025,17 @@ _ANCHOR_ALERT_TEXT = (
     "🚨 DROP ANCHOR: fable stuck above low effort after repeated /effort low "
     "attempts — owner attention needed (see decision.log)"
 )
+# Plan 00297 follow-up (owner-approved, ruling: "Compaction is uninterruptible
+# AFAIK... Esc can be disruptive but its basically OK - its MUCH MUCH better
+# than leaving fable running at xhigh"): once ESCALATED, the anchor also
+# sends a raw ESC to interrupt an in-flight turn that is swallowing the
+# `/effort low` injection -- the same WOULD_ESCAPE keystroke path the
+# AWAIT_COMPACTING flush already uses. Its OWN cooldown, separate from
+# `_ANCHOR_RETRY_COOLDOWN_SECONDS`, so ESC does not fire every retry tick.
+_ANCHOR_ESC_COOLDOWN_SECONDS = 60.0
+_DRY_RUN_ANCHOR_ESCAPE_BODY = (
+    "would send [esc] to interrupt the in-flight turn (dry-run — no real ESC sent)"
+)
 
 
 def _parse_model_restore_delay(raw: str) -> float:
@@ -1357,6 +1368,13 @@ class TickOutcome:
     # successful PTY write. False for every other decision and for legacy
     # replies without the field.
     is_anchor_injection: bool = False
+    # Plan 00297 follow-up: True only for the DROP ANCHOR escalation ESC (a
+    # WOULD_ESCAPE decision fired to interrupt an in-flight turn that may be
+    # swallowing the emergency `/effort low` correction), so the HOST records
+    # the send against the anchor's own ESC cooldown (`mark_anchor_esc`)
+    # rather than the AWAIT_COMPACTING flush's escape-count bookkeeping.
+    # False for every other decision and for legacy replies without the field.
+    is_anchor_escape: bool = False
 
 
 def _coerce_float(value: object) -> float:
@@ -2393,6 +2411,11 @@ class CompactStateMachine:
         self._anchor_started_ts: float | None = None
         self._anchor_last_injected_ts: float | None = None
         self._anchor_attempts: int = 0
+        # Plan 00297 follow-up: last wall-clock time the escalation ESC fired
+        # (its own cooldown, separate from `_anchor_last_injected_ts`). Reset
+        # to None whenever the anchor clears, so a fresh violation episode is
+        # never throttled by a previous episode's ESC cooldown.
+        self._anchor_esc_last_sent_ts: float | None = None
 
     @property
     def effort_pending(self) -> str | None:
@@ -2641,6 +2664,7 @@ class CompactStateMachine:
             self._anchor_started_ts = None
             self._anchor_last_injected_ts = None
             self._anchor_attempts = 0
+            self._anchor_esc_last_sent_ts = None
 
     def anchor_injection_due(self, now_wall: float) -> bool:
         """True when the anchor should (re)inject `/effort low` this tick.
@@ -2683,6 +2707,28 @@ class CompactStateMachine:
             self._anchor_started_ts is not None
             and now_wall - self._anchor_started_ts >= _ANCHOR_ESCALATION_BOUND_SECONDS
         )
+
+    def anchor_esc_due(self, now_wall: float) -> bool:
+        """True when an ESCALATED anchor should send an ESC to flush the turn.
+
+        Requires the anchor to be both active AND escalated -- ESC is a
+        stronger interrupt than the plain `/effort low` retry, reserved for
+        the case that retry alone has not been enough. Gated by its OWN
+        cooldown (`_ANCHOR_ESC_COOLDOWN_SECONDS`), independent of
+        `anchor_injection_due`'s cooldown, so ESC never fires every retry
+        tick. Callers must ALSO check that no compaction is in flight --
+        compaction is uninterruptible, and this method has no visibility
+        into the sidecar reading needed to know that.
+        """
+        if not self._anchor_active or not self.anchor_escalated_at(now_wall):
+            return False
+        if self._anchor_esc_last_sent_ts is None:
+            return True
+        return now_wall - self._anchor_esc_last_sent_ts >= _ANCHOR_ESC_COOLDOWN_SECONDS
+
+    def mark_anchor_esc(self, now_wall: float) -> None:
+        """Record that the anchor's escalation ESC fired this tick (HOST-side)."""
+        self._anchor_esc_last_sent_ts = now_wall
 
     @property
     def last_model_session(self) -> str | None:
@@ -2842,6 +2888,7 @@ class CompactStateMachine:
             "anchor_started_ts": self._anchor_started_ts,
             "anchor_last_injected_ts": self._anchor_last_injected_ts,
             "anchor_attempts": self._anchor_attempts,
+            "anchor_esc_last_sent_ts": self._anchor_esc_last_sent_ts,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -2918,6 +2965,9 @@ class CompactStateMachine:
             self._anchor_last_injected_ts = None if raw is None else _coerce_float(raw)
         if "anchor_attempts" in state:
             self._anchor_attempts = _coerce_int(state["anchor_attempts"])
+        if "anchor_esc_last_sent_ts" in state:
+            raw = state["anchor_esc_last_sent_ts"]
+            self._anchor_esc_last_sent_ts = None if raw is None else _coerce_float(raw)
 
     def evaluate(
         self,
@@ -3607,6 +3657,11 @@ def decide_once(
     # Plan 00297: set True only by the DROP ANCHOR branch immediately below,
     # so the HOST records the attempt against the anchor's OWN bookkeeping.
     is_anchor_injection = False
+    # Plan 00297 follow-up: set True only by the DROP ANCHOR ESCALATION ESC
+    # branch immediately below, so the HOST records the send against the
+    # anchor's own ESC cooldown (`mark_anchor_esc`) rather than treating it
+    # like a normal `/effort` injection.
+    is_anchor_escape = False
     # ── DROP ANCHOR: fable-above-low invariant (Plan 00297) ─────────────────
     # HIGHEST subordinate priority -- checked even ahead of the coupled-effort
     # correction below -- because fable observed running above low effort is
@@ -3638,8 +3693,34 @@ def decide_once(
                 if reading is not None
                 else "model=? effort=?"
             )
+            # Compaction is uninterruptible (owner ruling, Plan 00297
+            # follow-up) -- an ESC must never fire while one is in flight,
+            # even though `machine.state` staying MONITOR on the FIRST tick
+            # that observes `reading.compacting` (before `_enter_await` can
+            # run) would otherwise let it slip through.
+            compacting_in_flight = reading is not None and reading.compacting
             if not facts.input_line_empty:
                 deferred_log = f"{_DEFERRED_LOG_PREFIX} (DROP ANCHOR: fable above low effort)"
+                noop_reason_log = None
+            elif not compacting_in_flight and machine.anchor_esc_due(facts.now_wall):
+                # Escalation ESC (Plan 00297 follow-up): retries alone have
+                # not verified within the escalation bound, so interrupt the
+                # in-flight turn that may be swallowing the `/effort low`
+                # injection -- reusing the WOULD_ESCAPE keystroke path
+                # AWAIT_COMPACTING already uses (raw ESC, no Enter).
+                decision_value = Decision.WOULD_ESCAPE.value
+                reason = (
+                    f"DROP ANCHOR ESCALATED: fable observed above low effort ({observed}) "
+                    f"persists after {machine.anchor_attempts} attempt(s) -> would send "
+                    f"[esc] to interrupt the in-flight turn"
+                )
+                if dry_run:
+                    payload = f"{_format_bot_prefix(facts.now_wall)} {_DRY_RUN_ANCHOR_ESCAPE_BODY}"
+                else:
+                    payload = _ESC_PAYLOAD
+                submit = False
+                is_anchor_escape = True
+                deferred_log = None
                 noop_reason_log = None
             elif machine.anchor_injection_due(facts.now_wall):
                 decision_value = Decision.WOULD_EFFORT.value
@@ -4042,6 +4123,7 @@ def decide_once(
         model_switch_is_auto_restore=model_switch_is_auto_restore,
         is_flag_compact=is_flag_compact,
         is_anchor_injection=is_anchor_injection,
+        is_anchor_escape=is_anchor_escape,
     )
 
 
@@ -4162,6 +4244,13 @@ def _apply_post_injection_bookkeeping(
         # is_flag_compact False and is governed by its AWAIT_COMPACTING
         # lifecycle instead.
         machine.mark_flag_compaction()
+    elif outcome.decision_value == Decision.WOULD_ESCAPE.value and outcome.is_anchor_escape:
+        # Plan 00297 follow-up: the escalation ESC has its OWN cooldown,
+        # separate from the AWAIT_COMPACTING flush's `_escapes_sent` counter
+        # (which `evaluate()` already manages internally) -- `is_anchor_escape`
+        # disambiguates the two so a compaction flush never throttles, or is
+        # throttled by, the anchor's interrupt.
+        machine.mark_anchor_esc(now_wall if now_wall is not None else time.time())
 
 
 def _poll_once(
@@ -4277,6 +4366,7 @@ def _outcome_to_json(outcome: TickOutcome) -> str:
             "model_switch_is_auto_restore": outcome.model_switch_is_auto_restore,
             "is_flag_compact": outcome.is_flag_compact,
             "is_anchor_injection": outcome.is_anchor_injection,
+            "is_anchor_escape": outcome.is_anchor_escape,
         }
     )
 
@@ -4299,6 +4389,7 @@ def _outcome_from_json(line: str) -> TickOutcome:
         model_switch_is_auto_restore=bool(data.get("model_switch_is_auto_restore", False)),
         is_flag_compact=bool(data.get("is_flag_compact", False)),
         is_anchor_injection=bool(data.get("is_anchor_injection", False)),
+        is_anchor_escape=bool(data.get("is_anchor_escape", False)),
     )
 
 
