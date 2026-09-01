@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00301: monorepo single config hard cutover](00301-monorepo-single-config-hard-cutover/PLAN.md) - In Progress (owner-ruled hard cutover of the monorepo config alias, `test_path_map` anchoring, and per-project `layout:`)
-
 - [00299: multi plan goal support](00299-multi-plan-goal-support/PLAN.md) - Not Started (the `/goal` Stop-hook condition is a single session-scoped slot that concurrent worktree plans overwrite last-writer-wins, while the daemon's goal ledger already tracks multiple In-Progress plans — make the ledger authoritative and the goal signal a per-plan-additive view of it)
 
 - [00298: failsafe cron blockage cadence](00298-failsafe-cron-blockage-cadence/PLAN.md) - Not Started (design/brainstorm: a session stably blocked only on human input burns a full model turn per hourly failsafe-cron tick — recommends a daemon-side blocked-state marker + zero-token `UserPromptSubmit` suppression, with a bounded expiry so a stale marker cannot mask a real rate-limit recovery)
@@ -171,6 +169,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00301: monorepo single config hard cutover](Completed/00301-monorepo-single-config-hard-cutover/PLAN.md) - Complete at `aa914471`/`906eed45` + the archiving commit (owner-ruled hard cutover: alias hard-error, single test_dir anchoring, per-project `layout:` with DRY aggregation helpers, REPO/PROJECT `workspace_scope` taxonomy)
 
 - [00116: CLAUDE.md Token Compression via Stateful Progressive Disclosure](Completed/00116-claude-md-token-compression/PLAN.md) - Complete at `ba8860ed` + the archiving commit (two-tier injected block live at 63.6% shrink; 46 handlers on Rule/DisclosureTracker; block-report data-driven promotion; explain-rule CLI+skill)
 
@@ -1299,9 +1299,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 301 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 245 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 246 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 

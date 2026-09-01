@@ -1,6 +1,6 @@
 # Plan 00301: monorepo single config hard cutover
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: Medium
@@ -146,3 +146,5 @@ authoritative for the FOLDER number only.
      JOURNAL/00301-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Phases 1-5 delivered in this worktree branch; see JOURNAL/00301-Journal-26-09-01.md and commit history for detail.
+- `aa914471` — hard cutover merged: alias hard-error, single test_dir anchoring, per-project `layout:` with DRY aggregation helpers, upgrade manifests staged.
+- `906eed45` — REPO-level vs PROJECT-level handler taxonomy merged: `Handler.workspace_scope` declared on all Plan 00296/00301 consumers, six deferred `ProjectLayout` consumers classified.
