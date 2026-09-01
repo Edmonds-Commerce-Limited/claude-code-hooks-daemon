@@ -237,7 +237,7 @@ Creating a production source file with `Write` is blocked until a corresponding 
 
 **The deny message lists every location it searched.** If your project's real test directory is not in that list, no amount of retrying will satisfy the gate — the project needs to DECLARE the directory (below), not move the test.
 
-**A layout the resolvers cannot infer is declarable** via `handlers.pre_tool_use.tdd_enforcement.options.test_path_map` — a list of `{source_glob, test_dir}` entries. `test_dir` is project-root-relative (or absolute) and FLAT: the test filename is placed directly in it, not mirrored under it. This keeps enforcement ON and is the preferred fix, because a test that exists is worth more than an exemption:
+**A layout the resolvers cannot infer is declarable** via `handlers.pre_tool_use.tdd_enforcement.options.test_path_map` — a list of `{source_glob, test_dir}` entries. `test_dir` is repository-root-relative (an absolute path is rejected) and FLAT: the test filename is placed directly in it, not mirrored under it. This keeps enforcement ON and is the preferred fix, because a test that exists is worth more than an exemption:
 
 ```yaml
 test_path_map:
@@ -379,9 +379,9 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 
 <!-- handler: validate-instruction-content -->
 
-<!-- handler: validate-eslint-on-write -->
-
 <!-- handler: lint-on-edit -->
+
+<!-- handler: validate-eslint-on-write -->
 
 | ID                                 | Blocked                                                                                              | Why                                                                                                                             | Fix                                                                                                              |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -441,10 +441,10 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 | R-INSTRUCTION-FILE-LISTING         | changelog-style file listings (e.g. 'created src/Service/Foo.php')                                   | A file path preceded by a past-tense action verb is changelog narrative                                                         | Remove the log line; a bare path reference used as documentation stays allowed                                   |
 | R-INSTRUCTION-CHANGE-SUMMARY       | change summaries (e.g. 'Added 15 lines', 'Removed 8 lines')                                          | A line-count delta describes one diff, not a stable instruction                                                                 | Remove the summary; the diff itself is preserved in git                                                          |
 | R-INSTRUCTION-COMPLETION-INDICATOR | completion indicators (e.g. 'ALL DONE!', 'Task complete!', 'Finished task')                          | A completion phrase announces a session's end, not a fact about the project                                                     | Remove the phrase; instruction files should never celebrate finishing a task                                     |
+| R-LINT-FAILURE                     | a written/authored file that fails its language's lint check                                         | The write has already landed on disk; this is a failure report, not a rollback                                                  | Fix the reported problems with Edit — do not re-Write the file from scratch                                      |
 | R-ESLINT-ERRORS                    | a written/authored TS/TSX file with reported ESLint errors                                           | The write has already landed on disk; this is a failure report, not a rollback                                                  | Fix the reported problems with Edit (`npx eslint <file> --fix` clears most)                                      |
 | R-ESLINT-TIMEOUT                   | an ESLint run that did not finish within the configured timeout                                      | This handler DENIES on a timeout — unlike lint_on_edit, which allows                                                            | Investigate why ESLint is slow (config, project size); retry the edit                                            |
 | R-ESLINT-RUN-FAILURE               | an ESLint invocation that failed to run at all                                                       | ESLint could not be launched (exception raised invoking it)                                                                     | Check the ESLint wrapper/tsx setup, then retry the edit                                                          |
-| R-LINT-FAILURE                     | a written/authored file that fails its language's lint check                                         | The write has already landed on disk; this is a failure report, not a rollback                                                  | Fix the reported problems with Edit — do not re-Write the file from scratch                                      |
 
 ## Advisories and other active handlers
 
