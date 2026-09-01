@@ -143,14 +143,28 @@ projects:
     root: infra
     kind: ansible          # no manifest at this root — declaration is the only way
     bin_dirs: [.venv/bin]
+  - name: legacy-app
+    root: apps/legacy
+    layout:                # this project's OWN directory-layout truths (Plan 00300)
+      source_dirs: ["backend/src"]
+      test_dirs: ["backend/tests"]
 ```
 
-| Field      | Required | Description                                                                           |
-| ---------- | -------- | ------------------------------------------------------------------------------------- |
-| `name`     | yes      | Unique identifier within the block; used in advisory/diagnostic output.               |
-| `root`     | yes      | Repository-relative project directory. `.` declares the repo root itself.             |
-| `kind`     | no       | Ecosystem name. Unset infers from the manifest found at `root`.                       |
-| `bin_dirs` | no       | Root-relative tool bin dirs. Unset infers from `kind`; `[]` explicitly declares none. |
+Each project's `layout:` (same shape as the top-level `layout:` block)
+is its OWN — a project without one uses built-in defaults for its own root,
+never the root project's declared lists. The top-level `layout:` is the ROOT
+project's layout only, not a global fallback. `ProjectRegistry.layout_for(path)`
+resolves the owning project's layout for a file; a handler needing the union
+across every project uses `ProjectRegistry.iter_layouts()`/`all_source_dirs()`
+— never a hand-rolled loop.
+
+| Field      | Required | Description                                                                                                                                                          |
+| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`     | yes      | Unique identifier within the block; used in advisory/diagnostic output.                                                                                              |
+| `root`     | yes      | Repository-relative project directory. `.` declares the repo root itself.                                                                                            |
+| `kind`     | no       | Ecosystem name. Unset infers from the manifest found at `root`.                                                                                                      |
+| `bin_dirs` | no       | Root-relative tool bin dirs. Unset infers from `kind`; `[]` explicitly declares none.                                                                                |
+| `layout`   | no       | This project's own `layout:` block (source/test/config/vendor dirs). Unset uses built-in defaults for this project's root — never the root project's declared lists. |
 
 **Every path is repository-root-relative — zero absolute paths.** `root` and
 each `bin_dirs` entry reject absolute paths, `~`, and `..` escapes. `name`
@@ -162,8 +176,11 @@ The `monorepo_detector` session-start handler is advisory only: when it sees
 an unconfigured monorepo shape, it prints a paste-ready `projects:` block, but
 never changes enforcement itself.
 
-`markdown_organization`'s `monorepo_subproject_patterns` option is a
-**deprecated alias** for a `projects:` entry — declare projects here instead.
+`markdown_organization`'s `monorepo_subproject_patterns` option was **removed**
+(Plan 00300 hard cutover) — `projects:` is the only sub-project mechanism.
+Loading a config that still sets it is a hard startup error whose message
+prints the equivalent `projects:` block; there is no fallback, and staying on
+an older daemon version is the backward-compat path.
 
 ---
 

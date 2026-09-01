@@ -1,0 +1,66 @@
+version: "3.58.0"
+date: "UNRELEASED"
+breaking: true
+upgrade_guide: null
+config_changes:
+  added:
+    - key: projects[].layout
+      recommended: false
+      dormant: true
+      description: >-
+        NEW per-project field (Plan 00300 owner ruling): a declared
+        `projects:` entry may now carry its own `layout:` block (same shape
+        as the top-level `layout:`) governing ONLY that project's own
+        source/test/config/vendor directory names. A declared project
+        without one uses built-in defaults for its own root -- it never
+        inherits the top-level `layout:` block, which is the ROOT project's
+        layout only, never a global fallback (no leaking one project's
+        layout into another's). `ProjectRegistry.layout_for(path)` resolves
+        the owning project's layout for one file;
+        `ProjectRegistry.iter_layouts()`/`all_source_dirs()` are the DRY
+        aggregation helpers for a handler needing the union across every
+        project.
+      migration_note: >-
+        No action needed. A repository with no `projects:` block (or
+        `projects:` entries with no `layout:` of their own) behaves exactly
+        as before -- pinned by tests. Add `layout:` to a `projects:` entry
+        only if that sub-project's own source/test dir names differ from the
+        root project's or from the built-in defaults.
+  renamed: []
+  removed:
+    - key: handlers.pre_tool_use.markdown_organization.options.monorepo_subproject_patterns
+      description: >-
+        Plan 00300 hard cutover: the regex-pattern sub-project alias is
+        removed outright. Declared `projects:` config (Plan 00296) is now the
+        ONLY sub-project resolution mechanism — there is no fallback and no
+        override. The option's mere PRESENCE in config is now a hard
+        config-validation error at startup; the error message prints the
+        equivalent `projects:` block, derived mechanically for every literal
+        (non-wildcard) pattern.
+      migration_note: >-
+        Load the daemon once and read the printed error — it is a paste-ready
+        `projects:` block for every literal pattern. A pattern containing a
+        regex wildcard (e.g. `packages/[^/]+`) cannot be auto-named: declare
+        each real sub-project directory by hand as its own `projects:` entry.
+        Staying on an older (pre-3.58.0) daemon version is the backward-compat
+        path — there is no other way to keep the old alias working.
+  changed:
+    - key: handlers.pre_tool_use.tdd_enforcement.options.test_path_map
+      description: >-
+        Plan 00300 hard cutover: a relative `test_dir` entry now anchors
+        against the source file's DECLARED WORKSPACE ONLY (via `projects:`,
+        Plan 00296) — the extra project-root-anchored candidate that used to
+        be searched second is gone. In a single-project repo (no `projects:`
+        declared, or the file is outside every declared root) the workspace
+        IS the repository root, so zero-config behaviour is byte-identical.
+        Only a project that BOTH declares `projects:` AND relies on the
+        project-root candidate being searched as a second location is
+        affected.
+      recommended: false
+      migration_note: >-
+        No action needed unless your project declares `projects:` AND has a
+        `test_path_map` entry whose test file happened to live at the
+        project-root-anchored path rather than the workspace-anchored one.
+        Move the test file to `{declared project root}/{test_dir}/`, or split
+        the `test_path_map` entry into one per declared project with its own
+        `test_dir`.

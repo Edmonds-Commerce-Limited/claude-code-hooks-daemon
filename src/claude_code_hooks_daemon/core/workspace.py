@@ -24,12 +24,15 @@ Usage:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
 if TYPE_CHECKING:
-    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.config.models import Config, LayoutConfig
 
 # Recognised manifest filenames, in precedence order, used only to break ties
 # when one directory holds several. This table does NOT decide where a project
@@ -103,6 +106,7 @@ class DeclaredProject:
     root: Path
     kind: str | None = None
     bin_dirs: tuple[str, ...] | None = None
+    layout: LayoutConfig | None = None
 
     def resolve(self) -> Workspace:
         """Build the :class:`Workspace` for this declaration.
@@ -134,15 +138,26 @@ class ProjectRegistry:
         project_root: The repository root -- the fallback project.
         projects: Declared projects, in config order. Empty means
             single-project, which is the zero-config default.
+        root_layout: The ROOT project's own `ProjectLayout` (from the
+            top-level `layout:` block). This is the root project's layout
+            ONLY -- never a global fallback leaked into a declared
+            sub-project (Plan 00300); see :meth:`layout_for`.
     """
 
     project_root: Path
     projects: tuple[DeclaredProject, ...] = ()
+    root_layout: ProjectLayout = field(default_factory=ProjectLayout.built_in_default)
 
     @classmethod
-    def single_project(cls, project_root: Path) -> ProjectRegistry:
+    def single_project(
+        cls, project_root: Path, root_layout: ProjectLayout | None = None
+    ) -> ProjectRegistry:
         """A registry with nothing declared: one project at the repo root."""
-        return cls(project_root=project_root.resolve(), projects=())
+        return cls(
+            project_root=project_root.resolve(),
+            projects=(),
+            root_layout=root_layout or ProjectLayout.built_in_default(),
+        )
 
     @classmethod
     def from_config(cls, config: Config, project_root: Path) -> ProjectRegistry:
@@ -164,10 +179,15 @@ class ProjectRegistry:
                 root=(resolved_root / entry.root).resolve(),
                 kind=entry.kind,
                 bin_dirs=tuple(entry.bin_dirs) if entry.bin_dirs is not None else None,
+                layout=entry.layout,
             )
             for entry in config.projects
         )
-        return cls(project_root=resolved_root, projects=declared)
+        return cls(
+            project_root=resolved_root,
+            projects=declared,
+            root_layout=ProjectLayout.from_config(config),
+        )
 
     def for_path(self, file_path: Path) -> Workspace:
         """Resolve the project containing ``file_path``.
@@ -185,8 +205,68 @@ class ProjectRegistry:
             The resolved Workspace. Never None -- the repository root is
             always a valid answer.
         """
-        resolved = file_path.resolve()
+        best = self._nearest_project(file_path.resolve())
+        if best is not None:
+            return best.resolve()
+        return DeclaredProject(name="", root=self.project_root).resolve()
 
+    def layout_for(self, file_path: Path) -> ProjectLayout:
+        """Resolve the `ProjectLayout` OWNING ``file_path`` (Plan 00300).
+
+        A declared project without its own `layout:` block uses BUILT-IN
+        defaults for its four directory-role lists, never the root
+        project's declared lists -- one project's layout must never leak
+        into a sibling's, same declared-not-inferred philosophy as
+        `for_path`. A file resolving to no declared project (including
+        every file in a zero-config, single-project repository) gets
+        `root_layout` -- byte-identical to pre-Plan-00300 behaviour.
+
+        This is the DRY helper every per-file consumer of ProjectLayout
+        should call instead of hand-rolling project resolution; use
+        :meth:`iter_layouts`/:meth:`all_source_dirs` for whole-repo
+        aggregation instead.
+
+        Args:
+            file_path: The file being acted on. May be relative; resolved to
+                an absolute path first.
+        """
+        best = self._nearest_project(file_path.resolve())
+        if best is None:
+            return self.root_layout
+        return ProjectLayout.for_project(best.layout, self.root_layout)
+
+    def iter_layouts(self) -> Iterator[tuple[str, ProjectLayout]]:
+        """Yield ``(label, ProjectLayout)`` for the root project + every declared project.
+
+        The root project's label is ``""``. DRY aggregation helper for a
+        handler that needs the union across EVERY project (e.g. "does any
+        project in this repo call `test/` a test dir?") rather than "the
+        owning project for one path" (:meth:`layout_for`). Handlers must
+        never hand-roll this loop.
+        """
+        yield "", self.root_layout
+        for project in self.projects:
+            yield project.name, ProjectLayout.for_project(project.layout, self.root_layout)
+
+    def all_source_dirs(self) -> tuple[str, ...]:
+        """Union of `source_dirs` across the root project and every declared project.
+
+        Order-preserving, de-duplicated (first occurrence wins), built on
+        :meth:`iter_layouts` -- the DRY aggregation primitive every
+        whole-repo-scoped consumer should share rather than re-deriving.
+        """
+        seen: dict[str, None] = {}
+        for _, layout in self.iter_layouts():
+            for name in layout.source_dirs:
+                seen.setdefault(name, None)
+        return tuple(seen)
+
+    def _nearest_project(self, resolved: Path) -> DeclaredProject | None:
+        """The nearest declared project containing ``resolved``, or None.
+
+        Shared by :meth:`for_path` and :meth:`layout_for` so "nearest
+        declared root wins" is decided in exactly one place.
+        """
         best: DeclaredProject | None = None
         for project in self.projects:
             if not self._contains(project.root, resolved):
@@ -196,11 +276,7 @@ class ProjectRegistry:
             # root from beating a short-named deeper one.
             if best is None or len(project.root.parts) > len(best.root.parts):
                 best = project
-
-        if best is not None:
-            return best.resolve()
-
-        return DeclaredProject(name="", root=self.project_root).resolve()
+        return best
 
     @staticmethod
     def _contains(root: Path, candidate: Path) -> bool:
@@ -236,3 +312,39 @@ def resolve_workspace(
     """
     effective = registry if registry is not None else ProjectRegistry.single_project(project_root)
     return effective.for_path(file_path)
+
+
+def resolve_layout(
+    registry: ProjectRegistry | None,
+    file_path: Path,
+    project_root: Path,
+    *,
+    fallback_root_layout: ProjectLayout | None = None,
+) -> ProjectLayout:
+    """Resolve ``file_path``'s owning `ProjectLayout` via an injected registry (Plan 00300).
+
+    Mirrors :func:`resolve_workspace`: the registry is injected onto
+    handlers at construction and is None only where that injection has not
+    happened (a unit test exercising a handler directly). Falling back to a
+    single-project registry there keeps the zero-config answer -- the
+    caller's own already-injected `_project_layout` facade, when one is
+    passed as ``fallback_root_layout``, or the built-in defaults otherwise.
+
+    Args:
+        registry: The injected ``_project_registry``, or None.
+        file_path: The file being acted on.
+        project_root: Repository root, used only for the fallback.
+        fallback_root_layout: The root layout to use when no registry is
+            injected -- ordinarily the caller's own `_project_layout`
+            (already injected by the registry, Plan 00288), so behaviour
+            stays byte-identical to before this helper existed.
+
+    Returns:
+        The resolved `ProjectLayout`.
+    """
+    if registry is not None:
+        return registry.layout_for(file_path)
+    root_layout = fallback_root_layout or ProjectLayout.built_in_default()
+    return ProjectRegistry.single_project(project_root, root_layout=root_layout).layout_for(
+        file_path
+    )

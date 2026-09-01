@@ -217,3 +217,145 @@ class TestFromConfig:
         registry = ProjectRegistry.from_config(Config(), tmp_path)
 
         assert registry.for_path(tmp_path / "apps" / "web" / "x.ts").root == tmp_path
+
+
+class TestPerProjectLayout:
+    """Plan 00300 owner ruling: `layout.source_dirs` is per-project config.
+
+    A declared project without its own `layout:` block uses BUILT-IN
+    defaults for ITS root -- never the top-level `layout:` block, which is
+    the ROOT project's layout only, never a global fallback. Same
+    declared-not-inferred philosophy as `root`/`kind`.
+    """
+
+    def test_single_project_config_with_top_level_layout_needs_zero_edits(
+        self, tmp_path: Path
+    ) -> None:
+        """Owner acceptance check: a top-level `layout:` with no `projects:`
+        parses and resolves EXACTLY as before Plan 00300 -- the dogfood
+        config shape (`layout: {source_dirs: [...]}`, no `projects:` key).
+        """
+        config = Config.model_validate({"layout": {"source_dirs": ["src"]}})
+        registry = ProjectRegistry.from_config(config, tmp_path)
+
+        layout = registry.layout_for(tmp_path / "src" / "main.py")
+
+        assert layout.source_dirs == ("src",)
+        assert layout is registry.root_layout, "no projects: means every path is the root project"
+
+    def test_declared_project_without_own_layout_uses_built_in_defaults(
+        self, tmp_path: Path
+    ) -> None:
+        """No leaking: the root's declared `layout.source_dirs` must NOT
+        apply inside a sub-project that declares no `layout:` of its own."""
+        (tmp_path / "apps" / "web").mkdir(parents=True)
+        config = Config.model_validate(
+            {
+                "layout": {"source_dirs": ["root-only-src"]},
+                "projects": [{"name": "web", "root": "apps/web"}],
+            }
+        )
+        registry = ProjectRegistry.from_config(config, tmp_path)
+
+        layout = registry.layout_for(tmp_path / "apps" / "web" / "main.py")
+
+        assert "root-only-src" not in layout.source_dirs
+        # Falls back to the cross-project built-in (currently empty for
+        # source_dirs — see project_layout.py's module docstring), NOT the
+        # root project's own declared list.
+        assert layout.source_dirs == ()
+
+    def test_declared_project_with_own_layout_uses_it(self, tmp_path: Path) -> None:
+        (tmp_path / "apps" / "web").mkdir(parents=True)
+        config = Config.model_validate(
+            {
+                "projects": [
+                    {
+                        "name": "web",
+                        "root": "apps/web",
+                        "layout": {"source_dirs": ["web-src"]},
+                    }
+                ]
+            }
+        )
+        registry = ProjectRegistry.from_config(config, tmp_path)
+
+        layout = registry.layout_for(tmp_path / "apps" / "web" / "main.py")
+
+        assert layout.source_dirs == ("web-src",)
+
+    def test_a_path_outside_every_declared_project_gets_the_root_layout(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "apps" / "web").mkdir(parents=True)
+        config = Config.model_validate(
+            {
+                "layout": {"source_dirs": ["root-src"]},
+                "projects": [
+                    {
+                        "name": "web",
+                        "root": "apps/web",
+                        "layout": {"source_dirs": ["web-src"]},
+                    }
+                ],
+            }
+        )
+        registry = ProjectRegistry.from_config(config, tmp_path)
+
+        layout = registry.layout_for(tmp_path / "other" / "main.py")
+
+        assert layout.source_dirs == ("root-src",)
+
+    def test_iter_layouts_yields_root_then_every_declared_project(self, tmp_path: Path) -> None:
+        (tmp_path / "apps" / "web").mkdir(parents=True)
+        (tmp_path / "apps" / "service").mkdir(parents=True)
+        config = Config.model_validate(
+            {
+                "layout": {"source_dirs": ["root-src"]},
+                "projects": [
+                    {"name": "web", "root": "apps/web", "layout": {"source_dirs": ["web-src"]}},
+                    {"name": "service", "root": "apps/service"},
+                ],
+            }
+        )
+        registry = ProjectRegistry.from_config(config, tmp_path)
+
+        labelled = dict(registry.iter_layouts())
+
+        assert set(labelled) == {"", "web", "service"}
+        assert labelled[""].source_dirs == ("root-src",)
+        assert labelled["web"].source_dirs == ("web-src",)
+        assert labelled["service"].source_dirs == ()
+
+    def test_all_source_dirs_is_the_deduped_union_across_every_project(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "apps" / "web").mkdir(parents=True)
+        (tmp_path / "apps" / "service").mkdir(parents=True)
+        config = Config.model_validate(
+            {
+                "layout": {"source_dirs": ["shared-src"]},
+                "projects": [
+                    {
+                        "name": "web",
+                        "root": "apps/web",
+                        "layout": {"source_dirs": ["shared-src", "web-src"]},
+                    },
+                    {
+                        "name": "service",
+                        "root": "apps/service",
+                        "layout": {"source_dirs": ["service-src"]},
+                    },
+                ],
+            }
+        )
+        registry = ProjectRegistry.from_config(config, tmp_path)
+
+        assert registry.all_source_dirs() == ("shared-src", "web-src", "service-src")
+
+    def test_single_project_registry_has_built_in_default_root_layout(self, tmp_path: Path) -> None:
+        """`ProjectRegistry.single_project` (no Config at all) still works."""
+        registry = ProjectRegistry.single_project(tmp_path)
+
+        assert registry.layout_for(tmp_path / "anything.py").source_dirs == ()
+        assert registry.all_source_dirs() == ()

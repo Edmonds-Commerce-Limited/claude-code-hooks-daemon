@@ -1,0 +1,25 @@
+version: "3.58.0"
+truth_changes:
+  - was: >
+      A monorepo can declare sub-projects for markdown_organization either via
+      the top-level `projects:` config block or via
+      `markdown_organization.options.monorepo_subproject_patterns` (a
+      deprecated but still-functional regex-pattern alias) — the two were
+      unioned together.
+    now: >
+      `projects:` is the only sub-project resolution mechanism.
+      `monorepo_subproject_patterns` was removed outright (Plan 00300 hard
+      cutover); its presence in config is now a hard startup error whose
+      message prints the equivalent `projects:` block. There is no fallback
+      and no override — staying on an older daemon version is the
+      backward-compat path.
+  - was: >
+      In a declared `projects:` monorepo, `tdd_enforcement`'s `test_path_map`
+      resolves a relative `test_dir` against TWO candidates, most specific
+      first: the source file's declared workspace root, then the repository
+      root — both are searched.
+    now: >
+      A relative `test_dir` anchors against the source file's declared
+      workspace ONLY. There is no second, repository-root-anchored candidate.
+      In a single-project repo the workspace IS the repository root, so
+      zero-config behaviour is unchanged.

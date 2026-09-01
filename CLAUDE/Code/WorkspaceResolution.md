@@ -121,16 +121,34 @@ quietly became a resolver would put the daemon back to guessing.
 
 ### The other config surfaces, and what they now mean
 
-- **`markdown_organization.monorepo_subproject_patterns`** — a *documentation
-  layout* sub-project. This is the same need `projects:` serves, so it becomes
-  a deprecated alias for a `projects:` entry rather than a second mechanism.
+- **`markdown_organization.monorepo_subproject_patterns`** — **removed**
+  outright (Plan 00300 hard cutover). This was the same need `projects:`
+  serves, so keeping it as a second mechanism doubled the maintenance surface
+  for no gain. `projects:` is now the ONLY sub-project resolution mechanism;
+  the option's presence in config is a hard startup error whose message
+  prints the equivalent `projects:` block. There is no fallback and no
+  override — staying on an older daemon version is the backward-compat path.
 - **`tdd_enforcement.test_path_map`** — declares where tests for a source glob
-  live. Orthogonal to *which* project; resolution only changes what a relative
-  `test_dir` is anchored against.
+  live. Orthogonal to *which* project; a relative `test_dir` anchors against
+  the source file's declared WORKSPACE ONLY (Plan 00300 hard cutover removed
+  the extra project-root-anchored candidate — a single anchoring semantics
+  everywhere, unchanged in a single-project repo since the workspace IS the
+  repo root there).
 - **`validate_eslint_on_write`'s `workspace_root` constructor argument** — a
   test seam, not user configuration. It is not read from YAML.
-- **`layout.source_dirs` and friends** — roles *within* a project, a different
-  axis entirely.
+- **`layout.source_dirs` and friends** — roles *within* a project, a
+  different axis entirely, but now (Plan 00300) DECLARED PER PROJECT: the
+  top-level `layout:` block is the ROOT project's own layout, not a global
+  fallback, and a declared `projects:` entry may carry its own `layout:`
+  block that governs only its own root. A declared project without one uses
+  built-in defaults for its OWN root -- it never inherits the root project's
+  declared lists, same declared-not-inferred philosophy as `root`/`kind`.
+  `ProjectRegistry.layout_for(path)` resolves the OWNING project's layout for
+  one file; `ProjectRegistry.iter_layouts()`/`all_source_dirs()` are the DRY
+  aggregation primitives for a handler that needs the union across every
+  project. Zero-config (no `projects:` declared) is unaffected: every path
+  resolves to the root project, so `layout_for()` always returns
+  `root_layout`, built from the top-level `layout:` block exactly as before.
 
 ## Known limits
 

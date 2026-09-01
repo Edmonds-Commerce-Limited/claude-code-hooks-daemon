@@ -35,6 +35,54 @@ class ValidationError(Exception):
     pass
 
 
+# Plan 00300 hard cutover: `markdown_organization`'s regex-pattern sub-project
+# alias was removed outright -- declared `projects:` config (Plan 00296) is
+# the ONLY sub-project resolution mechanism. Its mere PRESENCE in config is a
+# hard startup error (no silent fallback -- staying on an older daemon
+# version is the backward-compat path, per owner ruling).
+_REMOVED_MONOREPO_SUBPROJECT_PATTERNS_OPTION = "monorepo_subproject_patterns"
+
+# Only a LITERAL path segment (no regex metacharacters) can be mechanically
+# translated into a `projects:` root -- a pattern such as `packages/[^/]+`
+# describes a SHAPE, not a concrete directory, so it cannot be auto-named.
+_LITERAL_PATTERN_RE = re.compile(r"^[A-Za-z0-9_\-./]+$")
+
+
+def _migrated_projects_yaml_block(patterns: list[Any]) -> str:
+    """Best-effort `projects:` YAML derived from removed regex patterns.
+
+    Args:
+        patterns: The raw ``monorepo_subproject_patterns`` config value.
+
+    Returns:
+        A ``projects:`` YAML block covering every literal pattern, plus a
+        comment listing any pattern that needs manual translation because it
+        described a shape (a regex wildcard) rather than one concrete path.
+    """
+    lines: list[str] = ["projects:"]
+    declared_any = False
+    manual: list[str] = []
+    for pattern in patterns:
+        if isinstance(pattern, str) and _LITERAL_PATTERN_RE.match(pattern):
+            name = pattern.strip("/").split("/")[-1] or pattern
+            lines.append(f"  - name: {name}")
+            lines.append(f"    root: {pattern}")
+            declared_any = True
+        else:
+            manual.append(str(pattern))
+
+    if not declared_any:
+        lines.append("  # No pattern below could be mechanically translated -- see comments")
+
+    if manual:
+        lines.append("# The pattern(s) below describe a SHAPE (a regex wildcard), not one")
+        lines.append("# concrete directory -- declare each real sub-project root by hand:")
+        for pattern in manual:
+            lines.append(f"#   was: {pattern}")
+
+    return "\n".join(lines)
+
+
 class ConfigValidator:
     """Exhaustive configuration validator."""
 
@@ -410,6 +458,16 @@ class ConfigValidator:
                     )
                     continue
 
+                # Plan 00300 hard cutover: the removed monorepo_subproject_patterns
+                # option is a hard error, not a silent no-op -- surface it here,
+                # before the handler ever instantiates.
+                if handler_name == "markdown_organization":
+                    errors.extend(
+                        ConfigValidator._validate_removed_monorepo_patterns_option(
+                            handler_path, handler_config
+                        )
+                    )
+
                 # Validate enabled field (if present)
                 if ConfigKey.ENABLED in handler_config:
                     enabled = handler_config[ConfigKey.ENABLED]
@@ -451,6 +509,49 @@ class ConfigValidator:
                             priorities[priority] = handler_name
 
         return errors
+
+    @staticmethod
+    def _validate_removed_monorepo_patterns_option(
+        handler_path: str, handler_config: dict[str, Any]
+    ) -> list[str]:
+        """Hard-error if the removed `monorepo_subproject_patterns` option is present.
+
+        Plan 00300 hard cutover: `projects:` (Plan 00296) is the ONLY
+        sub-project resolution mechanism now -- there is no fallback, and no
+        `MUST_..._BECAUSE` override. Staying on an older daemon version is the
+        backward-compat path (owner ruling). The error prints the equivalent
+        `projects:` block, derived mechanically where possible, so migration
+        is a paste rather than a research project.
+
+        Args:
+            handler_path: Dotted config path to this handler (for the message).
+            handler_config: This handler's raw config dict.
+
+        Returns:
+            A single-element list with the hard-error message, or empty.
+        """
+        options = handler_config.get(ConfigKey.OPTIONS)
+        if not isinstance(options, dict):
+            return []
+        if _REMOVED_MONOREPO_SUBPROJECT_PATTERNS_OPTION not in options:
+            return []
+
+        raw_patterns = options[_REMOVED_MONOREPO_SUBPROJECT_PATTERNS_OPTION]
+        patterns = raw_patterns if isinstance(raw_patterns, list) else []
+        migrated_yaml = _migrated_projects_yaml_block(patterns)
+
+        return [
+            f"Removed config option '{_REMOVED_MONOREPO_SUBPROJECT_PATTERNS_OPTION}' at "
+            f"'{handler_path}.options.{_REMOVED_MONOREPO_SUBPROJECT_PATTERNS_OPTION}'. "
+            "Plan 00300 hard cutover: declared `projects:` config is now the ONLY "
+            "sub-project resolution mechanism -- there is no fallback and no "
+            "override. Staying on an older daemon version is the backward-compat "
+            "path.\n\n"
+            "Migrate by pasting this into .claude/hooks-daemon.yaml (top level):\n\n"
+            f"{migrated_yaml}\n\n"
+            "See CLAUDE/Code/WorkspaceResolution.md and the CLAUDE/UPGRADES/ upgrade "
+            "guide for this release."
+        ]
 
     @staticmethod
     def _validate_plugins(config: dict[str, Any]) -> list[str]:

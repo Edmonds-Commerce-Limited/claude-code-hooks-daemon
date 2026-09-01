@@ -744,5 +744,76 @@ class TestEdgeCases:
         assert errors == []
 
 
+class TestRemovedMonorepoSubprojectPatternsOption:
+    """Plan 00300 hard cutover: `monorepo_subproject_patterns` is a hard error.
+
+    There is no fallback and no override -- its mere presence in
+    `markdown_organization.options` is a config-validation failure whose
+    message prints the equivalent `projects:` block, so migration is a paste
+    rather than a research project.
+    """
+
+    @staticmethod
+    def _config(options: dict) -> dict:
+        return {
+            "handlers": {
+                "pre_tool_use": {
+                    "markdown_organization": {"enabled": True, "options": options},
+                }
+            }
+        }
+
+    def test_absent_option_is_not_an_error(self) -> None:
+        """No `monorepo_subproject_patterns` key at all -- nothing to flag."""
+        config = self._config({"track_plans_in_project": "CLAUDE/Plan"})
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
+        assert errors == []
+
+    def test_presence_is_a_hard_error(self) -> None:
+        """The option's mere PRESENCE denies -- regardless of its value."""
+        config = self._config({"monorepo_subproject_patterns": [r"packages/[^/]+"]})
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
+        assert len(errors) == 1
+        assert "monorepo_subproject_patterns" in errors[0]
+        assert "Plan 00300" in errors[0]
+        assert "no fallback" in errors[0]
+
+    def test_error_prints_migrated_projects_block_for_literal_pattern(self) -> None:
+        """A literal (non-wildcard) pattern is mechanically translated."""
+        config = self._config({"monorepo_subproject_patterns": ["packages/api"]})
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
+        assert "projects:" in errors[0]
+        assert "name: api" in errors[0]
+        assert "root: packages/api" in errors[0]
+
+    def test_error_flags_wildcard_pattern_for_manual_translation(self) -> None:
+        """A pattern containing a regex wildcard cannot be auto-named."""
+        config = self._config({"monorepo_subproject_patterns": [r"packages/[^/]+"]})
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
+        assert "was: packages/[^/]+" in errors[0]
+
+    def test_error_points_to_upgrade_docs(self) -> None:
+        """The migration message points at the durable docs, not just itself."""
+        config = self._config({"monorepo_subproject_patterns": ["packages/api"]})
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
+        assert "WorkspaceResolution.md" in errors[0]
+        assert "CLAUDE/UPGRADES/" in errors[0]
+
+    def test_other_handlers_are_unaffected(self) -> None:
+        """The check is scoped to markdown_organization only."""
+        config = {
+            "handlers": {
+                "pre_tool_use": {
+                    "sed_blocker": {
+                        "enabled": True,
+                        "options": {"monorepo_subproject_patterns": ["x"]},
+                    },
+                }
+            }
+        }
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
+        assert errors == []
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

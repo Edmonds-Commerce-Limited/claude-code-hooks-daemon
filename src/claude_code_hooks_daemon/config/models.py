@@ -1029,6 +1029,12 @@ class ProjectConfig(BaseModel):
         bin_dirs: Root-relative tool binary directories. Unset means infer
             from ``kind``; an explicitly EMPTY list declares that this project
             has none, which is a different statement from staying silent.
+        layout: This project's OWN directory-layout truths (Plan 00300). Unset
+            means this project uses convention/built-in defaults for ITS OWN
+            root -- it never inherits the top-level ``layout:`` block, which
+            is the ROOT project's layout only, not a global fallback. Same
+            declared-not-inferred philosophy as ``root``/``kind``: one
+            project's layout must never leak into another's.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1040,6 +1046,10 @@ class ProjectConfig(BaseModel):
     )
     bin_dirs: list[str] | None = Field(
         default=None, description="Root-relative tool bin dirs; unset infers from kind"
+    )
+    layout: LayoutConfig | None = Field(
+        default=None,
+        description="This project's own directory-layout truths; unset uses built-in defaults",
     )
 
     @field_validator("root")

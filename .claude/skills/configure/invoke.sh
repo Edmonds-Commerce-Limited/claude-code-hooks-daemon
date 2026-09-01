@@ -73,7 +73,7 @@ Parse the arguments to determine the action:
 4. Highlight which handlers have configurable options:
    - **sed_blocker**: \`blocking_mode\` (strict | direct_invocation_only) [default: strict]
    - **git_stash**: \`mode\` (warn | deny) [default: warn]
-   - **markdown_organization**: \`track_plans_in_project\`, \`plan_workflow_docs\`, \`allowed_markdown_paths\`, \`monorepo_subproject_patterns\`
+   - **markdown_organization**: \`track_plans_in_project\`, \`plan_workflow_docs\`, \`allowed_markdown_paths\` (sub-projects: top-level \`projects:\` block, not a handler option)
    - **plan_number_helper**: \`track_plans_in_project\`, \`plan_workflow_docs\` (inherits from markdown_organization)
 
 ## Action: Show Handler (if args = single handler name)
