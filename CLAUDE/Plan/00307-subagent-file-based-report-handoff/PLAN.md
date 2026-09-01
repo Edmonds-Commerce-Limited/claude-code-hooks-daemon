@@ -139,4 +139,6 @@ threshold/steering design thinking where it fits.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00307-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- `5f674028` — Phase 2 (Task 2.1/2.2) + Phase 3 (Task 3.1/3.2): dispatch_declaration
+  and subagent_report_size_blocker handlers, docs, wire-up, both enabled in
+  this repo's dogfood config
