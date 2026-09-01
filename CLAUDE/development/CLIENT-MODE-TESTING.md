@@ -97,6 +97,42 @@ Two things the wrapper does **not** do for you:
 
 `dummy-client-repo.sh cli` handles both and remains the easiest correct option.
 
+## The real-repo canary (php-qa-ci)
+
+The dummy fixture proves the install *mechanics*; it cannot prove the daemon
+behaves sanely against a real project's files, config and history. For that,
+the canary is `LongTermSupport/php-qa-ci` — a real, public, PHP client-shaped
+repository — upgraded in a throwaway clone.
+
+**The concept is: delete, reclone, upgrade. NEVER commit or push.** The clone
+is a disposable observation chamber, not a workspace: every canary run starts
+from a fresh clone so results are reproducible, and nothing that happens
+inside it may ever reach the remote.
+
+```bash
+C=untracked/repos/php-qa-ci
+rm -rf "$C"                                            # delete
+git clone https://github.com/LongTermSupport/php-qa-ci "$C"   # reclone
+git -C "$C" remote remove origin                       # make pushing IMPOSSIBLE
+# upgrade: drive the production install/upgrade chain from THIS checkout
+# into the canary clone, then inspect health/handlers/check output there.
+```
+
+Rules (same spirit as the fixture's design rules):
+
+1. **Remove `origin` immediately after cloning.** With no remote, a push
+   cannot happen even by accident. Commits inside the clone are equally
+   forbidden — the clone is destroyed, not iterated.
+2. **It lives in `untracked/repos/`** and is disposable; a suspect state is
+   answered by `rm -rf` + reclone, never by repair.
+3. **It drives the production install/upgrade chain** (same rule as the
+   fixture: never synthesise install state).
+4. **Isolate the daemon by `HOSTNAME`** (e.g. `HOSTNAME=canary-php-qa-ci`) so
+   the canary daemon's socket/PID/log never collide with the dogfood daemon,
+   and verify the dogfood daemon still reports RUNNING afterwards.
+5. **The canary is read-out only**: findings go into the driving plan's
+   JOURNAL in *this* repository; nothing is recorded in the clone.
+
 ## When this is required
 
 Verify in client mode — not just self-install — whenever a change touches:
