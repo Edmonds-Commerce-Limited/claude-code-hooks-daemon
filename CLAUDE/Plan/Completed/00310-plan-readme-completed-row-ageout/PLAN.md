@@ -95,4 +95,6 @@ archive index that is only opened when someone is digging.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00310-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- Complete at `fddd6890` (rule settled, retention test added, checklist/local
+  conventions documented, backlog migrated, plan_qa row-folder-bijection
+  taught to see the archive index)
