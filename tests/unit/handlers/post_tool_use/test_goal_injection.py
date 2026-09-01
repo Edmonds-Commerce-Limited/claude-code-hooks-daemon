@@ -25,6 +25,8 @@ from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
     _SIGNAL_SUFFIX,
     _SOURCE_STATUS_FLIP,
     GoalInjectionHandler,
+    LivePlan,
+    render_combined_goal_line,
     render_goal_line,
     write_goal_signal,
 )
@@ -194,6 +196,81 @@ class TestRenderGoalLine:
         )
         assert joined is not None
         assert "Fine." in joined
+
+
+class TestRenderCombinedGoalLine:
+    """Plan 00299: single live plan degrades byte-for-byte; N>1 combines."""
+
+    def test_empty_list_returns_none(self) -> None:
+        assert render_combined_goal_line([]) is None
+
+    def test_single_plan_matches_render_goal_line_byte_for_byte(self) -> None:
+        combined = render_combined_goal_line(
+            [LivePlan(plan_number=_PLAN_NUMBER, plan_title="my title", plan_path="CLAUDE/Plan/x")]
+        )
+        single = render_goal_line(_PLAN_NUMBER, "my title", "CLAUDE/Plan/x")
+        assert combined == single
+
+    def test_two_plans_names_both_numbers(self) -> None:
+        combined = render_combined_goal_line(
+            [
+                LivePlan(plan_number="00296", plan_title="a", plan_path="CLAUDE/Plan/00296-a"),
+                LivePlan(plan_number="00298", plan_title="b", plan_path="CLAUDE/Plan/00298-b"),
+            ]
+        )
+        assert combined is not None
+        assert combined.startswith(_HEADER_TEXT)
+        assert "00296" in combined
+        assert "00298" in combined
+        assert "Plan(s)" in combined
+
+    def test_two_plans_sorted_regardless_of_input_order(self) -> None:
+        first = render_combined_goal_line(
+            [
+                LivePlan(plan_number="00298", plan_title="b", plan_path="p"),
+                LivePlan(plan_number="00296", plan_title="a", plan_path="p"),
+            ]
+        )
+        second = render_combined_goal_line(
+            [
+                LivePlan(plan_number="00296", plan_title="a", plan_path="p"),
+                LivePlan(plan_number="00298", plan_title="b", plan_path="p"),
+            ]
+        )
+        assert first == second
+
+    def test_invalid_plan_number_returns_none(self) -> None:
+        assert (
+            render_combined_goal_line(
+                [
+                    LivePlan(plan_number="00296", plan_title="a", plan_path="p"),
+                    LivePlan(plan_number="bad", plan_title="b", plan_path="p"),
+                ]
+            )
+            is None
+        )
+
+    def test_combined_line_is_single_physical_line_and_capped(self) -> None:
+        combined = render_combined_goal_line(
+            [
+                LivePlan(plan_number="00296", plan_title="a", plan_path="p"),
+                LivePlan(plan_number="00298", plan_title="b", plan_path="p"),
+            ]
+        )
+        assert combined is not None
+        assert "\n" not in combined
+        assert len(combined) <= _MAX_JOINED_CHARS
+
+    def test_project_line_still_applied_for_multi_plan(self) -> None:
+        combined = render_combined_goal_line(
+            [
+                LivePlan(plan_number="00296", plan_title="a", plan_path="p"),
+                LivePlan(plan_number="00298", plan_title="b", plan_path="p"),
+            ],
+            raw_lines=[{"id": "motto", "text": "Fixed motto."}],
+        )
+        assert combined is not None
+        assert "Fixed motto." in combined
 
 
 class TestWriteGoalSignal:
@@ -486,3 +563,89 @@ class TestGoalLedgerIntegration:
         )
         result = handler.handle(self._hook_input(plan))
         assert result.decision == Decision.ALLOW
+
+
+class TestCombinedGoalSignal:
+    """Plan 00299: the signal reflects EVERY live ledgered plan, not just
+    the newest — and a plan retiring refreshes it to drop that plan."""
+
+    @pytest.fixture(autouse=True)
+    def mock_project_context(self, tmp_path: Path):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.daemon_untracked_dir",
+                classmethod(lambda cls: tmp_path / "untracked"),
+            )
+            self._untracked = tmp_path / "untracked"
+            self._project = tmp_path
+            yield
+
+    @pytest.fixture
+    def handler(self) -> GoalInjectionHandler:
+        return GoalInjectionHandler()
+
+    def _write_plan(self, folder: str, status: str = "In Progress") -> Path:
+        plan_dir = self._project / "CLAUDE" / "Plan" / folder
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        plan_file = plan_dir / "PLAN.md"
+        plan_file.write_text(
+            f"# Plan {folder.split('-', 1)[0]}: {folder}\n\n**Status**: {status}\n",
+            encoding="utf-8",
+        )
+        return plan_file
+
+    def _hook_input(self, file_path: Path) -> dict[str, Any]:
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(file_path)},
+            "session_id": _SESSION,
+        }
+
+    def _signal(self) -> dict[str, Any]:
+        path = self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_SIGNAL_SUFFIX}"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def test_second_plan_signal_names_both_live_plans(self, handler: GoalInjectionHandler) -> None:
+        first = self._write_plan("00296-first")
+        second = self._write_plan("00298-second")
+        handler.handle(self._hook_input(first))
+        handler.handle(self._hook_input(second))
+        data = self._signal()
+        joined = data["rendered_lines"][0]
+        assert "00296" in joined
+        assert "00298" in joined
+        assert data["plan_number"] == "00296,00298"
+
+    def test_third_plan_signal_names_all_three(self, handler: GoalInjectionHandler) -> None:
+        for folder in ("00296-a", "00297-b", "00298-c"):
+            handler.handle(self._hook_input(self._write_plan(folder)))
+        joined = self._signal()["rendered_lines"][0]
+        assert "00296" in joined
+        assert "00297" in joined
+        assert "00298" in joined
+
+    def test_completing_one_plan_refreshes_signal_to_drop_it(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        first = self._write_plan("00296-first")
+        second = self._write_plan("00298-second")
+        handler.handle(self._hook_input(first))
+        handler.handle(self._hook_input(second))
+        # First plan reaches a terminal status; re-writing it should refresh
+        # the combined signal to drop it while the second stays.
+        completed_first = self._write_plan("00296-first", status="Complete")
+        handler.handle(self._hook_input(completed_first))
+        joined = self._signal()["rendered_lines"][0]
+        assert "00296" not in joined
+        assert "00298" in joined
+
+    def test_terminal_write_for_unledgered_plan_is_a_no_op(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """A terminal-status write for a plan this session never emitted a
+        goal for must not touch the signal at all (nothing to refresh)."""
+        plan = self._write_plan("00299-never-in-progress", status="Complete")
+        result = handler.handle(self._hook_input(plan))
+        assert result.decision == Decision.ALLOW
+        assert not (self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_SIGNAL_SUFFIX}").exists()

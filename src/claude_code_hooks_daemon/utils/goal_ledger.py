@@ -89,6 +89,20 @@ class GoalLedgerEntry:
     retired_reason: str | None = None
 
 
+@dataclass(frozen=True)
+class LivePlanRef:
+    """One still-live ledgered plan, resolved against the plan directory.
+
+    Feeds ``goal_injection``'s combined-``/goal`` renderer (Plan 00299),
+    which needs the plan's title (parsed from ``plan_text``) and folder to
+    build a rendered line — without a second directory scan of its own.
+    """
+
+    plan_number: str
+    plan_folder: str
+    plan_text: str
+
+
 def _optional_str(value: Any) -> str | None:
     return None if value is None else str(value)
 
@@ -102,6 +116,40 @@ def _optional_float(value: Any) -> float | None:
         return None
 
 
+def _candidate_folders(plan_dir: Path, plan_number: str) -> list[Path] | None:
+    """Sorted ``<plan_number>-*`` folders under ``plan_dir``, or None on OSError."""
+    try:
+        return sorted(plan_dir.glob(f"{plan_number}-*"))
+    except OSError as e:
+        logger.warning("goal_ledger: cannot scan plan dir %s: %s", plan_dir, e)
+        return None
+
+
+def _find_plan_md_text(plan_dir: Path, plan_number: str) -> tuple[str, str] | None:
+    """Return ``(folder_name, plan_md_text)`` for the first readable match.
+
+    Used by :meth:`GoalLedger.live_plan_refs` to resolve a live plan's
+    folder/title source without a second directory scan; unreadable
+    candidates are skipped (mirrors ``_plan_state``'s tolerance).
+    """
+    if not plan_dir.is_dir():
+        return None
+    folders = _candidate_folders(plan_dir, plan_number)
+    if folders is None:
+        return None
+    for folder in folders:
+        plan_md = folder / _PLAN_MD_FILENAME
+        if not plan_md.is_file():
+            continue
+        try:
+            text = plan_md.read_text(encoding="utf-8")
+        except OSError as e:
+            logger.warning("goal_ledger: cannot read %s: %s", plan_md, e)
+            continue
+        return folder.name, text
+    return None
+
+
 def _plan_state(plan_dir: Path, plan_number: str) -> str:
     """Classify the plan's current state for ledger reconciliation.
 
@@ -113,10 +161,8 @@ def _plan_state(plan_dir: Path, plan_number: str) -> str:
     """
     if not plan_dir.is_dir():
         return _STATE_UNREADABLE
-    try:
-        folders = sorted(plan_dir.glob(f"{plan_number}-*"))
-    except OSError as e:
-        logger.warning("goal_ledger: cannot scan plan dir %s: %s", plan_dir, e)
+    folders = _candidate_folders(plan_dir, plan_number)
+    if folders is None:
         return _STATE_UNREADABLE
     for folder in folders:
         plan_md = folder / _PLAN_MD_FILENAME
@@ -356,3 +402,21 @@ class GoalLedger:
             if e.retired_at is None and states.get(e.plan_number) == _STATE_IN_PROGRESS
         }
         return sorted(live)
+
+    def live_plan_refs(self, plan_dir: Path) -> list[LivePlanRef]:
+        """Like :meth:`live_plan_numbers`, resolved with folder + PLAN.md text.
+
+        A live plan number whose folder/PLAN.md cannot be re-read (deleted
+        between reconciliation and this call, permission error) is skipped
+        rather than raising — the caller renders a combined signal from
+        whatever it CAN resolve; a single unreadable plan must not blank
+        out every other still-live plan's goal.
+        """
+        refs: list[LivePlanRef] = []
+        for plan_number in self.live_plan_numbers(plan_dir):
+            found = _find_plan_md_text(plan_dir, plan_number)
+            if found is None:
+                continue
+            folder, text = found
+            refs.append(LivePlanRef(plan_number=plan_number, plan_folder=folder, plan_text=text))
+        return refs
