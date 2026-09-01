@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00312: supervisor ctrl c double press guard](00312-supervisor-ctrl-c-double-press-guard/PLAN.md) - Not Started (a single accidental ^C kills background agents; the supervisor's PTY position lets it swallow a lone 0x03 and forward on rapid double-press — escape hatch always wins, visibly hinted, dogfooded here)
+- [00312: supervisor ctrl c double press guard](00312-supervisor-ctrl-c-double-press-guard/PLAN.md) - In Progress (a single accidental ^C kills background agents; the supervisor's PTY position lets it swallow a lone 0x03 and forward on rapid double-press — escape hatch always wins, visibly hinted, dogfooded here)
 
 - [00311: v3.59.0 release review followups](00311-v3590-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.59.0 code review: dispatch_declaration's hardcoded plan path, the secret_file_matching glob-heuristic maintenance surface, and the git rm --cached looseness verification)
 

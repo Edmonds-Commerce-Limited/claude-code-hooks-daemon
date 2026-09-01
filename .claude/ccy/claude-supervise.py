@@ -140,7 +140,7 @@ import threading
 import time
 import traceback
 import tty
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -154,7 +154,7 @@ if TYPE_CHECKING:
 # (see CLAUDE/development/RELEASING.md). Display-only for the banner and the
 # runtime status file; staleness detection (Plan 00164 Phase 3) uses a content
 # hash of THIS file so it is correct even between version bumps.
-__version__ = "3.58.1"
+__version__ = "3.59.0"
 
 # Absolute path to THIS running script — hashed for staleness detection so the
 # daemon can tell when the on-disk supervisor differs from the running one.
@@ -381,6 +381,90 @@ def strip_suspend(data: bytes) -> bytes:
     if _SUSPEND_BYTE not in data:
         return data
     return bytes(byte for byte in data if byte != _SUSPEND_BYTE)
+
+
+# Ctrl+C double-press guard (Plan 00312). In current Claude Code a single ^C
+# kills background agents, so one accidental press can destroy hours of
+# delegated work. The outer terminal is raw, so Ctrl+C arrives as a lone 0x03
+# byte on stdin — the gate swallows the first lone press, arms a confirm
+# window, and forwards a second press inside the window (spamming always
+# wins). Only a chunk that is EXACTLY one 0x03 byte counts as a press: a 0x03
+# inside a larger chunk is a paste burst or a coalesced spam and passes
+# through untouched, so pasted content is never corrupted and the escape
+# hatch can never be delayed by read coalescing.
+_INTERRUPT_BYTE = 0x03
+_LONE_INTERRUPT_CHUNK = bytes([_INTERRUPT_BYTE])
+_CTRL_C_CONFIRM_WINDOW_SECONDS = 2.0
+_CTRL_C_GUARD_ENV_VAR = "CCY_CTRL_C_GUARD"
+_CTRL_C_WINDOW_ENV_VAR = "CCY_CTRL_C_WINDOW_SECONDS"
+_CTRL_C_EVENT_SWALLOWED = "ctrl-c-swallowed"
+_CTRL_C_EVENT_FORWARDED = "ctrl-c-forwarded"
+_CTRL_C_FALSE_WORDS = frozenset({"0", "false", "no", "off"})
+
+
+def _resolve_ctrl_c_guard_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Resolve the Ctrl+C guard enabled flag (default ON; CCY_CTRL_C_GUARD=0 off)."""
+    resolved_env = env if env is not None else os.environ
+    raw = resolved_env.get(_CTRL_C_GUARD_ENV_VAR, "").strip().lower()
+    return raw not in _CTRL_C_FALSE_WORDS
+
+
+def _resolve_ctrl_c_window_seconds(env: Mapping[str, str] | None = None) -> float:
+    """Resolve the confirm window seconds (CCY_CTRL_C_WINDOW_SECONDS; default 2.0).
+
+    Garbage or non-positive values fall back to the default rather than
+    disabling interruption semantics in a surprising way.
+    """
+    resolved_env = env if env is not None else os.environ
+    raw = resolved_env.get(_CTRL_C_WINDOW_ENV_VAR, "").strip()
+    if not raw:
+        return _CTRL_C_CONFIRM_WINDOW_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        return _CTRL_C_CONFIRM_WINDOW_SECONDS
+    if value <= 0:
+        return _CTRL_C_CONFIRM_WINDOW_SECONDS
+    return value
+
+
+class CtrlCGate:
+    """Double-press gate for Ctrl+C on the supervisor's stdin path.
+
+    ``filter(data)`` returns ``(forwarded_bytes, event)`` where ``event`` is
+    ``_CTRL_C_EVENT_SWALLOWED`` when a lone first press was withheld,
+    ``_CTRL_C_EVENT_FORWARDED`` when a confirmed second press goes through,
+    or ``None`` when the gate did not intervene. Non-press chunks (anything
+    other than exactly ``b"\\x03"``) pass through untouched and never disturb
+    an armed window — typing between the two presses must not disarm it.
+    """
+
+    def __init__(
+        self,
+        *,
+        window_seconds: float = _CTRL_C_CONFIRM_WINDOW_SECONDS,
+        enabled: bool = True,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._window_seconds = window_seconds
+        self._enabled = enabled
+        self._clock = clock
+        self._armed_at: float | None = None
+
+    @property
+    def window_seconds(self) -> float:
+        return self._window_seconds
+
+    def filter(self, data: bytes) -> tuple[bytes, str | None]:
+        """Gate one stdin chunk; see class docstring for the contract."""
+        if not self._enabled or data != _LONE_INTERRUPT_CHUNK:
+            return data, None
+        now = self._clock()
+        if self._armed_at is not None and now - self._armed_at <= self._window_seconds:
+            self._armed_at = None
+            return data, _CTRL_C_EVENT_FORWARDED
+        self._armed_at = now
+        return b"", _CTRL_C_EVENT_SWALLOWED
 
 
 # ANSI control-sequence parser states. Terminal-GENERATED sequences (focus
@@ -1608,6 +1692,11 @@ _CTRL_Z_NOTICE_TEXT = "⛔ Ctrl+Z ignored — use /exit to quit"
 # never intentional — a fat-finger next to Enter that would otherwise SIGQUIT
 # (and possibly core-dump) the session.
 _CTRL_BACKSLASH_NOTICE_TEXT = "⛔ Ctrl+\\ ignored — use /exit to quit"
+
+
+def _ctrl_c_notice_text(window_seconds: float) -> str:
+    """Status-line hint shown when a lone Ctrl+C is swallowed (Plan 00312)."""
+    return f"⚠ Ctrl+C intercepted — press Ctrl+C again within {window_seconds:g}s to interrupt"
 # The signals install_input_signal_guards manages — SIGINT (Ctrl+C) is
 # deliberately EXCLUDED. Kept as one tuple so supervise() can save+restore
 # exactly this set around the forwarding loop (must stay in sync with the
@@ -4705,6 +4794,8 @@ def _forward_io(
     on_poll: Callable[[], None] | None = None,
     output_activity: OutputActivity | None = None,
     on_suspend: Callable[[], object] | None = None,
+    ctrl_c_gate: CtrlCGate | None = None,
+    on_ctrl_c_event: Callable[[str], object] | None = None,
 ) -> None:
     """Select loop: forward stdin -> master, master -> stdout.
 
@@ -4763,6 +4854,17 @@ def _forward_io(
         if stdin_open and stdin_fd in readable:
             data = os.read(stdin_fd, _READ_CHUNK_SIZE)
             if data:
+                # Ctrl+C double-press gate (Plan 00312): a lone 0x03 chunk is
+                # withheld until confirmed by a second press inside the window.
+                # Runs BEFORE strip_suspend so the exact-chunk press test sees
+                # the raw read. A fully-swallowed chunk forwards nothing but
+                # must NOT be mistaken for EOF — so this stays inside `if data:`.
+                if ctrl_c_gate is not None:
+                    data, ctrl_c_event = ctrl_c_gate.filter(data)
+                    if ctrl_c_event is not None and on_ctrl_c_event is not None:
+                        # Surface the swallow/forward (status-line hint +
+                        # decision log). Best-effort: never let it break I/O.
+                        on_ctrl_c_event(ctrl_c_event)
                 # Drop Ctrl+Z (SUSP) before it reaches the child so it can never
                 # suspend the session. A chunk that was ONLY suspend bytes
                 # forwards nothing, but must NOT be mistaken for EOF (that is the
@@ -5012,6 +5114,24 @@ def supervise(
     prev_signal_guards = {sig: signal.getsignal(sig) for sig in _INPUT_GUARD_SIGNALS}
     install_input_signal_guards(_post_signal_notice)
 
+    # Ctrl+C double-press guard (Plan 00312): on by default, disable with
+    # CCY_CTRL_C_GUARD=0; window via CCY_CTRL_C_WINDOW_SECONDS. A None gate is
+    # full passthrough — Ctrl+C behaves exactly as before the guard existed.
+    ctrl_c_gate = (
+        CtrlCGate(window_seconds=_resolve_ctrl_c_window_seconds())
+        if _resolve_ctrl_c_guard_enabled()
+        else None
+    )
+
+    def _on_ctrl_c_event(event: str) -> None:
+        if event == _CTRL_C_EVENT_SWALLOWED and ctrl_c_gate is not None:
+            status_message_poster.post(
+                _ctrl_c_notice_text(ctrl_c_gate.window_seconds),
+                level=_STATUS_LEVEL_WARNING,
+            )
+        if log is not None:
+            log.write(f"ctrl-c guard: {event}")
+
     try:
         _forward_io(
             stdin_fd,
@@ -5023,6 +5143,8 @@ def supervise(
             on_suspend=lambda: status_message_poster.post(
                 _CTRL_Z_NOTICE_TEXT, level=_STATUS_LEVEL_WARNING
             ),
+            ctrl_c_gate=ctrl_c_gate,
+            on_ctrl_c_event=_on_ctrl_c_event,
         )
     finally:
         for guarded_signal, prior_handler in prev_signal_guards.items():

@@ -1,6 +1,8 @@
 # Plan 00312: supervisor ctrl c double press guard
 
-**Status**: Not Started
+**Status**: In Progress (implemented + unit-verified; live dogfood awaits next
+supervised session start — the gate lives in the PTY HOST tier, which does not
+hot-reload)
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: High
@@ -60,7 +62,7 @@ loudly visible, and the guard is configurable/disable-able.
 
 ### Phase 1: Design spike and byte-level verification
 
-- [ ] ⬜ **Task 1.1**: In a live supervised PTY, capture what actually
+- [x] ✅ **Task 1.1**: In a live supervised PTY, capture what actually
   arrives on Ctrl+C (single byte 0x03? repeats on hold?), on paste bursts
   containing 0x03, and confirm the child's observable behaviour when 0x03
   is withheld. Record findings + the settled design (window length default,
@@ -68,16 +70,17 @@ loudly visible, and the guard is configurable/disable-able.
 
 ### Phase 2: Implement in the supervisor (TDD)
 
-- [ ] ⬜ **Task 2.1**: Implement the double-press gate in `_forward_io`'s
+- [x] ✅ **Task 2.1**: Implement the double-press gate in `_forward_io`'s
   stdin path: swallow the first 0x03, arm a timestamp, forward on a second
   within the window; expire the arm after the window. Config plumbing +
   decision-log entries. Unit tests for: single press swallowed, double
   press forwarded, window expiry re-arms, paste-burst exemption,
   disabled-flag passthrough.
-- [ ] ⬜ **Task 2.2**: Hot-reload/live verification per the supervisor
-  contract (verify the worker pid changed post-edit before testing), then
-  live dogfood: single ^C shows the hint and kills nothing; double ^C
-  interrupts as before. Journal the live evidence.
+- [ ] ⬜ **Task 2.2**: Live dogfood in the NEXT supervised session (the gate
+  runs in `_forward_io`, which is the PTY HOST tier — worker hot-reload does
+  not apply, and restarting the host would kill the live `claude` child):
+  single ^C shows the hint and kills nothing; double ^C interrupts as
+  before. Journal the live evidence.
 
 ## Success Criteria
 
