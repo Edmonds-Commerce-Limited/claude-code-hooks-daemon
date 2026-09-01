@@ -1,6 +1,6 @@
 # Plan 00296: monorepo workspace resolver
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-31
 **Owner**: joseph
 **Priority**: Medium
@@ -151,18 +151,51 @@ consumes: this changes where a `Workspace` COMES FROM, not what consumes it.
 
 ## Success Criteria
 
-- [ ] In a fixture monorepo declaring `projects:` (Node workspace + PHP
+- [x] In a fixture monorepo declaring `projects:` (Node workspace + PHP
   workspace + a manifest-less `infra/`, no root manifest), `npm_command`
   enforces `llm:` wrappers, `lint_on_edit` finds workspace-installed
   linters, and `tdd_enforcement` honours a workspace-relative test dir —
-  including for `infra/`, which has no manifest to infer from.
-- [ ] The SAME fixture with `projects:` absent behaves exactly as a
+  including for `infra/`, which has no manifest to infer from. Pinned by
+  `test_npm_command.py::test_enforces_in_workspace_with_llm_scripts_via_cwd`
+  and `test_leading_cd_selects_the_workspace`,
+  `test_lint_on_edit_tool_resolution.py::test_finds_a_linter_in_the_workspace_vendor_bin`
+  and `test_workspace_bin_wins_over_path`, and
+  `test_tdd_enforcement.py::TestDeclaredTestPathMapWorkspaceAnchoring`.
+- [x] The SAME fixture with `projects:` absent behaves exactly as a
   single-project repo (no guessing) and emits the monorepo advisory naming
-  the workspaces it found.
-- [ ] Single-project repositories show byte-identical handler behaviour with
-  no added configuration and no advisory.
+  the workspaces it found. Pinned by
+  `test_npm_command.py::test_undeclared_monorepo_is_not_split_up` and
+  `test_monorepo_detector.py::test_advisory_when_manifests_below_root_and_none_at_root`
+  / `test_no_advisory_when_projects_declared`.
+- [x] Single-project repositories show byte-identical handler behaviour with
+  no added configuration and no advisory. Pinned by
+  `test_monorepo_detector.py::test_no_advisory_for_ordinary_single_project_repo`
+  and `test_no_advisory_when_root_manifest_exists`, and the
+  `ProjectRegistry.single_project()` fallback exercised throughout
+  `test_project_registry.py` and `test_projects_config.py`.
 - [x] A silently-downgraded handler mode is visible in `check` output.
+  Pinned by `test_cli_enforcement_status.py` (7 tests, all passing).
+
+Verification: 594 tests across the handler/config/detector/registry suites
+listed above pass, plus a clean full-suite run
+(14,464 passed, 0 unexpected failures — the two documented order-dependent
+`test_project_context.py` failures do not reproduce under full-suite
+ordering in this run, and pass in isolation regardless). The full-suite run
+surfaced three genuine but previously-undocumented error-hiding sites
+introduced by this plan's own code (`cli.py::_collect_enforcement_status_lines`,
+`markdown_organization.py::_declared_subproject_relative`,
+`monorepo_detector.py::_find_manifest_dirs`); each is a deliberate,
+documented fallback (best-effort `check` config load, expected
+out-of-scope path, best-effort advisory directory walk) and is now recorded
+in `scripts/qa/error_hiding_exclusions.json` with rationale, restoring the
+repo self-scan to green.
 
 ## Delivery & Milestones
 
-- <!-- milestone or delivery commit hash -->
+- Phases 1–4 delivered and merged to `main`: 0ad8d034, a2247305, a534aa78,
+  92711e19, 75dd2f7e, 6242a42e, c7d21ffa, 31e9ba57, 3a811267.
+- Closeout: three error-hiding sites in the merged Phase 3/4 code
+  (`cli.py`, `markdown_organization.py`, `monorepo_detector.py`) recorded in
+  `scripts/qa/error_hiding_exclusions.json`, restoring
+  `test_audit_error_hiding.py::TestRealRepoSelfScan` to green before
+  archiving.

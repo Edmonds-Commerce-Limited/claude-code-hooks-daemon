@@ -881,6 +881,24 @@
       "function": "_ensure_source_disable",
       "rule": "return-none-on-error",
       "reason": "Plan 00293: the source-disable settings write is deliberately fail-safe — an unreadable/malformed/unwritable client settings.json is logged at WARNING and abandoned, because a PreToolUse chain must never crash or block tool calls over a broken client file. Nothing is concealed (the warning names the path and error), the once-per-process flag prevents retry storms, and the call-time deny remains in force regardless, so the guard the option supplements keeps protecting."
+    },
+    {
+      "file": "daemon/cli.py",
+      "function": "_collect_enforcement_status_lines",
+      "rule": "silent-fallback",
+      "reason": "Plan 00296 T4.1: this helper backs `check`, which is also the tool used to diagnose a broken config -- a config-load failure here must not itself break `check`, so it falls back to a single-project registry (repository root only) rather than raising. This narrows the enforcement-status probe to the root, it does not hide the underlying config error, which config validation elsewhere in `check` already reports."
+    },
+    {
+      "file": "handlers/pre_tool_use/markdown_organization.py",
+      "function": "_declared_subproject_relative",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00296 T3.5: ValueError from Path.relative_to means the resolved workspace root does not actually contain this normalized path (e.g. normalize_path already stripped it to a project marker) -- an expected 'nothing declared covers this path' outcome, not an error condition. None is this method's existing documented signal for that case, identical in shape to the sibling exclusion for docs_qa_edit.py's _rel_path above."
+    },
+    {
+      "file": "handlers/session_start/monorepo_detector.py",
+      "function": "_find_manifest_dirs",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00296 T3.4: the manifest walk is advisory-only session-start detection, never a decision path -- an unreadable directory during the walk (permissions, a race with a concurrent delete) is logged at DEBUG and that subtree is skipped, so the advisory it feeds still fires for every reachable manifest instead of aborting the whole scan over one unlistable directory."
     }
   ]
 }

@@ -10,8 +10,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00297: supervisor drop anchor safety net](00297-supervisor-drop-anchor-safety-net/PLAN.md) - Not Started (read-back-verified hard stop whenever the session is observed running Fable above low effort)
 
-- [00296: monorepo workspace resolver](00296-monorepo-workspace-resolver/PLAN.md) - In Progress (one shared `Workspace.for_path()` resolver, so a multi-workspace monorepo stops silently degrading enforcement)
-
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 
 - [00293: tool inventory disable and token savings](00293-tool-inventory-disable-and-token-savings/PLAN.md) - Not Started (disable-at-source for never-wanted tools instead of fighting them with hooks, transcript-scanning analyser for never-used tools, tools-vs-tokens report with the decision left to projects; dogfood here)
@@ -173,6 +171,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Completed Plans
 
 - [00116: CLAUDE.md Token Compression via Stateful Progressive Disclosure](Completed/00116-claude-md-token-compression/PLAN.md) - Complete at `ba8860ed` + the archiving commit (two-tier injected block live at 63.6% shrink; 46 handlers on Rule/DisclosureTracker; block-report data-driven promotion; explain-rule CLI+skill)
+
+- [00296: monorepo workspace resolver](Completed/00296-monorepo-workspace-resolver/PLAN.md) - Complete at 9 merge commits + the archiving commit (one shared `Workspace`/`ProjectRegistry` resolver, declared-or-root `projects:` config, five handlers routed through it, monorepo detector advisory, degradation surfaced in `check`)
 
 - [00294: relay transport safe toggle and reenable](Completed/00294-relay-transport-safe-toggle-and-reenable/PLAN.md) - Complete at `17f9446e` + the archiving commit (one-command verified auto-reverting `transport on|off|status`; relay dogfood re-enabled here via the toggle; canary run 5 proved client parity incl. client-side relay build)
 
@@ -1297,9 +1297,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 295 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 244 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 245 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
