@@ -134,7 +134,7 @@ consumes: this changes where a `Workspace` COMES FROM, not what consumes it.
 - [x] ✅ **Task 3.3**: Handlers resolve via the injected `_project_registry`
   (wiring mirrors `ProjectLayout`); Phase 2 handler tests re-pointed at
   `projects:`-declared fixtures, each with an anti-inference pin.
-- [ ] ⬜ **Task 3.4**: Monorepo DETECTOR + advisory: manifests below the root
+- [x] ✅ **Task 3.4**: Monorepo DETECTOR + advisory: manifests below the root
   with none at it means "this looks like a monorepo" — name the workspaces
   found and print the `projects:` block to paste. Advises, never decides.
 - [ ] ⬜ **Task 3.5**: `markdown_organization`'s `monorepo_subproject_patterns`

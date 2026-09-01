@@ -624,6 +624,14 @@ class HandlerID:
         config_key="tool_disable_advisor",
         display_name="tool-disable-advisor",
     )
+    # Monorepo detector (SessionStart handler) -- Plan 00296 Task 3.4: manifests
+    # below the repo root with none at it is the signature of an unconfigured
+    # monorepo. Advises only -- never resolves a boundary itself.
+    MONOREPO_DETECTOR = HandlerIDMeta(
+        class_name="MonorepoDetectorHandler",
+        config_key="monorepo_detector",
+        display_name="monorepo-detector",
+    )
 
     # Plan QA edit lint (PreToolUse handler) — Plan 00144: Stage 1 checks on
     # the would-be PLAN.md content at Write/Edit time
