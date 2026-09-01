@@ -51,6 +51,13 @@ class TestProjectHandlersConfigValidation:
         config = ProjectHandlersConfig(path="")
         assert config.path == ""
 
+    def test_absolute_path_is_accepted(self) -> None:
+        """Project handlers dir is EXEMPT from the repository-relative rule
+        (Plan 00303): see ``ProjectHandlersConfig.path``'s field description.
+        """
+        config = ProjectHandlersConfig(path="/srv/handlers")
+        assert config.path == "/srv/handlers"
+
     def test_extra_fields_are_rejected(self) -> None:
         """Test that unknown fields raise ValidationError (extra='forbid').
 

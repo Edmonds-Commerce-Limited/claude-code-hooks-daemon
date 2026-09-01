@@ -19,11 +19,13 @@ coupling) so they are trivially testable; the server does the config wiring.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
+from claude_code_hooks_daemon.utils.repo_relative_path import normalise_repo_relative_path
 from claude_code_hooks_daemon.utils.secret_redaction import redact_structure
 
 # The ``_system`` envelope is the CLI's own control channel (logs, status,
@@ -43,6 +45,8 @@ _DEFAULT_SUBDIR = "payload-capture"
 _TOOL_INPUT_PATH_FIELDS: tuple[str, ...] = ("file_path", "notebook_path", "path")
 _TOOL_INPUT_KEY = "tool_input"
 _COMMAND_KEY = "command"
+
+logger = logging.getLogger(__name__)
 
 
 def _touches_protected_path(hook_input: dict[str, Any], patterns: tuple[str, ...]) -> bool:
@@ -73,15 +77,25 @@ def resolve_capture_dir(configured_dir: str | None, untracked_dir: Path) -> Path
 
     Args:
         configured_dir: Explicit directory from config, or ``None`` for default.
-        untracked_dir: The daemon's untracked dir (default parent).
+        untracked_dir: The daemon's untracked dir (default parent), used both
+            as the repository root for a relative ``configured_dir`` and as
+            the fallback when none is configured.
 
     Returns:
         The directory capture files are written under. When ``configured_dir``
         is falsy, ``<untracked_dir>/payload-capture`` is used (never ``/tmp`` —
-        runtime files stay in the daemon's untracked area).
+        runtime files stay in the daemon's untracked area). An absolute or
+        home-relative ``configured_dir`` (Plan 00303: config carries zero
+        absolute paths) is rejected -- logged and treated as unset, never
+        raised, matching this module's fail-open/advisory contract.
     """
     if configured_dir:
-        return Path(configured_dir).expanduser()
+        try:
+            relative = normalise_repo_relative_path(configured_dir, "payload_capture.dir")
+        except ValueError as exc:
+            logger.warning("Ignoring payload_capture.dir: %s", exc)
+        else:
+            return untracked_dir / relative
     return untracked_dir / _DEFAULT_SUBDIR
 
 

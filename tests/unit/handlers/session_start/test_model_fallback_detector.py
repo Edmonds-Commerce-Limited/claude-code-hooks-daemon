@@ -90,8 +90,16 @@ def _hook_input(transcript: Path, session_id: str = "session-1") -> dict[str, An
 
 @pytest.fixture
 def handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ModelFallbackDetectorHandler:
+    """A ``model_fallback_detector`` isolated to ``tmp_path`` for snapshotting.
+
+    ``_snapshot_dir`` is repository-relative (Plan 00303), so isolation is via
+    ``monkeypatch.chdir`` -- ``_resolve_snapshot_dir`` falls back to the cwd
+    when ``ProjectContext`` is not initialised, which is the unit-test case
+    here.
+    """
+    monkeypatch.chdir(tmp_path)
     instance = ModelFallbackDetectorHandler()
-    instance._snapshot_dir = str(tmp_path / "reports")
+    instance._snapshot_dir = "reports"
     state_file = tmp_path / "advised-state.json"
     monkeypatch.setattr(instance, "_resolve_state_file", lambda: state_file)
     return instance
@@ -503,6 +511,18 @@ class TestEdgeBranches:
         handler._snapshot_dir = "untracked/reports"
         resolved = handler._resolve_snapshot_dir()
         assert resolved.is_absolute()
+        assert str(resolved).endswith("untracked/reports")
+
+    def test_absolute_snapshot_dir_is_rejected_and_falls_back_to_default(
+        self, handler: ModelFallbackDetectorHandler, tmp_path: Path
+    ) -> None:
+        """Config carries zero absolute paths (Plan 00303): degrade, never raise.
+
+        Snapshotting is best-effort diagnostics throughout, so an absolute
+        ``snapshot_dir`` is logged and treated as unset rather than raised.
+        """
+        handler._snapshot_dir = str(tmp_path / "elsewhere")
+        resolved = handler._resolve_snapshot_dir()
         assert str(resolved).endswith("untracked/reports")
 
 

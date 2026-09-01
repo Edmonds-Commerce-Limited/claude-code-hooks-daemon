@@ -118,7 +118,19 @@ def test_resolve_capture_dir_defaults_to_untracked(tmp_path: Path) -> None:
 
 
 def test_resolve_capture_dir_uses_configured_dir(tmp_path: Path) -> None:
-    assert resolve_capture_dir(str(tmp_path / "custom"), tmp_path) == tmp_path / "custom"
+    """A repository-relative ``configured_dir`` is joined to ``untracked_dir``."""
+    assert resolve_capture_dir("custom/capture", tmp_path) == tmp_path / "custom" / "capture"
+
+
+def test_resolve_capture_dir_rejects_absolute_configured_dir(tmp_path: Path) -> None:
+    """Config carries zero absolute paths (Plan 00303): degrade, never raise.
+
+    ``payload_capture`` is a best-effort dogfooding aid, so an absolute
+    ``configured_dir`` is logged and treated as unset -- the default is used
+    instead -- rather than raising.
+    """
+    absolute = str(tmp_path / "custom")
+    assert resolve_capture_dir(absolute, tmp_path) == tmp_path / "payload-capture"
 
 
 class TestSecretRedaction:
