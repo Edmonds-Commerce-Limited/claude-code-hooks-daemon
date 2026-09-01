@@ -478,13 +478,13 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
-<!-- handler: goal-injection -->
-
-- goal_injection — plan-start goal signal for the ccy supervisor
-
 <!-- handler: markdown-table-formatter -->
 
 - markdown_table_formatter — markdown tables are auto-aligned
+
+<!-- handler: goal-injection -->
+
+- goal_injection — plan-start goal signal for the ccy supervisor
 
 <!-- handler: recovery-cron-advisor -->
 
@@ -493,10 +493,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: ccy-supervisor-integrity -->
 
 - ccy_supervisor_integrity — keep the ccy supervisor properly set up
-
-<!-- handler: docs-qa-sweep -->
-
-- docs_qa_sweep — documentation drift report at session start
 
 <!-- handler: git-upstream-checker -->
 
@@ -529,6 +525,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: tool-disable-advisor -->
 
 - tool_disable_advisor — declared never-want tools are checked at session start
+
+<!-- handler: docs-qa-sweep -->
+
+- docs_qa_sweep — documentation drift report at session start
 
 <!-- handler: idle-housekeeping-advisory -->
 
