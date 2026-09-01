@@ -379,9 +379,9 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 
 <!-- handler: validate-instruction-content -->
 
-<!-- handler: lint-on-edit -->
-
 <!-- handler: validate-eslint-on-write -->
+
+<!-- handler: lint-on-edit -->
 
 <!-- handler: failsafe-cron-blockage-suppressor -->
 
@@ -443,10 +443,10 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 | R-INSTRUCTION-FILE-LISTING         | changelog-style file listings (e.g. 'created src/Service/Foo.php')                                   | A file path preceded by a past-tense action verb is changelog narrative                                                         | Remove the log line; a bare path reference used as documentation stays allowed                                   |
 | R-INSTRUCTION-CHANGE-SUMMARY       | change summaries (e.g. 'Added 15 lines', 'Removed 8 lines')                                          | A line-count delta describes one diff, not a stable instruction                                                                 | Remove the summary; the diff itself is preserved in git                                                          |
 | R-INSTRUCTION-COMPLETION-INDICATOR | completion indicators (e.g. 'ALL DONE!', 'Task complete!', 'Finished task')                          | A completion phrase announces a session's end, not a fact about the project                                                     | Remove the phrase; instruction files should never celebrate finishing a task                                     |
-| R-LINT-FAILURE                     | a written/authored file that fails its language's lint check                                         | The write has already landed on disk; this is a failure report, not a rollback                                                  | Fix the reported problems with Edit — do not re-Write the file from scratch                                      |
 | R-ESLINT-ERRORS                    | a written/authored TS/TSX file with reported ESLint errors                                           | The write has already landed on disk; this is a failure report, not a rollback                                                  | Fix the reported problems with Edit (`npx eslint <file> --fix` clears most)                                      |
 | R-ESLINT-TIMEOUT                   | an ESLint run that did not finish within the configured timeout                                      | This handler DENIES on a timeout — unlike lint_on_edit, which allows                                                            | Investigate why ESLint is slow (config, project size); retry the edit                                            |
 | R-ESLINT-RUN-FAILURE               | an ESLint invocation that failed to run at all                                                       | ESLint could not be launched (exception raised invoking it)                                                                     | Check the ESLint wrapper/tsx setup, then retry the edit                                                          |
+| R-LINT-FAILURE                     | a written/authored file that fails its language's lint check                                         | The write has already landed on disk; this is a failure report, not a rollback                                                  | Fix the reported problems with Edit — do not re-Write the file from scratch                                      |
 | R-FAILSAFE-CRON-SUPPRESSED         | A delivered failsafe-cron tick, while a 'blocked only on human input' marker is live                 | Every tick against a session blocked only on human input is a guaranteed no-op model turn                                       | Nothing to do -- this is expected. Send a real message to clear the marker and resume ticks                      |
 
 ## Advisories and other active handlers
