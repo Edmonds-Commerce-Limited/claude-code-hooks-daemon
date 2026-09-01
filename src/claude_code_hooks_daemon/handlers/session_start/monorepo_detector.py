@@ -137,10 +137,19 @@ class MonorepoDetectorHandler(SessionStartHandlerBase):
 
     def _build_context(self, found: list[tuple[Path, str]], project_root: Path) -> list[str]:
         """Build the advisory text: workspaces found + a paste-ready projects: block."""
-        entries = [
-            {"name": directory.name, "root": directory.relative_to(project_root).as_posix()}
-            for directory, _ in found
-        ]
+        entries = []
+        used_names: set[str] = set()
+        for directory, _ in found:
+            rel = directory.relative_to(project_root).as_posix()
+            name = directory.name
+            if name in used_names:
+                # Basename collides with an already-used name (e.g.
+                # apps/web vs packages/web both yielding "web") -- fall back
+                # to the full relative path so the suggested block never has
+                # duplicate project names.
+                name = rel.replace("/", "-")
+            used_names.add(name)
+            entries.append({"name": name, "root": rel})
         yaml_block = yaml.safe_dump(
             {"projects": entries}, default_flow_style=False, sort_keys=False
         ).rstrip("\n")

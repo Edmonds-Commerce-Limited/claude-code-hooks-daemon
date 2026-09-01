@@ -54,6 +54,7 @@ from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor impor
 )
 from claude_code_hooks_daemon.utils.blockage_marker import (
     MARKER_FILENAME,
+    clear_marker,
     marker_is_valid,
     read_marker,
 )
@@ -89,7 +90,12 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             handler_id=HandlerID.FAILSAFE_CRON_BLOCKAGE_SUPPRESSOR,
             priority=Priority.FAILSAFE_CRON_BLOCKAGE_SUPPRESSOR,
             terminal=False,
-            tags=[HandlerTag.WORKFLOW, HandlerTag.AUTOMATION, HandlerTag.NON_TERMINAL],
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.AUTOMATION,
+                HandlerTag.NON_TERMINAL,
+                HandlerTag.BLOCKING,
+            ],
         )
         # Config option (hours); overridden by the registry from handler
         # options via setattr.
@@ -98,25 +104,48 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         self._clock: Callable[[], float] = time.time
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Match a delivered canonical-cron-prompt tick, and nothing else."""
+        """Match a delivered canonical-cron-prompt tick, OR any real prompt
+        while a marker file exists (so a genuine reply can clear it)."""
         prompt = hook_input.get(HookInputField.PROMPT)
-        return isinstance(prompt, str) and CANONICAL_CRON_PROMPT_MARKER in prompt
+        if not isinstance(prompt, str):
+            return False
+        if CANONICAL_CRON_PROMPT_MARKER in prompt:
+            return True
+        try:
+            marker_path = ProjectContext.daemon_untracked_dir() / MARKER_FILENAME
+        except RuntimeError:
+            return False
+        return marker_path.exists()
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
-        """Suppress the tick when a still-valid marker exists for this session.
+        """Suppress a cron tick when a still-valid marker exists for this
+        session; clear the marker on any genuine (non-cron) prompt.
 
         Args:
             hook_input: The UserPromptSubmit event's hook input.
 
         Returns:
-            DENY (blocks/erases the prompt) only when a valid marker is
-            found; ALLOW in every other case, including every failure mode.
+            DENY (blocks/erases the prompt) only for a cron-prompt tick with
+            a valid marker. ALLOW in every other case, including every
+            failure mode -- a real prompt that fails to clear the marker
+            (e.g. an unlink error) still gets through unchanged.
         """
         session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or _UNKNOWN_SESSION)
         try:
             marker_path = ProjectContext.daemon_untracked_dir() / MARKER_FILENAME
         except RuntimeError as e:
             logger.debug("failsafe_cron_blockage_suppressor: no project context: %s", e)
+            return BlockingResult(decision=Decision.ALLOW)
+
+        prompt = hook_input.get(HookInputField.PROMPT)
+        is_cron_prompt = isinstance(prompt, str) and CANONICAL_CRON_PROMPT_MARKER in prompt
+
+        if not is_cron_prompt:
+            # A genuine (non-cron) prompt means the owner is back -- clear any
+            # stale marker now instead of waiting up to expiry_hours for it to
+            # lapse on its own. clear_marker() is already fail-open (logs and
+            # swallows OSError), so this never blocks the prompt.
+            clear_marker(marker_path)
             return BlockingResult(decision=Decision.ALLOW)
 
         marker = read_marker(marker_path)

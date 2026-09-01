@@ -193,6 +193,10 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "call this fires on; the standing delegation discipline cannot fit in "
         "the once-per-path fire-time line"
     ),
+    "FailsafeCronBlockageSuppressorHandler": (
+        "T1 denies a delivered failsafe-cron tick while a still-valid "
+        "'blocked only on human input' marker exists for the session"
+    ),
 }
 
 # Handlers that correctly return None. The reason is the point: it is what a
@@ -214,6 +218,11 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "UpgradeNotifierHandler": "status-line renderer, no agent-facing action",
     "WorkingDirectoryHandler": "status-line renderer, no agent-facing action",
     "CompactionSignalHandler": "writes a signal file for the supervisor, not the agent",
+    "MonorepoDetectorHandler": (
+        "never denies (T1 no); one-shot correction delivered fully at fire-time "
+        "(paste-ready projects: block), not a standing policy to hold across "
+        "later decisions (T3 no)"
+    ),
     "DisclosureResetPreCompactHandler": "resets internal disclosure state, no agent-facing action",
     "DisclosureResetSessionStartHandler": "resets internal disclosure state, no agent-facing action",
     "WorktreeRemoveHandler": "prunes stale registrations; nothing to do differently",

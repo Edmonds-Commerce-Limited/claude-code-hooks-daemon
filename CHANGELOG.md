@@ -5,6 +5,112 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.58.0] - 2026-09-01
+
+### Added
+
+- **Declared-not-inferred project boundaries via top-level `projects:` config
+  (Plan 00296).** A new shared `Workspace.for_path` resolver (manifest
+  walk-up + git-root fallback) and a `projects:` config block let a monorepo
+  declare each sub-project's root explicitly; a repository with no `projects:`
+  block behaves exactly as before (single root project, byte-identical
+  behaviour). `markdown_organization`, `tdd_enforcement`'s `test_path_map`,
+  `npm_command`, `lint_on_edit` and `eslint` all resolve against the declared
+  workspace first. A new SessionStart `monorepo_detector` advisory flags a
+  likely-monorepo layout with no `projects:` declared (advises, never
+  decides), and `hooks-daemon check` surfaces downgraded enforcement status
+  when workspace resolution degrades.
+- **Per-project `layout:` blocks (Plan 00300/00301, owner ruling).** A
+  declared `projects:` entry may now carry its own `layout:` block (same
+  shape as the top-level `layout:`) governing only that project's own
+  source/test/config/vendor directory names, resolved via
+  `ProjectRegistry.layout_for(path)`; DRY aggregation helpers
+  (`iter_layouts()`/`all_source_dirs()`) serve handlers needing the union
+  across every project. A project with no `layout:` of its own uses built-in
+  defaults and never inherits the root project's layout.
+- **REPO vs PROJECT handler `workspace_scope` taxonomy (Plan 00301).** Every
+  handler now declares whether it operates repo-wide or per-declared-project,
+  clarifying `worktree_file_copy` aggregation and other handlers that must
+  see every project at once versus those scoped to the file's own workspace.
+- **Zero-absolute-paths-in-config enforcement + `{REPO_ROOT}` path token
+  (Plans 00302, 00303, owner rulings).** `plan_workflow.directory`,
+  `plan_workflow.workflow_docs`, and `documentation.trees.agent`/`human` now
+  reuse `projects[].root`'s repository-relative validator and hard-error on
+  an absolute value; `sensitive_content.options.secret_word_list_path`,
+  `daemon.payload_capture.dir`, and
+  `model_fallback_detector.options.snapshot_dir` fail open instead (log +
+  fall back to default) on an absolute value, matching their existing
+  fail-open contracts. The literal token `{REPO_ROOT}` is now accepted as
+  portable notation for "the repository root" on any repository-relative
+  path field, and expands against the project root at load time on the
+  documented absolute-capable exemptions (`plugins.paths` /
+  `plugins.plugins[].path`, `project_handlers.path`).
+- **Degraded-mode safety net (Plan 00304).** `DestructiveGitHandler` now runs
+  config-independently while the daemon is in degraded mode, so destructive
+  `git reset --hard`/`clean -f`/etc. protection never silently lapses;
+  degraded mode is now visible on `hooks-daemon status`, `hooks-daemon check`, and `config-validate` output via a shared DEGRADED banner and
+  business-rule module.
+- **Failsafe-cron blockage suppressor (Plan 00298).** A narrow
+  "blocked-on-human-input" marker now suppresses recovery-cron ticks with
+  zero model tokens spent — every tick against a session blocked only on
+  human input was previously a guaranteed no-op turn. The suppression is
+  fail-open everywhere: any doubt about the marker's validity resumes normal
+  ticking rather than risking a stuck session.
+- **Multi-plan combined goal rendering (Plan 00299).** The `/goal` supervisor
+  signal now renders a ledger-authoritative combined view across every live
+  plan instead of a single plan's goal, with a thrash guard against rapid
+  goal churn across concurrent plans.
+- **Supervisor DROP ANCHOR safety net (Plan 00297).** The ccy supervisor now
+  read-back-verifies a "Fable model, at or below low effort" invariant on
+  every escalation and forces it if drifted, treating a Fable-above-low state
+  as an emergency; an owner-approved ESC interrupt now accompanies the DROP
+  ANCHOR escalation itself.
+- `php-qa-ci` canary workflow documentation for real-repo upgrade rehearsal
+  (delete, reclone, upgrade — never commit or push against the canary).
+
+### Changed
+
+- Documented the `php-qa-ci` real-repo canary procedure and folded its
+  findings into the fixes below.
+- Removed the erroneous secondary publish-confirmation gate from the release
+  process (owner ruling): `/release` is the sole authorisation, and the
+  pipeline's blocking gates are the only gates — the `publish_authorised`
+  flag, the stop-and-ask-before-tagging rule, and the corresponding
+  `release_blocker` stand-down branch are gone; a legacy state file still
+  carrying the field has it ignored.
+
+### Fixed
+
+- **Go error-hiding false positive**: the blank-identifier check denied
+  `_, err := f()` (the form that CAPTURES the error) instead of the real
+  error-hiding shape, a blank in the LAST tuple position (`result, _ :=`).
+- **`quarantine_artefact_read_guard` false positive on unexpanded shell
+  globs**: an ordinary `grep -c pattern docs/*.md` was denied even with no
+  `*-opus-security-DETAIL*` artefact anywhere on disk, because the glob
+  token fnmatched the seed literal's stem regardless of what actually
+  existed on the filesystem. A new strict glob-expansion check
+  (`find_protected_mention_strict`) requires a glob-shaped token to expand
+  to a real matching file before it counts as a mention; `secret_file_guard`
+  keeps its deliberately conservative heuristic-only behaviour unchanged.
+
+### Removed
+
+- **BREAKING**: `handlers.pre_tool_use.markdown_organization.options.monorepo_subproject_patterns`
+  is removed outright (Plan 00300 hard cutover, owner ruling). Declared
+  `projects:` config (Plan 00296) is now the only sub-project resolution
+  mechanism — there is no fallback and no override. A **non-empty** pattern
+  list is now a hard config-validation error at daemon startup, whose
+  message prints the equivalent `projects:` block for every literal
+  (non-wildcard) pattern; a `null`/empty/absent value (the shape an older
+  daemon version's own default config template writes) is tolerated with an
+  advisory log line only. See the [v3.57→v3.58 upgrade
+  guide](CLAUDE/UPGRADES/v3/v3.57-to-v3.58/v3.57-to-v3.58.md).
+- **BREAKING**: in a declared `projects:` monorepo, `tdd_enforcement`'s
+  `test_path_map` no longer searches a second, repository-root-anchored
+  candidate for a relative `test_dir` — it resolves against the source
+  file's declared workspace only. Zero-config (no `projects:` declared)
+  behaviour is unchanged, since the workspace IS the repository root.
+
 ## [3.57.0] - 2026-08-31
 
 ### Added

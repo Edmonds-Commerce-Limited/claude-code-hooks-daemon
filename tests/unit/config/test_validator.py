@@ -3,7 +3,10 @@
 Test Driven Development: Tests written to cover all validation branches.
 """
 
+import re
+
 import pytest
+import yaml
 
 from claude_code_hooks_daemon.config.validator import ConfigValidator, ValidationError
 
@@ -812,6 +815,33 @@ class TestRemovedMonorepoSubprojectPatternsOption:
         config = self._config({"monorepo_subproject_patterns": []})
         errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert errors == []
+
+    def test_error_disambiguates_colliding_basenames(self) -> None:
+        """Two patterns sharing a basename (`apps/web`, `packages/web`) must
+        not collide on `name: web` twice -- the emitted block is pasted
+        straight into Config and a duplicate project name is a hard error
+        there, so this generator must never produce one."""
+        config = self._config({"monorepo_subproject_patterns": ["apps/web", "packages/web"]})
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
+        message = errors[0]
+        names = re.findall(r"name: (\S+)", message)
+        assert len(names) == len(set(names)), f"duplicate project names in: {message}"
+        assert "name: web" in message
+        assert "name: packages-web" in message
+
+        # The emitted block must also be paste-ready: valid YAML that passes
+        # Config's own duplicate-project-name validation.
+        start = message.index("projects:", message.index("top level):"))
+        end = message.index("\n\n", start)
+        yaml_block = message[start:end]
+        parsed = yaml.safe_load(yaml_block)
+        full_config = {
+            "version": "1.0",
+            "daemon": {"idle_timeout_seconds": 60},
+            **parsed,
+        }
+        project_errors = ConfigValidator.validate(full_config, validate_handler_names=False)
+        assert not any("duplicate" in e.lower() for e in project_errors), project_errors
 
     def test_other_handlers_are_unaffected(self) -> None:
         """The check is scoped to markdown_organization only."""

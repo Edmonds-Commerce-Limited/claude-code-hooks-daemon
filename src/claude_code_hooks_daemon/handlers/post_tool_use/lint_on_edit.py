@@ -26,7 +26,10 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.core.workspace import Workspace, resolve_workspace
 from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
-from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
+from claude_code_hooks_daemon.strategies.lint.protocol import (
+    ClassifiesToolUnavailable,
+    LintStrategy,
+)
 from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.path_exclusion import (
@@ -213,7 +216,7 @@ class LintOnEditHandler(PostToolUseHandlerBase):
 
         # Run default lint command
         default_result = self._run_lint_command(
-            hook_input, default_cmd, file_path, strategy.language_name
+            hook_input, default_cmd, file_path, strategy.language_name, strategy
         )
         if default_result is not None:
             return default_result
@@ -221,7 +224,7 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         # Run extended lint command if configured and default passed
         if extended_cmd:
             return self._run_lint_command(
-                hook_input, extended_cmd, file_path, strategy.language_name
+                hook_input, extended_cmd, file_path, strategy.language_name, strategy
             )
 
         return None
@@ -336,6 +339,7 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         command_template: str,
         file_path: str,
         language_name: str,
+        strategy: LintStrategy | None = None,
     ) -> BlockingResult | None:
         """Run a lint command and return BlockingResult if it fails, None if it passes.
 
@@ -404,6 +408,22 @@ class LintOnEditHandler(PostToolUseHandlerBase):
                 if result.stderr:
                     error_output = (
                         error_output + "\n" + result.stderr if error_output else result.stderr
+                    )
+
+                if isinstance(strategy, ClassifiesToolUnavailable) and (
+                    strategy.is_tool_unavailable_output(error_output)
+                ):
+                    # The resolved executable ran (no FileNotFoundError) but its
+                    # own output says the real tool behind it is missing -- a
+                    # launcher/shim reporting absence, not a genuine lint
+                    # failure against the file's content.
+                    return BlockingResult(
+                        decision=Decision.ALLOW,
+                        context=[
+                            f"⚠️ {language_name} lint tool ({command_parts[0]}) reports "
+                            f"the underlying tool is not installed - install it to "
+                            f"enable lint checking"
+                        ],
                     )
 
                 dynamic_detail = (

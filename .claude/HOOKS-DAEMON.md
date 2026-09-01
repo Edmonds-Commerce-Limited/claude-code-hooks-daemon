@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-08-31 (v3.57.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-09-01 (v3.58.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
@@ -74,7 +74,7 @@
 | 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
 | 31 | goal_injection | ADVISORY | Write a goal-intent signal when a plan flips to In Progress |
 
-### SessionStart (18 handlers)
+### SessionStart (19 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -96,6 +96,7 @@
 | 63 | model_fallback_detector | ADVISORY | Detect a safety-triggered model fallback from the session transcript |
 | 64 | docs_qa_sweep | ADVISORY | Advisory SessionStart sweep over the documentation corpus (silent when clean) |
 | 65 | tool_disable_advisor | NON-TERMINAL | Advise when a declared never-want tool is not disabled at source |
+| 66 | monorepo_detector | ADVISORY | Advise when manifests exist below the repo root but not at it |
 
 ### PreCompact (2 handlers)
 
@@ -104,11 +105,12 @@
 | 15 | disclosure_reset_pre_compact | NON-TERMINAL | Reset DisclosureTracker state for the firing agent on PreCompact |
 | 20 | compaction_signal | NON-TERMINAL | Write a ``<session>.compacting`` signal on PreCompact for the supervisor |
 
-### UserPromptSubmit (4 handlers)
+### UserPromptSubmit (5 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | git_context_injector | CONTEXT | Inject current git status as context when user submits a prompt |
+| 37 | failsafe_cron_blockage_suppressor | BLOCKING | Suppress a delivered failsafe-cron tick while the session is stably |
 | 55 | critical_thinking_advisory | ADVISORY | Periodically inject advisory context encouraging critical evaluation |
 | 56 | idle_housekeeping_advisory | ADVISORY | After N consecutive no-op recovery ticks, advise a report-first |
 | 57 | standing_authorisations | ADVISORY | Inject the authorisations a project has recorded in its config |

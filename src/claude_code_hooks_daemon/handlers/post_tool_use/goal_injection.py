@@ -542,13 +542,17 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             return BlockingResult(decision=Decision.ALLOW)
 
         displaced = self._ledger_record(session_id, plan_number, joined, Path(file_path))
-        self._record_latch(latch_key)
 
         written = self._write_combined_signal(
             session_id, Path(file_path), fallback=joined, fallback_plan_number=plan_number
         )
         if written is None:
             return BlockingResult(decision=Decision.ALLOW)
+
+        # Latch only after a CONFIRMED write -- a failed write (returns
+        # None) must leave the session free to retry on the next
+        # qualifying event, or it never gets a /goal at all.
+        self._record_latch(latch_key)
 
         if displaced:
             plans = ", ".join(displaced)

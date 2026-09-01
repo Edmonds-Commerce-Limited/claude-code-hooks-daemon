@@ -8,7 +8,7 @@ ProjectContext.project_root() for project-shaped questions.
 """
 
 from claude_code_hooks_daemon.core.handler import Handler, WorkspaceScope
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import GoalInjectionHandler
 from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
@@ -40,7 +40,7 @@ class _PlainHandler(Handler):
         return False
 
     def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(decision="allow")
+        return HookResult(decision=Decision.ALLOW)
 
     def get_claude_md(self) -> str | None:
         return None

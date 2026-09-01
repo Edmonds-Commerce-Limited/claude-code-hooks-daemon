@@ -7,6 +7,13 @@
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Sub-Agent Orchestration
 
+> **Label note**: release documentation, config-changes/truth-changes
+> manifests and `docs/guides/CONFIGURATION.md` cite this body of work as
+> "Plan 00303" (a number claimed by a concurrent worktree agent's scaffolder
+> during the same cycle — same situation as Plan 00300/00301). "Plan 00303"
+> is a deliberately retained label for THIS plan folder, 00302; no separate
+> 00303 folder exists.
+
 ## Overview
 
 Owner ruling: config carries ZERO absolute paths — a repository is mounted at

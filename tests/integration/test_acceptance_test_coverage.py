@@ -101,6 +101,13 @@ _EXEMPT_FROM_DENY_TEST: dict[str, str] = {
         "evaluates to ALLOW here. The test is correct; the verdict is simply "
         "not observable from this project's configuration."
     ),
+    "FailsafeCronBlockageSuppressorHandler": (
+        "its DENY path requires a blockage-marker file whose session_id "
+        "matches the CURRENT live session -- that id is not knowable to a "
+        "setup script written ahead of time, so no scripted playbook step can "
+        "construct a valid marker for the session running the test. The ALLOW "
+        "(no-marker default) path IS covered by its acceptance test."
+    ),
 }
 
 

@@ -19,7 +19,11 @@ from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor impor
 from claude_code_hooks_daemon.handlers.user_prompt_submit.failsafe_cron_blockage_suppressor import (
     FailsafeCronBlockageSuppressorHandler,
 )
-from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
+from claude_code_hooks_daemon.utils.blockage_marker import (
+    MARKER_FILENAME,
+    read_marker,
+    write_marker,
+)
 
 _DAEMON_UNTRACKED_DIR_PATCH_TARGET = (
     "claude_code_hooks_daemon.handlers.user_prompt_submit."
@@ -29,6 +33,12 @@ _DAEMON_UNTRACKED_DIR_PATCH_TARGET = (
 
 def _cron_hook_input(session_id: str = "sess-1") -> dict[str, Any]:
     return {"prompt": _CANONICAL_CRON_PROMPT, "session_id": session_id}
+
+
+def _real_hook_input(
+    session_id: str = "sess-1", prompt: str = "please fix the bug"
+) -> dict[str, Any]:
+    return {"prompt": prompt, "session_id": session_id}
 
 
 class TestInit:
@@ -132,3 +142,82 @@ class TestHandle:
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             result = handler.handle({"prompt": _CANONICAL_CRON_PROMPT})
         assert result.decision == Decision.DENY
+
+    def test_real_prompt_with_valid_marker_clears_it_and_allows(self, tmp_path: Path) -> None:
+        """A genuine (non-cron) user prompt is the owner replying -- the
+        marker must be removed immediately rather than waiting up to
+        expiry_hours to lapse on its own."""
+        marker_path = tmp_path / MARKER_FILENAME
+        write_marker(marker_path, "sess-1", now=1000.0)
+        handler = FailsafeCronBlockageSuppressorHandler()
+        handler._clock = lambda: 1100.0
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            result = handler.handle(_real_hook_input("sess-1"))
+        assert result.decision == Decision.ALLOW
+        assert not marker_path.exists()
+        assert read_marker(marker_path) is None
+
+    def test_real_prompt_then_cron_tick_is_allowed_through(self, tmp_path: Path) -> None:
+        """After a real prompt clears the marker, a subsequent cron tick for
+        the same session must no longer be suppressed."""
+        marker_path = tmp_path / MARKER_FILENAME
+        write_marker(marker_path, "sess-1", now=1000.0)
+        handler = FailsafeCronBlockageSuppressorHandler()
+        handler._clock = lambda: 1100.0
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            real_result = handler.handle(_real_hook_input("sess-1"))
+            cron_result = handler.handle(_cron_hook_input("sess-1"))
+        assert real_result.decision == Decision.ALLOW
+        assert cron_result.decision == Decision.ALLOW
+
+    def test_cron_prompt_with_valid_marker_is_still_denied(self, tmp_path: Path) -> None:
+        """Regression: widening matches()/handle() for real prompts must not
+        change the suppression behaviour for an actual cron tick."""
+        write_marker(tmp_path / MARKER_FILENAME, "sess-1", now=1000.0)
+        handler = FailsafeCronBlockageSuppressorHandler()
+        handler._clock = lambda: 1100.0
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            result = handler.handle(_cron_hook_input("sess-1"))
+        assert result.decision == Decision.DENY
+
+    def test_real_prompt_clear_failure_still_allows(self, tmp_path: Path) -> None:
+        """clear_marker() is fail-open (Plan 00298 contract): an unlink
+        error must never block the real prompt it was riding along with.
+        Patches Path.unlink (not clear_marker itself) so this exercises the
+        real fail-open path, not a mocked-away one."""
+        marker_path = tmp_path / MARKER_FILENAME
+        write_marker(marker_path, "sess-1", now=1000.0)
+        handler = FailsafeCronBlockageSuppressorHandler()
+        handler._clock = lambda: 1100.0
+        with (
+            patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
+            patch.object(Path, "unlink", side_effect=OSError("boom")),
+        ):
+            result = handler.handle(_real_hook_input("sess-1"))
+        assert result.decision == Decision.ALLOW
+
+    def test_real_prompt_with_no_marker_allows(self, tmp_path: Path) -> None:
+        handler = FailsafeCronBlockageSuppressorHandler()
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            result = handler.handle(_real_hook_input("sess-1"))
+        assert result.decision == Decision.ALLOW
+
+
+class TestMatchesWithMarker:
+    def test_matches_real_prompt_when_marker_exists(self, tmp_path: Path) -> None:
+        write_marker(tmp_path / MARKER_FILENAME, "sess-1", now=1000.0)
+        handler = FailsafeCronBlockageSuppressorHandler()
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            assert handler.matches(_real_hook_input("sess-1")) is True
+
+    def test_does_not_match_real_prompt_when_no_marker(self, tmp_path: Path) -> None:
+        handler = FailsafeCronBlockageSuppressorHandler()
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            assert handler.matches(_real_hook_input("sess-1")) is False
+
+    def test_does_not_match_real_prompt_when_no_project_context(self) -> None:
+        handler = FailsafeCronBlockageSuppressorHandler()
+        with patch(
+            _DAEMON_UNTRACKED_DIR_PATCH_TARGET, side_effect=RuntimeError("no project context")
+        ):
+            assert handler.matches(_real_hook_input("sess-1")) is False

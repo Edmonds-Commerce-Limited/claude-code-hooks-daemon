@@ -1,0 +1,15 @@
+# Configuration file after v3.58.0 upgrade
+# Same monorepo, declared via the top-level projects: block.
+
+projects:
+  - name: api
+    root: packages/api
+  - name: web
+    root: packages/web
+
+handlers:
+  pre_tool_use:
+    markdown_organization:
+      enabled: true
+      # monorepo_subproject_patterns REMOVED — projects: above is now
+      # the only sub-project resolution mechanism.

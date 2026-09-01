@@ -473,11 +473,43 @@ class TestGoalInjectionHandler:
     ) -> None:
         plan = self._write_plan()
         monkeypatch.setattr(
-            "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection." "write_goal_signal",
+            "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection.write_goal_signal",
             lambda *a, **k: None,
         )
         result = handler.handle(self._hook_input(plan))
         assert result.decision == Decision.ALLOW
+
+    def test_failed_write_does_not_latch(
+        self, handler: GoalInjectionHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A write failure (``write_goal_signal`` returns None) must not set
+        the once-per-(plan, session) latch -- otherwise the session never
+        retries and never gets a signal, even after the failure clears."""
+        plan = self._write_plan()
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection.write_goal_signal",
+            lambda *a, **k: None,
+        )
+        handler.handle(self._hook_input(plan))
+        assert not self._signal_path().exists()
+
+        monkeypatch.undo()
+        handler.handle(self._hook_input(plan))
+        assert self._signal_path().exists()
+
+    def test_successful_write_still_latches(self, handler: GoalInjectionHandler) -> None:
+        """A successful write DOES set the latch -- no duplicate write on a
+        second qualifying event for the same (plan, session)."""
+        plan = self._write_plan()
+        handler.handle(self._hook_input(plan))
+        assert self._signal_path().exists()
+        first_mtime = self._signal_path().stat().st_mtime_ns
+
+        self._signal_path().unlink()
+        handler.handle(self._hook_input(plan))
+        assert (
+            not self._signal_path().exists()
+        ), f"second write happened despite latch (first mtime {first_mtime})"
 
 
 class TestGoalLedgerIntegration:

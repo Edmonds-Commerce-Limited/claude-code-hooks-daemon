@@ -492,6 +492,10 @@ handlers:
       enabled: false  # Opt-in; advisory only, never edits settings; inert without tool_policy.never_want entries
       priority: 65
 
+    monorepo_detector:  # Advise on an unconfigured monorepo shape (manifests found below the repo root, none at it) (Plan 00298)
+      enabled: true  # Advisory only, never resolves a boundary; silent when projects: already declared
+      priority: 66
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     disclosure_reset_pre_compact:  # Reset per-agent rule-disclosure state before compaction (Plan 00116 Phase 4)
@@ -507,6 +511,10 @@ handlers:
     git_context_injector:  # Injects git context into user prompts
       enabled: true
       priority: 10
+
+    failsafe_cron_blockage_suppressor:  # Suppress a delivered failsafe-cron tick while the session is blocked only on human input (Plan 00298)
+      enabled: true  # On by default (dogfooding purpose); never terminal
+      priority: 37
 
     critical_thinking_advisory:  # Periodic advisory encouraging critical evaluation
       enabled: false              # Enable for critical thinking nudges on substantial prompts

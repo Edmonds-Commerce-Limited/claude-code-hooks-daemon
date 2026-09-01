@@ -1,5 +1,6 @@
 """Tests for MonorepoDetectorHandler."""
 
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -98,6 +99,27 @@ class TestMonorepoDetectorHandle:
         assert "projects:" in joined
         assert "root: web" in joined
         assert "root: api" in joined
+
+    def test_advisory_disambiguates_colliding_basenames(
+        self, handler: MonorepoDetectorHandler, tmp_path: Path
+    ) -> None:
+        """Two manifest dirs sharing a basename (`apps/web`, `packages/web`)
+        must not both suggest `name: web` -- pasting the block straight in
+        would produce a duplicate project name."""
+        apps_web = tmp_path / "apps" / "web"
+        apps_web.mkdir(parents=True)
+        (apps_web / "package.json").write_text("{}")
+
+        packages_web = tmp_path / "packages" / "web"
+        packages_web.mkdir(parents=True)
+        (packages_web / "package.json").write_text("{}")
+
+        decision, context = self._handle(handler, tmp_path)
+        assert decision == Decision.ALLOW
+        joined = "\n".join(context)
+        names = re.findall(r"name: (\S+)", joined)
+        assert len(names) == len(set(names)), f"duplicate project names in: {joined}"
+        assert "name: apps-web" in joined or "name: packages-web" in joined
 
     def test_no_advisory_when_projects_declared(
         self, handler: MonorepoDetectorHandler, tmp_path: Path

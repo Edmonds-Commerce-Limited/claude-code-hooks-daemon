@@ -62,9 +62,19 @@ def _migrated_projects_yaml_block(patterns: list[Any]) -> str:
     lines: list[str] = ["projects:"]
     declared_any = False
     manual: list[str] = []
+    used_names: set[str] = set()
     for pattern in patterns:
         if isinstance(pattern, str) and _LITERAL_PATTERN_RE.match(pattern):
-            name = pattern.strip("/").split("/")[-1] or pattern
+            stripped = pattern.strip("/")
+            name = stripped.split("/")[-1] or pattern
+            if name in used_names:
+                # Basename collides with an already-used name (e.g.
+                # apps/web vs packages/web both yielding "web") -- fall
+                # back to the full relative path so the emitted block
+                # never has duplicate project names, which Config's own
+                # validator would reject.
+                name = stripped.replace("/", "-")
+            used_names.add(name)
             lines.append(f"  - name: {name}")
             lines.append(f"    root: {pattern}")
             declared_any = True

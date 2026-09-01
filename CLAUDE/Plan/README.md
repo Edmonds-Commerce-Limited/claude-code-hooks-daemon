@@ -4,11 +4,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00299: multi plan goal support](00299-multi-plan-goal-support/PLAN.md) - Not Started (the `/goal` Stop-hook condition is a single session-scoped slot that concurrent worktree plans overwrite last-writer-wins, while the daemon's goal ledger already tracks multiple In-Progress plans — make the ledger authoritative and the goal signal a per-plan-additive view of it)
+- [00305: v3580 release review followups](00305-v3580-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.58.0 release code review gate, deferred per the never-drop-a-finding rule: mock.patch in shipped CLI code, unguarded {REPO_ROOT} token call sites, silent secret-word-list degrade)
 
-- [00298: failsafe cron blockage cadence](00298-failsafe-cron-blockage-cadence/PLAN.md) - Not Started (design/brainstorm: a session stably blocked only on human input burns a full model turn per hourly failsafe-cron tick — recommends a daemon-side blocked-state marker + zero-token `UserPromptSubmit` suppression, with a bounded expiry so a stale marker cannot mask a real rate-limit recovery)
+- [00299: multi plan goal support](00299-multi-plan-goal-support/PLAN.md) - In Progress (implemented and live: the goal ledger is authoritative and the goal signal renders a combined line across every In-Progress plan, re-rendered on plan retirement; dogfood soak before archiving)
 
-- [00297: supervisor drop anchor safety net](00297-supervisor-drop-anchor-safety-net/PLAN.md) - Not Started (read-back-verified hard stop whenever the session is observed running Fable above low effort)
+- [00298: failsafe cron blockage cadence](00298-failsafe-cron-blockage-cadence/PLAN.md) - In Progress (implemented and live: daemon-side blocked-on-human marker + zero-token `UserPromptSubmit` suppression of the canonical failsafe-cron prompt, 24h expiry, every failure path fails open; dogfood soak before archiving)
+
+- [00297: supervisor drop anchor safety net](00297-supervisor-drop-anchor-safety-net/PLAN.md) - In Progress (implemented and live in the supervisor: read-back-verified DROP ANCHOR forcing Fable to low effort with retry/escalation and owner-approved ESC interrupt; live worker hot-reload verification outstanding)
 
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 
@@ -246,7 +248,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00259: block artefact publishing by default](Completed/00259-block-public-artefact-publishing-by-default/PLAN.md) - Complete at the commit that archives it (the `Artifact` tool mints a claude.ai URL outside the repository and was the one disclosure path with no guard; blocked by default, `action: "list"` still allowed, and deliberately NO agent-side escape hatch — verified live, not just by unit test)
 
-- [00256: docs consistency round, found by the v3.54.0 release](Completed/00256-docs-consistency-round-for-v3540-release/PLAN.md) - Complete at `3ff4078e` + `4e064e15` + the commit that archives it (eight documents asserting something untrue of the tree, found by the release's own Step 7 and Step 10 gates; the durable half is the `unreleased-manifest-date` guard, since the placeholder it catches had already shipped silently in four manifests)
+- [00256: docs consistency round, found by the v3.54.0 release](Completed/00256-docs-consistency-round-for-v3540-release/PLAN.md) - Complete at `3ff4078e` + `4e064e15` (eight untrue doc assertions found by release gates; durable half is the `unreleased-manifest-date` guard)
 
 - [00255: bare refnames outside branch_safety](Completed/00255-bare-refname-ambiguity-outside-branch-safety/PLAN.md) - Complete at the commit that archives it (the filed cosmetic bug, plus a worse one the sweep found: an ambiguous base flipped the merged verdict; guard added for the checkable half)
 
@@ -264,7 +266,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00247: Exactly one failsafe recovery cron per session](Completed/00247-one-recovery-cron-per-session/PLAN.md) - Complete at the archiving commit (recovery-cron and watchdog advisories are now CronList-first, so plans stop stacking duplicate hourly crons)
 
-- [00246: The daemon takes the git index lock it does not need](Completed/00246-git-index-lock-contention/PLAN.md) - Complete at `013b48e7` + `60ae1074` (dogfooding report of stale `.git/index.lock`: `git status` REWRITES the index, so three daemon paths contended with the agent for the lock; `run_git` is now the single spawn point declining the optional lock, with an AST guard so the 15 files that bypassed the declared facade cannot come back)
+- [00246: The daemon takes the git index lock it does not need](Completed/00246-git-index-lock-contention/PLAN.md) - Complete at `013b48e7` + `60ae1074` (`run_git` is now the single git spawn point declining the optional index lock, with an AST guard against facade bypass)
 
 - [00244: Generated tracked docs must be path-agnostic](Completed/00244-path-agnostic-generated-docs/PLAN.md) - Complete at `6d7f8192` (client bug report: every daemon-CLI example in the tracked `CLAUDE.md` block named the rendering machine's absolute root, publishing a home directory and churning per machine; a second class hard-coded `/workspace`, true on no client machine at all — verified fixed in a real client install)
 
@@ -326,21 +328,21 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00213: planlib plan folder orchestrator tooling](Completed/00213-planlib-plan-folder-orchestrator-tooling/PLAN.md) - Complete (adopts a client project's `planlib` bash library behind a `plan_workflow.scripts` block shipping OFF, deployed through the same seam as `mkplan.bash`. `root_marker` is deliberately defaultless and `.git` is rejected as a marker, since `.git` is the walk's boundary. Supersedes Plan 00199.)
 
-- [00215: readme repositioning guardrails not hook tooling](Completed/00215-readme-repositioning-guardrails-not-hook-tooling/PLAN.md) - Complete (README now answers "why guardrails?" before "why a daemon?", and states the incident the project exists to prevent. Every number re-measured rather than carried over — three of the request's own figures were wrong. The origin story stayed BLANK until the maintainer supplied the facts, rather than being invented.)
+- [00215: readme repositioning guardrails not hook tooling](Completed/00215-readme-repositioning-guardrails-not-hook-tooling/PLAN.md) - Complete (README leads with "why guardrails?"; every figure re-measured — three of the request's own were wrong; origin story left blank until the maintainer supplied facts)
 
 - [00214: magic number scanner blindness](Completed/00214-magic-number-scanner-blindness/PLAN.md) - Complete (DBF: Core Standard 9 bans magic strings **and numbers**, but `check_magic_values.py` implemented only string-shaped rules, so `magic_values: 0 violations` had always meant "half the standard was checked". Identity/index numerics measured at 61% of literals and left unenforced, with the standard reworded rather than overclaiming.)
 
-- [00207: ban squash merge to preserve ancestry](Completed/00207-ban-squash-merge-preserve-ancestry/PLAN.md) - Complete (measurement widened this from "ban squash" to "mandate ancestry-preserving merges": a rebase merge severs ancestry identically, and only a merge commit preserves it. Both stop a branch's commits ever becoming ancestors of the target, so `git branch -d` refuses permanently. 10/10 spellings verified through the production forwarder post-merge.)
+- [00207: ban squash merge to preserve ancestry](Completed/00207-ban-squash-merge-preserve-ancestry/PLAN.md) - Complete (widened to "mandate ancestry-preserving merges" — rebase merges sever ancestry identically; 10/10 spellings verified through the production forwarder)
 
 - [00212: generic command hint handler](Completed/00212-generic-command-hint-handler/PLAN.md) - Complete (one config-driven PostToolUse handler mapping command patterns to hints, rather than a handler per command; TTL cooldown per (session, hint), extend-or-replace project config. Live-verified post-merge: fires on `agent-browser`, and three repeat probes were all suppressed.)
 
-- [00211: plan-size guidance missing extract remedy](Completed/00211-plan-size-guidance-missing-extract-remedy/PLAN.md) - Complete (adds EXTRACT — relocate durable detail into a named supporting doc — as a third, first-listed remedy for oversized plans, and teaches `plan-shrink-without-journal` that a staged new `.md` in the plan folder is relocation, not deletion. The concept existed in the daemon's own internal docs and had never shipped to clients.)
+- [00211: plan-size guidance missing extract remedy](Completed/00211-plan-size-guidance-missing-extract-remedy/PLAN.md) - Complete (adds EXTRACT — relocate durable detail into a named supporting doc — as the first-listed oversized-plan remedy; a staged new `.md` in the plan folder counts as relocation, not deletion)
 
 - [00208: comment changelog and size handlers](Completed/00208-comment-changelog-and-size-handlers/PLAN.md) - Complete (blocks `Prior <version>:`/dated entries in comments; caps comment length with plan-doc-size-style tiering. A whole-repo self-scan demoted 3 of 5 planned blocking signals to advisory after measuring real false positives.)
 
 - [00206: safe branch delete deterministic proof](Completed/00206-safe-branch-delete-deterministic-proof/PLAN.md) - Complete (`hooks-daemon delete-branch`: four tiers proven cheapest-first on blob identity, never path presence, since a rewrite leaves no ancestor route for `git branch -d`. `unproven` abandonment is human-gated at an interactive terminal.)
 
-- [00202: Sensitive content git metadata surfaces](Completed/00202-sensitive-content-git-metadata-surfaces/PLAN.md) - Complete (contents and paths were 2 of the 7 surfaces cleaning this repo's history had to touch; the other 5 are git metadata — commit messages, author identity, tag/branch names, tag messages — all entering via Bash, which `matches()` rejected outright. Each surface now carries both a write-time and a batch guard, exercised in a 7×2 matrix.)
+- [00202: Sensitive content git metadata surfaces](Completed/00202-sensitive-content-git-metadata-surfaces/PLAN.md) - Complete (all 7 sensitive-term entry surfaces guarded — file contents/paths plus 5 git-metadata surfaces entering via Bash; 7×2 write-time/batch guard matrix)
 
 - [00201: Sensitive Content Secret-Word Blocking](Completed/00201-sensitive-content-secret-word-blocking/PLAN.md) - Complete (guard against recurrence of the ~160-place employer/client identifier leak found by the presentation-quality audit; five leak vectors closed, not the four scoped, and the live dogfood confirms the term reaches no log or capture.)
 
@@ -1305,7 +1307,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Completed**: 248 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 

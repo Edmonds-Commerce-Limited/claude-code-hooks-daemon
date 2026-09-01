@@ -1,9 +1,40 @@
 version: "3.58.0"
-date: "UNRELEASED"
+date: "2026-09-01"
 breaking: true
-upgrade_guide: null
+upgrade_guide: CLAUDE/UPGRADES/v3/v3.57-to-v3.58/v3.57-to-v3.58.md
 config_changes:
   added:
+    - key: projects
+      recommended: false
+      dormant: true
+      description: >-
+        NEW top-level block (Plan 00296): declared-not-inferred monorepo
+        sub-project boundaries. Each entry names a sub-project (`name`,
+        `root` — repository-relative, validated) and optionally its own
+        `layout:` (see `projects[].layout` below). This is now the ONLY
+        sub-project boundary mechanism — it replaces the removed
+        `monorepo_subproject_patterns` alias (see `removed:` below). A
+        repository with no `projects:` block is a single project rooted at
+        the repository root, byte-identical to prior behaviour (pinned by
+        tests).
+      migration_note: >-
+        No action needed for single-project repositories. A monorepo that
+        previously set `monorepo_subproject_patterns` must declare its
+        sub-projects here — the startup validation error prints a
+        paste-ready `projects:` block for literal patterns.
+    - key: handlers.session_start.monorepo_detector
+      recommended: false
+      dormant: true
+      description: >-
+        NEW advisory SessionStart handler (Plan 00300, priority 66): when
+        the repository contains multiple toolchain roots that are NOT
+        covered by declared `projects:` entries, it surfaces a one-time
+        advisory suggesting a `projects:` declaration. Advisory only —
+        never blocks, never infers boundaries for enforcement.
+      migration_note: >-
+        No action needed. Enabled by default; silence it per-handler
+        (`enabled: false`) if the advisory is unwanted in a deliberately
+        undeclared monorepo.
     - key: projects[].layout
       recommended: false
       dormant: true

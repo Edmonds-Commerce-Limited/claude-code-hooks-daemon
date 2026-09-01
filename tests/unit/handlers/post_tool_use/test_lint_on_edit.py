@@ -344,6 +344,72 @@ class TestHandle:
         result = handler.handle(hook_input)
         assert result.decision.value == "allow"
 
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_handle_rustup_clippy_shim_not_installed_allows(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Acceptance Test 128 (cycle 2) regression.
+
+        Rustup's clippy-driver shim resolves on PATH and runs successfully
+        (no FileNotFoundError) even when the clippy component is absent, then
+        exits non-zero reporting that -- it must degrade to an advisory
+        ALLOW, not deny a valid file.
+        """
+        test_file = tmp_path / "valid.rs"
+        test_file.write_text("pub fn hello() {}")
+
+        pass_result = MagicMock()
+        pass_result.returncode = 0
+        pass_result.stdout = ""
+        pass_result.stderr = ""
+
+        fail_result = MagicMock()
+        fail_result.returncode = 1
+        fail_result.stdout = ""
+        toolchain_name = "stable-x86_64-unknown-linux-gnu"
+        fail_result.stderr = (
+            "error: 'clippy-driver' is not installed for the " f"toolchain '{toolchain_name}'.\n"
+        )
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        first_result, second_result = pass_result, fail_result
+        mock_subprocess.run.side_effect = (first_result, second_result)
+
+        result = handler.handle(hook_input)
+        assert result.decision.value == "allow"
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_handle_real_clippy_finding_still_denies(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """A real clippy installation's genuine findings must still deny."""
+        test_file = tmp_path / "valid.rs"
+        test_file.write_text("pub fn hello() {}")
+
+        pass_result = MagicMock()
+        pass_result.returncode = 0
+        pass_result.stdout = ""
+        pass_result.stderr = ""
+
+        clippy_fail_result = MagicMock()
+        clippy_fail_result.returncode = 1
+        clippy_fail_result.stdout = ""
+        clippy_fail_result.stderr = "error: could not compile due to previous error\n"
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        first_result, second_result = pass_result, clippy_fail_result
+        mock_subprocess.run.side_effect = (first_result, second_result)
+
+        result = handler.handle(hook_input)
+        assert result.decision.value == "deny"
+        assert "could not compile" in (result.reason or "")
+
 
 class TestLanguageFilter:
     def test_language_filter_restricts_matching(self, tmp_path: Path) -> None:

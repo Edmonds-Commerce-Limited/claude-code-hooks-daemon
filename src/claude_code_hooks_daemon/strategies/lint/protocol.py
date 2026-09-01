@@ -92,3 +92,39 @@ class NarrowsByPath(Protocol):
             True to accept the file, False to leave it unlinted.
         """
         ...
+
+
+@runtime_checkable
+class ClassifiesToolUnavailable(Protocol):
+    """Optional capability: a strategy that can recognise its own tool as absent.
+
+    ``_run_lint_command`` treats a linter as "not installed" only when
+    ``shutil.which``/workspace resolution fails to find it, or the resolved
+    executable itself raises ``FileNotFoundError``. Neither test catches a
+    LAUNCHER that resolves and runs successfully but reports, in its own
+    non-zero output, that the real tool behind it is missing — e.g. rustup's
+    ``clippy-driver`` shim, which stays on ``PATH`` even when the ``clippy``
+    component was never installed and exits non-zero with "is not installed
+    for the toolchain" instead of failing to launch at all. Without this hook
+    that output reads exactly like a genuine lint failure and denies every
+    valid file the language strategy is asked to check.
+
+    Deliberately SEPARATE from :class:`LintStrategy` for the same Interface
+    Segregation reason as :class:`NarrowsByPath`: most strategies have no
+    launcher-vs-tool distinction to make, and ``LintStrategy`` being
+    ``runtime_checkable`` means folding this in would force every existing
+    strategy to grow a stub.
+    """
+
+    def is_tool_unavailable_output(self, output: str) -> bool:
+        """Whether a non-zero lint run's combined stdout+stderr means "not installed".
+
+        Args:
+            output: The lint command's stdout and stderr, concatenated as
+                ``_run_lint_command`` builds its failure report.
+
+        Returns:
+            True to degrade this run to an advisory ALLOW instead of a DENY,
+            False to treat the non-zero exit as a genuine lint failure.
+        """
+        ...

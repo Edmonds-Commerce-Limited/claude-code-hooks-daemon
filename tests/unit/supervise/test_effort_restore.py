@@ -406,9 +406,7 @@ def test_coupled_effort_still_deferred_while_input_box_not_empty(tmp_path: Path)
     _write_sidecar(sidecar_dir)
     machine = _machine()
     machine.arm_coupled_effort(session=_SESSION, family="fable")
-    busy = _decide(
-        sidecar_dir, machine, facts=_facts(idle=False, input_line_empty=False)
-    )
+    busy = _decide(sidecar_dir, machine, facts=_facts(idle=False, input_line_empty=False))
     assert busy.payload is None
     assert machine.coupled_effort_pending is not None
 

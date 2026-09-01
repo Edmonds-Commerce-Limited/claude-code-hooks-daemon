@@ -1,0 +1,11 @@
+# Configuration file before v3.58.0 upgrade
+# Shows a monorepo declared via the removed regex-pattern alias.
+
+handlers:
+  pre_tool_use:
+    markdown_organization:
+      enabled: true
+      options:
+        monorepo_subproject_patterns: # REMOVED in v3.58.0
+          - "packages/api"
+          - "packages/web"

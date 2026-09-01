@@ -228,9 +228,7 @@ class TestUnfinishedReleaseAlwaysBlocks:
 
             handler = ReleaseBlockerHandler()
 
-            with patch.object(
-                ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)
-            ):
+            with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
                 assert handler.matches({}) is True, f"blocked regardless of {legacy_value!r}"
 
     def test_a_missing_authorisation_field_changes_nothing(self, tmp_path: Path) -> None:

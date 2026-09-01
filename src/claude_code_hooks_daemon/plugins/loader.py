@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from claude_code_hooks_daemon.core import Handler
 from claude_code_hooks_daemon.utils.error_formatter import format_plugin_load_error
 from claude_code_hooks_daemon.utils.repo_relative_path import (
-    REPO_ROOT_TOKEN,
+    REPO_ROOT_PLACEHOLDER,
     expand_repo_root_token,
 )
 
@@ -266,10 +266,10 @@ class PluginLoader:
 
             # Determine search paths: plugin.path or global paths
             raw_plugin_path = plugin_config.path
-            if REPO_ROOT_TOKEN in raw_plugin_path:
+            if REPO_ROOT_PLACEHOLDER in raw_plugin_path:
                 if workspace_root is None:
                     raise RuntimeError(
-                        f"Plugin path {raw_plugin_path!r} uses the {REPO_ROOT_TOKEN} "
+                        f"Plugin path {raw_plugin_path!r} uses the {REPO_ROOT_PLACEHOLDER} "
                         f"token but no workspace_root was provided to resolve it against."
                     )
                 raw_plugin_path = expand_repo_root_token(raw_plugin_path, workspace_root)
@@ -295,11 +295,11 @@ class PluginLoader:
                 # Use global search paths with plugin.path as module name
                 expanded_global_paths = []
                 for global_path in plugins_config.paths:
-                    if REPO_ROOT_TOKEN in global_path:
+                    if REPO_ROOT_PLACEHOLDER in global_path:
                         if workspace_root is None:
                             raise RuntimeError(
                                 f"Plugin search path {global_path!r} uses the "
-                                f"{REPO_ROOT_TOKEN} token but no workspace_root was "
+                                f"{REPO_ROOT_PLACEHOLDER} token but no workspace_root was "
                                 f"provided to resolve it against."
                             )
                         global_path = expand_repo_root_token(global_path, workspace_root)
