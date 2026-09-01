@@ -17,10 +17,12 @@ def mock_project_context():
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
+from claude_code_hooks_daemon.core.workspace import ProjectRegistry
 from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import (
     MarkdownOrganizationHandler,
 )
@@ -1468,6 +1470,110 @@ class TestMonorepoSupport:
         handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
         write_input["tool_input"]["file_path"] = "packages/frontend/CLAUDE.md"
         assert handler.matches(write_input) is False  # Allowed
+
+
+class TestDeclaredProjectsSubprojects:
+    """Plan 00296 Tasks 2.5/3.5: declared `projects:` is the PRIMARY
+    sub-project resolution mechanism; `monorepo_subproject_patterns` is a
+    deprecated alias unioned in for backward compatibility.
+
+    RELEASES/ paths are used (rather than CLAUDE/Plan/...) because
+    normalize_path's marker-stripping already allows CLAUDE/-containing
+    paths regardless of any monorepo mechanism -- RELEASES/ has no such
+    marker, so it isolates the sub-project resolution behaviour under test.
+    """
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> MarkdownOrganizationHandler:
+        handler = MarkdownOrganizationHandler()
+        handler._workspace_root = tmp_path
+        return handler
+
+    @pytest.fixture
+    def write_input(self) -> dict[str, Any]:
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "", "content": "Test content"},
+        }
+
+    @staticmethod
+    def _declare(tmp_path: Path, *roots: str) -> ProjectRegistry:
+        return ProjectRegistry.from_config(
+            Config.model_validate({"projects": [{"name": r, "root": r} for r in roots]}),
+            tmp_path,
+        )
+
+    def test_declared_project_allows_releases_subdirectory(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any], tmp_path: Path
+    ) -> None:
+        """A `projects:`-declared sub-project gets normal rules applied within it."""
+        handler._project_registry = self._declare(tmp_path, "packages/api")
+        write_input["tool_input"]["file_path"] = "packages/api/RELEASES/v1.0.0.md"
+        assert handler.matches(write_input) is False  # Allowed
+
+    def test_declared_project_still_blocks_invalid_location(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any], tmp_path: Path
+    ) -> None:
+        """Sub-project markdown outside any allowed location is still blocked."""
+        handler._project_registry = self._declare(tmp_path, "packages/api")
+        write_input["tool_input"]["file_path"] = "packages/api/random/notes.md"
+        assert handler.matches(write_input) is True  # Blocked
+
+    def test_declared_project_does_not_affect_root_project_paths(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any], tmp_path: Path
+    ) -> None:
+        """Root-level RELEASES/ still works when a sub-project is declared elsewhere."""
+        handler._project_registry = self._declare(tmp_path, "packages/api")
+        write_input["tool_input"]["file_path"] = "RELEASES/v1.0.0.md"
+        assert handler.matches(write_input) is False  # Allowed (root project)
+
+    def test_anti_inference_undeclared_subproject_runs_from_repository_root(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any], tmp_path: Path
+    ) -> None:
+        """An undeclared subdirectory, even one that LOOKS like a workspace,
+        gets repo-root behaviour -- NO inference. Only `web` is declared, so
+        a `RELEASES/` write under the sibling, undeclared `api` directory is
+        blocked exactly as it would be with no `projects:` config at all.
+        """
+        handler._project_registry = self._declare(tmp_path, "packages/web")
+        write_input["tool_input"]["file_path"] = "packages/api/RELEASES/v1.0.0.md"
+        assert handler.matches(write_input) is True  # Blocked -- not declared
+
+    def test_deprecated_pattern_alias_still_works_when_projects_not_declared(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """`monorepo_subproject_patterns` remains fully functional as a
+        deprecated alias when no `projects:` registry is injected at all."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        write_input["tool_input"]["file_path"] = "packages/api/RELEASES/v1.0.0.md"
+        assert handler.matches(write_input) is False  # Allowed via the alias
+
+    def test_declared_projects_and_pattern_alias_are_unioned(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any], tmp_path: Path
+    ) -> None:
+        """A `projects:`-declared root and the deprecated pattern alias both
+        resolve their own sub-project -- neither mechanism shadows the other.
+        """
+        handler._project_registry = self._declare(tmp_path, "packages/web")
+        handler._monorepo_subproject_patterns = [r"apps/[^/]+"]
+
+        write_input["tool_input"]["file_path"] = "packages/web/RELEASES/v1.0.0.md"
+        assert handler.matches(write_input) is False  # Allowed via projects:
+
+        write_input["tool_input"]["file_path"] = "apps/mobile/RELEASES/v1.0.0.md"
+        assert handler.matches(write_input) is False  # Allowed via the alias
+
+    def test_no_registry_injected_is_byte_identical_to_before(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """A handler with no `_project_registry` injected (unit-test
+        construction, or no `projects:` config loaded) behaves exactly as
+        before Plan 00296: an unconfigured, unpatterned sub-project path is
+        blocked -- `_project_registry` defaults to None.
+        """
+        assert handler._project_registry is None
+        write_input["tool_input"]["file_path"] = "packages/api/RELEASES/v1.0.0.md"
+        assert handler.matches(write_input) is True  # Blocked -- nothing declared
 
 
 class TestAllowedMarkdownPaths:
