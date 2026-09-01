@@ -24,6 +24,7 @@ Design constraints pinned:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -97,6 +98,73 @@ class TestSizeThreshold:
         result = handler.handle(_subagent_stop_input("this message is longer than ten chars"))
 
         assert result.decision == Decision.DENY
+
+
+class TestPrescriptiveFallbackPath:
+    """Task 4.2: the deny reason must PRESCRIBE an exact, writable path."""
+
+    def test_deny_reason_prescribes_a_concrete_fallback_path(
+        self, handler: SubagentReportSizeBlockerHandler
+    ) -> None:
+        oversized = "x" * (handler._threshold_chars + 1)
+
+        result = handler.handle(_subagent_stop_input(oversized, agent_type="Explore"))
+
+        assert result.reason is not None
+        # yymmdd (today's date, 6 digits) + the real agent_type + the
+        # documented model placeholder, under the fallback dir.
+        yymmdd = datetime.now(tz=UTC).strftime("%y%m%d")
+        assert f"untracked/agent-reports/{yymmdd}-Explore-{{model}}.md" in result.reason
+
+    def test_deny_reason_uses_placeholder_when_agent_type_missing(
+        self, handler: SubagentReportSizeBlockerHandler
+    ) -> None:
+        oversized = "x" * (handler._threshold_chars + 1)
+        hook_input = _subagent_stop_input(oversized)
+        del hook_input["agent_type"]
+
+        result = handler.handle(hook_input)
+
+        assert result.reason is not None
+        assert "{agent-name}" in result.reason
+
+    def test_fallback_report_dir_is_configurable(
+        self, handler: SubagentReportSizeBlockerHandler
+    ) -> None:
+        handler._fallback_report_dir = "untracked/custom-reports/"
+        oversized = "x" * (handler._threshold_chars + 1)
+
+        result = handler.handle(_subagent_stop_input(oversized))
+
+        assert result.reason is not None
+        assert "untracked/custom-reports/" in result.reason
+
+    def test_prescribed_fallback_path_is_allowed_by_markdown_organization(
+        self, handler: SubagentReportSizeBlockerHandler
+    ) -> None:
+        """Pin Task 4.2 finding 2: the two handlers must never argue."""
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import (
+            MarkdownOrganizationHandler,
+        )
+
+        path = handler._prescribed_fallback_path(_subagent_stop_input("x", agent_type="Explore"))
+        with patch(
+            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root"
+        ) as mock_root:
+            mock_root.return_value = Path("/tmp/test")
+            location_handler = MarkdownOrganizationHandler()
+            write_input = {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Write",
+                "tool_input": {"file_path": path, "content": "report"},
+            }
+
+            # matches() False means the write is NOT intercepted as a wrong
+            # location -- i.e. the path is allowed.
+            assert location_handler.matches(write_input) is False
 
 
 class TestFailOpen:
