@@ -211,3 +211,4 @@ CLAUDE/AcceptanceTests/results/*
 # BEFORE any such file is created so a broad `git add` can never catch one.
 *.secret
 *.secrets
+*.secret.example

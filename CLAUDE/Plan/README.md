@@ -6,12 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00306: secret bash mention overbroad matching](00306-secret-bash-mention-overbroad-matching/PLAN.md) - Not Started (R-SECRET-BASH-MENTION false-fires on plain words containing "secret" with no protected path named; same defect class as the Edit-path fix in Plan 00305 Task 2.5, Bash-mention path)
 
-- [00299: multi plan goal support](00299-multi-plan-goal-support/PLAN.md) - In Progress (implemented and live: the goal ledger is authoritative and the goal signal renders a combined line across every In-Progress plan, re-rendered on plan retirement; dogfood soak before archiving)
-
-- [00298: failsafe cron blockage cadence](00298-failsafe-cron-blockage-cadence/PLAN.md) - In Progress (implemented and live: daemon-side blocked-on-human marker + zero-token `UserPromptSubmit` suppression of the canonical failsafe-cron prompt, 24h expiry, every failure path fails open; dogfood soak before archiving)
-
-- [00297: supervisor drop anchor safety net](00297-supervisor-drop-anchor-safety-net/PLAN.md) - In Progress (implemented and live in the supervisor: read-back-verified DROP ANCHOR forcing Fable to low effort with retry/escalation and owner-approved ESC interrupt; live worker hot-reload verification outstanding)
-
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 
 - [00293: tool inventory disable and token savings](00293-tool-inventory-disable-and-token-savings/PLAN.md) - Not Started (disable-at-source for never-wanted tools instead of fighting them with hooks, transcript-scanning analyser for never-used tools, tools-vs-tokens report with the decision left to projects; dogfood here)
@@ -171,6 +165,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00299: multi plan goal support](Completed/00299-multi-plan-goal-support/PLAN.md) - Complete (goal ledger is authoritative for the supervisor's goal signal: combined line across every In-Progress plan, re-rendered on plan retirement, single-plan behaviour byte-for-byte unchanged; dogfood-soaked live in this repo)
+
+- [00298: failsafe cron blockage cadence](Completed/00298-failsafe-cron-blockage-cadence/PLAN.md) - Complete (daemon-side blocked-on-human marker + zero-token `UserPromptSubmit` suppression of the canonical failsafe-cron prompt, 24h expiry, every failure path fails open; dogfood-soaked live — R-FAILSAFE-CRON-SUPPRESSED observed in session)
+
+- [00297: supervisor drop anchor safety net](Completed/00297-supervisor-drop-anchor-safety-net/PLAN.md) - Complete at 4be5bbef + ESC follow-up (read-back-verified DROP ANCHOR forcing Fable to low effort with retry/escalation, ESC interrupt on escalation; hot-reload verified against the live worker and the anchor observed firing in production)
 
 - [00305: v3580 release review followups](Completed/00305-v3580-release-review-followups/PLAN.md) - Complete at 5fd91df3 + 277a47bd (v3.58.0 deferred review findings: mock.patch removed from shipped CLI, {REPO_ROOT} placement validators, absolute secret-list degrade surfaced; playbook drift fixed incl. secret_file_guard bracket false positive and pipe_blocker quoted-argument producer attribution)
 
@@ -1307,9 +1307,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 306 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 249 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 252 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 38 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 

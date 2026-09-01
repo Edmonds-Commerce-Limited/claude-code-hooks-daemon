@@ -246,6 +246,6 @@ nearest.
 
 Which handlers currently resolve through `Workspace` rather than through
 `ProjectContext.project_root()` is tracked in
-[Plan 00296](../Plan/00296-monorepo-workspace-resolver/PLAN.md), along with the
+[Plan 00296](../Plan/Completed/00296-monorepo-workspace-resolver/PLAN.md), along with the
 field report that motivated it. A handler that needs a project — not a git
 root — should use `Workspace.for_path()`.

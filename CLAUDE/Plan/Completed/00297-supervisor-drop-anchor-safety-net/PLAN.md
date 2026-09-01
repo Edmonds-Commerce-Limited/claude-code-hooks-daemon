@@ -1,6 +1,6 @@
 # Plan 00297: supervisor drop anchor safety net
 
-**Status**: In Progress (ESC follow-up implemented; hot-reload verification pending)
+**Status**: Complete
 **Created**: 2026-08-31
 **Owner**: joseph
 **Priority**: Critical
@@ -169,3 +169,7 @@ all work rather than letting the session keep burning.
   across `tests/unit/supervise/`). Live worker hot-reload verification is
   the coordinator's responsibility (not performed by the implementing
   agent, per its task brief).
+- Hot-reload verification closed at archive time: live worker pid 68
+  (started after the last supervisor edit/commit `bbf01e9b`) is running
+  current code, and the anchor fired live — the supervisor's audit line
+  records a DROP ANCHOR `/effort low` emergency correction with read-back.
