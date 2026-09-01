@@ -1,12 +1,13 @@
 """WorktreeFileCopyHandler - prevents copying files between worktrees and main repo."""
 
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_layout import main_repo_code_dirs
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -23,6 +24,11 @@ _WORKTREE_RE = "(?:" + "|".join(re.escape(prefix) for prefix in _WORKTREE_PREFIX
 
 class WorktreeFileCopyHandler(PreToolUseHandlerBase):
     """Prevent copying files between worktrees and main repo."""
+
+    # PROJECT-scoped: the "main repo code dirs" alternation aggregates every
+    # declared project's source/test/config dirs (see
+    # CLAUDE/Code/WorkspaceResolution.md).
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
 
     def __init__(self) -> None:
         super().__init__(
@@ -57,6 +63,24 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
         """Return the single Rule backing this handler's deny path."""
         return [self._rule]
 
+    def _all_main_repo_code_dirs(self) -> tuple[str, ...]:
+        """Union of "main repo code dirs" across every declared project.
+
+        A Bash command's two paths can name any two declared projects (or
+        none), so this must aggregate rather than resolve one owning
+        project the way a per-file consumer (`tdd_enforcement`) does.
+        Falls back to the single root `_project_layout` when no registry
+        was injected -- a unit test exercising the handler directly, or a
+        zero-config repository, where `iter_layouts()` yields only the root.
+        """
+        if self._project_registry is None:
+            return main_repo_code_dirs(self._project_layout)
+        seen: dict[str, None] = {}
+        for _, layout in self._project_registry.iter_layouts():
+            for name in main_repo_code_dirs(layout):
+                seen.setdefault(name, None)
+        return tuple(seen)
+
     def _is_same_worktree_operation(self, command: str) -> bool:
         """Return True if both paths in command refer to the same worktree branch."""
         for prefix in _WORKTREE_PREFIXES:
@@ -83,8 +107,11 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
         # Check patterns — the "main repo code dirs" alternation is built
         # from the ProjectLayout facade (Plan 00288 Task 4.3/C5) rather than
         # hardcoded, so a project declaring extra source/test/config dirs is
-        # also protected.
-        code_dirs = "|".join(re.escape(d) for d in main_repo_code_dirs(self._project_layout))
+        # also protected. A Bash command can name ANY declared project's
+        # code dirs (there is no single "owning file" here), so this
+        # AGGREGATES across every declared project via `iter_layouts`
+        # (Plan 00301 follow-up), never just the root `_project_layout`.
+        code_dirs = "|".join(re.escape(d) for d in self._all_main_repo_code_dirs())
         patterns = [
             rf"{_WORKTREE_RE}/[^/\s]+/\S+\s+.*\b({code_dirs})/",
             rf"rsync.*{_WORKTREE_RE}.*\b({code_dirs})\b",

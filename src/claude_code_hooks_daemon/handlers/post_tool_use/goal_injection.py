@@ -38,11 +38,12 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_file_path
@@ -350,6 +351,10 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
     Sensor only: the daemon never types; the ccy PTY supervisor consumes the
     signal at its injection choke point. ADVISORY: never blocks, never denies.
     """
+
+    # REPO-scoped: the plan tree is repository-singular (see
+    # CLAUDE/Code/WorkspaceResolution.md).
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.REPO
 
     def __init__(self) -> None:
         super().__init__(

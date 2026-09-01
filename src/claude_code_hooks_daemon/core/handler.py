@@ -8,7 +8,8 @@ hook events.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -19,6 +20,28 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.core.rule import Rule
     from claude_code_hooks_daemon.core.workspace import ProjectRegistry
+
+
+class WorkspaceScope(StrEnum):
+    """Which axis a handler's concern is resolved against (Plan 00301 follow-up).
+
+    See CLAUDE/Code/WorkspaceResolution.md's "REPO-level vs PROJECT-level
+    handlers" section for the full taxonomy this pins.
+
+    REPO: the concern is repository-singular (the plan tree, the agent/human
+    docs corpus taken as a whole, git metadata, session/cron state). Must NOT
+    consume per-project layout/workspace resolution -- there is exactly one
+    of these per repository, declared `projects:` sub-trees notwithstanding.
+
+    PROJECT: the concern belongs to a file's OWNING project (toolchains,
+    manifests, source/test/config directory roles). Must resolve via the
+    injected `_project_registry` (`resolve_workspace`/`resolve_layout`/
+    `layout_for`/`iter_layouts`/`all_source_dirs`), never
+    `ProjectContext.project_root()` for a project-shaped question.
+    """
+
+    REPO = "repo"
+    PROJECT = "project"
 
 
 class Handler(ABC):
@@ -47,6 +70,13 @@ class Handler(ABC):
     ``constants/priority.py`` (the source of truth); documented in
     CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide.
     """
+
+    #: Which axis this handler's concern is resolved against -- see
+    #: :class:`WorkspaceScope`. Defaults to REPO, the neutral value: a
+    #: handler that never touches project layout/workspace resolution is
+    #: correctly REPO-scoped without declaring anything. A handler that
+    #: DOES resolve per-project state must override this to PROJECT.
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.REPO
 
     __slots__ = (
         "_project_exclude_paths",

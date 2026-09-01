@@ -7,7 +7,7 @@ implementations. The handler itself has ZERO language awareness.
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
@@ -193,6 +194,10 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
             If not set or empty, ALL registered languages are enforced (default).
             Example: ["python", "go", "javascript/typescript"]
     """
+
+    # PROJECT-scoped: resolves per-file layout/workspace via resolve_layout()
+    # (see CLAUDE/Code/WorkspaceResolution.md).
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
 
     def __init__(self) -> None:
         super().__init__(

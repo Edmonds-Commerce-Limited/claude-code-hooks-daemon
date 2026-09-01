@@ -71,6 +71,31 @@ authoritative for the FOLDER number only.
 
 ## Tasks
 
+### Phase 6: REPO-level vs PROJECT-level handler taxonomy (owner follow-up)
+
+- [x] ✅ **Task 6.1**: Owner ruling confirmed — `docs_qa_sweep` and
+  `plan_workflow` are REPO-level, not PROJECT-level. Canonical taxonomy
+  written to `CLAUDE/Code/WorkspaceResolution.md` ("REPO-level vs
+  PROJECT-level handlers"), pointer added to `CLAUDE/HANDLER_DEVELOPMENT.md`.
+- [x] ✅ **Task 6.2**: `Handler.workspace_scope: ClassVar[WorkspaceScope]`
+  (`core/handler.py`), default `REPO`. Declared on the Plan 00296/00301
+  consumers: PROJECT — `npm_command`, `lint_on_edit`,
+  `validate_eslint_on_write`, `tdd_enforcement`, `markdown_organization`,
+  `monorepo_detector`, `worktree_file_copy`; REPO — `docs_qa_sweep`,
+  `plan_workflow`, `goal_injection`, `recovery_cron_advisor`,
+  `british_english`. Pinning tests in
+  `tests/unit/core/test_handler_workspace_scope.py`.
+- [x] ✅ **Task 6.3**: Classified the six deferred `ProjectLayout` consumers
+  from 00301's journal. `worktree_file_copy` was genuinely PROJECT-level and
+  is rewired to aggregate every declared project's code dirs via
+  `iter_layouts()` (a Bash command names paths, not one owning file).
+  `british_english` was suspected PROJECT-level but is REPO-level by
+  design — `ProjectLayout.for_project` always sources
+  `agent_docs_dir`/`human_docs_dir` from the ROOT's `documentation.trees`,
+  never per-project, so per-file resolution would be a no-op. `goal_injection`,
+  `recovery_cron_advisor`, `plan_workflow`, `docs_qa_sweep` confirmed
+  correctly REPO-level and left unrewired, closing 00301's caveat.
+
 ### Phase 1: Remove the `monorepo_subproject_patterns` alias
 
 - [x] ✅ **Task 1.1**: Delete `strip_monorepo_prefix`/`_monorepo_subproject_patterns` from `markdown_organization.py`; `matches()` uses only the declared `projects:` resolution.
@@ -112,6 +137,7 @@ authoritative for the FOLDER number only.
 - [x] The dogfood config (`.claude/hooks-daemon.yaml`, top-level `layout:`, no `projects:`) needs zero edits and resolves byte-identically — pinned by test.
 - [x] Upgrade manifests staged for the next release, covering all three changes in one manifest.
 - [x] Full unit suite, mypy --strict, black, ruff all green on touched files.
+- [x] REPO-level vs PROJECT-level handler taxonomy defined canonically and made machine-readable (`Handler.workspace_scope`); the six deferred `ProjectLayout` consumers each carry an explicit classification decision, closing the "not rewired" caveat.
 
 ## Delivery & Milestones
 

@@ -9,13 +9,14 @@ ready-to-paste ``projects:`` block -- it never resolves a boundary itself.
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.workspace import _manifest_in
@@ -89,6 +90,10 @@ class MonorepoDetectorHandler(SessionStartHandlerBase):
     when a root manifest exists, when ``projects:`` is already declared, or in
     an ordinary single-project repository with nothing below the root either.
     """
+
+    # PROJECT-scoped: the advisory it prints is a `projects:` boundary, a
+    # per-project concern (see CLAUDE/Code/WorkspaceResolution.md).
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
 
     def __init__(self) -> None:
         super().__init__(

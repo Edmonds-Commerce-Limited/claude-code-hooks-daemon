@@ -150,6 +150,66 @@ quietly became a resolver would put the daemon back to guessing.
   resolves to the root project, so `layout_for()` always returns
   `root_layout`, built from the top-level `layout:` block exactly as before.
 
+## REPO-level vs PROJECT-level handlers
+
+Plan 00301 left an open caveat: several `ProjectLayout` consumers were never
+rewired to per-project resolution, deferred as "not a design gap, just
+follow-on work". Sorting which ones NEED rewiring requires a name for the
+axis a handler's concern sits on — this section is that name, made
+machine-readable via `Handler.workspace_scope`
+(`claude_code_hooks_daemon.core.handler.WorkspaceScope`).
+
+**REPO** — the concern is repository-singular: there is exactly ONE of it
+per repository, declared `projects:` sub-trees notwithstanding. Examples: the
+plan tree (`plan_workflow`, `goal_injection`, `recovery_cron_advisor` — a
+repo has one `CLAUDE/Plan/`, never a per-project one), the documentation
+corpus taken as a WHOLE (`docs_qa_sweep` — a single sweep, single index),
+git metadata, session/cron state. A REPO-scoped handler must NOT consume
+per-project layout/workspace resolution (`_project_registry.layout_for`/
+`resolve_workspace`) for its core concern — doing so would resolve a
+question that has only one right answer per repository, per file, which is
+not what per-project resolution is for.
+
+**PROJECT** — the concern belongs to a file's OWNING project: toolchains,
+manifests, source/test/config directory roles. A PROJECT-scoped handler MUST
+resolve via the injected `ProjectRegistry` helpers
+(`resolve_workspace`/`resolve_layout`/`layout_for`/`iter_layouts`/
+`all_source_dirs`), never `ProjectContext.project_root()`, for a
+project-shaped question — see "The problem it solves" above for what goes
+wrong when it does.
+
+**The axis is about the CONCERN, not about whether the handler happens to
+process one file at a time.** `british_english` matches per Write/Edit call
+(one file), yet is REPO-scoped: `ProjectLayout.for_project` always sources
+`agent_docs_dir`/`human_docs_dir` from the ROOT project's
+`documentation.trees` config, even when composing a declared sub-project's
+layout (there is no per-project override for doc-tree names — see the table
+above). Per-file resolution there would be a no-op that only looks
+project-aware. Conversely, `worktree_file_copy` judges a Bash COMMAND that
+can name paths under ANY declared project's source/test/config dirs — no
+single file to resolve an owning project for — so it is PROJECT-scoped but
+consumes the AGGREGATE across every project (`iter_layouts`), not a single
+`layout_for(file)` answer.
+
+**Declaring it**: override the class attribute, defaulted to `REPO` (the
+neutral value — a handler that never touches project layout/workspace
+resolution is correctly REPO-scoped by doing nothing):
+
+```python
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
+
+class MyHandler(PreToolUseHandlerBase):
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
+```
+
+This is deliberately lightweight — a declaration plus a pinning test per
+handler (`tests/unit/core/test_handler_workspace_scope.py`), not a new
+enforcement regime. Nothing reads `workspace_scope` at runtime yet; it exists
+so a reviewer (human or agent) can answer "which axis does this handler
+resolve on?" without reading the handler's source, and so a new handler
+picks a scope deliberately instead of copy-pasting whichever pattern was
+nearest.
+
 ## Known limits
 
 - **Marker files that are not manifests.** `lint_on_edit` resolves a working

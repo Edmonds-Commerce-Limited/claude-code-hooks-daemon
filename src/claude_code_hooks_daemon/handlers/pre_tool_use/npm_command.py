@@ -11,6 +11,7 @@ from typing import Any, ClassVar
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
@@ -89,6 +90,10 @@ _NPM_NON_LLM_RULE = Rule(
 
 class NpmCommandHandler(PreToolUseHandlerBase):
     """Enforce llm: prefixed npm commands and block direct npx tool usage."""
+
+    # PROJECT-scoped: resolves the command's cwd via resolve_workspace()
+    # (see CLAUDE/Code/WorkspaceResolution.md).
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
 
     ALLOWED_COMMANDS: ClassVar[list[str]] = ["clean", "dev:permissive"]
     SUGGESTIONS: ClassVar[dict[str, str]] = {

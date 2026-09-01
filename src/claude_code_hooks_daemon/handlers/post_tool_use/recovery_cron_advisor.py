@@ -36,7 +36,7 @@ PreToolUse plan_workflow handler.
 
 import re
 from enum import Enum
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 
@@ -387,6 +388,10 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
     Opt-out: get_default_enabled() returns True (advisory-only, safe + useful, so
     on by default).  Projects that do not want it set enabled: false.
     """
+
+    # REPO-scoped: the plan tree is repository-singular (see
+    # CLAUDE/Code/WorkspaceResolution.md).
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.REPO
 
     def __init__(self) -> None:
         super().__init__(

@@ -1,6 +1,6 @@
 """PlanWorkflowHandler - provides guidance for plan creation."""
 
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -10,6 +10,7 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.remedy import remedy_markdown_list
@@ -21,6 +22,10 @@ _FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 
 class PlanWorkflowHandler(PreToolUseHandlerBase):
     """Provide guidance when creating plan files."""
+
+    # REPO-scoped: the plan tree is repository-singular (see
+    # CLAUDE/Code/WorkspaceResolution.md).
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.REPO
 
     def __init__(self) -> None:
         super().__init__(

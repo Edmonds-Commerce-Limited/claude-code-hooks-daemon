@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_layer
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
@@ -81,6 +82,10 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         command_overrides: dict[str, dict] | None - Override lint commands per language.
             Example: {"Python": {"default": "ruff check {file}", "extended": null}}
     """
+
+    # PROJECT-scoped: resolves the file's toolchain via resolve_workspace()
+    # (see CLAUDE/Code/WorkspaceResolution.md).
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
 
     def __init__(self) -> None:
         super().__init__(

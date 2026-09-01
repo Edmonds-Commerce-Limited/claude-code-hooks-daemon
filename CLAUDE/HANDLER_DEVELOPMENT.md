@@ -464,6 +464,14 @@ the file's **workspace**, not about the git root — reaching for
 `Workspace.for_path()`; depth is in
 [Code/WorkspaceResolution.md](Code/WorkspaceResolution.md).
 
+**Before writing `matches()`/`handle()`, decide REPO or PROJECT scope and
+declare it**: is this handler's concern repository-singular (the plan tree,
+the docs corpus as a whole, git metadata) or does it belong to a file's
+OWNING project (toolchains, manifests, source/test/config roles)? Set
+`workspace_scope: ClassVar[WorkspaceScope]` accordingly (defaults to `REPO`).
+Full taxonomy, worked examples and the aggregate-vs-per-file distinction:
+[Code/WorkspaceResolution.md](Code/WorkspaceResolution.md#repo-level-vs-project-level-handlers).
+
 ## Priority Guide
 
 <!-- ssot-anchor: priority-guide -->
