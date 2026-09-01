@@ -258,7 +258,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00245: CI suite green again](Completed/00245-ci-suite-green-again/PLAN.md) - Complete at run 32033242091 / `4d1a553b1` (green on all three interpreters after 25+ red runs; four defects each hidden behind the one before it, plus the instrumentation that made them visible; spawned Plan 00250)
 
-- [00247: Exactly one failsafe recovery cron per session](Completed/00247-one-recovery-cron-per-session/PLAN.md) - Complete at the commit that archives it (dogfooding report: the `recovery_cron_advisor` creation advisory said "create a cron NOW" with no check, so every plan in a session stacked another identical hourly cron; both it and the `background_process_tracker` watchdog advisory are now CronList-first, implementing Plan 00139's Decision D2 which the handler cited but never enforced)
+- [00247: Exactly one failsafe recovery cron per session](Completed/00247-one-recovery-cron-per-session/PLAN.md) - Complete at the archiving commit (recovery-cron and watchdog advisories are now CronList-first, so plans stop stacking duplicate hourly crons)
 
 - [00246: The daemon takes the git index lock it does not need](Completed/00246-git-index-lock-contention/PLAN.md) - Complete at `013b48e7` + `60ae1074` (dogfooding report of stale `.git/index.lock`: `git status` REWRITES the index, so three daemon paths contended with the agent for the lock; `run_git` is now the single spawn point declining the optional lock, with an AST guard so the 15 files that bypassed the declared facade cannot come back)
 
