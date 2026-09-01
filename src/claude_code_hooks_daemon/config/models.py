@@ -59,6 +59,19 @@ class HandlerConfig(BaseModel):
     priority: int | None = Field(default=None, description="Override priority")
     options: dict[str, Any] = Field(default_factory=dict, description="Handler-specific options")
 
+    @field_validator("options", mode="before")
+    @classmethod
+    def normalise_null_options(cls, v: dict[str, Any] | None) -> dict[str, Any]:
+        """Treat a null `options:` as empty, not a schema error.
+
+        A comments-only `options:` YAML block (all lines are `#`-comments)
+        parses to `None`, not `{}` -- that is legal YAML, not a malformed
+        config, so it must not hard-fail startup (Plan 00304).
+        """
+        if v is None:
+            return {}
+        return v
+
 
 class EventHandlersConfig(BaseModel):
     """Configuration for handlers of a specific event type.

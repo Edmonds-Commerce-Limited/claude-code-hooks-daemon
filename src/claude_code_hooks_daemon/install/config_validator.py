@@ -12,6 +12,9 @@ from typing import Any
 from pydantic import ValidationError
 
 from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.config.validator import (
+    ConfigValidator as _BusinessRuleValidator,
+)
 
 
 @dataclass
@@ -95,7 +98,6 @@ class ConfigValidator:
 
         try:
             Config.model_validate(config)
-            return ValidationResult(valid=True)
         except ValidationError as e:
             errors = self._extract_errors(e)
             return ValidationResult(valid=False, errors=errors)
@@ -104,6 +106,27 @@ class ConfigValidator:
                 valid=False,
                 errors=[f"Unexpected validation error: {e}"],
             )
+
+        # Plan 00304: the Pydantic schema check above is necessary but not
+        # sufficient -- it cannot see hand-written business rules like the
+        # Plan 00300 removed-`monorepo_subproject_patterns` hard cutover, so
+        # this CLI used to report `valid: true` for a config the daemon's OWN
+        # startup path (`config.validator.ConfigValidator.validate`) degrades
+        # on -- a real-repo canary caught exactly that divergence. Reuse the
+        # SAME check here (not the whole startup validator, which additionally
+        # requires top-level `version`/`daemon`/`handlers` sections this
+        # merged-config validator intentionally treats as optional/defaulted).
+        try:
+            business_rule_errors = _BusinessRuleValidator.validate_business_rules(config)
+        except Exception as e:
+            return ValidationResult(
+                valid=False,
+                errors=[f"Unexpected validation error: {e}"],
+            )
+        if business_rule_errors:
+            return ValidationResult(valid=False, errors=business_rule_errors)
+
+        return ValidationResult(valid=True)
 
     def _extract_errors(self, validation_error: ValidationError) -> list[str]:
         """Extract human-readable error messages from Pydantic ValidationError.

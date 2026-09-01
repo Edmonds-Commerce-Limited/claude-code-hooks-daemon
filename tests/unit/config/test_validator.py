@@ -799,6 +799,20 @@ class TestRemovedMonorepoSubprojectPatternsOption:
         assert "WorkspaceResolution.md" in errors[0]
         assert "CLAUDE/UPGRADES/" in errors[0]
 
+    def test_null_value_is_silently_tolerated(self) -> None:
+        """Plan 00304: `monorepo_subproject_patterns: null` (an OLDER daemon's
+        own default config template) must not degrade the daemon -- only real
+        usage (a non-empty pattern list) keeps the hard error."""
+        config = self._config({"monorepo_subproject_patterns": None})
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
+        assert errors == []
+
+    def test_empty_list_value_is_silently_tolerated(self) -> None:
+        """An empty list is equally not real usage -- tolerate it too."""
+        config = self._config({"monorepo_subproject_patterns": []})
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
+        assert errors == []
+
     def test_other_handlers_are_unaffected(self) -> None:
         """The check is scoped to markdown_organization only."""
         config = {

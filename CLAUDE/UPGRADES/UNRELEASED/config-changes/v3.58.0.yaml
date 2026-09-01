@@ -53,17 +53,24 @@ config_changes:
         Plan 00300 hard cutover: the regex-pattern sub-project alias is
         removed outright. Declared `projects:` config (Plan 00296) is now the
         ONLY sub-project resolution mechanism — there is no fallback and no
-        override. The option's mere PRESENCE in config is now a hard
+        override. A NON-EMPTY pattern list is real usage and is a hard
         config-validation error at startup; the error message prints the
         equivalent `projects:` block, derived mechanically for every literal
-        (non-wildcard) pattern.
+        (non-wildcard) pattern. Plan 00304 (real-repo canary fix): a null or
+        empty value — the shape an OLDER daemon version's own default config
+        template writes, with nothing actually configured — is now tolerated
+        silently (an advisory log line only, no degraded mode) rather than
+        hard-erroring on a key nobody set.
       migration_note: >-
-        Load the daemon once and read the printed error — it is a paste-ready
-        `projects:` block for every literal pattern. A pattern containing a
-        regex wildcard (e.g. `packages/[^/]+`) cannot be auto-named: declare
-        each real sub-project directory by hand as its own `projects:` entry.
-        Staying on an older (pre-3.58.0) daemon version is the backward-compat
-        path — there is no other way to keep the old alias working.
+        If your `monorepo_subproject_patterns` is null, empty, or absent: no
+        action needed — it is auto-cleaned and never blocks startup. If it
+        lists real patterns, load the daemon once and read the printed error
+        — it is a paste-ready `projects:` block for every literal pattern. A
+        pattern containing a regex wildcard (e.g. `packages/[^/]+`) cannot be
+        auto-named: declare each real sub-project directory by hand as its
+        own `projects:` entry. Staying on an older (pre-3.58.0) daemon
+        version is the backward-compat path for real usage — there is no
+        other way to keep the old alias working.
   changed:
     - key: plan_workflow.directory
       description: >-

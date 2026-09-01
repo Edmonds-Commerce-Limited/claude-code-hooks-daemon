@@ -784,9 +784,8 @@ The daemon includes CLI commands for config operations:
   --new-default /tmp/new_default.yaml \
   --custom-diff /tmp/custom_diff.yaml
 
-# Validate: check config structure
-.claude/hooks-daemon/bin/hooks-daemon config-validate \
-  --config .claude/hooks-daemon.yaml
+# Validate: check config structure (config_path is POSITIONAL, no --config flag)
+.claude/hooks-daemon/bin/hooks-daemon config-validate .claude/hooks-daemon.yaml
 
 # Migration advisory: see new options for your upgrade path
 .claude/hooks-daemon/bin/hooks-daemon check-config-migrations \

@@ -188,6 +188,31 @@ class TestDegradedModeRequestHandling:
             context = response["hookSpecificOutput"].get("additionalContext", "")
             assert "configuration" in context.lower() or "DEGRADED" in context
 
+    def test_degraded_mode_still_blocks_destructive_git(
+        self, degraded_controller: DaemonController
+    ) -> None:
+        """Plan 00304: degraded mode must NOT be all-enforcement-off.
+
+        A CONFIG VALIDATION failure (a bad handler option) has nothing to do
+        with whether `git reset --hard` is safe to run -- the destructive-git
+        guard is config-independent and must still deny it even while the
+        daemon is degraded (the php-qa-ci canary caught the old fail-open
+        behaviour letting this straight through as an ALLOW)."""
+        event = HookEvent(
+            event=EventType.PRE_TOOL_USE,
+            hook_input=HookInput(
+                tool_name="Bash",
+                tool_input={"command": "git reset --hard HEAD"},
+                transcript_path="/tmp/transcript.jsonl",
+            ),
+        )
+
+        result = degraded_controller.process_event(event)
+
+        assert result.result.decision == Decision.DENY
+        context_text = "\n".join(result.result.context)
+        assert "DEGRADED" in result.result.reason or "DEGRADED" in context_text
+
     def test_degraded_every_request_returns_error(
         self, degraded_controller: DaemonController
     ) -> None:

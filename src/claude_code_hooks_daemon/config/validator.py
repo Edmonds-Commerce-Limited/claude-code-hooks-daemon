@@ -234,6 +234,47 @@ class ConfigValidator:
         return matches
 
     @staticmethod
+    def validate_business_rules(config: dict[str, Any]) -> list[str]:
+        """Run ONLY the hand-written business-rule checks, not the schema.
+
+        Single source of truth for the checks Pydantic's `Config` model
+        cannot express (e.g. the Plan 00300 removed-`monorepo_subproject_patterns`
+        hard cutover), shared by the daemon's startup validation (`validate`,
+        via `_validate_handlers`) and `install.config_validator.ConfigValidator`
+        (the `config-validate` CLI, which validates a MERGED config where
+        top-level `version`/`daemon`/`handlers` sections are optional and
+        Pydantic-defaulted -- so this deliberately skips the presence checks
+        `validate`'s `_validate_version`/`_validate_daemon`/`_validate_handlers`
+        perform). Plan 00304: a real-repo canary found `config-validate`
+        reporting `valid: true` for a config the daemon degrades on at
+        startup, because the CLI ran the schema only.
+
+        Args:
+            config: Configuration dictionary to check.
+
+        Returns:
+            List of business-rule error messages (empty if none apply).
+        """
+        handlers = config.get(ConfigKey.HANDLERS)
+        if not isinstance(handlers, dict):
+            return []
+
+        errors: list[str] = []
+        for event_type, handler_configs in handlers.items():
+            if not isinstance(handler_configs, dict):
+                continue
+            for handler_name, handler_config in handler_configs.items():
+                if handler_name != "markdown_organization" or not isinstance(handler_config, dict):
+                    continue
+                handler_path = f"handlers.{event_type}.{handler_name}"
+                errors.extend(
+                    ConfigValidator._validate_removed_monorepo_patterns_option(
+                        handler_path, handler_config
+                    )
+                )
+        return errors
+
+    @staticmethod
     def validate(config: dict[str, Any], *, validate_handler_names: bool = True) -> list[str]:
         """Validate configuration and return list of error messages.
 
@@ -537,6 +578,23 @@ class ConfigValidator:
             return []
 
         raw_patterns = options[_REMOVED_MONOREPO_SUBPROJECT_PATTERNS_OPTION]
+
+        # A null or empty value carries no real usage to migrate -- this shape
+        # is written by an OLDER daemon version's own default config template
+        # (confirmed via a real-repo canary upgrade), not a deliberate
+        # sub-project declaration. Tolerate it silently (advisory log only) so
+        # a routine upgrade never trips the hard cutover for a key nobody set.
+        # Only a NON-EMPTY pattern list is real usage and keeps the hard error
+        # (Plan 00300 owner ruling: real usage must migrate).
+        if raw_patterns is None or (isinstance(raw_patterns, list) and not raw_patterns):
+            logger.info(
+                "Ignoring removed, empty '%s' at '%s.options.%s' -- no migration needed.",
+                _REMOVED_MONOREPO_SUBPROJECT_PATTERNS_OPTION,
+                handler_path,
+                _REMOVED_MONOREPO_SUBPROJECT_PATTERNS_OPTION,
+            )
+            return []
+
         patterns = raw_patterns if isinstance(raw_patterns, list) else []
         migrated_yaml = _migrated_projects_yaml_block(patterns)
 

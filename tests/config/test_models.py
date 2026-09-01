@@ -90,6 +90,12 @@ class TestHandlerConfig:
         config1.options["key"] = "value"
         assert "key" not in config2.options
 
+    def test_null_options_normalised_to_empty_dict(self) -> None:
+        """Plan 00304: a comments-only `options:` YAML block parses to
+        `None` (legal YAML), and must not be a schema error."""
+        config = HandlerConfig.model_validate({"enabled": True, "options": None})
+        assert config.options == {}
+
 
 class TestEventHandlersConfig:
     """Tests for EventHandlersConfig model."""
@@ -916,6 +922,23 @@ handlers:
         assert loaded.daemon.log_level == LogLevel.DEBUG
         assert loaded.plugins.paths == ["path1", "path2"]
         assert len(loaded.plugins.plugins) == 1
+
+    def test_comments_only_options_block_does_not_fail_to_start(self) -> None:
+        """Plan 00304: a comments-only `options:` block under a handler is
+        legal YAML that parses to `None` -- it must load, not hard-fail with
+        a misleading 'handlers.pre_tool_use.options' error path that never
+        names the actual handler."""
+        config = Config.model_validate(
+            {
+                "version": "1.0",
+                "handlers": {
+                    "pre_tool_use": {
+                        "sed_blocker": {"enabled": True, "options": None},
+                    }
+                },
+            }
+        )
+        assert config.handlers.pre_tool_use["sed_blocker"].options == {}
 
 
 class TestPlanWorkflowConfig:

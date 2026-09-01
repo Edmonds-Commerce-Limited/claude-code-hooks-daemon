@@ -779,6 +779,56 @@ def cmd_stop(args: argparse.Namespace) -> int:
         return 1
 
 
+def _query_daemon_config_degraded(
+    socket_path: Path, pid: int | None
+) -> tuple[bool, list[str]] | None:
+    """Query the live daemon's own config-validation degraded state.
+
+    Plan 00304: a real-repo canary found `status` reporting RUNNING and
+    `check` byte-identical between a degraded and a healthy daemon -- only a
+    live hook response revealed degraded mode. Both surfaces now ask the
+    daemon directly (the same ``health`` action ``cmd_health`` already uses)
+    instead of re-deriving the signal, so they can never drift from what the
+    running process actually believes about itself.
+
+    Args:
+        socket_path: Path to the daemon's Unix socket.
+        pid: The daemon's PID, or None if not running.
+
+    Returns:
+        ``(is_degraded, config_errors)`` if the daemon answered, else
+        ``None`` (daemon not running or unreachable -- callers stay silent
+        rather than report a false degraded/healthy verdict).
+    """
+    if pid is None:
+        return None
+    request = {"event": "_system", "hook_input": {"action": "health"}}
+    response = send_daemon_request(socket_path, request)
+    if response is None or "error" in response:
+        return None
+    result = response.get("result", {})
+    return result.get("status") == "degraded", result.get("config_errors", [])
+
+
+def _print_degraded_config_block(degraded_state: tuple[bool, list[str]] | None) -> None:
+    """Print the degraded-mode block if the daemon reported one.
+
+    Args:
+        degraded_state: Result of `_query_daemon_config_degraded`.
+    """
+    if degraded_state is None:
+        return
+    is_degraded, config_errors = degraded_state
+    if not is_degraded:
+        return
+    print("\n🚨 CONFIGURATION DEGRADED 🚨")
+    print("Daemon is running in DEGRADED MODE — invalid configuration disabled enforcement")
+    print("for handlers that need config (a config-independent safety net still runs).")
+    for error in config_errors:
+        print(f"  - {error}")
+    print("Fix: correct .claude/hooks-daemon.yaml, then restart the daemon.")
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     """Check daemon status.
 
@@ -848,6 +898,11 @@ def cmd_status(args: argparse.Namespace) -> int:
                 )
         else:
             print("Per-event listeners: transport enabled but events dir not found")
+
+    # Config-validation degraded mode (Plan 00304). Surfaced for visibility;
+    # the exit code stays liveness-based, same rationale as project-handler
+    # health below — `health` is the command that returns non-zero on degrade.
+    _print_degraded_config_block(_query_daemon_config_degraded(socket_path, pid))
 
     # Project-handler protection signal (Plan 00143). Surfaced for visibility;
     # the exit code stays liveness-based so existing "status == RUNNING" checks
@@ -1111,6 +1166,13 @@ def cmd_check(args: argparse.Namespace) -> int:
     project_path = get_project_path(getattr(args, "project_root", None))
 
     print("Hooks Daemon — Environment Check\n")
+
+    # 0. Config-validation degraded mode (Plan 00304): `check` used to be
+    # byte-identical between a degraded and a healthy daemon -- a real-repo
+    # canary caught that. Query the live daemon the same way `health` does.
+    socket_path, pid_path, _drift_warning = _resolve_effective_daemon(args, project_path)
+    pid = read_pid_file(str(pid_path))
+    _print_degraded_config_block(_query_daemon_config_degraded(socket_path, pid))
 
     # 1. Claude Code optimal configuration (the verbose report SessionStart hides)
     checks = OptimalConfigCheckerHandler()._run_checks()
