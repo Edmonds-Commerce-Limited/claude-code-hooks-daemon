@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00310: plan readme completed row ageout](00310-plan-readme-completed-row-ageout/PLAN.md) - Not Started (age old completed rows out of this README into Completed/README.md — the 253-row completed section is 107KB of the 130KB ceiling)
+
 - [00309: lint on edit per language timeout](00309-lint-on-edit-per-language-timeout/PLAN.md) - In Progress (per-language `options.timeouts` delivered at 373db1f9; success-criteria confirmation pending)
 
 - [00308: post upgrade config optimisation autorun](00308-post-upgrade-config-optimisation-autorun/PLAN.md) - Not Started (formalise "enable all relevant handlers and optimise config" and autorun it post-upgrade)
@@ -1311,11 +1313,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 309 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 310 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 253 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
