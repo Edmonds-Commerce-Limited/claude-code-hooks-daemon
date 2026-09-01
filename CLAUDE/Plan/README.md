@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00304: degraded mode fail open and visibility](00304-degraded-mode-fail-open-and-visibility/PLAN.md) - In Progress (php-qa-ci canary: a stale null legacy key put a real client into invisible fail-open degraded mode — release blocker for v3.58.0)
-
 - [00299: multi plan goal support](00299-multi-plan-goal-support/PLAN.md) - Not Started (the `/goal` Stop-hook condition is a single session-scoped slot that concurrent worktree plans overwrite last-writer-wins, while the daemon's goal ledger already tracks multiple In-Progress plans — make the ledger authoritative and the goal signal a per-plan-additive view of it)
 
 - [00298: failsafe cron blockage cadence](00298-failsafe-cron-blockage-cadence/PLAN.md) - Not Started (design/brainstorm: a session stably blocked only on human input burns a full model turn per hourly failsafe-cron tick — recommends a daemon-side blocked-state marker + zero-token `UserPromptSubmit` suppression, with a bounded expiry so a stale marker cannot mask a real rate-limit recovery)
@@ -171,6 +169,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00304: degraded mode fail open and visibility](Completed/00304-degraded-mode-fail-open-and-visibility/PLAN.md) - Complete at the merge + archiving commits (php-qa-ci canary blocker: null legacy key tolerated, destructive-git safety net while degraded, degradation visible on status/check/config-validate)
 
 - [00302: zero absolute paths config audit](Completed/00302-zero-absolute-paths-config-audit/PLAN.md) - Complete at `5bf8b8a6`/`b8c280a6` + the archiving commit (shared repo-relative validator across all path-typed config, fail-open runtime resolvers, documented exemptions, `{REPO_ROOT}` canonical token)
 
@@ -1303,9 +1303,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 301 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 247 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 248 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
