@@ -933,6 +933,10 @@ class TestPerLanguageTimeout:
     one slow language without touching every other language's timeout.
     """
 
+    # A configured per-language budget deliberately larger than the 15s
+    # Timeout.LINT_CHECK default these tests contrast against.
+    PHP_CONFIGURED_TIMEOUT_SECONDS = 30
+
     @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
     def test_default_timeout_is_lint_check_constant(
         self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
@@ -984,11 +988,13 @@ class TestPerLanguageTimeout:
         """Task 1.2: PHP configured to 30 uses 30 seconds for its lint runs."""
         import subprocess
 
-        handler._timeouts = {"PHP": 30}
+        handler._timeouts = {"PHP": self.PHP_CONFIGURED_TIMEOUT_SECONDS}
 
         test_file = tmp_path / "app.php"
         test_file.write_text("<?php echo 'x';")
-        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(cmd="php", timeout=30)
+        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(
+            cmd="php", timeout=self.PHP_CONFIGURED_TIMEOUT_SECONDS
+        )
         mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
 
         hook_input: dict[str, Any] = {
@@ -998,7 +1004,7 @@ class TestPerLanguageTimeout:
         handler.handle(hook_input)
 
         called_timeout = mock_subprocess.run.call_args.kwargs["timeout"]
-        assert called_timeout == 30
+        assert called_timeout == self.PHP_CONFIGURED_TIMEOUT_SECONDS
 
     @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
     def test_unconfigured_language_stays_at_default_when_others_configured(
@@ -1031,11 +1037,13 @@ class TestPerLanguageTimeout:
     ) -> None:
         import subprocess
 
-        handler._timeouts = {"php": 30}
+        handler._timeouts = {"php": self.PHP_CONFIGURED_TIMEOUT_SECONDS}
 
         test_file = tmp_path / "app.php"
         test_file.write_text("<?php echo 'x';")
-        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(cmd="php", timeout=30)
+        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(
+            cmd="php", timeout=self.PHP_CONFIGURED_TIMEOUT_SECONDS
+        )
         mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
 
         hook_input: dict[str, Any] = {
@@ -1045,7 +1053,7 @@ class TestPerLanguageTimeout:
         handler.handle(hook_input)
 
         called_timeout = mock_subprocess.run.call_args.kwargs["timeout"]
-        assert called_timeout == 30
+        assert called_timeout == self.PHP_CONFIGURED_TIMEOUT_SECONDS
 
     @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
     def test_non_positive_timeout_is_rejected_and_falls_back_to_default(
