@@ -238,7 +238,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00261: `Write` clobbers an existing file nobody read](Completed/00261-write-clobbers-unread-file-guard/PLAN.md) - Complete at the commit that archives it (a `Write` destroyed a tracked 58-line journal here, caught only by an ADVISE-level rule that happens to cover journals; `write_clobber_guard` tracks READS not sizes, because the clobbering write GREW the file)
 
-- [00260: the Bash write side-door, and a handler that under-describes its own rule](Completed/00260-bash-write-side-door-and-stream-editor-guidance/PLAN.md) - Complete at `5094526e` (verified field report: 22 handlers keyed on `Write`/`Edit`, so a heredoc/redirect/`tee` write was seen by none of them; both linters now check Bash-AUTHORED files while relocation stays excluded, and a closing sweep found five blocking handlers the generated table advertised as advisory)
+- [00260: the Bash write side-door, and a handler that under-describes its own rule](Completed/00260-bash-write-side-door-and-stream-editor-guidance/PLAN.md) - Complete at `5094526e` (linters now check Bash-AUTHORED files, closing the heredoc/redirect write side-door past the Write/Edit content guards)
 
 - [00259: block artefact publishing by default](Completed/00259-block-public-artefact-publishing-by-default/PLAN.md) - Complete at the commit that archives it (the `Artifact` tool mints a claude.ai URL outside the repository and was the one disclosure path with no guard; blocked by default, `action: "list"` still allowed, and deliberately NO agent-side escape hatch — verified live, not just by unit test)
 
