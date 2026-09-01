@@ -23,3 +23,26 @@ truth_changes:
       workspace ONLY. There is no second, repository-root-anchored candidate.
       In a single-project repo the workspace IS the repository root, so
       zero-config behaviour is unchanged.
+  - was: >
+      The zero-absolute-paths config ruling (repo-root-relative only) was
+      enforced on `projects[].root`/`bin_dirs` and per-project `layout:`
+      (Plans 00296/00300) but not swept across the rest of config: several
+      other path-typed options either accepted an absolute value verbatim, or
+      resolved a relative value against an ambiguous base (CWD).
+    now: >
+      Plan 00303 audited every config-declared filesystem path. Hard
+      config-validation errors were added for `plan_workflow.directory`,
+      `plan_workflow.workflow_docs`, and `documentation.trees.agent`/`human`
+      (same `_repo_relative_path` validator as `projects[].root`). Three
+      advisory/best-effort surfaces —
+      `sensitive_content.options.secret_word_list_path`,
+      `daemon.payload_capture.dir`, and
+      `model_fallback_detector.options.snapshot_dir` — now degrade (log +
+      fall back to default) on an absolute value rather than using it
+      verbatim, matching their existing fail-open contracts. Three surfaces
+      are DOCUMENTED EXEMPTIONS, left absolute-capable on purpose:
+      `plugins.paths`/`plugins.plugins[].path` and
+      `project_handlers.path` (both load external code that may legitimately
+      live outside the repository — an explicitly tested feature), and
+      `daemon.socket_path`/`pid_file_path`/`transport.relay_binary` (daemon
+      runtime state / a system binary override, not repository artefacts).

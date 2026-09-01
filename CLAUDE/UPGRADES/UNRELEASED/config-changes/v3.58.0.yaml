@@ -45,6 +45,82 @@ config_changes:
         Staying on an older (pre-3.58.0) daemon version is the backward-compat
         path — there is no other way to keep the old alias working.
   changed:
+    - key: plan_workflow.directory
+      description: >-
+        Plan 00303 owner ruling (zero absolute paths in config): now
+        repository-relative only, reusing the same validator as
+        `projects[].root` (Plan 00296). An absolute or home-relative value is
+        a hard config-validation error at load. A trailing slash / leading
+        `./` is normalised away (e.g. `plans/` -> `plans`).
+      recommended: false
+      migration_note: >-
+        No action needed for the default (`CLAUDE/Plan`) or any existing
+        relative value beyond the cosmetic trailing-slash normalisation. If
+        your config sets an absolute `plan_workflow.directory`, change it to
+        a path relative to the repository root.
+    - key: plan_workflow.workflow_docs
+      description: >-
+        Plan 00303: same repository-relative rule and normalisation as
+        `plan_workflow.directory` above -- same validator, same reason.
+      recommended: false
+      migration_note: >-
+        No action needed unless the value is absolute; change it to a
+        repository-root-relative path.
+    - key: documentation.trees.agent
+      description: >-
+        Plan 00303: the agent-facing documentation tree root is now
+        repository-relative only, same validator as `projects[].root`.
+      recommended: false
+      migration_note: >-
+        No action needed for the default (`CLAUDE`) or an existing relative
+        value; change an absolute value to a repository-relative path.
+    - key: documentation.trees.human
+      description: >-
+        Plan 00303: same repository-relative rule as
+        `documentation.trees.agent` above.
+      recommended: false
+      migration_note: >-
+        No action needed for the default (`docs`) or an existing relative
+        value; change an absolute value to a repository-relative path.
+    - key: handlers.pre_tool_use.sensitive_content.options.secret_word_list_path
+      description: >-
+        Plan 00303: an absolute or home-relative value is no longer used
+        verbatim. This surface's contract stays fail-open/advisory (matching
+        its existing "missing file = no match" behaviour), so a rejected
+        value is LOGGED and treated as unset -- the built-in default
+        (`.claude/block-words.secret`, repository-relative) is used instead
+        -- rather than raised as a hard error.
+      recommended: false
+      migration_note: >-
+        No action needed for the default or an existing relative value.
+        Change an absolute `secret_word_list_path` to a repository-relative
+        path; if you relied on an absolute override, it is now silently
+        ignored (check the daemon log for the warning) and the default
+        applies -- verify that is not a behaviour change you needed.
+    - key: daemon.payload_capture.dir
+      description: >-
+        Plan 00303: same fail-open degrade as `secret_word_list_path` above.
+        An absolute `payload_capture.dir` is logged and treated as unset (the
+        `<untracked>/payload-capture` default is used); a relative value is
+        now explicitly joined against the daemon's untracked dir rather than
+        left ambiguous.
+      recommended: false
+      migration_note: >-
+        No action needed for the default or an existing relative value.
+        Change an absolute override to a path relative to the daemon's
+        untracked dir; if you relied on the absolute override, it is now
+        silently ignored (check the daemon log) and the default applies.
+    - key: handlers.session_start.model_fallback_detector.options.snapshot_dir
+      description: >-
+        Plan 00303: same fail-open degrade as `payload_capture.dir` above.
+        An absolute `snapshot_dir` is logged and treated as unset (the
+        built-in default, `untracked/reports`, is used instead).
+      recommended: false
+      migration_note: >-
+        No action needed for the default or an existing relative value.
+        Change an absolute override to a repository-relative path; if you
+        relied on the absolute override, it is now silently ignored (check
+        the daemon log) and the default applies.
     - key: handlers.pre_tool_use.tdd_enforcement.options.test_path_map
       description: >-
         Plan 00300 hard cutover: a relative `test_dir` entry now anchors

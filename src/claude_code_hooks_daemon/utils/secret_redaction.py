@@ -70,15 +70,25 @@ def resolve_secret_word_list_path(configured_path: str | None, project_root: Pat
     """Resolve the secret word list path.
 
     Mirrors ``daemon/payload_capture.resolve_capture_dir``'s shape: an
-    explicit configured value wins (absolute paths used verbatim, relative
-    ones joined to ``project_root``); ``None``/empty falls back to
-    :data:`DEFAULT_SECRET_WORD_LIST_PATH`.
+    explicit configured value is repository-relative and joined to
+    ``project_root``; ``None``/empty falls back to the built-in default path.
+
+    Config carries zero absolute paths (Plan 00303): an absolute or
+    home-relative ``configured_path`` is logged and treated as unset, never
+    raised -- this module's contract is fail-open/advisory, matching
+    ``payload_capture``'s degrade-not-raise handling of the same shape.
     """
+    from claude_code_hooks_daemon.utils.repo_relative_path import (
+        normalise_repo_relative_path,
+    )
+
     raw = configured_path or DEFAULT_SECRET_WORD_LIST_PATH
-    candidate = Path(raw).expanduser()
-    if candidate.is_absolute():
-        return candidate
-    return project_root / candidate
+    try:
+        relative = normalise_repo_relative_path(raw, "secret_word_list_path")
+    except ValueError as exc:
+        logger.warning("Ignoring secret_word_list_path: %s", exc)
+        relative = DEFAULT_SECRET_WORD_LIST_PATH
+    return project_root / relative
 
 
 def load_secret_terms(path: Path) -> tuple[str, ...]:

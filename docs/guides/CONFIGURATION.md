@@ -182,6 +182,18 @@ Loading a config that still sets it is a hard startup error whose message
 prints the equivalent `projects:` block; there is no fallback, and staying on
 an older daemon version is the backward-compat path.
 
+**The zero-absolute-paths rule extends beyond `projects:` (Plan 00303).**
+`plan_workflow.directory`/`workflow_docs` and `documentation.trees.agent`/
+`human` follow the same repository-relative-or-reject rule as `root` above.
+A handful of advisory/best-effort options (`sensitive_content`'s
+`secret_word_list_path`, `daemon.payload_capture.dir`,
+`model_fallback_detector`'s `snapshot_dir`) degrade instead of rejecting: an
+absolute value is logged and the built-in default is used. Plugin paths,
+`project_handlers.path`, `daemon.socket_path`/`pid_file_path`, and
+`transport.relay_binary` are documented exemptions — see
+`CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.58.0.yaml` for the full list and
+rationale.
+
 ---
 
 ## Handler Configuration

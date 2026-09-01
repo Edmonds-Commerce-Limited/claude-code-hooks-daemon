@@ -27,10 +27,18 @@ class TestResolveSecretWordListPath:
         result = sr.resolve_secret_word_list_path("custom/words.secret", tmp_path)
         assert result == tmp_path / "custom" / "words.secret"
 
-    def test_configured_absolute_path_is_used_verbatim(self, tmp_path: Path) -> None:
-        absolute = tmp_path / "elsewhere" / "words.secret"
+    def test_configured_absolute_path_is_rejected_and_falls_back_to_default(
+        self, tmp_path: Path
+    ) -> None:
+        """Config carries zero absolute paths (Plan 00303): degrade, never raise.
+
+        This module's contract is fail-open/advisory (a missing/unreadable
+        word list is a documented no-match, not an error), so an absolute
+        ``configured_path`` is logged and treated as unset rather than raised.
+        """
+        absolute = tmp_path / "elsewhere" / "wordlist"
         result = sr.resolve_secret_word_list_path(str(absolute), tmp_path)
-        assert result == absolute
+        assert result == sr.resolve_secret_word_list_path(None, tmp_path)
 
 
 class TestLoadSecretTerms:

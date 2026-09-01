@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.utils import secret_redaction
+from claude_code_hooks_daemon.utils.repo_relative_path import normalise_repo_relative_path
 
 # Module-level aliases so tests can monkeypatch this module's own names, and
 # so the snapshot path has exactly one redaction entry point.
@@ -578,10 +579,19 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         Falls back to the current working directory when ``ProjectContext``
         is not initialised (unit tests, CLI probes) — snapshotting is
         best-effort diagnostics, never worth failing over.
+
+        Config carries zero absolute paths (Plan 00303): an absolute or
+        home-relative ``snapshot_dir`` option is logged and treated as unset,
+        never raised -- this handler's snapshotting is best-effort diagnostics
+        throughout.
         """
-        configured = Path(self._snapshot_dir or _DEFAULT_SNAPSHOT_DIR).expanduser()
-        if configured.is_absolute():
-            return configured
+        raw = self._snapshot_dir or _DEFAULT_SNAPSHOT_DIR
+        try:
+            relative = normalise_repo_relative_path(raw, "model_fallback_detector.snapshot_dir")
+        except ValueError as exc:
+            logger.warning("Ignoring model_fallback_detector snapshot_dir: %s", exc)
+            relative = _DEFAULT_SNAPSHOT_DIR
+        configured = Path(relative)
         try:
             from claude_code_hooks_daemon.core.project_context import ProjectContext
 

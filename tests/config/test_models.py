@@ -373,8 +373,8 @@ class TestPluginConfig:
 
     def test_default_values(self) -> None:
         """PluginConfig has correct defaults for optional fields."""
-        config = PluginConfig(path="/path/to/plugin", event_type=EventID.PRE_TOOL_USE.config_key)
-        assert config.path == "/path/to/plugin"
+        config = PluginConfig(path="path/to/plugin", event_type=EventID.PRE_TOOL_USE.config_key)
+        assert config.path == "path/to/plugin"
         assert config.event_type == EventID.PRE_TOOL_USE.config_key
         assert config.handlers is None
         assert config.enabled is True
@@ -382,12 +382,12 @@ class TestPluginConfig:
     def test_can_set_all_fields(self) -> None:
         """Can set all PluginConfig fields."""
         config = PluginConfig(
-            path="/custom/path",
+            path="custom/path",
             event_type=EventID.POST_TOOL_USE.config_key,
             handlers=["Handler1", "Handler2"],
             enabled=False,
         )
-        assert config.path == "/custom/path"
+        assert config.path == "custom/path"
         assert config.event_type == EventID.POST_TOOL_USE.config_key
         assert config.handlers == ["Handler1", "Handler2"]
         assert config.enabled is False
@@ -409,7 +409,7 @@ class TestPluginConfig:
         ]
 
         for event_type in valid_event_types:
-            config = PluginConfig(path="/path", event_type=event_type)
+            config = PluginConfig(path="path", event_type=event_type)
             assert config.event_type == event_type
 
     def test_event_type_invalid_values_rejected(self) -> None:
@@ -425,18 +425,28 @@ class TestPluginConfig:
 
         for event_type in invalid_event_types:
             with pytest.raises(ValidationError, match="event_type"):
-                PluginConfig(path="/path", event_type=event_type)
+                PluginConfig(path="path", event_type=event_type)
 
     def test_extra_fields_allowed(self) -> None:
         """PluginConfig allows extra fields."""
         config = PluginConfig.model_validate(
             {
-                "path": "/path",
+                "path": "path",
                 "event_type": EventID.PRE_TOOL_USE.config_key,
                 "custom_field": "value",
             }
         )
-        assert config.path == "/path"
+        assert config.path == "path"
+
+    def test_absolute_path_is_accepted(self) -> None:
+        """Plugin paths are EXEMPT from the repository-relative rule (Plan 00303).
+
+        A plugin loads external code that may legitimately live outside the
+        repository -- see ``PluginConfig.path``'s field description for the
+        full rationale.
+        """
+        config = PluginConfig(path="/abs/plugin", event_type=EventID.PRE_TOOL_USE.config_key)
+        assert config.path == "/abs/plugin"
         assert config.event_type == EventID.PRE_TOOL_USE.config_key
 
 
@@ -451,21 +461,26 @@ class TestPluginsConfig:
 
     def test_can_set_paths(self) -> None:
         """Can set plugin search paths."""
-        config = PluginsConfig(paths=["/path1", "/path2"])
-        assert config.paths == ["/path1", "/path2"]
+        config = PluginsConfig(paths=["path1", "path2"])
+        assert config.paths == ["path1", "path2"]
+
+    def test_absolute_search_path_is_accepted(self) -> None:
+        """Search paths are EXEMPT from the repository-relative rule (Plan 00303)."""
+        config = PluginsConfig(paths=["/abs/plugins"])
+        assert config.paths == ["/abs/plugins"]
 
     def test_can_set_plugins(self) -> None:
         """Can set plugin configurations."""
         config = PluginsConfig(
             plugins=[
-                PluginConfig(path="/plugin1", event_type=EventID.PRE_TOOL_USE.config_key),
+                PluginConfig(path="plugin1", event_type=EventID.PRE_TOOL_USE.config_key),
                 PluginConfig(
-                    path="/plugin2", event_type=EventID.POST_TOOL_USE.config_key, enabled=False
+                    path="plugin2", event_type=EventID.POST_TOOL_USE.config_key, enabled=False
                 ),
             ]
         )
         assert len(config.plugins) == 2
-        assert config.plugins[0].path == "/plugin1"
+        assert config.plugins[0].path == "plugin1"
         assert config.plugins[0].event_type == EventID.PRE_TOOL_USE.config_key
         assert config.plugins[1].enabled is False
         assert config.plugins[1].event_type == EventID.POST_TOOL_USE.config_key
@@ -475,9 +490,9 @@ class TestPluginsConfig:
         config = PluginsConfig.model_validate(
             {
                 "plugins": [
-                    {"path": "/plugin1", "event_type": EventID.PRE_TOOL_USE.config_key},
+                    {"path": "plugin1", "event_type": EventID.PRE_TOOL_USE.config_key},
                     {
-                        "path": "/plugin2",
+                        "path": "plugin2",
                         "event_type": EventID.SESSION_START.config_key,
                         "handlers": ["Handler1"],
                     },
@@ -884,9 +899,9 @@ handlers:
                 }
             ),
             plugins=PluginsConfig(
-                paths=["/path1", "/path2"],
+                paths=["path1", "path2"],
                 plugins=[
-                    PluginConfig(path="/plugin1", event_type="pre_tool_use", handlers=["Handler1"]),
+                    PluginConfig(path="plugin1", event_type="pre_tool_use", handlers=["Handler1"]),
                 ],
             ),
         )
@@ -899,7 +914,7 @@ handlers:
         assert loaded.version == original.version
         assert loaded.daemon.idle_timeout_seconds == 300
         assert loaded.daemon.log_level == LogLevel.DEBUG
-        assert loaded.plugins.paths == ["/path1", "/path2"]
+        assert loaded.plugins.paths == ["path1", "path2"]
         assert len(loaded.plugins.plugins) == 1
 
 
@@ -929,7 +944,8 @@ class TestPlanWorkflowConfig:
             enforce_claude_code_sync=True,
         )
         assert config.enabled is False
-        assert config.directory == "plans/"
+        # Repository-relative normalisation (Plan 00303) drops the trailing slash.
+        assert config.directory == "plans"
         assert config.workflow_docs == "docs/PLANS.md"
         assert config.enforce_claude_code_sync is True
 
@@ -937,6 +953,15 @@ class TestPlanWorkflowConfig:
         """PlanWorkflowConfig rejects extra fields."""
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
             PlanWorkflowConfig.model_validate({"unknown_field": "value"})
+
+    def test_absolute_directory_is_rejected(self) -> None:
+        """Plan directory is repository-relative (Plan 00303)."""
+        with pytest.raises(ValidationError):
+            PlanWorkflowConfig(directory="/srv/plans")
+
+    def test_absolute_workflow_docs_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            PlanWorkflowConfig(workflow_docs="/srv/PLANS.md")
 
 
 class TestPlanWorkflowQaConfig:
@@ -1192,7 +1217,8 @@ class TestMigratePlanHandlerOptions:
                 }
             ),
         )
-        assert config.plan_workflow.directory == "plans/"
+        # Repository-relative normalisation (Plan 00303) drops the trailing slash.
+        assert config.plan_workflow.directory == "plans"
         assert config.plan_workflow.workflow_docs == "CLAUDE/PlanWorkflow.md"
 
     def test_no_migration_when_track_plans_not_set(self) -> None:

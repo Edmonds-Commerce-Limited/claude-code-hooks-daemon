@@ -91,6 +91,15 @@ class TestStrictValidation:
         with pytest.raises(ValidationError):
             DocumentationTreesConfig.model_validate({"bogus": True})
 
+    def test_rejects_absolute_agent_tree(self) -> None:
+        """Documentation tree roots are repository-relative (Plan 00303)."""
+        with pytest.raises(ValidationError):
+            DocumentationTreesConfig(agent="/srv/CLAUDE")
+
+    def test_rejects_absolute_human_tree(self) -> None:
+        with pytest.raises(ValidationError):
+            DocumentationTreesConfig(human="/srv/docs")
+
     def test_rejects_invalid_edit_mode(self) -> None:
         with pytest.raises(ValidationError):
             DocumentationQaConfig.model_validate({"edit_mode": "bogus"})

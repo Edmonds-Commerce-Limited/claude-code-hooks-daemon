@@ -6,7 +6,7 @@ validation, serialisation, and sensible defaults.
 
 import logging
 from enum import StrEnum
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Annotated, Any, Final, Literal, Self
 
 import yaml
@@ -19,6 +19,9 @@ from pydantic import (
 )
 
 from claude_code_hooks_daemon.constants import wired_event_metas
+from claude_code_hooks_daemon.utils.repo_relative_path import (
+    normalise_repo_relative_path as _normalise_repo_relative_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +296,17 @@ class PluginConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    path: str = Field(description="Path to plugin")
+    path: str = Field(
+        description=(
+            "Path to plugin module or package. EXEMPT from the "
+            "repository-relative rule (Plan 00303): a plugin loads external "
+            "code that may legitimately live outside the repository -- the "
+            "same category as TransportConfig.relay_binary -- and the "
+            "loader's absolute-path resolution is an explicitly tested "
+            "feature (tests/unit/test_plugin_loader.py). Prefer a "
+            "repository-relative path when the plugin ships inside the repo."
+        )
+    )
     event_type: Literal[
         "pre_tool_use",
         "post_tool_use",
@@ -315,7 +328,9 @@ class PluginsConfig(BaseModel):
     """Configuration for the plugin system.
 
     Attributes:
-        paths: Additional paths to search for plugins
+        paths: Additional paths to search for plugins. EXEMPT from the
+            repository-relative rule for the same reason as
+            ``PluginConfig.path`` -- see that field's docstring.
         plugins: List of plugin configurations
     """
 
@@ -369,7 +384,14 @@ class ProjectHandlersConfig(BaseModel):
     )
     path: str = Field(
         default=".claude/project-handlers",
-        description="Path to project handlers directory (relative to workspace root)",
+        description=(
+            "Path to project handlers directory (relative to workspace root). "
+            "EXEMPT from the repository-relative rule (Plan 00303): the "
+            "controller explicitly supports and tests an absolute override "
+            "(tests/unit/daemon/test_controller_project_handlers.py) for a "
+            "project-owned handler directory that may legitimately live "
+            "outside the repository, the same category as a plugin path."
+        ),
     )
 
 
@@ -743,6 +765,13 @@ class PlanWorkflowConfig(BaseModel):
         default="CLAUDE/PlanWorkflow.md",
         description="Path to workflow documentation file",
     )
+
+    @field_validator("directory", "workflow_docs")
+    @classmethod
+    def validate_paths_are_repo_relative(cls, value: str) -> str:
+        """Plan directory / workflow docs are repository-relative (Plan 00303)."""
+        return _repo_relative_path(value, "plan_workflow path")
+
     enforce_claude_code_sync: bool = Field(
         default=False,
         description="Enforce plansDirectory sync with .claude/settings.json",
@@ -775,6 +804,12 @@ class DocumentationTreesConfig(BaseModel):
 
     agent: str = Field(default="CLAUDE", description="Root directory of the agent-facing tree")
     human: str = Field(default="docs", description="Root directory of the human-facing tree")
+
+    @field_validator("agent", "human")
+    @classmethod
+    def validate_trees_are_repo_relative(cls, value: str) -> str:
+        """Documentation tree roots are repository-relative (Plan 00303)."""
+        return _repo_relative_path(value, "documentation tree root")
 
 
 class DocumentationGeneratedDocEntry(BaseModel):
@@ -983,24 +1018,15 @@ def _repo_relative_path(value: str, label: str) -> str:
     Raises:
         ValueError: If the path is absolute or escapes the repository.
     """
-    if value.startswith("/") or PurePosixPath(value).is_absolute():
-        raise ValueError(
-            f"{label} must be repository-relative, got absolute {value!r}. "
-            f"Absolute paths break when the repository is mounted elsewhere."
-        )
-    if value.startswith("~"):
-        raise ValueError(
-            f"{label} must be repository-relative, got home-relative {value!r}. "
-            f"Absolute paths break when the repository is mounted elsewhere."
-        )
+    return _normalise_repo_relative_path(value, label)
 
-    # PurePosixPath normalises "./web", "web/" and "a//b" without touching
-    # ".." components, which are then rejected rather than resolved.
-    normalised = PurePosixPath(value).as_posix()
-    if ".." in PurePosixPath(normalised).parts:
-        raise ValueError(f"{label} must not escape the repository, got {value!r}")
 
-    return normalised
+# Public alias (Plan 00303): other modules resolving a config-declared path at
+# RUNTIME (outside a pydantic field validator, e.g. an options dict a handler
+# reads by hand) reuse this SAME validator rather than growing a copy. Kept as
+# an alias rather than a rename so every existing in-module call site stays
+# untouched.
+validate_repo_relative_path = _repo_relative_path
 
 
 class ProjectConfig(BaseModel):
@@ -1220,7 +1246,11 @@ class TransportConfig(BaseModel):
             time); also the ``nc -w`` budget. Mirrors the python3 transport's
             30s default (``CLAUDE_HOOKS_SOCKET_TIMEOUT`` keeps overriding it).
         relay_binary: Absolute-path override for the relay binary. ``None``
-            means ``{untracked}/bin/hooks-relay``.
+            means ``{untracked}/bin/hooks-relay``. EXEMPT from the
+            repository-relative rule (Plan 00303): like a system binary
+            path, this names an executable that may legitimately live
+            outside the repository (a machine-wide install), and the
+            override exists precisely to point at one.
         relay_source: How the relay binary at ``relay_binary`` gets there —
             ``"build"`` (compile from source with plain ``rustc``, preferred
             whenever a musl-capable toolchain is present), ``"download"``
@@ -1272,8 +1302,14 @@ class DaemonConfig(BaseModel):
     Attributes:
         idle_timeout_seconds: Seconds of inactivity before shutdown
         log_level: Logging level
-        socket_path: Custom socket path (None = auto)
-        pid_file_path: Custom PID file path (None = auto)
+        socket_path: Custom socket path (None = auto). EXEMPT from the
+            repository-relative rule (Plan 00303): an AF_UNIX socket is
+            RUNTIME state, not a repository artefact -- it commonly needs to
+            live under ``/tmp`` or similar to stay under the platform's short
+            socket-path length limit, which a repo-nested path cannot
+            guarantee.
+        pid_file_path: Custom PID file path (None = auto). Same exemption as
+            ``socket_path``: daemon runtime state, not a repository artefact.
         log_buffer_size: Size of in-memory log buffer
         request_timeout_seconds: Request processing timeout
         self_install_mode: Whether daemon runs from project root (vs .claude/hooks-daemon/)
