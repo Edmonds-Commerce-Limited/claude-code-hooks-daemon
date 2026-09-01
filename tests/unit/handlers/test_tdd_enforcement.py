@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegistry
 from claude_code_hooks_daemon.handlers.pre_tool_use.tdd_enforcement import (
     _DEFAULT_TEST_LOCATIONS,
     _SRC_DIR,
@@ -1719,8 +1720,20 @@ class TestDeclaredTestPathMap:
 
         assert handler.handle(self._write(rule)).decision == "allow"
 
-    def test_an_absolute_test_dir_needs_no_project_root(self, tmp_path: Path) -> None:
-        """An absolute `test_dir` is usable where the root is unresolvable."""
+    def test_an_absolute_test_dir_is_rejected_at_the_config_boundary(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Plan 00296 zero-absolute-paths ruling: an absolute `test_dir` is skipped, not used.
+
+        Rewritten from `test_an_absolute_test_dir_needs_no_project_root`, which
+        pinned the OLD contract ("absolute is usable where the root is
+        unresolvable"). The owner ruling supersedes that: every configured path
+        must be repository-root-relative, because a repository is mounted at
+        different places on different machines and an absolute path in
+        committed config is correct on exactly one of them. The mapping now
+        degrades gracefully (skip + warn, matching every other malformed
+        `test_path_map` entry) rather than being honoured.
+        """
         self._place_real_test(tmp_path)
         handler = TddEnforcementHandler()
         handler._test_path_map = [
@@ -1729,7 +1742,11 @@ class TestDeclaredTestPathMap:
                 "test_dir": str(tmp_path.joinpath(*self._TEST_REL).parent),
             }
         ]
-        assert handler.handle(self._write(self._rule(tmp_path))).decision == "allow"
+        with caplog.at_level("WARNING"):
+            result = handler.handle(self._write(self._rule(tmp_path)))
+
+        assert result.decision == "deny"
+        assert any("absolute" in record.message for record in caplog.records)
 
     def test_a_relative_test_dir_without_a_project_root_is_skipped(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1790,6 +1807,112 @@ class TestDeclaredTestPathMap:
         candidates = handler._get_test_file_paths(str(rule), strategy)
         assert candidates[0] == tmp_path / "apps/admin/qaConfig/Tests" / candidates[0].name
         assert candidates[1] == tmp_path.joinpath(*self._TEST_REL)
+
+
+class TestDeclaredTestPathMapWorkspaceAnchoring:
+    """A relative `test_dir` anchors against the source file's DECLARED project.
+
+    Plan 00296 Task 2.4: `test_path_map` is orthogonal to *which* project (see
+    `CLAUDE/Code/WorkspaceResolution.md`), so resolution only changes what a
+    relative `test_dir` is anchored against -- the workspace-anchored candidate
+    is added AHEAD of the repo-root candidate. Projects are declared, never
+    inferred: an undeclared subproject that merely LOOKS like a workspace must
+    still anchor at the repository root.
+    """
+
+    _SOURCE_GLOB = "**/Rules/**"
+    _TEST_DIR = "qaConfig/Tests"
+
+    @staticmethod
+    def _anchor_project_root(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
+        import claude_code_hooks_daemon.core.project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: root), raising=False
+        )
+
+    @staticmethod
+    def _write(file_path: Path) -> dict:
+        return {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(file_path),
+                "content": "<?php\n\nclass SampleColumnPolicy {}\n",
+            },
+        }
+
+    def test_a_declared_project_anchors_the_relative_test_dir_at_its_own_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The workspace-anchored candidate is searched, and searched FIRST."""
+        self._anchor_project_root(monkeypatch, tmp_path)
+        rule = tmp_path / "web" / "qaConfig" / "PHPStan" / "Rules" / "SampleColumnPolicy.php"
+
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [{"source_glob": self._SOURCE_GLOB, "test_dir": self._TEST_DIR}]
+        # Simulate an injected registry with a declared "web" project without
+        # depending on Config wiring -- ProjectRegistry.for_path only needs the
+        # DeclaredProject dataclass, constructed the same way from_config does.
+        handler._project_registry = ProjectRegistry(
+            project_root=tmp_path,
+            projects=(DeclaredProject(name="web", root=tmp_path / "web"),),
+        )
+
+        strategy = handler._registry.get_strategy(str(rule))
+        assert strategy is not None
+        candidates = handler._get_test_file_paths(str(rule), strategy)
+
+        assert candidates[0] == tmp_path / "web" / self._TEST_DIR / candidates[0].name
+
+        test_path = candidates[0]
+        test_path.parent.mkdir(parents=True, exist_ok=True)
+        test_path.write_text("<?php\n\nclass SampleColumnPolicyTest {}\n")
+        assert handler.handle(self._write(rule)).decision == "allow"
+
+    def test_an_undeclared_subproject_still_anchors_at_the_repository_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Anti-inference pin: nothing declared means one project, the repo root.
+
+        `web/` here has nothing marking it a project -- with no `projects:`
+        entry the resolver must NOT guess a boundary at `web/`, so the only
+        candidate is the repo-root-anchored path, exactly as before this task.
+        """
+        self._anchor_project_root(monkeypatch, tmp_path)
+        rule = tmp_path / "web" / "qaConfig" / "PHPStan" / "Rules" / "SampleColumnPolicy.php"
+
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [{"source_glob": self._SOURCE_GLOB, "test_dir": self._TEST_DIR}]
+        # No registry injected: resolve_workspace() falls back to single-project,
+        # which resolves every file to the repository root (Plan 00296).
+
+        strategy = handler._registry.get_strategy(str(rule))
+        assert strategy is not None
+        candidates = handler._get_test_file_paths(str(rule), strategy)
+
+        assert candidates[0] == tmp_path / self._TEST_DIR / candidates[0].name
+        assert tmp_path / "web" / self._TEST_DIR not in [c.parent for c in candidates]
+
+    def test_absolute_test_dir_is_skipped_with_a_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Config-boundary rejection: an absolute `test_dir` contributes no candidate."""
+        self._anchor_project_root(monkeypatch, tmp_path)
+        rule = tmp_path / "web" / "qaConfig" / "PHPStan" / "Rules" / "SampleColumnPolicy.php"
+
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [
+            {"source_glob": self._SOURCE_GLOB, "test_dir": "/etc/absolute/tests"}
+        ]
+
+        strategy = handler._registry.get_strategy(str(rule))
+        assert strategy is not None
+        with caplog.at_level("WARNING"):
+            candidates = handler._get_test_file_paths(str(rule), strategy)
+
+        assert Path("/etc/absolute/tests") not in [c.parent for c in candidates]
+        assert any("absolute" in record.message for record in caplog.records)
 
 
 class TestTddEnforcementGetRules:
