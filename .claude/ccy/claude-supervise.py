@@ -1697,6 +1697,8 @@ _CTRL_BACKSLASH_NOTICE_TEXT = "⛔ Ctrl+\\ ignored — use /exit to quit"
 def _ctrl_c_notice_text(window_seconds: float) -> str:
     """Status-line hint shown when a lone Ctrl+C is swallowed (Plan 00312)."""
     return f"⚠ Ctrl+C intercepted — press Ctrl+C again within {window_seconds:g}s to interrupt"
+
+
 # The signals install_input_signal_guards manages — SIGINT (Ctrl+C) is
 # deliberately EXCLUDED. Kept as one tuple so supervise() can save+restore
 # exactly this set around the forwarding loop (must stay in sync with the
