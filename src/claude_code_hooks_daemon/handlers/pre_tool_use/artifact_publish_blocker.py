@@ -299,14 +299,19 @@ is the backstop until the current session ends."""
                 description="Blocks artefact publishing (disclosure outside the project)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"BLOCKED: publishing an artefact",
+                    r"BLOCKED \[R-ARTIFACT-PUBLISH\]",
                     r"artifact_publish_blocker",
                     r"Ask the user",
                 ],
-                safety_notes=("The call is denied before it runs, so nothing is ever published."),
+                safety_notes=(
+                    "The Artifact tool is not exposed to sub-agents and is removed entirely "
+                    "when a project opts into `source_disable` — a runner without main-thread "
+                    "access to the Artifact tool, or with source_disable active, records a "
+                    "valid SKIP rather than attempting this test."
+                ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
-                requires_main_thread=False,
+                requires_main_thread=True,
             ),
             AcceptanceTest(
                 title="Artifact list is allowed",
@@ -317,9 +322,14 @@ is the backstop until the current session ends."""
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Read-only; publishes nothing.",
+                safety_notes=(
+                    "Read-only; publishes nothing. The Artifact tool is not exposed to "
+                    "sub-agents and is removed entirely when a project opts into "
+                    "`source_disable` — a runner without main-thread access to the "
+                    "Artifact tool, or with source_disable active, records a valid SKIP."
+                ),
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,
-                requires_main_thread=False,
+                requires_main_thread=True,
             ),
         ]

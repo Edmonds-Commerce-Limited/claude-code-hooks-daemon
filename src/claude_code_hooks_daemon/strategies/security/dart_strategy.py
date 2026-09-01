@@ -69,7 +69,7 @@ class DartSecurityStrategy:
                 description="Blocks writing Dart file with Process.run() call",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"SECURITY ANTIPATTERN BLOCKED",
+                    r"BLOCKED \[R-SEC-",
                     r"Process\.run\(\)",
                 ],
                 safety_notes="Handler blocks before file is written.",

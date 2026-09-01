@@ -53,7 +53,7 @@ class JavaErrorHidingStrategy:
                 description=("Blocks Java file with empty catch block written via Write tool"),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"Error-hiding pattern detected",
+                    r"BLOCKED \[R-ERROR-HIDING\]",
                     r"empty catch block",
                 ],
                 safety_notes="Uses Write tool to a /tmp path",

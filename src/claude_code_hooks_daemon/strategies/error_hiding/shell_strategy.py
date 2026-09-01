@@ -86,7 +86,7 @@ class ShellErrorHidingStrategy:
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"Error-hiding pattern detected",
+                    r"BLOCKED \[R-ERROR-HIDING\]",
                     r"\|\| true",
                 ],
                 safety_notes="Uses Write tool to a /tmp path",

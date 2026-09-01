@@ -69,7 +69,7 @@ class GoSecurityStrategy:
                 description="Blocks writing Go file with template.HTML() call",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"SECURITY ANTIPATTERN BLOCKED",
+                    r"BLOCKED \[R-SEC-",
                     r"template\.HTML\(\)",
                 ],
                 safety_notes="Handler blocks before file is written.",

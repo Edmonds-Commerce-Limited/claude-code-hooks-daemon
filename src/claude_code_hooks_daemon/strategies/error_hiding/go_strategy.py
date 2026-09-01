@@ -62,7 +62,7 @@ class GoErrorHidingStrategy:
                 description=("Blocks Go file with empty error check written via Write tool"),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"Error-hiding pattern detected",
+                    r"BLOCKED \[R-ERROR-HIDING\]",
                     r"empty error check",
                 ],
                 safety_notes="Uses Write tool to a /tmp path",

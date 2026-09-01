@@ -90,7 +90,7 @@ class SecretDetectionStrategy:
                 description="Blocks writing file with hardcoded AWS access key",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"SECURITY ANTIPATTERN BLOCKED",
+                    r"BLOCKED \[R-SEC-",
                     r"AWS Access Key",
                 ],
                 safety_notes="Handler blocks before file is written.",

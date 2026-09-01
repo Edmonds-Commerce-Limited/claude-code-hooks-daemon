@@ -102,7 +102,7 @@ class PhpTddStrategy:
                 ),
                 description="Blocks PHP source file creation without corresponding test file",
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"TDD REQUIRED", r"PHP", r"test file"],
+                expected_message_patterns=[r"BLOCKED \[R-TDD-TEST-FIRST\]", r"PHP", r"test file"],
                 safety_notes="Uses /tmp path - safe. Handler blocks Write before file is created.",
                 test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-tdd-php/src/Services"],

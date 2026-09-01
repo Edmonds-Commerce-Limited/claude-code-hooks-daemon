@@ -59,31 +59,31 @@ tracked MUST-FIX ledger and are to be fixed immediately after the release.
 
 ### Phase 2: v3.58.0 acceptance-run playbook drift
 
-- [ ] ⬜ **Task 2.1**: Playbook expected-message drift — many generated
+- [x] ✅ **Task 2.1**: Playbook expected-message drift — many generated
   expected patterns still cite long-form literals (`SECURITY ANTIPATTERN BLOCKED`, `TDD REQUIRED`, `dangerous permissions`, `Error-hiding pattern detected`) that the live short-form `BLOCKED [R-*]` deny messages no
   longer contain (denials themselves correct throughout). Regenerate the
   playbook generator's expected patterns from the current message forms.
 
-- [ ] ⬜ **Task 2.2**: Playbook Test 124 `valid.py` fixture lacks a
+- [x] ✅ **Task 2.2**: Playbook Test 124 `valid.py` fixture lacks a
   trailing newline, so the "valid" case is denied on ruff W292 as written.
 
-- [ ] ⬜ **Task 2.3**: Playbook Tests 39/40 (artifact_publish_blocker) are
+- [x] ✅ **Task 2.3**: Playbook Tests 39/40 (artifact_publish_blocker) are
   marked `Requires Main Thread: no` but the Artifact tool is not exposed
   to sub-agents (and is source-disabled in never_want sessions) — routing
   field should be `yes`, or the tests should document the source-disable
   skip.
 
-- [ ] ⬜ **Task 2.4**: Playbook Test 110 (ESLint deny path) is
+- [x] ✅ **Task 2.4**: Playbook Test 110 (ESLint deny path) is
   unexecutable in this repo — needs `llm:` scripts in a tracked
   package.json; document the precondition or synthesise a fixture.
 
-- [ ] ⬜ **Task 2.5**: secret_file_guard false positive (reported by the
+- [x] ✅ **Task 2.5**: secret_file_guard false positive (reported by the
   clippy-shim-fix agent): an Edit whose new content contained the literal
   Python list `[pass_result, fail_result]` was blocked as matching the
   `*vault_pass*`-family protected glob, despite no vault/password content.
   Reproduce, pin with a test, and tighten the substring/glob matching.
 
-- [ ] ⬜ **Task 2.6**: pipe_blocker producer attribution for a plain
+- [x] ✅ **Task 2.6**: pipe_blocker producer attribution for a plain
   quoted-argument pipe under a `[[` head (playbook Test 87,
   `[[ "python -m pytest tests/ | tail -5" == 0 ]]`): the deny is correct and
   the expected patterns match, but the headline names the producer as

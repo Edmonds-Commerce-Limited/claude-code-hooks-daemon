@@ -55,7 +55,7 @@ class PythonLintStrategy:
                 command=(
                     "Use the Write tool to create file "
                     "/tmp/acceptance-test-lint-python/valid.py "
-                    "with content \"def hello():\\n    print('hello')\""
+                    "with content \"def hello():\\n    print('hello')\\n\""
                 ),
                 description="Valid Python code should pass lint validation",
                 expected_decision=Decision.ALLOW,

@@ -239,6 +239,18 @@ class TestBashMentionsProtectedPath:
         assert self._match("x = words[0].rsplit(y)") is None
         assert self._match("a = parts[0].split(z)") is None
 
+    def test_python_list_literal_is_not_matched(self) -> None:
+        """Regression (Plan 00305 Task 2.5, clippy-shim-fix agent report): an
+        Edit whose added content was the literal Python list
+        ``[pass_result, fail_result]`` was denied as matching the
+        ``*vault_pass*`` protected glob. The comma splits it into tokens
+        ``[pass_result`` and ``fail_result]`` — the unmatched ``[``/``]`` are
+        Python list syntax, not a real fnmatch bracket expression, so the
+        token must never be treated as glob-shaped, and ``pass_result``'s
+        ``pass`` edge must never be compared against the ``vault_pass``
+        stem."""
+        assert self._match("result = [pass_result, fail_result]") is None
+
     def test_regex_non_greedy_quantifier_is_not_matched(self) -> None:
         """Plan 00284 live dogfooding find: ``<`` and ``>`` are token
         delimiters, so an HTML/XML-shaped regex like ``<a>.*?</a>`` isolates

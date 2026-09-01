@@ -430,7 +430,11 @@ is not evidence that a `.ts` file is clean."""
                     "A heredoc authoring invalid TypeScript is ESLint-checked and DENIED, "
                     "proving the Bash write route is no longer a way past this handler. "
                     "The write lands on disk first, so the denial is a failure report to "
-                    "repair with Edit, not a rollback."
+                    "repair with Edit, not a rollback. PRECONDITION: this handler only runs "
+                    "ESLint when the project has a tracked package.json declaring `llm:` "
+                    "scripts (see get_claude_md); a repo without one (e.g. this daemon's own "
+                    "checkout) never reaches ESLint, so a runner records a valid SKIP rather "
+                    "than a failure."
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"broken\.ts"],

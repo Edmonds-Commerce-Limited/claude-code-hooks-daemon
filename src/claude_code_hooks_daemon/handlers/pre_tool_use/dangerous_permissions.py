@@ -200,7 +200,7 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
                 description="Blocks chmod a+rwx (equivalent to 777)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"dangerous permissions",
+                    r"BLOCKED \[R-CHMOD-WORLD-WRITABLE\]",
                     r"anyone to read, write, and execute",
                 ],
                 safety_notes="Uses echo - safe to test",

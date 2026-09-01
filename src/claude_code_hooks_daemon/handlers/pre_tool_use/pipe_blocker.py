@@ -585,8 +585,9 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
 
     @staticmethod
     def _substitution_content_start(command: str, pipe_index: int) -> int:
-        """Where the INNERMOST command substitution containing ``pipe_index``
-        begins its content, or 0 when the pipe is not inside one.
+        """Where the INNERMOST command substitution or quoted argument
+        containing ``pipe_index`` begins its content, or 0 when the pipe is
+        at the top level.
 
         Lexical, quote-aware, and deliberately not a shell parser — the same
         posture as the existing segmentation. It tracks only what changes the
@@ -599,6 +600,14 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         - a backslash-escaped character can neither open nor close anything
         - backticks do not nest, so a frame records which spelling opened it
           and only that spelling closes it
+        - a pipe sitting inside a plain quoted ARGUMENT (no substitution at
+          all, e.g. ``[[ "pytest tests/ | tail -5" == 0 ]]``) still narrows to
+          the quote's content start (Plan 00305 Task 2.6): without this, the
+          text to the left of the pipe starts with the OUTER command (here
+          the `[[` test-command head), so that gets reported as the producer
+          and the printed remediation splices `2>&1 | ...` onto a string that
+          starts mid-quote and cannot run. An open substitution frame always
+          wins over a bare quote, since it is the narrower region.
 
         An unbalanced or exotic construct degrades to a shallower frame (or to
         top level), which is the pre-existing behaviour rather than a crash.
@@ -607,6 +616,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         open_frames: list[tuple[int, bool]] = []
         in_single_quotes = False
         in_double_quotes = False
+        quote_content_start: int | None = None
         index = 0
 
         while index < pipe_index:
@@ -623,12 +633,19 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
                 continue
 
             if char == _SINGLE_QUOTE and not in_double_quotes:
+                # Deliberately does NOT set quote_content_start: a single
+                # quote suppresses ALL shell interpretation, including the
+                # pipe itself, so unlike a double-quoted argument there is no
+                # narrower "inner command" to attribute here — the existing
+                # (pre-Task-2.6) top-level attribution is left exactly as it
+                # was for this case.
                 in_single_quotes = True
                 index += 1
                 continue
 
             if char == _DOUBLE_QUOTE:
                 in_double_quotes = not in_double_quotes
+                quote_content_start = index + 1 if in_double_quotes else None
                 index += 1
                 continue
 
@@ -652,9 +669,11 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
 
             index += 1
 
-        if not open_frames:
-            return _TOP_LEVEL_CONTENT_START
-        return open_frames[-1][0]
+        if open_frames:
+            return open_frames[-1][0]
+        if quote_content_start is not None:
+            return quote_content_start
+        return _TOP_LEVEL_CONTENT_START
 
     def _matches_whitelist(self, source_segment: str) -> bool:
         """Check if source segment matches the whitelist (never block)."""

@@ -69,7 +69,7 @@ class SwiftSecurityStrategy:
                 description="Blocks writing Swift file with Process() call",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"SECURITY ANTIPATTERN BLOCKED",
+                    r"BLOCKED \[R-SEC-",
                     r"Process\(\)",
                 ],
                 safety_notes="Handler blocks before file is written.",

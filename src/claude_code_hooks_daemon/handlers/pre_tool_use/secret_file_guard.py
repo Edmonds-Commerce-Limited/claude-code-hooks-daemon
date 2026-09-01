@@ -355,7 +355,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 ),
                 description="Read of a path matching a protected glob is denied.",
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"SECRET FILE PROTECTED", r"secret-meta"],
+                expected_message_patterns=[r"BLOCKED \[R-SECRET-READ\]", r"secret-meta"],
                 safety_notes="Dummy path only — never a real secret; deny path, no read happens",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.SONNET,
@@ -366,7 +366,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 command="cat /tmp/fixture.vault-password",
                 description="Any Bash mention of a protected path is denied.",
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"SECRET FILE PROTECTED", r"NO escape hatch"],
+                expected_message_patterns=[
+                    r"BLOCKED \[R-SECRET-BASH-MENTION\]",
+                    r"NO escape hatch",
+                ],
                 safety_notes="Dummy path — the file need not exist; deny fires on the mention",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.SONNET,
@@ -377,7 +380,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 command="python3 -c \"print(open('/tmp/fixture.vault-password').read())\"",
                 description="Deny-by-default catches interpreter one-liners uniformly.",
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"SECRET FILE PROTECTED"],
+                expected_message_patterns=[r"BLOCKED \[R-SECRET-BASH-MENTION\]"],
                 safety_notes="Dummy path — deny fires before anything runs",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.SONNET,
@@ -414,7 +417,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                     "case; it needs ansible installed to run to completion.)"
                 ),
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"SECRET FILE PROTECTED"],
+                expected_message_patterns=[r"BLOCKED \[R-SECRET-BASH-MENTION\]"],
                 safety_notes=(
                     "Demonstrates the no-echo-exemption rule; the bare "
                     "`ansible-playbook --vault-password-file <path> ...` form is the "

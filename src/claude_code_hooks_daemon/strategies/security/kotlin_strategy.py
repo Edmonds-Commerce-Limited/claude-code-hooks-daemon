@@ -75,7 +75,7 @@ class KotlinSecurityStrategy:
                 description="Blocks writing Kotlin file with ObjectInputStream() call",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"SECURITY ANTIPATTERN BLOCKED",
+                    r"BLOCKED \[R-SEC-",
                     r"ObjectInputStream",
                 ],
                 safety_notes="Handler blocks before file is written.",

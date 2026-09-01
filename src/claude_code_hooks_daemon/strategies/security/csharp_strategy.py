@@ -75,7 +75,7 @@ class CSharpSecurityStrategy:
                 description="Blocks writing C# file with BinaryFormatter usage",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"SECURITY ANTIPATTERN BLOCKED",
+                    r"BLOCKED \[R-SEC-",
                     r"BinaryFormatter",
                 ],
                 safety_notes="Handler blocks before file is written.",

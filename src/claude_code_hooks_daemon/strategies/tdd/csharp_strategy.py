@@ -69,7 +69,7 @@ class CSharpTddStrategy:
                 ),
                 description="Blocks C# source file creation without corresponding test file",
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"TDD REQUIRED", r"C#", r"test file"],
+                expected_message_patterns=[r"BLOCKED \[R-TDD-TEST-FIRST\]", r"C#", r"test file"],
                 safety_notes="Uses /tmp path - safe. Handler blocks Write before file is created.",
                 test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-tdd-csharp/src/Services"],

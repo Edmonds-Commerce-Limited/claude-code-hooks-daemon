@@ -228,3 +228,31 @@ class TestBlockMessageNamesTheInnerProducer:
         assert result.reason is not None
         assert '"^some_unknown_tool\\\\b"' in result.reason
         assert "^FOO=" not in result.reason
+
+
+class TestQuotedArgumentPipeNamesTheInnerProducer:
+    """Plan 00305 Task 2.6 (playbook Test 87): a pipe inside a plain quoted
+    ARGUMENT (no ``$( )`` substitution at all, e.g. a `[[` string comparison)
+    is scanned and denied like any other pipe — that decision is correct and
+    out of scope here. What was wrong is attribution: producer extraction
+    read the text to the left of the pipe from the TOP of the command, so the
+    `[[` test-command head was reported as the producer instead of the
+    command actually named inside the quotes, and the printed remediation
+    spliced `2>&1 | ...` onto that same malformed prefix."""
+
+    def test_reason_names_the_quoted_inner_producer_not_the_double_bracket_head(self) -> None:
+        handler = PipeBlockerHandler()
+        result = handler.handle(_bash('[[ "python -m pytest tests/ | tail -5" == 0 ]]'))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "pytest" in result.reason
+        assert "[[ unrecognized" not in result.reason
+        assert '"^[[\\\\b"' not in result.reason
+
+    def test_remediation_line_is_runnable_not_spliced_mid_quote(self) -> None:
+        handler = PipeBlockerHandler()
+        result = handler.handle(_bash('[[ "python -m pytest tests/ | tail -5" == 0 ]]'))
+        assert result.reason is not None
+        # The COMMAND: line legitimately echoes the raw text verbatim — only
+        # the REMEDIATION line must not be spliced mid-quote.
+        assert 'python -m pytest tests/ > "$TEMP_FILE" 2>&1' in result.reason

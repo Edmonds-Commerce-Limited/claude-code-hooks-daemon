@@ -77,12 +77,11 @@ _COMMAND_SEPARATORS: Final[tuple[str, ...]] = (";", "&&", "||", "|", "\n")
 _PROCESS_SUBSTITUTION: Final[str] = "<("
 
 _GLOB_CHARS: Final[tuple[str, ...]] = ("*", "?", "[")
-# Wildcard characters by POSITION: a leading wildcard opens the token's LEFT
-# edge (an arbitrary prefix), a trailing wildcard opens its RIGHT edge. The
-# overlap heuristic only treats a stem/residue edge match as a real truncation
-# when the token carries a wildcard at that edge (see `_glob_token_overlaps_stem`).
-_LEADING_WILDCARD_CHARS: Final[tuple[str, ...]] = ("*", "?", "[")
-_TRAILING_WILDCARD_CHARS: Final[tuple[str, ...]] = ("*", "?", "]")
+# Wildcard-position detection (leading edge opens an arbitrary prefix,
+# trailing edge an arbitrary suffix) lives in `_has_leading_wildcard` /
+# `_has_trailing_wildcard` — a bracket only counts as a wildcard when it
+# forms a COMPLETE expression (Plan 00305 Task 2.5), which a fixed char
+# tuple cannot express.
 
 # The metadata helper: the ONE universally-exempt way to mention a protected
 # path in Bash. Recognised as `<anything>/hooks-daemon secret-meta ...` (or a
@@ -325,6 +324,41 @@ _BRACKET_EXPRESSION_RE: Final[re.Pattern[str]] = re.compile(r"\[[^\]]*\]")
 _MIN_GLOB_OVERLAP_CHARS: Final[int] = 2
 
 
+def _is_glob_shaped(token: str) -> bool:
+    """True when ``token`` carries a genuine fnmatch metacharacter.
+
+    ``*`` and ``?`` are always wildcards. ``[``/``]`` are wildcards only as a
+    COMPLETE bracket expression (``_BRACKET_EXPRESSION_RE``) -- fnmatch itself
+    treats a lone, unterminated ``[`` as a literal character, and Plan 00305
+    Task 2.5 found this handler disagreeing: a Python list literal like
+    ``[pass_result, fail_result]`` tokenises (on the comma) into
+    ``[pass_result`` and ``fail_result]``, each carrying an unmatched
+    bracket. Treating that as glob-shaped let the leading-wildcard overlap
+    check compare ``pass_result``'s ``pass`` edge against the
+    ``*vault_pass*`` stem and false-fire. Requiring a matched pair closes
+    that gap while leaving real bracket expressions (``[Vv]ault_pass``)
+    unaffected.
+    """
+    if "*" in token or "?" in token:
+        return True
+    return bool(_BRACKET_EXPRESSION_RE.search(token))
+
+
+def _has_leading_wildcard(basename: str) -> bool:
+    """True when ``basename``'s LEFT edge is open to an arbitrary prefix."""
+    if basename[:1] in ("*", "?"):
+        return True
+    match = _BRACKET_EXPRESSION_RE.match(basename)
+    return match is not None and match.start() == 0
+
+
+def _has_trailing_wildcard(basename: str) -> bool:
+    """True when ``basename``'s RIGHT edge is open to an arbitrary suffix."""
+    if basename[-1:] in ("*", "?"):
+        return True
+    return any(match.end() == len(basename) for match in _BRACKET_EXPRESSION_RE.finditer(basename))
+
+
 def _token_literal_residue(token: str) -> str:
     """The literal text left after removing glob syntax from ``token``.
 
@@ -417,15 +451,15 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
             for pattern in patterns:
                 if path_matches_globs(form, (pattern,), project_root=project_root):
                     return pattern
-            if any(char in form for char in _GLOB_CHARS):
+            if _is_glob_shaped(form):
                 basename = form.rsplit("/", maxsplit=1)[-1]
                 residue = _token_literal_residue(basename)
                 if not residue:
                     continue
                 # Where the token's wildcard sits decides which overlap
                 # direction is a plausible truncation (see the helper).
-                has_leading_wildcard = basename[:1] in _LEADING_WILDCARD_CHARS
-                has_trailing_wildcard = basename[-1:] in _TRAILING_WILDCARD_CHARS
+                has_leading_wildcard = _has_leading_wildcard(basename)
+                has_trailing_wildcard = _has_trailing_wildcard(basename)
                 for stem, pattern in stem_pairs:
                     stem_basename = stem.rsplit("/", maxsplit=1)[-1]
                     # Original fnmatch check (v3.55.0 release code review): a
@@ -515,7 +549,7 @@ def find_protected_mention_strict(command: str, patterns: tuple[str, ...]) -> st
             for pattern in patterns:
                 if path_matches_globs(form, (pattern,), project_root=project_root):
                     return pattern
-            if any(char in form for char in _GLOB_CHARS):
+            if _is_glob_shaped(form):
                 match = _expand_glob_token(form, patterns, project_root)
                 if match is not None:
                     return match

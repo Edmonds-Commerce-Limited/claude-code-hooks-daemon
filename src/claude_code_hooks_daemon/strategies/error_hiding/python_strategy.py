@@ -74,7 +74,7 @@ class PythonErrorHidingStrategy:
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"Error-hiding pattern detected",
+                    r"BLOCKED \[R-ERROR-HIDING\]",
                     r"bare except",
                 ],
                 safety_notes="Uses Write tool to a /tmp path",

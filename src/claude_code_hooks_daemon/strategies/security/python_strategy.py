@@ -93,7 +93,7 @@ class PythonSecurityStrategy:
                 description="Blocks writing Python file with eval() call",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"SECURITY ANTIPATTERN BLOCKED",
+                    r"BLOCKED \[R-SEC-",
                     r"eval\(\)",
                 ],
                 safety_notes="Handler blocks before file is written.",
