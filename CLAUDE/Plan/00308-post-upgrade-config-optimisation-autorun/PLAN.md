@@ -1,6 +1,6 @@
 # Plan 00308: post upgrade config optimisation autorun
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: Medium

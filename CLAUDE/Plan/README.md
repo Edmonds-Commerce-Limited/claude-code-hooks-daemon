@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00308: post upgrade config optimisation autorun](00308-post-upgrade-config-optimisation-autorun/PLAN.md) - Not Started (formalise "enable all relevant handlers and optimise config" and autorun it post-upgrade)
+- [00308: post upgrade config optimisation autorun](00308-post-upgrade-config-optimisation-autorun/PLAN.md) - In Progress (formalise "enable all relevant handlers and optimise config" and autorun it post-upgrade)
 
 - [00307: subagent file based report handoff](00307-subagent-file-based-report-handoff/PLAN.md) - In Progress (subagents hand over large data by file, never inline; both enforcement handlers live at 5f674028, GREEN acceptance re-run pending)
 
