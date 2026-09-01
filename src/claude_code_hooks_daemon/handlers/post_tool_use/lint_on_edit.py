@@ -451,6 +451,32 @@ class LintOnEditHandler(PostToolUseHandlerBase):
 
         return f"{message}\n\n{dynamic_detail}"
 
+    def get_enforcement_status(self, project_root: Path) -> list[str]:
+        """Advisory when an active strategy's extended linter is unresolvable.
+
+        Plan 00296 Task 4.1. Only the EXTENDED tool is probed -- the built-in
+        default command (``bash -n``, ``python -m py_compile``) is always
+        available, so its absence is not a meaningful degradation to report.
+        Cheap: reuses `_resolve_executable`'s own filesystem checks (`is_file`/
+        `shutil.which`), no subprocess is run.
+        """
+        self._apply_language_filter()
+        workspace = resolve_workspace(self._project_registry, project_root, project_root)
+        statuses: list[str] = []
+        for strategy in self._registry.strategies():
+            extended = strategy.extended_lint_command
+            if not extended:
+                continue
+            executable = extended.split()[0]
+            if self._resolve_executable(executable, workspace.bin_dirs) is None:
+                statuses.append(
+                    f"lint_on_edit: {strategy.language_name} extended linter "
+                    f"'{executable}' not found at {project_root} (workspace bin dirs, "
+                    "interpreter bin, or PATH) — falls back to the built-in default "
+                    "lint command only."
+                )
+        return statuses
+
     def get_claude_md(self) -> str | None:
         return """## lint_on_edit — source writes are linted, and a failure DENIES
 

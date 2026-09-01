@@ -94,6 +94,36 @@ class TestRegistry:
         assert set(registry.registered_languages) == {"Lang1", "Lang2"}
 
 
+class TestStrategies:
+    """strategies() (Plan 00296 T4.1): dedup listing for a caller that needs
+    instances, not just names -- e.g. `get_enforcement_status()`'s extended-
+    linter probe."""
+
+    def test_empty_registry_returns_empty_list(self) -> None:
+        assert LintStrategyRegistry().strategies() == []
+
+    def test_returns_registered_instance(self) -> None:
+        registry = LintStrategyRegistry()
+        strategy = _MockLintStrategy()
+        registry.register(strategy)
+        assert registry.strategies() == [strategy]
+
+    def test_dedupes_a_strategy_registered_under_several_extensions(self) -> None:
+        """One strategy, several extensions -> one entry, not one per extension."""
+        registry = LintStrategyRegistry()
+        strategy = _MockLintStrategy(extensions=(".sh", ".bash"))
+        registry.register(strategy)
+        assert registry.strategies() == [strategy]
+
+    def test_lists_every_distinct_strategy(self) -> None:
+        registry = LintStrategyRegistry()
+        strategy1 = _MockLintStrategy(language_name="Lang1", extensions=(".l1",))
+        strategy2 = _MockLintStrategy(language_name="Lang2", extensions=(".l2",))
+        registry.register(strategy1)
+        registry.register(strategy2)
+        assert {s.language_name for s in registry.strategies()} == {"Lang1", "Lang2"}
+
+
 class TestFilterByLanguages:
     @pytest.fixture()
     def registry(self) -> LintStrategyRegistry:

@@ -11,6 +11,8 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
     from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
     from claude_code_hooks_daemon.core.hook_result import HookResult
@@ -240,6 +242,36 @@ class Handler(ABC):
         Returns:
             List of ``Rule`` objects; empty list if the handler has not yet
             declared rules (legacy / non-blocking handlers).
+        """
+        return []
+
+    def get_enforcement_status(self, project_root: Path) -> list[str]:
+        """Return advisory strings for any downgraded enforcement at ``project_root``.
+
+        Plan 00296 Task 4.1. Some handlers decide their strictness from what
+        they find on disk (an ``llm:`` script in ``package.json``, a resolvable
+        linter binary) rather than from config — and when that probe comes up
+        empty, enforcement quietly drops to advisory-only with nothing saying
+        so outside the handler's own source. This hook lets a handler declare
+        its CURRENT posture at a given root so `hooks-daemon check` can surface
+        it, instead of the fact staying invisible until someone reads the code.
+
+        Concrete (not abstract): most handlers have no such probe, so the
+        default is "nothing to report" (nominal enforcement). Override only in
+        a handler whose enforcement mode depends on what it finds on disk.
+
+        Must stay CHEAP: `check` calls this synchronously and it must not add
+        filesystem cost beyond what the handler already does per invocation
+        (existence checks, one small file read) — no subprocess execution, no
+        directory walks.
+
+        Args:
+            project_root: The root to evaluate the handler's posture at (the
+                repository root, or a declared project's root).
+
+        Returns:
+            Human-readable advisory strings, one per degraded condition found.
+            Empty list means nominal enforcement at this root.
         """
         return []
 

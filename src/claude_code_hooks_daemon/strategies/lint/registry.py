@@ -59,6 +59,23 @@ class LintStrategyRegistry:
         for ext in to_remove:
             del self._strategies[ext]
 
+    def strategies(self) -> list[LintStrategy]:
+        """Deduplicated list of currently registered strategy instances.
+
+        A strategy is registered once per declared extension (Ansible, for
+        instance, may own several), so the underlying dict can hold the same
+        instance more than once -- deduplicate by identity so a caller
+        iterating strategies (rather than extensions) sees each language once.
+        """
+        seen: set[int] = set()
+        result: list[LintStrategy] = []
+        for strategy in self._strategies.values():
+            if id(strategy) in seen:
+                continue
+            seen.add(id(strategy))
+            result.append(strategy)
+        return result
+
     @property
     def registered_languages(self) -> list[str]:
         """Get names of all registered languages (deduplicated)."""

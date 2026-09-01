@@ -146,7 +146,7 @@ consumes: this changes where a `Workspace` COMES FROM, not what consumes it.
 
 ### Phase 4: Degradation visibility
 
-- [ ] ⬜ **Task 4.1**: Surface downgraded enforcement modes and unresolved
+- [x] ✅ **Task 4.1**: Surface downgraded enforcement modes and unresolved
   tools in `handlers` and `check` output.
 
 ## Success Criteria
@@ -161,7 +161,7 @@ consumes: this changes where a `Workspace` COMES FROM, not what consumes it.
   the workspaces it found.
 - [ ] Single-project repositories show byte-identical handler behaviour with
   no added configuration and no advisory.
-- [ ] A silently-downgraded handler mode is visible in `check` output.
+- [x] A silently-downgraded handler mode is visible in `check` output.
 
 ## Delivery & Milestones
 

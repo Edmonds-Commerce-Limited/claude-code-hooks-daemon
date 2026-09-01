@@ -821,6 +821,48 @@ class TestNpmCommandGetRules:
             assert rule.verbose
 
 
+class TestNpmCommandEnforcementStatus:
+    """get_enforcement_status() (Plan 00296 T4.1): degraded-mode visibility."""
+
+    def test_nominal_when_llm_commands_present(self, tmp_path: Path) -> None:
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command."
+            "has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            handler = NpmCommandHandler()
+            assert handler.get_enforcement_status(tmp_path) == []
+
+    def test_advisory_when_no_llm_commands(self, tmp_path: Path) -> None:
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command."
+            "has_llm_commands_in_package_json",
+            return_value=False,
+        ):
+            handler = NpmCommandHandler()
+            statuses = handler.get_enforcement_status(tmp_path)
+        assert len(statuses) == 1
+        assert "npm_command" in statuses[0]
+        assert str(tmp_path) in statuses[0]
+        assert "advisory only" in statuses[0]
+
+    def test_evaluates_at_the_given_root_not_construction_root(self, tmp_path: Path) -> None:
+        """The probe re-reads at the PASSED root -- it is not frozen at __init__."""
+        other_root = tmp_path / "other"
+        other_root.mkdir()
+        (other_root / "package.json").write_text(
+            json.dumps({"scripts": {"llm:build": "true"}}), encoding="utf-8"
+        )
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command."
+            "has_llm_commands_in_package_json",
+            return_value=False,
+        ):
+            handler = NpmCommandHandler()
+        # Real (unpatched) probe against a root that DOES have llm: scripts.
+        assert handler.get_enforcement_status(other_root) == []
+
+
 class TestNpmCommandDisclosureLadder:
     """Verbose-first/terse-after per (transcript_path, rule_id) (Plan 00116)."""
 

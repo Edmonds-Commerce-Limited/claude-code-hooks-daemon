@@ -337,6 +337,23 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
                 ),
             )
 
+    def get_enforcement_status(self, project_root: Path) -> list[str]:
+        """Advisory when ``project_root`` has no ``llm:`` scripts (Plan 00296 T4.1).
+
+        Cheap: one ``package.json`` read via ``has_llm_commands_in_package_json``,
+        the same probe ``handle()`` already runs per authored file — no extra
+        cost. A pinned ``workspace_root`` (test seam) is used verbatim rather
+        than the passed-in root, matching ``_workspace_for``'s own precedence.
+        """
+        root = self._pinned_workspace_root or project_root
+        if has_llm_commands_in_package_json(root):
+            return []
+        return [
+            f"validate_eslint_on_write: llm-wrapper enforcement inactive at {root} "
+            "(no llm: scripts found in package.json) — ESLint validation is skipped, "
+            "advisory only."
+        ]
+
     def get_claude_md(self) -> str | None:
         return """## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
 
