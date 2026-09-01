@@ -339,6 +339,10 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
         "there is no command spelling to evade; advisory-only, never denies"
     ),
     "AgentIsolationAdvisorHandler": "matches on the Agent tool, not a command",
+    "DispatchDeclarationHandler": (
+        "matches on the Task tool's prompt field, not a command string - there is "
+        "no shell spelling to evade"
+    ),
     "WriteClobberGuardHandler": (
         "matches a Write file path plus per-session read state, not a command string - "
         "there is no shell spelling to evade, and the Bash-mediated write route is "

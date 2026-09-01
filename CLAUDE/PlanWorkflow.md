@@ -114,8 +114,37 @@ CLAUDE/
     ├── 00003-qa-improvements/
     │   ├── PLAN.md
     │   └── coverage-report.md
+    ├── 00307-subagent-file-based-report-handoff/
+    │   ├── PLAN.md
+    │   ├── JOURNAL/
+    │   └── subagent-reports/            # Dispatched subagents' file-handoff reports
+    │       └── {yymmdd}-{agent-name}-{model}.md
     └── README.md                        # Index of all plans
 ```
+
+### Subagent report handoff (`subagent-reports/`)
+
+Plan 00307: a subagent dispatched to work on THIS plan writes any long-form
+report — findings, exploration notes, review output — to a file under this
+plan folder's `subagent-reports/` subdirectory, never inline as its final
+message. The standard filename is `{yymmdd}-{agent-name}-{model}.md` (e.g.
+`260901-explore-hook-surfaces-fable.md`). The subagent's final message stays
+a short completion summary plus the file path.
+
+Rationale: a subagent's return travels over a bounded-size wire channel. Task
+1.1's reproduction (`CLAUDE/Plan/00307-subagent-file-based-report-handoff/`)
+found the harness silently eliding the MIDDLE of an oversized inline report
+while both start/end sentinels survived intact — a coordinator can receive
+what looks like a complete report while content is missing. The
+`dispatch_declaration` handler (PreToolUse on the `Task` tool) injects this
+contract at dispatch time when a prompt does not already declare it; the
+`subagent_report_size_blocker` handler (SubagentStop) blocks an oversized
+final message until it is re-routed through a file. Work that is NOT plan
+work should instead declare an explicit destination (falling back to
+`untracked/agent-reports/` when none is given).
+
+`subagent-reports/` is a recognised plan-folder member for plan QA purposes —
+its presence never triggers a stray-file or unexpected-content finding.
 
 ### Plan Numbering
 

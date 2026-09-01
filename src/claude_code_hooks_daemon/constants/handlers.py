@@ -446,6 +446,21 @@ class HandlerID:
         config_key="global_npm_advisor",
         display_name="advise-global-npm",
     )
+    # Dispatch-declaration handler (PreToolUse on Agent/Task) -- Plan 00307
+    # Task 2.1: injects/enforces the file-handoff report-location contract
+    # at dispatch time (advisory by default; strict mode denies).
+    DISPATCH_DECLARATION = HandlerIDMeta(
+        class_name="DispatchDeclarationHandler",
+        config_key="dispatch_declaration",
+        display_name="dispatch-declaration",
+    )
+    # SubagentStop report-size blocker -- Plan 00307 Task 3.1: blocks an
+    # oversized subagent final message until it is re-routed through a file.
+    SUBAGENT_REPORT_SIZE_BLOCKER = HandlerIDMeta(
+        class_name="SubagentReportSizeBlockerHandler",
+        config_key="subagent_report_size_blocker",
+        display_name="subagent-report-size-blocker",
+    )
     COMMAND_HINTS = HandlerIDMeta(
         class_name="CommandHintsHandler",
         config_key="command_hints",

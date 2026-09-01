@@ -87,6 +87,10 @@ class Priority:
     AUTO_CONTINUE_STOP = 15
     WORKTREE_FILE_COPY = 15
     PIPE_BLOCKER = 15
+    # Plan 00307 Task 3.1: SubagentStop size blocker -- same safety band as
+    # its Stop-event sibling AUTO_CONTINUE_STOP, the only other handler
+    # currently registered on the blocking Stop-family events.
+    SUBAGENT_REPORT_SIZE_BLOCKER = 15
 
     GIT_CONTEXT_INJECTOR = 20
     GIT_BRANCH = 20
@@ -198,6 +202,11 @@ class Priority:
     # sharing priority 44 -- both trigger on disjoint tool shapes (Write/Edit
     # vs git-commit Bash), so a shared priority never collides in practice.
     DOCS_QA_COMMIT_GATE = 47
+
+    # Plan 00307 Task 2.1: workflow-band advisory/strict gate on Agent/Task
+    # dispatch prompts -- sits after the docs_qa pair (47) and before
+    # npm_command (50), a sibling gate on a disjoint tool shape (Task).
+    DISPATCH_DECLARATION = 48
 
     NPM_COMMAND = 50
     VALIDATE_INSTRUCTION_CONTENT = 50

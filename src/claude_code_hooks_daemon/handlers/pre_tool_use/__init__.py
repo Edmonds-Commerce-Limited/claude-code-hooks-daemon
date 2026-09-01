@@ -8,6 +8,7 @@ from .comment_changelog import CommentChangelogHandler
 from .comment_size import CommentSizeHandler
 from .daemon_location_guard import DaemonLocationGuardHandler
 from .destructive_git import DestructiveGitHandler
+from .dispatch_declaration import DispatchDeclarationHandler
 from .error_hiding_blocker import ErrorHidingBlockerHandler
 from .flaggable_content_channel_guard import FlaggableContentChannelGuardHandler
 from .flaggable_work_advisor import FlaggableWorkAdvisorHandler
@@ -43,6 +44,7 @@ __all__ = [
     "CommentSizeHandler",
     "DaemonLocationGuardHandler",
     "DestructiveGitHandler",
+    "DispatchDeclarationHandler",
     "ErrorHidingBlockerHandler",
     "FlaggableContentChannelGuardHandler",
     "FlaggableWorkAdvisorHandler",

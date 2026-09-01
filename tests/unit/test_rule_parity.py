@@ -332,6 +332,15 @@ _DENY_WITHOUT_RULES_ALLOWLIST: dict[str, str] = {
         "guards against a non-read tool reaching handle() by a path matches() "
         "does not permit today — not a live blocking rule with a table entry."
     ),
+    "DispatchDeclarationHandler": (
+        "Plan 00307: a single opt-in strict-mode DENY branch (declaration "
+        "absent), disabled by default — not a disclosure-ladder table with "
+        "multiple concepts to distinguish."
+    ),
+    "SubagentReportSizeBlockerHandler": (
+        "Plan 00307: a single DENY branch (message over threshold) with no "
+        "other concept to distinguish — not a disclosure-ladder table."
+    ),
 }
 
 

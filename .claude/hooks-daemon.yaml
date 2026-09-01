@@ -460,6 +460,13 @@ handlers:
       enabled: true
       priority: 46
 
+    dispatch_declaration:  # Advises a file-handoff declaration on Task dispatch (Plan 00307)
+      enabled: true
+      priority: 48
+      options:
+        strict: false
+        fallback_report_dir: "untracked/agent-reports/"
+
     gh_issue_comments:     # Requires --comments flag for gh issue view
       enabled: true
       priority: 40
@@ -716,11 +723,15 @@ handlers:
   # The section stays so SessionEnd remains a declared, dispatchable event.
   session_end: {}
 
-  # SubagentStop handlers — none ship today. Both were removed in Plan 00237:
-  # `subagent_completion_logger` wrote a JSONL nothing read, and
-  # `remind_prompt_library` advised an npm script and a docs directory that do
-  # not exist. The section stays so SubagentStop remains a dispatchable event.
-  subagent_stop: {}
+  # SubagentStop handlers. Both Plan 00237 removals (`subagent_completion_logger`,
+  # `remind_prompt_library`) stay gone; Plan 00307 Task 3.1 adds the first live
+  # handler back onto this event.
+  subagent_stop:
+    subagent_report_size_blocker:  # Blocks an oversized subagent final message
+      enabled: true
+      priority: 15
+      options:
+        threshold_chars: 4000
 
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:

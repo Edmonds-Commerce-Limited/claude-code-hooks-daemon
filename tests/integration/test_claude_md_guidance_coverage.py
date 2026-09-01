@@ -140,6 +140,12 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "WorktreeFileCopyHandler": "T1 denies copying across worktree boundaries",
     "AutoContinueStopHandler": "T1 denies a stop with no declared reason",
     "AutoApproveReadsHandler": "T1 decides a permission request outright",
+    "SubagentReportSizeBlockerHandler": "T1 denies an oversized SubagentStop return",
+    "DispatchDeclarationHandler": (
+        "T1 strict mode denies an undeclared Task dispatch; the fire-time "
+        "additionalContext alone would not teach the standing filename "
+        "convention the fallback dir needs before the first dispatch"
+    ),
     # -- Test 2: the advice is too late for the call it fires on ---------
     "AgentIsolationAdvisorHandler": "T2 the isolation argument is already set",
     "DaemonRestartVerifierHandler": "T2 fires on the commit the restart should precede",

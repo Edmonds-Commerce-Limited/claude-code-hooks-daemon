@@ -73,7 +73,7 @@ threshold/steering design thinking where it fits.
 
 ### Phase 2: Prevention at dispatch (PreToolUse on Agent)
 
-- [ ] ⬜ **Task 2.1**: TDD a PreToolUse handler on the `Agent` tool
+- [x] ✅ **Task 2.1**: TDD a PreToolUse handler on the `Agent` tool
   enforcing a dispatch declaration (owner-ruled): every dispatch prompt
   must EITHER name the plan folder the agent is working in — which then IS
   the canonical location for its reports and other artefacts — OR
@@ -85,7 +85,7 @@ threshold/steering design thinking where it fits.
   message is summary + path. Fallback location for genuinely plan-less
   work: configurable, default `untracked/agent-reports/`. Enable in this
   repo (dogfood).
-- [ ] ⬜ **Task 2.2** (owner-ruled): standardise WHERE and WHAT NAME.
+- [x] ✅ **Task 2.2** (owner-ruled): standardise WHERE and WHAT NAME.
   Reports live in a standard `subagent-reports/` subfolder of the declared
   plan folder (created on demand; plan-less work uses the fallback
   directory), with a standard filename `{yymmdd}-{agent-name}-{model}.md`
@@ -97,12 +97,12 @@ threshold/steering design thinking where it fits.
 
 ### Phase 3: Enforcement at return (SubagentStop)
 
-- [ ] ⬜ **Task 3.1**: TDD a SubagentStop handler that measures the
+- [x] ✅ **Task 3.1**: TDD a SubagentStop handler that measures the
   subagent's final message and, above the configured threshold, blocks the
   stop with remediation: "write the full report to a file under the report
   directory; reply with a short summary + path". Fail-open on any
   transcript-read failure. Threshold from Task 1.1's findings.
-- [ ] ⬜ **Task 3.2**: Wire-up completeness: HandlerID/Priority, `__init__`
+- [x] ✅ **Task 3.2**: Wire-up completeness: HandlerID/Priority, `__init__`
   export, config template + example, drift-guard set, docs (CLAUDE.md
   handler guidance regeneration), explain-handler text. Note SubagentStop
   wiring status in `constants/events.py` — if the event is currently

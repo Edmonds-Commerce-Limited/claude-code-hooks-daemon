@@ -240,6 +240,13 @@ handlers:
       enabled: false          # Enable if you dispatch concurrent agents
       priority: 46
 
+    dispatch_declaration:  # Advises/enforces a file-handoff declaration on Task dispatch
+      enabled: false        # Enable to prevent oversized inline subagent reports
+      priority: 48
+      options:
+        strict: false                        # true denies an undeclared dispatch instead of advising
+        fallback_report_dir: "untracked/agent-reports/"  # used when a dispatch is genuinely plan-less
+
     gh_issue_comments:     # Requires --comments flag for gh issue view
       enabled: true
       priority: 40
@@ -552,6 +559,13 @@ handlers:
     auto_continue_stop:  # Auto-continues after stop events based on criteria
       enabled: true
       priority: 10
+
+  subagent_stop:
+    subagent_report_size_blocker:  # Blocks an oversized subagent final message
+      enabled: false               # Enable to route large subagent reports through a file
+      priority: 15
+      options:
+        threshold_chars: 4000
 
   # Status line handlers (format daemon-based status display)
   status_line:

@@ -225,8 +225,19 @@ SUBAGENT_STOP_INPUT_SCHEMA: Final[dict[str, Any]] = {
     "properties": {
         **_BASE_PROPERTIES,
         "hook_event_name": {"const": "SubagentStop"},
+        # Plan 00307 Task 3.1: the vendored contract (v2.1.252,
+        # contracts/claude-code-hooks/SubagentStop.json) names agent_id/
+        # agent_type/agent_transcript_path/last_assistant_message, not the
+        # subagent_id/subagent_type this schema previously declared. Both
+        # sets are kept (additionalProperties: True already let the real
+        # fields through unvalidated) rather than dropping the stale ones,
+        # since a caller may still be relying on their presence.
         "subagent_id": {"type": "string"},
         "subagent_type": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "agent_type": {"type": "string"},
+        "agent_transcript_path": {"type": "string"},
+        "last_assistant_message": {"type": "string"},
     },
     "additionalProperties": True,
 }

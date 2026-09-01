@@ -1,10 +1,12 @@
 """SubagentStop handlers for claude-code-hooks-daemon.
 
-Empty since Plan 00237. ``subagent_completion_logger`` appended to a JSONL log
-nothing read; ``remind_prompt_library`` unconditionally advised running
-``npm run llm:prompts`` and reading ``CLAUDE/PromptLibrary/README.md``, neither
-of which exists in this repository. The package stays so SubagentStop remains a
-registered, dispatchable event with a home for future handlers.
+Empty from Plan 00237 until Plan 00307 Task 3.1 dropped in
+``SubagentReportSizeBlockerHandler`` — its predecessors
+(``subagent_completion_logger``, ``remind_prompt_library``) were removed for
+appending to a log nothing read and unconditionally advising a command/doc
+that does not exist in this repository.
 """
 
-__all__: list[str] = []
+from .subagent_report_size_blocker import SubagentReportSizeBlockerHandler
+
+__all__: list[str] = ["SubagentReportSizeBlockerHandler"]
