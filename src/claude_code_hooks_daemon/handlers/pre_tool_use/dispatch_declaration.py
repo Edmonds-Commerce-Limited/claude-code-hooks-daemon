@@ -167,7 +167,7 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="Task dispatch without a file-handoff declaration",
-                command='Use the Agent tool to dispatch a subagent with a prompt that names '
+                command="Use the Agent tool to dispatch a subagent with a prompt that names "
                 "neither a plan folder nor a non-plan-work destination",
                 description=(
                     "Injects the file-handoff contract as additionalContext "

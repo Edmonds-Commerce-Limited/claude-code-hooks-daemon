@@ -6559,9 +6559,7 @@ def main() -> int:
         type=Path,
         help="Project root for state resolution (trusted as-is; auto-detected by default)",
     )
-    parser_record_config_optimisation_run.set_defaults(
-        func=cmd_record_config_optimisation_run
-    )
+    parser_record_config_optimisation_run.set_defaults(func=cmd_record_config_optimisation_run)
 
     # transport-probe (Plan 00290) — relay/nc rung availability, read-only
     parser_transport_probe = subparsers.add_parser(

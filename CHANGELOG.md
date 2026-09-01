@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Subagent file-based report handoff (Plan 00307).** A live reproduction
+  proved the harness silently elides the MIDDLE of an oversized subagent
+  final message (both start/end sentinels survive, so a coordinator can
+  receive what looks like a complete report while content is missing). Two
+  new handlers enforce the fix: `dispatch_declaration` (PreToolUse on
+  `Task`, advisory by default, opt-in `strict` mode) injects a file-handoff
+  contract when a dispatch prompt names neither a plan folder nor an
+  explicit non-plan-work destination; `subagent_report_size_blocker`
+  (SubagentStop — the first handler back on this event since Plan 00237)
+  denies a stop whose `last_assistant_message` exceeds a configurable
+  character threshold (default 4,000) and prescribes a concrete,
+  always-writable fallback path. Both ship enabled by default. New
+  `subagent-reports/{yymmdd}-{agent-name}-{model}.md` convention documented
+  in `PlanWorkflow.md`/`DirectoryRoles.md` and recognised by plan QA.
+- **Per-language `lint_on_edit` extended-lint timeouts (Plan 00309).** The
+  previously hardcoded 15-second budget for slower linters (e.g. cold
+  `phpstan` runs) is now configurable per language, fixing a field report of
+  silently-allowed timeouts on first-run static analysis.
+- **`/optimise` formalised as the post-upgrade config-optimisation step,
+  autorun after upgrade (Plan 00308).** A new `config_optimisation_reminder`
+  advisory prompts running `/optimise` after an upgrade instead of relying
+  on a repeated manual reminder.
+- **Plan README age-out (Plan 00310).** The main plan index now retains only
+  the 30 highest-numbered completed rows; older rows move verbatim into
+  `CLAUDE/Plan/Completed/README.md`, keeping the index under its
+  navigability size ceiling as the completed-plan count grows.
+
+### Fixed
+
+- **`secret_file_guard` Bash-mention false positive and hygiene fixes
+  (Plan 00306).** `git rm --cached` on a protected path is now exempted
+  from the Bash-mention block; registry roots are iterated for secret
+  redaction status; dead code and POSIX bracket-handling bugs fixed.
+
+### Changed
+
+- **Vendored Claude Code hooks contract refreshed to v2.1.252.** Updates the
+  `contracts/claude-code-hooks/` snapshot the daemon validates hook payloads
+  against, including the `SubagentStop` schema fields
+  (`last_assistant_message`, `agent_id`, `agent_type`, `agent_transcript_path`)
+  consumed by the new `subagent_report_size_blocker` handler above.
+
 ## [3.58.1] - 2026-09-01
 
 ### Fixed

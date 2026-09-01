@@ -67,9 +67,7 @@ class TestMatching:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls"}}
         assert handler.matches(hook_input) is False
 
-    def test_does_not_match_task_without_prompt(
-        self, handler: DispatchDeclarationHandler
-    ) -> None:
+    def test_does_not_match_task_without_prompt(self, handler: DispatchDeclarationHandler) -> None:
         hook_input = {"tool_name": "Task", "tool_input": {}}
         assert handler.matches(hook_input) is False
 

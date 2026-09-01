@@ -1,0 +1,46 @@
+version: "UNRELEASED"
+date: "UNRELEASED"
+breaking: false
+upgrade_guide: null
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.dispatch_declaration
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PreToolUse handler on the `Task` tool (Plan 00307): advises
+        (default) or, in opt-in `strict` mode, denies a subagent dispatch
+        whose prompt declares neither a plan folder nor an explicit
+        "not plan work" + destination. Carries the file-handoff contract
+        that pairs with `subagent_report_size_blocker` below. Ships
+        enabled by default (advisory, non-strict) — this is a universal
+        harness-safety behaviour, not project-specific configuration, the
+        same rationale `secret_file_guard` ships on for.
+      migration_note: >-
+        No action needed to receive the advisory. Set
+        `handlers.pre_tool_use.dispatch_declaration.enabled: false` to opt
+        out, or `options.strict: true` to deny undeclared dispatches
+        outright once your team's dispatch prompts are compliant.
+    - key: handlers.subagent_stop.subagent_report_size_blocker
+      recommended: true
+      dormant: false
+      description: >-
+        NEW SubagentStop handler (Plan 00307 — the first handler back on
+        this event since Plan 00237): denies a subagent stop whose
+        `last_assistant_message` exceeds `options.threshold_chars`
+        (default 4,000), prescribing a concrete fallback path
+        (`untracked/agent-reports/{yymmdd}-{agent-name}-{model}.md`) for
+        the full report. A live reproduction (`REPRODUCTION.md` in the
+        plan folder) proved the harness silently elides the MIDDLE of an
+        oversized inline subagent return, so this cannot be caught
+        coordinator-side. Fails open on any missing/malformed
+        `last_assistant_message`. Ships enabled by default for the same
+        reason as `dispatch_declaration` above.
+      migration_note: >-
+        No action needed to receive enforcement. Set
+        `handlers.subagent_stop.subagent_report_size_blocker.enabled: false`
+        to opt out, or tune `options.threshold_chars` /
+        `options.fallback_report_dir` to your project's conventions.
+  renamed: []
+  removed: []
+  changed: []

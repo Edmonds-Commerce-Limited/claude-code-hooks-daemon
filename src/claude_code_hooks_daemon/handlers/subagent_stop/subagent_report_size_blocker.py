@@ -90,8 +90,8 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         """
         yymmdd = datetime.now(tz=UTC).strftime("%y%m%d")
         agent_type = hook_input.get("agent_type")
-        agent_name = agent_type if isinstance(agent_type, str) and agent_type else (
-            _AGENT_NAME_PLACEHOLDER
+        agent_name = (
+            agent_type if isinstance(agent_type, str) and agent_type else (_AGENT_NAME_PLACEHOLDER)
         )
         return f"{self._fallback_report_dir}{yymmdd}-{agent_name}-{_MODEL_PLACEHOLDER}.md"
 

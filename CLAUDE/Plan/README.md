@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00307: subagent file based report handoff](00307-subagent-file-based-report-handoff/PLAN.md) - In Progress (subagents hand over large data by file, never inline; both enforcement handlers live at 5f674028, GREEN acceptance re-run pending)
-
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 
 - [00293: tool inventory disable and token savings](00293-tool-inventory-disable-and-token-savings/PLAN.md) - Not Started (disable-at-source for never-wanted tools instead of fighting them with hooks, transcript-scanning analyser for never-used tools, tools-vs-tokens report with the decision left to projects; dogfood here)
@@ -168,6 +166,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00307: subagent file based report handoff](Completed/00307-subagent-file-based-report-handoff/PLAN.md) - Complete (dispatch_declaration + subagent_report_size_blocker handlers, both enabled by default; three live probe runs proved RED truncation, GREEN blocked+re-routed, third-run full convention compliance; owner called time on passive multi-session soak)
+
 - [00309: lint on edit per language timeout](Completed/00309-lint-on-edit-per-language-timeout/PLAN.md) - Complete at 373db1f9, merged at 6ca8bf79 (per-language `options.timeouts.<Language>` for lint_on_edit; fail-open kept, fired timeouts now name the language, budget and config key)
 
 - [00308: post upgrade config optimisation autorun](Completed/00308-post-upgrade-config-optimisation-autorun/PLAN.md) - Complete at 022dbcea (merged) (/optimise promoted as the canonical config-optimisation step with manifest-diff + run recording; upgrade/install flows invoke it with `--skip-config-optimisation` opt-out; `config_optimisation_reminder` SessionStart safety net)
@@ -220,8 +220,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00279: generic agent install subsystem](Completed/00279-generic-agent-install-subsystem/PLAN.md) - Complete at merges `6679da75` + `3abbc809` + the archiving commit (first-class daemon-shipped agent deployment: version + md5 ledger, customisation detection that never clobbers, config-gated deploy/remove lifecycle, `hooks-daemon agents` CLI; payloads: plan-dedupe scout migration + the opus-security quarantine agent v1.1.0)
 
-- [00274: skill opportunity detector](Completed/00274-skill-opportunity-detector/PLAN.md) - Complete at the archiving commit (transcript mining → redacted digest → report embedding a judging rubric; an in-session subagent judges it — the model shell-out was removed per Decision 9; TTL-gated SessionStart advisory, report-only, ships disabled upstream)
-
 - [00276: goal stack concurrent tracking](Completed/00276-goal-stack-concurrent-tracking/PLAN.md) - Complete at merge `74fa6e50` + the archiving commit (daemon-side goal ledger: every emission recorded, displacement advisory, Stop-time defence naming all still-live ledgered plans; live-verified by the production ledger's six-emission displacement history)
 
 - [00277: release acceptance findings v3 55 0](Completed/00277-release-acceptance-findings-v3-55-0/PLAN.md) - Complete at `ebf7016a` + the archiving commit (all v3.55.0 gate findings closed: per-session block_once with session-attributed HandlerDecisionRecord, isolation-advisor test precondition, lint-clean error-hiding samples, validate_eslint_on_write deny branch verified live in the client fixture)
@@ -267,9 +265,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 310 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 256 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 257 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 38 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 

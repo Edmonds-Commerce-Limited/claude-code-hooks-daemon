@@ -241,7 +241,7 @@ handlers:
       priority: 46
 
     dispatch_declaration:  # Advises/enforces a file-handoff declaration on Task dispatch
-      enabled: false        # Enable to prevent oversized inline subagent reports
+      enabled: true          # On by default (Plan 00307 Task 4.3); set false to opt out
       priority: 48
       options:
         strict: false                        # true denies an undeclared dispatch instead of advising
@@ -569,7 +569,7 @@ handlers:
 
   subagent_stop:
     subagent_report_size_blocker:  # Blocks an oversized subagent final message
-      enabled: false               # Enable to route large subagent reports through a file
+      enabled: true                 # On by default (Plan 00307 Task 4.3); set false to opt out
       priority: 15
       options:
         threshold_chars: 4000
