@@ -202,6 +202,31 @@ class TestConfigValidatorValidate:
         error_text = " ".join(result.errors).lower()
         assert "request_timeout" in error_text or "timeout" in error_text
 
+    def test_agrees_with_daemon_startup_on_business_rule_errors(self) -> None:
+        """Plan 00304: `config-validate` must reach the SAME verdict as the
+        daemon's own startup validation path.
+
+        A real-repo canary found `config-validate` reporting `{"valid": true}`
+        for a config file the DAEMON degrades on at startup -- this validator
+        only ran the Pydantic schema, silently skipping the business-rule
+        checks in `config.validator.ConfigValidator` (e.g. the Plan 00300
+        removed-`monorepo_subproject_patterns` hard cutover with a REAL,
+        non-empty pattern list)."""
+        config = {
+            "version": "1.0",
+            "handlers": {
+                "pre_tool_use": {
+                    "markdown_organization": {
+                        "enabled": True,
+                        "options": {"monorepo_subproject_patterns": ["packages/api"]},
+                    },
+                }
+            },
+        }
+        result = self.validator.validate(config)
+        assert result.valid is False
+        assert any("monorepo_subproject_patterns" in error for error in result.errors)
+
 
 class TestValidationResultGuidanceWithWarnings:
     """Test guidance output with warnings."""

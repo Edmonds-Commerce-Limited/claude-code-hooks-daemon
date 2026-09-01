@@ -18,7 +18,7 @@ from claude_code_hooks_daemon.core.chain import ChainExecutionResult
 from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 from claude_code_hooks_daemon.core.data_layer import get_data_layer
 from claude_code_hooks_daemon.core.event import EventType, HookEvent
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.mode import ModeManager
 from claude_code_hooks_daemon.core.mode_interceptor import get_interceptor_for_mode
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -715,6 +715,56 @@ class DaemonController:
             )
 
     @staticmethod
+    def _degraded_mode_safety_net(event: HookEvent) -> HookResult | None:
+        """Run the destructive-command guard family even while degraded.
+
+        Plan 00304 (real-repo canary, LongTermSupport/php-qa-ci): a bad
+        HANDLER OPTION -- unrelated to whether a command is destructive --
+        must not silently disable the destructive-git guard. This handler
+        needs no config (it hard-codes its own patterns), so it is safe to
+        run outside the normal, config-dependent handler chain.
+
+        Only PreToolUse can carry a deny on the wire (Plan 00271's tiering),
+        so this is a no-op for every other event.
+
+        Args:
+            event: The hook event being processed while degraded.
+
+        Returns:
+            A deny ``HookResult`` (with degraded-mode context appended) if
+            the guard fires, else ``None`` to fall through to the ordinary
+            degraded-mode configuration-error advisory.
+        """
+        if event.event_type != EventType.PRE_TOOL_USE:
+            return None
+
+        from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import (
+            DestructiveGitHandler,
+        )
+
+        hook_input_dict = event.hook_input.model_dump(by_alias=False)
+        guard = DestructiveGitHandler()
+        if not guard.matches(hook_input_dict):
+            return None
+
+        result = guard.handle(hook_input_dict)
+        if result.decision != Decision.DENY:
+            return None
+
+        return result.model_copy(
+            update={
+                "context": [
+                    *result.context,
+                    "",
+                    "NOTE: The hooks daemon is running in DEGRADED MODE (invalid "
+                    "configuration) -- this destructive-command guard still ran "
+                    "because it does not depend on config. Other handlers may not "
+                    "be active. Fix the configuration and restart the daemon.",
+                ]
+            }
+        )
+
+    @staticmethod
     def _init_mode_manager(config: "DaemonConfig | None") -> ModeManager:
         """Initialize ModeManager from config.
 
@@ -779,8 +829,20 @@ class DaemonController:
         if not self._initialised:
             self.initialise()
 
-        # In degraded mode, return config error for every request
+        # In degraded mode, run the config-independent destructive-command
+        # safety net first (Plan 00304): a CONFIG VALIDATION failure says
+        # nothing about whether a destructive git command is safe, so
+        # blanket fail-open here was a real gap (a real-repo canary caught
+        # `git reset --hard` sailing through unblocked). Everything else
+        # still gets the config-error advisory (fail-open remains the
+        # design for ordinary handlers -- see PLAN.md for the rationale).
         if self._degraded:
+            safety_net_result = self._degraded_mode_safety_net(event)
+            if safety_net_result is not None:
+                return ChainExecutionResult(
+                    result=safety_net_result,
+                    execution_time_ms=0.0,
+                )
             config_error_result = HookResult.configuration_error(self._config_errors)
             return ChainExecutionResult(
                 result=config_error_result,
