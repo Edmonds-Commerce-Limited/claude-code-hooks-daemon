@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import LayoutConfig
 from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegistry
 from claude_code_hooks_daemon.handlers.pre_tool_use.tdd_enforcement import (
     _DEFAULT_TEST_LOCATIONS,
@@ -2001,3 +2002,119 @@ class TestTddEnforcementDisclosureLadder:
         second = handler.handle(self._hook_input(None))
         assert "PHILOSOPHY" in first.reason
         assert "PHILOSOPHY" in second.reason
+
+
+class TestPerProjectLayoutRouting:
+    """Plan 00300: matches() routes through the file's OWNING project's
+    layout, via `resolve_layout` — never blindly the root `_project_layout`.
+
+    A declared project without its own `layout:` uses built-in defaults for
+    ITS root, not the root project's declared lists (no leaking).
+    """
+
+    @staticmethod
+    def _write(file_path: Path) -> dict:
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(file_path)},
+        }
+
+    def test_declared_projects_own_layout_source_dirs_gates_tdd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """'backend' is not in Python's own inferred source dirs -- only the
+        sub-project's OWN declared `layout.source_dirs` makes it match."""
+        import claude_code_hooks_daemon.core.project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: tmp_path), raising=False
+        )
+
+        handler = TddEnforcementHandler()
+        handler._project_registry = ProjectRegistry(
+            project_root=tmp_path,
+            projects=(
+                DeclaredProject(
+                    name="api",
+                    root=tmp_path / "apps" / "api",
+                    layout=LayoutConfig(source_dirs=["backend"]),
+                ),
+            ),
+        )
+
+        rule = tmp_path / "apps" / "api" / "backend" / "my_module.py"
+        assert handler.matches(self._write(rule)) is True
+
+    def test_declared_project_without_own_layout_does_not_inherit_the_roots(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The ROOT's declared `layout.source_dirs` must not leak into a
+        sub-project that declares no `layout:` of its own."""
+        import claude_code_hooks_daemon.core.project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: tmp_path), raising=False
+        )
+
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler = TddEnforcementHandler()
+        handler._project_layout = ProjectLayout(
+            source_dirs=("root-only-src",),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+        handler._project_registry = ProjectRegistry(
+            project_root=tmp_path,
+            projects=(DeclaredProject(name="api", root=tmp_path / "apps" / "api"),),
+            root_layout=handler._project_layout,
+        )
+
+        rule = tmp_path / "apps" / "api" / "root-only-src" / "my_module.py"
+        assert handler.matches(self._write(rule)) is False
+
+    def test_path_outside_every_declared_project_still_uses_the_root_layout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import claude_code_hooks_daemon.core.project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: tmp_path), raising=False
+        )
+
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler = TddEnforcementHandler()
+        root_layout = ProjectLayout(
+            source_dirs=("root-src",),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+        handler._project_layout = root_layout
+        handler._project_registry = ProjectRegistry(
+            project_root=tmp_path,
+            projects=(
+                DeclaredProject(
+                    name="api",
+                    root=tmp_path / "apps" / "api",
+                    layout=LayoutConfig(source_dirs=["backend"]),
+                ),
+            ),
+            root_layout=root_layout,
+        )
+
+        rule = tmp_path / "root-src" / "my_module.py"
+        assert handler.matches(self._write(rule)) is True

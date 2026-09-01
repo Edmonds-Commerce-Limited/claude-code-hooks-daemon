@@ -63,9 +63,9 @@ _RULE_WRONG_LOCATION = Rule(
         "NEED A DIFFERENT LOCATION? Configure in .claude/hooks-daemon.yaml:\n"
         "- allowed_markdown_paths: add regex patterns for extra allowed paths\n"
         "- projects: declare a sub-project (with its own docs/, CLAUDE/, etc.) "
-        "as a `projects:` entry (see CLAUDE/Code/WorkspaceResolution.md). "
-        "monorepo_subproject_patterns is a deprecated alias, kept for "
-        "backward compatibility."
+        "as a `projects:` entry (see CLAUDE/Code/WorkspaceResolution.md). This "
+        "is the ONLY sub-project mechanism -- monorepo_subproject_patterns was "
+        "removed (Plan 00300 hard cutover)."
     ),
 )
 
@@ -224,9 +224,6 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         self._track_plans_in_project: str | None = None  # Path to plan folder or None
         self._plan_workflow_docs: str | None = None  # Path to workflow doc or None
         self._enforce_claude_code_sync: bool = False  # Enforce plansDirectory sync
-        self._monorepo_subproject_patterns: list[str] | None = (
-            None  # Regex patterns for sub-projects
-        )
         self._allowed_markdown_paths: list[str] | None = None  # Regex patterns for allowed paths
         # Additive allowed paths: layered ON TOP of built-ins OR the legacy override
         self._extra_allowed_markdown_paths: list[str] | None = None
@@ -353,37 +350,6 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         return bool(
             re.match(r"^src/pages/articles/.*/article-[^/]+\.md$", normalized, re.IGNORECASE)
         )
-
-    def strip_monorepo_prefix(self, normalized_path: str) -> str | None:
-        """Strip monorepo sub-project prefix from a normalized path.
-
-        DEPRECATED ALIAS (Plan 00296): declared `projects:` config
-        (`_declared_subproject_relative`) is the primary mechanism for
-        sub-project resolution; this regex-pattern option is checked
-        second and unioned in for backward compatibility. Prefer
-        declaring the sub-project as a `projects:` entry in
-        `.claude/hooks-daemon.yaml`.
-
-        If the path matches a configured monorepo sub-project pattern,
-        returns the path relative to the sub-project root. Otherwise
-        returns None (no match).
-
-        Args:
-            normalized_path: Already-normalized file path (no leading slash)
-
-        Returns:
-            Sub-project-relative path, or None if no pattern matches
-        """
-        if not self._monorepo_subproject_patterns:
-            return None
-
-        for pattern in self._monorepo_subproject_patterns:
-            # Pattern must match at the start of the path followed by /
-            match = re.match(rf"^({pattern})/(.+)$", normalized_path)
-            if match:
-                return match.group(2)
-
-        return None
 
     def _declared_subproject_relative(self, normalized_path: str) -> str | None:
         """Strip a DECLARED `projects:` sub-project root from a normalized path.
@@ -1018,14 +984,10 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         if dep_relative is not None:
             return self._is_invalid_location(dep_relative)
 
-        # Check sub-project paths: declared `projects:` config is checked
-        # FIRST (Plan 00296, primary mechanism); the deprecated
-        # monorepo_subproject_patterns regex alias is checked second and
-        # unioned in for backward compatibility. Strip whichever matched
-        # and validate the remainder.
-        subproject_relative = self._declared_subproject_relative(
-            normalized
-        ) or self.strip_monorepo_prefix(normalized)
+        # Check sub-project paths: declared `projects:` config (Plan 00296)
+        # is the ONLY sub-project resolution mechanism (Plan 00300 hard
+        # cutover removed the monorepo_subproject_patterns regex alias).
+        subproject_relative = self._declared_subproject_relative(normalized)
         if subproject_relative is not None:
             # Path is within a declared or pattern-configured sub-project.
             # Apply the same organization rules to the sub-project-relative path.
@@ -1326,9 +1288,9 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             "If your project has sub-projects with their own `docs/`, `CLAUDE/`, etc., "
             "declare each one as a `projects:` entry in `.claude/hooks-daemon.yaml` "
             "(see `CLAUDE/Code/WorkspaceResolution.md`) so normal rules apply within "
-            "each sub-project. `monorepo_subproject_patterns` is a **deprecated "
-            "alias** — its regex patterns still work (unioned in), but `projects:` "
-            "is the primary mechanism and projects are DECLARED, never inferred."
+            "each sub-project. This is the ONLY sub-project mechanism — projects are "
+            "DECLARED, never inferred. `monorepo_subproject_patterns` was removed "
+            "(Plan 00300 hard cutover) and is now a hard config-validation error."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

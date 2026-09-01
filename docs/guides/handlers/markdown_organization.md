@@ -22,7 +22,6 @@ handlers:
         plan_workflow_docs: "CLAUDE/PlanWorkflow.md"
         # extra_allowed_markdown_paths: [...]   # additive over built-ins (preferred)
         # allowed_markdown_paths: [...]         # full override (legacy)
-        # monorepo_subproject_patterns: [...]
 ```
 
 ## Options
@@ -33,7 +32,10 @@ handlers:
 | `plan_workflow_docs`           | `string \| null`       | `null`  | Path to workflow doc referenced in redirect context.                                                                                                                     |
 | `extra_allowed_markdown_paths` | `list[string] \| null` | `null`  | Regex patterns ADDED to the allowed locations. **Additive** — layered on top of the built-in defaults (or the override, if set). Preferred way to allow extra locations. |
 | `allowed_markdown_paths`       | `list[string] \| null` | `null`  | Regex patterns for allowed locations. **Overrides ALL built-in paths when set.** Legacy; prefer `extra_allowed_markdown_paths` for simple additions.                     |
-| `monorepo_subproject_patterns` | `list[string] \| null` | `null`  | Regex patterns matching sub-project root directories.                                                                                                                    |
+
+> **Removed (Plan 00300)**: `monorepo_subproject_patterns`. Its presence in
+> config is now a **hard startup error** — see [Sub-projects](#sub-projects)
+> below.
 
 ## Built-in Allowed Paths
 
@@ -85,18 +87,30 @@ Only paths matching at least one pattern are allowed; everything else is blocked
 
 > **Prefer `extra_allowed_markdown_paths`.** A full override must be kept in sync with upstream defaults forever — every new built-in location (e.g. `.claude/skills/`) silently fails to apply until you copy it in. If you only need to *add* a location, use the additive option instead.
 
-## Monorepo Support
+## Sub-projects
 
-Set `monorepo_subproject_patterns` to recognise sub-project directories. Matched paths have their prefix stripped before path rules apply.
+Sub-projects are **declared**, never inferred, via the top-level `projects:`
+config block — see
+[`CLAUDE/Code/WorkspaceResolution.md`](../../../CLAUDE/Code/WorkspaceResolution.md)
+for the full contract. This is the **only** sub-project mechanism: a matched
+path has its declared root's prefix stripped before path rules apply.
 
 ```yaml
-options:
-  monorepo_subproject_patterns:
-    - "packages/[^/]+"   # packages/frontend/, packages/backend/
-    - "apps/[^/]+"       # apps/web/, apps/mobile/
+projects:
+  - name: frontend
+    root: packages/frontend
+  - name: backend
+    root: packages/backend
 ```
 
-## Monorepo + Custom Paths Interaction
+The removed `monorepo_subproject_patterns` regex-pattern option (Plan 00300
+hard cutover) has no replacement config shape to copy-paste blind — each
+declared root names one real directory, not a regex shape. **Loading a
+config that still sets it is a hard startup error**; the error message
+prints the equivalent `projects:` block derived mechanically from any
+literal (non-wildcard) pattern.
+
+## Sub-project + Custom Paths Interaction
 
 Custom `allowed_markdown_paths` patterns match against the **sub-project-relative path** (after prefix stripping). This means the same rules apply uniformly to root and all sub-projects.
 
@@ -108,7 +122,7 @@ Custom `allowed_markdown_paths` patterns match against the **sub-project-relativ
 
 ### Gotcha
 
-A pattern like `^packages/frontend/docs/.*` will **never match** because the monorepo prefix is already stripped before custom paths are checked. Use `^docs/.*` instead.
+A pattern like `^packages/frontend/docs/.*` will **never match** because the declared sub-project's prefix is already stripped before custom paths are checked. Use `^docs/.*` instead.
 
 This is intentional: write rules once, apply everywhere (DRY).
 
@@ -139,15 +153,19 @@ options:
 
 Result: `CLAUDE/test.md` allowed, `src/notes.md` blocked, `CLAUDE.md` always allowed.
 
-**Monorepo with shared rules:**
+**Sub-project with shared rules:**
 
 ```yaml
-options:
-  monorepo_subproject_patterns:
-    - "packages/[^/]+"
-  allowed_markdown_paths:
-    - "^docs/.*\\.md$"
-    - "^CLAUDE/.*\\.md$"
+projects:
+  - name: frontend
+    root: packages/frontend
+handlers:
+  pre_tool_use:
+    markdown_organization:
+      options:
+        allowed_markdown_paths:
+          - "^docs/.*\\.md$"
+          - "^CLAUDE/.*\\.md$"
 ```
 
 Result: Both `docs/api.md` and `packages/frontend/docs/api.md` allowed (same pattern).

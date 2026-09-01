@@ -300,12 +300,17 @@ handlers:
         # (single source of truth). Set plan_workflow.enabled: true there to
         # enable plan tracking for this handler — no per-handler option needed.
         #
-        # Monorepo support: regex patterns matching sub-project root directories.
-        # Sub-projects get the same organization rules as the root project.
-        # See docs/guides/HANDLER_REFERENCE.md -> "Monorepo Support"
-        #   monorepo_subproject_patterns:
-        #     - "packages/[^/]+"    # matches packages/frontend, packages/backend, etc.
-        #     - "apps/[^/]+"        # matches apps/web, apps/mobile, etc.
+        # Sub-project support: declared at the top-level `projects:` block, NOT
+        # here. Sub-projects get the same organization rules as the root
+        # project. See CLAUDE/Code/WorkspaceResolution.md, e.g.:
+        #   projects:
+        #     - name: frontend
+        #       root: packages/frontend
+        #     - name: backend
+        #       root: packages/backend
+        #
+        # (Removed in Plan 00300's hard cutover: `monorepo_subproject_patterns`
+        # regex patterns. Its presence in config is now a hard startup error.)
         #
         # Custom allowed markdown paths: OVERRIDES all built-in path rules.
         # Each entry is a regex matched against the project-relative path.
@@ -320,9 +325,7 @@ handlers:
         #     - "^RELEASES/.*\\.md$"                            # Release notes
         #     - "^eslint-rules/.*\\.md$"                        # ESLint rule docs
         #     - "^src/claude_code_hooks_daemon/guides/.*\\.md$" # Shipped guides
-        #     - "cluster"           # matches a single top-level sub-project folder
-        #     - "services"          # matches another top-level sub-project folder
-        monorepo_subproject_patterns: null
+        allowed_markdown_paths: null
 
     # TOOL USAGE HANDLERS (Priority 50-60)
     web_search_year:       # Fixes year in web search queries (uses current year)

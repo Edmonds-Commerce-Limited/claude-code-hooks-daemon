@@ -44,7 +44,7 @@ from claude_code_hooks_daemon.docs_qa.corpus import COMMON_VENDORED_BUILD_DIR_NA
 from claude_code_hooks_daemon.strategies.tdd.common import COMMON_TEST_DIRECTORIES
 
 if TYPE_CHECKING:
-    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.config.models import Config, LayoutConfig
 
 _MODE_REPLACE: Final[str] = "replace"
 
@@ -64,6 +64,16 @@ _BUILTIN_TEST_DIRS: Final[tuple[str, ...]] = tuple(
 _BUILTIN_SOURCE_DIRS: Final[tuple[str, ...]] = ()
 
 _BUILTIN_VENDOR_DIRS: Final[tuple[str, ...]] = tuple(COMMON_VENDORED_BUILD_DIR_NAMES)
+
+# Doc/plan axes fallbacks (Plan 00300), matching Config's own field defaults
+# (DocumentationTreesConfig.agent/human, PlanWorkflowConfig.directory,
+# PlanWorkflowQaConfig.completed_dir) -- used only when NO Config is
+# available at all (e.g. ProjectLayout.built_in_default() for a registry
+# built with no config, mirroring ProjectRegistry.single_project()).
+_DEFAULT_AGENT_DOCS_DIR: Final[str] = "CLAUDE"
+_DEFAULT_HUMAN_DOCS_DIR: Final[str] = "docs"
+_DEFAULT_PLAN_DIR: Final[str] = "CLAUDE/Plan"
+_DEFAULT_PLAN_ARCHIVE_DIRS: Final[tuple[str, ...]] = ("Completed",)
 
 
 def _merge(mode: str, declared: tuple[str, ...], builtin: tuple[str, ...]) -> tuple[str, ...]:
@@ -93,6 +103,33 @@ def _path_parts(rel_path: str) -> tuple[str, ...]:
 def _has_dir_component(rel_path: str, dirs: tuple[str, ...]) -> bool:
     """True when any segment of ``rel_path`` names one of ``dirs``."""
     return any(part in dirs for part in _path_parts(rel_path))
+
+
+def _dirs_from_layout_config(
+    layout_config: LayoutConfig | None,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], frozenset[str]]:
+    """Effective (source_dirs, test_dirs, config_dirs, vendor_dirs) for one `layout:` block.
+
+    Shared by the root project (`from_config`) and every declared project
+    (`for_project`) so the additive/replace merge rule (see `_merge`) is
+    computed in exactly one place. `layout_config=None` means "declares
+    nothing" -- additive mode over the built-ins, i.e. the built-ins
+    unchanged.
+    """
+    if layout_config is None:
+        return (
+            _BUILTIN_SOURCE_DIRS,
+            _BUILTIN_TEST_DIRS,
+            _BUILTIN_CONFIG_DIRS,
+            frozenset(_BUILTIN_VENDOR_DIRS),
+        )
+    mode = layout_config.mode
+    return (
+        _merge(mode, tuple(layout_config.source_dirs), _BUILTIN_SOURCE_DIRS),
+        _merge(mode, tuple(layout_config.test_dirs), _BUILTIN_TEST_DIRS),
+        _merge(mode, tuple(layout_config.config_dirs), _BUILTIN_CONFIG_DIRS),
+        frozenset(_merge(mode, tuple(layout_config.vendor_dirs), _BUILTIN_VENDOR_DIRS)),
+    )
 
 
 def _is_under(rel_path: str, root: str) -> bool:
@@ -161,6 +198,57 @@ class ProjectLayout:
         return _is_under(rel_path, self.plan_dir)
 
     @classmethod
+    def built_in_default(cls) -> ProjectLayout:
+        """A `ProjectLayout` with every axis at its built-in default.
+
+        Used where no `Config` is available at all (mirrors
+        `ProjectRegistry.single_project()`), and as the base every DECLARED
+        project without its own `layout:` block resolves to (Plan 00300) --
+        never the root project's own declared lists, so one project's layout
+        can never leak into another's.
+        """
+        return cls(
+            source_dirs=_BUILTIN_SOURCE_DIRS,
+            test_dirs=_BUILTIN_TEST_DIRS,
+            config_dirs=_BUILTIN_CONFIG_DIRS,
+            vendor_dirs=frozenset(_BUILTIN_VENDOR_DIRS),
+            agent_docs_dir=_DEFAULT_AGENT_DOCS_DIR,
+            human_docs_dir=_DEFAULT_HUMAN_DOCS_DIR,
+            plan_dir=_DEFAULT_PLAN_DIR,
+            plan_archive_dirs=_DEFAULT_PLAN_ARCHIVE_DIRS,
+        )
+
+    @classmethod
+    def for_project(
+        cls, layout_config: LayoutConfig | None, doc_axes: ProjectLayout
+    ) -> ProjectLayout:
+        """Build a per-DECLARED-project `ProjectLayout` (Plan 00300).
+
+        `source_dirs`/`test_dirs`/`config_dirs`/`vendor_dirs` come from this
+        project's OWN `layout:` block (or the built-in defaults when it
+        declares none) -- deliberately never from `doc_axes`' own declared
+        lists, so one project's layout can never leak into a sibling's. The
+        doc/plan axes (`agent_docs_dir`, `human_docs_dir`, `plan_dir`,
+        `plan_archive_dirs`) are not yet a per-project concept and are reused
+        from `doc_axes` (ordinarily the registry's `root_layout`).
+
+        Args:
+            layout_config: This project's own `layout:` block, or None.
+            doc_axes: Supplies the doc/plan axes only.
+        """
+        source_dirs, test_dirs, config_dirs, vendor_dirs = _dirs_from_layout_config(layout_config)
+        return cls(
+            source_dirs=source_dirs,
+            test_dirs=test_dirs,
+            config_dirs=config_dirs,
+            vendor_dirs=vendor_dirs,
+            agent_docs_dir=doc_axes.agent_docs_dir,
+            human_docs_dir=doc_axes.human_docs_dir,
+            plan_dir=doc_axes.plan_dir,
+            plan_archive_dirs=doc_axes.plan_archive_dirs,
+        )
+
+    @classmethod
     def from_config(cls, config: Config) -> ProjectLayout:
         """Compose a :class:`ProjectLayout` from the daemon's typed ``Config``.
 
@@ -169,19 +257,16 @@ class ProjectLayout:
         canonical where they are per decision D2) — the single place these
         homes are combined into one API.
         """
-        layout_config = config.layout
-        mode = layout_config.mode
         qa = config.plan_workflow.qa
         archive_dirs = tuple(
             dict.fromkeys(name for name in (qa.completed_dir, qa.cancelled_dir) if name)
         )
+        source_dirs, test_dirs, config_dirs, vendor_dirs = _dirs_from_layout_config(config.layout)
         return cls(
-            source_dirs=_merge(mode, tuple(layout_config.source_dirs), _BUILTIN_SOURCE_DIRS),
-            test_dirs=_merge(mode, tuple(layout_config.test_dirs), _BUILTIN_TEST_DIRS),
-            config_dirs=_merge(mode, tuple(layout_config.config_dirs), _BUILTIN_CONFIG_DIRS),
-            vendor_dirs=frozenset(
-                _merge(mode, tuple(layout_config.vendor_dirs), _BUILTIN_VENDOR_DIRS)
-            ),
+            source_dirs=source_dirs,
+            test_dirs=test_dirs,
+            config_dirs=config_dirs,
+            vendor_dirs=vendor_dirs,
             agent_docs_dir=config.documentation.trees.agent,
             human_docs_dir=config.documentation.trees.human,
             plan_dir=config.plan_workflow.directory,

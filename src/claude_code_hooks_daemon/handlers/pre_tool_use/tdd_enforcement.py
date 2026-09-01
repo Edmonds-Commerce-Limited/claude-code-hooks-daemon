@@ -21,7 +21,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
-from claude_code_hooks_daemon.core.workspace import resolve_workspace
+from claude_code_hooks_daemon.core.workspace import resolve_layout, resolve_workspace
 from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
 from claude_code_hooks_daemon.utils.path_exclusion import (
@@ -305,14 +305,27 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         # core/project_layout.py), so is_source_path() never fires and
         # resolution falls through to strategy.is_production_source() exactly
         # as before.
-        layout = self._project_layout
-        if layout is not None and layout.is_test_path(file_path):
+        #
+        # Per-project layout (Plan 00300): resolved via the file's OWNING
+        # declared project, not blindly the root project's `_project_layout`
+        # -- a sub-project's own `layout:` (or built-in defaults, if it
+        # declares none) must never be shadowed by a sibling's or the root's.
+        # Zero-config / no `projects:` declared resolves to the same
+        # `_project_layout` as before this task (pinned by tests).
+        root_for_fallback = resolve_project_root()
+        layout = resolve_layout(
+            self._project_registry,
+            Path(file_path),
+            Path(root_for_fallback) if root_for_fallback else Path(),
+            fallback_root_layout=self._project_layout,
+        )
+        if layout.is_test_path(file_path):
             return False
 
         if strategy.is_test_file(file_path):
             return False
 
-        if layout is not None and layout.is_source_path(file_path):
+        if layout.is_source_path(file_path):
             return True
 
         return strategy.is_production_source(file_path)
@@ -438,14 +451,16 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
     def _map_declared_test_paths(self, source_path: str, test_filename: str) -> list[Path]:
         """Candidate test paths from the project's declared ``test_path_map``.
 
-        Each matching mapping contributes up to TWO candidates, most specific
-        first: a workspace-anchored candidate (the source file's DECLARED
-        project, resolved via the injected ``_project_registry`` — Plan 00296)
-        ahead of the project-root-anchored candidate. In a single-project repo
-        (no registry injected, or nothing declared) the two resolve to the same
-        path and only one is added — resolution stays byte-identical to before
-        this task. Test filenames are placed FLAT in the declared directory,
-        never mirrored under it. Mappings are returned in config order, so a
+        Each matching mapping contributes exactly ONE candidate: a relative
+        ``test_dir`` anchors against the source file's DECLARED WORKSPACE ONLY
+        (resolved via the injected ``_project_registry`` — Plan 00296),
+        resolved through ``resolve_workspace``. In a single-project repo (no
+        registry injected, or nothing declared) the workspace IS the
+        repository root, so zero-config behaviour is unchanged. There is no
+        second, project-root-anchored candidate (Plan 00300 hard cutover) --
+        a single anchoring semantics for a relative ``test_dir`` everywhere.
+        Test filenames are placed FLAT in the declared directory, never
+        mirrored under it. Mappings are returned in config order, so a
         project controls which of several matching declarations the deny
         message suggests first.
 
@@ -483,12 +498,7 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
             workspace = resolve_workspace(
                 self._project_registry, Path(source_path), project_root_path
             )
-            workspace_candidate = workspace.root / test_dir / test_filename
-            project_candidate = project_root_path / test_dir / test_filename
-
-            candidates.append(workspace_candidate)
-            if project_candidate != workspace_candidate:
-                candidates.append(project_candidate)
+            candidates.append(workspace.root / test_dir / test_filename)
         return candidates
 
     @staticmethod
