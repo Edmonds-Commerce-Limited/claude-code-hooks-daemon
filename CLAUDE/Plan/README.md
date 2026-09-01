@@ -166,13 +166,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
-- [00306: secret bash mention overbroad matching](Completed/00306-secret-bash-mention-overbroad-matching/PLAN.md) - Complete at 49befa8b (secret_file_guard Bash-mention both-edges-wildcard false positive fixed, `git rm --cached <protected-path>` exempted so the hygiene checker's own remediation is runnable, CLI secret-redaction status iterates all registry roots, dead-code/POSIX-bracket cleanups, pipe_blocker duplicate disable-footer removed)
+- [00306: secret bash mention overbroad matching](Completed/00306-secret-bash-mention-overbroad-matching/PLAN.md) - Complete at 49befa8b (secret_file_guard Bash-mention false positives fixed, `git rm --cached` exempted, plus four same-subsystem review findings)
 
-- [00299: multi plan goal support](Completed/00299-multi-plan-goal-support/PLAN.md) - Complete (goal ledger is authoritative for the supervisor's goal signal: combined line across every In-Progress plan, re-rendered on plan retirement, single-plan behaviour byte-for-byte unchanged; dogfood-soaked live in this repo)
+- [00299: multi plan goal support](Completed/00299-multi-plan-goal-support/PLAN.md) - Complete (goal ledger renders a combined goal line across every In-Progress plan; single-plan behaviour unchanged)
 
-- [00298: failsafe cron blockage cadence](Completed/00298-failsafe-cron-blockage-cadence/PLAN.md) - Complete (daemon-side blocked-on-human marker + zero-token `UserPromptSubmit` suppression of the canonical failsafe-cron prompt, 24h expiry, every failure path fails open; dogfood-soaked live — R-FAILSAFE-CRON-SUPPRESSED observed in session)
+- [00298: failsafe cron blockage cadence](Completed/00298-failsafe-cron-blockage-cadence/PLAN.md) - Complete (blocked-on-human marker suppresses failsafe-cron ticks at zero token cost; every failure path fails open)
 
-- [00297: supervisor drop anchor safety net](Completed/00297-supervisor-drop-anchor-safety-net/PLAN.md) - Complete at 4be5bbef + ESC follow-up (read-back-verified DROP ANCHOR forcing Fable to low effort with retry/escalation, ESC interrupt on escalation; hot-reload verified against the live worker and the anchor observed firing in production)
+- [00297: supervisor drop anchor safety net](Completed/00297-supervisor-drop-anchor-safety-net/PLAN.md) - Complete at 4be5bbef (read-back-verified DROP ANCHOR forces Fable to low effort, with retry/escalation and ESC interrupt; observed firing live)
 
 - [00305: v3580 release review followups](Completed/00305-v3580-release-review-followups/PLAN.md) - Complete at 5fd91df3 + 277a47bd (v3.58.0 deferred review findings: mock.patch removed from shipped CLI, {REPO_ROOT} placement validators, absolute secret-list degrade surfaced; playbook drift fixed incl. secret_file_guard bracket false positive and pipe_blocker quoted-argument producer attribution)
 
