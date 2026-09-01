@@ -406,3 +406,170 @@ def test_anchor_injection_reason_names_observed_effort(tmp_path: Path) -> None:
     outcome = _decide(sidecar_dir, machine)
     assert "xhigh" in outcome.reason
     assert "DROP ANCHOR" in outcome.reason
+
+
+# ── ESC interrupt on escalation (Plan 00297 follow-up, owner-approved) ──────
+#
+# Owner ruling verbatim: "we already fire esc keys to get stuff done with
+# supervisor - this is not a new idea. Compaction is uninterruptible AFAIK...
+# Esc can be disruptive but its basically OK - its MUCH MUCH better than
+# leaving fable running at xhigh for a period of time." ESC reuses the
+# existing WOULD_ESCAPE machinery (the same raw-ESC keystroke path the
+# AWAIT_COMPACTING flush uses) rather than inventing a parallel one.
+
+
+def _escalate(machine: Any, sidecar_dir: Path) -> None:
+    """Drive an anchor episode straight to escalated (max attempts)."""
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=_NOW - 2.0)
+    _decide(sidecar_dir, machine)
+    assert machine.anchor_active is True
+    for _ in range(_mod._ANCHOR_MAX_ATTEMPTS):
+        machine.mark_anchor_injection(_NOW)
+    assert machine.anchor_escalated_at(_NOW) is True
+
+
+def test_escalated_anchor_sends_esc_to_interrupt_the_turn(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _escalate(machine, sidecar_dir)
+    later = _NOW + _mod._ANCHOR_RETRY_COOLDOWN_SECONDS + 1.0
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=later - 0.5)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(later))
+    assert outcome.decision_value == "would-escape"
+    assert outcome.payload == _mod._ESC_PAYLOAD
+    assert outcome.submit is False
+
+
+def test_esc_reason_logs_observed_model_and_effort(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _escalate(machine, sidecar_dir)
+    later = _NOW + _mod._ANCHOR_RETRY_COOLDOWN_SECONDS + 1.0
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=later - 0.5)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(later))
+    assert "DROP ANCHOR" in outcome.reason
+    assert "claude-fable-5" in outcome.reason
+    assert "xhigh" in outcome.reason
+
+
+def test_esc_not_sent_before_escalation(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=_NOW - 2.0)
+    outcome = _decide(sidecar_dir, machine)
+    assert machine.anchor_escalated_at(_NOW) is False
+    assert outcome.decision_value != "would-escape"
+
+
+def test_esc_not_sent_while_compaction_in_flight(tmp_path: Path) -> None:
+    # Compaction is uninterruptible: an ESC mid-compaction risks a worse
+    # outcome than the effort misconfiguration it protects against. The
+    # effort correction itself still fires -- only the ESC is suppressed.
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _escalate(machine, sidecar_dir)
+    later = _NOW + _mod._ANCHOR_RETRY_COOLDOWN_SECONDS + 1.0
+    _write_sidecar(
+        sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=later - 0.5, compacting=True
+    )
+    outcome = _decide(sidecar_dir, machine, facts=_facts(later))
+    assert outcome.decision_value != "would-escape"
+
+
+def test_esc_fires_once_compaction_clears_if_still_violated(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _escalate(machine, sidecar_dir)
+    mid_compaction = _NOW + _mod._ANCHOR_RETRY_COOLDOWN_SECONDS + 1.0
+    _write_sidecar(
+        sidecar_dir,
+        model_id="claude-fable-5",
+        effort="xhigh",
+        ts=mid_compaction - 0.5,
+        compacting=True,
+    )
+    during = _decide(sidecar_dir, machine, facts=_facts(mid_compaction))
+    assert during.decision_value != "would-escape"
+    after_compaction = mid_compaction + 1.0
+    _write_sidecar(
+        sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=after_compaction - 0.5
+    )
+    after = _decide(sidecar_dir, machine, facts=_facts(after_compaction))
+    assert after.decision_value == "would-escape"
+
+
+def test_esc_is_rate_limited_and_does_not_repeat_every_tick(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _escalate(machine, sidecar_dir)
+    later = _NOW + _mod._ANCHOR_RETRY_COOLDOWN_SECONDS + 1.0
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=later - 0.5)
+    first = _decide(sidecar_dir, machine, facts=_facts(later))
+    assert first.decision_value == "would-escape"
+    machine.mark_anchor_esc(later)
+    soon_after = later + 1.0
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=soon_after - 0.5)
+    second = _decide(sidecar_dir, machine, facts=_facts(soon_after))
+    assert second.decision_value != "would-escape"
+    much_later = later + _mod._ANCHOR_ESC_COOLDOWN_SECONDS + 1.0
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=much_later - 0.5)
+    third = _decide(sidecar_dir, machine, facts=_facts(much_later))
+    assert third.decision_value == "would-escape"
+
+
+def test_esc_cooldown_does_not_block_the_effort_retry(tmp_path: Path) -> None:
+    # ESC being rate-limited must never stop the retry-until-verified
+    # `/effort low` correction from firing on its own cooldown.
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _escalate(machine, sidecar_dir)
+    later = _NOW + _mod._ANCHOR_RETRY_COOLDOWN_SECONDS + 1.0
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=later - 0.5)
+    esc_tick = _decide(sidecar_dir, machine, facts=_facts(later))
+    assert esc_tick.decision_value == "would-escape"
+    machine.mark_anchor_esc(later)
+    effort_retry_ready = later + _mod._ANCHOR_RETRY_COOLDOWN_SECONDS + 1.0
+    _write_sidecar(
+        sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=effort_retry_ready - 0.5
+    )
+    effort_tick = _decide(sidecar_dir, machine, facts=_facts(effort_retry_ready))
+    assert effort_tick.decision_value == "would-effort"
+    assert effort_tick.payload == "/effort low"
+
+
+def test_anchor_esc_bookkeeping_round_trips_through_export_import(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _escalate(machine, sidecar_dir)
+    machine.mark_anchor_esc(_NOW)
+    clone = _machine()
+    clone.import_state(machine.export_state())
+    assert clone.anchor_esc_due(_NOW) is False
+    assert clone.anchor_esc_due(_NOW + _mod._ANCHOR_ESC_COOLDOWN_SECONDS + 1.0) is True
+
+
+def test_anchor_esc_state_defaults_ready_for_legacy_state() -> None:
+    machine = _machine()
+    legacy_state = machine.export_state()
+    legacy_state.pop("anchor_esc_last_sent_ts", None)
+    fresh = _machine()
+    fresh.import_state(legacy_state)
+    assert fresh.anchor_esc_due(_NOW) is False  # anchor inactive -> never due
+
+
+def test_anchor_esc_last_sent_resets_when_anchor_clears(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _escalate(machine, sidecar_dir)
+    machine.mark_anchor_esc(_NOW)
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW - 0.5)
+    _decide(sidecar_dir, machine)
+    assert machine.anchor_active is False
+    # A fresh violation must be free to ESC immediately, not inherit the
+    # previous episode's cooldown.
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=_NOW + 0.5)
+    _decide(sidecar_dir, machine, facts=_facts(_NOW + 1.0))
+    for _ in range(_mod._ANCHOR_MAX_ATTEMPTS):
+        machine.mark_anchor_injection(_NOW + 1.0)
+    assert machine.anchor_escalated_at(_NOW + 1.0) is True
+    assert machine.anchor_esc_due(_NOW + 1.0) is True

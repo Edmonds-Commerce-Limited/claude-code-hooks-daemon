@@ -1,6 +1,6 @@
 # Plan 00297: supervisor drop anchor safety net
 
-**Status**: In Progress (implementation complete; hot-reload verification pending)
+**Status**: In Progress (ESC follow-up implemented; hot-reload verification pending)
 **Created**: 2026-08-31
 **Owner**: joseph
 **Priority**: Critical
@@ -108,12 +108,17 @@ all work rather than letting the session keep burning.
   preempts a `WOULD_CONTINUE` nudge (replacing it with the `/effort low`
   correction) and the goal-signal block is naturally starved (it only ever
   fires on an otherwise-NOOP tick, which an active anchor never leaves).
-  **Deviation from the brief**: an ESC interrupt was NOT added — compact/
-  escape decisions (`WOULD_COMPACT`/`WOULD_ESCAPE`) are left untouched
-  because they manage an in-flight compaction rather than invite more
-  work, and interrupting mid-compaction risked a worse outcome than the
-  effort correction it would have protected. See the JOURNAL for the
-  full rationale.
+  **Follow-up delivered (owner-approved)**: once escalated, the anchor now
+  also sends a raw ESC to interrupt an in-flight turn that may be
+  swallowing the `/effort low` injection — reusing the existing
+  `WOULD_ESCAPE` keystroke path (`_ESC_PAYLOAD`, no Enter) rather than a
+  parallel mechanism. `anchor_esc_due()`/`mark_anchor_esc()` give it its
+  own rate limit (`_ANCHOR_ESC_COOLDOWN_SECONDS`, 60s) independent of the
+  effort retry cooldown; the send is skipped whenever `reading.compacting`
+  is true (compaction is uninterruptible) and fires on the next
+  unobstructed tick once compaction clears if the violation persists. The
+  retry-until-verified `/effort low` correction is unchanged and keeps
+  firing on its own cooldown regardless of ESC's cooldown state.
 - [x] ✅ **Task 2.3**: `_coupled_effort_target()` now clamps the top-ranked
   family's configured floor to `_ANCHOR_TARGET_EFFORT` ("low") whenever it
   would resolve above that ceiling (covers a `CCY_MIN_EFFORT_LEVELS`
@@ -142,12 +147,12 @@ all work rather than letting the session keep burning.
 
 - [x] A simulated swallowed `/effort low` injection while on Fable is
   detected by read-back and corrected without owner intervention.
-- [ ] When correction is impossible (injections keep being swallowed), the
+- [x] When correction is impossible (injections keep being swallowed), the
   supervisor halts work-continuing injections and interrupts the session
   within the bound — Fable never runs another turn above low effort.
-  **Partial**: continue/goal nudges ARE suppressed and a loud owner alert
-  IS posted, but the ESC interrupt was deliberately not implemented (see
-  Task 2.2 deviation in the JOURNAL) — still open.
+  Continue/goal nudges are suppressed, a loud owner alert is posted, and
+  (owner-approved follow-up) an ESC now interrupts an in-flight turn once
+  the anchor is escalated, skipped only while a compaction is in flight.
 - [x] A `/model` flip to Fable while an xhigh effort floor is active results
   in observed effort low, verified by read-back, not by the audit log.
 - [x] Anchor events appear in the decision log with observed-state evidence
@@ -157,5 +162,10 @@ all work rather than letting the session keep burning.
 
 - `4be5bbef` — DROP ANCHOR implementation delivered (anchor invariant,
   read-back-only clearing, retry/escalation, floor clamp, 25 tests); live
-  worker verified reloaded (fresh worker pid post-edit). Open: ESC interrupt
-  on escalation (deliberate deviation, owner decision pending).
+  worker verified reloaded (fresh worker pid post-edit).
+- ESC-on-escalation follow-up (owner-approved) — `anchor_esc_due()`/
+  `mark_anchor_esc()`, reused `WOULD_ESCAPE` payload, compaction guard, own
+  60s cooldown, 10 new tests (35 total in `test_drop_anchor.py`, 559 passing
+  across `tests/unit/supervise/`). Live worker hot-reload verification is
+  the coordinator's responsibility (not performed by the implementing
+  agent, per its task brief).
