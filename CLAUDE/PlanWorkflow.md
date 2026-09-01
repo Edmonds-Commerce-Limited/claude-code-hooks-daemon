@@ -547,8 +547,15 @@ When a plan is complete, follow these steps to properly close it out. Skipping s
    - Remove the plan entry from the "Active Plans" section
    - Add the plan to the "Completed Plans" section with a brief summary
    - Update plan statistics (Total, Active count, Completed count, Success Rate)
-5. **Unblock dependent plans**: Check if any other plans had `Blocked by: Plan NNNNN` referencing this plan and remove that blocker so dependent work can proceed
-6. **Commit**: Include all plan-related file changes (PLAN.md, README.md, directory move) in a single commit using the message format:
+5. **Age out old completed rows**: after adding your row, if the "Completed
+   Plans" section now holds more than the retention window (the 30
+   highest-numbered completed plans — enforced by
+   `tests/integration/test_plan_index_navigability.py`), move every row
+   beyond that window, verbatim (no rewording, no trimming; multi-line rows
+   with sub-bullets move whole), into `CLAUDE/Plan/Completed/README.md`, in
+   the same commit as step 6.
+6. **Unblock dependent plans**: Check if any other plans had `Blocked by: Plan NNNNN` referencing this plan and remove that blocker so dependent work can proceed
+7. **Commit**: Include all plan-related file changes (PLAN.md, README.md, archive README.md, directory move) in a single commit using the message format:
    ```
    Plan NNNNN: Complete - Brief description
    ```

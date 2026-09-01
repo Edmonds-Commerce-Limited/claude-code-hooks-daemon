@@ -32,17 +32,27 @@ two places, and the copy is the one that goes stale.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_INDEX_ROW_MAX_CHARS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INDEX = REPO_ROOT / "CLAUDE" / "Plan" / "README.md"
+COMPLETED_ARCHIVE = REPO_ROOT / "CLAUDE" / "Plan" / "Completed" / "README.md"
 
 # Ceilings, not targets. Chosen with ~200 plans indexed and roughly 40% of
 # headroom left, so ordinary growth never trips them and a return to
 # paragraph-per-row does.
 MAX_BYTES = 130_000
+
+# Plan 00310: Completed rows age out of the main index. The 30 highest-numbered
+# completed plans stay here; everything older lives verbatim in
+# CLAUDE/Plan/Completed/README.md. This is the cause-side guard (row count),
+# complementing the symptom-side byte ceiling above.
+MAX_COMPLETED_ROWS = 30
+
+_COMPLETED_ROW_RE = re.compile(r"^- \[\d+")
 
 # IMPORTED, never redeclared (Plan 00218). The per-line ceiling is now also
 # enforced in the fast loop by the plan_qa ``index-row-length`` check, and two
@@ -68,6 +78,35 @@ def test_index_stays_under_the_size_ceiling() -> None:
         "Compact the rows: each should be a link, a status and ONE clause. The "
         "full rationale belongs in the linked PLAN.md — that is what the link "
         "is for, and a second copy here is the one that goes stale."
+    )
+
+
+def test_completed_rows_stay_within_the_retention_window() -> None:
+    """Completed rows age out; only the newest MAX_COMPLETED_ROWS may remain.
+
+    A main-README row count above the window means an archival forgot the
+    age-out step from the Plan Completion Checklist: add the new row, then
+    move rows beyond the window to CLAUDE/Plan/Completed/README.md, verbatim,
+    in the same commit.
+    """
+    lines = _lines()
+    try:
+        start = next(i for i, line in enumerate(lines) if line.strip() == "## Completed Plans")
+    except StopIteration:
+        return  # test_index_exists / structural change would already fail elsewhere
+    end = next(
+        (i for i, line in enumerate(lines) if i > start and line.startswith("## ")),
+        len(lines),
+    )
+    row_count = sum(1 for line in lines[start:end] if _COMPLETED_ROW_RE.match(line))
+
+    assert row_count <= MAX_COMPLETED_ROWS, (
+        f"CLAUDE/Plan/README.md has {row_count} completed rows "
+        f"(retention window: {MAX_COMPLETED_ROWS}).\n"
+        "Age out the oldest rows: move every completed row beyond the "
+        f"{MAX_COMPLETED_ROWS} highest-numbered plans, verbatim, into "
+        f"{COMPLETED_ARCHIVE.relative_to(REPO_ROOT)}, per the Plan Completion "
+        "Checklist in CLAUDE/PlanWorkflow.md."
     )
 
 

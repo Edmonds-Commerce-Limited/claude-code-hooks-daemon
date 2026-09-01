@@ -25,3 +25,8 @@ Directory shape: `NNNNN-description/PLAN.md` (+ supporting docs and
   Superseded) ships the `git mv` into `Completed/` plus the README row and
   statistics update in the SAME commit — see the Plan Completion Checklist in
   [CLAUDE/PlanWorkflow.md](../PlanWorkflow.md).
+- **Completed rows age out**: the main `README.md` keeps only the 30
+  highest-numbered completed rows; on archival, add your row, then move any
+  rows beyond that window verbatim into `Completed/README.md` in the same
+  commit — enforced by
+  `tests/integration/test_plan_index_navigability.py`.

@@ -130,6 +130,27 @@ def _tree_and_readme(
     )
     readme_path = plan_dir / README_FILENAME
     readme = ReadmeIndex.parse(readme_path.read_text()) if readme_path.is_file() else None
+
+    # Plan 00310: aged-out completed rows live verbatim in an archive index
+    # inside the completed dir (CLAUDE/Plan/Completed/README.md). Merge its
+    # rows into the primary ReadmeIndex so row-folder-bijection (and any
+    # other check keyed on ``readme.rows``/``readme.numbers()``) still sees
+    # them — otherwise every archived plan reads as unindexed the moment its
+    # row ages out of the main file. Stats and ``lines`` stay sourced from
+    # the PRIMARY file only: those drive checks (index-row-length,
+    # stats-recount) that are about the primary index's own text/counts, not
+    # the union of both files. Archive row links are relative to the
+    # completed dir, not ``plan_dir`` — rewritten here so link resolution
+    # (relative to ``plan_dir``) still finds the real folder.
+    archive_path = plan_dir / policy.completed_dir / README_FILENAME
+    if readme is not None and archive_path.is_file():
+        archive_readme = ReadmeIndex.parse(archive_path.read_text())
+        rewritten_rows = tuple(
+            replace(row, link=f"{policy.completed_dir}/{row.link}") if row.link else row
+            for row in archive_readme.rows
+        )
+        readme = replace(readme, rows=readme.rows + rewritten_rows)
+
     return tree, readme
 
 

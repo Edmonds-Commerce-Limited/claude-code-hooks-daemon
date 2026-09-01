@@ -1,6 +1,6 @@
 # Plan 00310: plan readme completed row ageout
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: Medium
@@ -49,38 +49,45 @@ archive index that is only opened when someone is digging.
 
 ### Phase 1: Rule design and enforcement hook
 
-- [ ] ⬜ **Task 1.1**: Fix the rule precisely: retention count (proposed:
-  the 30 highest-numbered completed plans stay in the main README), the
-  archive index location (`CLAUDE/Plan/Completed/README.md`), its format
-  (same row shape, grouped as-is), and the link from the main README's
-  Completed section header to the archive index. Record in PLAN.md (this
-  section) once settled.
-- [ ] ⬜ **Task 1.2**: Enforce it: extend `test_plan_index_navigability.py`
-  (or plan QA's stats/index checks) so a main README holding more than the
-  retention count of completed rows FAILS with a message naming the
-  age-out procedure — the same discoverable-failure pattern as the size
-  ceiling, but firing on the cause rather than the symptom.
-- [ ] ⬜ **Task 1.3**: Document the age-out step in the Plan Completion
-  Checklist (`CLAUDE/PlanWorkflow.md`) and `CLAUDE/Plan/CLAUDE.md`'s local
-  conventions: on archival, add your row, then move any rows beyond the
-  retention count to the archive index in the same commit.
+- [x] ✅ **Task 1.1**: **Settled rule**: the main `CLAUDE/Plan/README.md`
+  "Completed Plans" section retains the **30 highest-numbered** completed
+  plan rows (recency by plan number, not by document position — the
+  document is roughly but not strictly chronological, e.g. Plan 00116 was
+  inserted out of order). Every completed row for a lower-numbered plan
+  lives verbatim in the new archive index
+  `CLAUDE/Plan/Completed/README.md`, same row shape (link, status clause,
+  multi-line sub-bullets moved whole), grouped under one `## Completed Plans (Archive)` heading. Row links inside the archive drop the
+  `Completed/` path prefix (the archive file itself already lives inside
+  `CLAUDE/Plan/Completed/`, so links are `NNNNN-slug/PLAN.md`, not
+  `Completed/NNNNN-slug/PLAN.md`). The main README's "Completed Plans"
+  header carries a one-line pointer to the archive. Cancelled section and
+  Plan Statistics are untouched by this rule.
+- [x] ✅ **Task 1.2**: Enforced via a new test,
+  `test_completed_rows_stays_within_the_retention_window` in
+  `tests/integration/test_plan_index_navigability.py`, which counts `- [`
+  rows in the main README's "Completed Plans" section and fails above 30,
+  naming the age-out procedure and the archive path in the assertion
+  message. Kept alongside (not replacing) the existing byte-ceiling test.
+- [x] ✅ **Task 1.3**: Age-out step documented in the Plan Completion
+  Checklist (`CLAUDE/PlanWorkflow.md`, new step 5, checklist renumbered)
+  and in `CLAUDE/Plan/CLAUDE.md`'s local conventions.
 
 ### Phase 2: Migrate the backlog
 
-- [ ] ⬜ **Task 2.1**: One-time migration: move all completed rows beyond
-  the retention count, verbatim, into `Completed/README.md`; link it from
-  the main README; verify the navigability test passes with real headroom
-  (target: main README well under 60KB) and plan QA sweep stays clean
-  (stats unchanged — they count folders, not rows).
+- [x] ✅ **Task 2.1**: One-time migration complete: 223 completed rows
+  (plan numbers 1-270) moved verbatim into `CLAUDE/Plan/Completed/README.md`;
+  the 30 highest-numbered (271-306) stay in the main README. Navigability
+  tests pass with large headroom; `plan-qa --sweep` stats unchanged (they
+  count folders, not rows).
 
 ## Success Criteria
 
-- [ ] Main README is under the ceiling with large headroom and holds only
+- [x] Main README is under the ceiling with large headroom and holds only
   the retention window of completed rows; every older row is verbatim in
   `Completed/README.md` and linked.
-- [ ] A future archival that forgets the age-out step fails a test naming
+- [x] A future archival that forgets the age-out step fails a test naming
   the procedure.
-- [ ] `git log` shows no row content lost (verbatim moves only).
+- [x] `git log` shows no row content lost (verbatim moves only).
 
 ## Delivery & Milestones
 

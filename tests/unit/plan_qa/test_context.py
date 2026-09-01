@@ -164,6 +164,68 @@ class TestSweepContext:
             )
 
 
+class TestCompletedArchiveMerge:
+    """Plan 00310: rows aged out to Completed/README.md still count as indexed."""
+
+    def test_archive_rows_merge_into_readme_numbers(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        completed = root / "CLAUDE/Plan/Completed"
+        (completed / "00099-archived").mkdir()
+        (completed / "00099-archived" / "PLAN.md").write_text(
+            "# Plan 00099: archived\n\n**Status**: Complete\n"
+        )
+        (completed / "README.md").write_text(
+            "# Completed Plans Archive\n\n"
+            "## Completed Plans (Archive)\n\n"
+            "- [00099: archived](00099-archived/PLAN.md) - Complete\n"
+        )
+        context = sweep_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=_Policy(),
+            today=date(2026, 7, 7),
+        )
+        assert context.readme is not None
+        assert 99 in context.readme.numbers()
+
+    def test_archive_row_link_resolves_relative_to_plan_dir(self, tmp_path: Path) -> None:
+        # The archive file's own links are relative to the completed dir, not
+        # plan_dir — the merge must rewrite them so row-folder-bijection's
+        # link check (relative to plan_dir) still finds the real folder.
+        root = _scaffold(tmp_path)
+        completed = root / "CLAUDE/Plan/Completed"
+        (completed / "00099-archived").mkdir()
+        (completed / "00099-archived" / "PLAN.md").write_text(
+            "# Plan 00099: archived\n\n**Status**: Complete\n"
+        )
+        (completed / "README.md").write_text(
+            "# Completed Plans Archive\n\n"
+            "## Completed Plans (Archive)\n\n"
+            "- [00099: archived](00099-archived/PLAN.md) - Complete\n"
+        )
+        context = sweep_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=_Policy(),
+            today=date(2026, 7, 7),
+        )
+        assert context.readme is not None
+        rows = context.readme.rows_for(99)
+        assert len(rows) == 1
+        assert rows[0].link == "Completed/00099-archived/PLAN.md"
+
+    def test_missing_archive_readme_is_a_no_op(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        context = sweep_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=_Policy(),
+            today=date(2026, 7, 7),
+        )
+        assert context.readme is not None
+        assert context.readme.numbers() == frozenset()
+
+
 class TestStagedContext:
     def test_includes_gitfacts_and_commit_message(self, tmp_path: Path) -> None:
         root = _scaffold(tmp_path)
