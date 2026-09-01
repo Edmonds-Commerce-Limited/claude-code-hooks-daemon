@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00305: v3580 release review followups](00305-v3580-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.58.0 release code review gate, deferred per the never-drop-a-finding rule: mock.patch in shipped CLI code, unguarded {REPO_ROOT} token call sites, silent secret-word-list degrade)
+- [00306: secret bash mention overbroad matching](00306-secret-bash-mention-overbroad-matching/PLAN.md) - Not Started (R-SECRET-BASH-MENTION false-fires on plain words containing "secret" with no protected path named; same defect class as the Edit-path fix in Plan 00305 Task 2.5, Bash-mention path)
 
 - [00299: multi plan goal support](00299-multi-plan-goal-support/PLAN.md) - In Progress (implemented and live: the goal ledger is authoritative and the goal signal renders a combined line across every In-Progress plan, re-rendered on plan retirement; dogfood soak before archiving)
 
@@ -171,6 +171,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00305: v3580 release review followups](Completed/00305-v3580-release-review-followups/PLAN.md) - Complete at 5fd91df3 + 277a47bd (v3.58.0 deferred review findings: mock.patch removed from shipped CLI, {REPO_ROOT} placement validators, absolute secret-list degrade surfaced; playbook drift fixed incl. secret_file_guard bracket false positive and pipe_blocker quoted-argument producer attribution)
 
 - [00304: degraded mode fail open and visibility](Completed/00304-degraded-mode-fail-open-and-visibility/PLAN.md) - Complete at the merge + archiving commits (php-qa-ci canary blocker: null legacy key tolerated, destructive-git safety net while degraded, degradation visible on status/check/config-validate)
 
@@ -1303,9 +1305,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 301 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 306 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 248 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 249 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
 - **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 

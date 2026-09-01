@@ -1,6 +1,6 @@
 # Plan 00305: v3580 release review followups
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: Medium
@@ -95,9 +95,13 @@ tracked MUST-FIX ledger and are to be fixed immediately after the release.
 
 ## Success Criteria
 
-- [ ] All three findings fixed with TDD (or owner-ruled-out with the ruling
+- [x] All three findings fixed with TDD (or owner-ruled-out with the ruling
   recorded), QA green, daemon restarted and verified.
 
 ## Delivery & Milestones
 
-- (none yet)
+- Phase 1 delivered in commit 5fd91df3; Phase 2 in commit 277a47bd (QA
+  25/25, 17,009 tests, 95.3% coverage, daemon restarted and verified).
+- Follow-up finding surfaced during Task 2.5 work (over-broad
+  R-SECRET-BASH-MENTION matching on plain words containing "secret") is
+  tracked in its own plan, not here.
