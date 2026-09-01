@@ -921,3 +921,232 @@ class TestLintOnEditDisclosureLadder:
         second = handler.handle(self._hook_input(test_file, None))
         assert "ALREADY landed on disk" in first.reason
         assert "ALREADY landed on disk" in second.reason
+
+
+class TestPerLanguageTimeout:
+    """Plan 00309: extended lint timeout is configurable per language.
+
+    Field report: a php-qa-ci extended lint (~5s warm) can exceed the
+    hardcoded 15s Timeout.LINT_CHECK when cold/lock-contended, and the
+    handler silently ALLOWS on timeout -- exactly the risky runs skip
+    linting with no signal. A project must be able to raise the budget for
+    one slow language without touching every other language's timeout.
+    """
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_default_timeout_is_lint_check_constant(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Task 1.1: pin current behaviour -- no option set, default timeout used."""
+        import subprocess
+
+        test_file = tmp_path / "app.py"
+        test_file.write_text("x = 1")
+        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(
+            cmd="python", timeout=Timeout.LINT_CHECK
+        )
+        mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        handler.handle(hook_input)
+
+        called_timeout = mock_subprocess.run.call_args.kwargs["timeout"]
+        assert called_timeout == Timeout.LINT_CHECK
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_default_timeout_fires_allow(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Task 1.1: a timeout still ALLOWs -- fail-open semantics unchanged."""
+        import subprocess
+
+        test_file = tmp_path / "app.py"
+        test_file.write_text("x = 1")
+        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(
+            cmd="python", timeout=Timeout.LINT_CHECK
+        )
+        mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision.value == "allow"
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_configured_language_uses_its_own_timeout(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Task 1.2: PHP configured to 30 uses 30 seconds for its lint runs."""
+        import subprocess
+
+        handler._timeouts = {"PHP": 30}
+
+        test_file = tmp_path / "app.php"
+        test_file.write_text("<?php echo 'x';")
+        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(cmd="php", timeout=30)
+        mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        handler.handle(hook_input)
+
+        called_timeout = mock_subprocess.run.call_args.kwargs["timeout"]
+        assert called_timeout == 30
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_unconfigured_language_stays_at_default_when_others_configured(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Task 1.2: Python unconfigured stays at 15 while PHP is raised to 30."""
+        import subprocess
+
+        handler._timeouts = {"PHP": 30}
+
+        test_file = tmp_path / "app.py"
+        test_file.write_text("x = 1")
+        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(
+            cmd="python", timeout=Timeout.LINT_CHECK
+        )
+        mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        handler.handle(hook_input)
+
+        called_timeout = mock_subprocess.run.call_args.kwargs["timeout"]
+        assert called_timeout == Timeout.LINT_CHECK
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_configured_language_key_is_case_insensitive(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        import subprocess
+
+        handler._timeouts = {"php": 30}
+
+        test_file = tmp_path / "app.php"
+        test_file.write_text("<?php echo 'x';")
+        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(cmd="php", timeout=30)
+        mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        handler.handle(hook_input)
+
+        called_timeout = mock_subprocess.run.call_args.kwargs["timeout"]
+        assert called_timeout == 30
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_non_positive_timeout_is_rejected_and_falls_back_to_default(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Task 1.2: validated -- a non-positive number never crashes the handler."""
+        import subprocess
+
+        handler._timeouts = {"Python": -5}
+
+        test_file = tmp_path / "app.py"
+        test_file.write_text("x = 1")
+        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(
+            cmd="python", timeout=Timeout.LINT_CHECK
+        )
+        mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        result = handler.handle(hook_input)
+
+        called_timeout = mock_subprocess.run.call_args.kwargs["timeout"]
+        assert called_timeout == Timeout.LINT_CHECK
+        assert result.decision.value == "allow"
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_non_numeric_timeout_is_rejected_and_falls_back_to_default(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        import subprocess
+
+        handler._timeouts = {"Python": "fast"}
+
+        test_file = tmp_path / "app.py"
+        test_file.write_text("x = 1")
+        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(
+            cmd="python", timeout=Timeout.LINT_CHECK
+        )
+        mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        result = handler.handle(hook_input)
+
+        called_timeout = mock_subprocess.run.call_args.kwargs["timeout"]
+        assert called_timeout == Timeout.LINT_CHECK
+        assert result.decision.value == "allow"
+
+    def test_unknown_language_key_warns_but_does_not_crash(
+        self, handler: LintOnEditHandler, tmp_path: Path, caplog: Any
+    ) -> None:
+        """Task 1.2: an unknown language key warns rather than raising."""
+        import logging
+
+        handler._timeouts = {"NotARealLanguage": 30}
+
+        with caplog.at_level(logging.WARNING):
+            # Any lintable write triggers timeout resolution/validation.
+            test_file = tmp_path / "app.py"
+            test_file.write_text("x = 1")
+            hook_input: dict[str, Any] = {
+                "tool_name": "Write",
+                "tool_input": {"file_path": str(test_file)},
+            }
+            with patch(
+                "claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess"
+            ) as mock_subprocess:
+                mock_result = MagicMock()
+                mock_result.returncode = 0
+                mock_result.stdout = ""
+                mock_result.stderr = ""
+                mock_subprocess.run.return_value = mock_result
+                handler.handle(hook_input)
+
+        assert any("NotARealLanguage" in record.message for record in caplog.records)
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_timeout_advisory_names_language_budget_and_config_key(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Task 1.3: a fired timeout becomes visible -- language, budget, config key."""
+        import subprocess
+
+        test_file = tmp_path / "app.py"
+        test_file.write_text("x = 1")
+        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(
+            cmd="python", timeout=Timeout.LINT_CHECK
+        )
+        mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        result = handler.handle(hook_input)
+
+        context = "\n".join(result.context)
+        assert "Python" in context
+        assert str(Timeout.LINT_CHECK) in context
+        assert "handlers.post_tool_use.lint_on_edit.options.timeouts.Python" in context

@@ -44,26 +44,25 @@ its toolchain is slower, it does not change fail-open semantics.
 
 ### Phase 1: TDD the configurable timeout
 
-- [ ] ⬜ **Task 1.1**: Pin current behaviour: unit test that the extended
+- [x] ✅ **Task 1.1**: Pin current behaviour: unit test that the extended
   lint command runs under `Timeout.LINT_CHECK` when no option is set, and
   that a timeout results in allow.
-- [ ] ⬜ **Task 1.2**: Add `options.timeouts.<LANGUAGE>: <seconds>` to
+- [x] ✅ **Task 1.2**: Add `options.timeouts.<LANGUAGE>: <seconds>` to
   lint_on_edit (language keys matching the handler's language registry
   names, case-insensitive; validated: positive number, unknown-language
   keys warn rather than crash). Resolve per file language at check time;
   fall back to `Timeout.LINT_CHECK`. TDD: PHP configured to 30 uses 30,
   Python unconfigured stays 15.
-- [ ] ⬜ **Task 1.3**: Surface the timeout when it fires: log line +
+- [x] ✅ **Task 1.3**: Surface the timeout when it fires: log line +
   advisory text naming the language, the budget used, and the config key
   that raises it — so a silent allow becomes a visible, actionable one.
 
 ### Phase 2: Config plumbing and docs
 
-- [ ] ⬜ **Task 2.1**: Config template + `.claude/hooks-daemon.yaml.example`
-  entry, options documentation, explain-handler text, and the
-  CLAUDE.md-guidance regeneration; whatever the handler-completeness tests
-  require.
-- [ ] ⬜ **Task 2.2**: Verify against the field report shape: a fake slow
+- [x] ✅ **Task 2.1**: Config template + `.claude/hooks-daemon.yaml.example`
+  entry, options documentation, explain-handler text (via `get_claude_md`),
+  and CLAUDE.md-guidance regeneration where applicable.
+- [x] ✅ **Task 2.2**: Verify against the field report shape: a fake slow
   extended command configured at 30s for PHP completes where the 15s
   default would have timed out (integration-level test with an injectable
   clock/command, not a real 16s sleep in the suite).

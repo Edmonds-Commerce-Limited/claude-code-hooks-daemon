@@ -361,6 +361,9 @@ handlers:
     lint_on_edit:              # Language-aware lint validation after Write/Edit
       enabled: false           # Enable for automatic lint validation (Shell, Python, Go, Rust, etc.)
       priority: 25
+      # options:
+      #   timeouts:              # Per-language extended-lint timeout override (seconds), default 15
+      #     PHP: 30              # e.g. a slow/cold-cache extended linter wrapper
 
     markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
       enabled: false           # Enable for automatic markdown table alignment

@@ -577,6 +577,13 @@ handlers:
       #     default: "bash -n {file}"
       #     extended: null  # Disable shellcheck
       # Default: Uses sys.executable for Python, standard binaries for others
+      # Optional: Per-language extended-lint timeout (seconds), default 15s.
+      # A timeout ALLOWs (fail-open, unchanged) but is now logged/advised by
+      # name -- raise the budget for a language whose extended linter is
+      # genuinely slower (e.g. a cold/lock-contended toolchain wrapper).
+      # options:
+      #   timeouts:
+      #     PHP: 30
 
     markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
       enabled: true
