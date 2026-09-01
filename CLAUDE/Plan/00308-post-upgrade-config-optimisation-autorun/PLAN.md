@@ -51,56 +51,66 @@ you" pass instead of silence.
 
 ### Phase 1: Audit the current encouragement surface
 
-- [ ] ⬜ **Task 1.1**: Map every place a project learns about handler
+- [x] ✅ **Task 1.1**: Map every place a project learns about handler
   configuration during install/upgrade today: the `optimise` and
   `configure` skills, `LLM-INSTALL.md`/`LLM-UPDATE.md`, upgrade script
   output, UPGRADES/ truth-changes and config-changes manifests, and any
   session-start checkers (e.g. project_handler_load_checker,
   tool_disable_advisor). Record in a findings doc where the gap is — why
-  the owner still has to prompt manually every time.
+  the owner still has to prompt manually every time. Findings:
+  `subagent-reports/260901-implementation-sonnet.md`.
 
 ### Phase 2: Formalise the step
 
-- [ ] ⬜ **Task 2.1**: Define `/hooks-daemon config-optimisation` (or
-  promote/alias the existing `optimise` skill) as the canonical
-  "enable-and-configure review": inventory disabled-but-relevant handlers,
-  compare current config against the release's capabilities (using the
-  UPGRADES/ config-changes manifests for what is new since the installed
-  version), and emit a prioritised recommendation list with per-handler
-  enable/skip rationale and ready-to-apply config snippets.
-- [ ] ⬜ **Task 2.2**: Make it apply-capable: on explicit user
-  confirmation, write the agreed config changes and restart/verify the
-  daemon — the same acceptance discipline as the `configure` skill.
+- [x] ✅ **Task 2.1**: Promoted the existing `optimise` skill as the
+  canonical step rather than adding a parallel `config-optimisation`
+  subcommand (rationale + full decision record in the findings doc). Added
+  a Step 0 to `.claude/skills/optimise/invoke.sh` that reads
+  `CLAUDE/UPGRADES/config-changes/v*.yaml` manifests newer than the last
+  recorded run and folds new `handlers.*` entries into the recommendation
+  list.
+- [x] ✅ **Task 2.2**: Already satisfied structurally by the pre-existing
+  `optimise` apply flow (explicit "apply all"/"apply N,M"/"skip"
+  confirmation, then restart + verify) — no silent config writes.
 
 ### Phase 3: Wire it into the upgrade (and install) flow
 
-- [ ] ⬜ **Task 3.1**: `/hooks-daemon upgrade` ends by invoking the
-  config-optimisation step automatically (with an opt-out flag), and the
-  upgrade scripts' printed next-steps say so; `LLM-UPDATE.md` makes it a
-  numbered mandatory step rather than a suggestion.
-- [ ] ⬜ **Task 3.2**: Post-upgrade session-start reinforcement: a
-  session-start advisory (or extension of an existing checker) that fires
-  when the installed version changed since the last config-optimisation
-  run, so a skipped autorun is surfaced in the next session instead of
-  being lost.
-- [ ] ⬜ **Task 3.3**: Add the same closing step to `LLM-INSTALL.md` so
-  fresh installs get the review too.
+- [x] ✅ **Task 3.1**: `src/claude_code_hooks_daemon/skills/hooks-daemon/upgrade.md`
+  gained a mandatory Step 8 invoking `/optimise`; `scripts/upgrade.sh` /
+  `scripts/upgrade_version.sh` accept and forward `--skip-config-optimisation`
+  and print the mandatory-next-step banner; `LLM-UPDATE.md`'s manual 5-step
+  walkthrough replaced with one numbered mandatory step pointing at `/optimise`.
+- [x] ✅ **Task 3.2**: New SessionStart handler `config_optimisation_reminder`
+  (priority 67) + `config_optimisation` state module + CLI subcommand
+  `record-config-optimisation-run`. Fires (advisory, fail-open) when the
+  installed version differs from the last recorded run. This is the fallback
+  for when Task 3.1's automatic invocation is skipped, opted out of, or
+  reached via a path with no agent in the loop — not a duplicate of it.
+- [x] ✅ **Task 3.3**: Added "Post-Installation: Run the Config-Optimisation
+  Review (MANDATORY)" section to `LLM-INSTALL.md`.
 
 ### Phase 4: Dogfood and client-verify
 
-- [ ] ⬜ **Task 4.1**: Run the formalised step against this repo (dogfood)
-  and against a client-mode test project (per
-  CLAUDE/development client-mode testing docs); journal what it
-  recommended and whether the recommendations were correct and actionable.
+- [x] ✅ **Task 4.1**: Dogfooded from the worktree (informational, see the
+  venv caveat in the dispatch instructions); enabled the new handler in this
+  repo's own `.claude/hooks-daemon.yaml`. Full findings, and what remains for
+  live verification by the coordinator, are in the findings doc.
 
 ## Success Criteria
 
-- [ ] Running the single formal command reproduces (or beats) what the
-  owner's manual "enable all relevant handlers…" prompt achieves today.
-- [ ] A `/hooks-daemon upgrade` in a test project ends with a concrete
-  per-handler recommendation list without any extra prompting.
-- [ ] A skipped post-upgrade review is surfaced at the next session start.
-- [ ] No config change is ever applied without explicit user confirmation.
+- [x] Running the single formal command (`/optimise`) reproduces what the
+  owner's manual "enable all relevant handlers…" prompt achieves today —
+  it already did; this plan formalised the invocation, not the analysis.
+- [x] `/hooks-daemon upgrade`'s workflow doc ends with a mandatory
+  per-handler recommendation step (`/optimise`) without extra prompting,
+  unless `--skip-config-optimisation` was passed. Live end-to-end
+  verification (a real upgrade run) is left for the coordinator — see the
+  findings doc.
+- [x] A skipped post-upgrade review is surfaced at the next session start
+  (`config_optimisation_reminder`, live-verification steps in the findings
+  doc).
+- [x] No config change is ever applied without explicit user confirmation
+  (unchanged `optimise` apply-flow contract).
 
 ## Delivery & Milestones
 

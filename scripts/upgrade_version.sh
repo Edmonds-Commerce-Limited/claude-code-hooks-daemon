@@ -1101,4 +1101,22 @@ echo "  1. Exit your current Claude Code session"
 echo "  2. Start a new Claude Code session"
 echo ""
 
+# Plan 00308: every upgrade ends with the config-optimisation review, unless
+# explicitly opted out. Same --force-style detection as the compat check
+# above -- this script has no proper flag parser, so match against $* and the
+# UPGRADE_FLAGS passthrough.
+if [[ "$*" == *"--skip-config-optimisation"* ]] || [[ "${UPGRADE_FLAGS:-}" == *"--skip-config-optimisation"* ]]; then
+    echo "Config-optimisation review skipped (--skip-config-optimisation)."
+    echo "Run it later: Skill tool, skill=optimise (or /optimise in a session)."
+    echo ""
+else
+    echo "MANDATORY NEXT STEP: run the config-optimisation review in your next"
+    echo "Claude Code session (Skill tool: skill=optimise, or /optimise). This"
+    echo "inventories disabled-but-relevant handlers, surfaces what is new in"
+    echo "$NEW_VERSION, and produces a per-handler enable/skip recommendation"
+    echo "list -- it never applies changes without your explicit confirmation."
+    echo "Pass --skip-config-optimisation to this script to opt out."
+    echo ""
+fi
+
 exit 0

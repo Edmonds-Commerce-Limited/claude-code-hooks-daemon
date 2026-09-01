@@ -506,6 +506,10 @@ handlers:
       enabled: true  # Advisory only, never resolves a boundary; silent when projects: already declared
       priority: 66
 
+    config_optimisation_reminder:  # Remind to re-run /optimise after an upgrade (Plan 00308)
+      enabled: true  # Advisory only; silent once a run is recorded against the current version
+      priority: 67
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     disclosure_reset_pre_compact:  # Reset per-agent rule-disclosure state before compaction (Plan 00116 Phase 4)

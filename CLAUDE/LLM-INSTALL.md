@@ -340,6 +340,21 @@ cat /tmp/handler-status.txt
 
 ---
 
+## Post-Installation: Run the Config-Optimisation Review (MANDATORY)
+
+A raw handler count is not the same as a *reviewed* configuration. Run the
+`/optimise` skill (Skill tool: `skill=optimise`, or `/optimise` in a session)
+— this is the formalised "enable all relevant handlers and ensure optimal
+configuration" step (Plan 00308), the same one an upgrade runs automatically
+afterwards. It profiles the project (languages, tests, CI, plan directory),
+scores the config across five areas, and produces a prioritised per-handler
+enable/skip recommendation list with ready-to-apply config snippets — it only
+applies changes on your explicit confirmation. Run this before moving on to
+Planning Workflow Setup below; it decides which handlers from that section (and
+every other category) are actually worth enabling for this project.
+
+---
+
 ## Post-Installation: Update Project CLAUDE.md
 
 Add a `### Hooks Daemon` section to the **project's root `CLAUDE.md`** so future agents working in this project know how to manage the daemon.

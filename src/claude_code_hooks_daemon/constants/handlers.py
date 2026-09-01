@@ -403,6 +403,14 @@ class HandlerID:
         config_key="skill_opportunity_detector",
         display_name="skill-opportunity-detector",
     )
+    # Config-optimisation reminder (SessionStart handler) — Plan 00308:
+    # reminds when the installed daemon version changed since the last
+    # recorded /optimise (config-optimisation) run.
+    CONFIG_OPTIMISATION_REMINDER = HandlerIDMeta(
+        class_name="ConfigOptimisationReminderHandler",
+        config_key="config_optimisation_reminder",
+        display_name="config-optimisation-reminder",
+    )
     # Model-fallback detector (SessionStart handler) — Plan 00278 Phase 3/3b:
     # loud advisory when the transcript records a safety-triggered model
     # fallback, plus a redacted diagnostic snapshot

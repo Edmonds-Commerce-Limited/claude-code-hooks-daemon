@@ -2,6 +2,7 @@
 
 from . import secret_file_hygiene_checker as _secret_file_hygiene_checker_module
 from .ccy_supervisor_integrity import CcySupervisorIntegrityHandler
+from .config_optimisation_reminder import ConfigOptimisationReminderHandler
 from .contract_staleness import ContractStalenessHandler
 from .disclosure_reset_session_start import DisclosureResetSessionStartHandler
 from .git_filemode_checker import GitFilemodeCheckerHandler
@@ -23,6 +24,7 @@ SecretFileHygieneCheckerHandler = (
 
 __all__ = [
     "CcySupervisorIntegrityHandler",
+    "ConfigOptimisationReminderHandler",
     "ContractStalenessHandler",
     "DisclosureResetSessionStartHandler",
     "GitFilemodeCheckerHandler",

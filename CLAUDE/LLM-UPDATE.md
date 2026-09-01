@@ -342,53 +342,29 @@ Run with --help for all options.
 - Includes descriptions and examples from the version manifests
 - Machine-readable: exit code 0/1 for scripting
 
-### What to Do with New Handlers (CRITICAL)
+### Step N (MANDATORY): Run the config-optimisation review
 
-**New handlers ship DISABLED by default.** After every upgrade, you MUST review new handlers and enable them. Skipping this step means you miss new safety protections, code quality enforcement, and workflow improvements that were added in the new version.
+**New handlers ship DISABLED by default.** An upgrade that ends without a
+configuration review is an upgrade that silently missed every new protection —
+so this step is not optional and not something to reconstruct by hand.
 
-**Step 1: Review each new handler and decide:**
+Run the `/optimise` skill (`Skill` tool: `skill=optimise`) — this IS the
+formalised "review new handlers and enable what's relevant" step (Plan 00308).
+It profiles the project, compares the config against
+`CLAUDE/UPGRADES/config-changes/` manifests newer than the last recorded
+review, and produces a scored, per-handler enable/skip recommendation list
+with ready-to-apply config snippets. It only applies changes on your explicit
+confirmation ("apply all" / "apply N,M" / "skip"), then restarts and verifies
+the daemon, and records the run so the `config_optimisation_reminder`
+SessionStart advisory does not re-nag next session.
 
-| Category                                               | Default Action                              |
-| ------------------------------------------------------ | ------------------------------------------- |
-| **Safety handlers** (destructive operations, security) | **Always enable** — these prevent data loss |
-| **Code quality handlers** (linting, TDD, QA)           | **Enable unless project has reason not to** |
-| **Workflow handlers** (npm, git, planning)             | **Enable if relevant to project**           |
-| **Advisory handlers** (spelling, suggestions)          | Enable based on project preferences         |
+`/hooks-daemon upgrade` invokes this automatically at the end of a successful
+upgrade (pass `--skip-config-optimisation` to opt out and run it yourself
+later) — running it manually here is for the documented curl+script upgrade
+path, which does not.
 
-**Step 2: Add new handlers to config** — enable them, don't just list them:
-
-```yaml
-handlers:
-  pre_tool_use:
-    new_handler_name:
-      enabled: true  # <-- ENABLE, not just add
-      priority: 50
-```
-
-**Step 3: Check release notes** for handler descriptions and options:
-
-```bash
-cd .claude/hooks-daemon
-# Find release notes for the version you upgraded to
-ls RELEASES/
-cat RELEASES/vX.Y.Z.md
-```
-
-**Step 4: Restart daemon** to load new config:
-
-```bash
-cd .claude/hooks-daemon
-.claude/hooks-daemon/bin/hooks-daemon restart
-```
-
-**Step 5: Verify handler count increased:**
-
-```bash
-cd .claude/hooks-daemon
-.claude/hooks-daemon/bin/hooks-daemon handlers | grep -i "enabled"
-```
-
-A well-configured installation has **30+ handlers enabled**. If your count is significantly lower, review the full handler list and enable more.
+A well-configured installation has **30+ handlers enabled**; `/optimise`'s
+report shows the current count against that baseline.
 
 ### Understanding Handler Tags
 
@@ -412,8 +388,11 @@ cd .claude/hooks-daemon
 Review the output and check:
 
 - **Enabled count** — should be **30+ handlers** for a well-configured installation
-- **New handlers** — any new handlers from the upgrade should be enabled (see Step 5)
-- **Disabled handlers** — if any safety or code quality handlers are disabled, enable them now
+- **New handlers** — any new handlers from the upgrade should be enabled; the
+  config-optimisation review above (`/optimise`) is what decides which ones and applies
+  them, not a manual read of this list
+- **Disabled handlers** — if any safety or code quality handlers are disabled, `/optimise`
+  flags them too
 
 ---
 
