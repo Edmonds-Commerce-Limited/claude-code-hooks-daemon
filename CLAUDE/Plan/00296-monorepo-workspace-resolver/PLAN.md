@@ -113,7 +113,7 @@ the affected handlers through it.
   explicit `workspace_root` still pins every file (test seam preserved).
 - [x] ✅ **Task 2.4**: `tdd_enforcement` workspace-relative `test_path_map`
   and removal of the hardcoded `/workspace` fallback.
-- [ ] ⬜ **Task 2.5**: `markdown_organization` automatic resolution with
+- [x] ✅ **Task 2.5**: `markdown_organization` automatic resolution with
   `monorepo_subproject_patterns` as override.
 
 ### Phase 3: `projects:` config is the only source of boundaries
@@ -137,7 +137,7 @@ consumes: this changes where a `Workspace` COMES FROM, not what consumes it.
 - [ ] ⬜ **Task 3.4**: Monorepo DETECTOR + advisory: manifests below the root
   with none at it means "this looks like a monorepo" — name the workspaces
   found and print the `projects:` block to paste. Advises, never decides.
-- [ ] ⬜ **Task 3.5**: `markdown_organization`'s `monorepo_subproject_patterns`
+- [x] ✅ **Task 3.5**: `markdown_organization`'s `monorepo_subproject_patterns`
   re-expressed as `projects:` entries, keeping the option working as a
   deprecated alias rather than a parallel mechanism.
 - [ ] ⬜ **Task 3.6**: Document `projects:` in the config reference and
