@@ -1238,6 +1238,18 @@ def cmd_check(args: argparse.Namespace) -> int:
         for line in enforcement_lines:
             print(f"  ⚠️  {line}")
 
+    # 7. Secret redaction degrade (Plan 00305 Task 1.3): an absolute or
+    # home-relative configured secret-term list path is silently replaced by
+    # the default, with only a `logger.warning` as prior evidence. Surface
+    # that here instead.
+    print("\nSecret redaction:")
+    secret_redaction_lines = _collect_secret_redaction_status_lines(project_path)
+    if not secret_redaction_lines:
+        print("  OK — no degraded secret-term list configuration detected")
+    else:
+        for line in secret_redaction_lines:
+            print(f"  ⚠️  {line}")
+
     return 0
 
 
@@ -1770,9 +1782,6 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
         Advisory lines, or an empty list when every probed handler is nominal
         at every evaluated root.
     """
-    from unittest.mock import patch
-
-    from claude_code_hooks_daemon.core.project_context import ProjectContext
     from claude_code_hooks_daemon.core.workspace import ProjectRegistry
     from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler
     from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
@@ -1791,21 +1800,18 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
 
     roots = [registry.project_root, *(project.root for project in registry.projects)]
 
-    # Construction alone probes ProjectContext.project_root() (npm_command,
-    # validate_eslint_on_write) for state this function never reads -- their
-    # posture is decided per-root below via get_enforcement_status(), not from
-    # that constructor default. A daemon-driven `check` may run with no live
+    # Construction alone probes project state (npm_command,
+    # validate_eslint_on_write) this function never reads -- their posture is
+    # decided per-root below via get_enforcement_status(), not from that
+    # constructor default. A daemon-driven `check` may run with no live
     # ProjectContext (that singleton is initialised at daemon startup, and
-    # this CLI command talks to config files directly), so it is patched for
-    # the duration of construction only, exactly as the handlers' own test
-    # suites already do (see e.g. test_validate_eslint_on_write.py's
-    # mock_project_context fixture).
-    with patch.object(ProjectContext, "project_root", return_value=project_path):
-        handlers: list[Any] = [
-            NpmCommandHandler(),
-            LintOnEditHandler(),
-            ValidateEslintOnWriteHandler(),
-        ]
+    # this CLI command talks to config files directly), so both handlers are
+    # given `project_path` explicitly instead of relying on that singleton.
+    handlers: list[Any] = [
+        NpmCommandHandler(project_root=project_path),
+        LintOnEditHandler(),
+        ValidateEslintOnWriteHandler(workspace_root=project_path),
+    ]
     for handler in handlers:
         handler._project_registry = registry
 
@@ -1818,6 +1824,41 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
                     seen.add(status)
                     statuses.append(status)
     return statuses
+
+
+def _collect_secret_redaction_status_lines(project_path: Path) -> list[str]:
+    """Surface a degraded configured secret-term list path at `check` time (Plan 00305 Task 1.3).
+
+    The redaction module silently replaces an absolute or home-relative
+    configured word-list path with its built-in default (correct per the
+    zero-absolute-paths ruling, Plan 00303) -- but the only prior evidence
+    was a `logger.warning`, and secret-term blocking then stops enforcing
+    with nothing a human is likely to see. This reads the same config option
+    the redaction module reads at runtime and reports the same degrade
+    through its own describe-degradation helper.
+
+    Best-effort: config-load failure here must not break `check`, which is
+    also used to diagnose a broken config -- any error reports nothing
+    rather than raising.
+
+    Returns:
+        Advisory lines, or an empty list when nothing is configured or the
+        configured value is unproblematic.
+    """
+    from claude_code_hooks_daemon.utils import secret_redaction
+
+    config_file = project_path / ".claude" / "hooks-daemon.yaml"
+    try:
+        config_dict = ConfigLoader.load(config_file) if config_file.exists() else {}
+        config = Config.model_validate(config_dict)
+    except (PydanticValidationError, OSError, ValueError):
+        return []
+
+    handler_cfg = config.handlers.pre_tool_use.get("sensitive_content")
+    options = getattr(handler_cfg, "options", None)
+    configured = options.get("secret_word_list_path") if isinstance(options, dict) else None
+    message = secret_redaction.describe_secret_word_list_degradation(configured)
+    return [message] if message else []
 
 
 def _format_project_handler_health_lines(

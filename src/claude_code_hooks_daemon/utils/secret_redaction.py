@@ -76,7 +76,12 @@ def resolve_secret_word_list_path(configured_path: str | None, project_root: Pat
     Config carries zero absolute paths (Plan 00303): an absolute or
     home-relative ``configured_path`` is logged and treated as unset, never
     raised -- this module's contract is fail-open/advisory, matching
-    ``payload_capture``'s degrade-not-raise handling of the same shape.
+    ``payload_capture``'s degrade-not-raise handling of the same shape. The
+    same degrade is also surfaced where a human sees it (``describe_secret_
+    word_list_degradation``, called by ``hooks-daemon check`` -- Plan 00305
+    Task 1.3), since a missing default word list is inert by design and a
+    `logger.warning` alone is easy to miss on a repo that never provisioned
+    one.
     """
     from claude_code_hooks_daemon.utils.repo_relative_path import (
         normalise_repo_relative_path,
@@ -89,6 +94,47 @@ def resolve_secret_word_list_path(configured_path: str | None, project_root: Pat
         logger.warning("Ignoring secret_word_list_path: %s", exc)
         relative = DEFAULT_SECRET_WORD_LIST_PATH
     return project_root / relative
+
+
+def describe_secret_word_list_degradation(configured_path: str | None) -> str | None:
+    """Describe the silent absolute/home-relative-path degrade, for a human-visible report.
+
+    ``resolve_secret_word_list_path`` treats an absolute or home-relative
+    ``configured_path`` as unset and falls back to
+    :data:`DEFAULT_SECRET_WORD_LIST_PATH` -- correct per the zero-absolute-
+    paths ruling (Plan 00303), but the only evidence was a `logger.warning`
+    a human is unlikely to ever read. This is the pure, side-effect-free
+    detector behind that visibility: it never raises and never touches the
+    filesystem, so ``hooks-daemon check`` (and any other degraded-mode
+    report) can call it per configured project root with no extra cost.
+
+    Args:
+        configured_path: The raw ``secret_word_list_path`` option value, or
+            ``None``/empty when nothing was configured.
+
+    Returns:
+        A human-readable advisory naming the ignored value and the default
+        it was replaced by, or ``None`` when nothing was configured or the
+        configured value is a plain repository-relative path (no degrade).
+    """
+    if not configured_path:
+        return None
+
+    from claude_code_hooks_daemon.utils.repo_relative_path import (
+        normalise_repo_relative_path,
+    )
+
+    try:
+        normalise_repo_relative_path(configured_path, "secret_word_list_path")
+    except ValueError:
+        return (
+            f"secret_word_list_path {configured_path!r} is not repository-relative "
+            f"and was IGNORED -- secret-term blocking falls back to the default "
+            f"{DEFAULT_SECRET_WORD_LIST_PATH!r}, which likely does not exist on this repo. "
+            f"Move the word list under the repository (or use the {{REPO_ROOT}} token) "
+            f"to restore enforcement."
+        )
+    return None
 
 
 def load_secret_terms(path: Path) -> tuple[str, ...]:

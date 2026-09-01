@@ -133,8 +133,11 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
         self.workspace_root = self._pinned_workspace_root or ProjectContext.project_root()
         # The mode at the PROJECT ROOT. `handle()` re-decides per authored file
         # against that file's own workspace; this survives for callers that
-        # inspect the handler's default mode without a hook event.
-        self.has_llm_commands: bool = has_llm_commands_in_package_json()
+        # inspect the handler's default mode without a hook event. Probed at
+        # `self.workspace_root` (not the bare `ProjectContext` default) so a
+        # pinned root is honoured even with no live `ProjectContext` (Plan
+        # 00305 Task 1.1).
+        self.has_llm_commands: bool = has_llm_commands_in_package_json(self.workspace_root)
         # Check files a Bash command AUTHORED as well as Write/Edit ones
         # (Plan 00260 Task 3.5). Relocation (`cp`/`mv`/`dd`) is never checked --
         # see `get_written_file_paths` for why a DENYING guard must not.

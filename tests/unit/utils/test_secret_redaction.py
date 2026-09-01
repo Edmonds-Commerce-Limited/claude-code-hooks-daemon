@@ -41,6 +41,35 @@ class TestResolveSecretWordListPath:
         assert result == sr.resolve_secret_word_list_path(None, tmp_path)
 
 
+class TestDescribeSecretWordListDegradation:
+    """Plan 00305 Task 1.3: surface the absolute-path degrade where a human
+    sees it, not just a `logger.warning`. A missing default word list is
+    inert BY DESIGN (module docstring) and must not be reported here -- only
+    a configured value that was silently replaced is a degrade worth
+    surfacing.
+    """
+
+    def test_none_is_not_degraded(self) -> None:
+        assert sr.describe_secret_word_list_degradation(None) is None
+
+    def test_empty_string_is_not_degraded(self) -> None:
+        assert sr.describe_secret_word_list_degradation("") is None
+
+    def test_relative_path_is_not_degraded(self) -> None:
+        assert sr.describe_secret_word_list_degradation("custom/wordlist") is None
+
+    def test_absolute_path_is_degraded(self) -> None:
+        message = sr.describe_secret_word_list_degradation("/etc/wordlist")
+        assert message is not None
+        assert "/etc/wordlist" in message
+        assert sr.DEFAULT_SECRET_WORD_LIST_PATH in message
+
+    def test_home_relative_path_is_degraded(self) -> None:
+        message = sr.describe_secret_word_list_degradation("~/wordlist")
+        assert message is not None
+        assert "~/wordlist" in message
+
+
 class TestLoadSecretTerms:
     def test_missing_file_returns_empty_tuple(self, tmp_path: Path) -> None:
         assert sr.load_secret_terms(tmp_path / "nonexistent.secret") == ()

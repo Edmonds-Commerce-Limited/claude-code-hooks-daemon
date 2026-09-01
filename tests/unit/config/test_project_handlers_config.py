@@ -58,6 +58,18 @@ class TestProjectHandlersConfigValidation:
         config = ProjectHandlersConfig(path="/srv/handlers")
         assert config.path == "/srv/handlers"
 
+    def test_misplaced_repo_root_token_is_a_validation_error(self) -> None:
+        """Plan 00305 Task 1.2: a misplaced {REPO_ROOT} token is a named config
+        error, not a startup traceback from the unguarded
+        `expand_repo_root_token` call sites -- caught here instead."""
+        with pytest.raises(ValidationError, match="REPO_ROOT"):
+            ProjectHandlersConfig(path="handlers/{REPO_ROOT}/foo")
+
+    def test_token_prefixed_path_is_still_accepted(self) -> None:
+        """A correctly-placed token is untouched by the placement validator."""
+        config = ProjectHandlersConfig(path="{REPO_ROOT}/.claude/project-handlers")
+        assert config.path == "{REPO_ROOT}/.claude/project-handlers"
+
     def test_extra_fields_are_rejected(self) -> None:
         """Test that unknown fields raise ValidationError (extra='forbid').
 

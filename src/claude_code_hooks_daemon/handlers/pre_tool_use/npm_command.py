@@ -119,7 +119,21 @@ class NpmCommandHandler(PreToolUseHandlerBase):
         "tsx": "npm run llm:* (if script has wrapper) or ask user which command",
     }
 
-    def __init__(self, options: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        options: dict[str, Any] | None = None,
+        project_root: Path | None = None,
+    ) -> None:
+        """
+        Args:
+            options: Config-driven handler options (unused here; kept for the
+                shared handler-construction signature).
+            project_root: Root to probe for `package.json` instead of
+                `ProjectContext.project_root()`. A caller that has no live
+                `ProjectContext` (e.g. a CLI command reading config files
+                directly, Plan 00305 Task 1.1) passes this explicitly so
+                construction never touches that singleton.
+        """
         super().__init__(
             handler_id=HandlerID.NPM_COMMAND,
             priority=Priority.NPM_COMMAND,
@@ -137,7 +151,7 @@ class NpmCommandHandler(PreToolUseHandlerBase):
         # workspace (Plan 00296). It survives only for `get_acceptance_tests()`,
         # which generates expectations with no hook input and so has no
         # command, no cwd, and no workspace to resolve.
-        self.has_llm_commands: bool = has_llm_commands_in_package_json()
+        self.has_llm_commands: bool = has_llm_commands_in_package_json(project_root)
         self._formatter = RuleFormatter()
 
     def _workspace_root_for(self, hook_input: dict[str, Any], command: str) -> Path:

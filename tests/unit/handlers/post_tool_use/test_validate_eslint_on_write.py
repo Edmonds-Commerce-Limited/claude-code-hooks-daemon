@@ -113,6 +113,19 @@ class TestValidateEslintOnWriteHandler:
         assert "typescript" in handler.tags
         assert handler.workspace_root == tmp_path
 
+    def test_llm_commands_probed_at_pinned_workspace_root(
+        self, tmp_path: Path, mock_llm_commands_detection: MagicMock
+    ) -> None:
+        """Plan 00305 Task 1.1: an explicit `workspace_root` is what gets probed.
+
+        Construction must not fall back to `ProjectContext.project_root()`
+        for the llm-command probe once a root has been pinned explicitly --
+        a caller with no live `ProjectContext` (e.g. a CLI command reading
+        config files directly) needs this to never touch that singleton.
+        """
+        ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+        mock_llm_commands_detection.assert_called_once_with(tmp_path)
+
     def test_initialization_auto_detect_workspace(self) -> None:
         """Handler should auto-detect workspace if not provided."""
         with patch(

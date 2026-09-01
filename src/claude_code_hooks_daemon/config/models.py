@@ -22,6 +22,9 @@ from claude_code_hooks_daemon.constants import wired_event_metas
 from claude_code_hooks_daemon.utils.repo_relative_path import (
     normalise_repo_relative_path as _normalise_repo_relative_path,
 )
+from claude_code_hooks_daemon.utils.repo_relative_path import (
+    validate_repo_root_token_placement as _validate_repo_root_token_placement,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -338,6 +341,17 @@ class PluginConfig(BaseModel):
     handlers: list[str] | None = Field(default=None, description="Handler classes to load")
     enabled: bool = Field(default=True, description="Whether plugin is enabled")
 
+    @field_validator("path")
+    @classmethod
+    def _validate_path_token_placement(cls, value: str) -> str:
+        """Plan 00305 Task 1.2: reject a misplaced ``{REPO_ROOT}`` token at
+        config-load time rather than letting it surface as a startup
+        ``ValueError`` from the unguarded ``expand_repo_root_token`` callers.
+        This field is exempt from repo-relativity, so only token PLACEMENT is
+        checked here.
+        """
+        return _validate_repo_root_token_placement(value, "plugin path")
+
 
 class PluginsConfig(BaseModel):
     """Configuration for the plugin system.
@@ -412,6 +426,17 @@ class ProjectHandlersConfig(BaseModel):
             "alternative to a genuine absolute path."
         ),
     )
+
+    @field_validator("path")
+    @classmethod
+    def _validate_path_token_placement(cls, value: str) -> str:
+        """Plan 00305 Task 1.2: reject a misplaced ``{REPO_ROOT}`` token at
+        config-load time rather than letting it surface as a startup
+        ``ValueError`` from the unguarded ``expand_repo_root_token`` callers.
+        This field is exempt from repo-relativity, so only token PLACEMENT is
+        checked here.
+        """
+        return _validate_repo_root_token_placement(value, "project handlers path")
 
 
 class PlanWorkflowQaJournalConfig(BaseModel):

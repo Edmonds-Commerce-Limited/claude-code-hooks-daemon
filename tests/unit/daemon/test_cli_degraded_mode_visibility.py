@@ -110,6 +110,7 @@ class TestCmdCheckDegradedVisibility:
     _REGISTRATION = "claude_code_hooks_daemon.daemon.cli.check_hook_registration_warnings"
     _HEALTH = "claude_code_hooks_daemon.daemon.cli._read_project_handler_health"
     _ENFORCEMENT = "claude_code_hooks_daemon.daemon.cli._collect_enforcement_status_lines"
+    _SECRET_REDACTION = "claude_code_hooks_daemon.daemon.cli._collect_secret_redaction_status_lines"
 
     def _patches(self, *, daemon_health_response: dict[str, Any] | None) -> Any:
         from claude_code_hooks_daemon.daemon.project_handler_health import (
@@ -124,6 +125,7 @@ class TestCmdCheckDegradedVisibility:
             patch(self._REGISTRATION, return_value=[]),
             patch(self._HEALTH, return_value=ProjectHandlerHealthState()),
             patch(self._ENFORCEMENT, return_value=[]),
+            patch(self._SECRET_REDACTION, return_value=[]),
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
@@ -162,3 +164,23 @@ class TestCmdCheckDegradedVisibility:
 
         out = capsys.readouterr().out
         assert "DEGRADED" not in out
+
+    def test_reports_degraded_secret_word_list_path(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Plan 00305 Task 1.3: `check` surfaces an ignored absolute/home-relative
+        `secret_word_list_path`, previously visible only via `logger.warning`."""
+        health_response = {"result": {"status": "healthy", "config_errors": []}}
+        with (
+            self._enter(self._patches(daemon_health_response=health_response)),
+            patch(
+                self._SECRET_REDACTION,
+                return_value=["secret_word_list_path '/etc/wordlist' was IGNORED"],
+            ),
+        ):
+            cmd_check(argparse.Namespace(project_root=None))
+
+        out = capsys.readouterr().out
+        assert "Secret redaction:" in out
+        assert "/etc/wordlist" in out
+        assert "IGNORED" in out

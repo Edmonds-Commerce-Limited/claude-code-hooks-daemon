@@ -38,6 +38,24 @@ REPO_ROOT_PLACEHOLDER = "{REPO_ROOT}"
 _TOKEN_PREFIX = REPO_ROOT_PLACEHOLDER + "/"
 
 
+def _check_token_placement(value: str, label: str) -> None:
+    """Raise if ``{REPO_ROOT}`` appears anywhere other than the very start of ``value``.
+
+    Shared by every caller that needs the placement rule -- stripping it
+    (:func:`_strip_repo_root_token`), expanding it
+    (:func:`expand_repo_root_token`), or validating placement alone on a
+    field that is otherwise exempt from repo-relativity
+    (:func:`validate_repo_root_token_placement`).
+    """
+    if value == REPO_ROOT_PLACEHOLDER or value.startswith(_TOKEN_PREFIX):
+        return
+    if REPO_ROOT_PLACEHOLDER in value:
+        raise ValueError(
+            f"{label} may only use {REPO_ROOT_PLACEHOLDER!r} at the very start of the path, "
+            f"followed by '/' (or alone, for the repository root itself), got {value!r}"
+        )
+
+
 def _strip_repo_root_token(value: str, label: str) -> str:
     """Strip a leading ``{REPO_ROOT}`` token, if present, from ``value``.
 
@@ -54,15 +72,39 @@ def _strip_repo_root_token(value: str, label: str) -> str:
             start of ``value`` (either alone, or immediately followed by
             ``/``).
     """
+    _check_token_placement(value, label)
     if value == REPO_ROOT_PLACEHOLDER:
         return ""
     if value.startswith(_TOKEN_PREFIX):
         return value[len(_TOKEN_PREFIX) :]
-    if REPO_ROOT_PLACEHOLDER in value:
-        raise ValueError(
-            f"{label} may only use {REPO_ROOT_PLACEHOLDER!r} at the very start of the path, "
-            f"followed by '/' (or alone, for the repository root itself), got {value!r}"
-        )
+    return value
+
+
+def validate_repo_root_token_placement(value: str, label: str) -> str:
+    """Validate ``{REPO_ROOT}`` token PLACEMENT only, leaving ``value`` unchanged.
+
+    For a config field that is EXEMPT from the repo-relative-only rule (e.g.
+    ``PluginConfig.path``, ``ProjectHandlersConfig.path``) but still accepts
+    the optional ``{REPO_ROOT}`` token, this is the pydantic ``field_validator``
+    seam: it turns a misplaced token into a named config validation error at
+    load time, instead of a startup ``ValueError`` from the unguarded
+    ``expand_repo_root_token`` call each such field's consumer makes later
+    (Plan 00305 Task 1.2). It does not check repo-relativity or ``..``
+    escapes -- those remain irrelevant for an exempt field and are left to
+    :func:`expand_repo_root_token`'s own escape check at expansion time.
+
+    Args:
+        value: The raw configured path, possibly token-prefixed.
+        label: What is being validated, for the error message.
+
+    Returns:
+        ``value`` unchanged.
+
+    Raises:
+        ValueError: If the token appears anywhere other than at the very
+            start of ``value``.
+    """
+    _check_token_placement(value, label)
     return value
 
 

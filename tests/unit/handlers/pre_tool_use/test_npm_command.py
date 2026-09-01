@@ -651,6 +651,36 @@ class TestNpmCommandHandler:
             handler = NpmCommandHandler()
             assert handler.has_llm_commands is False
 
+    # Tests for explicit project_root (Plan 00305 Task 1.1: construct without
+    # a live ProjectContext, e.g. from a CLI command talking to config files
+    # directly rather than a running daemon session)
+
+    def test_project_root_param_used_instead_of_project_context(self, tmp_path: Path) -> None:
+        """An explicit `project_root` is read from directly, bypassing ProjectContext.
+
+        `ProjectContext.project_root()` is never called when a root is
+        passed explicitly -- construction must succeed with no
+        ProjectContext initialised at all.
+        """
+        (tmp_path / "package.json").write_text(
+            json.dumps({"scripts": {"llm:build": "true"}}), encoding="utf-8"
+        )
+        with patch(
+            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+            side_effect=AssertionError("ProjectContext.project_root() must not be called"),
+        ):
+            handler = NpmCommandHandler(project_root=tmp_path)
+        assert handler.has_llm_commands is True
+
+    def test_project_root_param_defaults_to_none(self) -> None:
+        """Omitting `project_root` preserves the original ProjectContext-driven behaviour."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ) as mock_detect:
+            NpmCommandHandler()
+            mock_detect.assert_called_once_with(None)
+
     # Tests for advisory mode (no llm: commands)
 
     def test_advisory_mode_allows_npm_run_build(self, advisory_handler: NpmCommandHandler) -> None:

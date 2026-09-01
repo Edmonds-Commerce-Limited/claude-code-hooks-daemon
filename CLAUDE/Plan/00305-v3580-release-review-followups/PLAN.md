@@ -1,6 +1,6 @@
 # Plan 00305: v3580 release review followups
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: Medium
@@ -31,7 +31,7 @@ tracked MUST-FIX ledger and are to be fixed immediately after the release.
 
 ### Phase 1: Deferred MUST-FIX findings
 
-- [ ] ⬜ **Task 1.1** (review finding 3, MEDIUM):
+- [x] ✅ **Task 1.1** (review finding 3, MEDIUM):
   `src/claude_code_hooks_daemon/daemon/cli.py:148,178` — `unittest.mock.patch`
   imported and used in shipped CLI code (`_collect_enforcement_status_lines`
   wraps three handler constructions in
@@ -39,7 +39,7 @@ tracked MUST-FIX ledger and are to be fixed immediately after the release.
   process-wide). Remediation: let those handlers construct without a live
   `ProjectContext` (optional root argument or lazy resolution at first use),
   then delete the patch and the import.
-- [ ] ⬜ **Task 1.2** (review finding 4, MEDIUM):
+- [x] ✅ **Task 1.2** (review finding 4, MEDIUM):
   `src/claude_code_hooks_daemon/utils/repo_relative_path.py:135` —
   `expand_repo_root_token` raises `ValueError` for a misplaced `{REPO_ROOT}`
   token at four unguarded call sites (`daemon/controller.py:474`,
@@ -48,7 +48,7 @@ tracked MUST-FIX ledger and are to be fixed immediately after the release.
   `field_validator` on the two token-accepting exempt fields
   (`PluginConfig.path`, `ProjectHandlersConfig.path`) checking token
   PLACEMENT only (not repo-relativity).
-- [ ] ⬜ **Task 1.3** (review finding 5, MEDIUM, security-relevant):
+- [x] ✅ **Task 1.3** (review finding 5, MEDIUM, security-relevant):
   `src/claude_code_hooks_daemon/utils/secret_redaction.py:222` — an absolute
   configured `secret_word_list_path` is silently replaced by the default
   `.claude/block-words.secret`, which likely does not exist on such a repo,

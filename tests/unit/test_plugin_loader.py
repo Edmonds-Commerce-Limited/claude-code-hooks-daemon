@@ -729,6 +729,32 @@ class TestLoadFromPluginsConfig:
         with pytest.raises(RuntimeError, match="REPO_ROOT"):
             PluginLoader.load_from_plugins_config(plugins_config, workspace_root=None)
 
+    def test_plugin_config_misplaced_repo_root_token_is_a_validation_error(self) -> None:
+        """Plan 00305 Task 1.2: a misplaced token is a named config error, not a
+        startup traceback from the unguarded `expand_repo_root_token` call
+        sites -- caught at `PluginConfig` construction time instead."""
+        from pydantic import ValidationError
+
+        from claude_code_hooks_daemon.config.models import PluginConfig
+
+        with pytest.raises(ValidationError, match="REPO_ROOT"):
+            PluginConfig(
+                path="plugins/{REPO_ROOT}/foo",
+                event_type="pre_tool_use",
+                enabled=True,
+            )
+
+    def test_plugin_config_token_prefixed_path_is_still_accepted(self) -> None:
+        """A correctly-placed token is untouched by the placement validator."""
+        from claude_code_hooks_daemon.config.models import PluginConfig
+
+        config = PluginConfig(
+            path="{REPO_ROOT}/fixtures/plugins/custom_handler.py",
+            event_type="pre_tool_use",
+            enabled=True,
+        )
+        assert config.path == "{REPO_ROOT}/fixtures/plugins/custom_handler.py"
+
     def test_load_from_plugins_config_multiple_paths_first_wins(
         self, plugin_dir: Path, tmp_path: Path
     ) -> None:

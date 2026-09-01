@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.utils.repo_relative_path import (
     REPO_ROOT_PLACEHOLDER,
     expand_repo_root_token,
     normalise_repo_relative_path,
+    validate_repo_root_token_placement,
 )
 
 
@@ -98,3 +99,49 @@ class TestExpandRepoRootToken:
     def test_token_prefixed_escape_is_rejected(self) -> None:
         with pytest.raises(ValueError, match="must not escape"):
             expand_repo_root_token(f"{REPO_ROOT_PLACEHOLDER}/../elsewhere", Path("/repo"))
+
+
+class TestValidateRepoRootTokenPlacement:
+    """Plan 00305 Task 1.2: a placement-only check for token-exempt fields.
+
+    ``PluginConfig.path``/``ProjectHandlersConfig.path`` are exempt from the
+    repo-relative-only rule (an absolute path is a deliberate override), but
+    still accept the optional ``{REPO_ROOT}`` token, and a misplaced token
+    must be a named config validation error rather than a startup traceback
+    from the unguarded ``expand_repo_root_token`` call sites.
+    """
+
+    def test_no_token_is_returned_unchanged(self) -> None:
+        assert validate_repo_root_token_placement("/srv/plugins", "label") == "/srv/plugins"
+
+    def test_token_alone_is_returned_unchanged(self) -> None:
+        assert (
+            validate_repo_root_token_placement(REPO_ROOT_PLACEHOLDER, "label")
+            == REPO_ROOT_PLACEHOLDER
+        )
+
+    def test_token_prefix_is_returned_unchanged(self) -> None:
+        value = f"{REPO_ROOT_PLACEHOLDER}/plugins/foo"
+        assert validate_repo_root_token_placement(value, "label") == value
+
+    def test_plain_relative_path_is_returned_unchanged(self) -> None:
+        assert validate_repo_root_token_placement("plugins/foo", "label") == "plugins/foo"
+
+    def test_token_not_at_start_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="start"):
+            validate_repo_root_token_placement(f"plugins/{REPO_ROOT_PLACEHOLDER}/foo", "label")
+
+    def test_token_without_following_slash_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="start"):
+            validate_repo_root_token_placement(f"{REPO_ROOT_PLACEHOLDER}suffix", "label")
+
+    def test_error_message_includes_the_label(self) -> None:
+        with pytest.raises(ValueError, match="my thing"):
+            validate_repo_root_token_placement(f"x/{REPO_ROOT_PLACEHOLDER}/y", "my thing")
+
+    def test_does_not_reject_repo_escaping_dotdot(self) -> None:
+        """Placement-only: this check does not enforce repo-relativity or ``..`` rules --
+        those are left to `expand_repo_root_token`'s own escape check at expansion time.
+        """
+        value = f"{REPO_ROOT_PLACEHOLDER}/../elsewhere"
+        assert validate_repo_root_token_placement(value, "label") == value
