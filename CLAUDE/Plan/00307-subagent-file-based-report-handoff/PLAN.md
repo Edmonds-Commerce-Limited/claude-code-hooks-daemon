@@ -110,7 +110,9 @@ threshold/steering design thinking where it fits.
 
 ### Phase 4: Prove the fix, dogfood, then default
 
-- [ ] ⬜ **Task 4.1**: Re-run the Task 1.1 reproduction VERBATIM (GREEN):
+- [x] ✅ **Task 4.1** (PASS — see `REPRODUCTION.md` GREEN section; two
+  tuning findings carried into Task 4.2): Re-run the Task 1.1 reproduction
+  VERBATIM (GREEN):
   the same oversized-return dispatch must now be caught — the dispatch-time
   contract injected, and the oversized final message blocked at
   SubagentStop until the agent re-routes the report through a file and

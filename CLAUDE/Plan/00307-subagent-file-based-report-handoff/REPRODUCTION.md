@@ -61,3 +61,31 @@ Re-issue the dispatch above verbatim after Phases 2–3 land. Pass =
 dispatch-time contract injected AND the oversized inline return blocked at
 SubagentStop until the agent writes the report to a file and returns a short
 summary + path; no elision marker ever reaches the coordinator.
+
+## GREEN re-run result (Task 4.1) — PASS
+
+Same dispatch, verbatim, with `dispatch_declaration` (advisory) and
+`subagent_report_size_blocker` (threshold 4,000 chars) live:
+
+- The probe generated 84,877 characters (312 sections) and attempted the
+  inline return. **The SubagentStop blocker fired**: the probe's own report
+  confirms the harness "detected output exceeded 4,000-character threshold"
+  and the stop-hook guidance instructed redirecting to a file.
+- **The probe complied**: full output written to
+  `untracked/260901-probe-harness-test-haiku.md` (it noted its first-choice
+  location was rejected and it fell back to an allowed markdown path); the
+  final message returned to the coordinator was a ~1,100-character summary
+  - the file path. No elision marker, no truncated blob, no context flood.
+- Notable: this happened despite the probe being ORDERED not to write files
+  or use tools — the block redirected it anyway (two tool uses recorded).
+  Enforcement beats instructions, which is exactly the property we wanted.
+
+Tuning inputs for Task 4.2 (dogfood):
+
+1. The probe landed the file at `untracked/` root with its own name, not
+   the configured fallback `untracked/agent-reports/` nor the
+   `{yymmdd}-{agent-name}-{model}.md` convention path the guidance should
+   steer toward — the block reason's path guidance can be more prescriptive.
+2. The markdown-location handler rejected its first write location; the
+   size-blocker's remediation should name a location that is always
+   writable, so the two handlers never argue.
