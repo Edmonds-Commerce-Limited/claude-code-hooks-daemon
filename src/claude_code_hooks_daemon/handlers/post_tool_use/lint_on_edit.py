@@ -4,6 +4,7 @@ Uses Strategy Pattern: all language-specific logic is delegated to LintStrategy
 implementations. The handler itself has ZERO language awareness.
 """
 
+import logging
 import shutil
 import subprocess  # nosec B404 - subprocess used for lint validation only (trusted tools)
 import sys
@@ -36,6 +37,8 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
+
+logger = logging.getLogger(__name__)
 
 # Placeholder for file path in lint commands
 _FILE_PLACEHOLDER = "{file}"
@@ -109,10 +112,23 @@ class LintOnEditHandler(PostToolUseHandlerBase):
             ],
         )
         self._registry = LintStrategyRegistry.create_default()
+        # Full language universe, captured BEFORE any `languages` filter narrows
+        # the registry in place -- a `timeouts` key must validate against every
+        # language this handler could ever check, not just the ones a project
+        # chose to keep enabled (Plan 00309).
+        self._all_language_names: tuple[str, ...] = tuple(self._registry.registered_languages)
         # Config options: set via setattr AFTER __init__
         self._languages: list[str] | None = None
         self._command_overrides: dict[str, dict[str, str | None]] | None = None
         self._languages_applied: bool = False
+        # Per-language extended-lint timeout override in seconds (Plan 00309):
+        # `options.timeouts.<Language>: <seconds>`. Unconfigured languages keep
+        # `Timeout.LINT_CHECK`. Raw option value; validated lazily into
+        # `_resolved_timeouts` on first use since options are set via setattr
+        # AFTER __init__.
+        self._timeouts: dict[str, object] | None = None
+        self._timeouts_applied: bool = False
+        self._resolved_timeouts: dict[str, float] = {}
         # Glob patterns exempted from linting entirely. Unions with the
         # project-wide daemon.exclude_paths the registry injects (Plan 00251,
         # the other half of the follow-up Plan 00150's Non-Goals deferred).
@@ -133,6 +149,62 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         effective_languages = self._languages or self._project_languages
         if effective_languages:
             self._registry.filter_by_languages(effective_languages)
+
+    def _apply_timeouts(self) -> None:
+        """Validate `options.timeouts` into `_resolved_timeouts` on first use (lazy).
+
+        Plan 00309. A positive int/float per known language name (matched
+        case-insensitively against `_all_language_names`) is accepted;
+        anything else -- an unknown language, a non-positive or non-numeric
+        value -- is logged and skipped, never crashes, and that language
+        falls back to `Timeout.LINT_CHECK`.
+        """
+        if self._timeouts_applied:
+            return
+        self._timeouts_applied = True
+        if not self._timeouts:
+            return
+
+        known_by_lower = {name.lower(): name for name in self._all_language_names}
+        resolved: dict[str, float] = {}
+        for raw_key, raw_value in self._timeouts.items():
+            canonical = known_by_lower.get(str(raw_key).lower())
+            if canonical is None:
+                logger.warning(
+                    "lint_on_edit: unknown language %r in options.timeouts - ignoring "
+                    "(known languages: %s)",
+                    raw_key,
+                    ", ".join(sorted(self._all_language_names)),
+                )
+                continue
+            if (
+                isinstance(raw_value, bool)
+                or not isinstance(raw_value, (int, float))
+                or raw_value <= 0
+            ):
+                logger.warning(
+                    "lint_on_edit: options.timeouts.%s must be a positive number, got %r "
+                    "- using default %ss",
+                    raw_key,
+                    raw_value,
+                    Timeout.LINT_CHECK,
+                )
+                continue
+            resolved[canonical] = float(raw_value)
+
+        self._resolved_timeouts = resolved
+
+    def _timeout_for(self, language_name: str) -> float:
+        """The extended-lint timeout (seconds) for one language."""
+        self._apply_timeouts()
+        return self._resolved_timeouts.get(language_name, float(Timeout.LINT_CHECK))
+
+    @staticmethod
+    def _format_timeout(seconds: float) -> str:
+        """Render a whole-number timeout without a spurious `.0` suffix."""
+        if seconds == int(seconds):
+            return str(int(seconds))
+        return str(seconds)
 
     def _lintable_paths(self, hook_input: dict[str, Any]) -> list[str]:
         """Files this event authored that this handler should actually lint.
@@ -393,13 +465,14 @@ class LintOnEditHandler(PostToolUseHandlerBase):
                 ],
             )
         command_parts[0] = resolved
+        timeout_seconds = self._timeout_for(language_name)
 
         try:
             result = subprocess.run(  # nosec B603 - lint tools are trusted, file path from hook
                 command_parts,
                 capture_output=True,
                 text=True,
-                timeout=Timeout.LINT_CHECK,
+                timeout=timeout_seconds,
                 cwd=working_dir,
             )
 
@@ -446,12 +519,25 @@ class LintOnEditHandler(PostToolUseHandlerBase):
                 ],
             )
         except subprocess.TimeoutExpired:
-            return BlockingResult(
-                decision=Decision.ALLOW,
-                context=[
-                    f"Lint check timed out after {Timeout.LINT_CHECK}s for {Path(file_path).name}"
-                ],
+            # Plan 00309: name the language, the budget spent, and the exact
+            # config key that raises it -- a timeout still ALLOWs (fail-open
+            # is unchanged), but "silently allows" stops being fully silent.
+            budget = self._format_timeout(timeout_seconds)
+            config_key = f"handlers.post_tool_use.lint_on_edit.options.timeouts.{language_name}"
+            message = (
+                f"⚠️ {language_name} lint check timed out after {budget}s for "
+                f"{Path(file_path).name} - the write was ALLOWED without this check "
+                f"passing. Raise the budget via {config_key}: <seconds> if this "
+                f"language's linter is genuinely slower than {budget}s."
             )
+            logger.warning(
+                "lint_on_edit: %s lint timed out after %ss for %s (config key: %s)",
+                language_name,
+                budget,
+                file_path,
+                config_key,
+            )
+            return BlockingResult(decision=Decision.ALLOW, context=[message])
 
         return None
 
@@ -561,7 +647,18 @@ restricts which languages are checked, `command_overrides` replaces a
 language's `default`/`extended` command (set `extended: null` to run only the
 syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
 globs. The project-wide `daemon.exclude_paths` applies here too; the two are
-additive and neither overrides the other."""
+additive and neither overrides the other.
+
+**The extended-lint timeout is 15s by default, and configurable per
+language.** `options.timeouts.<Language>: <seconds>` (language name matches
+the strategy registry, case-insensitive) raises or lowers the budget for one
+language without touching the rest — e.g. `timeouts.PHP: 30` for a
+cold/lock-contended extended-lint wrapper that is fine warm but exceeds 15s
+cold. Fail-open is unchanged: a timeout still ALLOWs, but is now logged and
+surfaced as advisory context naming the language, the budget spent, and this
+exact config key. An unconfigured language keeps the 15s default; an unknown
+language key or a non-positive/non-numeric value is ignored with a logged
+warning, never crashes the handler."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests aggregated from all registered strategies."""
