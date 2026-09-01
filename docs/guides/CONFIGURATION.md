@@ -198,7 +198,7 @@ convenience:
 | 10-20          | Safety       | `destructive_git`, `sed_blocker`, `secret_file_guard`                                              |
 | 25-35          | Code Quality | `qa_suppression`, `lint_on_edit`, `comment_changelog`                                              |
 | 36-55          | Workflow     | `lsp_enforcement`, `plan_qa_edit`, `npm_command`                                                   |
-| 56-65          | Advisory     | `british_english`, `flaggable_work_advisor`, `model_fallback_detector`                             |
+| 56-66          | Advisory     | `british_english`, `flaggable_work_advisor`, `model_fallback_detector`                             |
 | 100+           | Logging      | Reserved for logging/metrics/cleanup; no built-in handlers ship here                               |
 
 <!-- /ssot-quote -->

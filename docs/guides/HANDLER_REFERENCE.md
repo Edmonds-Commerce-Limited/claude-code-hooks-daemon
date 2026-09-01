@@ -2984,6 +2984,33 @@ handlers:
 
 ---
 
+#### monorepo_detector
+
+| Property       | Value               |
+| -------------- | ------------------- |
+| **Config key** | `monorepo_detector` |
+| **Priority**   | 66                  |
+| **Type**       | Advisory            |
+| **Event**      | SessionStart        |
+
+**Description:** Plan 00296 Task 3.4. Detection advises, never decides (`CLAUDE/Code/WorkspaceResolution.md`): when manifest files (`package.json`, `composer.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`) are found BELOW the repository root with none AT it, and no `projects:` block is declared, this advisory names the workspaces it found and prints a ready-to-paste `projects:` block for `.claude/hooks-daemon.yaml`. It never resolves a project boundary itself — only a declared `projects:` entry does that.
+
+**Honest limits:** the walk skips vendored/build directories and dotdirs, and does not descend into a directory holding its own `.git` (a different repository, not a sub-project). It is bounded to a few directory levels below the root so a huge repository cannot make session start slow — a workspace nested deeper than that bound goes unreported.
+
+**Silent when:** a manifest exists at the repository root (an ordinary single-project repo), `projects:` is already declared, or no manifest exists anywhere below the root.
+
+**Config example:**
+
+```yaml
+handlers:
+  session_start:
+    monorepo_detector:
+      enabled: true
+      priority: 66
+```
+
+---
+
 ## PreCompact Handlers
 
 These handlers run before Claude Code compacts (summarises) the conversation to save context window space.
