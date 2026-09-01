@@ -78,6 +78,18 @@ class TestHandle:
         assert result.decision == Decision.ALLOW
         assert any("optimise" in line for line in result.context)
 
+    def test_reminder_names_the_cli_escape_hatch(self, tmp_path: Path) -> None:
+        """B2 fix (v3.59.0 release): the ``/optimise`` skill is not deployed
+        to every install (it may be absent or ahead of the daemon's own
+        vendored skill copy), so the reminder must also name the CLI
+        subcommand that silences it directly — the same command
+        ``/optimise``'s own Step 7 runs (`bin/hooks-daemon
+        record-config-optimisation-run`) — so the advisory is actionable even
+        without the skill."""
+        with patch(_STATE_DIR_TARGET, return_value=tmp_path):
+            result = _handler().handle(_hook_input())
+        assert any("record-config-optimisation-run" in line for line in result.context)
+
     def test_stale_version_reminds(self, tmp_path: Path) -> None:
         record_run(tmp_path / STATE_FILE_NAME, version="0.0.1", now=1000.0)
         with patch(_STATE_DIR_TARGET, return_value=tmp_path), patch(_VERSION_TARGET, "9.9.9"):

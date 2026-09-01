@@ -122,3 +122,14 @@ class TestPythonStrategyAcceptanceTests:
 
         tests = strategy.get_acceptance_tests()
         assert any(t.test_type == TestType.ADVISORY for t in tests)
+
+    def test_allow_fixture_content_is_ruff_clean(self, strategy: PythonErrorHidingStrategy) -> None:
+        """The allow-direction fixture must not trip lint_on_edit when written.
+
+        The acceptance playbook executes this fixture with a real Write; an
+        unrelated deny from the lint handler fails a test whose subject
+        (error-hiding) correctly allowed. Pin the two blank lines ruff's
+        E302/I001 formatting demands after the import block.
+        """
+        allow = next(t for t in strategy.get_acceptance_tests() if "good.py" in t.command)
+        assert "import logging\\n\\n\\ndef run(task):" in allow.command

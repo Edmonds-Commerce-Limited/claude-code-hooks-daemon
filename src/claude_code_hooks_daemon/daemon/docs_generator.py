@@ -13,7 +13,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.constants.config import ConfigKey, resolve_priority
-from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
+from claude_code_hooks_daemon.handlers.registry import (
+    EVENT_TYPE_MAPPING,
+    event_dir_name_matches_module,
+)
 from claude_code_hooks_daemon.pseudo_events.registry import (
     enabled_pseudo_event_handler_classes,
 )
@@ -282,7 +285,16 @@ class DocsGenerator:
                 if not handler_class:
                     continue
 
-                if event_dir_name not in handler_class.__module__:
+                # Component match, not substring (Plan 00311 fix): a plain
+                # `in` substring check on the dotted module path made every
+                # `subagent_stop` handler ALSO match event_dir_name "stop",
+                # because "stop" is a substring of "subagent_stop" -- the
+                # handler was rendered under both the SubagentStop AND Stop
+                # sections (and the Stop section's own count was inflated).
+                # `event_dir_name_matches_module` compares path SEGMENTS
+                # instead -- see its docstring for the two real
+                # EVENT_TYPE_MAPPING substring pairs this must not conflate.
+                if not event_dir_name_matches_module(event_dir_name, handler_class.__module__):
                     continue
 
                 config_key = _to_snake_case(handler_class_name)
@@ -352,9 +364,13 @@ class DocsGenerator:
                 module = getattr(project_handler, "__module__", "") or ""
                 proj_event_dir = self._event_type_to_dir(event_type_str)
                 if not proj_event_dir:
-                    # Fall back to module path detection
+                    # Fall back to module path detection. Same segment-match
+                    # discriminator as the built-in-handler loop above (R4,
+                    # Plan 00311 follow-up) -- a raw `in` substring check
+                    # here misfiles a project handler under `stop` whenever
+                    # its module/filename contains `subagent_stop`.
                     for dir_name in EVENT_TYPE_MAPPING:
-                        if dir_name in module:
+                        if event_dir_name_matches_module(dir_name, module):
                             proj_event_dir = dir_name
                             break
                 resolved_dir = proj_event_dir or "project"

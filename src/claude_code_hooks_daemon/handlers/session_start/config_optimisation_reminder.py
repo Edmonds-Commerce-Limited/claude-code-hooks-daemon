@@ -92,6 +92,9 @@ class ConfigOptimisationReminderHandler(SessionStartHandlerBase):
                     "Run `/optimise` to inventory disabled-but-relevant handlers "
                     "and get a prioritised enable/skip recommendation list.",
                     "It never applies changes without explicit confirmation.",
+                    "If `/optimise` is not available in this project, silence this "
+                    "reminder directly with `bin/hooks-daemon "
+                    "record-config-optimisation-run`.",
                 ]
             )
             return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=context)

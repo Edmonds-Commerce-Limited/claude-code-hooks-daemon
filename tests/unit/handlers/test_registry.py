@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.handlers.registry import (
     EVENT_TYPE_MAPPING,
     HandlerRegistry,
     _to_snake_case,
+    event_dir_name_matches_module,
     get_registry,
     is_discoverable_handler,
 )
@@ -457,6 +458,40 @@ class TestEventTypeMapping:
             # Should use underscores for word separation
             if len(key.split("_")) > 1:
                 assert "_" in key
+
+
+class TestEventDirNameMatchesModule:
+    """Plan 00311 follow-up (R2/R4): a shared, correct discriminator for
+    whether a handler's dotted module path belongs to a given event
+    directory, used by every caller that used to substring-match
+    ``handler_class.__module__`` directly. ``stop`` is a substring of
+    ``subagent_stop`` and ``post_tool_use`` is a substring of
+    ``post_tool_use_failure`` -- a plain ``in`` check on the raw string
+    wrongly matches both, so this must compare path SEGMENTS."""
+
+    def test_exact_segment_match(self) -> None:
+        assert event_dir_name_matches_module("stop", "handlers.stop.my_handler")
+
+    def test_substring_but_not_segment_does_not_match(self) -> None:
+        """The live bug this closes: a `subagent_stop` handler's module must
+        NOT be claimed by the `stop` directory."""
+        assert not event_dir_name_matches_module("stop", "handlers.subagent_stop.my_handler")
+
+    def test_subagent_stop_matches_its_own_segment(self) -> None:
+        assert event_dir_name_matches_module("subagent_stop", "handlers.subagent_stop.my_handler")
+
+    def test_post_tool_use_failure_substring_pair_does_not_cross_match(self) -> None:
+        """The second real EVENT_TYPE_MAPPING substring pair: `post_tool_use`
+        is a substring of `post_tool_use_failure`."""
+        assert not event_dir_name_matches_module(
+            "post_tool_use", "handlers.post_tool_use_failure.my_handler"
+        )
+        assert event_dir_name_matches_module(
+            "post_tool_use_failure", "handlers.post_tool_use_failure.my_handler"
+        )
+
+    def test_empty_module_never_matches(self) -> None:
+        assert not event_dir_name_matches_module("stop", "")
 
 
 class TestSnakeCaseConverter:

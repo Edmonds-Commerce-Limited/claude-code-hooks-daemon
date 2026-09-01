@@ -17,7 +17,10 @@ from typing import TYPE_CHECKING, Any
 from claude_code_hooks_daemon.constants.config import ConfigKey, resolve_priority
 from claude_code_hooks_daemon.core import AcceptanceTest
 from claude_code_hooks_daemon.core.cli_acceptance_test import CliAcceptanceTest
-from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
+from claude_code_hooks_daemon.handlers.registry import (
+    EVENT_TYPE_MAPPING,
+    event_dir_name_matches_module,
+)
 from claude_code_hooks_daemon.pseudo_events.registry import (
     enabled_pseudo_event_handler_classes,
 )
@@ -194,7 +197,13 @@ class PlaybookGenerator:
                 if not handler_class:
                     continue
 
-                if event_dir_name not in handler_class.__module__:
+                # Segment match, not substring (Plan 00311 follow-up, R2): a
+                # raw `in` check on the dotted module path also matched
+                # subagent_stop handlers under "stop" (and post_tool_use_
+                # failure handlers under "post_tool_use"), duplicating their
+                # acceptance tests across both sections. See
+                # `event_dir_name_matches_module`'s docstring.
+                if not event_dir_name_matches_module(event_dir_name, handler_class.__module__):
                     continue
 
                 from claude_code_hooks_daemon.handlers.registry import _to_snake_case

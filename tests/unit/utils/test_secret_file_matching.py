@@ -292,7 +292,69 @@ class TestBashMentionsProtectedPath:
         assert self._match('find . -iname "*secret_file*matching*"') is None
 
     def test_both_edges_wildcard_generic_word_search_is_not_matched(self) -> None:
+        """A both-edges glob token (``*.txt``) unrelated to any protected
+        stem, alongside a plain (non-glob-shaped) word that merely starts
+        with 'secret', is not a mention -- neither the fixed-extension token
+        nor the bare English word approximates a protected filename."""
         assert self._match("grep -l secretary_report *.txt") is None
+
+    def test_both_edges_wildcard_naming_the_stem_is_still_matched(self) -> None:
+        """Plan 00311 regression (opposite direction from the Plan 00306
+        tests above): a both-edges-wildcard token whose residue effectively
+        SPELLS the protected stem still glob-expands to the real file and
+        must stay denied -- unconditionally excluding both-edges tokens
+        opened a real read path (verified live with a synthetic pattern:
+        ``cat *zzz-passwd*`` was allowed while ``cat *zzz-passwd`` stayed
+        denied). Here the residue ``vault-pass`` differs from the
+        ``.vault-pass`` stem by only the leading dot, so it is a near-total
+        match, not a coincidental substring share."""
+        assert self._match("cat *vault-pass*") is not None
+
+    def test_both_edges_wildcard_naming_the_longer_stem_is_still_matched(self) -> None:
+        """Companion to the test above, against the longer ``.vault-password``
+        stem rather than the shorter ``.vault-pass`` one -- both near-total
+        residues must stay denied."""
+        assert self._match("grep x *vault-password*") is not None
+
+    def test_both_edges_wildcard_prefix_truncation_multi_char_short_is_matched(
+        self,
+    ) -> None:
+        """Plan 00311 follow-up (R1, incremental re-review): a both-edges
+        residue that is a PREFIX of the stem but MORE than one character
+        short of it must still deny -- the prior ``<= 1`` length-diff rule
+        only restored the single-character-short case, leaving every longer
+        truncation open. Verified live with a synthetic ``*.ZQZ-fshape``
+        pattern: a 1-char-short and a 3-char-short residue were BOTH denied
+        by v3.58.1."""
+        synthetic_patterns = ("*.ZQZ-fshape",)
+        assert sfm.find_protected_mention("ls *ZQZ-fshap*", synthetic_patterns) is not None
+        assert sfm.find_protected_mention("ls *ZQZ-fsh*", synthetic_patterns) is not None
+
+    def test_both_edges_wildcard_short_prefix_of_stem_is_matched(self) -> None:
+        """The extreme truncation case: a residue that is only a small
+        PREFIX of the stem's fixed literal (``*ZQZ*`` against a
+        ``*.ZQZ-fshape`` stem) still glob-expands to the real file and must
+        deny -- v3.58.1 denied the equivalent shape."""
+        synthetic_patterns = ("*.ZQZ-fshape",)
+        assert sfm.find_protected_mention("ls *ZQZ*", synthetic_patterns) is not None
+
+    def test_both_edges_wildcard_short_prefix_of_short_stem_is_matched(self) -> None:
+        """Same shape against a short 4-character stem (``.qqq``-style):
+        a 2-character prefix residue still denies. v3.58.1 denied the
+        equivalent shape against a short synthetic stem."""
+        synthetic_patterns = (".QQQ",)
+        assert sfm.find_protected_mention("ls *QQ*", synthetic_patterns) is not None
+
+    def test_both_edges_wildcard_extension_containing_full_stem_is_matched(
+        self,
+    ) -> None:
+        """A residue that CONTAINS the whole stem as its suffix (an
+        arbitrary prefix glued onto the real filename, e.g. ``*dummy.ZQZ-
+        fshape*``) names the real file exactly and must deny -- the most
+        natural spelling of a truncation-avoidance probe, and denied by
+        v3.58.1."""
+        synthetic_patterns = ("*.ZQZ-fshape",)
+        assert sfm.find_protected_mention("cat *dummy.ZQZ-fshape*", synthetic_patterns) is not None
 
     def test_both_edges_wildcard_prose_asterisk_word_is_not_matched(self) -> None:
         """Plan 00306 follow-up: the PRE-EXISTING (untouched-by-the-overlap-
@@ -396,6 +458,19 @@ class TestExemptions:
 
     def test_git_rm_cached_compound_command_is_not_exempt(self) -> None:
         cmd = "git rm --cached .claude/block-words.secret && cat .claude/block-words.secret"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_git_dash_c_rm_cached_is_exempt(self) -> None:
+        """N4 code-review fix (Plan 00311 follow-up): ``git -C <path> rm
+        --cached <protected-path>`` is exactly the shape an agent working
+        from another cwd types, and is exactly what
+        ``secret_file_hygiene_checker``'s own recommended remedy can produce
+        -- it must not be denied by the guard whose hygiene it improves."""
+        cmd = "git -C /repo rm --cached .claude/block-words.secret"
+        assert sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_git_dash_c_rm_without_cached_is_never_exempt(self) -> None:
+        cmd = "git -C /repo rm .claude/block-words.secret"
         assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
 
     def test_cat_of_protected_path_stays_denied_alongside_git_rm_exemption(self) -> None:

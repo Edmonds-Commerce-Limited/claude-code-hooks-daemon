@@ -412,6 +412,67 @@ def _suffix_prefix_overlap_length(a: str, b: str) -> int:
     return 0
 
 
+def _both_edges_residue_is_near_total_stem_match(residue: str, stem_basename: str) -> bool:
+    """True when a both-edges-wildcard token's residue could plausibly
+    glob-expand to the whole protected stem, rather than merely sharing a
+    coincidental substring with it (Plan 00311 follow-up to Plan 00306; R1
+    of the incremental re-review tightened this further).
+
+    A both-edges token (``*word*``) asserts only "contains this text" — most
+    of the time that is a plain-English "contains" search, not a truncation
+    of one specific protected filename, and Plan 00306 correctly stopped
+    treating every such token as a match (``*secret_file*matching*`` sharing
+    ``secret`` with the ``.secret`` stem; ``*word*`` sharing ``word`` with the
+    tail of ``.vault-password``). But an unconditional exclusion goes too
+    far: a residue that genuinely spells out the stem, or an initial/final
+    run of it, still glob-expands to the real protected file and must stay
+    denied.
+
+    **The discriminator, chosen after a length-difference rule (``<= 1``
+    char) proved too narrow** (it restored the deny direction only for a
+    residue exactly one character short of the stem, leaving every other
+    genuine truncation/extension open — five distinct probe shapes against
+    a synthetic pattern, live-verified): both ``residue`` and ``stem_basename``
+    are reduced to their "core" by stripping a single leading boundary
+    character (``.``, the common case for this project's dot-leading
+    stems), then judged by which side is the anchor:
+
+    - **Truncation** (``residue`` no longer than the stem core): denied when
+      the residue is a literal PREFIX of the stem core (``ZQZ`` is a prefix
+      of ``ZQZ-fshape``) — an arbitrary-length leading run of the real
+      filename, however short, since the token's own trailing wildcard can
+      absorb the rest. Deliberately NOT a suffix check in this direction —
+      that is exactly the Plan 00306 false-positive shape (``word`` is a
+      suffix of ``vault-password`` purely by English-word coincidence, not
+      because anyone is truncating the real filename from the front).
+    - **Extension** (``residue`` longer than the stem core): denied when the
+      stem core is a literal SUFFIX of the residue (``dummy.ZQZ-fshape``
+      ends with ``ZQZ-fshape``) — the token already contains a real matching
+      filename verbatim, with arbitrary junk glued in front. Deliberately
+      NOT a prefix check in this direction — that is the mirror-image false
+      positive (``secret_filematching`` starts with ``secret`` purely
+      because a source filename happens to start with that word, not
+      because it truncates any protected name).
+
+    Below ``_MIN_GLOB_OVERLAP_CHARS`` neither side is trusted, for the same
+    reason the single-edge overlap check requires it (see that constant's
+    docstring) — a one-character coincidental anchor is too generic. This
+    swaps false-negative risk for false-positive risk on the rare ambiguous
+    case (e.g. a token whose residue happens to be a genuine short prefix of
+    ``secret``) — deliberately, since a rare over-block on a secret-adjacent
+    guard is far cheaper than a silent leak.
+    """
+    if not residue or not stem_basename:
+        return False
+    stem_core = stem_basename.lstrip(".")
+    residue_core = residue.lstrip(".")
+    if len(residue_core) < _MIN_GLOB_OVERLAP_CHARS or not stem_core:
+        return False
+    if len(residue_core) <= len(stem_core):
+        return stem_core.startswith(residue_core)
+    return residue_core.endswith(stem_core)
+
+
 def _glob_token_overlaps_stem(
     residue: str,
     stem_basename: str,
@@ -438,20 +499,16 @@ def _glob_token_overlaps_stem(
     neither edge open, so neither direction applies. Gated at
     ``_MIN_GLOB_OVERLAP_CHARS`` — see its docstring.
 
-    A token with a wildcard at BOTH edges (``*secret_file*matching*``) is
-    excluded entirely (Plan 00306): that shape asserts nothing about either
-    a fixed prefix or a fixed suffix of a real filename — it is a bare
-    "contains this text" search, not a truncation of one specific protected
-    name. Treating it as a truncation let an ordinary plain-English residue
-    (``secret_file``) trip the reverse-overlap direction purely because it
-    happens to start with the same letters as a short stem's (``.secret``)
-    suffix — observed live: ``find . -iname "*secret_file*matching*"``
-    (an ordinary filename search) was denied as a ``*.secret*`` mention. A
-    truncation with only ONE open edge still has a genuinely anchored other
-    edge, so those keep using the overlap test as before.
+    A token with a wildcard at BOTH edges (``*secret_file*matching*``) only
+    counts as a match when the residue is a NEAR-TOTAL match of the stem
+    (``_both_edges_residue_is_near_total_stem_match``, Plan 00311) rather than
+    a coincidental short-edge overlap — see that helper's docstring for the
+    false positive (Plan 00306) and the false negative (Plan 00311) this
+    balances. A truncation with only ONE open edge still has a genuinely
+    anchored other edge, so those keep using the overlap test as before.
     """
     if leading_wildcard and trailing_wildcard:
-        return False
+        return _both_edges_residue_is_near_total_stem_match(residue, stem_basename)
     if (
         trailing_wildcard
         and _suffix_prefix_overlap_length(residue, stem_basename) >= _MIN_GLOB_OVERLAP_CHARS
@@ -515,20 +572,28 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
                     # concept: how many literal characters are needed
                     # before a partial glob match is trusted as a genuine
                     # truncation rather than coincidence.
-                    # Gated to NOT-both-edges-wildcard (Plan 00306 follow-up,
-                    # same reasoning as `_glob_token_overlaps_stem`'s gate):
-                    # with a wildcard on BOTH sides, `fnmatch(stem, basename)`
-                    # succeeds whenever the residue occurs ANYWHERE inside
-                    # the stem, not just as a real prefix/suffix truncation
-                    # -- an ordinary "*word*" contains-glob (or prose
-                    # emphasis) coincidentally matching a stem that merely
-                    # contains that substring elsewhere (e.g. ``*word*``
-                    # against ``.vault-password``, which ends "...s-s-w-o-r-
-                    # d") is not evidence of a real protected filename.
+                    # Gated on both-edges-wildcard via the NEAR-TOTAL-MATCH
+                    # test, not a flat exclusion (Plan 00311 follow-up to
+                    # Plan 00306): with a wildcard on BOTH sides,
+                    # `fnmatch(stem, basename)` succeeds whenever the residue
+                    # occurs ANYWHERE inside the stem, not just as a real
+                    # prefix/suffix truncation -- an ordinary "*word*"
+                    # contains-glob (or prose emphasis) coincidentally
+                    # matching a stem that merely contains that substring
+                    # elsewhere (e.g. ``*word*`` against ``.vault-password``,
+                    # which ends "...s-s-w-o-r-d") is not evidence of a real
+                    # protected filename. But a both-edges token whose residue
+                    # effectively SPELLS the stem (``*zzz-passwd*`` against a
+                    # ``*.zzz-passwd`` stem) really does glob-expand to the
+                    # protected file and must still deny -- see
+                    # ``_both_edges_residue_is_near_total_stem_match``.
                     if (
                         len(residue) >= _MIN_GLOB_OVERLAP_CHARS
                         and residue in stem_basename
-                        and not (has_leading_wildcard and has_trailing_wildcard)
+                        and (
+                            not (has_leading_wildcard and has_trailing_wildcard)
+                            or _both_edges_residue_is_near_total_stem_match(residue, stem_basename)
+                        )
                         and fnmatch.fnmatch(stem_basename, basename)
                     ):
                         return pattern
@@ -752,16 +817,29 @@ def is_exempt_invocation(
     return False
 
 
-def _is_git_rm_cached(words: list[str]) -> bool:
-    """True when ``words`` is ``git rm ... --cached ...`` -- untrack only.
+_GIT_C_FLAG: Final[str] = "-C"
 
-    Requires the ``rm`` subcommand as the second word and ``--cached``
-    present anywhere after it. No ``--cached`` (or no ``rm``) means the
-    command can delete the working-tree file too, so it is not exempt.
+
+def _is_git_rm_cached(words: list[str]) -> bool:
+    """True when ``words`` is ``git [-C <path>] rm ... --cached ...`` --
+    untrack only.
+
+    Requires the ``rm`` subcommand (immediately after ``git``, or after a
+    leading ``-C <path>`` -- Plan 00311 follow-up: an agent working from
+    another cwd via ``git -C /repo rm --cached <path>`` is exactly the shape
+    ``secret_file_hygiene_checker``'s own recommended remedy takes, and was
+    failing CLOSED before this) and ``--cached`` present anywhere after the
+    subcommand. No ``--cached`` (or no ``rm``) means the command can delete
+    the working-tree file too, so it is not exempt.
     """
-    if len(words) < 3 or words[1] != _GIT_RM_SUBCOMMAND:
+    subcommand_index = 1
+    if len(words) > 2 and words[1] == _GIT_C_FLAG:
+        subcommand_index = 3
+    if len(words) < subcommand_index + 2:
         return False
-    return any(word.strip("\"'") == _GIT_RM_CACHED_FLAG for word in words[2:])
+    if words[subcommand_index] != _GIT_RM_SUBCOMMAND:
+        return False
+    return any(word.strip("\"'") == _GIT_RM_CACHED_FLAG for word in words[subcommand_index + 1 :])
 
 
 def _denied_subcommand_used(words: list[str], consumer: ConsumerSpec) -> bool:

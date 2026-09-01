@@ -2313,6 +2313,43 @@ handlers:
 
 ---
 
+#### dispatch_declaration
+
+| Property       | Value                                       |
+| -------------- | ------------------------------------------- |
+| **Config key** | `dispatch_declaration`                      |
+| **Priority**   | 48                                          |
+| **Type**       | Advisory (Blocking in opt-in `strict` mode) |
+| **Event**      | PreToolUse                                  |
+
+**Description:** On a `Task` tool dispatch, checks the prompt for a file-handoff declaration — either the plan folder the subagent is working in, or an explicit "not plan work" statement paired with a declared file destination. A subagent's final message travels back over a bounded-size wire channel that can silently elide an oversized inline report in the MIDDLE, so a coordinator can receive what looks like a complete report while content is missing (Plan 00307). Declaring a file destination up front is the dispatch-time half of the fix; [`subagent_report_size_blocker`](#subagent_report_size_blocker) is the return-time half.
+
+**Fires when:** the dispatched prompt names neither a plan-folder path (`CLAUDE/Plan/NNNNN-name/`, or the project's configured plan directory) nor the `not plan work` phrase plus a declared write/save/report/output/store destination.
+
+**Enforcement mode:** advisory by default — injects the contract as `additionalContext` and still allows the dispatch. `options.strict: true` denies an undeclared dispatch instead.
+
+**Options:**
+
+| Option                | Type   | Default                    | Description                                                           |
+| --------------------- | ------ | -------------------------- | --------------------------------------------------------------------- |
+| `strict`              | `bool` | `false`                    | When true, denies a dispatch that declares neither destination shape. |
+| `fallback_report_dir` | `str`  | `untracked/agent-reports/` | Directory named in the contract text for non-plan-work dispatches.    |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    dispatch_declaration:
+      enabled: true
+      priority: 48
+      options:
+        strict: false
+        fallback_report_dir: "untracked/agent-reports/"
+```
+
+---
+
 #### npm_command
 
 | Property       | Value         |
@@ -3099,6 +3136,43 @@ register **below** priority 10 and confirm it fires;
 ## SubagentStop Handlers
 
 These handlers run when a subagent (Task tool agent) completes.
+
+#### subagent_report_size_blocker
+
+| Property       | Value                          |
+| -------------- | ------------------------------ |
+| **Config key** | `subagent_report_size_blocker` |
+| **Priority**   | 15                             |
+| **Type**       | Blocking (terminal)            |
+| **Event**      | SubagentStop                   |
+
+**Description:** Denies a SubagentStop whose `last_assistant_message` exceeds a configured character threshold. The vendored SubagentStop contract (v2.1.252) delivers `last_assistant_message` directly on `hook_input`. A live reproduction (Plan 00307) measured a ~24k-token inline report silently truncated in the MIDDLE by the harness while both start/end sentinels survived intact — the coordinator received something that looked complete while roughly seven sections were missing. This handler is the return-time half of the fix; [`dispatch_declaration`](#dispatch_declaration) is the dispatch-time half.
+
+**Fires when:** `last_assistant_message` is a string longer than `threshold_chars`. The deny message instructs the agent to write the full report to a file (the declared plan folder's `subagent-reports/{yymmdd}-{agent-name}-{model}.md`, or the configured fallback directory) and reply with a short summary plus the file path.
+
+**Fails open when:** `last_assistant_message` is missing or not a string (no verdict without a readable report), and never re-fires on `stop_hook_active` re-entry — a subagent that complies after one block cannot be looped.
+
+**Options:**
+
+| Option                | Type  | Default                    | Description                                                          |
+| --------------------- | ----- | -------------------------- | -------------------------------------------------------------------- |
+| `threshold_chars`     | `int` | `4000`                     | Character length above which the SubagentStop is denied.             |
+| `fallback_report_dir` | `str` | `untracked/agent-reports/` | Directory rendered in the deny message for non-plan-work dispatches. |
+
+**Config example:**
+
+```yaml
+handlers:
+  subagent_stop:
+    subagent_report_size_blocker:
+      enabled: true
+      priority: 15
+      options:
+        threshold_chars: 4000
+        fallback_report_dir: "untracked/agent-reports/"
+```
+
+---
 
 ## UserPromptSubmit Handlers
 

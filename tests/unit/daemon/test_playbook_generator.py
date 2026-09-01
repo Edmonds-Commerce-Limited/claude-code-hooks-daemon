@@ -491,6 +491,35 @@ def test_generate_markdown_filters_by_event_type() -> None:
     assert "**Total Tests**: 0" in markdown
 
 
+def test_generate_markdown_subagent_stop_handler_not_duplicated_under_stop() -> None:
+    """Plan 00311 follow-up (R2): `stop` is a substring of `subagent_stop`,
+    so a plain `event_dir_name in handler_class.__module__` check (still
+    present here after the sibling fix in docs_generator.py) filed a
+    `subagent_stop` handler's tests under BOTH the SubagentStop AND the Stop
+    sections. Live case: SubagentReportSizeBlockerHandler."""
+    test = AcceptanceTest(
+        title="Subagent stop test",
+        command="echo test",
+        description="Test subagent_stop is not also filed under stop",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.subagent_stop.event"
+
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+
+    config = {"subagent_stop": {"mock_handler_with_tests": {"enabled": True}}}
+
+    generator = PlaybookGenerator(config=config, registry=registry)
+    with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[test]):
+        markdown = generator.generate_markdown()
+
+    assert markdown.count("Subagent stop test") == 1
+    assert "**Total Tests**: 1" in markdown
+
+
 def test_generate_markdown_with_handler_no_config() -> None:
     """Test handler with no config entry uses default enabled=True."""
     test = AcceptanceTest(

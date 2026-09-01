@@ -99,6 +99,28 @@ class TestSizeThreshold:
 
         assert result.decision == Decision.DENY
 
+    def test_string_threshold_option_is_coerced(
+        self, handler: SubagentReportSizeBlockerHandler
+    ) -> None:
+        """N3 code-review fix: a YAML author writing ``threshold_chars: "10"``
+        (a string) must not raise ``TypeError`` from ``len(message) <= "10"``
+        inside a TERMINAL SubagentStop handler -- it must be parsed as an int."""
+        handler._threshold_chars = "10"
+
+        result = handler.handle(_subagent_stop_input("this message is longer than ten chars"))
+
+        assert result.decision == Decision.DENY
+
+    def test_malformed_threshold_option_falls_back_to_default(
+        self, handler: SubagentReportSizeBlockerHandler
+    ) -> None:
+        handler._threshold_chars = "not-a-number"
+
+        short_message = "short"
+        result = handler.handle(_subagent_stop_input(short_message))
+
+        assert result.decision == Decision.ALLOW
+
 
 class TestPrescriptiveFallbackPath:
     """Task 4.2: the deny reason must PRESCRIBE an exact, writable path."""

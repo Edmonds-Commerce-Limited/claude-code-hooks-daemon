@@ -1,5 +1,5 @@
-version: "UNRELEASED"
-date: "UNRELEASED"
+version: "3.59.0"
+date: "2026-09-01"
 breaking: false
 upgrade_guide: null
 config_changes:
@@ -41,6 +41,40 @@ config_changes:
         `handlers.subagent_stop.subagent_report_size_blocker.enabled: false`
         to opt out, or tune `options.threshold_chars` /
         `options.fallback_report_dir` to your project's conventions.
+    - key: handlers.session_start.config_optimisation_reminder
+      recommended: true
+      dormant: false
+      description: >-
+        NEW SessionStart handler (Plan 00308): compares the installed daemon
+        version against the version recorded the last time the `/optimise`
+        config-optimisation review ran (state written by
+        `bin/hooks-daemon record-config-optimisation-run`), and injects a
+        reminder to re-run it when they differ or no run was ever recorded.
+        Advisory only — never blocks session start. Ships enabled by default.
+      migration_note: >-
+        No action needed to receive the advisory. Run `/optimise` (or
+        `bin/hooks-daemon record-config-optimisation-run` if the skill is
+        unavailable in this project) to silence it, or set
+        `handlers.session_start.config_optimisation_reminder.enabled: false`
+        to opt out.
+    - key: handlers.post_tool_use.lint_on_edit.options.timeouts
+      recommended: true
+      dormant: false
+      description: >-
+        NEW per-language option map on the existing `lint_on_edit` handler
+        (Plan 00309): the previously hardcoded 15-second extended-lint
+        budget is now configurable per language via
+        `options.timeouts.<Language>: <seconds>`, fixing a silently-allowed
+        timeout on slow first-run static analysis (observed live: cold
+        `phpstan`). Unconfigured languages keep the 15-second default;
+        invalid entries are logged and skipped rather than raised.
+      migration_note: >-
+        No action needed — the default behaviour (15s per language) is
+        unchanged unless you set this option. If your project has a
+        language whose extended linter routinely needs longer than 15s
+        (e.g. a cold-cache static analyser), add
+        `handlers.post_tool_use.lint_on_edit.options.timeouts.<Language>: <seconds>`
+        to raise its budget.
   renamed: []
   removed: []
   changed: []

@@ -192,6 +192,31 @@ class TestDocsGeneratorHandlerCollection:
         output = gen.generate_markdown()
         assert "Block destructive git commands like force push" in output
 
+    def test_subagent_stop_handler_is_not_also_listed_under_stop(self) -> None:
+        """Opus v3.59.0 release review (5a): a plain substring check on the
+        dotted module path made every ``subagent_stop`` handler ALSO match
+        event dir name "stop" (a substring of "subagent_stop"), so the
+        handler rendered under BOTH the SubagentStop and Stop sections, and
+        the Stop section's own count was inflated."""
+        from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
+
+        handler_cls = _make_handler_class(
+            name="subagent-report-size-blocker",
+            priority=15,
+            tags=["blocking"],
+            docstring="Block a SubagentStop whose last_assistant_message is oversized.",
+            module_name=(
+                "claude_code_hooks_daemon.handlers.subagent_stop.subagent_report_size_blocker"
+            ),
+        )
+        registry = _make_registry(handler_cls)
+        config = _make_config("subagent_stop", {})
+        gen = DocsGenerator(config=config, registry=registry)
+        output = gen.generate_markdown()
+
+        assert "### SubagentStop (1 handler" in output
+        assert "### Stop " not in output
+
     def test_handlers_sorted_by_priority_within_event_type(self) -> None:
         """Handlers should be sorted by priority (lower first) within each event type."""
         from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator

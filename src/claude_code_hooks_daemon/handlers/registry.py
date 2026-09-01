@@ -69,6 +69,23 @@ EVENT_TYPE_MAPPING: dict[str, EventType] = {
 _PRIVATE_PREFIX = "_"
 
 
+def event_dir_name_matches_module(event_dir_name: str, module: str) -> bool:
+    """True when ``module``'s dotted path belongs to ``event_dir_name``.
+
+    Compares path SEGMENTS (``module.split(".")``), not a raw substring —
+    two real ``EVENT_TYPE_MAPPING`` entries are substrings of each other
+    (``stop`` in ``subagent_stop``; ``post_tool_use`` in
+    ``post_tool_use_failure``), so a plain ``event_dir_name in module`` check
+    wrongly claims a ``subagent_stop`` (or ``post_tool_use_failure``)
+    handler for the shorter directory too. Plan 00311 follow-up (R2/R4):
+    this was fixed at one call site and missed at two others that shared the
+    exact same substring bug — extracted once so a fourth copy can't drift.
+    """
+    if not module:
+        return False
+    return event_dir_name in module.split(".")
+
+
 def is_discoverable_handler(attr: object) -> TypeGuard[type[Handler]]:
     """Is this module attribute a handler class discovery should register?
 

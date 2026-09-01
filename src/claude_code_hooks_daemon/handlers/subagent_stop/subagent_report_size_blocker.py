@@ -68,7 +68,13 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         )
         # Config flags, declared here so mypy can verify them and a typo in a
         # config setter surfaces as a normal attribute (fail-fast).
-        self._threshold_chars: int = _DEFAULT_THRESHOLD_CHARS
+        # `Any`, not `int`: options arrive by blind setattr from YAML, so a
+        # string value is a real runtime possibility `_threshold()` must
+        # guard against -- an `int` annotation here would make mypy treat
+        # that guard's `isinstance(value, int)` check as always-true and
+        # flag it `redundant-expr` (peer precedent: bash_safe_mode's
+        # `_min_statements: Any` for the identical reason).
+        self._threshold_chars: Any = _DEFAULT_THRESHOLD_CHARS
         self._fallback_report_dir: str = _DEFAULT_FALLBACK_REPORT_DIR
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -95,6 +101,31 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         )
         return f"{self._fallback_report_dir}{yymmdd}-{agent_name}-{_MODEL_PLACEHOLDER}.md"
 
+    def _threshold(self) -> int:
+        """Coerced ``threshold_chars`` option.
+
+        Options arrive by blind ``setattr`` from YAML, so the type is not
+        trusted: a YAML author writing ``threshold_chars: "4000"`` (a string)
+        would otherwise raise ``TypeError`` on the ``len(message) <= ...``
+        comparison inside a TERMINAL SubagentStop handler -- fail-fast
+        elsewhere, but not here, where an unhandled exception in the
+        dispatch hot path is worse than falling back to the shipped default.
+        A real positive ``int`` (excluding ``bool``, itself an ``int``
+        subclass) is used as-is; a numeric string is parsed; anything else
+        degrades to ``_DEFAULT_THRESHOLD_CHARS``.
+        """
+        value = self._threshold_chars
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = int(value.strip())
+            except ValueError:
+                return _DEFAULT_THRESHOLD_CHARS
+            if parsed > 0:
+                return parsed
+        return _DEFAULT_THRESHOLD_CHARS
+
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """DENY when ``last_assistant_message`` exceeds the threshold, else ALLOW."""
         message = hook_input.get("last_assistant_message")
@@ -102,7 +133,8 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
             # Fail open: no verdict without a readable report string.
             return BlockingResult(decision=Decision.ALLOW)
 
-        if len(message) <= self._threshold_chars:
+        threshold = self._threshold()
+        if len(message) <= threshold:
             return BlockingResult(decision=Decision.ALLOW)
 
         fallback_path = self._prescribed_fallback_path(hook_input)
@@ -111,7 +143,7 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
             decision=Decision.DENY,
             reason=(
                 "📦 REPORT TOO LARGE (Plan 00307): your final message is "
-                f"{len(message)} characters, over the {self._threshold_chars}-"
+                f"{len(message)} characters, over the {threshold}-"
                 "character threshold. A subagent's final message travels over "
                 "a bounded-size wire channel that silently elides an oversized "
                 "inline report in the MIDDLE — the coordinator can receive "

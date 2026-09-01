@@ -239,3 +239,17 @@ class TestDeployMultipleSkills:
         skills_dir = temp_project / ".claude" / "skills"
         assert (skills_dir / "hooks-daemon" / "SKILL.md").is_file()
         assert (skills_dir / "docs-qa" / "SKILL.md").is_file()
+
+    def test_real_bundled_skills_directory_deploys_optimise(self, temp_project: Path) -> None:
+        """B2 fix (v3.59.0 release): the ``config_optimisation_reminder``
+        SessionStart handler ships enabled-by-default and points clients at
+        ``/optimise`` — that skill must actually be bundled and deployed, not
+        exist only in this repo's self-install ``.claude/skills/``."""
+        real_daemon_source = Path(__file__).resolve().parents[3]
+        deploy_skills(real_daemon_source, temp_project)
+
+        optimise_dir = temp_project / ".claude" / "skills" / "optimise"
+        assert (optimise_dir / "SKILL.md").is_file()
+        invoke_script = optimise_dir / "invoke.sh"
+        assert invoke_script.is_file()
+        assert invoke_script.stat().st_mode & 0o100

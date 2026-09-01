@@ -1,0 +1,35 @@
+version: "3.59.0"
+truth_changes:
+  - was: >
+      `CLAUDE/Plan/README.md` lists every completed plan row — a project doc
+      or agent asserting "the plan index lists every completed plan" was
+      accurate.
+    now: >
+      Plan README age-out (Plan 00310): the plan index retains only the 30
+      highest-numbered completed rows. Older rows move into
+      `CLAUDE/Plan/Completed/README.md`, which is the durable archive of
+      full completed-plan history. Any project doc or agent memory asserting
+      the top-level README is a complete completed-plan listing is now
+      false — check `Completed/README.md` too when an older plan is not
+      found in the top-level index.
+  - was: >
+      A dispatched subagent's final message is returned inline to the
+      coordinator with no size contract — a subagent could reply with its
+      full report content directly in its stop message.
+    now: >
+      Subagent file-based report handoff (Plan 00307): a subagent's final
+      message travels over a bounded-size wire channel that was
+      live-reproduced silently eliding the MIDDLE of an oversized (~24k
+      token) inline report while leaving both start/end sentinels intact —
+      the coordinator could receive something that looked complete while
+      content was missing. Two new handlers now enforce a file-based
+      convention instead: `dispatch_declaration` (PreToolUse on `Task`)
+      advises/requires the dispatch prompt to declare where long-form output
+      goes (a plan folder's `subagent-reports/{yymmdd}-{agent-name}-{model}.md`,
+      or an explicit non-plan-work destination), and
+      `subagent_report_size_blocker` (SubagentStop) denies a stop whose
+      `last_assistant_message` exceeds a configurable character threshold
+      (default 4,000), instructing the agent to write the full report to a
+      file and reply with a short summary plus the file path instead. A
+      dispatching agent should now expect — and write toward — this
+      convention rather than returning long-form content inline.

@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-09-01 (v3.58.1) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-09-01 (v3.59.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (52 handlers)
+### PreToolUse (53 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -53,6 +53,7 @@
 | 46 | plan_workflow | ADVISORY | Provide guidance when creating plan files |
 | 47 | docs_qa_commit_gate | NON-TERMINAL | Warn-first STAGED docs QA gate on git commit |
 | 47 | docs_qa_edit | NON-TERMINAL | Blocking/advisory EDIT-time lint for documentation-scoped files |
+| 48 | dispatch_declaration | BLOCKING | Advise or (strict mode) require a file-handoff declaration on Task dispatch |
 | 49 | npm_command | ADVISORY | Enforce llm: prefixed npm commands and block direct npx tool usage |
 | 50 | markdown_organization | BLOCKING | Enforce markdown file organization rules |
 | 50 | validate_instruction_content | TERMINAL | Validates content being written to CLAUDE.md and README.md files |
@@ -74,7 +75,7 @@
 | 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
 | 31 | goal_injection | ADVISORY | Write a goal-intent signal when a plan flips to In Progress |
 
-### SessionStart (19 handlers)
+### SessionStart (20 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -97,6 +98,7 @@
 | 64 | docs_qa_sweep | ADVISORY | Advisory SessionStart sweep over the documentation corpus (silent when clean) |
 | 65 | tool_disable_advisor | NON-TERMINAL | Advise when a declared never-want tool is not disabled at source |
 | 66 | monorepo_detector | ADVISORY | Advise when manifests exist below the repo root but not at it |
+| 67 | config_optimisation_reminder | ADVISORY | Remind the agent when the config-optimisation review is stale |
 
 ### PreCompact (2 handlers)
 
@@ -126,6 +128,12 @@
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |
+
+### SubagentStop (1 handler)
+
+| Priority | Handler | Behaviour | Description |
+|----------|---------|----------|-------------|
+| 15 | subagent_report_size_blocker | TERMINAL | Block a SubagentStop whose ``last_assistant_message`` is oversized |
 
 ### Status (14 handlers)
 
