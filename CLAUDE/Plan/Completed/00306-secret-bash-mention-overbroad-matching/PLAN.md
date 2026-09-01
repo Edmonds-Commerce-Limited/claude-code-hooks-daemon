@@ -1,6 +1,6 @@
 # Plan 00306: secret bash mention overbroad matching
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: Medium
@@ -87,7 +87,7 @@ without weakening genuine protected-path detection.
 
 ## Success Criteria
 
-- [ ] False positive pinned and fixed with TDD; full QA green; daemon
+- [x] False positive pinned and fixed with TDD; full QA green; daemon
   restarted and verified.
 
 ## Delivery & Milestones

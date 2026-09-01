@@ -62,7 +62,9 @@ threshold/steering design thinking where it fits.
   the observed size limit, and the exact dispatch prompt so the run is
   repeatable verbatim as the Phase 4 acceptance check. This same evidence
   pins the enforcement threshold.
-- [ ] ⬜ **Task 1.2**: Verify the hook surfaces against the vendored
+- [x] ✅ **Task 1.2** (report:
+  `subagent-reports/260901-explore-hook-surfaces-fable.md`): Verify the
+  hook surfaces against the vendored
   contract (contracts/claude-code-hooks/, now at v2.1.252): confirm what
   SubagentStop receives (transcript path? final message?), whether the
   daemon's existing transcript-reading machinery (stop-quality handlers) can

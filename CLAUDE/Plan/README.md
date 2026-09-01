@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00307: subagent file based report handoff](00307-subagent-file-based-report-handoff/PLAN.md) - Not Started (field report: subagent final reports truncated by the harness tool-result cap; establish and enforce "large data travels by file, the message is summary + path" — measure first, then PreToolUse dispatch-contract injection + SubagentStop oversized-return blocking, dogfooded here)
 
-- [00306: secret bash mention overbroad matching](00306-secret-bash-mention-overbroad-matching/PLAN.md) - In Progress (R-SECRET-BASH-MENTION false-fires on plain words containing "secret" with no protected path named; same defect class as the Edit-path fix in Plan 00305 Task 2.5, Bash-mention path; now also ledgers the hygiene-checker-vs-guard contradiction on `git rm --cached` of a protected path, found live during housekeeping)
-
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 
 - [00293: tool inventory disable and token savings](00293-tool-inventory-disable-and-token-savings/PLAN.md) - Not Started (disable-at-source for never-wanted tools instead of fighting them with hooks, transcript-scanning analyser for never-used tools, tools-vs-tokens report with the decision left to projects; dogfood here)
@@ -167,6 +165,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00306: secret bash mention overbroad matching](Completed/00306-secret-bash-mention-overbroad-matching/PLAN.md) - Complete at 49befa8b (secret_file_guard Bash-mention both-edges-wildcard false positive fixed, `git rm --cached <protected-path>` exempted so the hygiene checker's own remediation is runnable, CLI secret-redaction status iterates all registry roots, dead-code/POSIX-bracket cleanups, pipe_blocker duplicate disable-footer removed)
 
 - [00299: multi plan goal support](Completed/00299-multi-plan-goal-support/PLAN.md) - Complete (goal ledger is authoritative for the supervisor's goal signal: combined line across every In-Progress plan, re-rendered on plan retirement, single-plan behaviour byte-for-byte unchanged; dogfood-soaked live in this repo)
 
@@ -1309,9 +1309,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 306 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 252 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 253 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 38 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
