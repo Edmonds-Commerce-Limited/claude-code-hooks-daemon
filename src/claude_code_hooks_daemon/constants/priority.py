@@ -138,6 +138,10 @@ class Priority:
     # sits after recovery_cron_advisor, which watches the same PLAN.md writes)
     GOAL_INJECTION = 31
 
+    # Budget-exhaustion detector (Priority: 32 - PostToolUse advisory; Plan
+    # 00315, sits after goal_injection in the same PostToolUse advisory band)
+    BUDGET_EXHAUSTION_DETECTOR = 32
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30

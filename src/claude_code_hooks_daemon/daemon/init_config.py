@@ -242,6 +242,7 @@ class ConfigTemplate:
             "    command_hints: {enabled: true, priority: 29}  # Config-driven advisory reminder after a configured command\n"
             "    recovery_cron_advisor: {enabled: true, priority: 30}    # Advise on failsafe recovery cron lifecycle (opt-out)\n"
             "    goal_injection: {enabled: false, priority: 31}  # Write <session>.goal-intent for the ccy supervisor on plan flip to In Progress (opt-in)\n"
+            "    budget_exhaustion_detector: {enabled: true, priority: 32}  # Advisory when a tool response shows budget/quota exhaustion (opt-out)\n"
             "\n"
             "  # PermissionRequest - Auto-approve decisions\n"
             "  permission_request:\n"

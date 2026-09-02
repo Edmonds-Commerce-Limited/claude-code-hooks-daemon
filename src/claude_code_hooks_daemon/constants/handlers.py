@@ -479,6 +479,15 @@ class HandlerID:
         config_key="goal_injection",
         display_name="goal-injection",
     )
+    # Budget-exhaustion detector (PostToolUse) -- Plan 00315 Task 2.1: a
+    # generic advisory that catches budget/quota-exhaustion messaging in a
+    # completed tool call's response and tells the agent to surface it to
+    # the user prominently instead of retrying or silently degrading.
+    BUDGET_EXHAUSTION_DETECTOR = HandlerIDMeta(
+        class_name="BudgetExhaustionDetectorHandler",
+        config_key="budget_exhaustion_detector",
+        display_name="budget-exhaustion-detector",
+    )
     FAILSAFE_CRON_BLOCKAGE_SUPPRESSOR = HandlerIDMeta(
         class_name="FailsafeCronBlockageSuppressorHandler",
         config_key="failsafe_cron_blockage_suppressor",

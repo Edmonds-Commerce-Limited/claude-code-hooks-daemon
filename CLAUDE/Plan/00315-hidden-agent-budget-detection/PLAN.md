@@ -79,7 +79,7 @@ web-search shape today and any future budget message without a new
 handler — and its advisory MUST make the agent surface budget issues to
 the user VERY CLEARLY, with bold prominent prompting.
 
-- [ ] ⬜ **Task 2.1**: PostToolUse `budget_exhaustion_detector` handler,
+- [x] ✅ **Task 2.1**: PostToolUse `budget_exhaustion_detector` handler,
   fixture-driven TDD: generic pattern family (budget/exhausted/quota
   shapes, plus the pinned web-search fragments "Web search was not
   performed" / "web search budget" — never keyed on the configurable
@@ -89,11 +89,11 @@ the user VERY CLEARLY, with bold prominent prompting.
   agent it MUST report the budget hit to the user prominently (bold 🚨
   banner wording), name the budget if identifiable, state what work is
   affected, and stop retrying the exhausted tool.
-- [ ] ⬜ **Task 2.2**: Occurrence ledger — append each detection to
+- [x] ✅ **Task 2.2**: Occurrence ledger — append each detection to
   `untracked/budget-exhaustion-events.jsonl` (timestamp, session, tool,
   matched fragment) so recurrence is visible across a session and to the
   owner afterwards.
-- [ ] ⬜ **Task 2.3**: Full QA green; acceptance test entries via
+- [x] ✅ **Task 2.3**: Full QA green; acceptance test entries via
   `get_acceptance_tests()`; ship enabled-by-default advisory (never
   blocks); document in generated guidance.
 

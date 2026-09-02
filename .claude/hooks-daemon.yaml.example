@@ -404,6 +404,13 @@ handlers:
       #     - id: project-motto
       #       text: "All findings are logged to {plan_path}/REPORTS/."
 
+    budget_exhaustion_detector:  # Advisory when a tool response shows budget/quota-exhaustion messaging (Plan 00315)
+      enabled: true   # On by default (opt-out); advisory-only, never blocks.
+      priority: 32
+      # options:
+      #   excluded_tools: [Read, Grep, Glob]  # tools whose response is never scanned (default shown)
+      #   extra_patterns: []                   # additional regexes, additive to the built-in family
+
     validate_eslint_on_write:  # Runs ESLint after file writes
       enabled: false           # Enable for automatic ESLint validation
       priority: 20

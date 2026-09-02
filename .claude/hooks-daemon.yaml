@@ -626,6 +626,10 @@ handlers:
       #     - id: project-motto
       #       text: "All findings are logged to {plan_path}/REPORTS/."
 
+    budget_exhaustion_detector:  # Dogfood: advisory on budget/quota-exhaustion tool-response messaging (Plan 00315)
+      enabled: true  # On by default (opt-out) everywhere; advisory-only, never blocks.
+      priority: 32
+
   # SessionStart handlers (run when session starts)
   session_start:
     disclosure_reset_session_start:  # Reset per-agent rule-disclosure state on every SessionStart (Plan 00116 Phase 4)
