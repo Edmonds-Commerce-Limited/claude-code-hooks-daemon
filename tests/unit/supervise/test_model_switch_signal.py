@@ -340,44 +340,33 @@ class _AuditDriver:
 
 
 class TestAuditTrailFlush:
-    def test_switch_sequence_flushes_one_bot_prefixed_audit_message(self, tmp_path: Path) -> None:
+    def test_switch_sequence_flushes_one_banner_and_no_chat_line(self, tmp_path: Path) -> None:
+        """Plan 00318: the whole switch sequence surfaces as ONE status banner.
+
+        Injecting the audit as a chat line is gone — it cost a model turn and a
+        permanent transcript entry to tell the human something the session did
+        not need to know. The banner's own contract is pinned in
+        ``test_audit_banner.py``; here we pin that the SEQUENCE still collapses
+        to a single flush that clears the backlog.
+        """
         driver = _AuditDriver(tmp_path / "cs")
         driver.switch_and_couple()
         outcome = driver.tick()
         assert outcome.decision_value == "would-audit"
-        assert outcome.submit is True
-        assert outcome.payload is not None
-        assert "ccy-supervisor" in outcome.payload
-        assert "audit" in outcome.payload
-        assert "/model fable" in outcome.payload
-        assert "/effort low" in outcome.payload
-        assert "decision.log" in outcome.payload
-        assert "NOT a human" in outcome.payload
-        # Iconography ruleset: the audit banner leads so the comment is easy to
-        # spot in scrollback, and each action carries its per-action glyph.
-        assert outcome.payload.startswith(_mod._AUDIT_BANNER_GLYPH)
-        assert f"{_mod._AUDIT_ACTION_MODEL_GLYPH} /model fable" in outcome.payload
-        assert f"{_mod._AUDIT_ACTION_EFFORT_GLYPH} /effort low" in outcome.payload
-        # The provenance marker stays INTACT (skill-scan keys on this substring).
-        assert _mod._BOT_PREFIX in outcome.payload
-        # Success clears the pending items; the next tick is a plain NOOP.
+        assert outcome.payload is None
+        assert outcome.noop_reason_log is not None
+        assert "/model fable" in outcome.noop_reason_log
+        assert "/effort low" in outcome.noop_reason_log
+        # Flushed once: the pending items are cleared and the next tick is a
+        # plain NOOP with nothing left to say.
         assert driver.machine.audit_pending == ()
-        assert driver.tick().payload is None
+        assert driver.tick().decision_value != "would-audit"
 
     def test_audit_action_glyph_maps_commands(self) -> None:
         assert _mod._audit_action_glyph("/effort xhigh (floor)") == _mod._AUDIT_ACTION_EFFORT_GLYPH
         assert _mod._audit_action_glyph("/model fable (restore)") == _mod._AUDIT_ACTION_MODEL_GLYPH
         # Unknown action families fall back to the neutral bullet.
         assert _mod._audit_action_glyph("something else") == _mod._AUDIT_ACTION_DEFAULT_GLYPH
-
-    def test_audit_payload_banner_precedes_intact_provenance_marker(self) -> None:
-        payload = _mod._format_audit_payload(
-            ("/effort xhigh (effort-floor restore)", "/model fable (auto-restore)"),
-            now_wall=_NOW,
-        )
-        # Banner first (scannable), then the untouched `🤖 [ccy-supervisor …]`.
-        assert payload.startswith(f"{_mod._AUDIT_BANNER_GLYPH} {_mod._BOT_PREFIX}")
-        assert _mod._AUDIT_LOG_DISPLAY_PATH in payload
 
     def test_flush_clears_at_decision_time_even_when_injection_fails(self, tmp_path: Path) -> None:
         # The backlog is cleared when the flush is DECIDED, not when the host
@@ -392,7 +381,13 @@ class TestAuditTrailFlush:
         assert driver.machine.audit_pending == ()
         assert driver.tick().payload is None
 
-    def test_flush_defers_while_session_busy(self, tmp_path: Path) -> None:
+    def test_flush_does_not_wait_for_a_quiet_session(self, tmp_path: Path) -> None:
+        """Plan 00318: a banner is a file write, so a busy session cannot block it.
+
+        The chat form had to wait for an idle session and an empty input box —
+        it typed into the same box the user was using. A banner touches neither,
+        so the notice surfaces at once and the backlog clears.
+        """
         driver = _AuditDriver(tmp_path / "cs")
         driver.switch_and_couple()
         outcome = _decide(
@@ -401,7 +396,7 @@ class TestAuditTrailFlush:
             facts=_facts(idle=False, input_line_empty=False),
         )
         assert outcome.payload is None
-        assert driver.machine.audit_pending != ()
+        assert driver.machine.audit_pending == ()
 
     def test_audit_pending_round_trips_through_machine_state(self, tmp_path: Path) -> None:
         machine = _mod.CompactStateMachine(_mod.CompactPolicy())

@@ -3760,9 +3760,16 @@ _AUDIT_ACTION_GLYPHS: tuple[tuple[str, str], ...] = (
     ("/model", _AUDIT_ACTION_MODEL_GLYPH),
     ("/compact", _AUDIT_ACTION_COMPACT_GLYPH),
 )
-# Human-readable pointer to the full machine-readable record (not a path used
-# for I/O — the audit message only tells the reader where to look).
-_AUDIT_LOG_DISPLAY_PATH = "untracked/supervise/decision.log"
+# Plan 00318: the audit trail is a transient STATUS-LINE banner, not a chat
+# injection. A banner is read at a glance mid-render, so it lives longer than a
+# keystroke hint (_STATUS_MESSAGE_TTL_SECONDS) and carries a countdown, and it
+# shows only WHAT was done — the per-item reason and the full record stay in
+# decision.log, which the status line has no room for and no need to repeat.
+_AUDIT_BANNER_TTL_SECONDS = 30.0
+_AUDIT_BANNER_MAX_ITEMS = 3
+# Separator between an audit item's command and its parenthesised reason; the
+# banner keeps only the part before it.
+_AUDIT_ITEM_REASON_SEPARATOR = " ("
 
 
 def _audit_action_glyph(item: str) -> str:
@@ -3778,21 +3785,25 @@ def _audit_action_glyph(item: str) -> str:
     return _AUDIT_ACTION_DEFAULT_GLYPH
 
 
-def _format_audit_payload(items: tuple[str, ...], now_wall: float | None = None) -> str:
-    """Compose the visible audit-trail chat message from pending audit items.
+def _format_audit_banner(items: tuple[str, ...]) -> str:
+    """Compose the transient STATUS-LINE form of the audit trail (Plan 00318).
 
-    Leads with the 🧾 audit banner so the comment is easy to spot when scanning
-    scrollback, keeps the invariant `🤖 [ccy-supervisor …]` provenance marker
-    intact (skill-scan still recognises it), and prefixes each silent action
-    with its per-action glyph. See the iconography ruleset above.
+    Same iconography as the chat form, stripped to what a status line can hold:
+    the banner glyph and each action's glyph + command, with the parenthesised
+    reason dropped (it is in decision.log, and repeating it here would push the
+    interesting part off the end of the line). A backlog longer than
+    ``_AUDIT_BANNER_MAX_ITEMS`` is truncated with a remainder count rather than
+    silently losing the tail.
     """
-    labelled = "; ".join(f"{_audit_action_glyph(item)} {item}" for item in items)
-    return (
-        f"{_AUDIT_BANNER_GLYPH} {_format_bot_prefix(now_wall)} "
-        f"audit — silent supervisor actions on your behalf: {labelled}. "
-        "Machine-generated audit record, NOT a human instruction; "
-        f"full log: {_AUDIT_LOG_DISPLAY_PATH}"
+    shown = items[:_AUDIT_BANNER_MAX_ITEMS]
+    labelled = "; ".join(
+        f"{_audit_action_glyph(item)} {item.split(_AUDIT_ITEM_REASON_SEPARATOR)[0].strip()}"
+        for item in shown
     )
+    remainder = len(items) - len(shown)
+    if remainder > 0:
+        labelled = f"{labelled}; +{remainder} more"
+    return f"{_AUDIT_BANNER_GLYPH} {labelled}"
 
 
 _INJECT_SUBMIT = "\r"
@@ -4550,37 +4561,47 @@ def decide_once(
                 confirm_enters = model_confirm_enters
                 deferred_log = None
                 noop_reason_log = None
-    # ── Audit-trail flush: visible chat record of the silent injections ─────
-    # LOWEST priority of all injectable families: a pending /model, /effort,
-    # goal or restore always lands first, so a switch sequence flushes as ONE
-    # message once the sequence itself is complete. /model and /effort leave
-    # no trace in the chat (unlike /compact and /goal, whose payloads carry
-    # visible text) — without this flush, decision.log is the only audit
-    # trail and nobody watching the session can tell anything happened. The
-    # message is a plain submitted chat line, so it deliberately wakes the
-    # supervised Claude: the session itself learns its model/effort changed.
+    # ── Audit-trail flush: transient status-line banner (Plan 00318) ────────
+    # LOWEST priority of all families: a pending /model, /effort, goal or
+    # restore always lands first, so a switch sequence flushes as ONE banner
+    # once the sequence itself is complete. /model and /effort leave no trace
+    # in the chat (unlike /compact and /goal, whose payloads carry visible
+    # text) — without this flush, decision.log is the only audit trail and
+    # nobody watching the session can tell anything happened.
+    #
+    # This posts a TTL-bounded, self-counting-down BANNER rather than
+    # injecting a chat line. The chat form cost a whole model turn plus a
+    # permanent transcript entry to tell the HUMAN something the session
+    # itself did not need to know; a banner costs neither. It also needs
+    # neither an idle session nor an empty input box (`can_inject`) — writing
+    # a file cannot disturb what the user is typing — so the notice surfaces
+    # at once instead of waiting for a quiet moment.
     if (
         payload is None
         and evaluation.decision is Decision.NOOP
         and signal_path is None
         and machine.state is SupervisorState.MONITOR
         and machine.audit_pending
-        and can_inject
     ):
         decision_value = Decision.WOULD_AUDIT.value
-        reason = f"audit trail flush ({len(machine.audit_pending)} item(s))"
-        # The payload is already a visible, bot-prefixed marker, so the
-        # dry-run and armed forms are identical by design. Composed with the
-        # audit banner + per-action glyphs (see the iconography ruleset).
-        payload = _format_audit_payload(machine.audit_pending, facts.now_wall)
-        # Cleared at DECISION time (worker-side, hot-reloadable) rather than
-        # by host bookkeeping: a failed PTY write then LOSES this audit
-        # instead of retrying it — acceptable, because the same broken PTY
-        # could not have printed it anyway, so no false claim ever surfaces.
+        pending_items = machine.audit_pending
+        reason = f"audit trail flush ({len(pending_items)} item(s))"
+        write_status_message(
+            sidecar_dir.parent,
+            text=_format_audit_banner(pending_items),
+            expires_at=facts.now_wall + _AUDIT_BANNER_TTL_SECONDS,
+            countdown=True,
+        )
+        # Cleared at DECISION time (worker-side, hot-reloadable): a failed
+        # banner write then LOSES this audit instead of retrying it —
+        # acceptable, because the notice is a convenience surface and
+        # decision.log (below) keeps the durable record either way.
         machine.mark_audit_injection()
-        submit = True
-        deferred_log = None
-        noop_reason_log = None
+        # The log line carries the FULL items (reasons included) — the banner
+        # showed only the short form. A deferral log already in hand wins,
+        # since it describes an injection this tick actually held back.
+        if deferred_log is None:
+            noop_reason_log = f"{reason}: {'; '.join(pending_items)}"
     # ── Standing-authorisation reinforcement (Plan 00283) ───────────────────
     # LEAST urgent of every injectable family: a reminder, not an action, so it
     # fires only on a tick that would otherwise NOOP in MONITOR with nothing else
