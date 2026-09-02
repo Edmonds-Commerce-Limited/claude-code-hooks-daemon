@@ -6,6 +6,17 @@ argument-hint: "[all|blocking-only|advisory-only|context-only|handler-name]"
 
 # /acceptance-test - Acceptance Testing Skill
 
+## Run this first
+
+Claude Code loads this markdown and nothing else — the file below is not run
+for you, and it holds the procedure to follow (Plan 00324):
+
+```bash
+bash "${CLAUDE_SKILL_DIR:-.claude/skills/acceptance-test}/invoke.sh" <filter, or omit for all>
+```
+
+Follow its output exactly; what is written here is orientation.
+
 ## Description
 
 Execute acceptance tests for hooks daemon handlers via **real Claude Code tool calls in the main thread**. Tests verify real-world handler behaviour by invoking actual tools (Bash, Write, Edit, Read) and observing hook responses in system-reminders.

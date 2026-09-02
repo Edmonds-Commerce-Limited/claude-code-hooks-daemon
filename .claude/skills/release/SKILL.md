@@ -39,6 +39,17 @@ HUMAN-GATED" — for the full rule, the state-file schema, and how to recover fr
 an unauthorised release (never silently unpublish).
 
 ## Description
+## Run this first
+
+Claude Code loads this markdown and nothing else — the file below is not run
+for you, and it holds the procedure to follow (Plan 00324):
+
+```bash
+bash "${CLAUDE_SKILL_DIR:-.claude/skills/release}/invoke.sh" <major|minor|patch|X.Y.Z>
+```
+
+Follow its output exactly; what is written here is orientation.
+
 
 Automate the complete release process: version updates, changelog generation, Opus review, git tagging, and GitHub release creation.
 

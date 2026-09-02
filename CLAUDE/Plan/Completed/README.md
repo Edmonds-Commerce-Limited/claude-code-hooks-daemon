@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00286: plan-qa staged status/location coherence](00286-plan-qa-staged-status-location-coherence/PLAN.md) - Complete at `c7633e3f` + the archiving commit (adds the `archived-status-coherence` commit-gate check reading STAGED blobs, catching the git-mv-stages-rename-not-edits sequence that briefly landed Plan 00284 archived as In Progress)
+
 - [00285: skill bootstrap reexec breaks sibling source](00285-skill-bootstrap-reexec-breaks-sibling-source/PLAN.md) - Complete at `1ffb5e4a` + `798a5bc2` (self-bootstrap re-exec broke `$(dirname "$0")` sibling sourcing; fixed via re-exec-proof `DAEMON_DIR` + an `audit_shell.py` guard)
 
 - [00284: documentation SSoT enforcement](00284-documentation-ssot-enforcement/PLAN.md) - Complete at `674f6a11` + slices through `7f34718c` (R1–R13 ruleset in `CLAUDE/DocumentationStrategy.md`, docs_qa enforcement + agent + skill, repo sweep 168 → 34 advisories)

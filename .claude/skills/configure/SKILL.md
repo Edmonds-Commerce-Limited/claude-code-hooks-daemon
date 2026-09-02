@@ -6,6 +6,17 @@ argument-hint: "[list|<handler>|<handler> <option>=<value>]"
 
 # /configure - Handler Configuration Skill
 
+## Run this first
+
+Claude Code loads this markdown and nothing else — the file below is not run
+for you, and it holds the procedure to follow (Plan 00324):
+
+```bash
+bash "${CLAUDE_SKILL_DIR:-.claude/skills/configure}/invoke.sh" <the arguments the user typed>
+```
+
+Follow its output exactly; what is written here is orientation.
+
 ## Description
 
 View and modify the hooks daemon configuration interactively. Supports listing handlers, viewing individual handler settings, and changing options (enabled, priority, handler-specific options) with automatic daemon restart and verification.

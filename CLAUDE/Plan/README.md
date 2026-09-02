@@ -172,6 +172,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00324: skill invoke scripts never referenced](Completed/00324-skill-invoke-scripts-never-referenced/PLAN.md) - Complete (four skills kept 52-317 lines of procedure in an `invoke.sh` their SKILL.md never named, so every invocation ran on the summary and two of them discarded the caller's arguments)
+
 - [00323: optimise checklist names retired handlers](Completed/00323-optimise-checklist-names-retired-handlers/PLAN.md) - Complete (the config-optimisation checklist scored four handlers Plan 00237 deleted, so a fully-configured project could never exceed 25/29 and was told to enable handlers that do not exist)
 
 - [00322: post upgrade optimise deferral and client noise](Completed/00322-post-upgrade-optimise-deferral-and-client-noise/PLAN.md) - Complete (the mandatory post-upgrade config-optimisation review deferred itself to "your NEXT Claude Code session" and was duly filed as optional; it now claims the current session and lives at `/hooks-daemon optimise`)
@@ -230,7 +232,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00287: docs-qa pre-release punch list](Completed/00287-docs-qa-prerelease-punch-list/PLAN.md) - Complete at `94c41f61` (F1-F4 + N1 findings from the Plan 00284 post-completion review fixed; sweep re-verified at the 34-advisory baseline)
 
-- [00286: plan-qa staged status/location coherence](Completed/00286-plan-qa-staged-status-location-coherence/PLAN.md) - Complete at `c7633e3f` + the archiving commit (adds the `archived-status-coherence` commit-gate check reading STAGED blobs, catching the git-mv-stages-rename-not-edits sequence that briefly landed Plan 00284 archived as In Progress)
 
 
 ## Blocked / On Hold Plans
@@ -270,9 +271,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 323 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 324 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 267 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 268 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
 - **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
@@ -280,17 +281,17 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 40 + 267 + 7 = **314 folders**, spanning
-  **311 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 40 + 268 + 7 = **315 folders**, spanning
+  **312 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **12** of the
-  323 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  324 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  311 + 12 = 323. ✅
+  312 + 12 = 324. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267

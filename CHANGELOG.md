@@ -53,6 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Four skills kept their real procedure in a script nothing ever ran
+  (Plan 00324).** `configure`, `mode`, `acceptance-test` and `release` each
+  ship an `invoke.sh` — 52 to 317 lines of procedure — that their SKILL.md
+  never mentioned, and Claude Code loads a skill's markdown only. Every
+  invocation ran on the SKILL.md summary; worse, `mode` and `release` read
+  arguments (`${*:-get}`, `${1:-auto}`) that the caller's typed arguments
+  never reached. Each now opens with the command to run its own script,
+  arguments passed through. A contract test fails if any skill in either
+  tree bundles a runnable `.sh` its markdown never names (leading-underscore
+  helpers, which siblings `source`, are exempt).
 - **The config-optimisation checklist scored four handlers that no longer
   exist (Plan 00323).** `bash_error_detector`, `yolo_container_detection`,
   `validate_plan_number` and `plan_completion_advisor` were deleted by Plan

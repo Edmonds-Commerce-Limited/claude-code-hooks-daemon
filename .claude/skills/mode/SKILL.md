@@ -6,6 +6,17 @@ argument-hint: "[get|unattended|default] [message]"
 
 # /mode - Daemon Mode Management
 
+## Run this first
+
+Claude Code loads this markdown and nothing else — the file below is not run
+for you, and it holds the procedure to follow (Plan 00324):
+
+```bash
+bash "${CLAUDE_SKILL_DIR:-.claude/skills/mode}/invoke.sh" <the arguments the user typed>
+```
+
+Follow its output exactly; what is written here is orientation.
+
 ## Description
 
 View or change the daemon's operating mode. Supports `default` (normal operation) and `unattended` (blocks Stop events to keep Claude working autonomously).
