@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00322: post upgrade optimise deferral and client noise](00322-post-upgrade-optimise-deferral-and-client-noise/PLAN.md) - In Progress (field report: the mandatory post-upgrade `/optimise` banner defers itself to "your next Claude Code session" and gets filed as optional; and `contract_staleness` hands client installs a maintainer-only refresh procedure they must not perform)
-
 - [00319: supervisor release review followups](00319-supervisor-release-review-followups/PLAN.md) - Not Started (the ten non-blocking findings surviving the v3.60.0 code-review gate, grouped into silent failures, unbounded per-session growth, and writer/reader contract drift; the three BLOCKING siblings shipped in 55dd5b2e)
 
 - [00314: failsafe cron suppression marker never arms](00314-failsafe-cron-suppression-marker-never-arms/PLAN.md) - Not Started (Plan 00298's cron-tick suppression never engaged live: the human-input marker was not written despite a matching STOPPING BECAUSE phrase, and the pattern set misses natural phrasings; TDD reproduction + field observability + conservative pattern widening)
@@ -174,6 +172,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00322: post upgrade optimise deferral and client noise](Completed/00322-post-upgrade-optimise-deferral-and-client-noise/PLAN.md) - Complete (the mandatory post-upgrade config-optimisation review deferred itself to "your NEXT Claude Code session" and was duly filed as optional; it now claims the current session and lives at `/hooks-daemon optimise`)
+
 - [00321: injected goal has no retraction path](Completed/00321-injected-goal-has-no-retraction-path/PLAN.md) - Complete (the supervisor could set the `/goal` slot but nothing could clear it; adds a no-payload `.goal-clear` trigger, a supervisor-typed `/goal clear`, and a `hooks-daemon clear-goal` CLI for the already-empty-ledger case)
 
 - [00320: stale goal intent sidecar on retirement](Completed/00320-stale-goal-intent-sidecar-on-retirement/PLAN.md) - Complete (a retired goal outlived its ledger entry and kept challenging session stop; the sidecar is now retracted when the ledger empties, and the trigger is anchored to the project root)
@@ -230,8 +230,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00286: plan-qa staged status/location coherence](Completed/00286-plan-qa-staged-status-location-coherence/PLAN.md) - Complete at `c7633e3f` + the archiving commit (adds the `archived-status-coherence` commit-gate check reading STAGED blobs, catching the git-mv-stages-rename-not-edits sequence that briefly landed Plan 00284 archived as In Progress)
 
-- [00284: documentation SSoT enforcement](Completed/00284-documentation-ssot-enforcement/PLAN.md) - Complete at `674f6a11` + slices through `7f34718c` (R1–R13 ruleset in `CLAUDE/DocumentationStrategy.md`, docs_qa enforcement + agent + skill, repo sweep 168 → 34 advisories)
-
 - [00285: skill bootstrap reexec breaks sibling source](Completed/00285-skill-bootstrap-reexec-breaks-sibling-source/PLAN.md) - Complete at `1ffb5e4a` + `798a5bc2` (self-bootstrap re-exec broke `$(dirname "$0")` sibling sourcing; fixed via re-exec-proof `DAEMON_DIR` + an `audit_shell.py` guard)
 
 ## Blocked / On Hold Plans
@@ -273,15 +271,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 322 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 265 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 266 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 41 + 265 + 7 = **313 folders**, spanning
+- **Folder-to-number reconciliation**: 40 + 266 + 7 = **313 folders**, spanning
   **310 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

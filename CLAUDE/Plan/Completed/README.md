@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00284: documentation SSoT enforcement](00284-documentation-ssot-enforcement/PLAN.md) - Complete at `674f6a11` + slices through `7f34718c` (R1–R13 ruleset in `CLAUDE/DocumentationStrategy.md`, docs_qa enforcement + agent + skill, repo sweep 168 → 34 advisories)
+
 - [00283: standing-auth cadence + supervisor-typed channel](00283-standing-auth-cadence-supervisor-channel/PLAN.md) - Complete at `faf4fae0` + the archiving commit (bounded reinforcement cadence + opt-in ccy-supervisor-typed channel for `standing_authorisations`, plus a shared `utils/ccy_supervisor` liveness util)
 
 - [00282: generate-docs null-priority crash](00282-generate-docs-null-priority-crash/PLAN.md) - Complete at `86ca861a` + the archiving commit (both doc generators aborted with a NoneType-vs-int sort crash when a handler config omitted `priority:`; fixed via a shared `resolve_priority` helper across both generators and the `registry.py` guard, plus CLI traceback logging and two-handler regression tests)

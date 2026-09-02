@@ -1,6 +1,6 @@
 # Plan 00322: post upgrade optimise deferral and client noise
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-02
 **Owner**: joseph
 **Priority**: Medium
@@ -147,4 +147,9 @@ supersedes that choice.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00322-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- `eae052c4` — phases 1-2: the banner claims the current session and precedes
+  the restart block, the reminder matches, `contract_staleness` becomes
+  install-mode aware, all four wordings test-locked.
+- `8771832f` — phase 4: `/hooks-daemon optimise` replaces the standalone
+  `/optimise`, `deploy_skills` removes named retirements, and the step's
+  instruction script is referenced from its markdown so it actually runs.
