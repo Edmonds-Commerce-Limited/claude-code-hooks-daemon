@@ -4,6 +4,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00281: flag cleaning compaction on downgrade](00281-flag-cleaning-compaction-on-downgrade/PLAN.md) - Complete at `5580d9a7` + `6594dbad` + the archiving commit (supervisor fires an opt-in, gated, armed `/compact` on a REPEATED downgrade so the cleaned context stops re-tripping the classifier and the model-restore sticks; 🧽 audit glyph, dogfood-enabled here, default OFF for clients)
+
+- [00279: generic agent install subsystem](00279-generic-agent-install-subsystem/PLAN.md) - Complete at merges `6679da75` + `3abbc809` + the archiving commit (first-class daemon-shipped agent deployment: version + md5 ledger, customisation detection that never clobbers, config-gated deploy/remove lifecycle, `hooks-daemon agents` CLI; payloads: plan-dedupe scout migration + the opus-security quarantine agent v1.1.0)
+
 - [00275: github auto-close keyword blocker](00275-github-auto-close-keyword-blocker/PLAN.md) - Complete at merge `2bdafe05` (PreToolUse guard denying GitHub auto-closing keyword references in git commit/merge/tag and `gh pr` messages, inline or via `-F`/`--body-file`; enabled by default, `MUST_AUTO_CLOSE_BECAUSE` hatch)
 
 - [00278: model-downgrade resilience](00278-supervisor-effort-restore-on-model-downgrade/PLAN.md) - Complete at `f0a9dc33` + `864c9cc4` + the archiving commit (supervisor recovers a fable→opus downgrade via context-sidecar detection plus coupled effort/model auto-restore; opt-in prevention surfaces steer security-flavoured work to an Opus subagent)

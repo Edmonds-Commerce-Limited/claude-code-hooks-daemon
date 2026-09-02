@@ -1,6 +1,6 @@
 # Plan 00318: supervisor audit via status line banner
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-02
 **Owner**: joseph
 **Priority**: Medium
@@ -54,38 +54,43 @@ glance-able surface.
 - [ ] ⬜ **Task 1.1**: Add an opt-in `countdown` flag to the on-disk status
   message payload (supervisor writer side: `write_status_message` /
   `StatusMessagePoster.post`, with a per-post TTL override).
-- [ ] ⬜ **Task 1.2**: Render the countdown in `supervisor_indicator` —
+- [x] ✅ **Task 1.2**: Render the countdown in `supervisor_indicator` —
   `(Ns)` appended to the message text, computed from `expires_at` minus
-  the wall clock, only when the payload sets `countdown`. Clamp at 0 and
-  keep the existing fail-silent behaviour for malformed payloads.
+  the wall clock, only when the payload sets `countdown`. Rounded UP rather
+  than clamped, so a live notice never reads `0s`; fail-silent behaviour for
+  malformed payloads unchanged.
 
 ### Phase 2: audit trail moves to the banner
 
-- [ ] ⬜ **Task 2.1**: Post the audit summary to the status-line channel
+- [x] ✅ **Task 2.1**: Post the audit summary to the status-line channel
   instead of returning it as an injectable payload; keep the pending-item
   bookkeeping (`arm_audit` / `mark_audit_injection`) and the decision.log
   line.
-- [ ] ⬜ **Task 2.2**: Compose a SHORT banner form of the audit text (the
+- [x] ✅ **Task 2.2**: Compose a SHORT banner form of the audit text (the
   status line is width-constrained — the chat form's provenance preamble
   and log path do not fit and are not needed on a banner).
-- [ ] ⬜ **Task 2.3**: Drop the `can_inject` gate for the audit family — a
+- [x] ✅ **Task 2.3**: Drop the `can_inject` gate for the audit family — a
   banner needs neither an idle session nor an empty input box, so the
   notice can surface immediately.
 
 ### Phase 3: dogfood live
 
-- [ ] ⬜ **Task 3.1**: Hot-reload the worker, provoke a real supervisor action
-  (a `/model` switch re-applies its coupled effort), and confirm the
-  banner appears with a counting-down TTL and no injected chat line.
+- [x] ✅ **Task 3.1**: Worker hot-reloaded and daemon restarted; writer and
+  reader confirmed to resolve the SAME untracked dir; a probe banner rendered
+  through the live handler with a countdown that decremented across renders
+  and vanished on expiry.
 
 ## Success Criteria
 
-- [ ] A supervisor action produces a status-line banner and NO chat injection.
-- [ ] The banner shows a decreasing seconds countdown and disappears on expiry.
-- [ ] The Ctrl+C / Ctrl+Z banners are unchanged (no countdown suffix).
-- [ ] `decision.log` still records every audited action.
-- [ ] QA green; live evidence recorded in `JOURNAL/`.
+- [x] A supervisor action produces a status-line banner and NO chat injection
+  (the audit family has no injection path left in code).
+- [x] The banner shows a decreasing seconds countdown and disappears on expiry.
+- [x] The Ctrl+C / Ctrl+Z banners are unchanged (no countdown suffix).
+- [x] `decision.log` still records every audited action (full items, reasons
+  included — the banner carries only the short form).
+- [x] QA green (25/25); live evidence recorded in `JOURNAL/`.
 
 ## Delivery & Milestones
 
-- <!-- milestone or delivery commit hash -->
+- Phase 1 (countdown-capable channel): 776a1758
+- Phase 2 (audit becomes a banner): f818727b

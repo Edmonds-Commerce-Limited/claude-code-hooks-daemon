@@ -1344,9 +1344,9 @@ def _effort_confirm_enters_from_env() -> int:
 
 # /model and /effort injections leave NO trace in the chat (unlike /compact
 # and /goal, whose payloads carry visible text), so after a successful silent
-# injection the supervisor flushes a visible, bot-prefixed audit message on
-# the next injectable tick. Pending audit items are bounded so a stuck flush
-# can never grow the machine state without limit.
+# injection the supervisor flushes a transient status-line banner naming what
+# it did (Plan 00318). Pending audit items are bounded so a stuck flush can
+# never grow the machine state without limit.
 _MAX_AUDIT_ITEMS = 8
 
 
@@ -2939,18 +2939,16 @@ class CompactStateMachine:
         return tuple(self._audit_pending)
 
     def arm_audit(self, item: str) -> None:
-        """Queue one silent-injection audit item for the next chat flush.
+        """Queue one silent-injection audit item for the next banner flush.
 
         Called at DECISION time by the armed (non-dry-run) ``/model`` and
         ``/effort`` branches in ``decide_once`` — worker-side, so the whole
         audit loop deploys via worker hot-reload with no host restart (an
         older host's merge-by-key ``import_state`` never clobbers the
-        worker's backlog; it merely doesn't carry it). A decided payload is
-        injected on the same tick; if that PTY write fails, the flush cannot
-        print through the same broken PTY either, so a false "injected"
-        claim never surfaces. Bounded FIFO: the oldest item is dropped once
-        ``_MAX_AUDIT_ITEMS`` is reached, because an unflushable audit backlog
-        must never grow the machine state without limit.
+        worker's backlog; it merely doesn't carry it). Bounded FIFO: the
+        oldest item is dropped once ``_MAX_AUDIT_ITEMS`` is reached, because
+        an unflushable audit backlog must never grow the machine state
+        without limit.
         """
         if not item:
             return
@@ -2959,10 +2957,12 @@ class CompactStateMachine:
             del self._audit_pending[0]
 
     def mark_audit_injection(self) -> None:
-        """Clear the audit backlog after a SUCCESSFUL flush injection.
+        """Clear the audit backlog once the banner for it has been posted.
 
-        Called by the HOST only after a successful PTY write -- a failed
-        write keeps the backlog so the next tick retries the flush.
+        Called by ``decide_once`` at DECISION time (Plan 00318): the flush is
+        a file write, not a PTY write, so there is no host-side success to
+        wait for. A failed banner write therefore drops that notice rather
+        than retrying it -- decision.log keeps the durable record either way.
         """
         self._audit_pending = []
 

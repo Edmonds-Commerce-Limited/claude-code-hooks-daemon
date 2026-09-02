@@ -1,6 +1,6 @@
 # Plan 00316: manual model choice must win
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-02
 **Owner**: joseph
 **Priority**: High (the machine actively overrode a human's typed choice)
@@ -99,13 +99,17 @@ manual model setting always wins over restore logic.
 
 ## Success Criteria
 
-- [ ] Owner can type `/model opus` in a fable session and nothing fights
-  or flags it — verified by unit test; awaiting live confirmation in a
-  fresh session (see the hot-reload note in `JOURNAL/`).
+- [x] Owner can type `/model opus` in a fable session and nothing fights
+  or flags it — LIVE-CONFIRMED: no auto-restore, the shared marker written
+  with the real session id, and the downgrade indicator reading
+  `high_water_family: opus, downgraded: false` (see `JOURNAL/`).
 - [x] Silent substitution still detected and restored.
 - [x] Manual `/effort` always beats coupled defaults.
 - [x] QA 25/25.
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hashes -->
+- Recognition + classification: f7f939c4, 18e7652f
+- Field-miss observability (typed-slash diagnostics): 7fe9f13b
+- Latch survives busy spells; marker deferred until session known: da693aaa
+- Test pollution of the live worker log removed: 07871229

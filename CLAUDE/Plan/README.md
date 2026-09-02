@@ -4,10 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00318: supervisor audit via status line banner](00318-supervisor-audit-via-status-line-banner/PLAN.md) - In Progress (the supervisor's audit trail is INJECTED as a chat line, costing a model turn and permanent context for a notice only the human needs; move it onto the Ctrl+C-style transient status-line channel with a ~30s TTL and a visible countdown, decision.log staying the durable record)
-
-- [00316: manual model choice must win](00316-manual-model-choice-must-win/PLAN.md) - In Progress (field report: a user-typed /model opus was classified as a downgrade — status-line fallback fired and the ccy supervisor auto-restored fable over the human's choice; PTY input tracking distinguishes manual from silent substitution, manual always wins, per-model default effort kept but manual /effort beats the coupling)
-
 - [00314: failsafe cron suppression marker never arms](00314-failsafe-cron-suppression-marker-never-arms/PLAN.md) - Not Started (Plan 00298's cron-tick suppression never engaged live: the human-input marker was not written despite a matching STOPPING BECAUSE phrase, and the pattern set misses natural phrasings; TDD reproduction + field observability + conservative pattern widening)
 
 - [00311: v3.59.0 release review followups](00311-v3590-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.59.0 code review: dispatch_declaration's hardcoded plan path, the secret_file_matching glob-heuristic maintenance surface, and the git rm --cached looseness verification)
@@ -174,6 +170,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00318: supervisor audit via status line banner](Completed/00318-supervisor-audit-via-status-line-banner/PLAN.md) - Complete at f818727b (the audit trail was an INJECTED chat line costing a model turn and permanent context for a notice only the human needs; it is now a 30s self-counting-down status-line banner that no longer waits for an idle session, with decision.log keeping the full record)
+
+- [00316: manual model choice must win](Completed/00316-manual-model-choice-must-win/PLAN.md) - Complete at 07871229 (a typed /model opus was fought by the auto-restore because the 120s manual window expired during a busy spell before the sidecar ever reported the switch; the manual note is now a latch consumed by the first matching reading and the daemon marker is written as soon as a session id exists — live-confirmed: no restore, no downgrade flag)
+
 - [00317: supervisor host thin shim](Completed/00317-supervisor-host-thin-shim/PLAN.md) - Complete at c3eb83b2 (typed-command recognition moved worker-side via a fail-open RawInputTap; Ctrl+C byte-swallow audited as the one justified host-side stay; hot-reload live-confirmed — a recognition change now ships mid-session via worker reload alone)
 
 - [00312: supervisor ctrl c double press guard](Completed/00312-supervisor-ctrl-c-double-press-guard/PLAN.md) - Complete at 5242b58f (lone 0x03 swallowed with a visible status hint, rapid second press always forwarded; both halves live-confirmed by owner — single accidental press killed nothing, deliberate spam shut the session down)
@@ -230,10 +230,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00282: generate-docs null-priority crash](Completed/00282-generate-docs-null-priority-crash/PLAN.md) - Complete at `86ca861a` + the archiving commit (both doc generators aborted with a NoneType-vs-int sort crash when a handler config omitted `priority:`; fixed via a shared `resolve_priority` helper across both generators and the `registry.py` guard, plus CLI traceback logging and two-handler regression tests)
 
-- [00281: flag cleaning compaction on downgrade](Completed/00281-flag-cleaning-compaction-on-downgrade/PLAN.md) - Complete at `5580d9a7` + `6594dbad` + the archiving commit (supervisor fires an opt-in, gated, armed `/compact` on a REPEATED downgrade so the cleaned context stops re-tripping the classifier and the model-restore sticks; 🧽 audit glyph, dogfood-enabled here, default OFF for clients)
-
-- [00279: generic agent install subsystem](Completed/00279-generic-agent-install-subsystem/PLAN.md) - Complete at merges `6679da75` + `3abbc809` + the archiving commit (first-class daemon-shipped agent deployment: version + md5 ledger, customisation detection that never clobbers, config-gated deploy/remove lifecycle, `hooks-daemon agents` CLI; payloads: plan-dedupe scout migration + the opus-security quarantine agent v1.1.0)
-
 ## Blocked / On Hold Plans
 
 - **00032, 00034, 00035** - On hold pending upstream Claude Code delegate mode fix (GitHub #23447, #25037)
@@ -271,28 +267,27 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 317 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 318 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 261 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 263 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 36 + 245 + 7 = **288 folders**, spanning
-  **285 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 39 + 263 + 7 = **309 folders**, spanning
+  **306 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
-  (`001-`, `002-`, `003-`), so they count as present. That leaves **10** of the
-  295 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
-  00145, 00191, 00195, 00210, 00258 — abandoned drafts, numbers burned by
-  transient probes (00195 during the v3.51.0 acceptance run, 00258 during the
-  v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a sub-agent
-  that then found Plan 00208 already covered the work). Plans 00116, 00288, 00289, 00290, 00292 and 00294
-  are on disk under `Completed/`, counted in the 285 distinct numbers above.
-  285 + 10 = 295. ✅
+  (`001-`, `002-`, `003-`), so they count as present. That leaves **12** of the
+  318 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  00145, 00191, 00195, 00210, 00258, 00300, 00303 — abandoned drafts, numbers
+  burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
+  during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
+  sub-agent that then found Plan 00208 already covered the work).
+  306 + 12 = 318. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
