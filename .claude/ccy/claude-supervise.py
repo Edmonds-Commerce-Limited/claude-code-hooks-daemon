@@ -2782,14 +2782,20 @@ class CompactStateMachine:
         regardless of downgrade-episode state or sidecar timing. A blank
         ``session`` or ``family`` is a no-op (defensive: decide_once only
         ever calls this with values it has just resolved for a real switch).
+
+        Plan 00316 Task 2.1 (owner clarification): precedence is
+        TIME-ORDERED, not absolute -- EVERY model change (manual or
+        auto-restore) starts a fresh "model spell" and re-applies ITS
+        default effort, even over a manual /effort set under the PREVIOUS
+        spell. A manual /effort only stays sticky for the CURRENT spell,
+        beating the coupling until the NEXT model change. So every call
+        here (which only ever happens right after a real /model switch)
+        clears any earlier manual-effort latch before arming the new
+        default -- it never skips arming because one was active.
         """
         if not session or not family:
             return
-        if self._manual_effort_active is not None:
-            # Plan 00316 Task 2.1: a manual /effort always wins over the
-            # coupled default -- skip arming entirely so the next injectable
-            # tick leaves the user's own choice alone.
-            return
+        self._manual_effort_active = None
         target = self._coupled_effort_target(family)
         self._coupled_effort_pending = f"{session}:{family}:{target}"
 
@@ -2973,11 +2979,18 @@ class CompactStateMachine:
         """Record a user-TYPED ``/effort <level>`` command (Plan 00316 Task 2.1).
 
         A latch, not time-windowed: it wins over the per-model default and
-        the post-switch coupled effort until the user manually changes model
-        again (``note_manual_model_command``) or manually re-sets effort.
+        the post-switch coupled effort for the REST OF THE CURRENT model
+        spell -- until the user manually changes model again
+        (``note_manual_model_command``, which starts a fresh spell and
+        re-applies its own default via ``arm_coupled_effort``) or manually
+        re-sets effort. Also cancels any coupled-effort correction already
+        armed for THIS spell (from an earlier ``arm_coupled_effort`` call)
+        that has not yet been injected -- the human's choice, typed after
+        that default was queued, overrides the queued default outright.
         """
         del now_wall  # kept for signature symmetry with the model counterpart
         self._manual_effort_active = level
+        self._coupled_effort_pending = None
 
     def _manual_model_matches(self, family: str, now_wall: float) -> bool:
         """True when ``family`` matches a recent user-typed ``/model`` command."""

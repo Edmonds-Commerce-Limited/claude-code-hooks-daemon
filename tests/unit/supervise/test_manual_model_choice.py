@@ -280,14 +280,48 @@ def test_manual_effort_wins_over_per_model_floor(tmp_path: Path) -> None:
     assert outcome.payload is None
 
 
-def test_manual_effort_wins_over_coupled_post_switch_default(tmp_path: Path) -> None:
+def test_manual_effort_wins_within_the_same_model_spell(tmp_path: Path) -> None:
+    """A manual /effort beats the FLOOR default for as long as the model
+    does not change again -- no /model injection means arm_coupled_effort
+    is never called, so nothing re-applies the family's default."""
     sidecar_dir = tmp_path / "cs"
-    _write_sidecar(sidecar_dir)
     machine = _machine()
-    machine.note_manual_effort_command("high", now_wall=_NOW)
-    machine.arm_coupled_effort(session=_SESSION, family="fable")
-    assert machine.coupled_effort_pending is None
+    machine.note_manual_effort_command("low", now_wall=_NOW)
+    # opus's per-model default is "high" -- without the manual latch this
+    # would fire "/effort high".
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 0.5)
     outcome = _decide(sidecar_dir, machine)
+    assert outcome.payload is None
+
+
+def test_model_change_re_applies_its_own_default_over_a_prior_manual_effort() -> None:
+    """Owner clarification: precedence is TIME-ORDERED, not absolute. EVERY
+    model change (manual switch or auto-restore) starts a fresh spell and
+    re-applies ITS default -- even over a manual /effort set under the
+    PREVIOUS model. `arm_coupled_effort` only ever runs right after a real
+    /model switch, so it must win regardless of an earlier manual latch."""
+    machine = _machine()
+    # The human set effort low while on fable...
+    machine.note_manual_effort_command("low", now_wall=_NOW)
+    # ...then manually switches to sonnet: the switch is armed with sonnet's
+    # OWN default (xhigh, the non-top-family target), not fable's low.
+    machine.arm_coupled_effort(session=_SESSION, family="sonnet")
+    assert machine.coupled_effort_pending == f"{_SESSION}:sonnet:xhigh"
+    assert machine.export_state()["manual_effort_active"] is None
+
+
+def test_manual_effort_after_the_reset_still_wins_for_its_own_spell(
+    tmp_path: Path,
+) -> None:
+    """A manual /effort typed AFTER a model-change's auto-applied default
+    still wins for the remainder of THAT spell."""
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    machine.arm_coupled_effort(session=_SESSION, family="sonnet")  # spell starts
+    machine.note_manual_effort_command("low", now_wall=_NOW)  # human overrides it
+    _write_sidecar(sidecar_dir, model_id="claude-sonnet-5", effort="low", ts=_NOW - 0.5)
+    outcome = _decide(sidecar_dir, machine)
+    # The per-model floor (sonnet's default "high") must not re-fire over it.
     assert outcome.payload is None
 
 
@@ -313,8 +347,7 @@ def test_manual_effort_state_round_trips_through_export_import() -> None:
     machine.note_manual_effort_command("medium", now_wall=_NOW)
     clone = _machine()
     clone.import_state(machine.export_state())
-    clone.arm_coupled_effort(session=_SESSION, family="fable")
-    assert clone.coupled_effort_pending is None
+    assert clone.export_state()["manual_effort_active"] == "medium"
 
 
 def test_manual_model_state_round_trips_through_export_import() -> None:
