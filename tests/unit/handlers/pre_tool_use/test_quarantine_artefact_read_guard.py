@@ -10,6 +10,7 @@ out of the box with no config.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -356,6 +357,41 @@ class TestGuidanceSurfaces:
         for test in tests:
             assert test.title
         assert any(test.expected_decision == Decision.DENY for test in tests)
+
+
+class TestDeclaredAcceptancePatternsAreProducible:
+    """Every declared acceptance pattern must match the reason really produced.
+
+    The release acceptance gate passes a test only when the handler's own
+    ``expected_message_patterns`` match the live deny reason. A pattern left
+    behind by a header change therefore makes the gate unpassable while the
+    handler is behaving perfectly -- reporting a correct handler as a release
+    blocker, and costing a FAIL-FAST cycle to work out that nothing is wrong.
+    """
+
+    def _patterns_for(
+        self, handler: QuarantineArtefactReadGuardHandler, title_fragment: str
+    ) -> list[str]:
+        for test in handler.get_acceptance_tests():
+            if title_fragment in test.title:
+                return list(test.expected_message_patterns)
+        raise AssertionError(f"no acceptance test titled like {title_fragment!r}")
+
+    def test_read_deny_reason_matches_its_declared_patterns(
+        self, handler: QuarantineArtefactReadGuardHandler
+    ) -> None:
+        payload = _hook_input("Read", {"file_path": "/tmp/topic-opus-security-DETAIL.md"})
+        reason = handler.handle(payload).reason or ""
+        for pattern in self._patterns_for(handler,"blocks Read of a DETAIL artefact"):
+            assert re.search(pattern, reason), f"{pattern!r} no longer appears in: {reason}"
+
+    def test_bash_deny_reason_matches_its_declared_patterns(
+        self, handler: QuarantineArtefactReadGuardHandler
+    ) -> None:
+        payload = _hook_input("Bash", {"command": "cat /tmp/topic-opus-security-DETAIL.md"})
+        reason = handler.handle(payload).reason or ""
+        for pattern in self._patterns_for(handler,"blocks Bash cat of a DETAIL artefact"):
+            assert re.search(pattern, reason), f"{pattern!r} no longer appears in: {reason}"
 
 
 class TestEdgeBranches:

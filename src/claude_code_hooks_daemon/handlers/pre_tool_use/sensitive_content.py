@@ -551,7 +551,10 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                     "reason naming the pattern and the matched text."
                 ),
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"SENSITIVE CONTENT BLOCKED", r"Pattern:"],
+                expected_message_patterns=[
+                    rf"BLOCKED \[{RuleID.SENSITIVE_PUBLIC_PATTERN}\]",
+                    r"Pattern:",
+                ],
                 safety_notes="Deny path — no file is written",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.SONNET,

@@ -6,6 +6,7 @@ NEVER appear in the deny reason — only a 1-based index into the (gitignored,
 hence meaningless-without-it) file.
 """
 
+import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -647,3 +648,47 @@ class TestDisclosureLadder:
         result = handler.handle(hook_input)
 
         assert "safe to name in this reason" in (result.reason or "")
+
+
+class TestDeclaredAcceptancePatternsAreProducible:
+    """Every declared acceptance pattern must match the reason really produced.
+
+    The release acceptance gate passes a test only when the handler's own
+    ``expected_message_patterns`` match the live deny reason. A pattern left
+    behind by a header change therefore makes the gate unpassable while the
+    handler is behaving perfectly -- reporting a correct handler as a release
+    blocker, and costing a FAIL-FAST cycle to work out that nothing is wrong.
+    """
+
+    def test_public_pattern_deny_reason_matches_its_declared_patterns(self) -> None:
+        handler = _handler_with_public_patterns(
+            [
+                {
+                    "name": "vhosts-path",
+                    "pattern": "/var/www/vhosts",
+                    "description": "employer/hosting-provider server path convention",
+                }
+            ]
+        )
+        reason = handler.handle(_write_input("/tmp/f.txt", "deploy to /var/www/vhosts/app")).reason
+        declared = next(
+            test
+            for test in handler.get_acceptance_tests()
+            if "blocks a configured public pattern" in test.title
+        )
+        for pattern in declared.expected_message_patterns:
+            assert re.search(pattern, reason or ""), f"{pattern!r} no longer appears in: {reason}"
+
+    def test_secret_term_deny_reason_matches_its_declared_patterns(self, tmp_path: Path) -> None:
+        wordlist_file = tmp_path / "wordlist.txt"
+        wordlist_file.write_text("zzqx-nonsense-term\n")
+        handler = _handler_with_secret_file(wordlist_file)
+        reason = handler.handle(
+            _write_input("/tmp/f.txt", "contains zzqx-nonsense-term here")
+        ).reason
+        declared = next(
+            test for test in handler.get_acceptance_tests() if "without revealing it" in test.title
+        )
+        for pattern in declared.expected_message_patterns:
+            assert re.search(pattern, reason or ""), f"{pattern!r} no longer appears in: {reason}"
+        assert "zzqx-nonsense-term" not in (reason or "")
