@@ -21,7 +21,8 @@ Deliberately NEVER keys on the configurable ceiling number (e.g. "200" of
 configurable (``CLAUDE_CODE_MAX_WEB_SEARCHES``), so a number alone is not a
 stable signal and would false-fire on ordinary counts ("Found 200 results").
 
-**Precision**: by default, Read/Grep/Glob tool responses are excluded from
+**Precision**: by default, Read/Grep/Glob/Edit/Write/NotebookEdit tool
+responses are excluded from
 matching (``options.excluded_tools``). Those tools return FILE CONTENTS the
 model merely read -- prose in a file that happens to discuss budget
 exhaustion (this very docstring, for instance) is not a live exhaustion
@@ -68,7 +69,27 @@ logger = logging.getLogger(__name__)
 
 # File-content tools: their tool_response is what a file merely SAYS, not a
 # live budget signal from a tool that was actually rate/quota-limited.
-_DEFAULT_EXCLUDED_TOOLS: Final[tuple[str, ...]] = ("Read", "Grep", "Glob")
+_DEFAULT_EXCLUDED_TOOLS: Final[tuple[str, ...]] = (
+    "Read",
+    "Grep",
+    "Glob",
+    # Edit/Write/NotebookEdit responses echo AUTHORED file content back, so a
+    # budget phrase being written into a test fixture or document would
+    # otherwise fire the detector on its own material.
+    "Edit",
+    "Write",
+    "NotebookEdit",
+)
+
+# A Bash command naming any of these is INSPECTING recorded/pattern text —
+# the ledger itself, or this handler's own source/tests (whose fixtures
+# contain the trigger phrases) — not hitting a live budget. Without this
+# guard, cat-ing the ledger re-fires the detector and appends a fresh entry:
+# a self-feeding loop.
+_SELF_REFERENTIAL_COMMAND_MARKERS: Final[tuple[str, ...]] = (
+    "budget-exhaustion-events.jsonl",
+    "budget_exhaustion_detector",
+)
 
 # ─── Pattern family ───────────────────────────────────────────────────────────
 
@@ -166,7 +187,8 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
 
     Generic pattern family (never keyed on a configurable ceiling number) over
     the tool_response of any completed tool call, excluding file-content
-    tools (Read/Grep/Glob) by default so file prose about budgets is never
+    tools (Read/Grep/Glob/Edit/Write/NotebookEdit) by default so file prose
+    about budgets is never
     mistaken for a live exhaustion event. Never blocks: on a match it ALLOWs
     with an advisory demanding prominent user-facing reporting, and appends
     one line to an untracked occurrence ledger.
@@ -225,6 +247,13 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         if tool_name in self._resolved_excluded_tools():
             return False
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+        if isinstance(tool_input, dict):
+            command = tool_input.get("command")
+            if isinstance(command, str) and any(
+                marker in command for marker in _SELF_REFERENTIAL_COMMAND_MARKERS
+            ):
+                return False
         tool_response = hook_input.get(HookInputField.TOOL_RESPONSE)
         text = _stringify_tool_response(tool_response)
         if not text:
@@ -321,7 +350,7 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
             "silently retry or degrade.** Lead your next user-facing message with a "
             "bold banner naming the budget, state what you were attempting and what "
             "work is now affected, and stop hammering the exhausted tool.\n\n"
-            "File-content tools (Read/Grep/Glob) are excluded by default, since their "
+            "File-content tools (Read/Grep/Glob/Edit/Write/NotebookEdit) are excluded by default, since their "
             "response is text a file merely CONTAINS, not a live exhaustion signal.\n\n"
             "Every detection is appended to `budget-exhaustion-events.jsonl` in the "
             "daemon's untracked directory, so recurrence is visible across the "
@@ -335,7 +364,7 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
             "    budget_exhaustion_detector:\n"
             "      enabled: true\n"
             "      options:\n"
-            "        excluded_tools: [Read, Grep, Glob]  # additive override\n"
+            "        excluded_tools: [Read, Grep, Glob, Edit, Write, NotebookEdit]  # override\n"
             "        extra_patterns: []                   # extra regexes, additive\n"
             "```\n"
         )

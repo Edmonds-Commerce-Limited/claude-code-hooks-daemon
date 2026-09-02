@@ -408,7 +408,7 @@ handlers:
       enabled: true   # On by default (opt-out); advisory-only, never blocks.
       priority: 32
       # options:
-      #   excluded_tools: [Read, Grep, Glob]  # tools whose response is never scanned (default shown)
+      #   excluded_tools: [Read, Grep, Glob, Edit, Write, NotebookEdit]  # tools whose response is never scanned (default shown)
       #   extra_patterns: []                   # additional regexes, additive to the built-in family
 
     validate_eslint_on_write:  # Runs ESLint after file writes

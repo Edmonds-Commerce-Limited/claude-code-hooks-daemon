@@ -110,7 +110,7 @@ class TestGenericBudgetShapes:
 
 
 class TestExcludedToolsByDefault:
-    @pytest.mark.parametrize("tool_name", ["Read", "Grep", "Glob"])
+    @pytest.mark.parametrize("tool_name", ["Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit"])
     def test_default_excluded_tools_never_fire(
         self, handler: BudgetExhaustionDetectorHandler, tool_name: str
     ) -> None:
@@ -120,6 +120,29 @@ class TestExcludedToolsByDefault:
             tool_name,
             {"content": "budget exhausted: this session has used its web search budget"},
         )
+        assert handler.matches(hook_input) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat untracked/budget-exhaustion-events.jsonl",
+            "grep -c fragment /workspace/untracked/budget-exhaustion-events.jsonl",
+            "grep -n pattern src/claude_code_hooks_daemon/handlers/post_tool_use/budget_exhaustion_detector.py",
+            "sed -n 1p tests/unit/handlers/post_tool_use/test_budget_exhaustion_detector.py",
+        ],
+    )
+    def test_self_referential_bash_reads_never_fire(
+        self, handler: BudgetExhaustionDetectorHandler, command: str
+    ) -> None:
+        """A Bash command inspecting the ledger, the handler's own source or
+        its tests is READING recorded/pattern text, not hitting a budget --
+        without this guard, cat-ing the ledger re-fires the detector and
+        appends a fresh entry, a self-feeding loop."""
+        hook_input = _tool_input(
+            "Bash",
+            {"stdout": "budget exhausted: web search budget used", "stderr": ""},
+        )
+        hook_input["tool_input"] = {"command": command}
         assert handler.matches(hook_input) is False
 
     def test_excluded_tools_configurable(self, handler: BudgetExhaustionDetectorHandler) -> None:
