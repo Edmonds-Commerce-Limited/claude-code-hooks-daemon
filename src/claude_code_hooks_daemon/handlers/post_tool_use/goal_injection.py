@@ -512,6 +512,33 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         """
         return re.compile(rf"{re.escape(self._plan_dir())}/(\d+-[^/]+)/PLAN\.md$")
 
+    @staticmethod
+    def _is_inside_project(file_path: str) -> bool:
+        """True when ``file_path`` lives under this project's root.
+
+        The trigger pattern is applied with ``search``, so any path merely
+        CONTAINING ``<plan_dir>/NNNNN-name/PLAN.md`` matches wherever it
+        lives — while the rendered goal re-points it at the PROJECT's plan
+        directory. A scratch plan under /tmp would therefore emit a live
+        goal naming a project path that does not exist, and an
+        unsatisfiable goal cannot be discharged by doing the work
+        (Plan 00320).
+
+        Fails OPEN — an unresolvable path or uninitialised context keeps the
+        pre-existing behaviour rather than silently disabling the trigger,
+        matching this module's best-effort sensor contract.
+        """
+        try:
+            root = ProjectContext.project_root().resolve()
+        except (RuntimeError, OSError) as e:
+            logger.warning("goal_injection: project-root check skipped: %s", e)
+            return True
+        try:
+            Path(file_path).resolve().relative_to(root)
+        except (ValueError, OSError):
+            return False
+        return True
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True for a Write/Edit landing on an ACTIVE plan's PLAN.md."""
         if hook_input.get(HookInputField.TOOL_NAME) not in (ToolName.WRITE, ToolName.EDIT):
@@ -520,7 +547,9 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         normalized = file_path.replace("\\", "/")
         if _COMPLETED_SEGMENT in normalized:
             return False
-        return self._plan_path_pattern().search(normalized) is not None
+        if self._plan_path_pattern().search(normalized) is None:
+            return False
+        return self._is_inside_project(file_path)
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Render and write the goal-intent signal; always ALLOW.
@@ -536,7 +565,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         file_path = get_file_path(hook_input) or ""
         normalized = file_path.replace("\\", "/")
         match = self._plan_path_pattern().search(normalized)
-        if match is None:
+        if match is None or not self._is_inside_project(file_path):
             return BlockingResult(decision=Decision.ALLOW)
         folder = match.group(1)
         plan_number = folder.split("-", 1)[0].zfill(5)

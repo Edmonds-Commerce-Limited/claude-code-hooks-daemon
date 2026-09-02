@@ -1,6 +1,6 @@
 # Plan 00320: stale goal intent sidecar on retirement
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-02
 **Owner**: joseph
 **Priority**: High
@@ -75,11 +75,20 @@ by arguing with the challenge rather than by satisfying it.
 
 ### Phase 2: Follow-ups
 
-- [ ] ⬜ **Task 2.1**: Acceptance fixtures write goals for a fixture plan
-  (`CLAUDE/Plan/00099-test`) into the OPERATIONAL ledger and sidecar. Even with
-  Phase 1 fixed, a fixture run mid-session emits a real goal for a plan folder
-  that does not exist. Decide whether fixtures should be pointed at a temp
-  ledger, and file separately if the change is larger than a test-fixture edit.
+- [x] ✅ **Task 2.1**: Decided — and the root cause was not the fixture. The
+  trigger pattern is applied with `search`, so ANY path merely containing
+  `<plan_dir>/NNNNN-name/PLAN.md` matched wherever on the filesystem it lived,
+  while the emitted goal re-pointed it at the PROJECT's plan directory. A
+  scratch plan under `/tmp` therefore produced a live operational goal naming a
+  project path that does not exist. `recovery_cron_advisor`'s acceptance
+  fixture (`/tmp/acceptance-test-recovcron/CLAUDE/Plan/00099-test`) is how that
+  happened during the v3.60.0 release, but any scratch or fixture plan anywhere
+  would have done it. Fixed at the handler: `_is_inside_project` requires the
+  resolved path to sit under `ProjectContext.project_root()`, applied in both
+  `matches` and `handle`. Fails OPEN on an unresolvable path or uninitialised
+  context, matching the module's best-effort sensor contract. Pointing the
+  fixture at a temp ledger was rejected — it would have left every other
+  out-of-project PLAN.md still able to emit an unsatisfiable goal.
 
 ## Success Criteria
 
@@ -87,10 +96,11 @@ by arguing with the challenge rather than by satisfying it.
   after, verified by running it at both commits.
 - [x] After a retirement that empties the ledger, no `.goal-intent` file remains
   for that session.
-- [x] `./scripts/qa/llm_qa.py all` passes 25/25 (17,291 passed, 95.2%).
-- [ ] Task 2.1 (acceptance fixtures writing goals for a non-existent fixture
-  plan into the operational ledger) is decided — the only item keeping this
-  plan open.
+- [x] `./scripts/qa/llm_qa.py all` passes 25/25 for Phase 1 (17,291 passed,
+  95.2%), re-run after Phase 2.
+- [x] A plan-shaped path outside the project root neither matches nor emits a
+  goal, so no fixture or scratch plan can put an unsatisfiable goal into the
+  operational ledger.
 
 ## Delivery & Milestones
 

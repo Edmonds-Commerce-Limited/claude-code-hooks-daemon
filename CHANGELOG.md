@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contract, called when a retirement empties the ledger. Retiring one of
   several live plans still rewrites the signal rather than clearing it; both
   sides of that boundary are pinned by tests.
+- **A PLAN.md outside the project no longer emits a live goal (Plan 00320).**
+  The trigger pattern is applied with `search`, so any path merely CONTAINING
+  `<plan_dir>/NNNNN-name/PLAN.md` matched wherever on the filesystem it lived,
+  while the rendered goal re-pointed it at the PROJECT's plan directory. A
+  scratch or fixture plan under `/tmp` therefore emitted a real operational
+  goal naming a project path that does not exist — unsatisfiable, since no
+  work can complete a plan whose folder is absent. This is how
+  `CLAUDE/Plan/00099-test` reached the live ledger, from
+  `recovery_cron_advisor`'s acceptance fixture. `matches` and `handle` now
+  both require the resolved path to sit under `ProjectContext.project_root()`,
+  failing open on an unresolvable path or uninitialised context.
 
 ## [3.60.0] - 2026-09-02
 

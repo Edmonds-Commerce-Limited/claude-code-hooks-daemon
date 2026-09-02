@@ -314,6 +314,11 @@ class TestGoalInjectionHandler:
                 "ProjectContext.daemon_untracked_dir",
                 classmethod(lambda cls: tmp_path / "untracked"),
             )
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.project_root",
+                classmethod(lambda cls: tmp_path),
+            )
             self._untracked = tmp_path / "untracked"
             self._project = tmp_path
             yield
@@ -366,6 +371,43 @@ class TestGoalInjectionHandler:
     def test_matches_edit_tool(self, handler: GoalInjectionHandler) -> None:
         plan = self._write_plan()
         assert handler.matches(self._hook_input(plan, tool="Edit")) is True
+
+    def test_plan_shaped_path_outside_the_project_does_not_match(
+        self, handler: GoalInjectionHandler, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        """Plan 00320 Task 2.1: the trigger is a project plan, not a SHAPE.
+
+        The pattern is applied with ``search``, so any absolute path merely
+        CONTAINING ``<plan_dir>/NNNNN-name/PLAN.md`` matched wherever it lived
+        — and the rendered goal then re-pointed it at the PROJECT's plan dir.
+        A scratch plan under /tmp therefore emitted a live operational goal
+        naming a project path that does not exist, which is unsatisfiable: no
+        work can complete a plan whose folder is absent. This is exactly how
+        `CLAUDE/Plan/00099-test` reached the live ledger during the v3.60.0
+        release, from an acceptance fixture writing under
+        /tmp/acceptance-test-recovcron/.
+        """
+        outside = tmp_path_factory.mktemp("outside-project") / "CLAUDE" / "Plan" / "00099-test"
+        outside.mkdir(parents=True)
+        stray = outside / "PLAN.md"
+        stray.write_text(_plan_md("In Progress"), encoding="utf-8")
+
+        assert handler.matches(self._hook_input(stray)) is False
+
+    def test_plan_shaped_path_outside_the_project_emits_no_signal(
+        self, handler: GoalInjectionHandler, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        """Belt and braces: even if handle() is reached directly, an
+        out-of-project plan must not write a goal signal."""
+        outside = tmp_path_factory.mktemp("outside-project") / "CLAUDE" / "Plan" / "00099-test"
+        outside.mkdir(parents=True)
+        stray = outside / "PLAN.md"
+        stray.write_text(_plan_md("In Progress"), encoding="utf-8")
+
+        result = handler.handle(self._hook_input(stray))
+
+        assert result.decision == Decision.ALLOW
+        assert not self._signal_path().exists()
 
     def test_matches_honours_non_default_plan_dir_from_facade(
         self, handler: GoalInjectionHandler
@@ -523,6 +565,11 @@ class TestGoalLedgerIntegration:
                 "ProjectContext.daemon_untracked_dir",
                 classmethod(lambda cls: tmp_path / "untracked"),
             )
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.project_root",
+                classmethod(lambda cls: tmp_path),
+            )
             self._untracked = tmp_path / "untracked"
             self._project = tmp_path
             yield
@@ -608,6 +655,11 @@ class TestCombinedGoalSignal:
                 "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
                 "ProjectContext.daemon_untracked_dir",
                 classmethod(lambda cls: tmp_path / "untracked"),
+            )
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.project_root",
+                classmethod(lambda cls: tmp_path),
             )
             self._untracked = tmp_path / "untracked"
             self._project = tmp_path
