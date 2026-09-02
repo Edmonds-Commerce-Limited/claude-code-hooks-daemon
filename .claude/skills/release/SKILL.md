@@ -38,7 +38,6 @@ See **[RELEASING.md](../../../CLAUDE/development/RELEASING.md)** — "A RELEASE 
 HUMAN-GATED" — for the full rule, the state-file schema, and how to recover from
 an unauthorised release (never silently unpublish).
 
-## Description
 ## Run this first
 
 Claude Code loads this markdown and nothing else — the file below is not run
@@ -50,6 +49,7 @@ bash "${CLAUDE_SKILL_DIR:-.claude/skills/release}/invoke.sh" <major|minor|patch|
 
 Follow its output exactly; what is written here is orientation.
 
+## Description
 
 Automate the complete release process: version updates, changelog generation, Opus review, git tagging, and GitHub release creation.
 

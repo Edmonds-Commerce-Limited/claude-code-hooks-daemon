@@ -78,7 +78,7 @@ class ConfigOptimisationReminderHandler(SessionStartHandlerBase):
 
             if state.last_run_version is None:
                 context = [
-                    "🛠️ No config-optimisation review has ever been recorded " "for this project.",
+                    "🛠️ No config-optimisation review has ever been recorded for this project.",
                 ]
             else:
                 context = [

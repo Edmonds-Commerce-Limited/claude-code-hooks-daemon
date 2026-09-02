@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
     _SOURCE_STATUS_FLIP,
     GoalInjectionHandler,
     LivePlan,
+    clear_goal_signal,
     render_combined_goal_line,
     render_goal_line,
     write_goal_signal,
@@ -304,6 +305,42 @@ class TestWriteGoalSignal:
         path = write_goal_signal("a/b c", _PLAN_NUMBER, "x", _SOURCE_STATUS_FLIP)
         assert path is not None
         assert path.name == f"a_b_c{_SIGNAL_SUFFIX}"
+
+    def test_emitting_a_goal_drops_a_pending_clear_trigger(self) -> None:
+        """A NEW goal must not be retracted by a clear the supervisor never ate.
+
+        The exclusion between the two signals used to run one way only:
+        ``clear_goal_signal`` unlinks ``.goal-intent``, but the writer left a
+        pending ``.goal-clear`` in place. Both files could therefore coexist,
+        and the supervisor's "goal wins, the clear waits a tick" precedence
+        merely DEFERS the clear by one tick rather than resolving it — tick 1
+        injects the new goal, tick 2 types ``/goal clear`` and retracts it.
+
+        The window opens whenever one plan is retired and another started
+        before the session next goes idle, which is ordinary workflow here.
+        """
+        assert clear_goal_signal(_SESSION) is True
+        clear_path = self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_CLEAR_SUFFIX}"
+        assert clear_path.exists(), "precondition: a clear trigger is pending"
+
+        path = write_goal_signal(_SESSION, _PLAN_NUMBER, "joined line", _SOURCE_STATUS_FLIP)
+
+        assert path is not None and path.exists()
+        assert not clear_path.exists(), (
+            "a pending .goal-clear survived a new goal emission — the next idle "
+            "tick would retract the goal that was just set"
+        )
+
+    def test_dropping_a_pending_clear_is_scoped_to_this_session(self) -> None:
+        """Emitting for one session must not retract ANOTHER session's goal."""
+        other = "other-session"
+        assert clear_goal_signal(other) is True
+        other_clear = self._untracked / _SIGNAL_SUBDIR / f"{other}{_CLEAR_SUFFIX}"
+        assert other_clear.exists()
+
+        write_goal_signal(_SESSION, _PLAN_NUMBER, "joined line", _SOURCE_STATUS_FLIP)
+
+        assert other_clear.exists(), "another session's pending clear was consumed"
 
 
 class TestGoalInjectionHandler:
@@ -794,6 +831,33 @@ class TestCombinedGoalSignal:
         handler.handle(self._hook_input(self._write_plan("00296-first", status="Complete")))
 
         assert not clear_path.exists()
+
+    def test_a_render_failure_does_not_retract_a_still_live_goal(
+        self, handler: GoalInjectionHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only an EMPTY ledger retracts — a failed render must change nothing.
+
+        ``render_combined_goal_line`` returns None for two quite different
+        situations: no live plans, and a live set it could not render (e.g. a
+        malformed plan number). Routing both to the retract path meant a render
+        failure silently cleared a goal that was still owed, which is the same
+        ledger/slot disagreement Plan 00320 fixed, just reached another way.
+        """
+        clear_path = self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_CLEAR_SUFFIX}"
+        handler.handle(self._hook_input(self._write_plan("00296-first")))
+        handler.handle(self._hook_input(self._write_plan("00298-second")))
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+            "render_combined_goal_line",
+            lambda *a, **k: None,
+        )
+        handler.handle(self._hook_input(self._write_plan("00296-first", status="Complete")))
+
+        assert not clear_path.exists(), (
+            "a render failure retracted the goal while 00298 was still live — "
+            "the ledger would report a live plan with an empty /goal slot"
+        )
 
     def test_retirement_leaves_signal_intact_while_another_plan_stays_live(
         self, handler: GoalInjectionHandler

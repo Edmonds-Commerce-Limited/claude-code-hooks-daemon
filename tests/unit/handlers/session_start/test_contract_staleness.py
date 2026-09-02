@@ -157,13 +157,26 @@ class TestClientInstallAdvisory:
         text = "\n".join(client_handler.handle(_hook_input()).context)
         assert ".claude/hooks-daemon/" in text
 
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            RuntimeError("ProjectContext not initialized"),
+            OSError("marker unreadable"),
+        ],
+        ids=["runtime-error", "os-error"],
+    )
     def test_defaults_to_the_client_message_when_mode_is_unknown(
-        self, handler: ContractStalenessHandler
+        self, handler: ContractStalenessHandler, failure: Exception
     ) -> None:
-        """An uninitialised ProjectContext must not leak maintainer guidance."""
+        """An unresolvable install mode must not leak maintainer guidance.
+
+        Both arms the handler catches are pinned: the maintainer procedure
+        edits daemon-owned paths a client install must never touch, so
+        "cannot tell" has to resolve to the client answer either way.
+        """
 
         def _explode() -> bool:
-            raise RuntimeError("ProjectContext not initialized")
+            raise failure
 
         handler.self_install_reader = _explode
         handler.installed_version_reader = lambda: "2.2.0"

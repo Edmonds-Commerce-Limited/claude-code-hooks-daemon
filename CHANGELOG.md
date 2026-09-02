@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.61.0] - 2026-09-02
+
 ### Added
 
 - **Goal retraction: `hooks-daemon clear-goal` and an automatic `/goal clear`
@@ -53,6 +55,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A pending goal retraction could cancel the NEXT goal (Plan 00321,
+  caught by this release's own code-review gate).** The exclusion between
+  the two signal files ran one way only: `clear_goal_signal` unlinks
+  `.goal-intent`, but the writer left a pending `.goal-clear` in place. Both
+  could therefore coexist, and the supervisor's "goal wins, the clear waits
+  a tick" precedence merely DEFERRED the clear by one tick — tick 1 injected
+  the new goal, tick 2 typed `/goal clear` and retracted it. Because
+  `once_per_plan_per_session` defaults to true, the handler would not
+  re-emit for that plan, leaving the ledger reporting a live plan while the
+  upstream `/goal` slot sat empty: the same ledger/slot disagreement Plans
+  00320/00321 exist to eliminate, reached from the other direction. The
+  window opened whenever one plan was completed and another started before
+  the session next went idle. `write_goal_signal` now drops a pending clear
+  for its own session (and only its own), making the exclusion symmetric.
+- **A failed goal render retracted a goal that was still owed (Plan 00320).**
+  `render_combined_goal_line` returns `None` both for an empty live set and
+  for a live set it could not render (e.g. a malformed plan number), and
+  both were routed to the retract path. A render failure therefore cleared
+  the `/goal` slot while the ledger still reported work outstanding. Only
+  the genuinely-empty case now retracts; a render failure logs and leaves
+  the existing signal untouched.
+- **Removing the retired `optimise` skill checked no provenance
+  (Plan 00322).** The installer deleted `.claude/skills/optimise/`
+  unconditionally, with `shutil.rmtree` and an info-level log line — most
+  dangerous in exactly the case the rename exists to address, since
+  `optimise` is generic enough that the directory may be a project's own.
+  Removal now requires the directory's `SKILL.md` to carry the daemon's
+  provenance marker; a same-named skill the daemon did not write is left
+  alone with a WARNING naming the collision.
 - **Four skills kept their real procedure in a script nothing ever ran
   (Plan 00324).** `configure`, `mode`, `acceptance-test` and `release` each
   ship an `invoke.sh` — 52 to 317 lines of procedure — that their SKILL.md

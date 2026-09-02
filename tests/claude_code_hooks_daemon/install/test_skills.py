@@ -286,11 +286,37 @@ class TestRetiredSkillRemoval:
     ) -> None:
         orphan = temp_project / ".claude" / "skills" / "optimise"
         orphan.mkdir(parents=True)
-        (orphan / "SKILL.md").write_text("# stale standalone skill\n")
+        (orphan / "SKILL.md").write_text(
+            "# /optimise - Configuration Optimiser Skill\n\n"
+            "Analyse hooks daemon configuration and recommend improvements.\n"
+        )
 
         deploy_skills(daemon_source_one_skill, temp_project)
 
         assert not orphan.exists()
+
+    def test_leaves_a_same_named_skill_the_daemon_did_not_write(
+        self, temp_project: Path, daemon_source_one_skill: Path
+    ) -> None:
+        """`optimise` is a generic name — the delete must check provenance.
+
+        The whole reason this skill was renamed is that `optimise` collides
+        with whatever else a project or plugin calls `optimise`. That makes an
+        unconditional `rmtree` of the deployed path most dangerous in exactly
+        the case the rename exists to address: deleting work the daemon never
+        wrote, with no backup and only an info-level log line.
+        """
+        theirs = temp_project / ".claude" / "skills" / "optimise"
+        theirs.mkdir(parents=True)
+        (theirs / "SKILL.md").write_text(
+            "# optimise\n\nRuns our image-compression pipeline over static assets.\n"
+        )
+        (theirs / "compress.py").write_text("# our own tooling\n")
+
+        deploy_skills(daemon_source_one_skill, temp_project)
+
+        assert theirs.exists(), "a project's own optimise skill was destroyed"
+        assert (theirs / "compress.py").exists()
 
     def test_leaves_a_project_owned_skill_alone(
         self, temp_project: Path, daemon_source_one_skill: Path

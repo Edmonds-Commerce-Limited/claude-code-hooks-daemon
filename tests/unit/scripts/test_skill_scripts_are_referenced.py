@@ -72,3 +72,48 @@ def test_every_bundled_skill_script_is_referenced_by_its_markdown() -> None:
         "(passing the caller's arguments through if the script reads any), or "
         "delete the script if its content has moved into the markdown."
     )
+
+
+#: A script body reading any of these consumes caller arguments, so the line
+#: that invokes it must pass something through.
+_ARG_READS: Final[tuple[str, ...]] = ("$1", "${1", "$*", "${*", "$@", "${@")
+
+#: What an invocation line must carry to be passing arguments on. A literal
+#: `"$@"`/`$*` forwards them; an angle-bracket placeholder is the instruction
+#: to Claude to substitute what the user typed.
+_ARG_FORWARDS: Final[tuple[str, ...]] = ('"$@"', "$@", "$*", "<")
+
+
+def _invocation_lines(text: str, script_name: str) -> list[str]:
+    return [line for line in text.splitlines() if script_name in line]
+
+
+def test_a_script_that_reads_arguments_is_invoked_with_arguments() -> None:
+    """Naming the script is only half of Plan 00324's defect.
+
+    `mode` and `release` read `${*:-get}` and `${1:-auto}`, so a reference that
+    names the script but passes nothing still drops what the user typed — the
+    script runs with defaults and the argument silently disappears. A bare
+    mention in prose satisfies the reference check above while leaving that
+    half of the bug in place.
+    """
+    argless: list[str] = []
+    for skill in _skill_dirs():
+        text = _markdown_text(skill)
+        for script in _bundled_scripts(skill):
+            body = script.read_text(encoding="utf-8", errors="replace")
+            if not any(token in body for token in _ARG_READS):
+                continue
+            lines = _invocation_lines(text, script.name)
+            if not lines:
+                continue  # the reference check above owns this failure
+            if not any(any(f in line for f in _ARG_FORWARDS) for line in lines):
+                argless.append(str(script.relative_to(_REPO_ROOT)))
+
+    assert not argless, (
+        "These skill scripts read caller arguments, but their skill's markdown "
+        f"invokes them without passing any through: {argless}. The script will "
+        "silently run on its defaults and the user's typed argument is lost — "
+        'add a placeholder (e.g. `<the arguments the user typed>`) or `"$@"` '
+        "to the invocation line."
+    )

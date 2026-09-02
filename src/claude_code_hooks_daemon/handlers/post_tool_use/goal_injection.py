@@ -412,6 +412,13 @@ def write_goal_signal(
 ) -> Path | None:
     """Atomically write the ``<session>.goal-intent`` signal file.
 
+    Also drops any pending ``<session>.goal-clear`` for this session, which
+    makes the exclusion between the two signals SYMMETRIC: ``clear_goal_signal``
+    already unlinks the intent file. Without this half, a clear the supervisor
+    had not yet consumed survived alongside the new intent, and its precedence
+    rule ("goal wins, the clear waits a tick") only deferred the clear by one
+    tick — the next goal was set, then retracted a tick later.
+
     Failures are logged, never raised — this is a best-effort sensor signal
     and must never break the tool call that triggered it. Returns the final
     path, or None on failure.
@@ -420,6 +427,7 @@ def write_goal_signal(
         target_dir = ProjectContext.daemon_untracked_dir() / _SIGNAL_SUBDIR
         target_dir.mkdir(parents=True, exist_ok=True)
         stem = _UNSAFE_SESSION_CHARS.sub("_", session_id) if session_id else _SESSION_ID_FALLBACK
+        (target_dir / f"{stem}{_CLEAR_SUFFIX}").unlink(missing_ok=True)
         final_path = target_dir / f"{stem}{_SIGNAL_SUFFIX}"
         tmp_path = target_dir / f".{stem}.{os.getpid()}.tmp"
         payload = {
@@ -697,7 +705,16 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         ]
         combined = render_combined_goal_line(live_plans, mode=self._mode, raw_lines=self._lines)
         if combined is None:
-            return self._write_fallback(session_id, fallback, fallback_plan_number)
+            # Live plans exist and we simply could not render them (e.g. a
+            # malformed plan number). That is NOT a retirement, so it must not
+            # reach the retract path: clearing here would empty the /goal slot
+            # while the ledger still reports work owed.
+            logger.warning(
+                "goal_injection: combined render failed for %d live plan(s); "
+                "leaving the existing goal signal untouched",
+                len(live_plans),
+            )
+            return None
 
         plan_numbers_field = ",".join(sorted(plan.plan_number for plan in live_plans))
         return write_goal_signal(session_id, plan_numbers_field, combined, _SOURCE_STATUS_FLIP)

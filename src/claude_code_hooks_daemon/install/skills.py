@@ -22,7 +22,13 @@ logger = logging.getLogger(__name__)
 #: ``optimise`` was retired into the ``hooks-daemon`` skill as the
 #: ``optimise`` subcommand — a top-level name that generic collides with
 #: whatever else a project or plugin calls it.
-_RETIRED_SKILLS: Final[tuple[str, ...]] = ("optimise",)
+#:
+#: Each entry maps the directory name to a PROVENANCE MARKER that must appear
+#: in its ``SKILL.md`` before the directory is deleted. The marker is what
+#: separates "the copy we wrote" from "a project's own skill that happens to
+#: share this name" — and the collision risk is exactly why the skill was
+#: renamed, so it is highest for precisely these names.
+_RETIRED_SKILLS: Final[dict[str, str]] = {"optimise": "hooks daemon"}
 
 
 def _skills_source_root(daemon_source: Path) -> Path:
@@ -88,14 +94,42 @@ def deploy_skills(daemon_source: Path, project_root: Path) -> None:
 
 
 def _remove_retired_skills(project_root: Path) -> None:
-    """Delete deployed copies of skills this daemon no longer ships."""
+    """Delete deployed copies of skills this daemon no longer ships.
+
+    Only removes a directory whose ``SKILL.md`` carries the retirement's
+    provenance marker. A same-named directory the daemon did not write is
+    left alone with a WARNING naming the collision: deleting it would destroy
+    project work with no backup, which is far worse than leaving an orphan
+    slash command in place for a human to resolve.
+    """
     skills_root = project_root / ".claude" / "skills"
-    for retired in _RETIRED_SKILLS:
+    for retired, marker in _RETIRED_SKILLS.items():
         orphan = skills_root / retired
         if not orphan.is_dir():
             continue
+        if not _looks_daemon_deployed(orphan, marker):
+            logger.warning(
+                "Skill directory %s shares a name this daemon retired, but does not "
+                "look daemon-deployed (no %r in its SKILL.md) — leaving it untouched. "
+                "The retired daemon skill is now the 'optimise' subcommand of the "
+                "hooks-daemon skill.",
+                orphan,
+                marker,
+            )
+            continue
         logger.info("Removing retired skill directory: %s", orphan)
         shutil.rmtree(orphan)
+
+
+def _looks_daemon_deployed(skill_dir: Path, marker: str) -> bool:
+    """Whether ``skill_dir`` carries the retired daemon skill's marker."""
+    skill_md = skill_dir / "SKILL.md"
+    try:
+        text = skill_md.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        logger.warning("Cannot read %s to confirm provenance (%s) — not removing", skill_md, e)
+        return False
+    return marker.lower() in text.lower()
 
 
 def _make_executable(file_path: Path) -> None:
