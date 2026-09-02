@@ -4,13 +4,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00317: supervisor host thin shim](00317-supervisor-host-thin-shim/PLAN.md) - In Progress (Plan 00316 exposed host-tier logic in the never-reloading PTY host — typed-command parsing and the Ctrl+C gate decision — defeating the hot-reload split; audit then refactor to a thin forwarding shim with all recognition worker-side, fail-open on worker outage)
-
 - [00316: manual model choice must win](00316-manual-model-choice-must-win/PLAN.md) - In Progress (field report: a user-typed /model opus was classified as a downgrade — status-line fallback fired and the ccy supervisor auto-restored fable over the human's choice; PTY input tracking distinguishes manual from silent substitution, manual always wins, per-model default effort kept but manual /effort beats the coupling)
 
 - [00314: failsafe cron suppression marker never arms](00314-failsafe-cron-suppression-marker-never-arms/PLAN.md) - Not Started (Plan 00298's cron-tick suppression never engaged live: the human-input marker was not written despite a matching STOPPING BECAUSE phrase, and the pattern set misses natural phrasings; TDD reproduction + field observability + conservative pattern widening)
-
-- [00312: supervisor ctrl c double press guard](00312-supervisor-ctrl-c-double-press-guard/PLAN.md) - In Progress (a single accidental ^C kills background agents; the supervisor's PTY position lets it swallow a lone 0x03 and forward on rapid double-press — escape hatch always wins, visibly hinted, dogfooded here)
 
 - [00311: v3.59.0 release review followups](00311-v3590-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.59.0 code review: dispatch_declaration's hardcoded plan path, the secret_file_matching glob-heuristic maintenance surface, and the git rm --cached looseness verification)
 
@@ -176,6 +172,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00317: supervisor host thin shim](Completed/00317-supervisor-host-thin-shim/PLAN.md) - Complete at c3eb83b2 (typed-command recognition moved worker-side via a fail-open RawInputTap; Ctrl+C byte-swallow audited as the one justified host-side stay; hot-reload live-confirmed — a recognition change now ships mid-session via worker reload alone)
+
+- [00312: supervisor ctrl c double press guard](Completed/00312-supervisor-ctrl-c-double-press-guard/PLAN.md) - Complete at 5242b58f (lone 0x03 swallowed with a visible status hint, rapid second press always forwarded; both halves live-confirmed by owner — single accidental press killed nothing, deliberate spam shut the session down)
+
 - [00315: hidden agent budget detection](Completed/00315-hidden-agent-budget-detection/PLAN.md) - Complete at 0ee38866 + 74f3405e (BUDGETS.md catalogue of opaque per-session budgets with source-of-truth honesty; generic budget_exhaustion_detector PostToolUse advisory with mandatory prominent user reporting and an untracked occurrence ledger; live dogfood closed a self-feeding-loop false-fire the same day)
 
 - [00313: venv resolver cross-view reuse](Completed/00313-venv-resolver-cross-view-reuse/PLAN.md) - Complete at 3d71ff84, shipped in v3.59.0 (slug-mismatched `venv-*` candidates are now ineligible in the metadata and scan fallback resolution steps, so host and container views of the same repo each build their own venv; bash resolvers inherit via the Python SSOT)
@@ -224,8 +224,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00285: skill bootstrap reexec breaks sibling source](Completed/00285-skill-bootstrap-reexec-breaks-sibling-source/PLAN.md) - Complete at `1ffb5e4a` + `798a5bc2` (self-bootstrap re-exec broke `$(dirname "$0")` sibling sourcing; fixed via re-exec-proof `DAEMON_DIR` + an `audit_shell.py` guard)
 
-- [00278: model-downgrade resilience](Completed/00278-supervisor-effort-restore-on-model-downgrade/PLAN.md) - Complete at `f0a9dc33` + `864c9cc4` + the archiving commit (supervisor recovers a fable→opus downgrade via context-sidecar detection plus coupled effort/model auto-restore; opt-in prevention surfaces steer security-flavoured work to an Opus subagent)
-
 - [00283: standing-auth cadence + supervisor-typed channel](Completed/00283-standing-auth-cadence-supervisor-channel/PLAN.md) - Complete at `faf4fae0` + the archiving commit (bounded reinforcement cadence + opt-in ccy-supervisor-typed channel for `standing_authorisations`, plus a shared `utils/ccy_supervisor` liveness util)
 
 - [00282: generate-docs null-priority crash](Completed/00282-generate-docs-null-priority-crash/PLAN.md) - Complete at `86ca861a` + the archiving commit (both doc generators aborted with a NoneType-vs-int sort crash when a handler config omitted `priority:`; fixed via a shared `resolve_priority` helper across both generators and the `registry.py` guard, plus CLI traceback logging and two-handler regression tests)
@@ -233,8 +231,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 - [00281: flag cleaning compaction on downgrade](Completed/00281-flag-cleaning-compaction-on-downgrade/PLAN.md) - Complete at `5580d9a7` + `6594dbad` + the archiving commit (supervisor fires an opt-in, gated, armed `/compact` on a REPEATED downgrade so the cleaned context stops re-tripping the classifier and the model-restore sticks; 🧽 audit glyph, dogfood-enabled here, default OFF for clients)
 
 - [00279: generic agent install subsystem](Completed/00279-generic-agent-install-subsystem/PLAN.md) - Complete at merges `6679da75` + `3abbc809` + the archiving commit (first-class daemon-shipped agent deployment: version + md5 ledger, customisation detection that never clobbers, config-gated deploy/remove lifecycle, `hooks-daemon agents` CLI; payloads: plan-dedupe scout migration + the opus-security quarantine agent v1.1.0)
-
-- [00277: release acceptance findings v3 55 0](Completed/00277-release-acceptance-findings-v3-55-0/PLAN.md) - Complete at `ebf7016a` + the archiving commit (all v3.55.0 gate findings closed: per-session block_once with session-attributed HandlerDecisionRecord, isolation-advisor test precondition, lint-clean error-hiding samples, validate_eslint_on_write deny branch verified live in the client fixture)
 
 ## Blocked / On Hold Plans
 
@@ -275,9 +271,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 317 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 259 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 261 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 42 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 

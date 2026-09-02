@@ -1,8 +1,6 @@
 # Plan 00312: supervisor ctrl c double press guard
 
-**Status**: In Progress (implemented + unit-verified; live dogfood awaits next
-supervised session start — the gate lives in the PTY HOST tier, which does not
-hot-reload)
+**Status**: Complete
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: High
@@ -76,8 +74,7 @@ loudly visible, and the guard is configurable/disable-able.
   decision-log entries. Unit tests for: single press swallowed, double
   press forwarded, window expiry re-arms, paste-burst exemption,
   disabled-flag passthrough.
-- [ ] 🔄 **Task 2.2** (single-press half confirmed live; double-press forward
-  pending the owner's next deliberate shutdown — see JOURNAL/): Live dogfood
+- [x] ✅ **Task 2.2** (both halves confirmed live — see JOURNAL/): Live dogfood
   in the NEXT supervised session (the gate
   runs in `_forward_io`, which is the PTY HOST tier — worker hot-reload does
   not apply, and restarting the host would kill the live `claude` child):
@@ -86,10 +83,10 @@ loudly visible, and the guard is configurable/disable-able.
 
 ## Success Criteria
 
-- [ ] An accidental single ^C in a supervised session kills no background
+- [x] An accidental single ^C in a supervised session kills no background
   agents and visibly explains itself.
-- [ ] Two rapid ^C presses interrupt exactly as today (verified live).
-- [ ] Guard is configurable and its actions appear in the decision log.
+- [x] Two rapid ^C presses interrupt exactly as today (verified live — decision-log pairs at 09:18).
+- [x] Guard is configurable and its actions appear in the decision log.
 
 ## Delivery & Milestones
 
@@ -97,4 +94,6 @@ loudly visible, and the guard is configurable/disable-able.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00312-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- 5242b58f / 4dffe1c9 — CtrlCGate implementation + tests
+- live confirmation: single-press swallow (owner report) and rapid-press
+  forward (decision-log swallow/forward pairs)

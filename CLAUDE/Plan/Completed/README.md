@@ -6,6 +6,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 - [00275: github auto-close keyword blocker](00275-github-auto-close-keyword-blocker/PLAN.md) - Complete at merge `2bdafe05` (PreToolUse guard denying GitHub auto-closing keyword references in git commit/merge/tag and `gh pr` messages, inline or via `-F`/`--body-file`; enabled by default, `MUST_AUTO_CLOSE_BECAUSE` hatch)
 
+- [00278: model-downgrade resilience](00278-supervisor-effort-restore-on-model-downgrade/PLAN.md) - Complete at `f0a9dc33` + `864c9cc4` + the archiving commit (supervisor recovers a fable→opus downgrade via context-sidecar detection plus coupled effort/model auto-restore; opt-in prevention surfaces steer security-flavoured work to an Opus subagent)
+
+- [00277: release acceptance findings v3 55 0](00277-release-acceptance-findings-v3-55-0/PLAN.md) - Complete at `ebf7016a` + the archiving commit (all v3.55.0 gate findings closed: per-session block_once with session-attributed HandlerDecisionRecord, isolation-advisor test precondition, lint-clean error-hiding samples, validate_eslint_on_write deny branch verified live in the client fixture)
+
 - [00276: goal stack concurrent tracking](00276-goal-stack-concurrent-tracking/PLAN.md) - Complete at merge `74fa6e50` + the archiving commit (daemon-side goal ledger: every emission recorded, displacement advisory, Stop-time defence naming all still-live ledgered plans; live-verified by the production ledger's six-emission displacement history)
 
 - [00274: skill opportunity detector](00274-skill-opportunity-detector/PLAN.md) - Complete at the archiving commit (transcript mining → redacted digest → report embedding a judging rubric; an in-session subagent judges it — the model shell-out was removed per Decision 9; TTL-gated SessionStart advisory, report-only, ships disabled upstream)

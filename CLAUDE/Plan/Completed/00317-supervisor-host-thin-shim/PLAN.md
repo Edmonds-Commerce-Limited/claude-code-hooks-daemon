@@ -1,6 +1,6 @@
 # Plan 00317: supervisor host thin shim
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-02
 **Owner**: joseph
 **Priority**: Medium
@@ -92,13 +92,14 @@ input-recognition features hot-reload like every other worker feature.
 
 ## Success Criteria
 
-- [ ] Audit table exists and every remaining host-side responsibility is
+- [x] Audit table exists and every remaining host-side responsibility is
   named and justified.
-- [ ] A typed-command recognition change hot-reloads mid-session (test-
-  proven; live-confirmed at next opportunity).
-- [ ] Keystroke forwarding provably unaffected by worker outage.
-- [ ] QA 25/25.
+- [x] A typed-command recognition change hot-reloads mid-session (test-
+  proven AND live-confirmed: worker pid 81 → 2745 → 3248 on tweak/revert).
+- [x] Keystroke forwarding provably unaffected by worker outage.
+- [x] QA 25/25.
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hashes -->
+- c3eb83b2 — thin-shim refactor shipped
+- live hot-reload confirmed in the first post-restart session
