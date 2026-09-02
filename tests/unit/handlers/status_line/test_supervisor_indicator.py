@@ -61,9 +61,14 @@ _DETECT_PATCH = (
 )
 
 
-def _write_message(tmp_path: Path, text: str, expires_at: float, level: str) -> Path:
+def _write_message(
+    tmp_path: Path, text: str, expires_at: float, level: str, *, countdown: bool = False
+) -> Path:
     message_file = tmp_path / "status-message.json"
-    message_file.write_text(json.dumps({"text": text, "expires_at": expires_at, "level": level}))
+    payload: dict[str, object] = {"text": text, "expires_at": expires_at, "level": level}
+    if countdown:
+        payload["countdown"] = True
+    message_file.write_text(json.dumps(payload))
     return message_file
 
 
@@ -776,6 +781,48 @@ class TestSupervisorIndicatorMessage:
         assert _BG_GREEN in segment
         assert _BG_ORANGE not in segment
         assert _FG_BLACK in segment
+
+    def _handle_with_countdown_message(
+        self, tmp_path: Path, *, text: str, expires_at: float, wall_now: float
+    ) -> str | None:
+        msg = _write_message(tmp_path, text, expires_at, "info", countdown=True)
+        handler = SupervisorIndicatorHandler()
+        with (
+            patch(_MESSAGE_PATH_PATCH, return_value=msg),
+            patch(_WALL_NOW_PATCH, return_value=wall_now),
+            patch(_DETECT_PATCH, return_value=_SupervisorState.ACTIVE_ARMED),
+        ):
+            result = handler.handle({})
+        return result.context[0] if result.context else None
+
+    def test_countdown_message_shows_seconds_remaining(self, tmp_path: Path) -> None:
+        """A countdown notice announces its own transience (Plan 00318)."""
+        segment = self._handle_with_countdown_message(
+            tmp_path, text="⚙️ /effort low", expires_at=130.0, wall_now=102.0
+        )
+        assert segment is not None
+        assert "⚙️ /effort low" in segment
+        assert "28s" in segment
+
+    def test_countdown_rounds_up_so_it_never_reads_zero_while_live(self, tmp_path: Path) -> None:
+        """A live message showing '0s' would look stuck; a part-second reads 1s."""
+        segment = self._handle_with_countdown_message(
+            tmp_path, text="audit", expires_at=130.0, wall_now=129.6
+        )
+        assert segment is not None
+        assert "1s" in segment
+
+    def test_message_without_countdown_flag_shows_no_seconds(self, tmp_path: Path) -> None:
+        segment = self._handle_with_message(
+            tmp_path,
+            text="⛔ Ctrl+Z ignored — use /exit to quit",
+            expires_at=130.0,
+            level=_MESSAGE_LEVEL_WARNING,
+            wall_now=102.0,
+            state=_SupervisorState.ACTIVE_ARMED,
+        )
+        assert segment is not None
+        assert "28s" not in segment
 
     def test_expired_message_falls_back_to_plain_state_tophat(self, tmp_path: Path) -> None:
         segment = self._handle_with_message(

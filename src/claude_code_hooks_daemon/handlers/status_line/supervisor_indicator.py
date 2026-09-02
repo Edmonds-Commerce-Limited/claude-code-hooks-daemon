@@ -67,6 +67,7 @@ and never break the status line (mirrors the fail-silent pattern used by
 import errno
 import json
 import logging
+import math
 import os
 import time
 from enum import Enum
@@ -279,6 +280,11 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
         the WALL clock because the supervisor writes ``expires_at`` as
         ``time.time() + ttl`` — both sides must use the same clock (NOT the
         monotonic clock used for the negative-cache TTL).
+
+        A payload carrying ``countdown: true`` gets the seconds remaining
+        appended to its text, so a longer-lived notice (the audit banner)
+        visibly announces that it will clear itself. The key is absent on
+        keystroke hints, whose own wording already names any relevant window.
         """
         message = self._read_message(self._message_file_path())
         if message is None:
@@ -291,10 +297,16 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
         # bool is a subclass of int — exclude it so a stray `true` is not a time.
         if isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)):
             return None
-        if self._wall_now() >= expires_at:
+        now = self._wall_now()
+        if now >= expires_at:
             return None
         level_str = level if isinstance(level, str) else ""
-        return text.strip(), level_str
+        rendered = text.strip()
+        if message.get("countdown") is True:
+            # Rounded UP so a live notice never reads "0s" (which looks stuck)
+            # in its final part-second before expiry.
+            rendered = f"{rendered} ({math.ceil(expires_at - now)}s)"
+        return rendered, level_str
 
     def _wall_now(self) -> float:
         """Wall-clock epoch seconds (indirected for deterministic testing)."""

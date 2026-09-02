@@ -70,6 +70,19 @@ class TestWriteStatusMessage:
         leftovers = list((tmp_path / _LOG_SUBDIRECTORY).glob(".*tmp"))
         assert leftovers == []
 
+    def test_countdown_flag_is_omitted_by_default(self, tmp_path: Path) -> None:
+        """Absent means 'no countdown' -- keystroke hints keep their bare text."""
+        path = write_status_message(tmp_path, text="ctrl+z", expires_at=9.0)
+        assert path is not None
+        assert "countdown" not in json.loads(path.read_text())
+
+    def test_countdown_flag_rides_in_the_payload_when_requested(self, tmp_path: Path) -> None:
+        path = write_status_message(tmp_path, text="audit", expires_at=9.0, countdown=True)
+        assert path is not None
+        data = json.loads(path.read_text())
+        assert data["countdown"] is True
+        assert data["text"] == "audit"
+
     def test_unwritable_dir_returns_none_not_raises(self, tmp_path: Path) -> None:
         # Make the 'supervise' subdir path a FILE so mkdir(parents=True) fails
         # with OSError -> the writer must fail-safe to None, never raise.
@@ -106,6 +119,21 @@ class TestStatusMessagePoster:
         assert path is not None
         data = json.loads(path.read_text())
         assert data == {"text": "ctrl+z", "expires_at": 110.0, "level": _STATUS_LEVEL_WARNING}
+
+    def test_post_honours_a_per_post_ttl_and_countdown(self, tmp_path: Path) -> None:
+        """An audit banner outlives a keystroke hint and counts itself down."""
+        poster = StatusMessagePoster(
+            tmp_path,
+            ttl_seconds=10.0,
+            min_interval_seconds=1.0,
+            wall_clock=lambda: 100.0,
+            monotonic=lambda: 0.0,
+        )
+        path = poster.post("audit", ttl_seconds=30.0, countdown=True)
+        assert path is not None
+        data = json.loads(path.read_text())
+        assert data["expires_at"] == 130.0  # the override, not the poster default
+        assert data["countdown"] is True
 
     def test_second_post_within_interval_is_suppressed(self, tmp_path: Path) -> None:
         clock = {"mono": 0.0}

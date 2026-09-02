@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00318: supervisor audit via status line banner](00318-supervisor-audit-via-status-line-banner/PLAN.md) - In Progress (the supervisor's audit trail is INJECTED as a chat line, costing a model turn and permanent context for a notice only the human needs; move it onto the Ctrl+C-style transient status-line channel with a ~30s TTL and a visible countdown, decision.log staying the durable record)
+
 - [00316: manual model choice must win](00316-manual-model-choice-must-win/PLAN.md) - In Progress (field report: a user-typed /model opus was classified as a downgrade — status-line fallback fired and the ccy supervisor auto-restored fable over the human's choice; PTY input tracking distinguishes manual from silent substitution, manual always wins, per-model default effort kept but manual /effort beats the coupling)
 
 - [00314: failsafe cron suppression marker never arms](00314-failsafe-cron-suppression-marker-never-arms/PLAN.md) - Not Started (Plan 00298's cron-tick suppression never engaged live: the human-input marker was not written despite a matching STOPPING BECAUSE phrase, and the pattern set misses natural phrasings; TDD reproduction + field observability + conservative pattern widening)

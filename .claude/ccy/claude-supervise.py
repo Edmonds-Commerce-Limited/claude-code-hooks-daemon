@@ -1878,6 +1878,7 @@ def write_status_message(
     text: str,
     expires_at: float,
     level: str = _STATUS_LEVEL_INFO,
+    countdown: bool = False,
 ) -> Path | None:
     """Atomically write a transient supervisor message for the status line.
 
@@ -1893,6 +1894,12 @@ def write_status_message(
     the payload so the reader can colour warning-level notices (orange
     background on the supervisor's top hat) distinctly from plain info.
 
+    ``countdown`` asks the reader to render the seconds remaining until
+    ``expires_at`` alongside the text, so a longer-lived notice visibly
+    announces that it is transient. Opt-in per message: a keystroke hint whose
+    own text already names a window (Ctrl+C's confirm period) would only be
+    muddled by a second number.
+
     Best-effort: a write failure is reported to stderr and returns None rather
     than disturbing the supervised session.
 
@@ -1900,7 +1907,12 @@ def write_status_message(
         The message file path on success, or None on failure.
     """
     message_path = _status_message_path(untracked_dir)
-    payload = {"text": text, "expires_at": expires_at, "level": level}
+    payload: dict[str, object] = {"text": text, "expires_at": expires_at, "level": level}
+    if countdown:
+        # OMITTED when false, never written as `false`: absent is the reader's
+        # default, so an older daemon (no countdown support) sees exactly the
+        # payload it always saw, and a keystroke hint stays a bare notice.
+        payload["countdown"] = True
     try:
         message_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = (
@@ -1944,17 +1956,28 @@ class StatusMessagePoster:
         self._lock = threading.Lock()
         self._last_monotonic: float | None = None
 
-    def post(self, text: str, *, level: str = _STATUS_LEVEL_INFO) -> Path | None:
+    def post(
+        self,
+        text: str,
+        *,
+        level: str = _STATUS_LEVEL_INFO,
+        ttl_seconds: float | None = None,
+        countdown: bool = False,
+    ) -> Path | None:
         """Write ``text`` as the current status message, honouring the rate limit.
 
         ``level`` selects the severity (``_STATUS_LEVEL_WARNING`` renders on an
         orange background attached to the supervisor's top hat; the default is
-        plain info). Returns the written path, or None when the post is
-        suppressed by the rate limit or the write fails. Thread-safe: the
-        rate-limit check-and-update runs under the lock so concurrent posters
-        cannot both pass within one interval.
+        plain info). ``ttl_seconds`` overrides this poster's default lifetime
+        for THIS message alone (an audit summary is read, not glanced at, so it
+        needs longer on screen than a keystroke hint), and ``countdown`` asks
+        the reader to show the seconds remaining. Returns the written path, or
+        None when the post is suppressed by the rate limit or the write fails.
+        Thread-safe: the rate-limit check-and-update runs under the lock so
+        concurrent posters cannot both pass within one interval.
         """
         now_mono = self._monotonic()
+        ttl = self._ttl_seconds if ttl_seconds is None else ttl_seconds
         with self._lock:
             if (
                 self._last_monotonic is not None
@@ -1962,9 +1985,13 @@ class StatusMessagePoster:
             ):
                 return None
             self._last_monotonic = now_mono
-            expires_at = self._wall_clock() + self._ttl_seconds
+            expires_at = self._wall_clock() + ttl
         return write_status_message(
-            self._untracked_dir, text=text, expires_at=expires_at, level=level
+            self._untracked_dir,
+            text=text,
+            expires_at=expires_at,
+            level=level,
+            countdown=countdown,
         )
 
 
