@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A retired goal kept challenging session stop: the goal-intent sidecar is
+  now retracted, not merely left unwritten (Plan 00320).** When the last live
+  plan in the goal ledger retired, `goal_injection` re-rendered the combined
+  signal with `fallback=None` and, finding no live refs, wrote nothing — which
+  left the sidecar written at emission still on disk asserting the retired
+  goal. The ledger then read zero live entries while `<session>.goal-intent`,
+  the file the Stop challenge actually consumes, kept naming a plan nobody was
+  working on. Observed during the v3.60.0 release: an acceptance fixture
+  flipped `00099` to In Progress, the ledger retired it three seconds later,
+  and twenty-nine minutes on the Stop handler was still demanding work on
+  `CLAUDE/Plan/00099-test` — a path that has never existed, making the goal
+  unsatisfiable by construction. `write_goal_signal` now has a
+  `clear_goal_signal` counterpart with the same best-effort, never-raising
+  contract, called when a retirement empties the ledger. Retiring one of
+  several live plans still rewrites the signal rather than clearing it; both
+  sides of that boundary are pinned by tests.
+
 ## [3.60.0] - 2026-09-02
 
 ### Added

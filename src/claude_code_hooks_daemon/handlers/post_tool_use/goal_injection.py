@@ -435,6 +435,30 @@ def write_goal_signal(
         return None
 
 
+def clear_goal_signal(session_id: str) -> bool:
+    """Remove the ``<session>.goal-intent`` signal file (Plan 00320).
+
+    The retract counterpart to :func:`write_goal_signal`. Declining to
+    REWRITE the signal is not the same as retracting it: the file written
+    when the goal was emitted survives, so a retired goal keeps being read
+    as live. An already-absent file counts as success.
+
+    Failures are logged, never raised — same best-effort contract as the
+    writer. Returns True if no signal file remains for this session.
+    """
+    try:
+        target_dir = ProjectContext.daemon_untracked_dir() / _SIGNAL_SUBDIR
+        stem = _UNSAFE_SESSION_CHARS.sub("_", session_id) if session_id else _SESSION_ID_FALLBACK
+        (target_dir / f"{stem}{_SIGNAL_SUFFIX}").unlink(missing_ok=True)
+        return True
+    except RuntimeError as e:
+        logger.warning("goal_injection: skipping signal clear (no project context): %s", e)
+        return False
+    except OSError as e:
+        logger.warning("goal_injection: failed to clear goal signal: %s", e)
+        return False
+
+
 def extract_plan_title(plan_text: str) -> str:
     """First ``# `` heading of PLAN.md, minus any leading ``Plan NNNNN:``."""
     for raw_line in plan_text.splitlines():
@@ -595,9 +619,11 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
 
         ``fallback`` is written verbatim (single-plan compatibility path)
         when the ledger is unreachable or every live plan is unresolvable;
-        ``fallback=None`` (the retirement-refresh caller) means write
-        nothing in that case rather than re-asserting a goal for a plan
-        that just went terminal.
+        ``fallback=None`` (the retirement-refresh caller) means RETRACT the
+        signal in that case rather than re-asserting a goal for a plan that
+        just went terminal. Retracting is the point: leaving the previously
+        written file in place is what let a retired goal keep challenging
+        session stop (Plan 00320).
         """
         try:
             ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
@@ -628,6 +654,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
     @staticmethod
     def _write_fallback(session_id: str, fallback: str | None, plan_number: str) -> Path | None:
         if fallback is None:
+            clear_goal_signal(session_id)
             return None
         return write_goal_signal(session_id, plan_number, fallback, _SOURCE_STATUS_FLIP)
 

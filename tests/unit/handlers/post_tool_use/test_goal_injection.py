@@ -681,3 +681,48 @@ class TestCombinedGoalSignal:
         result = handler.handle(self._hook_input(plan))
         assert result.decision == Decision.ALLOW
         assert not (self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_SIGNAL_SUFFIX}").exists()
+
+    def test_retiring_the_only_live_plan_removes_the_signal(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """Plan 00320: emptying the ledger must RETRACT the sidecar, not just
+        decline to rewrite it.
+
+        Writing nothing leaves the file written moments earlier still on disk
+        asserting the retired goal, so the ledger reads zero live entries while
+        the sidecar — the file the Stop challenge actually reads — keeps naming
+        a plan nobody is working on. Observed live during the v3.60.0 release:
+        a goal retired three seconds after emission was still challenging the
+        session's stop twenty-nine minutes later.
+        """
+        signal_path = self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_SIGNAL_SUFFIX}"
+        only = self._write_plan("00296-only")
+        handler.handle(self._hook_input(only))
+        assert signal_path.exists(), "precondition: the goal signal was written"
+
+        handler.handle(self._hook_input(self._write_plan("00296-only", status="Complete")))
+
+        assert not signal_path.exists(), (
+            "sidecar survived the retirement of the last live plan — the ledger "
+            "and the sidecar now disagree about whether any goal is live"
+        )
+
+    def test_retirement_leaves_signal_intact_while_another_plan_stays_live(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """The retraction must be scoped to an EMPTY ledger.
+
+        Retiring one of two live plans still has something to assert, so the
+        sidecar must be rewritten rather than removed. This pins the boundary
+        the fix must not cross.
+        """
+        signal_path = self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_SIGNAL_SUFFIX}"
+        first = self._write_plan("00296-first")
+        second = self._write_plan("00298-second")
+        handler.handle(self._hook_input(first))
+        handler.handle(self._hook_input(second))
+
+        handler.handle(self._hook_input(self._write_plan("00296-first", status="Complete")))
+
+        assert signal_path.exists(), "a still-live plan must keep its signal"
+        assert "00298" in self._signal()["rendered_lines"][0]
