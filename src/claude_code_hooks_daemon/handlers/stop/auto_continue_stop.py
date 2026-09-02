@@ -34,7 +34,13 @@ from typing import TYPE_CHECKING, Any, ClassVar
 if TYPE_CHECKING:
     from pathlib import Path
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, ToolName
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
@@ -124,18 +130,32 @@ _TOOL_ERROR_RECOVERY_REASON = (
 # Prefix an assistant message uses to signal an intentional, explained stop.
 _STOP_EXPLANATION_PREFIX = "STOPPING BECAUSE:"
 
-# Plan 00298: narrow "blocked only on human input" shapes. Deliberately a
-# short, enumerated set -- NOT a broad "input" substring match -- because a
-# stop reason that merely MENTIONS human input without being stably blocked
-# on it (e.g. "waiting for human review of this PR, but background polling
-# continues") must not arm cron-tick suppression. Matched case-insensitively
-# against the resolved current-turn message text.
+# Plan 00298 (widened Plan 00314): narrow "blocked only on human input"
+# shapes. Deliberately a short, enumerated set -- NOT a broad "input"
+# substring match -- because a stop reason that merely MENTIONS human input
+# without being stably blocked on it (e.g. "waiting for human review of this
+# PR, but background polling continues") must not arm cron-tick suppression.
+# Matched case-insensitively against the resolved current-turn message text.
+#
+# Plan 00314 widened pattern 4's alternation from (?:owner|user) to
+# (?:owner|user|human) -- a real 2026-09-01/02 dogfood stop said "waiting
+# only on human input", which pattern 1 already covers exactly, but a
+# natural variant like "waiting on human response" fell through both
+# pattern 1 (fixed wording, no "response") and the old pattern 4 (missing
+# "human"). Pattern 4 has never required "only" (unlike patterns 1/2), and
+# that stays unchanged here -- "blocked on human input" (no "only") was
+# considered and deliberately NOT added as a NEW pattern: a transient
+# mention of being blocked on human input ("blocked on human input for this
+# one check, continuing other work") is not the same claim as being blocked
+# ONLY on it, and arming suppression on the weaker claim risks silencing a
+# cron tick the agent could actually have used.
 _HUMAN_BLOCKED_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"blocked only on human input", re.IGNORECASE),
     re.compile(r"blocked only on (?:the )?(?:owner|user)('s)? input", re.IGNORECASE),
     re.compile(r"need(?:s|ed)? user input", re.IGNORECASE),
     re.compile(
-        r"waiting (?:on|for) (?:the )?(?:owner|user)(?:'s)? (?:decision|input|response|answer)",
+        r"waiting (?:on|for) (?:the )?(?:owner|user|human)(?:'s)? "
+        r"(?:decision|input|response|answer)",
         re.IGNORECASE,
     ),
 )
@@ -525,9 +545,9 @@ class AutoContinueStopHandler(StopHandlerBase):
                     self._log_stop_event(hook_input, Decision.DENY, reason)
                     return result
                 logger.info("STOPPING BECAUSE: prefix detected - allowing stop")
-                self._maybe_record_human_blocked_marker(hook_input, text)
+                marker_written = self._maybe_record_human_blocked_marker(hook_input, text)
                 result = BlockingResult(decision=Decision.ALLOW)
-                self._log_stop_event(hook_input, Decision.ALLOW, "")
+                self._log_stop_event(hook_input, Decision.ALLOW, "", marker_written=marker_written)
                 return result
 
         # Branch 2.5: tool_use_error recovery (Plan 00101 Phase 6)
@@ -630,7 +650,9 @@ class AutoContinueStopHandler(StopHandlerBase):
             return None
         return _GOAL_LEDGER_CHALLENGE_TEMPLATE.format(plans=", ".join(live))
 
-    def _maybe_record_human_blocked_marker(self, hook_input: dict[str, Any], text: str) -> None:
+    def _maybe_record_human_blocked_marker(
+        self, hook_input: dict[str, Any], text: str
+    ) -> bool | None:
         """Record the Plan 00298 blockage marker when ``text`` matches a
         narrow 'blocked only on human input' shape. Best-effort: any failure
         to resolve project context or write the marker is logged and
@@ -639,19 +661,28 @@ class AutoContinueStopHandler(StopHandlerBase):
         Args:
             hook_input: The Stop event's hook input (for session_id).
             text: The current turn's full STOPPING BECAUSE: message text.
+
+        Returns:
+            None when the text does not match a human-blocked shape (not
+            applicable -- Branch 2 ALLOWed for an unrelated reason). Otherwise
+            True/False for whether the marker was actually written -- Plan
+            00314 field observability: a matching text that ends up False
+            (missing session_id, no project context, or a swallowed OSError
+            inside ``write_marker``) is exactly the "matched but not armed"
+            case that was previously invisible outside the volatile log ring.
         """
         if not any(pattern.search(text) for pattern in _HUMAN_BLOCKED_PATTERNS):
-            return
-        session_id = hook_input.get("session_id")
+            return None
+        session_id = hook_input.get(HookInputField.SESSION_ID)
         if not isinstance(session_id, str) or not session_id:
             logger.debug("human-blocked marker: no session_id, skipping")
-            return
+            return False
         try:
             marker_path = ProjectContext.daemon_untracked_dir() / MARKER_FILENAME
         except RuntimeError as e:
             logger.debug("human-blocked marker: no project context, skipping: %s", e)
-            return
-        write_marker(marker_path, session_id)
+            return False
+        return write_marker(marker_path, session_id)
 
     def _is_qa_failure(self, reader: TranscriptReader) -> bool:
         """Return True if the last QA Bash command's OWN result indicates failure.
@@ -882,7 +913,14 @@ class AutoContinueStopHandler(StopHandlerBase):
             return candidate
         return None
 
-    def _log_stop_event(self, hook_input: dict[str, Any], decision: Decision, reason: str) -> None:
+    def _log_stop_event(
+        self,
+        hook_input: dict[str, Any],
+        decision: Decision,
+        reason: str,
+        *,
+        marker_written: bool | None = None,
+    ) -> None:
         """Log stop event to JSONL file for debugging.
 
         Appends one JSON line to {project_root}/untracked/stop-events.jsonl.
@@ -892,6 +930,14 @@ class AutoContinueStopHandler(StopHandlerBase):
             hook_input: Original hook input
             decision: Decision made by the handler
             reason: Reason string (may be empty for ALLOW)
+            marker_written: Plan 00314 field observability for the Branch 2
+                ALLOW path only -- ``_maybe_record_human_blocked_marker``'s
+                outcome (True/False), or None when it was never applicable
+                (the stop text did not match a human-blocked shape, or this
+                is a different branch entirely). Written to the record as
+                ``marker_written`` only when not None, so "matched but not
+                armed" (False) is diagnosable in the field without the
+                volatile in-memory log ring.
         """
         try:
             untracked_dir: Path = ProjectContext.daemon_untracked_dir()
@@ -899,12 +945,14 @@ class AutoContinueStopHandler(StopHandlerBase):
             # Plan 00239: owner-only, explicit at the create site so it survives a
             # regression of the daemon umask.
             make_private_dir(log_path.parent)
-            entry = {
+            entry: dict[str, Any] = {
                 "timestamp": datetime.now(tz=UTC).isoformat(),
                 "decision": decision.value,
                 "reason_prefix": reason[:80],
                 "stop_hook_active": bool(hook_input.get("stop_hook_active", False)),
             }
+            if marker_written is not None:
+                entry["marker_written"] = marker_written
             with open_private_append(log_path) as f:
                 f.write(json.dumps(entry) + "\n")
             # Plan 00181: bound the append-only log (keep newest half on breach).

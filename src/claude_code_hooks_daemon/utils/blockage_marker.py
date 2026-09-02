@@ -52,13 +52,20 @@ class BlockageMarker:
     recorded_at: float
 
 
-def write_marker(path: Path, session_id: str, *, now: float | None = None) -> None:
+def write_marker(path: Path, session_id: str, *, now: float | None = None) -> bool:
     """Atomically (over)write the marker. Fail-open: logs, never raises.
 
     Args:
         path: Full path to the marker file.
         session_id: The session this marker applies to.
         now: Injectable clock for tests; defaults to ``time.time()``.
+
+    Returns:
+        True if the marker was written, False if an OSError was swallowed
+        (e.g. an unwritable parent directory) -- Plan 00314 field
+        observability: callers that log an outcome (e.g. ``stop-events.jsonl``
+        ``marker_written``) need this to tell "matched but not armed" apart
+        from "matched and armed" after the fact.
     """
     payload = {
         _FIELD_SESSION_ID: session_id,
@@ -73,8 +80,10 @@ def write_marker(path: Path, session_id: str, *, now: float | None = None) -> No
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(json.dumps(payload))
         tmp_path.replace(path)
+        return True
     except OSError as e:
         logger.warning("blockage_marker: failed to write %s: %s", path, e)
+        return False
 
 
 def read_marker(path: Path) -> BlockageMarker | None:

@@ -907,18 +907,6 @@
       "reason": "Plan 00296 T3.4: the manifest walk is advisory-only session-start detection, never a decision path -- an unreadable directory during the walk (permissions, a race with a concurrent delete) is logged at DEBUG and that subtree is skipped, so the advisory it feeds still fires for every reachable manifest instead of aborting the whole scan over one unlistable directory."
     },
     {
-      "file": "handlers/stop/auto_continue_stop.py",
-      "function": "_maybe_record_human_blocked_marker",
-      "rule": "return-none-on-error",
-      "reason": "Plan 00298: recording the blocked-on-human-input marker is a documented fail-open enrichment of an ALLOWed Stop -- the marker write is best-effort so a RuntimeError from an uninitialised ProjectContext (unit tests, degraded startup) must never affect the Stop decision itself. Logged at debug; the caller simply proceeds without a marker, which fails open to full hourly cron coverage (the safe default)."
-    },
-    {
-      "file": "utils/blockage_marker.py",
-      "function": "write_marker",
-      "rule": "log-and-continue",
-      "reason": "Plan 00298: the marker write is best-effort by contract -- it runs inside Stop handling, and an unwritable untracked dir (permissions, disk full, a blocked parent) must never break the Stop event. The OSError is logged at warning; the caller degrades to 'no marker recorded', which fails open to full hourly cron coverage."
-    },
-    {
       "file": "utils/blockage_marker.py",
       "function": "read_marker",
       "rule": "return-none-on-error",

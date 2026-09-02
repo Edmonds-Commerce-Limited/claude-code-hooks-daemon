@@ -29,6 +29,10 @@ class TestWriteAndReadMarker:
 
         assert marker == BlockageMarker(session_id="session-1", recorded_at=100.0)
 
+    def test_write_returns_true_on_success(self, tmp_path: Path) -> None:
+        path = tmp_path / MARKER_FILENAME
+        assert write_marker(path, "session-1", now=1.0) is True
+
     def test_write_creates_missing_parent_dirs(self, tmp_path: Path) -> None:
         path = tmp_path / "nested" / "dir" / MARKER_FILENAME
         write_marker(path, "session-1", now=1.0)
@@ -87,8 +91,9 @@ class TestWriteAndReadMarker:
         blocker.write_text("x", encoding="utf-8")
         path = blocker / MARKER_FILENAME
 
-        write_marker(path, "session-1", now=1.0)  # must not raise
+        result = write_marker(path, "session-1", now=1.0)  # must not raise
 
+        assert result is False
         assert not path.exists()
 
 

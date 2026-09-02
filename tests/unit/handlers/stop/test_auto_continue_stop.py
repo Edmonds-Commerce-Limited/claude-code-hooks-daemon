@@ -3220,6 +3220,68 @@ class TestHumanBlockedMarker:
 
         assert result.decision == Decision.ALLOW
 
+    def test_live_0128_shape_writes_marker(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00314: reproduce the 2026-09-01/02 v3.59.0 dogfood observation.
+
+        The 01:28 UTC stop message matched pattern 1 (Stop verdict log showed
+        ``auto-continue-stop allow``, the branch that calls the marker writer)
+        yet the marker file never appeared. This drives the real transcript
+        + Stop-handler path with the exact shape observed live: an em-dash
+        earlier in the sentence, then the pattern-1 phrase inside a
+        parenthetical aside, with a real (fresh, timestamped) transcript
+        entry -- not the synthetic no-timestamp fixture the other tests in
+        this class use.
+        """
+        from datetime import UTC, datetime
+
+        transcript = tmp_path / "t.jsonl"
+        entry = {
+            "type": "message",
+            "uuid": "live-0128",
+            "timestamp": datetime.now(tz=UTC).isoformat(),
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "STOPPING BECAUSE: failsafe cron tick delivered — "
+                            "nothing left to resume, blocked only on human "
+                            "input (Plan 00312 live Ctrl+C test)."
+                        ),
+                    }
+                ],
+            },
+        }
+        with transcript.open("w") as f:
+            f.write(json.dumps(entry) + "\n")
+
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-live-0128",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+
+        from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, read_marker
+
+        marker = read_marker(marker_dir / MARKER_FILENAME)
+        assert marker is not None, (
+            "Marker file must exist after a matching STOPPING BECAUSE: stop "
+            "(Plan 00314 defect 1: marker write silently failed on a matching phrase)"
+        )
+        assert marker.session_id == "sess-live-0128"
+
     def test_missing_session_id_still_allows_and_skips_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path
     ) -> None:
@@ -3229,6 +3291,179 @@ class TestHumanBlockedMarker:
         )
         marker_dir = tmp_path / "untracked"
         hook_input = {"transcript_path": str(transcript), "stop_hook_active": False}
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert not self._marker_path(marker_dir).exists()
+
+    def _read_last_stop_event(self, marker_dir: Path) -> dict[str, Any]:
+        log_path = marker_dir / "stop-events.jsonl"
+        lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+        result: dict[str, Any] = json.loads(lines[-1])
+        return result
+
+    def test_marker_written_true_recorded_in_stop_events(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00314: a matching, successfully-written marker records
+        ``marker_written: true`` in the stop-events.jsonl record."""
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript, "STOPPING BECAUSE: blocked only on human input. Waiting."
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-1",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            handler.handle(hook_input)
+
+        assert self._read_last_stop_event(marker_dir)["marker_written"] is True
+
+    def test_marker_written_false_recorded_when_session_id_missing(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00314: a matching phrase that could not be armed (no
+        session_id) records ``marker_written: false`` -- diagnosable in the
+        field without the volatile in-memory log ring."""
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript, "STOPPING BECAUSE: blocked only on human input. Waiting."
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {"transcript_path": str(transcript), "stop_hook_active": False}
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            handler.handle(hook_input)
+
+        assert self._read_last_stop_event(marker_dir)["marker_written"] is False
+
+    def test_marker_written_absent_when_not_applicable(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00314: an ordinary STOPPING BECAUSE: (no human-blocked shape)
+        never gains a ``marker_written`` key -- absent, not false, because
+        the marker writer was never a candidate for this stop."""
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript, "STOPPING BECAUSE: all tasks complete and QA passes."
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-1",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            handler.handle(hook_input)
+
+        assert "marker_written" not in self._read_last_stop_event(marker_dir)
+
+
+class TestHumanBlockedPatternWidening:
+    """Plan 00314 Task 1.3: `human` joins `owner|user` in the waiting
+    pattern; `blocked on human input` without "only" stays unmatched
+    (decision recorded at the pattern-table comment in the source)."""
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        return AutoContinueStopHandler()
+
+    def _write_assistant_text(self, path: Path, text: str) -> None:
+        msg = {
+            "type": "message",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
+        }
+        with path.open("w") as f:
+            f.write(json.dumps(msg) + "\n")
+
+    def _marker_path(self, tmp_path: Path) -> Path:
+        from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME
+
+        return tmp_path / MARKER_FILENAME
+
+    def test_waiting_on_human_response_shape_writes_marker(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript, "STOPPING BECAUSE: waiting on human response before proceeding."
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-1",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert self._marker_path(marker_dir).exists()
+
+    def test_waiting_for_human_decision_shape_writes_marker(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript, "STOPPING BECAUSE: waiting for the human's decision on deployment."
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-1",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert self._marker_path(marker_dir).exists()
+
+    def test_blocked_on_human_input_without_only_does_not_write_marker(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Deliberately unmatched: "blocked on human input" (no "only") is a
+        transient-mention risk, not a stable-blockage claim -- see the
+        pattern-table comment's decision in the source."""
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript,
+            "STOPPING BECAUSE: blocked on human input for this one check, "
+            "continuing other work in the meantime.",
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-1",
+        }
         with patch(
             "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
             "ProjectContext.daemon_untracked_dir",
