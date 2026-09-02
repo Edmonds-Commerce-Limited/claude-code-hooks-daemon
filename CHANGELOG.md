@@ -5,6 +5,79 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.60.0] - 2026-09-02
+
+### Added
+
+- **Generic budget/quota-exhaustion advisory: `budget_exhaustion_detector`
+  (Plan 00315).** New PostToolUse handler scans a completed tool call's
+  response for budget/quota-exhaustion messaging — the field-confirmed
+  web-search refusal fragments plus generic "budget exhausted/used
+  up/exceeded" and "quota exceeded" shapes — and advises the agent to
+  surface the hit to the user with a prominent banner rather than retry or
+  silently degrade. Deliberately never keys on the configurable ceiling
+  number itself (e.g. `CLAUDE_CODE_MAX_WEB_SEARCHES`), which would false-fire
+  on ordinary counts. Read/Grep/Glob/Edit/Write/NotebookEdit responses are
+  excluded by default — those return file contents the model merely read,
+  not a live exhaustion signal. Each detection is appended to an untracked
+  `budget-exhaustion-events.jsonl` occurrence ledger. Ships enabled by
+  default (opt-out), advisory only — never blocks. Catalogued alongside
+  other hidden agent budgets in the new `BUDGETS.md`.
+
+### Changed
+
+- **ccy supervisor host becomes a thin shim; typed-command recognition moves
+  worker-side (Plan 00317).** Parsing of human-typed `/compact`, `/model <x>`, `/effort <x>` commands moves from the never-hot-reloading host PTY
+  process into the hot-reloadable `--worker` subprocess, fed by a new
+  bounded raw-input tap (`RawInputTap`) the host forwards each tick. An edit
+  to command RECOGNITION now ships live on the worker's next reload — no
+  session restart — closing an owner-confirmed defect where host-tier logic
+  defeated the two-tier hot-reload split. Byte-level primitives that must
+  act before a byte reaches the child (the Ctrl+C double-press swallow, the
+  Ctrl+Z strip) remain host-side by design.
+- **Manual `/model` choice always wins over supervisor auto-restore and
+  effort coupling (Plan 00316).** Fixes a defect where the supervisor's
+  auto-restore logic silently overrode a human-typed `/model opus`. Now
+  time-ordered: every model switch re-applies its own default effort, and a
+  manual `/effort` latches only for the current spell, cancelling any
+  queued-but-uninjected default rather than being overridden by it.
+  `downgrade_indicator`'s status-line handler also now reads the
+  supervisor's manual-model-change marker: a family drop matching a
+  recently-typed `/model` command is no longer reported as a downgrade — the
+  high-water resets to the manual choice, so a later genuine SILENT
+  substitution below it is still caught.
+- **Supervisor audit trail moves from chat injection to a status-line banner
+  with a countdown (Plan 00318).** The audit trail no longer injects into
+  the chat transcript; `supervisor_indicator` now renders a live countdown
+  (`(Ns)`, rounded up so it never reads "0s") on any status-line message
+  carrying `countdown: true`.
+
+### Fixed
+
+- **Failsafe-cron suppression marker could silently fail to arm; write
+  outcome now observable (Plan 00314).** The "blocked only on human input"
+  marker that suppresses cron ticks against a session blocked purely on
+  human input could match a stop's text yet fail to actually write (missing
+  `session_id`, no project context, or a swallowed `OSError`) with no
+  visibility outside the volatile log ring — a dogfood defect from the
+  v3.59.0 release night. `write_marker` and
+  `_maybe_record_human_blocked_marker` now return whether the write
+  succeeded, and `stop-events.jsonl` records `marker_written`. The
+  "blocked only on human input" pattern is also widened
+  (`(?:owner|user)` → `(?:owner|user|human)`) after a live dogfood stop
+  ("waiting on human response") fell through both the fixed-wording
+  pattern 1 and the narrower pattern 4.
+- **`budget_exhaustion_detector` no longer false-fires on documentation
+  about itself (Plan 00315 follow-up).** Reading a file whose CONTENT
+  describes the detector — this project's own `CHANGELOG.md` entry,
+  `BUDGETS.md`, the release notes — tripped the generic
+  "budget…exhausted/used up/exceeded" pattern and raised a spurious
+  budget-exhaustion advisory. The existing self-referential guard only
+  inspected the Bash COMMAND, which is innocent in that case (`head CHANGELOG.md`); the trigger prose is in the response body. The same
+  markers are now applied to the tool RESPONSE, which is precise because a
+  genuine harness budget message never names the detector or its ledger.
+  Caught live while reading this release's own changelog entry.
+
 ## [3.59.0] - 2026-09-01
 
 ### Added

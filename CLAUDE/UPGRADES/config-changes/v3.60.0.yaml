@@ -1,0 +1,40 @@
+version: "3.60.0"
+date: "2026-09-02"
+breaking: false
+upgrade_guide: null
+config_changes:
+  added:
+    - key: handlers.post_tool_use.budget_exhaustion_detector
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PostToolUse handler (Plan 00315): scans a completed tool call's
+        response for budget/quota-exhaustion messaging — the field-confirmed
+        web-search refusal fragments plus the generic
+        "budget…exhausted/used up/exceeded", "quota exceeded" and
+        "budget…limit reached" shapes — and advises the agent to surface the
+        hit to the user with a prominent banner rather than retry the
+        exhausted tool or quietly degrade to a worse alternative. These
+        budgets are otherwise invisible: the harness replaces the tool result
+        with a system message, so an agent can silently lose a capability
+        mid-task and the user never learns why the work came back thinner.
+        Deliberately never keys on the configurable ceiling number itself
+        (e.g. `CLAUDE_CODE_MAX_WEB_SEARCHES`), which would false-fire on
+        ordinary counts. Read/Grep/Glob/Edit/Write/NotebookEdit responses are
+        excluded by default — those return file content the model merely
+        read, not a live exhaustion signal — and a response naming the
+        handler or its ledger is treated as documentation about the feature,
+        not a live signal. Each detection is appended to an untracked
+        `budget-exhaustion-events.jsonl` occurrence ledger. Advisory only —
+        never blocks. Ships enabled by default for the same reason as
+        `dispatch_declaration` in v3.59.0: this is universal harness
+        safety, not project-specific configuration.
+      migration_note: >-
+        No action needed to receive the advisory. Set
+        `handlers.post_tool_use.budget_exhaustion_detector.enabled: false` to
+        opt out, tune `options.excluded_tools` if your project wants a
+        different exclusion set, or add project-specific shapes via
+        `options.extra_patterns` (additive to the built-in family).
+  renamed: []
+  removed: []
+  changed: []

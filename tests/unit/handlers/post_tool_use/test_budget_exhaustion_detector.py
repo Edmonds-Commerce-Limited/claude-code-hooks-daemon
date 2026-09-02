@@ -145,6 +145,34 @@ class TestExcludedToolsByDefault:
         hook_input["tool_input"] = {"command": command}
         assert handler.matches(hook_input) is False
 
+    @pytest.mark.parametrize(
+        "documentation_text",
+        [
+            # The project's own CHANGELOG entry describing this handler -- the
+            # live false positive that motivated the guard (v3.60.0 release).
+            "New PostToolUse handler scans for generic 'budget exhausted/used\n"
+            "  up/exceeded' shapes. Ships as budget_exhaustion_detector.",
+            # BUDGETS.md prose cataloguing the shapes this handler looks for.
+            "The web search budget is exhausted per session; see "
+            "budget-exhaustion-events.jsonl for recorded occurrences.",
+        ],
+    )
+    def test_documentation_about_this_handler_never_fires(
+        self, handler: BudgetExhaustionDetectorHandler, documentation_text: str
+    ) -> None:
+        """Text that NAMES this handler or its ledger is documentation ABOUT the
+        feature, not a live budget signal.
+
+        The command guard above only inspects the COMMAND, so reading a file
+        whose CONTENT documents the detector (CHANGELOG.md, BUDGETS.md, the
+        release notes) still fired -- observed live while reading this repo's
+        own changelog. A genuine harness budget message never names the
+        detector or its ledger, so keying on those markers is precise.
+        """
+        hook_input = _tool_input("Bash", {"stdout": documentation_text, "stderr": ""})
+        hook_input["tool_input"] = {"command": "head -n 40 CHANGELOG.md"}
+        assert handler.matches(hook_input) is False
+
     def test_excluded_tools_configurable(self, handler: BudgetExhaustionDetectorHandler) -> None:
         handler._excluded_tools = ["Bash"]
         hook_input = _tool_input(

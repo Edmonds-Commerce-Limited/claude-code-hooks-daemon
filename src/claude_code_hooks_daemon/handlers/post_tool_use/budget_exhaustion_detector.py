@@ -91,6 +91,18 @@ _SELF_REFERENTIAL_COMMAND_MARKERS: Final[tuple[str, ...]] = (
     "budget_exhaustion_detector",
 )
 
+# The same markers, applied to the tool RESPONSE. A payload that names this
+# handler or its ledger is documentation ABOUT the feature -- the CHANGELOG
+# entry, BUDGETS.md, the release notes -- not a live budget signal, and the
+# command guard above cannot see it (the command is an innocent `head
+# CHANGELOG.md`; the trigger prose is in the CONTENT). Observed live while
+# reading this repo's own changelog during the v3.60.0 release. Safe because a
+# genuine harness budget message never names the detector or its ledger.
+_SELF_REFERENTIAL_RESPONSE_MARKERS: Final[tuple[str, ...]] = (
+    "budget-exhaustion-events.jsonl",
+    "budget_exhaustion_detector",
+)
+
 # ─── Pattern family ───────────────────────────────────────────────────────────
 
 # Pinned, verbatim-derived fragments from the field-confirmed web-search
@@ -257,6 +269,8 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
         tool_response = hook_input.get(HookInputField.TOOL_RESPONSE)
         text = _stringify_tool_response(tool_response)
         if not text:
+            return False
+        if any(marker in text for marker in _SELF_REFERENTIAL_RESPONSE_MARKERS):
             return False
         fragment = _find_matched_fragment(text, self._resolved_extra_patterns())
         if fragment is None:

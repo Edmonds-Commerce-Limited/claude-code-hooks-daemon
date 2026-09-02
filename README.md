@@ -1,10 +1,10 @@
 # Claude Code Hooks Daemon
 
-![Version](https://img.shields.io/badge/version-3.59.0-blue)
+![Version](https://img.shields.io/badge/version-3.60.0-blue)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-16000%2B%20passing-success)
+![Tests](https://img.shields.io/badge/tests-17000%2B%20passing-success)
 ![Coverage](https://img.shields.io/badge/coverage-95%25%20required-success)
 
 *~100,000 lines of source, ~209,000 lines of tests — the test tree is 2.1× the size of the thing it tests.*
