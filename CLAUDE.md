@@ -497,6 +497,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - goal_injection — plan-start goal signal for the ccy supervisor
 
+<!-- handler: budget-exhaustion-detector -->
+
+- budget_exhaustion_detector — hidden agent budgets are surfaced
+
 <!-- handler: ccy-supervisor-integrity -->
 
 - ccy_supervisor_integrity — keep the ccy supervisor properly set up
