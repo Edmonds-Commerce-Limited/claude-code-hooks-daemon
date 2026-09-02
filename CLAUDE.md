@@ -489,13 +489,13 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - markdown_table_formatter — markdown tables are auto-aligned
 
-<!-- handler: recovery-cron-advisor -->
-
-- recovery_cron_advisor — failsafe recovery cron lifecycle advisory
-
 <!-- handler: budget-exhaustion-detector -->
 
 - budget_exhaustion_detector — hidden agent budgets are surfaced
+
+<!-- handler: recovery-cron-advisor -->
+
+- recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
 <!-- handler: goal-injection -->
 
