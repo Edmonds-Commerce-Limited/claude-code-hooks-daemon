@@ -14,9 +14,31 @@ No occurrence of "search budget", "no more searches", or any
 WebSearch/WebFetch error, refusal or limit message exists in the archive
 outside this plan's own discussion text. Every "search budget" match (16) is
 the user's report or plan prose about the phenomenon, not an observed error.
-Absence is the finding: whatever the user saw, this machine's archive holds no
-verbatim fixture for it, so the refusal wording cannot be derived from local
-evidence and must come from the docs sweep or a live capture.
+Absence is the finding for the LOCAL archive: no native occurrence exists here,
+so the shape below is field-confirmed elsewhere, not locally observed.
+
+**Field-confirmed fixture (from another machine's session, relayed by
+team-lead; a targeted grep for it here finds only 5 relays of that same
+quotation inside the current Plan 00315 session, zero native hits).** Verbatim:
+
+> "Web search was not performed: this session has used its web search budget
+> (200 of 200 WebSearch calls). Continue with the information already gathered
+> instead of issuing more searches. If more searches are genuinely needed,
+> [raise CLAUDE_CODE_MAX_WEB_SEARCHES]"
+
+Pinned facts: the cap is **per-session** ("this session"), default **200
+WebSearch calls**, configurable via the **`CLAUDE_CODE_MAX_WEB_SEARCHES`**
+environment variable, and it recurred on every subsequent search attempt
+(41 occurrences in the source transcript). Delivery: a **system message
+replacing the search result** — visible in the turn/transcript, but as a
+result-replacement rather than a tool error field. Because it substitutes for
+the WebSearch result itself, a PostToolUse hook on WebSearch is the natural
+observer IF the replacement text flows through the hook's tool_response
+payload; that needs one live confirmation, since our archive contains no
+native event to verify the JSON field against. Stable trigger fragments for a
+detector: `Web search was not performed`, `web search budget`,
+`CLAUDE_CODE_MAX_WEB_SEARCHES`, `of 200 WebSearch calls` (the count varies
+with the configured ceiling, so prefer the first two).
 
 ## 2. Rate-limit / overloaded / quota shapes — FOUND, none in tool_result
 
@@ -125,20 +147,21 @@ correspond to the session-limit episode in 2b.
 
 ## Summary table
 
-| #   | Shape (verbatim trigger)                          | Field                                            | Producer      | Count | PostToolUse-visible?         |
-| --- | ------------------------------------------------- | ------------------------------------------------ | ------------- | ----- | ---------------------------- |
-| 1   | WebSearch/WebFetch budget refusal                 | —                                                | —             | 0     | n/a — no fixture exists      |
-| 2   | `API Error: 529 Overloaded…`                      | assistant content text; idle_notif failureReason | API stream    | 8     | No                           |
-| 3   | `You've hit your session limit · resets …`        | assistant content text + `quotaLimits` object    | API stream    | 2     | No                           |
-| 4   | `Usage limit reached · continuing automatically…` | system informational event                       | harness       | 1     | No                           |
-| 5   | `API Error: Unable to connect to API (ENOTIMP)`   | assistant content text                           | API stream    | 14    | No                           |
-| 6   | `<persisted-output>` / `Output too large (NKB)`   | tool_result content, is_error=false              | Bash          | 20    | **Yes**                      |
-| 7   | `... [N lines truncated] ...`                     | attachment payload                               | file renderer | 202   | Mostly no (attachment-borne) |
-| 8   | Subagent inline-report elision                    | none — silent mid-report cut                     | Agent return  | n/a   | No marker; size-check only   |
+| #   | Shape (verbatim trigger)                                | Field                                            | Producer      | Count                    | PostToolUse-visible?         |
+| --- | ------------------------------------------------------- | ------------------------------------------------ | ------------- | ------------------------ | ---------------------------- |
+| 1   | `Web search was not performed: … budget (200 of 200 …)` | system message replacing the search result       | WebSearch     | 0 local; field-confirmed | Likely — needs live confirm  |
+| 2   | `API Error: 529 Overloaded…`                            | assistant content text; idle_notif failureReason | API stream    | 8                        | No                           |
+| 3   | `You've hit your session limit · resets …`              | assistant content text + `quotaLimits` object    | API stream    | 2                        | No                           |
+| 4   | `Usage limit reached · continuing automatically…`       | system informational event                       | harness       | 1                        | No                           |
+| 5   | `API Error: Unable to connect to API (ENOTIMP)`         | assistant content text                           | API stream    | 14                       | No                           |
+| 6   | `<persisted-output>` / `Output too large (NKB)`         | tool_result content, is_error=false              | Bash          | 20                       | **Yes**                      |
+| 7   | `... [N lines truncated] ...`                           | attachment payload                               | file renderer | 202                      | Mostly no (attachment-borne) |
+| 8   | Subagent inline-report elision                          | none — silent mid-report cut                     | Agent return  | n/a                      | No marker; size-check only   |
 
-Practical upshot for the detector design: the only budget-adjacent signals a
-PostToolUse hook can catch today are the Bash `<persisted-output>` cap and a
-size check on Agent returns. Every genuine quota/rate-limit event in this
+Practical upshot for the detector design: the budget-adjacent signals a
+PostToolUse hook can plausibly catch are the Bash `<persisted-output>` cap, a
+size check on Agent returns, and — pending one live confirmation of the
+payload field — the WebSearch budget-refusal system message (shape 1). Every genuine quota/rate-limit event in this
 archive bypassed the tool layer entirely, surfacing as API-stream assistant
 text (with `quotaLimits` as the one structured field) or as teammate
 idle-notifications — channels a Stop/SessionStart/Notification observer, or a
