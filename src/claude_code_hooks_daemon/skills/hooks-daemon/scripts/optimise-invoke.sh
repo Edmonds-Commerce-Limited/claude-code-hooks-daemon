@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# /optimise skill - Analyse hooks daemon configuration and recommend improvements
+#
+# DAEMON-OWNED FILE - do not edit. Deployed into your project by the
+# claude-code-hooks-daemon installer and refreshed on every upgrade, so local
+# changes are discarded. See CLAUDE/LLM-INSTALL.md, "Which Files Under
+# .claude/ Are Yours?", for the full list and the linter exclusions.
+#
+# hooks-daemon optimise - Analyse hooks daemon config and recommend improvements
 
 set -euo pipefail
 
@@ -33,7 +39,8 @@ echo ""
 cat <<'SKILL_INSTRUCTIONS'
 # Hooks Daemon Configuration Optimiser (the canonical config-optimisation step)
 
-You are now running the /optimise skill. Follow these instructions precisely and completely.
+You are now running the hooks-daemon config-optimisation step. Follow these
+instructions precisely and completely.
 
 This IS "config-optimisation": the formalised, repeatable answer to "enable all
 relevant handlers and ensure optimal configuration for this project" (Plan 00308).
@@ -350,7 +357,7 @@ Then output a summary:
 
   Daemon restarted successfully. Status: RUNNING
 
-  Run /optimise again to verify the updated score.
+  Run the config-optimisation step again to verify the updated score.
 
 If the daemon fails to restart, output:
 

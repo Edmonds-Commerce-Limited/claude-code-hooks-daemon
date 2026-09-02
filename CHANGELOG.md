@@ -29,6 +29,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it can never be turned into an instruction-injection vector; the worst a
   forged trigger achieves is a retraction.
 
+### Changed
+
+- **The config-optimisation review moves into the daemon's own skill
+  namespace: `/hooks-daemon optimise` (Plan 00322).** `optimise` was a
+  standalone top-level skill name generic enough to collide with whatever
+  else a project or plugin calls `optimise`, with no predictable winner. It
+  now ships as `.claude/skills/hooks-daemon/optimise.md` alongside `upgrade`,
+  `health` and `bug-report`, with its instruction body at
+  `scripts/optimise-invoke.sh`. Deployment previously only ever WROTE the
+  skills it bundles, so a retired one would have kept working from an
+  earlier install's copy — an orphan no upgrade could reach, still owning
+  its slash command; the installer now removes named retirements (and only
+  those: a project's own skills are never touched).
+- **The config-optimisation instruction body is now actually reachable
+  (Plan 00322).** Its 395-line procedure lived in a sibling `invoke.sh` that
+  nothing referenced, and Claude Code loads a skill's markdown only — a
+  script beside SKILL.md never runs unless the markdown says to run it
+  (confirmed against the Claude Code skills documentation). Every run since
+  the skill shipped therefore worked from the ~80-line summary, silently
+  skipping the manifest-diff step Plan 00308 added. `optimise.md` now opens
+  by running the script and following its output.
+
 ### Fixed
 
 - **The mandatory post-upgrade config-optimisation review deferred itself out

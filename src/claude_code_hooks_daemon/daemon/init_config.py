@@ -278,7 +278,7 @@ class ConfigTemplate:
             "    docs_qa_sweep: {enabled: true, priority: 64}  # Whole-corpus docs drift report (fires only when documentation.enabled); silent when clean\n"
             "    tool_disable_advisor: {enabled: false, priority: 65}  # Opt-in (Plan 00293): advise when a tool_policy.never_want tool is not disabled in project settings (never edits)\n"
             "    monorepo_detector: {enabled: true, priority: 66}  # Advise on an unconfigured monorepo shape (manifests found below the repo root, none at it)\n"
-            "    config_optimisation_reminder: {enabled: true, priority: 67}  # Remind to re-run /optimise (config-optimisation) after an upgrade; silent once a run is recorded against the current version\n"
+            "    config_optimisation_reminder: {enabled: true, priority: 67}  # Remind to re-run the config-optimisation review after an upgrade; silent once a run is recorded against the current version\n"
             "\n"
             "  # SessionEnd - no handlers ship today (cleanup removed in Plan 00237)\n"
             "  session_end: {}\n"

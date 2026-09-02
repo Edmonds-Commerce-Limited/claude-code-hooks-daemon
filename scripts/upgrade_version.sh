@@ -1104,16 +1104,16 @@ fi
 # Plan 00322: the mandate claims THIS session and is printed BEFORE the
 # restart instruction. Addressed to "your next Claude Code session", and
 # printed after "exit your current session", it read as a hand-back note --
-# a client upgrade duly filed it as an optional "run /optimise at some point".
+# a client upgrade duly filed it as an optional "run it at some point".
 if [[ "$*" == *"--skip-config-optimisation"* ]] || [[ "${UPGRADE_FLAGS:-}" == *"--skip-config-optimisation"* ]]; then
     echo "Config-optimisation review skipped (--skip-config-optimisation)."
-    echo "Run it yourself when ready: Skill tool, skill=optimise (or /optimise)."
+    echo "Run it yourself when ready: Skill tool, skill=hooks-daemon, args=optimise."
     echo ""
 else
     echo "MANDATORY NEXT STEP -- do this NOW, in this session, before you"
     echo "report the upgrade as done and before the restart below: run the"
-    echo "config-optimisation review (Skill tool: skill=optimise, or"
-    echo "/optimise)."
+    echo "config-optimisation review (Skill tool: skill=hooks-daemon,"
+    echo "args=optimise)."
     echo "It is not an optional follow-up and does not belong in a hand-back"
     echo "list: handlers new in $NEW_VERSION stay inert until it runs."
     echo "It inventories disabled-but-relevant handlers, surfaces what is new,"

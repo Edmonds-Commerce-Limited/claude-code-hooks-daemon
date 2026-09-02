@@ -103,6 +103,19 @@ class TestHandle:
         assert "this session" in text
         assert "not an optional" in text
 
+    def test_reminder_names_the_hooks_daemon_subcommand(self, tmp_path: Path) -> None:
+        """Plan 00322: the step lives in the daemon's own skill namespace.
+
+        A bare `/optimise` was a generic top-level name that collides with any
+        project or plugin skill called the same thing, so the advisory must
+        name the namespaced invocation — and in Skill-tool form, which is what
+        the `skill_refs` QA check requires of agent-facing strings.
+        """
+        with patch(_STATE_DIR_TARGET, return_value=tmp_path):
+            result = _handler().handle(_hook_input())
+        text = "\n".join(result.context)
+        assert "skill=hooks-daemon, args=optimise" in text
+
     def test_escape_hatch_is_qualified_as_a_last_resort(self, tmp_path: Path) -> None:
         """The silence command must not read as an equal-cost alternative."""
         with patch(_STATE_DIR_TARGET, return_value=tmp_path):

@@ -1,7 +1,7 @@
 ---
 name: hooks-daemon
 description: Manage Claude Code Hooks Daemon - install, upgrade, check health, restart, and develop project-level handlers
-argument-hint: "[install|upgrade|health|restart|check|dev-handlers|regen-docs|rule-explain|logs|release-notes] [args...]"
+argument-hint: "[install|upgrade|optimise|health|restart|check|dev-handlers|regen-docs|rule-explain|logs|release-notes] [args...]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Bash, Read, Write, Edit
@@ -35,6 +35,22 @@ Update to a new version of the hooks daemon:
 ```
 
 See [upgrade.md](upgrade.md) for detailed upgrade documentation.
+
+### Optimise Configuration
+
+The config-optimisation review — the mandatory closing step of every upgrade,
+and the repeatable answer to "enable all relevant handlers and ensure optimal
+configuration for this project":
+
+```claude-code
+/hooks-daemon optimise
+```
+
+Scores five areas, surfaces handlers that are new or disabled-but-relevant, and
+applies its recommendations only on explicit confirmation.
+
+See [optimise.md](optimise.md) — it starts by running
+`scripts/optimise-invoke.sh`, which prints the procedure to follow.
 
 ### Restart Daemon
 

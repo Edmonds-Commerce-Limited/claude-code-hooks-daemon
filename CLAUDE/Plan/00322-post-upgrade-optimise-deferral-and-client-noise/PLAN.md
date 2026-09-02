@@ -98,7 +98,7 @@ asks a client for a change that is both out of scope and self-destructing.
 
 ### Phase 3: Ship phases 1-2
 
-- [ ] ⬜ **Task 3.1**: Full QA, daemon restart + verification, CHANGELOG
+- [x] ✅ **Task 3.1**: Full QA, daemon restart + verification, CHANGELOG
   entry, commit and push.
 
 ### Phase 4: `optimise` stops squatting a generic top-level name
@@ -111,27 +111,33 @@ under the daemon's namespace as a `hooks-daemon` subcommand, like `upgrade`,
 `health` and `bug-report`. Plan 00308 chose the standalone name; this
 supersedes that choice.
 
-- [ ] ⬜ **Task 4.1**: Move the skill body to
-  `skills/hooks-daemon/optimise.md` (+ its `invoke.sh`), add the SKILL.md
-  command-list entry, and stop deploying the standalone `skills/optimise/`.
-- [ ] ⬜ **Task 4.2**: Migration for installs that already have
-  `.claude/skills/optimise/` deployed — the installer must remove the
-  orphan, and the change needs a truth-changes entry so client docs
-  asserting `/optimise` are reconciled on upgrade.
-- [ ] ⬜ **Task 4.3**: Re-point every reference: the upgrade banner,
-  `config_optimisation_reminder`, `skills/hooks-daemon/upgrade.md`,
-  `LLM-INSTALL.md`, `LLM-UPDATE.md`, the state module docstrings and the
-  `record-config-optimisation-run` CLI help.
+- [x] ✅ **Task 4.1**: Moved to `skills/hooks-daemon/optimise.md` with its
+  instruction body at `scripts/optimise-invoke.sh`; SKILL.md gained the
+  command-list entry and argument hint; the standalone `skills/optimise/`
+  is gone from source and from this repo's own tracked deployment.
+- [x] ✅ **Task 4.2**: `deploy_skills` now removes NAMED retirements
+  (`_RETIRED_SKILLS`), never "anything not bundled" — a project's own
+  skills are untouched, test-locked both ways. Truth-changes staged at
+  `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.61.0.yaml`.
+- [x] ✅ **Task 4.3**: Every live reference re-pointed (upgrade banner and
+  `--help`, the reminder handler, `upgrade.md`, `LLM-INSTALL.md`,
+  `LLM-UPDATE.md`, the state module, `init_config`, `constants/handlers`
+  and the CLI help). Shipped-release notes and completed plans keep the
+  historical name.
+- [x] ✅ **Task 4.4**: Fixed the reachability defect found while moving it:
+  the 395-line instruction body sat in a sibling `invoke.sh` that nothing
+  referenced, and Claude Code loads a skill's markdown only. `optimise.md`
+  now opens by running the script.
 
 ## Success Criteria
 
-- [ ] No shipped upgrade surface tells the agent to run the
+- [x] No shipped upgrade surface tells the agent to run the
   config-optimisation review in a later session.
-- [ ] A client-install `contract_staleness` advisory is actionable by the
+- [x] A client-install `contract_staleness` advisory is actionable by the
   client without editing daemon-owned paths.
-- [ ] Both wordings are locked by tests that fail if the phrasing regresses.
-- [ ] QA green; daemon restarted and verified before commit.
-- [ ] The config-optimisation review is invoked through the `hooks-daemon`
+- [x] Both wordings are locked by tests that fail if the phrasing regresses.
+- [x] QA green; daemon restarted and verified before commit.
+- [x] The config-optimisation review is invoked through the `hooks-daemon`
   skill namespace, and no install is left holding an orphaned standalone
   `optimise` skill.
 

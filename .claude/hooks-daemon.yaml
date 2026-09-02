@@ -719,7 +719,7 @@ handlers:
       enabled: true  # Advisory only, never resolves a boundary; silent when projects: already declared
       priority: 66
 
-    config_optimisation_reminder:  # Remind to re-run /optimise after an upgrade (Plan 00308)
+    config_optimisation_reminder:  # Remind to re-run the config-optimisation review after an upgrade (Plan 00308)
       enabled: true  # Advisory only; silent once a run is recorded against the current version
       priority: 67
 

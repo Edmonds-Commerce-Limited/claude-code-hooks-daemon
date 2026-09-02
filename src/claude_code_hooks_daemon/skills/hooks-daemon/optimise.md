@@ -1,17 +1,8 @@
----
-name: optimise
-description: Analyse hooks daemon configuration and recommend improvements across Safety, Stop Quality, Plan Workflow, Code Quality, and Daemon Settings — the canonical config-optimisation step
-argument-hint: ""
----
-
-# /optimise - Configuration Optimiser Skill (canonical config-optimisation step)
-
-## Description
+# Hooks Daemon Configuration Optimiser (the config-optimisation step)
 
 This is the formalised "enable all relevant handlers and ensure optimal configuration"
 step (Plan 00308) — the same step whether run manually, automatically at the end of
-`/hooks-daemon upgrade`, or as the closing step of LLM-INSTALL.md/LLM-UPDATE.md. There
-is no separate `config-optimisation` command; `/optimise` IS it.
+`/hooks-daemon upgrade`, or as the closing step of LLM-INSTALL.md/LLM-UPDATE.md.
 
 Analyse the current hooks daemon configuration against the project's profile (languages,
 tests, CI, plans) and produce a scored report across five key areas. Also compares the
@@ -24,11 +15,32 @@ automatically. Every run (report-only or apply) records itself via
 ## Usage
 
 ```claude-code
-# Run full analysis and show scored report
-/optimise
+/hooks-daemon optimise
 ```
 
-No arguments — the skill profiles the project automatically.
+No arguments — the step profiles the project automatically.
+
+**Naming (Plan 00322)**: this used to be a standalone `/optimise` skill. A
+top-level command that generic collides with whatever else a project or plugin
+calls `optimise`, so it now lives in the daemon's own namespace with `upgrade`,
+`health` and `bug-report`. A project that still has `.claude/skills/optimise/`
+on disk is holding an orphan from before the move; the installer removes it.
+
+## Running it
+
+**Run this first** — it prints the full instruction set, which you then follow
+exactly:
+
+```bash
+bash "${CLAUDE_SKILL_DIR:-.claude/skills/hooks-daemon}/scripts/optimise-invoke.sh"
+```
+
+The script resolves the project root, the config path and the daemon CLI
+wrapper for this install (normal or self-install), then emits the step-by-step
+analysis and apply procedure. **The summary below is orientation only — the
+script's output is the procedure.** Nothing runs it for you: Claude Code loads
+markdown, never a sibling script, so skipping this command means running the
+step from the summary alone (Plan 00322).
 
 ## What It Checks
 

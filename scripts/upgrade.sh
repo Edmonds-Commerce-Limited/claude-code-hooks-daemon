@@ -47,7 +47,7 @@ while [ $# -gt 0 ]; do
             echo "Usage: upgrade.sh --project-root PATH [VERSION]"
             echo ""
             echo "  --project-root PATH        Project root directory (REQUIRED)"
-            echo "  --skip-config-optimisation Opt out of the mandatory post-upgrade /optimise reminder"
+            echo "  --skip-config-optimisation Opt out of the mandatory post-upgrade config-optimisation review"
             echo "  VERSION                    Git tag to upgrade to (default: latest)"
             exit 0
             ;;

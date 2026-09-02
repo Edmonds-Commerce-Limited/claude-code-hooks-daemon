@@ -1,0 +1,31 @@
+version: "3.61.0"
+truth_changes:
+  - was: >
+      The hooks daemon's config-optimisation review is a standalone
+      top-level skill invoked as `/optimise` (Skill tool: skill=optimise),
+      deployed to `.claude/skills/optimise/`. Project docs, runbooks and
+      agent instructions name `/optimise` as the command to run after an
+      upgrade or install.
+    now: >
+      It is a subcommand of the daemon's own skill: `/hooks-daemon optimise`
+      (Skill tool: skill=hooks-daemon, args=optimise), shipped as
+      `.claude/skills/hooks-daemon/optimise.md` with its instruction script
+      at `.claude/skills/hooks-daemon/scripts/optimise-invoke.sh`. `optimise`
+      is too generic a top-level command name — it collides with any project
+      or plugin skill of the same name, and which one wins is not
+      predictable. The installer deletes a `.claude/skills/optimise/` left
+      behind by an earlier version, so nothing needs removing by hand;
+      update any project doc that tells a reader to run `/optimise`.
+  - was: >
+      Running the config-optimisation step means invoking the skill and
+      following what it says — the instructions arrive with the skill.
+    now: >
+      The step's full procedure lives in
+      `.claude/skills/hooks-daemon/scripts/optimise-invoke.sh`, and Claude
+      Code never runs a script sitting beside a skill file: only markdown is
+      loaded, and a sibling script runs only when the markdown says to run
+      it. `optimise.md` now opens by telling the agent to run that script
+      and follow its output. An agent that skips the command is working from
+      the summary alone and will produce a shallower review — if you have
+      wrapped or paraphrased this step anywhere, make sure the wrapper runs
+      the script.

@@ -1,11 +1,11 @@
 """Config-optimisation reminder handler for SessionStart events (Plan 00308).
 
-Surfaces a skipped post-upgrade configuration review. ``/optimise`` (the
-formalised config-optimisation step, see ``.claude/skills/optimise``) is
-supposed to run after every upgrade, but nothing enforced that until now: an
-agent could upgrade, skip the review, and the gap would simply be lost. This
-handler ONLY compares the installed daemon version against the version
-recorded the last time ``/optimise`` ran (state written by that skill via
+Surfaces a skipped post-upgrade configuration review. The config-optimisation
+step (``hooks-daemon`` skill, ``optimise`` subcommand) is supposed to run
+after every upgrade, but nothing enforced that until now: an agent could
+upgrade, skip the review, and the gap would simply be lost. This handler ONLY
+compares the installed daemon version against the version recorded the last
+time that step ran (state written by the step via
 ``bin/hooks-daemon record-config-optimisation-run``) and reminds the agent to
 run it again when they differ, or when no run was ever recorded. Advisory
 only — it never blocks, and does the analysis itself.
@@ -78,8 +78,7 @@ class ConfigOptimisationReminderHandler(SessionStartHandlerBase):
 
             if state.last_run_version is None:
                 context = [
-                    "🛠️ No config-optimisation review (`/optimise`) has ever been "
-                    "recorded for this project.",
+                    "🛠️ No config-optimisation review has ever been recorded " "for this project.",
                 ]
             else:
                 context = [
@@ -89,14 +88,15 @@ class ConfigOptimisationReminderHandler(SessionStartHandlerBase):
                 ]
             context.extend(
                 [
-                    "Run `/optimise` in this session — it inventories "
-                    "disabled-but-relevant handlers and gives a prioritised "
-                    "enable/skip recommendation list, and never applies changes "
-                    "without explicit confirmation.",
+                    "Run it in this session (Skill tool: skill=hooks-daemon, "
+                    "args=optimise) — it inventories disabled-but-relevant "
+                    "handlers and gives a prioritised enable/skip "
+                    "recommendation list, and never applies changes without "
+                    "explicit confirmation.",
                     "This is the mandatory post-upgrade review, deferred: it is "
                     "not an optional to-do. If the user asked for other work "
                     "first, do that, then run the review before you stop.",
-                    "Only if `/optimise` is genuinely unavailable in this "
+                    "Only if that step is genuinely unavailable in this "
                     "project, silence this reminder with `bin/hooks-daemon "
                     "record-config-optimisation-run` — that records a review "
                     "that did not happen.",
@@ -128,7 +128,8 @@ class ConfigOptimisationReminderHandler(SessionStartHandlerBase):
                 description=(
                     "With the handler enabled and no config-optimisation run "
                     "recorded (or recorded against a stale version), a new "
-                    "session's context includes a reminder to run /optimise"
+                    "session's context includes a reminder to run the "
+                    "config-optimisation step"
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"optimise"],

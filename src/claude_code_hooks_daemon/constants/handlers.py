@@ -405,7 +405,7 @@ class HandlerID:
     )
     # Config-optimisation reminder (SessionStart handler) — Plan 00308:
     # reminds when the installed daemon version changed since the last
-    # recorded /optimise (config-optimisation) run.
+    # recorded config-optimisation run.
     CONFIG_OPTIMISATION_REMINDER = HandlerIDMeta(
         class_name="ConfigOptimisationReminderHandler",
         config_key="config_optimisation_reminder",

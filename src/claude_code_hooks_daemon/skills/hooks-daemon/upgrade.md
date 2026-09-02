@@ -11,6 +11,7 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
    /hooks-daemon upgrade 3.14.0                       # specific version
    /hooks-daemon upgrade --force                      # reinstall current
    /hooks-daemon upgrade --skip-config-optimisation    # opt out of step 8
+   /hooks-daemon optimise                              # step 8 on its own
    ```
 
 2. **Parse the metadata block** emitted on stdout between the
@@ -122,7 +123,7 @@ first (`.claude/hooks-daemon/bin/hooks-daemon logs`).
    session:
 
    ```claude-code
-   /optimise
+   /hooks-daemon optimise
    ```
 
    Run it in THIS session, immediately after the commit in step 7 above (it
@@ -131,4 +132,5 @@ first (`.claude/hooks-daemon/bin/hooks-daemon logs`).
    project-doc/config edits). The upgrade is not finished until it has run:
    do not defer it to a later session, and do not report it back as an
    optional follow-up. If `--skip-config-optimisation` was passed, skip this
-   step and tell the user to run `/optimise` themselves when ready.
+   step and tell the user to run `/hooks-daemon optimise` themselves when
+   ready.

@@ -240,16 +240,73 @@ class TestDeployMultipleSkills:
         assert (skills_dir / "hooks-daemon" / "SKILL.md").is_file()
         assert (skills_dir / "docs-qa" / "SKILL.md").is_file()
 
-    def test_real_bundled_skills_directory_deploys_optimise(self, temp_project: Path) -> None:
-        """B2 fix (v3.59.0 release): the ``config_optimisation_reminder``
-        SessionStart handler ships enabled-by-default and points clients at
-        ``/optimise`` — that skill must actually be bundled and deployed, not
-        exist only in this repo's self-install ``.claude/skills/``."""
+    def test_real_bundled_skills_deploy_optimise_as_a_subcommand(self, temp_project: Path) -> None:
+        """B2 fix (v3.59.0) kept, relocated by Plan 00322.
+
+        The ``config_optimisation_reminder`` SessionStart handler ships
+        enabled-by-default and points clients at the config-optimisation
+        step, so that step must actually be bundled and deployed — not exist
+        only in this repo's self-install ``.claude/skills/``. It now lives in
+        the daemon's own namespace rather than squatting the generic
+        top-level name ``optimise``, which collides with whatever else a
+        project or plugin calls the same thing.
+        """
         real_daemon_source = Path(__file__).resolve().parents[3]
         deploy_skills(real_daemon_source, temp_project)
 
-        optimise_dir = temp_project / ".claude" / "skills" / "optimise"
-        assert (optimise_dir / "SKILL.md").is_file()
-        invoke_script = optimise_dir / "invoke.sh"
+        hooks_daemon_dir = temp_project / ".claude" / "skills" / "hooks-daemon"
+        assert (hooks_daemon_dir / "optimise.md").is_file()
+        invoke_script = hooks_daemon_dir / "scripts" / "optimise-invoke.sh"
         assert invoke_script.is_file()
         assert invoke_script.stat().st_mode & 0o100
+        assert not (temp_project / ".claude" / "skills" / "optimise").exists()
+
+
+class TestRetiredSkillRemoval:
+    """Plan 00322: a skill that stops shipping must stop being installed.
+
+    ``deploy_skills`` only ever wrote the skills it bundles, so a renamed or
+    retired skill kept working from the copy an earlier install left behind —
+    an orphan no upgrade could reach, still owning its slash command.
+    """
+
+    @pytest.fixture
+    def daemon_source_one_skill(self, tmp_path: Path) -> Generator[Path, None, None]:
+        source = tmp_path / "daemon-source-retired"
+        (source / "skills" / "hooks-daemon").mkdir(parents=True)
+        (source / "skills" / "hooks-daemon" / "SKILL.md").write_text("# Hooks Daemon Skill\n")
+
+        yield source
+
+        if source.exists():
+            shutil.rmtree(source)
+
+    def test_removes_the_retired_standalone_optimise_skill(
+        self, temp_project: Path, daemon_source_one_skill: Path
+    ) -> None:
+        orphan = temp_project / ".claude" / "skills" / "optimise"
+        orphan.mkdir(parents=True)
+        (orphan / "SKILL.md").write_text("# stale standalone skill\n")
+
+        deploy_skills(daemon_source_one_skill, temp_project)
+
+        assert not orphan.exists()
+
+    def test_leaves_a_project_owned_skill_alone(
+        self, temp_project: Path, daemon_source_one_skill: Path
+    ) -> None:
+        """Only NAMED retirements are removed — never 'anything not bundled'."""
+        mine = temp_project / ".claude" / "skills" / "my-project-skill"
+        mine.mkdir(parents=True)
+        (mine / "SKILL.md").write_text("# mine\n")
+
+        deploy_skills(daemon_source_one_skill, temp_project)
+
+        assert (mine / "SKILL.md").read_text() == "# mine\n"
+
+    def test_no_skills_directory_is_not_an_error(
+        self, temp_project: Path, daemon_source_one_skill: Path
+    ) -> None:
+        deploy_skills(daemon_source_one_skill, temp_project)
+
+        assert (temp_project / ".claude" / "skills" / "hooks-daemon" / "SKILL.md").is_file()

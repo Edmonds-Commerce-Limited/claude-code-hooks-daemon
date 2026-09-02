@@ -343,8 +343,8 @@ cat /tmp/handler-status.txt
 ## Post-Installation: Run the Config-Optimisation Review (MANDATORY)
 
 A raw handler count is not the same as a *reviewed* configuration. Run the
-`/optimise` skill (Skill tool: `skill=optimise`, or `/optimise` in a session)
-— this is the formalised "enable all relevant handlers and ensure optimal
+config-optimisation step (Skill tool: `skill=hooks-daemon`, `args=optimise`,
+or `/hooks-daemon optimise` in a session) — this is the formalised "enable all relevant handlers and ensure optimal
 configuration" step (Plan 00308), the same one an upgrade runs automatically
 afterwards. It profiles the project (languages, tests, CI, plan directory),
 scores the config across five areas, and produces a prioritised per-handler

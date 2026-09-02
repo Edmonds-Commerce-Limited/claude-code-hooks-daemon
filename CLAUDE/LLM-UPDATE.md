@@ -351,8 +351,8 @@ inert until someone turns them on. An upgrade that ends without a
 configuration review is an upgrade where nobody established which is which —
 so this step is not optional and not something to reconstruct by hand.
 
-Run the `/optimise` skill (`Skill` tool: `skill=optimise`) — this IS the
-formalised "review new handlers and enable what's relevant" step (Plan 00308).
+Run the config-optimisation step (`Skill` tool: `skill=hooks-daemon`,
+`args=optimise`) — this IS the formalised "review new handlers and enable what's relevant" step (Plan 00308).
 It profiles the project, compares the config against
 `CLAUDE/UPGRADES/config-changes/` manifests newer than the last recorded
 review, and produces a scored, per-handler enable/skip recommendation list
@@ -366,7 +366,7 @@ upgrade (pass `--skip-config-optimisation` to opt out and run it yourself
 later) — running it manually here is for the documented curl+script upgrade
 path, which does not.
 
-A well-configured installation has **30+ handlers enabled**; `/optimise`'s
+A well-configured installation has **30+ handlers enabled**; the review's
 report shows the current count against that baseline.
 
 ### Understanding Handler Tags
@@ -392,9 +392,10 @@ Review the output and check:
 
 - **Enabled count** — should be **30+ handlers** for a well-configured installation
 - **New handlers** — any new handlers from the upgrade should be enabled; the
-  config-optimisation review above (`/optimise`) is what decides which ones and applies
+  config-optimisation review above (`/hooks-daemon optimise`) is what decides which ones
+  and applies
   them, not a manual read of this list
-- **Disabled handlers** — if any safety or code quality handlers are disabled, `/optimise`
+- **Disabled handlers** — if any safety or code quality handlers are disabled, the review
   flags them too
 
 ---
