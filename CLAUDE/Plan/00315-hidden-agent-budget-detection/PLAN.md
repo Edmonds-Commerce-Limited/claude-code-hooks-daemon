@@ -56,20 +56,20 @@ PostToolUse detector + occurrence ledger should match.
 
 ### Phase 1: Research
 
-- [ ] 🔄 **Task 1.1**: Documentation sweep — what do Anthropic/Claude Code
+- [x] ✅ **Task 1.1**: Documentation sweep — what do Anthropic/Claude Code
   docs actually say about search budgets, tool-use limits, subagent
   channel bounds, background task caps and any other per-session limits;
   record each with its URL as the source of truth, and note explicitly
   which limits have NO documented source (observed-only).
-- [ ] 🔄 **Task 1.2**: Transcript archive mining — search this machine's
+- [x] ✅ **Task 1.2**: Transcript archive mining — search this machine's
   session transcripts (~/.claude/projects/\*.jsonl via a subagent) for
   budget-shaped tool errors: search/fetch budget refusals, rate-limit
   errors, truncation markers, "budget" / "limit" / "exceeded" shapes in
   tool_result payloads. Extract verbatim (redacted) fixtures with event
   type and payload field locations.
-- [ ] ⬜ **Task 1.3**: Synthesise BUDGETS.md from 1.1 + 1.2; per-budget
-  build/no-build recommendation; owner review checkpoint before any
-  Phase 2 build.
+- [x] ✅ **Task 1.3**: Synthesise BUDGETS.md from 1.1 + 1.2; per-budget
+  build/no-build recommendation. Owner review checkpoint NOW OPEN — three
+  questions at the foot of BUDGETS.md gate Phase 2.
 
 ### Phase 2: Detection (scope TBD by Phase 1 evidence; requires owner go)
 
