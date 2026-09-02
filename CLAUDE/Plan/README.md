@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00317: supervisor host thin shim](00317-supervisor-host-thin-shim/PLAN.md) - In Progress (Plan 00316 exposed host-tier logic in the never-reloading PTY host — typed-command parsing and the Ctrl+C gate decision — defeating the hot-reload split; audit then refactor to a thin forwarding shim with all recognition worker-side, fail-open on worker outage)
+
 - [00316: manual model choice must win](00316-manual-model-choice-must-win/PLAN.md) - In Progress (field report: a user-typed /model opus was classified as a downgrade — status-line fallback fired and the ccy supervisor auto-restored fable over the human's choice; PTY input tracking distinguishes manual from silent substitution, manual always wins, per-model default effort kept but manual /effort beats the coupling)
 
 - [00314: failsafe cron suppression marker never arms](00314-failsafe-cron-suppression-marker-never-arms/PLAN.md) - Not Started (Plan 00298's cron-tick suppression never engaged live: the human-input marker was not written despite a matching STOPPING BECAUSE phrase, and the pattern set misses natural phrasings; TDD reproduction + field observability + conservative pattern widening)
@@ -271,11 +273,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 316 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 317 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 259 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 42 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
