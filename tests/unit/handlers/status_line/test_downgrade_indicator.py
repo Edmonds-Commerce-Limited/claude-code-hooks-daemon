@@ -7,6 +7,7 @@ session's high-water state, and renders a warning segment naming the drop
 """
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -222,3 +223,45 @@ class TestDowngradeIndicatorHandler:
 
     def test_has_acceptance_tests(self, handler: DowngradeIndicatorHandler) -> None:
         assert len(handler.get_acceptance_tests()) >= 1
+
+    # ---- Plan 00316: manual model change suppression ----------------------
+
+    def _write_manual_marker(self, session_id: str, family: str, ts: float) -> None:
+        marker_dir = self._untracked / "manual-model-changes"
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        (marker_dir / f"{session_id}.json").write_text(
+            json.dumps({"session_id": session_id, "family": family, "ts": ts}),
+            encoding="utf-8",
+        )
+
+    def test_manual_model_drop_emits_no_downgrade_segment(
+        self, handler: DowngradeIndicatorHandler
+    ) -> None:
+        handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
+        self._write_manual_marker("sess-a", "opus", time.time())
+        result = handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
+        assert result.context == []
+
+    def test_manual_model_drop_resets_the_high_water(
+        self, handler: DowngradeIndicatorHandler
+    ) -> None:
+        handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
+        self._write_manual_marker("sess-a", "opus", time.time())
+        handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
+        entry = json.loads((self._state_dir() / "sess-a.json").read_text(encoding="utf-8"))
+        assert entry["high_water_family"] == "opus"
+
+    def test_manual_marker_for_a_different_family_does_not_suppress(
+        self, handler: DowngradeIndicatorHandler
+    ) -> None:
+        handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
+        self._write_manual_marker("sess-a", "sonnet", time.time())
+        result = handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
+        assert len(result.context) == 1
+
+    def test_no_marker_still_reports_a_silent_downgrade(
+        self, handler: DowngradeIndicatorHandler
+    ) -> None:
+        handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
+        result = handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
+        assert len(result.context) == 1

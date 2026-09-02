@@ -59,42 +59,52 @@ manual model setting always wins over restore logic.
 
 ### Phase 1: manual-change recognition
 
-- [ ] ⬜ **Task 1.1**: RED — unit tests in the supervise test suite: a
+- [x] ✅ **Task 1.1**: RED — unit tests in the supervise test suite: a
   `/model opus` typed through the PTY input path within the validity
   window marks the subsequent observed model change as MANUAL (no
   restore, decision log says so); an observed change with no typed
   command in the window stays a fallback (restore fires as today); the
   window expires; rapid successive manual changes each count.
-- [ ] ⬜ **Task 1.2**: GREEN — implement last-typed-model tracking in the
+- [x] ✅ **Task 1.2**: GREEN — implement last-typed-model tracking in the
   supervisor input path (host tier — note the hot-reload contract:
   `_forward_io` runs in the PTY HOST, so live pickup needs a session
   restart or applies from the next session; the worker-tier decision
   logic hot-reloads) and consume it in the restore decision.
-- [ ] ⬜ **Task 1.3**: Suppress the daemon status-line fallback indicator
+- [x] ✅ **Task 1.3**: Suppress the daemon status-line fallback indicator
   for a manual change: give the supervisor a way to record the manual
   change where `model_fallback_detector` can see it (shared untracked
   marker/ledger), TDD on the handler side.
+  Correction during implementation: the field-report's status-line
+  indicator is `downgrade_indicator` (self-detected purely from the
+  model id Claude Code reports, no dependency on the supervisor), not
+  `model_fallback_detector` (which only ever fires from the platform's
+  OWN `model_refusal_fallback` transcript record — never on a manual
+  `/model` command, so it was never the culprit). Fixed
+  `downgrade_indicator`/`downgrade_state.py` to consult the shared
+  marker instead.
 
 ### Phase 2: effort coupling precedence
 
-- [ ] ⬜ **Task 2.1**: Config-declared per-model default effort mapping
+- [x] ✅ **Task 2.1**: Config-declared per-model default effort mapping
   (keep current behaviour as the defaults); manual `/effort` recorded and
   honoured over the coupling until the user changes model again or
   re-sets effort. TDD.
 
 ### Phase 3: verification
 
-- [ ] ⬜ **Task 3.1**: Full QA 25/25; live dogfood checklist journalled
+- [x] ✅ **Task 3.1**: Full QA 25/25; live dogfood checklist journalled
   (manual `/model opus` → no indicator, no restore; then a forced silent
-  substitution fixture → still detected).
+  substitution fixture → still detected). See `JOURNAL/` for the checklist
+  and the hot-reload caveat.
 
 ## Success Criteria
 
 - [ ] Owner can type `/model opus` in a fable session and nothing fights
-  or flags it.
-- [ ] Silent substitution still detected and restored.
-- [ ] Manual `/effort` always beats coupled defaults.
-- [ ] QA 25/25.
+  or flags it — verified by unit test; awaiting live confirmation in a
+  fresh session (see the hot-reload note in `JOURNAL/`).
+- [x] Silent substitution still detected and restored.
+- [x] Manual `/effort` always beats coupled defaults.
+- [x] QA 25/25.
 
 ## Delivery & Milestones
 

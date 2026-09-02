@@ -12,6 +12,7 @@ reports -- no dependency on the ccy supervisor or any external signal.
 """
 
 import logging
+import time
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
@@ -21,6 +22,8 @@ from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.handlers.status_line.downgrade_state import (
     evaluate_downgrade,
+    is_manual_model_change,
+    manual_model_change_dir,
     read_downgrade_counts,
     resolve_model_family,
     state_dir,
@@ -83,8 +86,17 @@ class DowngradeIndicatorHandler(StatusLineHandlerBase):
                 return ""
 
             current_family, current_rank = resolved
-            dir_path = state_dir(ProjectContext.daemon_untracked_dir())
-            downgrade = evaluate_downgrade(dir_path, session_id, current_family, current_rank)
+            daemon_untracked_dir = ProjectContext.daemon_untracked_dir()
+            dir_path = state_dir(daemon_untracked_dir)
+            manual = is_manual_model_change(
+                manual_model_change_dir(daemon_untracked_dir),
+                session_id,
+                current_family,
+                now=time.time(),
+            )
+            downgrade = evaluate_downgrade(
+                dir_path, session_id, current_family, current_rank, manual=manual
+            )
             if downgrade is None:
                 return ""
 

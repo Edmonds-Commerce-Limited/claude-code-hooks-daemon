@@ -10,6 +10,8 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.handlers.status_line.downgrade_state import (
     evaluate_downgrade,
+    is_manual_model_change,
+    manual_model_change_dir,
     read_downgrade_counts,
     read_high_water,
     resolve_model_family,
@@ -130,6 +132,61 @@ class TestEvaluateDowngrade:
         result = evaluate_downgrade(tmp_path, "sess-b", "opus", 2)
         assert result is None
         assert read_high_water(tmp_path, "sess-b") == ("opus", 2)
+
+    def test_manual_drop_reports_no_downgrade(self, tmp_path: Path) -> None:
+        write_high_water(tmp_path, "sess-a", "fable", 3)
+        result = evaluate_downgrade(tmp_path, "sess-a", "opus", 2, manual=True)
+        assert result is None
+
+    def test_manual_drop_resets_high_water_to_the_manual_choice(self, tmp_path: Path) -> None:
+        write_high_water(tmp_path, "sess-a", "fable", 3)
+        evaluate_downgrade(tmp_path, "sess-a", "opus", 2, manual=True)
+        assert read_high_water(tmp_path, "sess-a") == ("opus", 2)
+
+    def test_further_silent_drop_below_a_manual_choice_is_still_caught(
+        self, tmp_path: Path
+    ) -> None:
+        write_high_water(tmp_path, "sess-a", "fable", 3)
+        evaluate_downgrade(tmp_path, "sess-a", "opus", 2, manual=True)
+        result = evaluate_downgrade(tmp_path, "sess-a", "haiku", 0)
+        assert result == ("opus", "haiku")
+
+
+class TestManualModelChange:
+    def test_missing_marker_is_not_manual(self, tmp_path: Path) -> None:
+        assert is_manual_model_change(tmp_path, "sess-a", "opus", now=1000.0) is False
+
+    def test_matching_recent_marker_is_manual(self, tmp_path: Path) -> None:
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "sess-a.json").write_text(
+            json.dumps({"session_id": "sess-a", "family": "opus", "ts": 1000.0}),
+            encoding="utf-8",
+        )
+        assert is_manual_model_change(tmp_path, "sess-a", "opus", now=1005.0) is True
+
+    def test_marker_for_a_different_family_is_not_manual(self, tmp_path: Path) -> None:
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "sess-a.json").write_text(
+            json.dumps({"session_id": "sess-a", "family": "opus", "ts": 1000.0}),
+            encoding="utf-8",
+        )
+        assert is_manual_model_change(tmp_path, "sess-a", "sonnet", now=1005.0) is False
+
+    def test_stale_marker_outside_the_window_is_not_manual(self, tmp_path: Path) -> None:
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "sess-a.json").write_text(
+            json.dumps({"session_id": "sess-a", "family": "opus", "ts": 1000.0}),
+            encoding="utf-8",
+        )
+        assert is_manual_model_change(tmp_path, "sess-a", "opus", now=100_000.0) is False
+
+    def test_corrupt_marker_is_not_manual(self, tmp_path: Path) -> None:
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "sess-a.json").write_text("not json", encoding="utf-8")
+        assert is_manual_model_change(tmp_path, "sess-a", "opus", now=1000.0) is False
+
+    def test_manual_model_change_dir_is_a_subdirectory(self, tmp_path: Path) -> None:
+        assert manual_model_change_dir(tmp_path).parent == tmp_path
 
 
 class TestDowngradeCounts:

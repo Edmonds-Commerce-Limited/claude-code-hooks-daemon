@@ -527,6 +527,13 @@ class HumanInputLine:
         # Edge flag: set when a submitted line was a human `/compact`, cleared by
         # take_compact_submitted() so the supervisor acts on it exactly once.
         self._compact_submitted: bool = False
+        # Plan 00316: the raw argument text of a submitted human `/model <x>`
+        # or `/effort <x>` line -- cleared by take_model_submitted()/
+        # take_effort_submitted() so each typed command is consumed exactly
+        # once. A submission with no argument (bare `/model`) is not tracked
+        # -- it opens Claude Code's own selector rather than naming a target.
+        self._model_submitted: str | None = None
+        self._effort_submitted: str | None = None
 
     def feed(self, data: bytes) -> None:
         """Advance the line model with a chunk of forwarded human stdin bytes."""
@@ -561,8 +568,15 @@ class HumanInputLine:
         if byte in _LINE_CLEAR_BYTES:
             # Only Enter SUBMITS the line; Ctrl-U/Ctrl-C discard it. A submitted
             # `/compact` sets the edge flag so the supervisor can defer to it.
-            if byte in _LINE_SUBMIT_BYTES and self._buffer_is_compact():
-                self._compact_submitted = True
+            if byte in _LINE_SUBMIT_BYTES:
+                if self._buffer_is_compact():
+                    self._compact_submitted = True
+                model_arg = self._buffer_command_arg(_MODEL_COMMAND)
+                if model_arg:
+                    self._model_submitted = model_arg
+                effort_arg = self._buffer_command_arg(_EFFORT_COMMAND)
+                if effort_arg:
+                    self._effort_submitted = effort_arg
             self._buffer.clear()
         elif byte in _LINE_BACKSPACE_BYTES:
             if self._buffer:
@@ -615,6 +629,21 @@ class HumanInputLine:
         text = bytes(self._buffer).decode("utf-8", errors="ignore")
         return text.strip().startswith(_COMPACT_COMMAND_PREFIX)
 
+    def _buffer_command_arg(self, command: str) -> str | None:
+        """Return the trimmed argument of a submitted ``command <arg>`` line.
+
+        ``None`` when the line does not start with ``command`` followed by
+        whitespace and a non-empty argument -- a bare ``/model`` with no
+        target opens Claude Code's own selector and is not a command this
+        class can classify.
+        """
+        text = bytes(self._buffer).decode("utf-8", errors="ignore").strip()
+        prefix = f"{command} "
+        if not text.startswith(prefix):
+            return None
+        arg = text[len(prefix) :].strip()
+        return arg or None
+
     def take_compact_submitted(self) -> bool:
         """Return True once if a human `/compact` was submitted, then clear it.
 
@@ -625,6 +654,23 @@ class HumanInputLine:
             self._compact_submitted = False
             return True
         return False
+
+    def take_model_submitted(self) -> str | None:
+        """Return the argument of a submitted human `/model <x>`, then clear it.
+
+        Edge-triggered and consume-once, mirroring ``take_compact_submitted``
+        (Plan 00316) -- so a manual model command is recorded exactly once
+        per submission, however many ticks pass before it is consumed.
+        """
+        arg = self._model_submitted
+        self._model_submitted = None
+        return arg
+
+    def take_effort_submitted(self) -> str | None:
+        """Return the argument of a submitted human `/effort <x>`, then clear it."""
+        arg = self._effort_submitted
+        self._effort_submitted = None
+        return arg
 
     @property
     def is_empty(self) -> bool:
@@ -649,6 +695,14 @@ class InputActivity:
     def take_compact_submitted(self) -> bool:
         """Return True once if the human submitted a `/compact` since last checked."""
         return self.line.take_compact_submitted()
+
+    def take_model_submitted(self) -> str | None:
+        """Return the argument of a human `/model <x>` submitted since last checked."""
+        return self.line.take_model_submitted()
+
+    def take_effort_submitted(self) -> str | None:
+        """Return the argument of a human `/effort <x>` submitted since last checked."""
+        return self.line.take_effort_submitted()
 
 
 @dataclass
@@ -1071,6 +1125,12 @@ _DRY_RUN_EFFORT_BODY_PREFIX = "would inject /effort (dry-run — no real /effort
 # flip-back then RESETS effort down to the restored family's floor (the one
 # sanctioned lowering: fable at xhigh eats account allowance).
 _MODEL_COMMAND = "/model"
+# Plan 00316: how long a user-typed `/model <family>` command stays valid to
+# classify a LATER observed model-family change as manual. Generous on
+# purpose -- it only needs to outlast the render/tick latency between the
+# human pressing Enter and the sidecar reporting the new model, not bound any
+# real session activity.
+_MANUAL_MODEL_WINDOW_SECONDS = 120.0
 _DEFAULT_MODEL_RESTORE_DELAY_SECONDS = 0.0
 _MODEL_RESTORE_DISABLED_SENTINEL = -1.0
 _MODEL_RESTORE_ENV_VAR = "CCY_MODEL_RESTORE_SECONDS"
@@ -1383,6 +1443,13 @@ class TickFacts:
     input_line_empty: bool
     human_compact_submitted: bool
     work_idle: bool
+    # Plan 00316: the raw argument of a human-typed `/model <x>` / `/effort
+    # <x>` line submitted since the last tick, or None. Consumed by
+    # `CompactStateMachine.note_manual_model_command`/
+    # `note_manual_effort_command` so a manual choice is recognised and never
+    # fought by the auto-restore or the coupled-effort default.
+    human_model_command: str | None = None
+    human_effort_command: str | None = None
     # The host's authoritative CompactStateMachine state for this tick (Plan
     # 00164 Phase 4 fix). The worker loads it before deciding so it never runs on
     # divergent state; None on the in-process path (the machine is already live).
@@ -2328,6 +2395,34 @@ def write_model_switch_signal(
     return signal_path
 
 
+# Plan 00316 Task 1.3: subdirectory (under the daemon's untracked dir, the
+# same shared root ``sidecar_dir``'s parent resolves to) holding one small
+# marker file per session -- the last user-typed /model family + when. Read
+# by the daemon's ``downgrade_indicator`` status-line handler so a manual
+# choice never shows as a silent downgrade there either.
+_MANUAL_MODEL_MARKER_SUBDIR = "manual-model-changes"
+
+
+def write_manual_model_marker(
+    daemon_untracked_dir: Path, *, session_id: str, family: str, now: float
+) -> Path:
+    """Atomically record this session's last user-typed ``/model <family>``.
+
+    Mirrors ``write_model_switch_signal``'s atomic-replace pattern. Written
+    unconditionally on every typed command (no family validation) -- an
+    unrecognised family simply never matches any later observed reading, so
+    there is nothing to fail closed on here.
+    """
+    directory = daemon_untracked_dir / _MANUAL_MODEL_MARKER_SUBDIR
+    directory.mkdir(parents=True, exist_ok=True)
+    marker_path = directory / f"{session_id}.json"
+    payload = {"session_id": session_id, "family": family, "ts": now}
+    tmp_path = directory / f".{marker_path.name}.{os.getpid()}.tmp"
+    tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+    tmp_path.replace(marker_path)
+    return marker_path
+
+
 def reap_stale_sidecars(
     directory: Path,
     *,
@@ -2519,6 +2614,23 @@ class CompactStateMachine:
         # to None whenever the anchor clears, so a fresh violation episode is
         # never throttled by a previous episode's ESC cooldown.
         self._anchor_esc_last_sent_ts: float | None = None
+        # Plan 00316: the last user-TYPED `/model <family>` command (canonical
+        # family + when it was typed) -- an observed change matching this
+        # within `_MANUAL_MODEL_WINDOW_SECONDS` is classified MANUAL, not a
+        # silent downgrade, so it is never fought by the auto-restore. A
+        # fresh manual command always overwrites the previous one (rapid
+        # successive manual changes each count on their own).
+        self._manual_model_family: str | None = None
+        self._manual_model_ts: float | None = None
+        # Consume-once note set by note_model_reading() when a manual match
+        # suppressed what would otherwise have opened a downgrade episode --
+        # surfaced to decision.log by decide_once via take_manual_model_note().
+        self._manual_model_note: str | None = None
+        # Plan 00316 Task 2.1: the last user-TYPED `/effort <level>` -- a
+        # latch (not time-windowed): it wins over the per-model default/
+        # coupled effort until the user manually changes model again or
+        # manually re-sets effort.
+        self._manual_effort_active: str | None = None
 
     @property
     def effort_pending(self) -> str | None:
@@ -2672,6 +2784,11 @@ class CompactStateMachine:
         ever calls this with values it has just resolved for a real switch).
         """
         if not session or not family:
+            return
+        if self._manual_effort_active is not None:
+            # Plan 00316 Task 2.1: a manual /effort always wins over the
+            # coupled default -- skip arming entirely so the next injectable
+            # tick leaves the user's own choice alone.
             return
         target = self._coupled_effort_target(family)
         self._coupled_effort_pending = f"{session}:{family}:{target}"
@@ -2838,6 +2955,48 @@ class CompactStateMachine:
         """The most recently observed foreground session id, or None (Plan 00278)."""
         return self._last_model_session
 
+    def note_manual_model_command(self, family: str, *, now_wall: float) -> None:
+        """Record a user-TYPED ``/model <family>`` command (Plan 00316).
+
+        Called by decide_once for every tick that observed one (via
+        ``TickFacts.human_model_command``, sourced from the PTY host's input
+        path). A fresh command always overwrites the previous one -- rapid
+        successive manual changes each count on their own, never merged.
+        Also clears any manual effort latch: a deliberate model change is a
+        fresh context the old manual effort no longer speaks to (Task 2.1).
+        """
+        self._manual_model_family = family
+        self._manual_model_ts = now_wall
+        self._manual_effort_active = None
+
+    def note_manual_effort_command(self, level: str, *, now_wall: float) -> None:
+        """Record a user-TYPED ``/effort <level>`` command (Plan 00316 Task 2.1).
+
+        A latch, not time-windowed: it wins over the per-model default and
+        the post-switch coupled effort until the user manually changes model
+        again (``note_manual_model_command``) or manually re-sets effort.
+        """
+        del now_wall  # kept for signature symmetry with the model counterpart
+        self._manual_effort_active = level
+
+    def _manual_model_matches(self, family: str, now_wall: float) -> bool:
+        """True when ``family`` matches a recent user-typed ``/model`` command."""
+        return (
+            self._manual_model_family == family
+            and self._manual_model_ts is not None
+            and now_wall - self._manual_model_ts <= _MANUAL_MODEL_WINDOW_SECONDS
+        )
+
+    def take_manual_model_note(self) -> str | None:
+        """Return, once, the reason a manual match suppressed a downgrade episode.
+
+        Edge-triggered and consume-once, mirroring ``take_compact_submitted``,
+        so decide_once logs it exactly once per manual match.
+        """
+        note = self._manual_model_note
+        self._manual_model_note = None
+        return note
+
     def note_model_reading(self, reading: SidecarReading, *, now_wall: float) -> None:
         """Track the foreground model; recompute the floor-based effort episode.
 
@@ -2886,20 +3045,41 @@ class CompactStateMachine:
                 self._downgrade_episode = None
                 self._downgrade_from_family = None
                 self._downgrade_started_ts = None
+        manual_match = self._manual_model_matches(family, now_wall)
         if (
             prev_session == session
             and prev_family is not None
             and _family_rank(family) < _family_rank(prev_family)
         ):
-            if self._downgrade_episode is None:
-                # A fresh episode: remember where we fell FROM and when, for
-                # the delayed /model flip-back (Task 2b.3). A further drop
-                # inside an open episode keeps the original from/started.
-                self._downgrade_from_family = prev_family
-                self._downgrade_started_ts = now_wall
-            self._downgrade_episode = f"{session}:{family}"
-        if self._downgrade_episode is not None:
-            target: str | None = _DOWNGRADE_TARGET_EFFORT
+            if manual_match:
+                # Plan 00316: a rank drop matching a recently-typed /model
+                # command is the human's OWN deliberate choice, not a silent
+                # substitution -- never open a downgrade episode for it (no
+                # auto-restore, no forced xhigh floor). A stale episode left
+                # open from an earlier silent drop on this session is cleared
+                # too, since the manual choice must win outright.
+                if self._downgrade_episode is not None:
+                    ep_session, _, _ = self._downgrade_episode.partition(":")
+                    if ep_session == session:
+                        self._downgrade_episode = None
+                        self._downgrade_from_family = None
+                        self._downgrade_started_ts = None
+                self._manual_model_note = f"manual change ({family}) — no restore"
+            else:
+                if self._downgrade_episode is None:
+                    # A fresh episode: remember where we fell FROM and when, for
+                    # the delayed /model flip-back (Task 2b.3). A further drop
+                    # inside an open episode keeps the original from/started.
+                    self._downgrade_from_family = prev_family
+                    self._downgrade_started_ts = now_wall
+                self._downgrade_episode = f"{session}:{family}"
+        if self._manual_effort_active is not None:
+            # Plan 00316 Task 2.1: a manual /effort always wins -- neither the
+            # downgrade-episode xhigh floor nor the per-model default fires
+            # while it is active.
+            target: str | None = None
+        elif self._downgrade_episode is not None:
+            target = _DOWNGRADE_TARGET_EFFORT
         else:
             target = self._policy.min_effort_levels.get(family)
         current = reading.effort
@@ -3005,6 +3185,10 @@ class CompactStateMachine:
             "anchor_last_injected_ts": self._anchor_last_injected_ts,
             "anchor_attempts": self._anchor_attempts,
             "anchor_esc_last_sent_ts": self._anchor_esc_last_sent_ts,
+            "manual_model_family": self._manual_model_family,
+            "manual_model_ts": self._manual_model_ts,
+            "manual_model_note": self._manual_model_note,
+            "manual_effort_active": self._manual_effort_active,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -3087,6 +3271,18 @@ class CompactStateMachine:
         if "anchor_esc_last_sent_ts" in state:
             raw = state["anchor_esc_last_sent_ts"]
             self._anchor_esc_last_sent_ts = None if raw is None else _coerce_float(raw)
+        if "manual_model_family" in state:
+            raw = state["manual_model_family"]
+            self._manual_model_family = None if raw is None else str(raw)
+        if "manual_model_ts" in state:
+            raw = state["manual_model_ts"]
+            self._manual_model_ts = None if raw is None else _coerce_float(raw)
+        if "manual_model_note" in state:
+            raw = state["manual_model_note"]
+            self._manual_model_note = None if raw is None else str(raw)
+        if "manual_effort_active" in state:
+            raw = state["manual_effort_active"]
+            self._manual_effort_active = None if raw is None else str(raw)
 
     def evaluate(
         self,
@@ -3687,11 +3883,31 @@ def decide_once(
     # path (the passed machine is already the live authoritative one).
     if facts.machine_state is not None:
         machine.import_state(facts.machine_state)
+    # Plan 00316: record a user-typed /model or /effort command BEFORE
+    # tracking this tick's reading, so a manual match can be recognised on
+    # the same tick the change is first observed. Also drop a shared marker
+    # (untracked, keyed by session) so the daemon's status-line downgrade
+    # indicator can suppress itself for the very same manual choice.
+    if facts.human_model_command:
+        machine.note_manual_model_command(facts.human_model_command, now_wall=facts.now_wall)
+        marker_session = (reading.session_id if reading is not None else None) or (
+            machine.last_model_session
+        )
+        if marker_session:
+            write_manual_model_marker(
+                sidecar_dir.parent,
+                session_id=marker_session,
+                family=facts.human_model_command,
+                now=facts.now_wall,
+            )
+    if facts.human_effort_command:
+        machine.note_manual_effort_command(facts.human_effort_command, now_wall=facts.now_wall)
     # Plan 00278: track the foreground model family so a ranked downgrade
     # opens an effort-restore episode (fired further below, subordinate to
     # every other family). Synthetic/stale readings are ignored.
     if reading is not None and not reading.stale:
         machine.note_model_reading(reading, now_wall=facts.now_wall)
+    manual_model_note = machine.take_manual_model_note()
     evaluation = machine.evaluate(
         reading,
         idle=can_inject,
@@ -3755,6 +3971,11 @@ def decide_once(
     # so the block above skips it -- surface it explicitly for decision.log.
     if dry_run_latched_log is not None:
         noop_reason_log = dry_run_latched_log
+    # Plan 00316: a manual /model match suppressed what would otherwise have
+    # opened a downgrade episode this tick -- surface WHY nothing was done,
+    # overriding whatever generic NOOP reason was derived above.
+    if manual_model_note is not None:
+        noop_reason_log = f"{_NOOP_LOG_PREFIX}: {manual_model_note}"
     # ── Goal injection (Plan 00269) ─────────────────────────────────────────
     # Strictly SUBORDINATE to compact/continue: the goal branch runs only when
     # this tick decided NOOP with no payload, no compaction signal is pending,
@@ -4401,6 +4622,8 @@ def _poll_once(
     compaction_signal_ttl_seconds: float = _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS,
     input_line_empty: bool = True,
     human_compact_submitted: bool = False,
+    human_model_command: str | None = None,
+    human_effort_command: str | None = None,
     work_idle: bool = True,
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS,
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
@@ -4423,6 +4646,8 @@ def _poll_once(
         input_line_empty=input_line_empty,
         human_compact_submitted=human_compact_submitted,
         work_idle=work_idle,
+        human_model_command=human_model_command,
+        human_effort_command=human_effort_command,
     )
     outcome = decide_once(
         machine,
@@ -4464,6 +4689,8 @@ def _facts_to_json(facts: TickFacts) -> str:
             "input_line_empty": facts.input_line_empty,
             "human_compact_submitted": facts.human_compact_submitted,
             "work_idle": facts.work_idle,
+            "human_model_command": facts.human_model_command,
+            "human_effort_command": facts.human_effort_command,
             "machine_state": facts.machine_state,
             "tick_id": facts.tick_id,
         }
@@ -4478,6 +4705,8 @@ def _facts_from_json(line: str) -> TickFacts:
         input_line_empty=bool(data["input_line_empty"]),
         human_compact_submitted=bool(data["human_compact_submitted"]),
         work_idle=bool(data["work_idle"]),
+        human_model_command=data.get("human_model_command"),
+        human_effort_command=data.get("human_effort_command"),
         machine_state=data.get("machine_state"),
         tick_id=int(data.get("tick_id", 0)),
     )
@@ -5028,6 +5257,11 @@ def supervise(
         # Consume the human-/compact edge exactly once per tick so a human
         # compaction defers the supervisor's own, never suppresses it forever.
         human_compact = activity.take_compact_submitted()
+        # Plan 00316: consume a human-typed /model or /effort command the same
+        # way -- edge-triggered, once per tick, so a manual choice is recorded
+        # exactly once however many ticks pass before the worker consumes it.
+        human_model_command = activity.take_model_submitted()
+        human_effort_command = activity.take_effort_submitted()
         # Plan 00164 Phase 4: prefer the restartable policy worker; on ANY worker
         # failure (decider returns None) fall back to the identical in-process
         # path so a tick is never dropped. The host always performs the injection.
@@ -5041,6 +5275,8 @@ def supervise(
                     input_line_empty=activity.line.is_empty,
                     human_compact_submitted=human_compact,
                     work_idle=work_idle,
+                    human_model_command=human_model_command,
+                    human_effort_command=human_effort_command,
                     # Ship the host's authoritative machine state so the worker
                     # decides on it -- never on divergent worker-local state.
                     machine_state=machine.export_state(),
@@ -5082,6 +5318,8 @@ def supervise(
                 compaction_signal_ttl_seconds=policy.compaction_signal_ttl_seconds,
                 input_line_empty=activity.line.is_empty,
                 human_compact_submitted=human_compact,
+                human_model_command=human_model_command,
+                human_effort_command=human_effort_command,
                 work_idle=work_idle,
                 reap_ttl_seconds=policy.reap_ttl_seconds,
                 foreground_margin_seconds=policy.foreground_margin_seconds,
