@@ -17,6 +17,8 @@ from tests.unit.supervise._load import load_supervisor_module
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pytest
+
 _mod = load_supervisor_module()
 
 _NOW = 30_000.0
@@ -285,6 +287,25 @@ def test_manual_match_clears_a_stale_open_downgrade_episode(tmp_path: Path) -> N
 
 
 # ── Task 1.3: shared marker for the daemon's downgrade indicator ────────────
+
+
+def test_decide_once_never_writes_to_the_global_worker_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """decide_once must log only through its INJECTED DecisionLog.
+
+    ``append_worker_error`` resolves a GLOBAL path, so a call from decide_once
+    lands in the LIVE session's worker log even from a unit-test tick.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(_mod, "append_worker_error", calls.append)
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine, facts=_facts(human_model_command="opus"))
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW + 0.5)
+    _decide(sidecar_dir, machine, facts=_facts(_NOW + 1.0))
+    assert calls == []
 
 
 def test_marker_write_deferred_until_session_known(tmp_path: Path) -> None:

@@ -30,3 +30,21 @@ _mod = load_supervisor_module()
 def _neutralise_ambient_flag_compact(monkeypatch: pytest.MonkeyPatch) -> None:
     """Clear ambient ``CCY_FLAG_COMPACT`` so tests default to the shipped-off state."""
     monkeypatch.delenv(_mod._FLAG_COMPACT_ENV_VAR, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_worker_error_log(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Point the worker error log at a per-test temp file (dogfooding fix).
+
+    ``worker_error_log_path()`` resolves the LIVE daemon untracked dir, so any
+    test exercising a code path that calls ``append_worker_error`` appends to
+    the running session's own worker log — polluting field diagnostics with
+    test-session ids and fabricated 'observed' events. Redirecting here makes
+    that structurally impossible. The dedicated worker-error tests override
+    this symbol explicitly and, as with the fixture above, their setup wins
+    because it runs after this one.
+    """
+    sink = tmp_path_factory.mktemp("worker-error-log") / "worker.err.log"
+    monkeypatch.setattr(_mod, "worker_error_log_path", lambda: sink)

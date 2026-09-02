@@ -4039,10 +4039,14 @@ def decide_once(
                 now=facts.now_wall,
             )
             machine.clear_manual_marker_pending()
-            append_worker_error(
-                f"manual /model marker written: family={pending_marker_family!r} "
-                f"session={marker_session!r}"
-            )
+            if log is not None:
+                # Via the INJECTED log, never the global worker error log: this
+                # function runs under unit test too, and a global-path write
+                # would pollute the live session's log from a test run.
+                log.write(
+                    f"manual /model marker written: family={pending_marker_family!r} "
+                    f"session={marker_session!r}"
+                )
     if facts.human_effort_command:
         machine.note_manual_effort_command(facts.human_effort_command, now_wall=facts.now_wall)
     # Plan 00278: track the foreground model family so a ranked downgrade
