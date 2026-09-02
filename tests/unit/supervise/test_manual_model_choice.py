@@ -180,7 +180,7 @@ def test_silent_substitution_without_typed_command_still_restores(tmp_path: Path
 
 
 def test_manual_model_window_expires(tmp_path: Path) -> None:
-    """A typed command outside the validity window no longer counts as manual."""
+    """A typed command outside the backstop window no longer counts as manual."""
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
@@ -190,6 +190,46 @@ def test_manual_model_window_expires(tmp_path: Path) -> None:
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=stale - 0.5)
     outcome = _decide(sidecar_dir, machine, facts=_facts(stale))
     # Outside the window this is once again a silent downgrade -> effort floor fires.
+    assert outcome.decision_value == "would-effort"
+
+
+def test_manual_command_survives_long_busy_spell(tmp_path: Path) -> None:
+    """Field defect (2026-09-02 live test): the session stayed BUSY after the
+    human typed /model opus, so the first opus sidecar reading arrived minutes
+    later -- past the old 120s window -- and the supervisor fought the human's
+    own choice with an auto-restore. The manual note is a latch consumed by the
+    first matching reading, however late it arrives (backstop expiry only)."""
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _decide(sidecar_dir, machine, facts=_facts(human_model_command="opus"))
+    late = _NOW + 600.0  # ten busy minutes later
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=late - 0.5)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(late))
+    assert outcome.payload is None
+    even_later = _decide(sidecar_dir, machine, facts=_facts(late + 10_000.0))
+    assert even_later.decision_value != "would-model"
+
+
+def test_manual_match_is_consumed_by_first_matching_reading(tmp_path: Path) -> None:
+    """Once the typed choice is observed landing, the latch is spent: a LATER
+    silent drop to the same family is a substitution again and must restore."""
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _decide(sidecar_dir, machine, facts=_facts(human_model_command="opus"))
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 0.5)
+    assert _decide(sidecar_dir, machine).payload is None  # manual match consumed here
+    # The human goes back up to fable...
+    t1 = _NOW + 10.0
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=t1 - 0.5)
+    _decide(sidecar_dir, machine, facts=_facts(t1))
+    # ...then a SILENT drop to opus (nothing typed) must be classified silent.
+    t2 = _NOW + 20.0
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=t2 - 0.5)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(t2))
     assert outcome.decision_value == "would-effort"
 
 
@@ -245,6 +285,24 @@ def test_manual_match_clears_a_stale_open_downgrade_episode(tmp_path: Path) -> N
 
 
 # ── Task 1.3: shared marker for the daemon's downgrade indicator ────────────
+
+
+def test_marker_write_deferred_until_session_known(tmp_path: Path) -> None:
+    """A typed /model on a tick with no reading and no tracked session must not
+    lose the marker: it stays pending and is written on the first tick that can
+    name the session (field defect: no marker file ever appeared live)."""
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    # No sidecar on disk yet: the typed command cannot name a session.
+    _decide(sidecar_dir, machine, facts=_facts(human_model_command="opus"))
+    marker_path = tmp_path / _mod._MANUAL_MODEL_MARKER_SUBDIR / f"{_SESSION}.json"
+    assert not marker_path.exists()
+    # The session's sidecar appears -> the pending marker is written now.
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW + 4.5)
+    _decide(sidecar_dir, machine, facts=_facts(_NOW + 5.0))
+    assert marker_path.exists()
+    payload = json.loads(marker_path.read_text(encoding="utf-8"))
+    assert payload["family"] == "opus"
 
 
 def test_manual_model_command_writes_a_shared_marker(tmp_path: Path) -> None:

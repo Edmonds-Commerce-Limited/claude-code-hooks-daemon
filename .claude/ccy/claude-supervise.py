@@ -1206,12 +1206,14 @@ _DRY_RUN_EFFORT_BODY_PREFIX = "would inject /effort (dry-run — no real /effort
 # flip-back then RESETS effort down to the restored family's floor (the one
 # sanctioned lowering: fable at xhigh eats account allowance).
 _MODEL_COMMAND = "/model"
-# Plan 00316: how long a user-typed `/model <family>` command stays valid to
-# classify a LATER observed model-family change as manual. Generous on
-# purpose -- it only needs to outlast the render/tick latency between the
-# human pressing Enter and the sidecar reporting the new model, not bound any
-# real session activity.
-_MANUAL_MODEL_WINDOW_SECONDS = 120.0
+# Plan 00316: BACKSTOP expiry on a user-typed `/model <family>` command. The
+# manual note is a latch consumed by the first sidecar reading that shows the
+# family -- however late that reading arrives, because a BUSY session can defer
+# the first observation for many minutes (the sidecar only refreshes on status
+# renders). This window exists only so a typed command whose switch never
+# landed at all cannot re-classify a much-later unrelated silent drop to the
+# same family; it must dwarf any plausible busy spell.
+_MANUAL_MODEL_WINDOW_SECONDS = 3600.0
 _DEFAULT_MODEL_RESTORE_DELAY_SECONDS = 0.0
 _MODEL_RESTORE_DISABLED_SENTINEL = -1.0
 _MODEL_RESTORE_ENV_VAR = "CCY_MODEL_RESTORE_SECONDS"
@@ -2714,6 +2716,11 @@ class CompactStateMachine:
         # successive manual changes each count on their own).
         self._manual_model_family: str | None = None
         self._manual_model_ts: float | None = None
+        # Shared-marker debt: a typed /model whose daemon-facing marker file
+        # has not been written yet because no tick so far could name the
+        # session (no fresh reading, no tracked session). decide_once retries
+        # every tick until a session id exists, then clears it.
+        self._manual_marker_pending: str | None = None
         # Consume-once note set by note_model_reading() when a manual match
         # suppressed what would otherwise have opened a downgrade episode --
         # surfaced to decision.log by decide_once via take_manual_model_note().
@@ -3065,7 +3072,17 @@ class CompactStateMachine:
         """
         self._manual_model_family = family
         self._manual_model_ts = now_wall
+        self._manual_marker_pending = family
         self._manual_effort_active = None
+
+    @property
+    def manual_marker_pending(self) -> str | None:
+        """Family of a typed /model whose shared marker is not yet on disk."""
+        return self._manual_marker_pending
+
+    def clear_manual_marker_pending(self) -> None:
+        """The shared marker for the pending typed /model has been written."""
+        self._manual_marker_pending = None
 
     def note_manual_effort_command(self, level: str, *, now_wall: float) -> None:
         """Record a user-TYPED ``/effort <level>`` command (Plan 00316 Task 2.1).
@@ -3178,6 +3195,12 @@ class CompactStateMachine:
                     self._downgrade_from_family = prev_family
                     self._downgrade_started_ts = now_wall
                 self._downgrade_episode = f"{session}:{family}"
+        if manual_match:
+            # Latch consumed: the typed choice has been observed landing. A
+            # LATER family change with nothing newly typed is a silent
+            # substitution again -- the spent latch must not re-classify it.
+            self._manual_model_family = None
+            self._manual_model_ts = None
         if self._manual_effort_active is not None:
             # Plan 00316 Task 2.1: a manual /effort always wins -- neither the
             # downgrade-episode xhigh floor nor the per-model default fires
@@ -3293,6 +3316,7 @@ class CompactStateMachine:
             "manual_model_family": self._manual_model_family,
             "manual_model_ts": self._manual_model_ts,
             "manual_model_note": self._manual_model_note,
+            "manual_marker_pending": self._manual_marker_pending,
             "manual_effort_active": self._manual_effort_active,
         }
 
@@ -3385,6 +3409,9 @@ class CompactStateMachine:
         if "manual_model_note" in state:
             raw = state["manual_model_note"]
             self._manual_model_note = None if raw is None else str(raw)
+        if "manual_marker_pending" in state:
+            raw = state["manual_marker_pending"]
+            self._manual_marker_pending = None if raw is None else str(raw)
         if "manual_effort_active" in state:
             raw = state["manual_effort_active"]
             self._manual_effort_active = None if raw is None else str(raw)
@@ -3995,6 +4022,12 @@ def decide_once(
     # indicator can suppress itself for the very same manual choice.
     if facts.human_model_command:
         machine.note_manual_model_command(facts.human_model_command, now_wall=facts.now_wall)
+    pending_marker_family = machine.manual_marker_pending
+    if pending_marker_family:
+        # Written on the FIRST tick that can name the session (not necessarily
+        # the typing tick: right after a worker restart or during a compaction
+        # the reading can be absent or synthetic with an empty session id).
+        # Retried every tick until then so the marker is never silently lost.
         marker_session = (reading.session_id if reading is not None else None) or (
             machine.last_model_session
         )
@@ -4002,8 +4035,13 @@ def decide_once(
             write_manual_model_marker(
                 sidecar_dir.parent,
                 session_id=marker_session,
-                family=facts.human_model_command,
+                family=pending_marker_family,
                 now=facts.now_wall,
+            )
+            machine.clear_manual_marker_pending()
+            append_worker_error(
+                f"manual /model marker written: family={pending_marker_family!r} "
+                f"session={marker_session!r}"
             )
     if facts.human_effort_command:
         machine.note_manual_effort_command(facts.human_effort_command, now_wall=facts.now_wall)
