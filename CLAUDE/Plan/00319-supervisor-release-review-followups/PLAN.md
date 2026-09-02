@@ -28,7 +28,9 @@ worker restart with no diagnostic trace — each is invisible when it happens,
 which is exactly what makes it expensive to diagnose later. **Contract drift**:
 a writer and a reader disagreeing on how a session id is stemmed, an audit
 banner that bypasses the poster's own lock and rate limit, and mutable state
-on a router-shared handler instance.
+on a router-shared handler instance. One finding (F2) sits outside those three:
+`budget_exhaustion_detector` still self-triggers on its own ledger, which is
+the same self-reference gap Phase 4 records from the acceptance run.
 
 Each finding below is self-contained: it names the file, what is wrong, and
 why it matters. They can be fixed independently and in any order, so this plan
@@ -76,6 +78,20 @@ which of them are worth the change.
   is reset by the reload, so a partially-typed command vanishes. Dropping
   it may be the right behaviour; doing so invisibly is not — emit a trace
   so the next person debugging "my /model did nothing" can see it.
+- [ ] ⬜ **Task 1.4 (F2)**: `budget_exhaustion_detector` still self-feeds on
+  its own ledger whenever the command does not spell the filename. Both
+  guards key on the literal strings `budget-exhaustion-events.jsonl` and
+  `budget_exhaustion_detector`, and a ledger LINE contains neither — so
+  `cat untracked/*.jsonl`, `jq . untracked/budget*.jsonl` or
+  `tail -n 20 "$LEDGER"` re-fire the detector on its own recorded
+  `matched_fragment`, append a fresh entry, and inject a spurious advisory
+  telling the agent to alarm the user about a budget that was never hit.
+  Advisory-only and the ledger is capped, so this is noise rather than
+  damage — but the brief's "must never self-trigger on its own ledger"
+  requirement is not met. Add the ledger's unique JSON key
+  `"matched_fragment"` to `_SELF_REFERENTIAL_RESPONSE_MARKERS`; a genuine
+  harness budget message will never contain it. Same handler and same
+  self-reference gap as Task 4.5 — fix them together.
 
 ### Phase 2: Unbounded-growth findings
 
@@ -207,8 +223,8 @@ which of them are worth the change.
 
 ## Success Criteria
 
-- [ ] All fifteen items (F1, F3, F4, F5, F6, F7, F8, F9, F10 and the six
-  Phase 4 acceptance-run observations) are closed — each either fixed with a
+- [ ] All sixteen items (F1 through F10 and the six Phase 4 acceptance-run
+  observations) are closed — each either fixed with a
   regression test that fails against the pre-fix code, or marked won't-fix
   with a recorded reason.
 - [ ] `./scripts/qa/llm_qa.py all` passes 25/25 after the changes.
