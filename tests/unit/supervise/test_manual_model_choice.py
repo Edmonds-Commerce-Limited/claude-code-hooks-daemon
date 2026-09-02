@@ -400,3 +400,16 @@ def test_tick_facts_commands_default_to_none() -> None:
     )
     assert facts.human_model_command is None
     assert facts.human_effort_command is None
+
+
+def test_submitted_slash_lines_are_observable() -> None:
+    """Any submitted line starting with '/' is recorded verbatim (bounded),
+    whether or not a command recogniser matched it — the worker logs these
+    so a recognition MISS (e.g. autocomplete swallowing the argument) is
+    diagnosable from the field instead of invisible."""
+    line = _mod.HumanInputLine()
+    line.feed(b"/model opus\r")
+    line.feed(b"hello there\r")
+    line.feed(b"/mod\t\r")
+    assert line.take_slash_submitted() == ["/model opus", "/mod\t"]
+    assert line.take_slash_submitted() == []

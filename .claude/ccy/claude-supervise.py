@@ -374,6 +374,12 @@ _LINE_CLEAR_BYTES = frozenset({0x0D, 0x0A, 0x15, 0x03})
 # The SUBSET of clear bytes that SUBMIT the line (Enter). Ctrl-U/Ctrl-C discard
 # without submitting, so they must NOT count as a human `/compact` request.
 _LINE_SUBMIT_BYTES = frozenset({0x0D, 0x0A})
+# Slash-line observability bounds: submitted '/'-prefixed lines are recorded
+# for the worker's diagnostic log, truncated and capped so a paste storm
+# cannot bloat memory or the log.
+_SLASH_BYTE = 0x2F
+_SLASH_OBSERVED_MAX_CHARS = 80
+_SLASH_OBSERVED_MAX_LINES = 8
 # Keys that delete one character: Ctrl-H and DEL.
 _LINE_BACKSPACE_BYTES = frozenset({0x08, 0x7F})
 # Bytes that never make the box "non-empty" on their own: space and tab.
@@ -558,6 +564,11 @@ class HumanInputLine:
         # -- it opens Claude Code's own selector rather than naming a target.
         self._model_submitted: str | None = None
         self._effort_submitted: str | None = None
+        # Observability: every submitted line starting with '/' is recorded
+        # verbatim (bounded), matched or not, so a recognition MISS (e.g.
+        # autocomplete swallowing the argument bytes) is diagnosable from the
+        # worker's diagnostic log instead of failing invisibly.
+        self._slash_submitted: list[str] = []
 
     def feed(self, data: bytes) -> None:
         """Advance the line model with a chunk of forwarded human stdin bytes."""
@@ -601,6 +612,10 @@ class HumanInputLine:
                 effort_arg = self._buffer_command_arg(_EFFORT_COMMAND)
                 if effort_arg:
                     self._effort_submitted = effort_arg
+                if self._buffer and self._buffer[0] == _SLASH_BYTE:
+                    text = bytes(self._buffer).decode("utf-8", errors="replace")
+                    self._slash_submitted.append(text[:_SLASH_OBSERVED_MAX_CHARS])
+                    del self._slash_submitted[:-_SLASH_OBSERVED_MAX_LINES]
             self._buffer.clear()
         elif byte in _LINE_BACKSPACE_BYTES:
             if self._buffer:
@@ -695,6 +710,12 @@ class HumanInputLine:
         arg = self._effort_submitted
         self._effort_submitted = None
         return arg
+
+    def take_slash_submitted(self) -> list[str]:
+        """Return submitted '/'-prefixed lines observed since last checked."""
+        lines = self._slash_submitted
+        self._slash_submitted = []
+        return lines
 
     @property
     def is_empty(self) -> bool:
@@ -4894,6 +4915,16 @@ def run_worker(
             human_effort_command=line_recognizer.take_effort_submitted(),
             input_line_empty=line_recognizer.is_empty,
         )
+        for typed_slash in line_recognizer.take_slash_submitted():
+            # Recognition-miss observability: what the human's submitted
+            # slash line actually contained at the byte level, so a MISS
+            # (e.g. autocomplete inserting text the PTY never carries) is
+            # diagnosable from the field.
+            append_worker_error(
+                f"diagnostic typed-slash observed: {typed_slash!r} "
+                f"(recognised model={facts.human_model_command!r} "
+                f"effort={facts.human_effort_command!r})"
+            )
         try:
             outcome = decide_once(
                 machine,
