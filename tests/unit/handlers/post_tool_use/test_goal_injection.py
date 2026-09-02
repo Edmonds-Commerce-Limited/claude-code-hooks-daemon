@@ -18,6 +18,7 @@ import pytest
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
+    _CLEAR_SUFFIX,
     _HEADER_TEXT,
     _LOGICAL_LINE_SEPARATOR,
     _MAX_JOINED_CHARS,
@@ -758,6 +759,41 @@ class TestCombinedGoalSignal:
             "sidecar survived the retirement of the last live plan — the ledger "
             "and the sidecar now disagree about whether any goal is live"
         )
+
+    def test_retiring_the_only_live_plan_writes_a_clear_signal(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """Plan 00321: removing the sidecar is not enough — the upstream
+        `/goal` slot still holds the condition.
+
+        Deleting `<session>.goal-intent` stops the goal being RE-injected, but
+        Claude Code's `/goal` slot is last-writer-wins and keeps the condition
+        until something types a clearing form. So an emptied ledger must also
+        drop a `<session>.goal-clear` trigger for the supervisor to act on.
+        """
+        clear_path = self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_CLEAR_SUFFIX}"
+        only = self._write_plan("00296-only")
+        handler.handle(self._hook_input(only))
+        assert not clear_path.exists(), "precondition: no clear pending while the plan is live"
+
+        handler.handle(self._hook_input(self._write_plan("00296-only", status="Complete")))
+
+        assert clear_path.exists(), (
+            "no .goal-clear trigger written — the upstream /goal slot would keep "
+            "the retired condition and challenge every stop"
+        )
+
+    def test_no_clear_signal_while_another_plan_stays_live(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """A goal is still owed, so nothing may clear the slot."""
+        clear_path = self._untracked / _SIGNAL_SUBDIR / f"{_SESSION}{_CLEAR_SUFFIX}"
+        handler.handle(self._hook_input(self._write_plan("00296-first")))
+        handler.handle(self._hook_input(self._write_plan("00298-second")))
+
+        handler.handle(self._hook_input(self._write_plan("00296-first", status="Complete")))
+
+        assert not clear_path.exists()
 
     def test_retirement_leaves_signal_intact_while_another_plan_stays_live(
         self, handler: GoalInjectionHandler

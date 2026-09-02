@@ -1426,6 +1426,7 @@ class Decision(enum.Enum):
     WOULD_CONTINUE = "would-continue"
     WOULD_ESCAPE = "would-escape"
     WOULD_GOAL = "would-goal"
+    WOULD_GOAL_CLEAR = "would-goal-clear"
     WOULD_STANDING_AUTH = "would-standing-auth"
     WOULD_EFFORT = "would-effort"
     WOULD_MODEL = "would-model"
@@ -2243,6 +2244,69 @@ _GOAL_MAX_LOGICAL_LINES = 8
 _MAX_GOAL_INJECTIONS = 5
 _DRY_RUN_GOAL_BODY_PREFIX = "would inject /goal (dry-run — no real /goal sent):"
 
+# ---------------------------------------------------------------------------
+# Goal RETRACTION (Plan 00321).
+#
+# Removing the daemon's `.goal-intent` file only stops RE-injection: Claude
+# Code's own `/goal` slot is last-writer-wins and holds the condition until
+# something types a clearing form, so a retired goal otherwise challenges
+# every stop for the rest of the session.
+#
+# The clearing tokens are read out of the shipped Claude Code binary --
+# `new Set(["clear","stop","off","reset","none","cancel"])`, matched
+# case-insensitively. A BARE `/goal` does NOT clear; it prints status. So the
+# literal below must keep its argument.
+#
+# Unlike the goal signal, this one carries NO payload: the file's PRESENCE is
+# the whole message and the command below is a fixed literal with nothing
+# interpolated. That is deliberate -- anything able to write into the sidecar
+# directory can therefore only ever CLEAR a goal, never type text of its
+# choosing, so this channel cannot be turned into an instruction-injection
+# vector the way a payload-carrying one could.
+_GOAL_CLEAR_GLOB = "*.goal-clear"
+_GOAL_CLEAR_COMMAND = "/goal clear"
+_MAX_GOAL_CLEAR_INJECTIONS = 5
+_DRY_RUN_GOAL_CLEAR_BODY = "would inject /goal clear (dry-run — no real /goal clear sent)"
+
+
+def load_goal_clear_signal(
+    directory: Path,
+    *,
+    now: float,
+    ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS,
+    own_sessions: frozenset[str] | None = None,
+) -> Path | None:
+    """Return the path of an in-scope, fresh goal-clear trigger, else None.
+
+    There is no validation gate and no reject reason because there is no
+    payload to validate: the file carries no text this supervisor will ever
+    type. Only two things are checked, and both are scoping rather than
+    content -- the trigger must name one of THIS supervisor's sessions, and it
+    must be fresh.
+
+    A malformed or unreadable file therefore does NOT clear: with no readable
+    ``session_id`` it fails the scope filter, and with no readable ``ts`` it
+    reads as infinitely stale. That is the fail-safe direction. Clearing the
+    goal of a session we cannot identify would retract a condition that may
+    still be owed, and the daemon rewrites this trigger on the next
+    retirement, so a garbled one costs a tick rather than the retraction.
+    """
+    if not directory.is_dir():
+        return None
+    for path in sorted(directory.glob(_GOAL_CLEAR_GLOB)):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        if not _session_in_scope(data.get("session_id"), own_sessions):
+            continue
+        if (now - _coerce_float(data.get("ts"))) > ttl_seconds:
+            continue
+        return path
+    return None
+
 
 def _validate_goal_lines(rendered_lines: object) -> tuple[str | None, str | None]:
     """Validate ``rendered_lines`` from a goal signal; return (joined, error).
@@ -2554,7 +2618,8 @@ def reap_stale_sidecars(
     """Delete dead context-sidecar / compaction-signal files older than the TTL.
 
     Reaps ``*.json`` sidecars, ``*.compacting`` signals, ``*.goal-intent``
-    signals, ``*.standing-auth-intent`` signals and ``*.model-switch-intent``
+    signals, ``*.goal-clear`` triggers, ``*.standing-auth-intent`` signals and
+    ``*.model-switch-intent``
     signals whose FILE MTIME is older than ``ttl_seconds``. Mtime (not the JSON ``ts``) is used so a
     malformed, truncated, or foreign file is reaped uniformly without a parse --
     a dead file is a dead file. The single newest-mtime ``*.json`` is ALWAYS
@@ -2577,6 +2642,7 @@ def reap_stale_sidecars(
         list(directory.glob(_CONTEXT_SIDECAR_GLOB))
         + list(directory.glob(_COMPACTION_SIGNAL_GLOB))
         + list(directory.glob(_GOAL_SIGNAL_GLOB))
+        + list(directory.glob(_GOAL_CLEAR_GLOB))
         + list(directory.glob(_STANDING_AUTH_SIGNAL_GLOB))
         + list(directory.glob(_MODEL_SWITCH_SIGNAL_GLOB))
     ):
@@ -2683,6 +2749,9 @@ class CompactStateMachine:
         # tick's candidate to suppress a re-type of an identical combined
         # goal caused by an unrelated ledgered plan's status flip.
         self._last_goal_text: str | None = None
+        # Plan 00321: `/goal clear` retractions fired this process. Same
+        # runaway backstop shape as the injection cap above.
+        self._goal_clear_injections = 0
         # Plan 00283: standing-authorisation reinforcement injections this process
         # has fired. Runaway backstop only (see _MAX_STANDING_AUTH_INJECTIONS).
         self._standing_auth_injections = 0
@@ -3292,6 +3361,23 @@ class CompactStateMachine:
         return self._last_goal_text
 
     @property
+    def goal_clear_injections(self) -> int:
+        """How many goal RETRACTIONS this process has fired (Plan 00321)."""
+        return self._goal_clear_injections
+
+    def mark_goal_clear_injection(self) -> None:
+        """Count one `/goal clear` and forget the thrash guard (Plan 00321).
+
+        Resetting ``_last_goal_text`` is the load-bearing half. The guard
+        suppresses a candidate identical to the last injected text, so
+        without this a plan that goes In Progress -> Complete -> In Progress
+        again would have its second, legitimate goal silently swallowed as a
+        duplicate -- of a condition that is no longer set.
+        """
+        self._goal_clear_injections += 1
+        self._last_goal_text = None
+
+    @property
     def standing_auth_injections(self) -> int:
         """How many standing-auth reinforcements this process has fired (Plan 00283)."""
         return self._standing_auth_injections
@@ -3327,6 +3413,7 @@ class CompactStateMachine:
             "await_is_human": self._await_is_human,
             "dry_run_fired": self._dry_run_fired,
             "goal_injections": self._goal_injections,
+            "goal_clear_injections": self._goal_clear_injections,
             "last_goal_text": self._last_goal_text,
             "standing_auth_injections": self._standing_auth_injections,
             "last_model_session": self._last_model_session,
@@ -3377,6 +3464,8 @@ class CompactStateMachine:
             self._dry_run_fired = bool(state["dry_run_fired"])
         if "goal_injections" in state:
             self._goal_injections = _coerce_int(state["goal_injections"])
+        if "goal_clear_injections" in state:
+            self._goal_clear_injections = _coerce_int(state["goal_clear_injections"])
         if "last_goal_text" in state:
             raw = state["last_goal_text"]
             self._last_goal_text = None if raw is None else str(raw)
@@ -4453,6 +4542,45 @@ def decide_once(
                 consume_signal_path = str(goal_path)
                 deferred_log = None
                 noop_reason_log = None
+    # ── Goal RETRACTION (Plan 00321) ────────────────────────────────────────
+    # Subordinate to goal INJECTION above: if both a fresh goal and a clear
+    # trigger are somehow present, the goal wins and the clear waits a tick.
+    # In practice they are mutually exclusive -- the daemon removes the
+    # `.goal-intent` file in the same call that writes the clear trigger.
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+    ):
+        clear_path = load_goal_clear_signal(
+            sidecar_dir,
+            now=facts.now_wall,
+            ttl_seconds=goal_signal_ttl_seconds,
+            own_sessions=own_sessions,
+        )
+        if clear_path is not None:
+            if not can_inject:
+                if facts.idle and not facts.input_line_empty:
+                    deferred_log = f"{_DEFERRED_LOG_PREFIX} (goal clear pending)"
+                else:
+                    noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal clear pending but session busy"
+            elif machine.goal_clear_injections >= _MAX_GOAL_CLEAR_INJECTIONS:
+                noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal clear cap reached"
+            else:
+                decision_value = Decision.WOULD_GOAL_CLEAR.value
+                reason = "goal clear trigger -> would inject /goal clear"
+                if dry_run:
+                    payload = f"{_format_bot_prefix(facts.now_wall)} {_DRY_RUN_GOAL_CLEAR_BODY}"
+                else:
+                    # Fixed literal: nothing from the trigger file reaches the
+                    # PTY, so this channel cannot type text of a writer's
+                    # choosing (see the note on _GOAL_CLEAR_GLOB).
+                    payload = _GOAL_CLEAR_COMMAND
+                submit = True
+                consume_signal_path = str(clear_path)
+                deferred_log = None
+                noop_reason_log = None
     # ── Effort restore on model downgrade (Plan 00278) ──────────────────────
     # Subordinate to every other family: fires only on a tick that would
     # otherwise NOOP in MONITOR with no compaction signal and no goal payload.
@@ -4771,6 +4899,8 @@ def _apply_post_injection_bookkeeping(
     # never clobbers the worker's audit backlog; it merely doesn't carry it).
     if outcome.decision_value == Decision.WOULD_GOAL.value:
         machine.mark_goal_injection(outcome.goal_line)
+    elif outcome.decision_value == Decision.WOULD_GOAL_CLEAR.value:
+        machine.mark_goal_clear_injection()
     elif outcome.decision_value == Decision.WOULD_STANDING_AUTH.value:
         machine.mark_standing_auth_injection()
     elif outcome.decision_value == Decision.WOULD_EFFORT.value:

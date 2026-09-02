@@ -1,6 +1,6 @@
 # Plan 00321: injected goal has no retraction path
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-02
 **Owner**: joseph
 **Priority**: High
@@ -54,32 +54,78 @@ challenge rather than by discharging it.
   That hides an unsatisfiable goal instead of retracting it, and a stale goal
   naming a plan that DOES exist would still slip through.
 
-## Open Question (blocks Task 1.2 — needs a human or upstream answer)
+## Answered: the `/goal` clearing contract (verified, not inferred)
 
-**Does Claude Code's `/goal` accept a clearing form?** A bare `/goal`, an empty
-argument, or an explicit `/goal none` may or may not clear the slot; this was
-not verified, and guessing wrong would inject a literal junk condition instead
-of clearing it — strictly worse than the stale one. Establish the real
-semantics before implementing, from upstream documentation or a deliberate
-manual test in a scratch session, NOT by trying it in a live one.
+`/goal` DOES accept a clearing form. Read directly out of the shipped Claude
+Code binary
+(`/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe`), which
+is ground truth rather than documentation that could lag:
+
+```js
+hOe = 4000,
+k = new Set(["clear", "stop", "off", "reset", "none", "cancel"]);
+function oAe(t) { return k.has(t.toLowerCase()) }
+// command handler:
+//   if (oAe(e)) { let t = sAe(o);
+//                 return t === null ? "No goal set" : `Goal cleared: ${t}` }
+```
+
+Consequences that matter for the implementation:
+
+- **The clearing tokens are `clear`, `stop`, `off`, `reset`, `none`, `cancel`**,
+  matched case-insensitively on the whole argument. `/goal clear` is the
+  canonical one.
+- **A BARE `/goal` does NOT clear.** The empty string is not in the set, so it
+  falls through to the status branch (`Goal active: …` / `No goal set`). An
+  implementation that sent a bare `/goal` expecting a clear would silently do
+  nothing — this is exactly the wrong guess the plan was written to avoid.
+- `sAe` is the clear implementation: it removes the session-scoped Stop hooks
+  from `sessionHooksRegistry` and unsets `activeGoal` with reason `user_clear`.
+  So clearing is a real retraction of the hook, not a cosmetic reset.
+- A goal condition is capped at 4000 characters.
+
+## Design decision: the clear signal is a TRIGGER, not a payload
+
+The retraction must NOT ride the existing `.goal-intent` channel. That
+channel's validator is a shape allowlist requiring the verbatim machine-origin
+header, and that requirement is a security control: anything able to write the
+signal file (a bash redirect is enough) would otherwise be able to type
+arbitrary text into the session, including asserted human consent. Relaxing it
+to admit a clearing form would widen exactly the hole it exists to close.
+
+So retraction gets its own signal file, `<session>.goal-clear`, whose PRESENCE
+is the entire message. The supervisor types the fixed literal `/goal clear` and
+interpolates nothing from the file. A forged `.goal-clear` can therefore do
+only one thing — clear a goal — which is the safe direction: the failure mode
+of a spurious clear is a lost reminder, whereas the failure mode of a forged
+payload is injected instruction text.
 
 ## Tasks
 
 ### Phase 1: Establish and implement retraction
 
-- [ ] ⬜ **Task 1.1**: Answer the Open Question above and record the verified
-  `/goal` clearing semantics in this plan.
-- [ ] ⬜ **Task 1.2**: Teach the supervisor to inject the clearing form when a
-  retirement takes the ledger to zero live entries — the same trigger that now
-  retracts the sidecar, extended to the upstream slot. Gate it so it fires only
-  on the some-to-zero transition, never on a session that never had a goal.
-- [ ] ⬜ **Task 1.3**: Add a `hooks-daemon clear-goal` counterpart to
-  `inject-goal`, so a stale condition can be cleared on demand without waiting
-  for a retirement. `inject-goal` deliberately requires an ACTIVE plan number,
-  so it cannot be reused for this.
-- [ ] ⬜ **Task 1.4**: Regression tests pinning the some-to-zero transition, and
-  pinning that a still-live plan keeps its condition — the same boundary Plan
-  00320 pinned for the sidecar.
+- [x] ✅ **Task 1.1**: Answered from the shipped binary — see the clearing
+  contract above. `/goal clear` retracts; a bare `/goal` does not.
+- [x] ✅ **Task 1.2**: `clear_goal_signal` now writes a `<session>.goal-clear`
+  trigger alongside removing the sidecar, and the supervisor consumes it at the
+  same idle choke point as every other family, typing the fixed literal
+  `/goal clear`. It is subordinate to goal INJECTION, so a fresh goal wins and
+  a clear waits a tick; in practice they are mutually exclusive because the
+  daemon removes the `.goal-intent` in the same call that writes the trigger.
+  `mark_goal_clear_injection` also resets the Plan 00299 thrash guard — without
+  that, a plan cycling In Progress → Complete → In Progress would have its
+  second, legitimate goal swallowed as a duplicate of a condition no longer set.
+- [x] ✅ **Task 1.3**: `hooks-daemon clear-goal` added. It takes NO plan number
+  by design: `inject-goal` requires an ACTIVE plan and would refuse in exactly
+  the already-empty-ledger case this exists for — which is the case that
+  stranded the v3.60.0 session.
+- [x] ✅ **Task 1.4**: Regression tests on both sides. Supervisor:
+  `tests/unit/supervise/test_goal_clear_signal.py` pins the upstream clearing
+  token (a bare `/goal` would silently no-op), the injection, dry-run,
+  consumption, staleness/foreign-session/malformed scoping, precedence under a
+  competing goal, the cap, the state round-trip, and — most importantly — that
+  no file content ever reaches the PTY. Daemon: the some-to-zero transition and
+  the still-live boundary, plus the CLI's five cases.
 
 ## Success Criteria
 

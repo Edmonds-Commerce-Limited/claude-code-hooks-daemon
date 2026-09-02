@@ -3087,6 +3087,71 @@ def cmd_harvest_background(args: argparse.Namespace) -> int:
     return 1 if report["has_breaches"] else 0
 
 
+def cmd_clear_goal(args: argparse.Namespace) -> int:
+    """Retract this session's goal on demand (Plan 00321).
+
+    The automatic retraction fires when a retirement empties the goal ledger.
+    This is the manual counterpart for the case that leaves stranded: the
+    ledger is ALREADY empty while Claude Code's ``/goal`` slot still holds a
+    condition, so no retirement remains to trigger anything and the stale goal
+    challenges every stop until the session ends.
+
+    Deliberately takes NO plan number. ``inject-goal`` requires an ACTIVE
+    plan, which would refuse in exactly the stale-slot case this exists for --
+    there is no plan involved in retracting a goal.
+
+    Removes any pending ``<session>.goal-intent`` and writes the
+    ``<session>.goal-clear`` trigger the supervisor consumes. Idempotent.
+
+    Returns:
+        0 on trigger written, 1 on refusal/failure.
+    """
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import clear_goal_signal
+
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    if not session_id:
+        print(
+            "ERROR: CLAUDE_CODE_SESSION_ID is not set. The clear trigger is "
+            "session-keyed, so clear-goal must run INSIDE the Claude Code "
+            "session whose goal should be retracted (a Bash tool call sets "
+            "the variable). Cross-session retargeting is not supported.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if getattr(args, "project_root", None):
+        project_path = Path(args.project_root).resolve()
+    else:
+        project_path = get_project_path(None)
+    # Same tolerance as inject-goal: a repeat initialise raises RuntimeError
+    # (an earlier step in this process already did it), and a missing/invalid
+    # config does not abort -- refusing to retract because the config is
+    # unreadable would strand the stale goal this exists to remove. The
+    # ValueError is REMEMBERED rather than discarded, so if the write then
+    # fails the refusal names the real cause instead of a generic failure.
+    context_init_error: str | None = None
+    try:
+        ProjectContext.initialize(project_path / ".claude" / "hooks-daemon.yaml")
+    except RuntimeError:
+        logger.debug("clear-goal: project context already initialised; reusing it")
+    except ValueError as e:
+        context_init_error = str(e)
+        print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
+
+    if not clear_goal_signal(session_id):
+        if context_init_error is not None:
+            print(
+                f"ERROR: failed to write the goal-clear trigger: {context_init_error}",
+                file=sys.stderr,
+            )
+        else:
+            print("ERROR: failed to write the goal-clear trigger", file=sys.stderr)
+        return 1
+    print(f"Goal retraction queued for session {session_id}; the supervisor types /goal clear.")
+    return 0
+
+
 def cmd_inject_goal(args: argparse.Namespace) -> int:
     """Write a ``<session>.goal-intent`` signal on demand (Plan 00269 Task 2.3).
 
@@ -6353,6 +6418,22 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_inject_goal.set_defaults(func=cmd_inject_goal)
+
+    # clear-goal command (Plan 00321) — retract a stale /goal condition.
+    # No plan number: inject-goal's ACTIVE-plan requirement would refuse in
+    # exactly the already-empty-ledger case this exists for.
+    parser_clear_goal = subparsers.add_parser(
+        "clear-goal",
+        help="Retract this session's /goal condition (writes a <session>.goal-clear trigger)",
+    )
+    parser_clear_goal.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_clear_goal.set_defaults(func=cmd_clear_goal)
 
     # verdicts command (Plan 00209): report on the handler decision log
     parser_verdicts = subparsers.add_parser(

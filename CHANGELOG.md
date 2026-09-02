@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Goal retraction: `hooks-daemon clear-goal` and an automatic `/goal clear`
+  (Plan 00321).** Removing the daemon's `.goal-intent` file only stops a goal
+  being RE-injected — Claude Code's own `/goal` slot is last-writer-wins and
+  holds the condition until something types a clearing form, so a retired goal
+  challenged every stop for the rest of the session. A retirement that empties
+  the goal ledger now also drops a `<session>.goal-clear` trigger, which the
+  supervisor consumes at its usual idle choke point and answers with the fixed
+  literal `/goal clear`. The clearing tokens were read out of the shipped
+  Claude Code binary (`clear`, `stop`, `off`, `reset`, `none`, `cancel`,
+  case-insensitive) rather than guessed — note a BARE `/goal` does **not**
+  clear, it prints status, so an implementation that sent one would silently
+  no-op. `clear-goal` covers the case automatic retraction cannot reach: the
+  ledger already empty while the slot still holds a condition, leaving no
+  retirement to trigger anything. It deliberately takes no plan number, since
+  `inject-goal`'s ACTIVE-plan requirement would refuse in exactly that case.
+  The trigger carries no payload — its presence is the whole message and
+  nothing from the file reaches the PTY — so unlike a payload-carrying channel
+  it can never be turned into an instruction-injection vector; the worst a
+  forged trigger achieves is a retraction.
+
 ### Fixed
 
 - **A retired goal kept challenging session stop: the goal-intent sidecar is

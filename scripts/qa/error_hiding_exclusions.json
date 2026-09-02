@@ -841,6 +841,12 @@
       "reason": "Plan 00269 review fix: ProjectContext.initialize() is called unconditionally (no private-state peeking), so a repeat call raises RuntimeError meaning 'already initialised earlier in this process' -- a benign, expected state where the existing context is exactly what the command needs. Logged at debug and execution continues; raising would break every inject-goal run performed after any other context-initialising step."
     },
     {
+      "file": "daemon/cli.py",
+      "function": "cmd_clear_goal",
+      "rule": "log-and-continue",
+      "reason": "Plan 00321: identical shape and identical justification to the cmd_inject_goal entry above -- ProjectContext.initialize() is called unconditionally, so RuntimeError means 'already initialised earlier in this process', a benign expected state. Logged at debug and execution continues. The sibling ValueError branch is deliberately NOT excluded: it is remembered in context_init_error and consumed by the failure message, so a genuinely unreadable config names the real cause rather than being swallowed."
+    },
+    {
       "file": "handlers/stop/auto_continue_stop.py",
       "function": "_goal_ledger_challenge",
       "rule": "return-none-on-error",

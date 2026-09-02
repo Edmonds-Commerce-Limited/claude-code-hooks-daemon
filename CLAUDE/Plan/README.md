@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00321: injected goal has no retraction path](00321-injected-goal-has-no-retraction-path/PLAN.md) - Not Started (the supervisor can set the session `/goal` slot but nothing can clear it, so a stale condition outlives its ledger entry and challenges every stop; Plan 00320 stopped such goals being created, this one retracts the ones already in the slot)
+- [00321: injected goal has no retraction path](00321-injected-goal-has-no-retraction-path/PLAN.md) - In Progress (the supervisor could set the session `/goal` slot but nothing could clear it, so a stale condition outlived its ledger entry and challenged every stop; adds a `.goal-clear` trigger, a supervisor-typed `/goal clear`, and a `hooks-daemon clear-goal` CLI)
 
 - [00319: supervisor release review followups](00319-supervisor-release-review-followups/PLAN.md) - Not Started (the ten non-blocking findings surviving the v3.60.0 code-review gate, grouped into silent failures, unbounded per-session growth, and writer/reader contract drift; the three BLOCKING siblings shipped in 55dd5b2e)
 

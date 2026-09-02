@@ -83,6 +83,11 @@ _SIGNAL_SUBDIR: Final[str] = "context-sidecar"
 # Deliberately NOT ``.json`` so the supervisor's sidecar reader never
 # mistakes a goal signal for a context sidecar.
 _SIGNAL_SUFFIX: Final[str] = ".goal-intent"
+# Plan 00321: retraction gets its own signal, whose PRESENCE is the whole
+# message. The supervisor types the fixed literal `/goal clear` and reads no
+# text out of this file, so a forged one can only ever clear a goal — it can
+# never inject instruction text the way a widened .goal-intent validator could.
+_CLEAR_SUFFIX: Final[str] = ".goal-clear"
 _SESSION_ID_FALLBACK: Final[str] = "unknown"
 _UNSAFE_SESSION_CHARS: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9_.-]")
 
@@ -436,20 +441,37 @@ def write_goal_signal(
 
 
 def clear_goal_signal(session_id: str) -> bool:
-    """Remove the ``<session>.goal-intent`` signal file (Plan 00320).
+    """Retract the session's goal (Plans 00320, 00321).
 
-    The retract counterpart to :func:`write_goal_signal`. Declining to
-    REWRITE the signal is not the same as retracting it: the file written
-    when the goal was emitted survives, so a retired goal keeps being read
-    as live. An already-absent file counts as success.
+    The retract counterpart to :func:`write_goal_signal`, and it has two
+    halves because the goal lives in two places.
+
+    First, remove ``<session>.goal-intent``: declining to REWRITE it is not
+    the same as retracting it, so without this the file written when the
+    goal was emitted survives and a retired goal keeps being read as live.
+
+    Second, drop a ``<session>.goal-clear`` trigger. Removing the sidecar
+    only stops RE-injection; Claude Code's own ``/goal`` slot is
+    last-writer-wins and holds the condition until something types a
+    clearing form, so the supervisor needs telling. The file's PRESENCE is
+    the entire message — the supervisor types a fixed literal and reads no
+    text out of it, so a forged trigger can only ever clear a goal.
 
     Failures are logged, never raised — same best-effort contract as the
-    writer. Returns True if no signal file remains for this session.
+    writer. Returns True when both halves succeeded.
     """
     try:
         target_dir = ProjectContext.daemon_untracked_dir() / _SIGNAL_SUBDIR
         stem = _UNSAFE_SESSION_CHARS.sub("_", session_id) if session_id else _SESSION_ID_FALLBACK
         (target_dir / f"{stem}{_SIGNAL_SUFFIX}").unlink(missing_ok=True)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        clear_path = target_dir / f"{stem}{_CLEAR_SUFFIX}"
+        tmp_path = target_dir / f".{stem}.clear.{os.getpid()}.tmp"
+        tmp_path.write_text(
+            json.dumps({_FIELD_TS: time.time(), _FIELD_SESSION_ID: session_id}),
+            encoding="utf-8",
+        )
+        tmp_path.replace(clear_path)
         return True
     except RuntimeError as e:
         logger.warning("goal_injection: skipping signal clear (no project context): %s", e)

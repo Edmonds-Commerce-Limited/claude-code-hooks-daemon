@@ -603,7 +603,12 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         """Return acceptance tests for the three lifecycle phases."""
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
-        plan_dir = "/tmp/acceptance-test-recovcron/CLAUDE/Plan/00099-test"  # nosec B108 - acceptance test fixture path, not a runtime temp file
+        # Plan 00320/00321: the number MUST stay outside the real allocated
+        # range. This fixture flips a PLAN.md to In Progress, which is a real
+        # goal-emission trigger; when it used 00099 the resulting goal named a
+        # plan that genuinely exists (00099-python-fingerprint-venv-isolation),
+        # so a stale goal read as plausible and cost a long investigation.
+        plan_dir = "/tmp/acceptance-test-recovcron/CLAUDE/Plan/99099-test"  # nosec B108 - acceptance test fixture path, not a runtime temp file
         plan_path = f"{plan_dir}/PLAN.md"
 
         return [
@@ -611,7 +616,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                 title="Plan creation: writing new PLAN.md triggers recovery cron setup",
                 command=(
                     f"Use the Write tool to write to {plan_path}"
-                    " with content '# Plan 00099: Test\\n\\n**Status**: Not Started'"
+                    " with content '# Plan 99099: Test\\n\\n**Status**: Not Started'"
                 ),
                 description=(
                     "On plan creation, advises agent to create a non-durable hourly"
@@ -650,7 +655,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                 setup_commands=[
                     f"mkdir -p {plan_dir}",
                     (
-                        f"echo '# Plan 00099\\n\\n**Status**: In Progress"
+                        f"echo '# Plan 99099\\n\\n**Status**: In Progress"
                         f"\\n\\n- [ ] ⬜ **Task 1.1**: Todo' > {plan_path}"
                     ),
                 ],
@@ -662,7 +667,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                 title="Plan completion: writing Status Complete warns before cron teardown",
                 command=(
                     f"Use the Write tool to write to {plan_path}"
-                    " with content '# Plan 00099\\n\\n**Status**: Complete'"
+                    " with content '# Plan 99099\\n\\n**Status**: Complete'"
                 ),
                 description=(
                     "On plan completion, warns that deleting the recovery cron"
