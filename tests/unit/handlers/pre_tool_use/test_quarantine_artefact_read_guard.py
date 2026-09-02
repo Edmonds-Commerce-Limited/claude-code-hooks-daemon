@@ -382,7 +382,7 @@ class TestDeclaredAcceptancePatternsAreProducible:
     ) -> None:
         payload = _hook_input("Read", {"file_path": "/tmp/topic-opus-security-DETAIL.md"})
         reason = handler.handle(payload).reason or ""
-        for pattern in self._patterns_for(handler,"blocks Read of a DETAIL artefact"):
+        for pattern in self._patterns_for(handler, "blocks Read of a DETAIL artefact"):
             assert re.search(pattern, reason), f"{pattern!r} no longer appears in: {reason}"
 
     def test_bash_deny_reason_matches_its_declared_patterns(
@@ -390,7 +390,7 @@ class TestDeclaredAcceptancePatternsAreProducible:
     ) -> None:
         payload = _hook_input("Bash", {"command": "cat /tmp/topic-opus-security-DETAIL.md"})
         reason = handler.handle(payload).reason or ""
-        for pattern in self._patterns_for(handler,"blocks Bash cat of a DETAIL artefact"):
+        for pattern in self._patterns_for(handler, "blocks Bash cat of a DETAIL artefact"):
             assert re.search(pattern, reason), f"{pattern!r} no longer appears in: {reason}"
 
 

@@ -112,11 +112,28 @@ which of them are worth the change.
   secret-file guard's own deny message, so having it blocked when piped
   is a sharp edge in the recommended recovery path. Decide whether
   `secret-meta` belongs in `pipe_blocker`'s whitelist.
+- [ ] ⬜ **Task 4.2**: acceptance Tests 66 and 67 share one disclosure budget
+  and therefore cannot both pass as declared. `sensitive_content` emits its
+  verbose rationale once per transcript; Test 66 spends it, so Test 67 —
+  which declares the verbose-only pattern `deliberately not shown` —
+  necessarily sees the terse form. The handler is right and the tests are
+  individually right; they just cannot both hold in one transcript. Either
+  drop the verbose-only pattern from whichever test runs second, or give
+  the pair distinct transcript paths. Test 67's substantive contract (deny,
+  cite only an index, leak neither the term nor the raw command line) was
+  met in full during the v3.60.0 run.
+- [ ] ⬜ **Task 4.3**: `pipe_blocker` labels the producer of
+  `python -m pytest ... | tail` as "python is expensive", while the
+  project's own CLAUDE.md states it "names `pytest` as its producer,
+  because `-m` there means module". The REMEDIATION it prints does name
+  the real module (that is what Plan 00222 fixed) — only the label
+  disagrees. Cosmetic, but it made an acceptance runner report a false
+  FAIL, so either the label or the doc sentence should move.
 
 ## Success Criteria
 
-- [ ] All ten findings (F1, F3, F4, F5, F6, F7, F8, F9, F10 and the
-  `secret-meta` observation) are closed — each either fixed with a
+- [ ] All twelve items (F1, F3, F4, F5, F6, F7, F8, F9, F10 and the three
+  Phase 4 acceptance-run observations) are closed — each either fixed with a
   regression test that fails against the pre-fix code, or marked won't-fix
   with a recorded reason.
 - [ ] `./scripts/qa/llm_qa.py all` passes 25/25 after the changes.
