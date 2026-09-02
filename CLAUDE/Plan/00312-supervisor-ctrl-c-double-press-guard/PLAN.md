@@ -76,7 +76,9 @@ loudly visible, and the guard is configurable/disable-able.
   decision-log entries. Unit tests for: single press swallowed, double
   press forwarded, window expiry re-arms, paste-burst exemption,
   disabled-flag passthrough.
-- [ ] ⬜ **Task 2.2**: Live dogfood in the NEXT supervised session (the gate
+- [ ] 🔄 **Task 2.2** (single-press half confirmed live; double-press forward
+  pending the owner's next deliberate shutdown — see JOURNAL/): Live dogfood
+  in the NEXT supervised session (the gate
   runs in `_forward_io`, which is the PTY HOST tier — worker hot-reload does
   not apply, and restarting the host would kill the live `claude` child):
   single ^C shows the hint and kills nothing; double ^C interrupts as
