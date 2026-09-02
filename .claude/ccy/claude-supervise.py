@@ -3097,9 +3097,17 @@ class CompactStateMachine:
         Also clears any manual effort latch: a deliberate model change is a
         fresh context the old manual effort no longer speaks to (Task 2.1).
         """
-        self._manual_model_family = family
+        # CANONICALISE on the way in. `family` here is the RAW argument the
+        # human typed -- "Opus", "opusplan", "claude-opus-4-8", "mythos" -- and
+        # every later comparison is against a canonical family. Storing it raw
+        # made `/model Opus` silently fail to latch, so the auto-restore
+        # overrode the human's own choice. Falls back to the lowered raw string
+        # for an unrecognised family: it simply never matches a reading, which
+        # is the same harmless outcome as before.
+        canonical = _model_family(family) or family.strip().lower()
+        self._manual_model_family = canonical
         self._manual_model_ts = now_wall
-        self._manual_marker_pending = family
+        self._manual_marker_pending = canonical
         self._manual_effort_active = None
 
     @property
@@ -5003,7 +5011,13 @@ def run_worker(
             human_compact_submitted=line_recognizer.take_compact_submitted(),
             human_model_command=line_recognizer.take_model_submitted(),
             human_effort_command=line_recognizer.take_effort_submitted(),
-            input_line_empty=line_recognizer.is_empty,
+            # AND, never override: a worker restart resets this recognizer, so
+            # its buffer reads EMPTY while the human still has unsubmitted text
+            # in the box. Overriding the host's own observation there would let
+            # `can_inject` go True and the supervisor type into a non-empty
+            # input box -- the exact invariant the empty-box guard exists for.
+            # Either side seeing text is enough to hold the injection.
+            input_line_empty=facts.input_line_empty and line_recognizer.is_empty,
         )
         for typed_slash in line_recognizer.take_slash_submitted():
             # Recognition-miss observability: what the human's submitted

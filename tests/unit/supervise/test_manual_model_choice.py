@@ -12,12 +12,12 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import pytest
+
 from tests.unit.supervise._load import load_supervisor_module
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 _mod = load_supervisor_module()
 
@@ -251,18 +251,51 @@ def test_rapid_successive_manual_model_changes_each_count(tmp_path: Path) -> Non
     assert second.payload is None
 
 
-def test_case_and_alias_forms_of_model_names_match(tmp_path: Path) -> None:
-    """The typed command may be an alias (`mythos`) or a full model id."""
+@pytest.mark.parametrize(
+    "typed_argument",
+    [
+        "opus",  # the plain canonical form
+        "Opus",  # capitalised, as a human naturally types it
+        "OPUS",
+        "opusplan",  # a real Claude Code model alias
+        "claude-opus-4-8",  # a full model id pasted verbatim
+        "claude-opus-5",
+    ],
+)
+def test_raw_typed_model_argument_forms_all_latch(tmp_path: Path, typed_argument: str) -> None:
+    """The RAW argument the human typed must latch, in every form they may type.
+
+    This feeds the argument exactly as `HumanInputLine` hands it over. The
+    previous version of this test canonicalised with `_model_family()` in the
+    TEST before passing it in, so it only ever exercised the already-canonical
+    string and hid a real defect: the raw argument was stored verbatim and
+    compared with `==` against the canonical family, so `/model Opus` (or any
+    alias or full id) failed to latch and the auto-restore overrode the
+    human's own choice.
+    """
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
     _decide(sidecar_dir, machine)
-    # Typed as the raw sidecar-style id; _model_family() canonicalises both.
-    typed_family = _mod._model_family("claude-opus-4-8")
-    _decide(sidecar_dir, machine, facts=_facts(human_model_command=typed_family))
+    _decide(sidecar_dir, machine, facts=_facts(human_model_command=typed_argument))
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 0.5)
     outcome = _decide(sidecar_dir, machine)
     assert outcome.payload is None
+    later = _decide(sidecar_dir, machine, facts=_facts(_NOW + 10_000.0))
+    assert later.decision_value != "would-model"
+
+
+def test_manual_marker_records_the_canonical_family(tmp_path: Path) -> None:
+    """The daemon compares the marker against a CANONICAL family, so a raw
+    typed form must be canonicalised before it is written or the status-line
+    indicator never recognises the manual change."""
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _decide(sidecar_dir, machine, facts=_facts(human_model_command="Opus"))
+    marker_path = tmp_path / _mod._MANUAL_MODEL_MARKER_SUBDIR / f"{_SESSION}.json"
+    assert json.loads(marker_path.read_text(encoding="utf-8"))["family"] == "opus"
 
 
 def test_manual_match_clears_a_stale_open_downgrade_episode(tmp_path: Path) -> None:

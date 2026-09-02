@@ -1,0 +1,41 @@
+version: "3.60.0"
+truth_changes:
+  - was: >
+      In the ccy supervisor's two-tier design, only the injection DECISION
+      ran in the hot-reloadable `--worker` subprocess. RECOGNITION of a
+      human-typed slash command (`/compact`, `/model <x>`, `/effort <x>`)
+      ran in the long-lived host PTY process, which never hot-reloads — so
+      changing how a typed command is recognised required a full Claude Code
+      session restart, and an edit to that parsing was inert until then.
+    now: >
+      Supervisor host thin shim (Plan 00317): typed-command RECOGNITION also
+      runs worker-side, fed by a bounded raw-input tap (`RawInputTap`) the
+      host forwards each tick. An edit to command recognition now ships live
+      on the worker's next hot-reload — no session restart, no host change.
+      The verify-the-reload discipline is unchanged and still applies (the
+      reload is content-hash based with an mtime pre-check, so a bare `touch`
+      does nothing and an mtime-preserving redeploy can silently leave a
+      stale worker; confirm a new `--worker` pid before testing behaviour).
+      Only byte-level primitives that must act on a byte BEFORE it reaches
+      the child remain host-side by design — the Ctrl+C double-press swallow
+      and the Ctrl+Z (SUSP) strip.
+  - was: >
+      The ccy supervisor flushed its audit trail as a visible, bot-prefixed
+      message INJECTED INTO THE CHAT transcript, so a record of what the
+      supervisor did (`/model`, `/effort`, `/compact`, goal) appeared in the
+      conversation and needed an idle session with an empty input box before
+      it could be posted.
+    now: >
+      Supervisor audit banner (Plan 00318): the audit trail is a transient
+      STATUS-LINE banner, not a chat injection. `supervisor_indicator`
+      renders it from `supervise/status-message.json` with a live countdown
+      (`(Ns)`, rounded up so it never reads "0s") on any message carrying
+      `countdown: true`; it self-clears after its TTL and leaves nothing in
+      the transcript, costing neither a model turn nor a permanent
+      transcript entry. It needs no idle session or empty input box, so it
+      surfaces immediately. The banner shows only WHAT was done (truncated
+      to the first few items with a "+N more" remainder); the per-item
+      reason and the full durable record stay in the supervisor's
+      `decision.log`, which remains the audit source of truth. Any doc or
+      agent memory asserting the supervisor "posts an audit chat message" is
+      now false — look at the status line and `decision.log` instead.

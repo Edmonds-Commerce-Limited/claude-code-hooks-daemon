@@ -21,8 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   excluded by default — those return file contents the model merely read,
   not a live exhaustion signal. Each detection is appended to an untracked
   `budget-exhaustion-events.jsonl` occurrence ledger. Ships enabled by
-  default (opt-out), advisory only — never blocks. Catalogued alongside
-  other hidden agent budgets in the new `BUDGETS.md`.
+  default (opt-out), advisory only — never blocks. The research catalogue of
+  hidden agent budgets that motivated it is kept as a dated snapshot at
+  `CLAUDE/Plan/Completed/00315-hidden-agent-budget-detection/BUDGETS.md`.
 
 ### Changed
 
@@ -69,14 +70,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pattern 1 and the narrower pattern 4.
 - **`budget_exhaustion_detector` no longer false-fires on documentation
   about itself (Plan 00315 follow-up).** Reading a file whose CONTENT
-  describes the detector — this project's own `CHANGELOG.md` entry,
-  `BUDGETS.md`, the release notes — tripped the generic
-  "budget…exhausted/used up/exceeded" pattern and raised a spurious
-  budget-exhaustion advisory. The existing self-referential guard only
-  inspected the Bash COMMAND, which is innocent in that case (`head CHANGELOG.md`); the trigger prose is in the response body. The same
-  markers are now applied to the tool RESPONSE, which is precise because a
-  genuine harness budget message never names the detector or its ledger.
-  Caught live while reading this release's own changelog entry.
+  describes the detector — this project's own `CHANGELOG.md` entry, the
+  release notes — tripped the generic "budget…exhausted/used up/exceeded"
+  pattern and raised a spurious budget-exhaustion advisory. The existing
+  self-referential guard only inspected the Bash COMMAND, which is innocent
+  in that case (`head CHANGELOG.md`); the trigger prose is in the response
+  body. The same two markers (the handler name and its ledger filename) are
+  now applied to the tool RESPONSE, which is precise because a genuine
+  harness budget message never names the detector or its ledger. Note the
+  guard keys on those markers, NOT on "is this documentation": prose that
+  discusses budget exhaustion without naming the detector is still matched
+  by design. Caught live while reading this release's own changelog entry.
 
 ## [3.59.0] - 2026-09-01
 

@@ -99,9 +99,13 @@ def state_dir(daemon_untracked_dir: Path) -> Path:
 _MANUAL_MARKER_SUBDIR: Final[str] = "manual-model-changes"
 # Mirrors the supervisor's `_MANUAL_MODEL_WINDOW_SECONDS` — kept as an
 # independent constant (the two are separate deployables) rather than a
-# shared import, so this stays generous enough to outlast the render/tick
-# latency between the human's Enter and the daemon's next status-line render.
-_MANUAL_MARKER_WINDOW_SECONDS: Final[float] = 120.0
+# shared import. It is a BACKSTOP, not a race window: a busy session may not
+# re-render the status line for many minutes after the human's Enter, and a
+# marker that expires before that first render lets the indicator open a
+# downgrade episode against the human's own choice and latch for the rest of
+# the session. Raising the supervisor's constant WITHOUT raising this one
+# reintroduces exactly that defect, so the two must move together.
+_MANUAL_MARKER_WINDOW_SECONDS: Final[float] = 3600.0
 _MARKER_KEY_FAMILY: Final[str] = "family"
 _MARKER_KEY_TS: Final[str] = "ts"
 

@@ -172,6 +172,23 @@ class TestManualModelChange:
         )
         assert is_manual_model_change(tmp_path, "sess-a", "sonnet", now=1005.0) is False
 
+    def test_marker_survives_a_busy_gap_longer_than_two_minutes(self, tmp_path: Path) -> None:
+        """The supervisor's window is the backstop; this mirror must match it.
+
+        A busy session only re-renders the status line when it next renders, so
+        the first render after a manual `/model` can arrive many minutes later.
+        While this constant lagged the supervisor's at 120s, that render opened
+        a downgrade episode and the false "downgraded" indicator latched for the
+        rest of the session — the very defect the manual marker exists to stop.
+        """
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "sess-a.json").write_text(
+            json.dumps({"session_id": "sess-a", "family": "opus", "ts": 1000.0}),
+            encoding="utf-8",
+        )
+        ten_minutes_later = 1000.0 + 600.0
+        assert is_manual_model_change(tmp_path, "sess-a", "opus", now=ten_minutes_later) is True
+
     def test_stale_marker_outside_the_window_is_not_manual(self, tmp_path: Path) -> None:
         tmp_path.mkdir(parents=True, exist_ok=True)
         (tmp_path / "sess-a.json").write_text(

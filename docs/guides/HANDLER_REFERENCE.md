@@ -2705,6 +2705,40 @@ handlers:
 
 ---
 
+#### budget_exhaustion_detector
+
+| Property       | Value                        |
+| -------------- | ---------------------------- |
+| **Config key** | `budget_exhaustion_detector` |
+| **Type**       | Advisory                     |
+| **Event**      | PostToolUse                  |
+
+**Description:** Scans a completed tool call's response for budget/quota-exhaustion messaging and tells the agent to report it to you prominently instead of retrying the exhausted tool or quietly degrading to a worse alternative. These budgets are otherwise invisible: the harness replaces the tool result with a system message, so an agent can lose a capability mid-task and you never learn why the work came back thinner. Advisory only — it never blocks.
+
+Matched shapes: the web-search refusal fragments, plus generic "budget…exhausted/used up/exceeded", "quota exceeded" and "budget…limit reached". It deliberately never keys on the ceiling NUMBER (e.g. `CLAUDE_CODE_MAX_WEB_SEARCHES`), which would false-fire on ordinary counts. Each hit is appended to an untracked `budget-exhaustion-events.jsonl` ledger.
+
+**Two self-referential guards** stop it feeding on its own material: a Bash command naming the handler or its ledger is skipped, and so is a tool RESPONSE containing either marker (reading a changelog entry that describes the detector is documentation, not a live signal). Both key on those markers only — prose that discusses budget exhaustion without naming the detector is still matched, by design.
+
+| Option           | Values     | Default                                                 | Effect                                                              |
+| ---------------- | ---------- | ------------------------------------------------------- | ------------------------------------------------------------------- |
+| `excluded_tools` | list       | `Read`, `Grep`, `Glob`, `Edit`, `Write`, `NotebookEdit` | Tools whose responses are never scanned (they return file content). |
+| `extra_patterns` | regex list | none                                                    | Additional project-specific shapes; additive to the built-ins.      |
+| `exclude_paths`  | glob list  | none                                                    | Exempt paths entirely; unions with `daemon.exclude_paths`.          |
+
+**Config example:**
+
+```yaml
+handlers:
+  post_tool_use:
+    budget_exhaustion_detector:
+      enabled: true
+      options:
+        extra_patterns:
+          - "custom budget ceiling hit"
+```
+
+---
+
 ## SessionStart Handlers
 
 These handlers run when a new Claude Code session begins. They provide environment information and configuration checks.
