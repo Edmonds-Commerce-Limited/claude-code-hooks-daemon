@@ -6,6 +6,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 - [00275: github auto-close keyword blocker](00275-github-auto-close-keyword-blocker/PLAN.md) - Complete at merge `2bdafe05` (PreToolUse guard denying GitHub auto-closing keyword references in git commit/merge/tag and `gh pr` messages, inline or via `-F`/`--body-file`; enabled by default, `MUST_AUTO_CLOSE_BECAUSE` hatch)
 
+- [00276: goal stack concurrent tracking](00276-goal-stack-concurrent-tracking/PLAN.md) - Complete at merge `74fa6e50` + the archiving commit (daemon-side goal ledger: every emission recorded, displacement advisory, Stop-time defence naming all still-live ledgered plans; live-verified by the production ledger's six-emission displacement history)
+
 - [00274: skill opportunity detector](00274-skill-opportunity-detector/PLAN.md) - Complete at the archiving commit (transcript mining → redacted digest → report embedding a judging rubric; an in-session subagent judges it — the model shell-out was removed per Decision 9; TTL-gated SessionStart advisory, report-only, ships disabled upstream)
 
 - [00273: hook input payload validation](00273-hook-input-payload-validation/PLAN.md) - Complete at merge `e0f3dee9` + review fold `02957cb4` (input_contract QA check over the daemon's AST-derived read surface vs vendored input examples; Phase 2 runtime validation ruled NO-GO; Phase 3 channel question answered sentinel-free from transcript attachment typing — both SessionStart channels kept, each serving its own audience)

@@ -1,6 +1,6 @@
 # Plan 00315: hidden agent budget detection
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-02
 **Owner**: joseph
 **Priority**: Medium
@@ -99,11 +99,13 @@ the user VERY CLEARLY, with bold prominent prompting.
 
 ## Success Criteria
 
-- [ ] BUDGETS.md exists with source-of-truth attribution per entry and
+- [x] BUDGETS.md exists with source-of-truth attribution per entry and
   explicit "unknown/observed-only" honesty where docs are silent.
-- [ ] At least the search-budget failure shape is pinned by a verbatim
-  fixture (or documented as never-yet-observed in our archive).
-- [ ] Phase 2 decision recorded with owner sign-off, whatever it is.
+- [x] At least the search-budget failure shape is pinned by a verbatim
+  fixture (field-confirmed elsewhere; locally never observed — recorded
+  as such).
+- [x] Phase 2 decision recorded with owner sign-off (owner ruled: build
+  the generic detector) — and delivered.
 
 ## Delivery & Milestones
 
@@ -111,4 +113,7 @@ the user VERY CLEARLY, with bold prominent prompting.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00315-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- c4313cbb — BUDGETS.md synthesis (Phase 1 research complete)
+- 0ee38866 — budget_exhaustion_detector handler + ledger shipped
+- 74f3405e — live-dogfood self-feeding-loop fix (default exclusions +
+  self-referential command guard)
