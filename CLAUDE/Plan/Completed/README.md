@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00285: skill bootstrap reexec breaks sibling source](00285-skill-bootstrap-reexec-breaks-sibling-source/PLAN.md) - Complete at `1ffb5e4a` + `798a5bc2` (self-bootstrap re-exec broke `$(dirname "$0")` sibling sourcing; fixed via re-exec-proof `DAEMON_DIR` + an `audit_shell.py` guard)
+
 - [00284: documentation SSoT enforcement](00284-documentation-ssot-enforcement/PLAN.md) - Complete at `674f6a11` + slices through `7f34718c` (R1–R13 ruleset in `CLAUDE/DocumentationStrategy.md`, docs_qa enforcement + agent + skill, repo sweep 168 → 34 advisories)
 
 - [00283: standing-auth cadence + supervisor-typed channel](00283-standing-auth-cadence-supervisor-channel/PLAN.md) - Complete at `faf4fae0` + the archiving commit (bounded reinforcement cadence + opt-in ccy-supervisor-typed channel for `standing_authorisations`, plus a shared `utils/ccy_supervisor` liveness util)

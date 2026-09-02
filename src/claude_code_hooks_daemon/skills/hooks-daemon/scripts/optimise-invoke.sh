@@ -184,14 +184,12 @@ Check these items:
 
   plan_workflow.enabled                              - plan tracking config present
   handlers.pre_tool_use.plan_number_helper           - gives correct next plan number
-  handlers.pre_tool_use.validate_plan_number         - ensures sequential plan numbering
   handlers.pre_tool_use.plan_workflow                - guides plan creation workflow
-  handlers.pre_tool_use.plan_completion_advisor      - reminds to archive completed plans
   handlers.pre_tool_use.plan_time_estimates          - blocks time estimates (anti-pattern)
   (filesystem) plan directory has at least 1 plan    - confirms workflow actively used
 
 For "plans in use": PASS if the plan directory exists and has at least 1 plan (active or completed).
-Score: count of enabled/present items / 7
+Score: count of enabled/present items / 5
 
 ### Area 4: Code Quality
 
@@ -200,11 +198,10 @@ Check these handlers:
   handlers.pre_tool_use.tdd_enforcement        - tests written before production code
   handlers.pre_tool_use.qa_suppression         - blocks inline QA suppression comments
   handlers.post_tool_use.lint_on_edit          - linting after every file edit
-  handlers.post_tool_use.bash_error_detector   - detects errors in bash output
   handlers.pre_tool_use.lsp_enforcement        - LSP tools instead of grep for symbols
   handlers.pre_tool_use.daemon_restart_verifier - verifies daemon restart before commits
 
-Score: count enabled / 6
+Score: count enabled / 5
 
 ### Area 5: Daemon Settings
 
@@ -212,11 +209,10 @@ Check these handlers:
 
   handlers.session_start.version_check             - notifies when daemon updates available
   handlers.session_start.optimal_config_checker    - checks Claude Code env on startup
-  handlers.session_start.yolo_container_detection  - detects container environments
   handlers.user_prompt_submit.git_context_injector - injects git status into prompts
   handlers.user_prompt_submit.critical_thinking_advisory - periodic critical thinking nudge
 
-Score: count enabled / 5
+Score: count enabled / 4
 
 ---
 
@@ -251,34 +247,30 @@ the cross character (✗) for disabled/missing items.
     ✓|✗ nitpick.hedging_language     enabled: catches guessing language  |  DISABLED
     ✓|✗ nitpick.dismissive_language  enabled: catches avoiding-work language  |  DISABLED
 
-  ━━━ Area 3: Plan Workflow ━━━━━━━━━━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/7)
+  ━━━ Area 3: Plan Workflow ━━━━━━━━━━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/5)
     ✓|✗ plan_workflow (config)        enabled + directory set  |  DISABLED or missing
     ✓|✗ plan_number_helper            enabled: gives correct next plan number  |  DISABLED
-    ✓|✗ validate_plan_number          enabled: ensures sequential numbering  |  DISABLED
     ✓|✗ plan_workflow (handler)       enabled: guides plan creation  |  DISABLED
-    ✓|✗ plan_completion_advisor       enabled: reminds to archive completed plans  |  DISABLED
     ✓|✗ plan_time_estimates           enabled: blocks time estimates (anti-pattern)  |  DISABLED
     ✓|✗ plans in use                  N plans found - workflow is active  |  no plans found yet
 
-  ━━━ Area 4: Code Quality ━━━━━━━━━━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/6)
+  ━━━ Area 4: Code Quality ━━━━━━━━━━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/5)
     ✓|✗ tdd_enforcement           enabled: tests before production code  |  DISABLED
     ✓|✗ qa_suppression            enabled: blocks inline QA suppression comments  |  DISABLED
     ✓|✗ lint_on_edit              enabled: lints after every file edit  |  DISABLED
-    ✓|✗ bash_error_detector       enabled: detects errors in bash output  |  DISABLED
     ✓|✗ lsp_enforcement           enabled: LSP tools over grep for symbols  |  DISABLED
     ✓|✗ daemon_restart_verifier   enabled: verifies daemon restart before commits  |  DISABLED
 
-  ━━━ Area 5: Daemon Settings ━━━━━━━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/5)
+  ━━━ Area 5: Daemon Settings ━━━━━━━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/4)
     ✓|✗ version_check              enabled: notifies when updates available  |  DISABLED
     ✓|✗ optimal_config_checker     enabled: checks Claude Code env on startup  |  DISABLED
-    ✓|✗ yolo_container_detection   enabled: detects container environments  |  DISABLED
     ✓|✗ git_context_injector       enabled: injects git status into prompts  |  DISABLED
     ✓|✗ critical_thinking_advisory enabled: periodic critical thinking nudge  |  DISABLED
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Overall Score: TOTAL/29 (PCT%)
+  Overall Score: TOTAL/25 (PCT%)
 
-Where TOTAL = sum of all ✓ items, PCT = TOTAL*100/29 rounded to nearest integer.
+Where TOTAL = sum of all ✓ items, PCT = TOTAL*100/25 rounded to nearest integer.
 
 ---
 
@@ -293,7 +285,7 @@ Example format:
     [1] Safety: Enable error_hiding_blocker — catches swallowed exceptions and silent errors
     [2] Message Quality: Enable nitpick.hedging_language — catches guessing instead of researching
     [2] Message Quality: Enable nitpick.dismissive_language — catches avoiding-work deflection
-    [3] Plan Workflow: Enable plan_completion_advisor — reminds to archive completed plans
+    [3] Plan Workflow: Enable plan_time_estimates — blocks time estimates in plan documents
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Apply recommendations?
@@ -302,7 +294,7 @@ Example format:
     - Type "skip" to view report only
     - Use /configure to make targeted changes
 
-If score = 29/29 with no disabled items, output instead:
+If score = 25/25 with no disabled items, output instead:
   No recommendations — configuration is fully optimised.
 
 ---
@@ -389,7 +381,7 @@ failure of the review itself.
 - Preserve YAML comments when editing the config — do not strip them
 - Only recommend enabling handlers — never recommend disabling them
 - Plan workflow area: if plan_workflow.enabled is already true but some handlers
-  (plan_number_helper, validate_plan_number, etc.) are disabled, recommend enabling those
+  (plan_number_helper, plan_workflow, etc.) are disabled, recommend enabling those
   handlers specifically rather than changing the plan_workflow section
 - "plans in use" check: this is informational only — it cannot be fixed by enabling a
   handler. Note it in the report but do not include it in the recommendations list

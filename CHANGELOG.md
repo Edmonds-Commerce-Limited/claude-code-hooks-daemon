@@ -53,6 +53,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The config-optimisation checklist scored four handlers that no longer
+  exist (Plan 00323).** `bash_error_detector`, `yolo_container_detection`,
+  `validate_plan_number` and `plan_completion_advisor` were deleted by Plan
+  00237 but stayed in the five-area checklist, so a fully-configured project
+  scored 25/29 (86%) and could never reach 100% — and the step generated four
+  recommendations to "enable" handlers no config key can enable, which if
+  followed add dead keys. Areas 3, 4 and 5 lose those items, the denominators
+  and the overall total follow (now /25), and a contract test fails if any
+  `RETIRED_HANDLERS` name reappears in the instruction script or a dotted
+  `handlers.<event>.<name>` reference stops resolving. Found by running the
+  step on this repo — the first thing Plan 00322 asked for.
 - **The mandatory post-upgrade config-optimisation review deferred itself out
   of existence (Plan 00322).** Plan 00308 made `/optimise` a mandatory closing
   step of every upgrade, but the banner carrying that mandate addressed "your
