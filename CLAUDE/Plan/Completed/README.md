@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00283: standing-auth cadence + supervisor-typed channel](00283-standing-auth-cadence-supervisor-channel/PLAN.md) - Complete at `faf4fae0` + the archiving commit (bounded reinforcement cadence + opt-in ccy-supervisor-typed channel for `standing_authorisations`, plus a shared `utils/ccy_supervisor` liveness util)
+
 - [00282: generate-docs null-priority crash](00282-generate-docs-null-priority-crash/PLAN.md) - Complete at `86ca861a` + the archiving commit (both doc generators aborted with a NoneType-vs-int sort crash when a handler config omitted `priority:`; fixed via a shared `resolve_priority` helper across both generators and the `registry.py` guard, plus CLI traceback logging and two-handler regression tests)
 
 - [00281: flag cleaning compaction on downgrade](00281-flag-cleaning-compaction-on-downgrade/PLAN.md) - Complete at `5580d9a7` + `6594dbad` + the archiving commit (supervisor fires an opt-in, gated, armed `/compact` on a REPEATED downgrade so the cleaned context stops re-tripping the classifier and the model-restore sticks; 🧽 audit glyph, dogfood-enabled here, default OFF for clients)

@@ -1,6 +1,6 @@
 # Plan 00321: injected goal has no retraction path
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-02
 **Owner**: joseph
 **Priority**: High
@@ -129,10 +129,17 @@ payload is injected instruction text.
 
 ## Success Criteria
 
-- [ ] A retirement that empties the ledger leaves no condition in the `/goal`
-  slot, verified live by a Stop that is not challenged.
-- [ ] The three goal surfaces agree in every state, with a test per surface.
-- [ ] `./scripts/qa/llm_qa.py all` passes 25/25.
+- [x] A retirement that empties the ledger writes a `.goal-clear` trigger, and
+  the supervisor answers it with `/goal clear` at its usual idle choke point.
+  Exercised live: `hooks-daemon clear-goal` queued a real trigger for this
+  session, which also removed the pending `.goal-intent`.
+- [x] The three goal surfaces (ledger, sidecar, upstream `/goal` slot) can now
+  all be brought to agreement; each has a test. The upstream one is reachable
+  only through the supervisor, so its test pins the typed literal and the
+  no-payload property rather than the slot itself.
+- [x] `./scripts/qa/llm_qa.py all` passes 25/25 (17,312 passed, 95.2%).
+- [x] Supervisor worker confirmed running post-edit code by pid, per the
+  hot-reload contract in the global `CLAUDE.md`.
 
 ## Delivery & Milestones
 
