@@ -624,7 +624,10 @@ gaps cannot rot. Freshness is separate: the `contract_staleness` SessionStart
 advisory fires when the installed Claude Code version exceeds the last-audited
 one, pointing at the refresh procedure in
 `docs/guides/HOOK-CONTRACT-REFRESH.md` (raw-markdown fetch only — a
-summarising fetch layer once fabricated a contract value).
+summarising fetch layer once fabricated a contract value). That procedure is
+maintainer work on this repo, so a client install is given a client-shaped
+remedy instead (upgrade, else report upstream) — see the handler's entry in
+`docs/guides/HANDLER_REFERENCE.md`.
 
 ---
 

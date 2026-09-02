@@ -344,8 +344,11 @@ Run with --help for all options.
 
 ### Step N (MANDATORY): Run the config-optimisation review
 
-**New handlers ship DISABLED by default.** An upgrade that ends without a
-configuration review is an upgrade that silently missed every new protection —
+**Run it in the session that ran the upgrade, before reporting the upgrade
+done — not "at some point" and not in a hand-back list.** New handlers arrive
+in a mix of states: some ship enabled (opt-out), others are opt-in and stay
+inert until someone turns them on. An upgrade that ends without a
+configuration review is an upgrade where nobody established which is which —
 so this step is not optional and not something to reconstruct by hand.
 
 Run the `/optimise` skill (`Skill` tool: `skill=optimise`) — this IS the

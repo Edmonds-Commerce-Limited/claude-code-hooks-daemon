@@ -89,12 +89,17 @@ class ConfigOptimisationReminderHandler(SessionStartHandlerBase):
                 ]
             context.extend(
                 [
-                    "Run `/optimise` to inventory disabled-but-relevant handlers "
-                    "and get a prioritised enable/skip recommendation list.",
-                    "It never applies changes without explicit confirmation.",
-                    "If `/optimise` is not available in this project, silence this "
-                    "reminder directly with `bin/hooks-daemon "
-                    "record-config-optimisation-run`.",
+                    "Run `/optimise` in this session — it inventories "
+                    "disabled-but-relevant handlers and gives a prioritised "
+                    "enable/skip recommendation list, and never applies changes "
+                    "without explicit confirmation.",
+                    "This is the mandatory post-upgrade review, deferred: it is "
+                    "not an optional to-do. If the user asked for other work "
+                    "first, do that, then run the review before you stop.",
+                    "Only if `/optimise` is genuinely unavailable in this "
+                    "project, silence this reminder with `bin/hooks-daemon "
+                    "record-config-optimisation-run` — that records a review "
+                    "that did not happen.",
                 ]
             )
             return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=context)

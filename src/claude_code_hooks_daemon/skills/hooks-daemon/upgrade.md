@@ -125,8 +125,10 @@ first (`.claude/hooks-daemon/bin/hooks-daemon logs`).
    /optimise
    ```
 
-   Run it AFTER the commit in step 7 above (it may itself edit
-   `.claude/hooks-daemon.yaml` and restart the daemon — that is a separate,
-   later commit, same discipline as steps 4-5's project-doc/config edits).
-   If `--skip-config-optimisation` was passed, skip this step and tell the
-   user to run `/optimise` themselves when ready.
+   Run it in THIS session, immediately after the commit in step 7 above (it
+   may itself edit `.claude/hooks-daemon.yaml` and restart the daemon — that
+   is a separate, later commit, same discipline as steps 4-5's
+   project-doc/config edits). The upgrade is not finished until it has run:
+   do not defer it to a later session, and do not report it back as an
+   optional follow-up. If `--skip-config-optimisation` was passed, skip this
+   step and tell the user to run `/optimise` themselves when ready.

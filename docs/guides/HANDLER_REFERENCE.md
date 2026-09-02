@@ -2844,7 +2844,7 @@ handlers:
 | **Type**       | Advisory             |
 | **Event**      | SessionStart         |
 
-**Description:** Advises a refresh of the vendored Claude Code hooks contract (`contracts/claude-code-hooks/`) when the installed Claude Code version is newer than `META.json`'s `last_audited_claude_code_version`. The advisory points at the refresh procedure in `docs/guides/HOOK-CONTRACT-REFRESH.md` (raw-fetch-only extraction). Runs on new sessions only, caches the `claude --version` probe for 24 hours, and stays silent when the vendored contract is absent or unreadable — the `hook_contract` QA check owns that failure. Advisory by design, never an auto-refresh (Plan 00271 Decision 3).
+**Description:** Advises a refresh of the vendored Claude Code hooks contract (`contracts/claude-code-hooks/`) when the installed Claude Code version is newer than `META.json`'s `last_audited_claude_code_version`. **The remedy depends on the install (Plan 00322):** in the daemon repo itself the advisory points at the refresh procedure in `docs/guides/HOOK-CONTRACT-REFRESH.md` (raw-fetch-only extraction); in a client install — where the vendored copy lives under the upgrade-overwritten `.claude/hooks-daemon/` and the refresh is upstream maintainer work — it instead says to upgrade the daemon, or report it upstream if already current. An unresolvable install mode falls back to the client message. Runs on new sessions only, caches the `claude --version` probe for 24 hours, and stays silent when the vendored contract is absent or unreadable — the `hook_contract` QA check owns that failure. Advisory by design, never an auto-refresh (Plan 00271 Decision 3).
 
 **Config example:**
 

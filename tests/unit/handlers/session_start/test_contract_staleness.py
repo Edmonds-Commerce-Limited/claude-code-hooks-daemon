@@ -38,6 +38,9 @@ def handler(tmp_path: Path) -> ContractStalenessHandler:
             }
         )
     )
+    # The refresh procedure is maintainer work, so the default fixture is the
+    # daemon repo itself (Plan 00322); client installs get their own class.
+    h.self_install_reader = lambda: True
     return h
 
 
@@ -112,6 +115,61 @@ class TestHandle:
     def test_non_numeric_versions_stay_silent(self, handler: ContractStalenessHandler) -> None:
         handler.installed_version_reader = lambda: "dev-build"
         assert handler.handle(_hook_input()).context == []
+
+
+class TestClientInstallAdvisory:
+    """Plan 00322: a client cannot perform the maintainer refresh procedure.
+
+    In a client install the vendored contract lives under
+    ``.claude/hooks-daemon/`` — a path the upgrade contract forbids editing
+    and overwrites on the next upgrade. Pointing a client at the refresh
+    procedure asks for a change that is both out of scope and self-erasing,
+    so the client message must name actions a client can actually take.
+    """
+
+    @pytest.fixture
+    def client_handler(self, handler: ContractStalenessHandler) -> ContractStalenessHandler:
+        handler.self_install_reader = lambda: False
+        handler.installed_version_reader = lambda: "2.2.0"
+        return handler
+
+    def test_still_reports_the_staleness(self, client_handler: ContractStalenessHandler) -> None:
+        text = "\n".join(client_handler.handle(_hook_input()).context)
+        assert "2.1.246" in text
+        assert "2.2.0" in text
+
+    def test_does_not_cite_the_maintainer_refresh_procedure(
+        self, client_handler: ContractStalenessHandler
+    ) -> None:
+        text = "\n".join(client_handler.handle(_hook_input()).context)
+        assert "HOOK-CONTRACT-REFRESH.md" not in text
+
+    def test_names_the_actions_a_client_can_take(
+        self, client_handler: ContractStalenessHandler
+    ) -> None:
+        text = "\n".join(client_handler.handle(_hook_input()).context)
+        assert "skill=hooks-daemon, args=upgrade" in text
+        assert "bug-report" in text
+
+    def test_warns_against_editing_the_daemon_clone(
+        self, client_handler: ContractStalenessHandler
+    ) -> None:
+        text = "\n".join(client_handler.handle(_hook_input()).context)
+        assert ".claude/hooks-daemon/" in text
+
+    def test_defaults_to_the_client_message_when_mode_is_unknown(
+        self, handler: ContractStalenessHandler
+    ) -> None:
+        """An uninitialised ProjectContext must not leak maintainer guidance."""
+
+        def _explode() -> bool:
+            raise RuntimeError("ProjectContext not initialized")
+
+        handler.self_install_reader = _explode
+        handler.installed_version_reader = lambda: "2.2.0"
+        text = "\n".join(handler.handle(_hook_input()).context)
+        assert "HOOK-CONTRACT-REFRESH.md" not in text
+        assert "skill=hooks-daemon, args=upgrade" in text
 
 
 class TestVersionParsing:

@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00322: post upgrade optimise deferral and client noise](00322-post-upgrade-optimise-deferral-and-client-noise/PLAN.md) - In Progress (field report: the mandatory post-upgrade `/optimise` banner defers itself to "your next Claude Code session" and gets filed as optional; and `contract_staleness` hands client installs a maintainer-only refresh procedure they must not perform)
+
 - [00319: supervisor release review followups](00319-supervisor-release-review-followups/PLAN.md) - Not Started (the ten non-blocking findings surviving the v3.60.0 code-review gate, grouped into silent failures, unbounded per-session growth, and writer/reader contract drift; the three BLOCKING siblings shipped in 55dd5b2e)
 
 - [00314: failsafe cron suppression marker never arms](00314-failsafe-cron-suppression-marker-never-arms/PLAN.md) - Not Started (Plan 00298's cron-tick suppression never engaged live: the human-input marker was not written despite a matching STOPPING BECAUSE phrase, and the pattern set misses natural phrasings; TDD reproduction + field observability + conservative pattern widening)

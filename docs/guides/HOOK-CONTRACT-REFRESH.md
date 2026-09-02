@@ -15,6 +15,12 @@ fires (installed Claude Code version newer than
 `META.json.last_audited_claude_code_version`), or whenever hook behaviour is
 suspected to have changed.
 
+**This procedure belongs to the daemon repository only.** In a client install
+the vendored contract sits under `.claude/hooks-daemon/`, which every upgrade
+overwrites, so a refresh performed there is discarded and never reaches
+anyone. A client whose advisory fires should upgrade the daemon, or report it
+upstream if already current — which is what the client-mode advisory says.
+
 ## The one non-negotiable rule: RAW fetch only
 
 **Fetch the docs as raw markdown and read the raw text. Never trust a

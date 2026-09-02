@@ -90,8 +90,10 @@ class ContractStalenessHandler(SessionStartHandlerBase):
         )
         self.config: dict[str, Any] = {"enabled": True}
         self.meta_path: Path = _DEFAULT_META_PATH
-        # Injection point for tests; production reads `claude --version`.
+        # Injection points for tests; production reads `claude --version` and
+        # the resolved project context.
         self.installed_version_reader: Callable[[], str | None] = self._read_installed_version
+        self.self_install_reader: Callable[[], bool] = ProjectContext.self_install_mode
 
     def configure(self, config: dict[str, Any]) -> None:
         """Apply configuration."""
@@ -126,7 +128,34 @@ class ContractStalenessHandler(SessionStartHandlerBase):
             return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=[])
 
         refresh_doc = str(meta.get(_META_REFRESH_KEY) or _FALLBACK_REFRESH_DOC)
-        context = [
+        if self._is_self_install():
+            return AdvisoryResult(
+                decision=Decision.ALLOW,
+                reason=None,
+                context=self._maintainer_context(installed, audited, refresh_doc),
+            )
+        return AdvisoryResult(
+            decision=Decision.ALLOW,
+            reason=None,
+            context=self._client_context(installed, audited),
+        )
+
+    def _is_self_install(self) -> bool:
+        """Whether this is the daemon repo itself, where a refresh belongs.
+
+        Fails CLOSED to the client answer: an unresolvable project context
+        must not hand a client install the maintainer procedure, which edits
+        daemon-owned paths (Plan 00322).
+        """
+        try:
+            return self.self_install_reader()
+        except (RuntimeError, OSError) as exc:
+            logger.debug("install mode unresolvable, assuming client install: %s", exc)
+            return False
+
+    def _maintainer_context(self, installed: str, audited: str, refresh_doc: str) -> list[str]:
+        """Advisory for the daemon repo, where the vendored contract is source."""
+        return [
             (
                 f"📜 Hooks contract audit is stale: installed Claude Code is "
                 f"v{installed}, but the vendored hooks contract "
@@ -142,7 +171,29 @@ class ContractStalenessHandler(SessionStartHandlerBase):
                 f"QA check."
             ),
         ]
-        return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=context)
+
+    def _client_context(self, installed: str, audited: str) -> list[str]:
+        """Advisory for a client install, where the refresh is not the client's."""
+        return [
+            (
+                f"📜 Hooks contract audit is stale: installed Claude Code is "
+                f"v{installed}, but the hooks contract vendored with your hooks "
+                f"daemon was last audited against v{audited}."
+            ),
+            "",
+            (
+                "This is upstream maintenance, not work for this project. The "
+                "vendored contract lives under `.claude/hooks-daemon/`, which "
+                "every upgrade overwrites — do not edit it, and do not run the "
+                "maintainer refresh procedure here."
+            ),
+            (
+                "What you CAN do: upgrade the daemon (Skill tool: "
+                "skill=hooks-daemon, args=upgrade) to pick up a newer audit, "
+                "and if this project is already on the latest release, report "
+                "it upstream (Skill tool: skill=hooks-daemon, args=bug-report)."
+            ),
+        ]
 
     def _read_meta(self) -> dict[str, Any] | None:
         try:

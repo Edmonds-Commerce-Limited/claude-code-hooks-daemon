@@ -90,6 +90,26 @@ class TestHandle:
             result = _handler().handle(_hook_input())
         assert any("record-config-optimisation-run" in line for line in result.context)
 
+    def test_reminder_binds_the_review_to_this_session(self, tmp_path: Path) -> None:
+        """Plan 00322: the advisory must not read as an optional to-do.
+
+        A client upgrade filed this reminder as "run /optimise at some point",
+        which is exactly what the deferred mandatory step already was. The
+        wording now claims the current session and says so explicitly.
+        """
+        with patch(_STATE_DIR_TARGET, return_value=tmp_path):
+            result = _handler().handle(_hook_input())
+        text = "\n".join(result.context)
+        assert "this session" in text
+        assert "not an optional" in text
+
+    def test_escape_hatch_is_qualified_as_a_last_resort(self, tmp_path: Path) -> None:
+        """The silence command must not read as an equal-cost alternative."""
+        with patch(_STATE_DIR_TARGET, return_value=tmp_path):
+            result = _handler().handle(_hook_input())
+        hatch = next(line for line in result.context if "record-config-optimisation-run" in line)
+        assert "Only if" in hatch
+
     def test_stale_version_reminds(self, tmp_path: Path) -> None:
         record_run(tmp_path / STATE_FILE_NAME, version="0.0.1", now=1000.0)
         with patch(_STATE_DIR_TARGET, return_value=tmp_path), patch(_VERSION_TARGET, "9.9.9"):

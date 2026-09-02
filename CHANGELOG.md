@@ -31,6 +31,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The mandatory post-upgrade config-optimisation review deferred itself out
+  of existence (Plan 00322).** Plan 00308 made `/optimise` a mandatory closing
+  step of every upgrade, but the banner carrying that mandate addressed "your
+  NEXT Claude Code session" and printed immediately AFTER the block telling the
+  agent to exit its current one. A step scheduled for a session that does not
+  exist yet is, to the agent finishing the upgrade, a hand-back note: a real
+  client upgrade duly filed it under "Left for you to decide — run `/optimise`
+  at some point". The banner now claims the current session, says it is not an
+  optional follow-up, and is printed BEFORE the restart instruction; the
+  `config_optimisation_reminder` safety net (which had been deferred the same
+  way) says the same and demotes its "silence this reminder" escape hatch to a
+  genuine last resort. `--skip-config-optimisation` is unchanged. A wording
+  contract test now fails if deferral phrasing or the old ordering returns.
+- **`contract_staleness` handed client installs a maintainer-only remedy
+  (Plan 00322).** The advisory pointed every project at
+  `docs/guides/HOOK-CONTRACT-REFRESH.md`, which edits
+  `contracts/claude-code-hooks/*.json` and re-runs this repo's `hook_contract`
+  QA check. In a client install those files live under `.claude/hooks-daemon/`
+  — a path the upgrade contract forbids editing and the next upgrade
+  overwrites — so the advice asked for a change that was both out of scope and
+  self-erasing. The staleness is still reported (it is a real risk), but a
+  client now gets a client-shaped remedy: upgrade the daemon, or report it
+  upstream if already current. Self-install keeps the refresh procedure, and an
+  unresolvable install mode falls back to the client message.
 - **A retired goal kept challenging session stop: the goal-intent sidecar is
   now retracted, not merely left unwritten (Plan 00320).** When the last live
   plan in the goal ledger retired, `goal_injection` re-rendered the combined

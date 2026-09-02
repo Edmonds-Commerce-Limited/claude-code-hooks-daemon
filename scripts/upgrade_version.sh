@@ -1096,27 +1096,36 @@ if [ -d "$UPGRADE_DIR" ]; then
     echo ""
 fi
 
-echo "IMPORTANT: Restart Claude Code to activate upgraded hooks."
-echo "  1. Exit your current Claude Code session"
-echo "  2. Start a new Claude Code session"
-echo ""
-
 # Plan 00308: every upgrade ends with the config-optimisation review, unless
 # explicitly opted out. Same --force-style detection as the compat check
 # above -- this script has no proper flag parser, so match against $* and the
 # UPGRADE_FLAGS passthrough.
+#
+# Plan 00322: the mandate claims THIS session and is printed BEFORE the
+# restart instruction. Addressed to "your next Claude Code session", and
+# printed after "exit your current session", it read as a hand-back note --
+# a client upgrade duly filed it as an optional "run /optimise at some point".
 if [[ "$*" == *"--skip-config-optimisation"* ]] || [[ "${UPGRADE_FLAGS:-}" == *"--skip-config-optimisation"* ]]; then
     echo "Config-optimisation review skipped (--skip-config-optimisation)."
-    echo "Run it later: Skill tool, skill=optimise (or /optimise in a session)."
+    echo "Run it yourself when ready: Skill tool, skill=optimise (or /optimise)."
     echo ""
 else
-    echo "MANDATORY NEXT STEP: run the config-optimisation review in your next"
-    echo "Claude Code session (Skill tool: skill=optimise, or /optimise). This"
-    echo "inventories disabled-but-relevant handlers, surfaces what is new in"
-    echo "$NEW_VERSION, and produces a per-handler enable/skip recommendation"
-    echo "list -- it never applies changes without your explicit confirmation."
+    echo "MANDATORY NEXT STEP -- do this NOW, in this session, before you"
+    echo "report the upgrade as done and before the restart below: run the"
+    echo "config-optimisation review (Skill tool: skill=optimise, or"
+    echo "/optimise)."
+    echo "It is not an optional follow-up and does not belong in a hand-back"
+    echo "list: handlers new in $NEW_VERSION stay inert until it runs."
+    echo "It inventories disabled-but-relevant handlers, surfaces what is new,"
+    echo "and produces a per-handler enable/skip recommendation list -- it"
+    echo "never applies changes without your explicit confirmation."
     echo "Pass --skip-config-optimisation to this script to opt out."
     echo ""
 fi
+
+echo "IMPORTANT: after the review, restart Claude Code to activate upgraded hooks."
+echo "  1. Exit your current Claude Code session"
+echo "  2. Start a new Claude Code session"
+echo ""
 
 exit 0
