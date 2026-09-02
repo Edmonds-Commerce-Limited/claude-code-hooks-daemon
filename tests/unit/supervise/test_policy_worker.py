@@ -9,6 +9,7 @@ anything that goes wrong falls back to an identical in-process decision.
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
@@ -47,6 +48,34 @@ def test_facts_json_roundtrip() -> None:
         work_idle=False,
     )
     assert _mod._facts_from_json(_mod._facts_to_json(facts)) == facts
+
+
+def test_facts_json_roundtrip_carries_raw_input() -> None:
+    facts = _mod.TickFacts(
+        now_wall=1.5,
+        idle=True,
+        input_line_empty=False,
+        human_compact_submitted=False,
+        work_idle=False,
+        human_raw_input=base64.b64encode(b"/model opus\r").decode("ascii"),
+    )
+    restored = _mod._facts_from_json(_mod._facts_to_json(facts))
+    assert restored == facts
+    assert base64.b64decode(restored.human_raw_input) == b"/model opus\r"
+
+
+def test_facts_from_json_defaults_missing_raw_input_to_empty_string() -> None:
+    # Backward-compat: an older host's JSON without the new key must decode.
+    line = json.dumps(
+        {
+            "now_wall": 1.0,
+            "idle": True,
+            "input_line_empty": True,
+            "human_compact_submitted": False,
+            "work_idle": True,
+        }
+    )
+    assert _mod._facts_from_json(line).human_raw_input == ""
 
 
 def test_outcome_json_roundtrip_noop() -> None:
@@ -155,6 +184,70 @@ def test_run_worker_matches_in_process_decide(tmp_path: Path) -> None:
     assert got == expected
 
 
+def _facts_with_raw_input(raw: bytes, *, now: float = 1000.0) -> object:
+    return _mod.TickFacts(
+        now_wall=now,
+        idle=True,
+        input_line_empty=True,
+        human_compact_submitted=False,
+        work_idle=True,
+        human_raw_input=base64.b64encode(raw).decode("ascii"),
+    )
+
+
+def test_run_worker_recognizes_typed_model_command_from_raw_input(tmp_path: Path) -> None:
+    """Plan 00317 Task 2.1: the worker recognises a submitted `/model <x>` from
+    the raw-input tap, NOT from the host-precomputed (and here absent/False)
+    legacy fields -- proving recognition now runs worker-side."""
+    sidecar_dir = tmp_path / "context-sidecar"
+    in_stream = io.StringIO(_mod._facts_to_json(_facts_with_raw_input(b"/model opus\r")) + "\n")
+    out_stream = io.StringIO()
+
+    _mod.run_worker(
+        in_stream,
+        out_stream,
+        dry_run=True,
+        sidecar_dir=sidecar_dir,
+        policy=_mod.CompactPolicy(),
+    )
+
+    # decide_once acted on a recognised manual `/model opus` -- observable via
+    # the post-tick machine state recording the manual model note.
+    outcome = _mod._outcome_from_json(out_stream.getvalue().strip())
+    assert outcome.machine_state is not None
+    assert outcome.machine_state["manual_model_family"] == "opus"
+
+
+def test_run_worker_recognition_persists_across_ticks_until_submitted(tmp_path: Path) -> None:
+    """A typed line split across multiple ticks (no Enter yet) must stay
+    non-empty until submitted -- the worker's recognizer state must persist
+    across separate TickFacts lines within one worker lifetime."""
+    sidecar_dir = tmp_path / "context-sidecar"
+    lines = "\n".join(
+        [
+            _mod._facts_to_json(_facts_with_raw_input(b"/mo", now=1000.0)),
+            _mod._facts_to_json(_facts_with_raw_input(b"del opus\r", now=1000.5)),
+        ]
+    )
+    out_stream = io.StringIO()
+
+    _mod.run_worker(
+        io.StringIO(lines + "\n"),
+        out_stream,
+        dry_run=True,
+        sidecar_dir=sidecar_dir,
+        policy=_mod.CompactPolicy(),
+    )
+
+    outcomes = [
+        _mod._outcome_from_json(ln) for ln in out_stream.getvalue().splitlines() if ln.strip()
+    ]
+    assert len(outcomes) == 2
+    # The full command only completes (and is recognised) on the second tick.
+    assert outcomes[1].machine_state is not None
+    assert outcomes[1].machine_state["manual_model_family"] == "opus"
+
+
 def test_run_worker_skips_blank_and_bad_lines(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "context-sidecar"
     lines = "\n" + "not json\n" + _mod._facts_to_json(_idle_facts()) + "\n"
@@ -254,6 +347,65 @@ def test_worker_decider_restarts_dead_worker() -> None:
     decider = _mod._make_worker_decider(worker)
     decider(_idle_facts(now=1000.0))
     worker.restart.assert_called_once()
+
+
+# ── Mid-session reload picks up changed recognition (Plan 00317 Task 2.3) ────
+
+
+def test_worker_restart_alone_picks_up_changed_recognition_behaviour(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A code change to typed-command recognition takes effect via a worker
+    restart -- no host-side code, and no `_forward_io`/`supervise()` involved
+    at all -- proving recognition genuinely lives in the hot-reloadable tier.
+
+    Simulates a deploy by writing an EDITED copy of the supervisor (a
+    different `/model`-recognising prefix) to `tmp_path`, then pointing a
+    fresh `PolicyWorker` at that copy -- mirroring what a genuine on-disk
+    edit + `reload_if_stale()`/`restart()` does. The exact same raw bytes
+    recognise differently before/after, with nothing but the worker's
+    on-disk source having changed.
+    """
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    original_source = SCRIPT_PATH.read_text(encoding="utf-8")
+    assert '_MODEL_COMMAND = "/model"' in original_source
+
+    edited_copy = tmp_path / "claude-supervise-edited.py"
+    edited_copy.write_text(
+        original_source.replace('_MODEL_COMMAND = "/model"', '_MODEL_COMMAND = "/switchmodel"'),
+        encoding="utf-8",
+    )
+
+    original_worker = _mod.PolicyWorker(SCRIPT_PATH, dry_run=True)
+    assert original_worker.start() is True
+    try:
+        # BEFORE: running the ORIGINAL code, "/model opus" is recognised.
+        before = original_worker.decide(_facts_with_raw_input(b"/model opus\r"))
+        assert before is not None
+        assert before.machine_state is not None
+        assert before.machine_state["manual_model_family"] == "opus"
+    finally:
+        original_worker.close()
+
+    # AFTER: a fresh worker over the EDITED copy -- the redeploy + reload
+    # this simulates -- no longer matches the old prefix.
+    edited_worker = _mod.PolicyWorker(edited_copy, dry_run=True)
+    assert edited_worker.start() is True
+    try:
+        after_old_prefix = edited_worker.decide(_facts_with_raw_input(b"/model sonnet\r"))
+        assert after_old_prefix is not None
+        assert after_old_prefix.machine_state is not None
+        assert after_old_prefix.machine_state.get("manual_model_family") is None
+
+        # The NEW prefix now recognises the same style of command.
+        after_new_prefix = edited_worker.decide(
+            _facts_with_raw_input(b"/switchmodel sonnet\r", now=1002.0)
+        )
+        assert after_new_prefix is not None
+        assert after_new_prefix.machine_state is not None
+        assert after_new_prefix.machine_state["manual_model_family"] == "sonnet"
+    finally:
+        edited_worker.close()
 
 
 # ── Live PTY integration (Task 4.6) ──────────────────────────────────────────

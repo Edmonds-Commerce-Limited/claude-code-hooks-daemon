@@ -86,6 +86,29 @@ surfaces a transient status-line notice via the message channel below.
 Usage:
     claude-supervise.py [--dry-run | --arm] [--log PATH] -- <child argv...>
 
+HOST-TIER SURFACE (Plan 00317). The PTY host (`supervise()`/`_forward_io()`)
+never reloads -- it owns the live child. Everything it does beyond raw byte
+forwarding and child/worker lifecycle is intentionally minimal, audited in
+`CLAUDE/Plan/00317-supervisor-host-thin-shim/AUDIT.md`:
+
+  * the Ctrl+C double-press byte-level swallow (`CtrlCGate.filter`) and
+    Ctrl+Z byte strip (`strip_suspend`) -- must act on a byte BEFORE it is
+    forwarded to the child, so a worker round-trip is not viable here;
+  * the fixed per-process signal guards (`install_input_signal_guards`);
+  * injecting a `TickOutcome` the worker already decided on
+    (`_apply_decision`), and adopting the worker's post-tick state.
+
+Typed-command recognition (`/compact`, `/model <x>`, `/effort <x>`) runs
+WORKER-SIDE: the host only forwards raw stdin bytes into a bounded
+`RawInputTap`, drained each tick into `TickFacts.human_raw_input`; the
+`--worker` subprocess owns the `HumanInputLine` parser that recognises
+commands from it, so a code change to recognition hot-reloads with the rest
+of the worker (`run_worker`'s own restart-scoped instance). The host's own
+`HumanInputLine` (on `InputActivity.line`) is kept ONLY to feed the
+in-process fallback path (`_poll_once`, used when the worker is
+unavailable) -- an intentional, already-accepted non-hot-reloading
+degradation, not the live path.
+
 THREAD / PROCESS SAFETY (FIRST-CLASS CONCERN — read before touching shared
 state or any file under the ``supervise/`` runtime dir).
 
@@ -123,6 +146,7 @@ The paired daemon-side reader guidance lives in
 from __future__ import annotations
 
 import argparse
+import base64
 import enum
 import errno
 import fcntl
@@ -703,6 +727,42 @@ class InputActivity:
     def take_effort_submitted(self) -> str | None:
         """Return the argument of a human `/effort <x>` submitted since last checked."""
         return self.line.take_effort_submitted()
+
+
+_DEFAULT_RAW_INPUT_TAP_MAX_BYTES = 4096
+
+
+class RawInputTap:
+    """Bounded, fail-open buffer of raw stdin bytes forwarded to the child.
+
+    Plan 00317: the host-side ``HumanInputLine`` in ``InputActivity`` remains
+    for the in-process fallback path, but the LIVE typed-command recognition
+    now runs inside the hot-reloadable ``--worker`` subprocess, fed by this
+    tap (drained into ``TickFacts.human_raw_input`` once per tick). The tap
+    itself does no parsing -- it only accumulates bytes -- so it carries no
+    recognition logic to keep host-side.
+
+    Bounded so a slow/dead worker (drain not happening) can never grow this
+    buffer without limit: appending past ``max_bytes`` drops the OLDEST bytes,
+    never raises, and never blocks the forwarding call site.
+    """
+
+    def __init__(self, max_bytes: int = _DEFAULT_RAW_INPUT_TAP_MAX_BYTES) -> None:
+        self._buffer = bytearray()
+        self._max_bytes = max_bytes
+
+    def append(self, data: bytes) -> None:
+        """Append forwarded bytes, dropping the oldest on overflow."""
+        self._buffer.extend(data)
+        overflow = len(self._buffer) - self._max_bytes
+        if overflow > 0:
+            del self._buffer[:overflow]
+
+    def drain(self) -> bytes:
+        """Return and clear everything buffered since the last drain."""
+        data = bytes(self._buffer)
+        self._buffer.clear()
+        return data
 
 
 @dataclass
@@ -1450,6 +1510,17 @@ class TickFacts:
     # fought by the auto-restore or the coupled-effort default.
     human_model_command: str | None = None
     human_effort_command: str | None = None
+    # Plan 00317: raw stdin bytes forwarded since the last tick, base64-encoded
+    # (JSON has no byte-string type). Drained from the host's ``RawInputTap``.
+    # The worker feeds this into its OWN persistent ``HumanInputLine`` and
+    # RECOMPUTES ``human_compact_submitted``/``human_model_command``/
+    # ``human_effort_command``/``input_line_empty`` from it, overriding
+    # whatever the host sent above -- that override is what makes typed-
+    # command recognition hot-reloadable (a worker restart alone picks up a
+    # code change). Empty string when nothing was forwarded since last tick,
+    # and on the in-process fallback path (no worker, host's own
+    # ``HumanInputLine`` is authoritative there).
+    human_raw_input: str = ""
     # The host's authoritative CompactStateMachine state for this tick (Plan
     # 00164 Phase 4 fix). The worker loads it before deciding so it never runs on
     # divergent state; None on the in-process path (the machine is already live).
@@ -4704,6 +4775,7 @@ def _facts_to_json(facts: TickFacts) -> str:
             "work_idle": facts.work_idle,
             "human_model_command": facts.human_model_command,
             "human_effort_command": facts.human_effort_command,
+            "human_raw_input": facts.human_raw_input,
             "machine_state": facts.machine_state,
             "tick_id": facts.tick_id,
         }
@@ -4720,6 +4792,7 @@ def _facts_from_json(line: str) -> TickFacts:
         work_idle=bool(data["work_idle"]),
         human_model_command=data.get("human_model_command"),
         human_effort_command=data.get("human_effort_command"),
+        human_raw_input=str(data.get("human_raw_input", "")),
         machine_state=data.get("machine_state"),
         tick_id=int(data.get("tick_id", 0)),
     )
@@ -4784,8 +4857,20 @@ def run_worker(
     reloads the decision code (this whole 'brain') without disturbing the PTY
     host. Blocks on ``in_stream``; a closed pipe (host gone / EOF) ends the loop
     and returns 0. A malformed line is skipped (logged to stderr), never fatal.
+
+    Also owns a persistent ``HumanInputLine`` (Plan 00317): the SAME class the
+    host's in-process fallback uses, but here it is fed each tick's
+    ``human_raw_input`` and its recognition -- ``human_compact_submitted`` /
+    ``human_model_command`` / ``human_effort_command`` / ``input_line_empty``
+    -- overrides whatever the host sent, before ``decide_once`` runs. This is
+    the piece that now hot-reloads with the rest of the worker: a code change
+    to typed-command recognition takes effect on the next worker restart, with
+    no host-side change and no session restart. Reset (buffer cleared) on
+    every restart -- the same risk profile ``machine``'s in-flight state
+    already carries across a restart.
     """
     machine = CompactStateMachine(policy)
+    line_recognizer = HumanInputLine()
     for raw in in_stream:
         line = raw.strip()
         if not line:
@@ -4795,6 +4880,20 @@ def run_worker(
         except (ValueError, KeyError) as exc:
             append_worker_error(f"bad tick line: {exc}")
             continue
+        if facts.human_raw_input:
+            try:
+                line_recognizer.feed(base64.b64decode(facts.human_raw_input))
+            except (ValueError, TypeError) as exc:
+                # Fail-open: a malformed raw-input chunk must never stall or
+                # crash the worker -- just skip recognition for this tick.
+                append_worker_error(f"bad raw-input chunk: {exc}")
+        facts = replace(
+            facts,
+            human_compact_submitted=line_recognizer.take_compact_submitted(),
+            human_model_command=line_recognizer.take_model_submitted(),
+            human_effort_command=line_recognizer.take_effort_submitted(),
+            input_line_empty=line_recognizer.is_empty,
+        )
         try:
             outcome = decide_once(
                 machine,
@@ -5040,6 +5139,7 @@ def _forward_io(
     on_suspend: Callable[[], object] | None = None,
     ctrl_c_gate: CtrlCGate | None = None,
     on_ctrl_c_event: Callable[[str], object] | None = None,
+    raw_tap: RawInputTap | None = None,
 ) -> None:
     """Select loop: forward stdin -> master, master -> stdout.
 
@@ -5121,6 +5221,11 @@ def _forward_io(
                     on_suspend()
                 if forwarded:
                     activity.record(forwarded)
+                    if raw_tap is not None:
+                        # Plan 00317: same bytes, second sink -- feeds the
+                        # worker's hot-reloadable recognizer. Never blocks or
+                        # alters what is written to the child below.
+                        raw_tap.append(forwarded)
                     os.write(master_fd, forwarded)
             else:
                 # stdin EOF: stop watching it so poll timeouts can fire.
@@ -5195,6 +5300,9 @@ def supervise(
 
     activity = activity if activity is not None else InputActivity()
     output_activity = OutputActivity()
+    # Plan 00317: fed the same forwarded bytes as `activity`, drained once per
+    # tick into TickFacts.human_raw_input for the worker's own recognizer.
+    raw_tap = RawInputTap()
     stdin_fd = stdin_fd if stdin_fd is not None else sys.stdin.fileno()
     sidecar_dir = sidecar_dir if sidecar_dir is not None else _default_sidecar_dir()
     policy = policy if policy is not None else CompactPolicy()
@@ -5275,6 +5383,11 @@ def supervise(
         # exactly once however many ticks pass before the worker consumes it.
         human_model_command = activity.take_model_submitted()
         human_effort_command = activity.take_effort_submitted()
+        # Plan 00317: drain the raw tap for the worker's OWN recognizer. Sent
+        # alongside the host-computed fields above (unchanged, still used by
+        # the in-process fallback below) so a worker restart alone can change
+        # recognition behaviour without any host-side code change.
+        human_raw_input = base64.b64encode(raw_tap.drain()).decode("ascii")
         # Plan 00164 Phase 4: prefer the restartable policy worker; on ANY worker
         # failure (decider returns None) fall back to the identical in-process
         # path so a tick is never dropped. The host always performs the injection.
@@ -5290,6 +5403,7 @@ def supervise(
                     work_idle=work_idle,
                     human_model_command=human_model_command,
                     human_effort_command=human_effort_command,
+                    human_raw_input=human_raw_input,
                     # Ship the host's authoritative machine state so the worker
                     # decides on it -- never on divergent worker-local state.
                     machine_state=machine.export_state(),
@@ -5398,6 +5512,7 @@ def supervise(
             ),
             ctrl_c_gate=ctrl_c_gate,
             on_ctrl_c_event=_on_ctrl_c_event,
+            raw_tap=raw_tap,
         )
     finally:
         for guarded_signal, prior_handler in prev_signal_guards.items():

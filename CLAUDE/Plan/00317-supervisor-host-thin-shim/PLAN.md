@@ -63,7 +63,7 @@ input-recognition features hot-reload like every other worker feature.
 
 ### Phase 1: audit
 
-- [ ] ⬜ **Task 1.1**: Enumerate every host-tier responsibility in
+- [x] ✅ **Task 1.1**: Enumerate every host-tier responsibility in
   `claude-supervise.py` beyond byte forwarding and child/worker
   lifecycle; produce the classification table (move / must-stay + why) as
   a supporting doc `AUDIT.md` in this plan folder. Owner pre-approved
@@ -73,20 +73,20 @@ input-recognition features hot-reload like every other worker feature.
 
 ### Phase 2: refactor
 
-- [ ] ⬜ **Task 2.1**: Raw-input tap host→worker (bounded, fail-open,
+- [x] ✅ **Task 2.1**: Raw-input tap host→worker (bounded, fail-open,
   never adds forwarding latency); move typed-command recognition
   worker-side; TDD including worker-dead and worker-slow paths.
-- [ ] ⬜ **Task 2.2**: Ctrl+C gate per the audit decision (move with a
+- [x] ✅ **Task 2.2**: Ctrl+C gate per the audit decision (move with a
   hold-and-ask primitive, or documented stay with its logic minimised to
   the byte-level swallow only).
-- [ ] ⬜ **Task 2.3**: Mid-session reload proof test (changed recognition
+- [x] ✅ **Task 2.3**: Mid-session reload proof test (changed recognition
   behaviour picked up by worker restart without touching the host), docs
   updated (module docstring host-surface list + hot-reload contract
   notes).
 
 ### Phase 3: verification
 
-- [ ] ⬜ **Task 3.1**: Full QA 25/25; live dogfood checklist journalled
+- [x] ✅ **Task 3.1**: Full QA 25/25; live dogfood checklist journalled
   for the next session (typed-command recognition change applied via
   worker reload only).
 
