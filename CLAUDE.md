@@ -493,13 +493,13 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
-<!-- handler: goal-injection -->
-
-- goal_injection — plan-start goal signal for the ccy supervisor
-
 <!-- handler: budget-exhaustion-detector -->
 
 - budget_exhaustion_detector — hidden agent budgets are surfaced
+
+<!-- handler: goal-injection -->
+
+- goal_injection — plan-start goal signal for the ccy supervisor
 
 <!-- handler: ccy-supervisor-integrity -->
 
