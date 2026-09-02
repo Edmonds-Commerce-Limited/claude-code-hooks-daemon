@@ -510,6 +510,47 @@ including files `RELEASING.md` Step 12.0 declares BLOCKING, one of which it says
 explicitly "a skip there is itself an abort condition". Two rounds of this lesson
 in one plan, from the same one-flag change.
 
+## A test that was never ROUTED does not even appear as a skip
+
+**What happened (v3.60.0 release gate, Plan 00319 Task 4.4):** the acceptance
+playbook emits 276 tests. `RELEASING.md` Step 12.4 says to route each one by
+its `Requires Main Thread` field, so the runner split the playbook on that
+field into a delegable set and a main-thread set. Seven tests carry no such
+field. Four are playbook-declared SKIPs and resolve themselves. The other three
+are `Type: CLI Feature`, a shape the field does not describe — and they fell
+into NEITHER set. They went unexecuted across two consecutive full acceptance
+passes, and nothing reported them: not as failures, not as skips, not at all.
+
+An eighth test was lost differently. Test 210 sat correctly inside a delegable
+batch, but its runner's report simply omitted the row while its own summary
+claimed a total (20) that did not match the rows it had written (23). A
+self-reported total is an assertion by the thing being audited.
+
+Both were caught the same way, and only that way: counting. 276 total minus 82
+main-thread minus 187 delegable did not reconcile, and the union of every
+runner's reported test numbers was one short of the delegable set.
+
+**Apply:** this is the next rung below
+[A skipped test is indistinguishable from a passing one](#a-skipped-test-is-indistinguishable-from-a-passing-one).
+A skip at least appears in the report with a reason. A test that was never
+routed produces no row at all, so no amount of reading the reports finds it —
+the absence is visible only against the SOURCE OF TRUTH.
+
+- Reconcile the executed set against the generator's full set by IDENTIFIER,
+  not by total. Diff the sorted test numbers; do not compare counts alone, and
+  never accept a runner's self-reported total as the denominator.
+- When you route work by a field, first ask which items LACK that field.
+  Routing on an optional attribute silently discards everything that does not
+  carry it, and the discard looks identical to success.
+- Prefer a router that fails loudly on an unroutable item over one that drops
+  it. The defect worth fixing is not the three missed tests; it is that a
+  dropped test and a passing test rendered identically.
+
+The same reconcile-by-identifier discipline caught a second omission in the
+same release: the follow-up plan capturing the review's ten non-blocking
+findings held F1 and F3-F10, having skipped F2 in its own numbering. Nine
+findings filed under a heading promising ten reads exactly like ten.
+
 ## Centralising a property imposes the centre's defaults on every call site
 
 **What happened (Plan 00248):** Plan 00246 did the right thing and routed ~30
