@@ -81,6 +81,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guard keys on those markers, NOT on "is this documentation": prose that
   discusses budget exhaustion without naming the detector is still matched
   by design. Caught live while reading this release's own changelog entry.
+- **Two handlers declared acceptance-test patterns they could no longer
+  produce.** `quarantine_artefact_read_guard` and `sensitive_content` render
+  their deny reason through `RuleFormatter`, so it opens
+  `BLOCKED [R-<RULE-ID>]:`, but their `get_acceptance_tests()` still declared
+  the pre-`RuleFormatter` headers `QUARANTINE ARTEFACT READ-BOUNDARY` and
+  `SENSITIVE CONTENT BLOCKED`. A pattern the handler cannot emit makes the
+  release acceptance gate unpassable for a handler that is behaving
+  correctly — it reports a release blocker that does not exist. Both now
+  derive the expected header from the `RuleID`, so a future rule rename
+  carries the pattern with it. The matching legacy strings in
+  `block_report/fingerprints.py` are deliberately unchanged:
+  `attribute_deny()` resolves by rule ID first and consults that table only
+  as a fallback for historical transcript text, where the old header is
+  exactly what was written. Found live by this release's acceptance run.
 
 ## [3.59.0] - 2026-09-01
 

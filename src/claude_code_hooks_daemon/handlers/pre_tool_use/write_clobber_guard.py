@@ -261,7 +261,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
                 description="Blocks a Write that would destroy unread file contents",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"would destroy a file you have not read",
+                    rf"BLOCKED \[{RuleID.WRITE_CLOBBER}\]",
                     r"AT RISK",
                     r"Edit",
                 ],

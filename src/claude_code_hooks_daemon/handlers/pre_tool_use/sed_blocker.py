@@ -406,7 +406,7 @@ class SedBlockerHandler(PreToolUseHandlerBase):
                 description="Blocks sed -i (in-place editing) to prevent file destruction",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"(?i)sed.*forbidden",
+                    rf"BLOCKED \[{RuleID.SED_FILE_MODIFICATION}\]",
                     r"Edit tool",
                 ],
                 setup_commands=['echo "test content" > /tmp/sed_test.txt'],
@@ -422,7 +422,7 @@ class SedBlockerHandler(PreToolUseHandlerBase):
                 description="Blocks sed -e commands",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"(?i)sed.*forbidden",
+                    rf"BLOCKED \[{RuleID.SED_FILE_MODIFICATION}\]",
                     r"Edit tool",
                 ],
                 safety_notes="Uses test file in /tmp - safe to test",
@@ -445,7 +445,7 @@ class SedBlockerHandler(PreToolUseHandlerBase):
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"(?i)sed.*forbidden",
+                    rf"BLOCKED \[{RuleID.SED_FILE_MODIFICATION}\]",
                     r"Edit tool",
                 ],
                 safety_notes=(

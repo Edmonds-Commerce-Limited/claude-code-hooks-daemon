@@ -1,5 +1,7 @@
 """Comprehensive tests for SedBlockerHandler."""
 
+import re
+
 import pytest
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -1324,3 +1326,42 @@ class TestHeredocWrittenShellScripts:
         an agent learns to route around.
         """
         assert handler.matches(self._bash(self._MARKDOWN_HEREDOC)) is False
+
+
+class TestDeclaredAcceptancePatternsAreProducible:
+    """Every declared acceptance pattern must match the reason really produced.
+
+    The release acceptance gate passes a test only when the handler's own
+    ``expected_message_patterns`` match the live deny reason. This handler
+    declares "forbidden", a word that appears only in ``get_claude_md()`` and
+    in NEITHER the verbose nor the terse block -- so three acceptance tests
+    could never pass however correctly the handler behaved.
+    """
+
+    @pytest.fixture
+    def handler(self):
+        return SedBlockerHandler()
+
+    def _bash(self, command: str) -> dict:
+        return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+    def test_verbose_deny_matches_its_declared_patterns(self, handler) -> None:
+        reason = handler.handle(self._bash('sed -e "s/old/new/" /tmp/f.txt')).reason or ""
+        declared = next(
+            test for test in handler.get_acceptance_tests() if test.title == "sed -e command"
+        )
+        for pattern in declared.expected_message_patterns:
+            assert re.search(pattern, reason), f"{pattern!r} no longer appears in: {reason}"
+
+    def test_terse_deny_matches_its_declared_patterns(self, handler) -> None:
+        """The SECOND fire is terse, and the gate can just as easily observe that one."""
+        transcript = "/tmp/agent-terse/transcript.jsonl"
+        hook_input = self._bash('sed -e "s/old/new/" /tmp/f.txt')
+        hook_input["transcript_path"] = transcript
+        handler.handle(hook_input)
+        reason = handler.handle(hook_input).reason or ""
+        declared = next(
+            test for test in handler.get_acceptance_tests() if test.title == "sed -e command"
+        )
+        for pattern in declared.expected_message_patterns:
+            assert re.search(pattern, reason), f"{pattern!r} no longer appears in: {reason}"

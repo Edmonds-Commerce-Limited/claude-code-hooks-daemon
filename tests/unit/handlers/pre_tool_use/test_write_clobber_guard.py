@@ -14,6 +14,7 @@ shrink-threshold design would have passed it. The destructive property was
 replacement without knowledge, not shrinkage.
 """
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -258,3 +259,25 @@ class TestWriteClobberGuardDisclosureLadder:
         result = handler.handle(hook_input)
 
         assert "DO INSTEAD" in result.reason
+
+
+class TestDeclaredAcceptancePatternsAreProducible:
+    """Every declared acceptance pattern must match the reason really produced.
+
+    The release acceptance gate passes a test only when the handler's own
+    ``expected_message_patterns`` match the live deny reason, so a pattern
+    stranded by a wording change makes the gate unpassable for a handler that
+    is behaving correctly -- it reports a release blocker that does not exist.
+    """
+
+    def test_deny_reason_matches_its_declared_patterns(
+        self, handler: WriteClobberGuardHandler, existing_file: str
+    ) -> None:
+        reason = handler.handle(_write(existing_file)).reason or ""
+        declared = next(
+            test
+            for test in handler.get_acceptance_tests()
+            if "existing unread file is denied" in test.title
+        )
+        for pattern in declared.expected_message_patterns:
+            assert re.search(pattern, reason), f"{pattern!r} no longer appears in: {reason}"

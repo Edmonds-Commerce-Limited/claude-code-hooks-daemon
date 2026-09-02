@@ -112,6 +112,7 @@ which of them are worth the change.
   secret-file guard's own deny message, so having it blocked when piped
   is a sharp edge in the recommended recovery path. Decide whether
   `secret-meta` belongs in `pipe_blocker`'s whitelist.
+
 - [ ] ⬜ **Task 4.2**: acceptance Tests 66 and 67 share one disclosure budget
   and therefore cannot both pass as declared. `sensitive_content` emits its
   verbose rationale once per transcript; Test 66 spends it, so Test 67 —
@@ -122,6 +123,7 @@ which of them are worth the change.
   the pair distinct transcript paths. Test 67's substantive contract (deny,
   cite only an index, leak neither the term nor the raw command line) was
   met in full during the v3.60.0 run.
+
 - [ ] ⬜ **Task 4.3**: `pipe_blocker` labels the producer of
   `python -m pytest ... | tail` as "python is expensive", while the
   project's own CLAUDE.md states it "names `pytest` as its producer,
@@ -130,9 +132,82 @@ which of them are worth the change.
   disagrees. Cosmetic, but it made an acceptance runner report a false
   FAIL, so either the label or the doc sentence should move.
 
+- [ ] ⬜ **Task 4.4**: `Type: CLI Feature` tests carry no
+  `Requires Main Thread` field, so a runner that routes by that field —
+  which is exactly what RELEASING.md Step 12.4 instructs — silently drops
+  them into neither the delegable batches nor the main-thread set. Three
+  tests (274, 275, 276) went unexecuted in two consecutive v3.60.0
+  acceptance passes before a count reconciliation caught it. Playbook
+  SKIP-marked tests (25, 26, 139, 141) also lack the field, but they are
+  explicitly resolved and so are harmless. Either emit the routing field
+  for every executable test, or have `generate-playbook` state the routing
+  rule for `CLI Feature` explicitly. The silent-drop shape is the defect:
+  a dropped test is indistinguishable from a passing one in the totals.
+
+- [ ] ⬜ **Task 4.5**: `budget_exhaustion_detector` fires on the release
+  gate's own machinery. During the v3.60.0 run it triggered twice on text
+  that merely QUOTED its Test 187 fixture: once on `grep` output from the
+  generated playbook, once on a sub-agent dispatch prompt that cited the
+  fixture string. Both are working-as-designed — the guard keys on two
+  literal markers (the handler name, its ledger filename) and neither
+  quotation carried one, and the CHANGELOG says plainly that prose
+  discussing budget exhaustion without naming the detector is still
+  matched. But the handler's advisory demands a prominent user-facing
+  banner, so every false fire spends a real banner on a non-event and
+  trains the reader to discount the next one.
+
+  **Owner ruling (asked during the v3.60.0 gate): do this properly — a
+  robust, clean solution, explicitly not a quick workaround.** Two options
+  were put to the owner and are therefore REJECTED: leaving it as won't-fix,
+  and smuggling one of the guard's literal markers into the Test 187 fixture
+  string so the gate's own quotations self-exclude. The second is a
+  workaround precisely because it fixes the symptom at one known quotation
+  site while leaving every other quotation of a budget message —
+  documentation, a bug report, a transcript excerpt — still false-firing.
+
+  So this is a DESIGN task before it is a code task. The real question is
+  how the detector distinguishes a budget message the harness is DELIVERING
+  to this agent now from one that merely APPEARS as text in something the
+  agent read. The current marker list is a proxy for that distinction and is
+  too narrow to carry it. Whatever is designed must not be a keyword
+  blocklist grown one string at a time, and must not weaken detection of a
+  genuine exhaustion message — that remains the failure that actually costs
+  the user something. Write the approach down and get it agreed before
+  implementing.
+
+- [ ] ⬜ **Task 4.6**: FOUR handlers were found declaring acceptance patterns
+  their own deny reasons cannot produce — `quarantine_artefact_read_guard`
+  and `sensitive_content` (stale `RuleFormatter`-era headers),
+  `sed_blocker` (declares "forbidden", a word that appears only in
+  `get_claude_md()` and in neither the verbose nor the terse block), and
+  `write_clobber_guard` (declares "would destroy a file you have not read",
+  which appears nowhere). All four were fixed during the v3.60.0 release,
+  but they were found ONE AT A TIME, each costing a FAIL-FAST cycle, and
+  each looked like a release blocker until inspected. That is the signal
+  that a systemic check is missing.
+
+  ```
+  A static check was attempted during the release and is NOT good enough
+  to ship: patterns are matched against the deny text, which is assembled
+  at runtime from the `Rule` fields, the `RuleFormatter` header and
+  handler-appended literals, so checking a pattern against handler source
+  alone produced 87 candidates that were overwhelmingly false positives.
+  The only reliable oracle is EXECUTING the handler, which is exactly what
+  the acceptance gate does — too late, and only for handlers whose test
+  happens to run.
+
+  Design the real thing: a CI-time contract test that, for each handler,
+  drives it with the input its own acceptance test describes and asserts
+  every declared pattern matches the reason produced. The obstacle is that
+  `AcceptanceTest.command` is prose, not an executable payload, so the
+  test cannot currently synthesise the input. Solving that — a structured
+  payload alongside the prose, or a per-handler fixture — is the actual
+  unit of work here. Do NOT settle for a heuristic scanner.
+  ```
+
 ## Success Criteria
 
-- [ ] All twelve items (F1, F3, F4, F5, F6, F7, F8, F9, F10 and the three
+- [ ] All fifteen items (F1, F3, F4, F5, F6, F7, F8, F9, F10 and the six
   Phase 4 acceptance-run observations) are closed — each either fixed with a
   regression test that fails against the pre-fix code, or marked won't-fix
   with a recorded reason.
