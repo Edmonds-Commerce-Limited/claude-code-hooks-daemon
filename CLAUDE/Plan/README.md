@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00315: hidden agent budget detection](00315-hidden-agent-budget-detection/PLAN.md) - In Progress (research-first catalogue of opaque per-session budgets — search/fetch budget, subagent return channel, background task caps, truncations — with source-of-truth attribution and verbatim failure-shape fixtures mined from the transcript archive; detector build decided only after the evidence exists, no live budget exhaustion)
+
 - [00314: failsafe cron suppression marker never arms](00314-failsafe-cron-suppression-marker-never-arms/PLAN.md) - Not Started (Plan 00298's cron-tick suppression never engaged live: the human-input marker was not written despite a matching STOPPING BECAUSE phrase, and the pattern set misses natural phrasings; TDD reproduction + field observability + conservative pattern widening)
 
 - [00312: supervisor ctrl c double press guard](00312-supervisor-ctrl-c-double-press-guard/PLAN.md) - In Progress (a single accidental ^C kills background agents; the supervisor's PTY position lets it swallow a lone 0x03 and forward on rapid double-press — escape hatch always wins, visibly hinted, dogfooded here)
@@ -269,11 +271,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 314 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 315 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 258 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
