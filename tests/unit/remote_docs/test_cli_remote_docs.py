@@ -210,6 +210,48 @@ class TestRemotePolicy:
         assert document.provenance.stale_after == date(2026, 9, 10)
 
 
+class TestGeneratedIndex:
+    """An index that silently goes stale answers "no" confidently and wrongly."""
+
+    def _index(self, root: Path) -> Path:
+        from claude_code_hooks_daemon.remote_docs.index import INDEX_RELATIVE_PATH
+
+        return root / INDEX_RELATIVE_PATH
+
+    def test_add_regenerates_the_index(self, tmp_path: Path) -> None:
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+
+        assert "https://example.com/p" in self._index(tmp_path).read_text(encoding="utf-8")
+
+    def test_refresh_regenerates_the_index(self, tmp_path: Path) -> None:
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+        self._index(tmp_path).write_text("stale\n", encoding="utf-8")
+
+        cmd_remote_docs(_args(tmp_path, "refresh", all_docs=True))
+
+        assert "stale" not in self._index(tmp_path).read_text(encoding="utf-8")
+
+    def test_a_failed_capture_does_not_claim_the_document(self, tmp_path: Path) -> None:
+        """The index must describe the tree, not what we hoped to add to it."""
+
+        def boom(url: str) -> bytes:
+            raise OSError("network down")
+
+        cmd_remote_docs(
+            _args(tmp_path, "add", url="https://example.com/p", fetch_fn=boom)
+        )
+
+        index = self._index(tmp_path)
+        if index.exists():
+            assert "https://example.com/p" not in index.read_text(encoding="utf-8")
+
+    def test_the_index_is_not_written_inside_the_vendored_tree(self, tmp_path: Path) -> None:
+        """Inside, it would have no provenance and the gate would deny it."""
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+
+        assert _tree(tmp_path) not in self._index(tmp_path).parents
+
+
 class TestFetcherSelection:
     """agent-browser is the default; losing it must be visible, not silent."""
 

@@ -4945,8 +4945,26 @@ def cmd_remote_docs(args: argparse.Namespace) -> int:
         print(fetcher.warning, file=sys.stderr)
 
     if action == "add":
-        return _remote_docs_add(args, tree, fetcher, now, _remote_docs_policy(resolved_root))
-    return _remote_docs_refresh(args, tree, fetcher, now)
+        code = _remote_docs_add(args, tree, fetcher, now, _remote_docs_policy(resolved_root))
+    else:
+        code = _remote_docs_refresh(args, tree, fetcher, now)
+
+    # Regenerated on every capture and refresh, never on demand: an index
+    # that silently goes stale answers "we don't have that" confidently and
+    # wrongly. Rendered from the TREE, so a failed capture cannot make it
+    # claim a document that was never written.
+    _regenerate_remote_docs_index(resolved_root, tree)
+    return code
+
+
+def _regenerate_remote_docs_index(project_root: Path, tree: Path) -> None:
+    """Rewrite the corpus index, reporting rather than masking a failure."""
+    from claude_code_hooks_daemon.remote_docs.index import write_index
+
+    try:
+        write_index(project_root, tree)
+    except OSError as exc:
+        print(f"remote-docs: could not write the index: {exc}", file=sys.stderr)
 
 
 def _remote_docs_policy(project_root: Path) -> Any:
