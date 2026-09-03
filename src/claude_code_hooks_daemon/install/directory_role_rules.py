@@ -193,6 +193,10 @@ def _human_docs_globs(layout: ProjectLayout) -> tuple[str, ...]:
     return (f"{layout.human_docs_dir}/**/*.md",)
 
 
+def _remote_docs_globs(layout: ProjectLayout) -> tuple[str, ...]:
+    return (f"{layout.remote_docs_dir}/**/*.md",)
+
+
 def _agent_docs_globs(layout: ProjectLayout) -> tuple[str, ...]:
     return (f"{layout.agent_docs_dir}/**/*.md",)
 
@@ -269,6 +273,16 @@ Keep it to role framing and pointers -- no engineering-principle restatements or
 See [DirectoryRoles.md]({directory_roles_link}) for the full rule.
 """
 
+_REMOTE_DOCS_BODY: Final[str] = """\
+# Vendored remote documentation
+
+You are about to add or edit markdown in the vendored remote-docs tree.
+
+This tree is NOT authored here: every file is captured from upstream by `hooks-daemon remote-docs`, carries mandatory provenance frontmatter, and must not be reworded -- editing it silently falsifies its recorded `fidelity`.
+
+See [DirectoryRoles.md]({directory_roles_link}) for the full rule.
+"""
+
 _PLAN_DIR_BODY: Final[str] = """\
 # Plan directory markdown
 
@@ -282,6 +296,7 @@ See [DirectoryRoles.md]({directory_roles_link}) for the full rule.
 SOURCE_DIRS_RULE_KEY: Final[str] = "source-dirs"
 TEST_DIRS_RULE_KEY: Final[str] = "test-dirs"
 HUMAN_DOCS_RULE_KEY: Final[str] = "human-docs"
+REMOTE_DOCS_RULE_KEY: Final[str] = "remote-docs"
 AGENT_DOCS_RULE_KEY: Final[str] = "agent-docs"
 CLAUDE_SKILLS_RULE_KEY: Final[str] = "claude-skills"
 CLAUDE_AGENTS_RULE_KEY: Final[str] = "claude-agents"
@@ -308,6 +323,13 @@ SHIPPED_RULES: Final[tuple[RuleAssetSpec, ...]] = (
         description="The human-facing doc tree is terse and points at the agent tree (R3)",
         body_template=_HUMAN_DOCS_BODY,
         glob_resolver=_human_docs_globs,
+    ),
+    RuleAssetSpec(
+        key=REMOTE_DOCS_RULE_KEY,
+        version="1.0.0",
+        description="Vendored upstream docs are captured, never authored or reworded",
+        body_template=_REMOTE_DOCS_BODY,
+        glob_resolver=_remote_docs_globs,
     ),
     RuleAssetSpec(
         key=AGENT_DOCS_RULE_KEY,

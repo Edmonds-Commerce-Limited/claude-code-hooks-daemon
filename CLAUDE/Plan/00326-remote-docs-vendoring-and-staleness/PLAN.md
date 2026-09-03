@@ -139,23 +139,21 @@ field. **Settled — see [PAYLOADS.md](PAYLOADS.md): the field is
   `markdown_organization`. `is_docs_path()` deliberately does NOT claim the
   tree. Required fixing a latent `normalize_path` defect first (see Task
   1.6) — without it the allowance branch was unreachable.
-- [ ] ⬜ **Task 1.4**: Confirm ordinary docs-QA checks never see the tree. It
-  sits outside both corpus-collected trees, so no `scope_exclude_globs`
-  entry is needed (D10, amended); the remote checks walk it directly in
-  Phase 3. **Done when** `docs-qa --sweep` over a fixture remote file
-  reports zero findings from the existing eleven checks.
+- [x] ✅ **Task 1.4**: Confirmed by test — a remote doc yields zero sweep
+  findings, and a CONTROL test proves the same content in the human tree
+  does trip them, so the exclusion is real rather than an empty sweep. No
+  `scope_exclude_globs` entry needed: the tree is never corpus-collected.
 - [x] ✅ **Task 1.6**: Fix `markdown_organization.normalize_path`, which
   matched its project markers as bare SUBSTRINGS — so `remote-docs/`
   collapsed to `docs/` and the remote tree was silently classified as the
   human docs tree. Markers now match only at a path-segment boundary, and
   the remote tree is itself a marker. Found because Task 1.3's first
   allowance test passed vacuously.
-- [ ] ⬜ **Task 1.5**: Add a `remote-docs` directory role to
-  `install/directory_role_rules.py` (globs from `layout.remote_docs_dir`)
-  so every install deploys `.claude/rules/remote-docs.md`: never hand-author
-  here, capture with the CLI, frontmatter is mandatory. **Done when**
-  `sync_directory_role_rules` deploys it and the human-docs rule does not
-  also match the tree.
+- [x] ✅ **Task 1.5**: `remote-docs` directory role ships (globs derived from
+  `layout.remote_docs_dir`), so every install deploys
+  `.claude/rules/remote-docs.md`: captured not authored, never reworded,
+  frontmatter mandatory. A test asserts the human-docs rule does not also
+  match the tree.
 
 ### Phase 2: Capture and refresh CLI
 

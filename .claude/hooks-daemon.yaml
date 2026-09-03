@@ -1081,6 +1081,8 @@ documentation:
         generator: "bin/hooks-daemon restart (redeploys install/directory_role_rules.py)"
       - glob: ".claude/rules/human-docs.md"
         generator: "bin/hooks-daemon restart (redeploys install/directory_role_rules.py)"
+      - glob: ".claude/rules/remote-docs.md"
+        generator: "bin/hooks-daemon restart (redeploys install/directory_role_rules.py)"
       - glob: ".claude/rules/agent-docs.md"
         generator: "bin/hooks-daemon restart (redeploys install/directory_role_rules.py)"
       - glob: ".claude/rules/claude-skills.md"
