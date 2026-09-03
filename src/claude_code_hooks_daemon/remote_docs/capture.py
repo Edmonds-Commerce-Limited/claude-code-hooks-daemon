@@ -25,8 +25,29 @@ from claude_code_hooks_daemon.remote_docs.provenance import (
     Fidelity,
 )
 
-#: Signature of the injected fetcher: URL in, RAW response bytes out.
-FetchFn = Callable[[str], bytes]
+
+@dataclass(frozen=True)
+class FetchResult:
+    """Fetched bytes, plus how the fetcher says it obtained them.
+
+    ``source`` is the fetcher's own account (``accept-markdown``,
+    ``html-fallback``, ...). It is recorded in provenance because "upstream
+    served this as markdown" and "we extracted this from HTML" are
+    materially different claims about how close the stored text is to the
+    document.
+
+    It deliberately does NOT raise ``fidelity``. ``agent-browser`` only
+    guarantees an unchanged response body under ``--raw``, which capture does
+    not use, so treating ``accept-markdown`` as verbatim would over-claim.
+    """
+
+    content: bytes
+    source: str | None = None
+
+
+#: Signature of the injected fetcher. Returning plain ``bytes`` stays valid;
+#: a fetcher with something to say about provenance returns a FetchResult.
+FetchFn = Callable[[str], "bytes | FetchResult"]
 
 _REQUIRED_SCHEME: Final[str] = "https"
 _MARKDOWN_SUFFIX: Final[str] = ".md"
@@ -194,11 +215,18 @@ def capture(
     fetched_at = now or datetime.now(UTC)
 
     try:
-        raw = fetch_fn(url)
+        fetched = fetch_fn(url)
     except CaptureError:
         raise
     except (OSError, ValueError) as exc:
         raise CaptureError(f"fetch failed for {url}: {exc}") from exc
+
+    # A fetcher may return plain bytes or a FetchResult; normalise so the
+    # older contract keeps working at every existing call site.
+    normalised = fetched if isinstance(fetched, FetchResult) else FetchResult(content=fetched)
+    raw: bytes = normalised.content
+    if normalised.source and fetch_method:
+        fetch_method = f"{fetch_method} ({normalised.source})"
 
     try:
         body = raw.decode("utf-8")

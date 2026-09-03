@@ -171,11 +171,13 @@ are no longer paid for by this plan.
   accepting a URL directly, since callers hold URLs). Precedence is
   `--licence` flag > `known_sources` > `unreviewed` sentinel: the flag is
   the narrower statement, the config is the standing default (D13).
-- [ ] ⬜ **Task 3.8**: Record the fetcher's reported `source`
-  (`accept-markdown` vs `html-fallback`) in provenance — a sharper signal
-  than the binary name, distinguishing upstream's own markdown from our
-  extraction of their HTML. Deferred from D18 because it changes the
-  `FetchFn` contract from `str -> bytes` at every call site.
+- [x] 🟩 **Task 3.8**: The fetcher's reported `source` is recorded, e.g.
+  `fetch_method: agent-browser-lite-headless (accept-markdown)`. `FetchFn`
+  may now return a `FetchResult`; plain `bytes` stays valid, so no existing
+  call site changed. It does **not** raise `fidelity` to `verbatim`:
+  agent-browser only guarantees an unchanged body under `--raw`, which
+  capture does not use, so upgrading on one observed hash match would
+  over-claim (D21).
 
 **Not done here, deliberately** — the dropped Tasks 3.1–3.3 and 3.5, and why
 each is either moot or worth filing separately, are recorded in D17.
@@ -303,11 +305,6 @@ human-tree documentation, and the v3.61.0 config-changes manifest.
 
 **Deliberately still open, neither blocked nor forgotten:**
 
-- **Task 3.8** — record the fetcher's reported `source` so a capture of a
-  markdown-serving site can claim `verbatim` honestly. Safe to defer: the
-  current behaviour UNDER-claims (`converted`), and `--verbatim` already
-  covers work that must quote exactly. Changes the `FetchFn` contract at
-  every call site, which is why it is not smuggled in here.
 - **Task 6.3** — fold the mechanisable half of the hooks-contract refresh
   into the CLI, and clear the firing staleness advisory. The second half
   needs a verified section-by-section extraction audit against the raw

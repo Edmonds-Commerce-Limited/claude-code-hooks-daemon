@@ -33,7 +33,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
-from claude_code_hooks_daemon.remote_docs.capture import CaptureError, FetchFn
+from claude_code_hooks_daemon.remote_docs.capture import CaptureError, FetchFn, FetchResult
 from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
 
 # Preference order. The mode-suffixed wrappers come first because where they
@@ -211,6 +211,19 @@ def agent_browser_fetch(
     return (content, source) if with_source else content
 
 
+def _fetch_with_source(url: str, *, binary: str, runner: Runner | None) -> FetchResult:
+    """Fetch, carrying agent-browser's own account of where the text came from.
+
+    ``source`` reaches provenance because "upstream served markdown" and "we
+    extracted this from HTML" are different claims about how close the stored
+    text is to the document. It does NOT raise ``fidelity``: agent-browser
+    only guarantees an unchanged response body under ``--raw``, which this
+    does not use.
+    """
+    content, source = agent_browser_fetch(url, binary=binary, runner=runner, with_source=True)
+    return FetchResult(content=content, source=source)
+
+
 def _is_usable(binary: str, runner: Runner) -> bool:
     """Whether ``binary`` actually runs, not merely whether it exists.
 
@@ -259,7 +272,7 @@ def resolve_fetcher(
         if locate(binary) is None or not _is_usable(binary, probe):
             continue
         return ResolvedFetcher(
-            fetch_fn=lambda url, _binary=binary: agent_browser_fetch(
+            fetch_fn=lambda url, _binary=binary: _fetch_with_source(
                 url, binary=_binary, runner=runner
             ),
             # Extracted and normalised text is not the response body, however

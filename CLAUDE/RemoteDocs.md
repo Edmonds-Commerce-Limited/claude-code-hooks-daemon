@@ -36,16 +36,16 @@ a project's vendored docs are theirs to refresh.
 
 Every document opens with YAML frontmatter:
 
-| Field              | Required | Meaning                                                     |
-| ------------------ | -------- | ----------------------------------------------------------- |
-| `source_url`       | yes      | Where it came from. Without this, nothing can be refreshed. |
-| `fetched_at`       | yes      | When it was captured (ISO 8601, timezone-aware).            |
-| `fidelity`         | yes      | `verbatim` \| `converted` \| `summarised` — see below.      |
-| `source_sha256`    | yes      | Hash of the fetched bytes, so refresh can no-op.            |
-| `licence`          | yes      | SPDX identifier, or the `unreviewed` sentinel.              |
-| `stale_after`      | yes      | Date the freshness window expires, or the `never` sentinel. |
-| `fetch_method`     | no       | Which fetcher produced it.                                  |
-| `upstream_version` | no       | Version pin, where upstream publishes one.                  |
+| Field              | Required | Meaning                                                                                                         |
+| ------------------ | -------- | --------------------------------------------------------------------------------------------------------------- |
+| `source_url`       | yes      | Where it came from. Without this, nothing can be refreshed.                                                     |
+| `fetched_at`       | yes      | When it was captured (ISO 8601, timezone-aware).                                                                |
+| `fidelity`         | yes      | `verbatim` \| `converted` \| `summarised` — see below.                                                          |
+| `source_sha256`    | yes      | Hash of the fetched bytes, so refresh can no-op.                                                                |
+| `licence`          | yes      | SPDX identifier, or the `unreviewed` sentinel.                                                                  |
+| `stale_after`      | yes      | Date the freshness window expires, or the `never` sentinel.                                                     |
+| `fetch_method`     | no       | Which fetcher produced it, and how — e.g. `agent-browser-lite-headless (accept-markdown)` vs `(html-fallback)`. |
+| `upstream_version` | no       | Version pin, where upstream publishes one.                                                                      |
 
 `stale_after` is a **date in the document**, not a policy someone must know
 about: any consumer — a tool, `cat`, a human — can see it without understanding
@@ -70,6 +70,12 @@ This is not theoretical caution. During the Plan 00271 hook-contract audit, a
 **summarising fetch layer fabricated** a `permissionDecision: "escalate"` value
 that appears nowhere in the raw text. A fabricated value vendored with
 `fidelity: verbatim` would be enforced against the daemon as if documented.
+
+A browser capture records `converted` **even when `fetch_method` reports
+`accept-markdown`** — upstream serving markdown does not make our stored copy
+the response body, because `agent-browser` only guarantees unchanged bytes
+under `--raw`, which capture does not use. Under-claiming is safe;
+over-claiming is the failure the field exists to prevent.
 
 Work that must quote upstream exactly should demand raw bytes:
 

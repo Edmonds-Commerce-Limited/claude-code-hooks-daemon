@@ -119,6 +119,37 @@ tool's `tool_response`, so the only new hook surface is one PreToolUse
 handler with two branches (`WebFetch`, `Read`), and Phase 0 shrinks to
 confirming two input field names.
 
+## D21 — the reported `source` is RECORDED, but does not raise `fidelity`
+
+Closes Task 3.8, deferred from D18.
+
+`agent-browser read --json` reports where the text came from
+(`accept-markdown` when upstream served markdown, `html-fallback` when it
+extracted from HTML). That distinction is worth keeping: it says how close
+the stored text is to the document, which is exactly what a reader judging
+a vendored doc wants to know. It is now recorded as
+`fetch_method: <binary> (<source>)`.
+
+**The tempting next step is wrong.** Measurement showed an
+`accept-markdown` capture producing a sha256 IDENTICAL to the raw GET, which
+looks like grounds for claiming `verbatim`. It is not, for two reasons:
+
+- That is ONE observation on ONE URL. A fidelity claim is exactly the thing
+  that must not rest on a sample.
+- `agent-browser`'s own reference says `--raw` is for "when you need the
+  response body unchanged", which implies the non-raw path may normalise.
+  Capture does not pass `--raw`, so it cannot honestly assert the bytes are
+  upstream's.
+
+Under-claiming is safe; over-claiming is the failure this field exists to
+prevent. Anyone needing a genuine `verbatim` capture already has
+`--verbatim`, which uses the raw GET.
+
+**The contract change stayed additive.** `FetchFn` may now return a
+`FetchResult`, but plain `bytes` remains valid and is normalised inside
+`capture`, so no existing call site changed — which is what made this
+cheap enough to do after all.
+
 ## D20 — `--verbatim` is demandable, and Phase 6 is narrower than drafted
 
 Three findings, taken while assessing Phase 6 against the real vendored

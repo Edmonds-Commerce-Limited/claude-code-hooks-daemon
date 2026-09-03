@@ -184,6 +184,90 @@ class TestCapture:
             )
 
 
+class TestReportedSource:
+    """A fetcher may report HOW it got the text; that belongs in provenance.
+
+    `accept-markdown` (upstream served markdown) and `html-fallback` (we
+    extracted it from HTML) are materially different claims about how close
+    the stored text is to the document — but NOT different enough to change
+    `fidelity`, because without `--raw` the content is still normalised.
+    Recording it preserves the distinction without over-claiming on it.
+    """
+
+    def _fetch(self, result):
+        def fetch_fn(url: str):
+            return result
+
+        return fetch_fn
+
+    def test_a_plain_bytes_fetcher_still_works(self) -> None:
+        """The contract stays backwards-compatible: bytes remain valid."""
+        result = capture("https://example.com/p", fetch_fn=self._fetch(b"# X\n"), now=_NOW)
+
+        assert "# X" in result.content
+
+    def test_a_reported_source_is_recorded_alongside_the_method(self) -> None:
+        from claude_code_hooks_daemon.remote_docs.capture import FetchResult
+
+        result = capture(
+            "https://example.com/p",
+            fetch_fn=self._fetch(FetchResult(content=b"# X\n", source="accept-markdown")),
+            now=_NOW,
+            fetch_method="agent-browser",
+        )
+
+        provenance = parse_provenance(result.content).provenance
+        assert provenance is not None
+        assert provenance.fetch_method == "agent-browser (accept-markdown)"
+
+    def test_a_reported_source_does_not_upgrade_fidelity(self) -> None:
+        """Upstream serving markdown does not make OUR copy the response body.
+
+        agent-browser only guarantees an unchanged body under `--raw`, which
+        capture does not use, so claiming verbatim here would over-claim on
+        one observation.
+        """
+        from claude_code_hooks_daemon.remote_docs.capture import FetchResult
+
+        result = capture(
+            "https://example.com/p",
+            fetch_fn=self._fetch(FetchResult(content=b"# X\n", source="accept-markdown")),
+            now=_NOW,
+            fidelity=Fidelity.CONVERTED,
+            fetch_method="agent-browser",
+        )
+
+        provenance = parse_provenance(result.content).provenance
+        assert provenance is not None
+        assert provenance.fidelity is Fidelity.CONVERTED
+
+    def test_the_hash_is_of_the_returned_content(self) -> None:
+        from claude_code_hooks_daemon.remote_docs.capture import FetchResult
+
+        body = b"# X\n"
+        result = capture(
+            "https://example.com/p",
+            fetch_fn=self._fetch(FetchResult(content=body, source="html-fallback")),
+            now=_NOW,
+        )
+
+        assert result.source_sha256 == hashlib.sha256(body).hexdigest()
+
+    def test_no_source_leaves_the_method_unadorned(self) -> None:
+        from claude_code_hooks_daemon.remote_docs.capture import FetchResult
+
+        result = capture(
+            "https://example.com/p",
+            fetch_fn=self._fetch(FetchResult(content=b"# X\n", source=None)),
+            now=_NOW,
+            fetch_method="https-get",
+        )
+
+        provenance = parse_provenance(result.content).provenance
+        assert provenance is not None
+        assert provenance.fetch_method == "https-get"
+
+
 class TestDeclaredFidelity:
     """The fetcher declares its own claim; capture must not overwrite it.
 
