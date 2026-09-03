@@ -4889,6 +4889,159 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
+def _https_fetch(url: str) -> bytes:
+    """Fetch ``url`` over https only (Plan 00326 Task 2.1).
+
+    Same defence-in-depth shape as ``install/relay_deploy._default_fetch``:
+    the scheme is validated before ``urlopen`` is reached, so ``file:`` and
+    custom schemes are impossible by construction rather than by convention.
+    """
+    import urllib.parse
+    import urllib.request
+
+    from claude_code_hooks_daemon.remote_docs.capture import CaptureError
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https":
+        raise CaptureError(f"refusing to fetch non-https URL: {url!r}")
+    with urllib.request.urlopen(  # nosec B310 - scheme validated to https above
+        url, timeout=Timeout.VERSION_CHECK
+    ) as response:
+        return bytes(response.read())
+
+
+def _remote_docs_tree(project_root: Path) -> Path:
+    """Resolve the configured remote-docs tree root for ``project_root``."""
+    from claude_code_hooks_daemon.config.models import Config
+
+    config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+    return project_root / config.documentation.trees.remote
+
+
+def cmd_remote_docs(args: argparse.Namespace) -> int:
+    """Capture, list, check and refresh vendored remote documentation.
+
+    Exit codes: 0 success, 1 a document is stale/unreadable or a capture
+    failed, 2 the invocation itself was wrong (no refresh target named).
+    """
+    resolved_root = resolve_tree_root(args)
+    if resolved_root is None:
+        return 2
+    tree = _remote_docs_tree(resolved_root)
+    fetch_fn = getattr(args, "fetch_fn", None) or _https_fetch
+    now = getattr(args, "now", None)
+    action = args.remote_docs_action
+
+    if action == "add":
+        return _remote_docs_add(args, tree, fetch_fn, now)
+    if action == "list":
+        return _remote_docs_list(tree)
+    if action == "check":
+        return _remote_docs_check(tree, now)
+    return _remote_docs_refresh(args, tree, fetch_fn, now)
+
+
+def _remote_docs_add(
+    args: argparse.Namespace, tree: Path, fetch_fn: Any, now: Any
+) -> int:
+    from claude_code_hooks_daemon.remote_docs.capture import (
+        DEFAULT_STALE_AFTER_DAYS,
+        CaptureError,
+    )
+    from claude_code_hooks_daemon.remote_docs.provenance import UNREVIEWED
+    from claude_code_hooks_daemon.remote_docs.store import write_capture
+
+    if not args.url:
+        print("remote-docs add: a URL is required", file=sys.stderr)
+        return 2
+    try:
+        written = write_capture(
+            tree,
+            args.url,
+            fetch_fn=fetch_fn,
+            now=now,
+            licence=args.licence or UNREVIEWED,
+            stale_after_days=(
+                args.stale_after_days
+                if args.stale_after_days is not None
+                else DEFAULT_STALE_AFTER_DAYS
+            ),
+        )
+    except CaptureError as exc:
+        print(f"remote-docs add failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"captured {args.url} -> {written}")
+    if not args.licence:
+        print(
+            f"  licence recorded as `{UNREVIEWED}` — set it once for this source "
+            "rather than per file"
+        )
+    return 0
+
+
+def _remote_docs_list(tree: Path) -> int:
+    from claude_code_hooks_daemon.remote_docs.store import list_documents
+
+    documents = list_documents(tree)
+    if not documents:
+        print(f"no vendored documents under {tree}")
+        return 0
+    for document in documents:
+        if document.provenance is None:
+            print(f"{document.path}: UNREADABLE ({len(document.errors)} problem(s))")
+            continue
+        provenance = document.provenance
+        print(
+            f"{document.path}: {provenance.source_url} "
+            f"[{provenance.fidelity.value}, licence={provenance.licence}, "
+            f"stale_after={provenance.stale_after}]"
+        )
+    return 0
+
+
+def _remote_docs_check(tree: Path, now: Any) -> int:
+    from claude_code_hooks_daemon.remote_docs.store import check_staleness
+
+    today = now.date() if now is not None else None
+    flagged = check_staleness(tree, today=today)
+    if not flagged:
+        print("remote-docs: all vendored documents are fresh")
+        return 0
+    for document in flagged:
+        if document.provenance is None:
+            print(f"{document.path}: provenance unreadable")
+        else:
+            print(f"{document.path}: stale since {document.provenance.stale_after}")
+    print(f"remote-docs: {len(flagged)} document(s) need attention")
+    return 1
+
+
+def _remote_docs_refresh(
+    args: argparse.Namespace, tree: Path, fetch_fn: Any, now: Any
+) -> int:
+    from claude_code_hooks_daemon.remote_docs.store import (
+        RefreshOutcome,
+        list_documents,
+        refresh_document,
+    )
+
+    if args.path is not None:
+        targets = [Path(args.path)]
+    elif args.all_docs:
+        targets = [document.path for document in list_documents(tree)]
+    else:
+        print("remote-docs refresh: name a PATH or pass --all", file=sys.stderr)
+        return 2
+
+    failed = 0
+    for target in targets:
+        outcome = refresh_document(target, fetch_fn=fetch_fn, now=now)
+        print(f"{target}: {outcome.value}")
+        if outcome in (RefreshOutcome.FAILED, RefreshOutcome.UNREADABLE):
+            failed += 1
+    return 1 if failed else 0
+
+
 def cmd_find_comment_blocks(args: argparse.Namespace) -> int:
     """List long comment blocks under the given paths (Plan 00284 Task 3.1g).
 
@@ -6301,6 +6454,58 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_docs_qa.set_defaults(func=cmd_docs_qa)
+
+    # remote-docs command (Plan 00326) — capture, list, check and refresh
+    # vendored upstream documentation. The procedure lives here rather than
+    # in prose an agent re-derives per capture (the Plan 00324 lesson).
+    parser_remote_docs = subparsers.add_parser(
+        "remote-docs",
+        help="Vendor upstream docs: add URL | list | check | refresh",
+    )
+    parser_remote_docs.add_argument(
+        "remote_docs_action",
+        choices=["add", "list", "check", "refresh"],
+        help="add: capture a URL; list: show the corpus; check: staleness "
+        "(exit 1 when any document needs attention); refresh: re-fetch",
+    )
+    parser_remote_docs.add_argument(
+        "url",
+        nargs="?",
+        default=None,
+        help="URL to capture (add only); must be https",
+    )
+    parser_remote_docs.add_argument(
+        "--path",
+        type=Path,
+        default=None,
+        help="A single stored document to refresh",
+    )
+    parser_remote_docs.add_argument(
+        "--all",
+        dest="all_docs",
+        action="store_true",
+        help="Refresh every stored document",
+    )
+    parser_remote_docs.add_argument(
+        "--licence",
+        default=None,
+        help="Licence to record (default: the `unreviewed` sentinel)",
+    )
+    parser_remote_docs.add_argument(
+        "--stale-after-days",
+        dest="stale_after_days",
+        type=int,
+        default=None,
+        help="Freshness window in days for this capture",
+    )
+    parser_remote_docs.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_remote_docs.set_defaults(func=cmd_remote_docs)
 
     # find-comment-blocks command (Plan 00284 Task 3.1g) — deterministic
     # finder feeding the hooks-daemon-docs-qa agent's worklist (Decision 7)

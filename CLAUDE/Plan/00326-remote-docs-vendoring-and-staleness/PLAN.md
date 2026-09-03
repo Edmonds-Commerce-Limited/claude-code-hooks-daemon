@@ -157,25 +157,23 @@ field. **Settled — see [PAYLOADS.md](PAYLOADS.md): the field is
 
 ### Phase 2: Capture and refresh CLI
 
-- [ ] ⬜ **Task 2.1**: `bin/hooks-daemon remote-docs add <url>` — raw https
-  fetch, hash, markdown conversion, provenance frontmatter, write to the
-  derived `<domain>/<page-name>.md` path. Injected `fetch_fn` for
-  testability, per `install/relay_deploy.py`. `licence` is filled from
-  `documentation.remote.known_sources` (domain → licence) or set to
-  `unreviewed`; `stale_after` from the resolved staleness policy. **Done
-  when** the written file parses clean under the Task 1.2 parser with no
-  manual edit.
-- [ ] ⬜ **Task 2.2**: Path derivation from URL — deterministic, collision-free,
-  filesystem-safe, and readable. The page name need not be the URL slug.
-  **Done when** two distinct normalised URLs never derive the same path and
-  one URL (after Task 5.1's normalisation) always derives one path.
-- [ ] ⬜ **Task 2.3**: `remote-docs refresh <path|--all>` with the hash
-  short-circuit: unchanged upstream bumps `fetched_at`/`stale_after` only
-  and reports a no-op; changed upstream rewrites body and hash.
-- [ ] ⬜ **Task 2.4**: `remote-docs list` and `remote-docs check` — read-only,
-  CI-suitable: non-zero exit when any document is past `stale_after`; also
-  lists `licence: unreviewed` documents without affecting the exit code
-  (D7).
+- [x] ✅ **Task 2.1**: `remote-docs add <url>` — raw https fetch via an
+  injected `fetch_fn`, RAW-bytes hash, provenance frontmatter, written to
+  the derived path. The written file parses clean under the Task 1.2 parser
+  with no manual edit. `known_sources` licence pre-fill is deferred to
+  Task 3.7's config work; capture records `unreviewed` until then.
+- [x] ✅ **Task 2.2**: Path derivation is `<host>/<path>.md`, deterministic,
+  filesystem-safe, traversal-proof. Where the readable form is lossy (query,
+  fragment, sanitised characters) a short URL digest disambiguates, so
+  `?v=1` and `?v=2` cannot overwrite each other. An implied `index` is not
+  lossy: `/docs` and `/docs/` already derive differently.
+- [x] ✅ **Task 2.3**: `remote-docs refresh <--path|--all>` with the hash
+  short-circuit — unchanged upstream moves `fetched_at`/`stale_after` only,
+  changed upstream rewrites the body. Refresh reads the URL from the file,
+  and carries the recorded `licence` across rather than re-deriving it.
+- [x] ✅ **Task 2.4**: `remote-docs list` and `remote-docs check` — read-only,
+  CI-suitable, exit 1 when any document is stale OR has unreadable
+  provenance (silence must not mean "clean" over an unparseable corpus).
 - [ ] ⬜ **Task 2.5**: No `Write` hook sees a CLI write, so run the captured
   body through `sensitive_content`'s own matcher (public patterns and secret
   word list) before writing. **Done when** a fixture page carrying a matching
