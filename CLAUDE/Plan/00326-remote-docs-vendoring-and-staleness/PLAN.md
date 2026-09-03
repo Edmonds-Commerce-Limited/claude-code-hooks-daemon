@@ -109,14 +109,11 @@ The decisions this plan rests on, each with its reasoning, live in
 
 ### Phase 0: De-risk before building
 
-Phase 0 precedes Phase 5: Task 5.1 keys on the `WebFetch` `tool_input` URL
-field. **Settled — see [PAYLOADS.md](PAYLOADS.md): the field is
-`tool_input.url`.**
-
-- [x] ✅ **Task 0.1**: Payloads captured (see [PAYLOADS.md](PAYLOADS.md)).
-  `WebFetch`'s `tool_response.result` is the fast model's **answer to the
-  prompt**, not the page — no route exists from a `WebFetch` to the document
-  it fetched. D2 confirmed by measurement, D15 upgraded to fact.
+- [x] ✅ **Task 0.1**: Payloads captured (see [PAYLOADS.md](PAYLOADS.md)); the
+  field is `tool_input.url`. `WebFetch`'s `tool_response.result` is the fast
+  model's **answer to the prompt**, not the page — no route exists from a
+  `WebFetch` to the document it fetched. D2 confirmed by measurement, D15
+  upgraded to fact.
 - [ ] ⬜ **Task 0.2**: Decide whether the vendored contract should record that
   real `PreToolUse` payloads carry `effort` and `prompt_id`, which its
   `input_example` omits (candidate finding logged in `PAYLOADS.md`). The
@@ -129,13 +126,11 @@ field. **Settled — see [PAYLOADS.md](PAYLOADS.md): the field is
   a validator and a rejection test.
 - [x] ✅ **Task 1.2**: `parse_provenance()` returns a typed `ParseResult`,
   never raising, reporting EVERY invalid field.
-- [x] ✅ **Task 1.3**: Tree registered — `documentation.trees.remote` (default
-  `remote-docs`), a `remote_docs_dir` axis (defaulted and last, so the
-  addition is additive for existing call sites) plus `is_remote_docs_path()`
-  on `ProjectLayout`, and a config-derived allowance in
-  `markdown_organization`. `is_docs_path()` deliberately does NOT claim the
-  tree. Required fixing a latent `normalize_path` defect first (see Task
-  1.6) — without it the allowance branch was unreachable.
+- [x] ✅ **Task 1.3**: Tree registered — `documentation.trees.remote`, a
+  `remote_docs_dir` axis plus `is_remote_docs_path()` on `ProjectLayout`,
+  and a config-derived allowance in `markdown_organization`.
+  `is_docs_path()` deliberately does NOT claim the tree. Required fixing a
+  latent `normalize_path` defect first (Task 1.6).
 - [x] ✅ **Task 1.4**: Confirmed by test — a remote doc yields zero sweep
   findings, and a CONTROL test proves the same content in the human tree
   does trip them, so the exclusion is real rather than an empty sweep. No
@@ -154,16 +149,13 @@ field. **Settled — see [PAYLOADS.md](PAYLOADS.md): the field is
 
 ### Phase 2: Capture and refresh CLI
 
-- [x] ✅ **Task 2.1**: `remote-docs add <url>` — raw https fetch via an
-  injected `fetch_fn`, RAW-bytes hash, provenance frontmatter, written to
-  the derived path. The written file parses clean under the Task 1.2 parser
-  with no manual edit. `known_sources` licence pre-fill is deferred to
-  Task 3.7's config work; capture records `unreviewed` until then.
+- [x] ✅ **Task 2.1**: `remote-docs add <url>` — fetch via an injected
+  `fetch_fn`, RAW-bytes hash, provenance frontmatter, written to the derived
+  path. The written file parses clean with no manual edit.
 - [x] ✅ **Task 2.2**: Path derivation is `<host>/<path>.md`, deterministic,
-  filesystem-safe, traversal-proof. Where the readable form is lossy (query,
-  fragment, sanitised characters) a short URL digest disambiguates, so
-  `?v=1` and `?v=2` cannot overwrite each other. An implied `index` is not
-  lossy: `/docs` and `/docs/` already derive differently.
+  filesystem-safe, traversal-proof. Where the readable form is lossy a short
+  URL digest disambiguates, so `?v=1` and `?v=2` cannot overwrite each
+  other. An implied `index` is not lossy.
 - [x] ✅ **Task 2.3**: `remote-docs refresh <--path|--all>` with the hash
   short-circuit — unchanged upstream moves `fetched_at`/`stale_after` only,
   changed upstream rewrites the body. Refresh reads the URL from the file,
@@ -287,22 +279,28 @@ One PreToolUse handler carries both branches; Task 0.1 supplies the
 
 ## Success Criteria
 
-- [ ] A markdown file in the remote tree without valid provenance frontmatter
-  cannot be written via `Write`/`Edit` and cannot pass the commit gate.
-- [ ] `remote-docs add <url>` produces a file whose frontmatter records source
+- [x] A markdown file in the remote tree without valid provenance frontmatter
+  cannot be written via `Write`/`Edit` (`remote_docs_provenance`) and cannot
+  pass the commit gate (`remote_docs_commit_gate`, which judges the index so
+  a Bash-authored file is caught too).
+- [x] `remote-docs add <url>` produces a file whose frontmatter records source
   URL, fetch time, raw content hash, fidelity, licence and `stale_after`,
   with no manual editing.
-- [ ] `remote-docs refresh` on unchanged upstream content performs no rewrite
+- [x] `remote-docs refresh` on unchanged upstream content performs no rewrite
   beyond `fetched_at`/`stale_after`, and says so.
-- [ ] A stale document announces its staleness **in its own contents**, and
+- [x] A stale document announces its staleness **in its own contents**, and
   an agent reading it through `Read` is told so at that moment.
-- [ ] Ordinary documentation-QA checks produce zero findings against vendored
+- [x] Ordinary documentation-QA checks produce zero findings against vendored
   upstream prose.
-- [ ] An agent calling `WebFetch` on an already-vendored, fresh URL is
+- [x] An agent calling `WebFetch` on an already-vendored, fresh URL is
   redirected to the local path.
-- [ ] `contracts/claude-code-hooks/` is managed by this subsystem, and its
-  currently-firing staleness advisory is cleared.
-- [ ] Every new handler ships with tests, an `explain-rule` entry, a
+- [ ] ~~`contracts/claude-code-hooks/` is managed by this subsystem~~ —
+  **superseded by D20**: the contract vendors 33 derived schemas, and its
+  source doc is deliberately fetched to an untracked path, so there is
+  nothing for this subsystem to manage. Clearing its staleness advisory
+  needs a verified extraction audit and is left as its own work — upstream
+  HAS changed (`e2462deb…` vs META's `d514bf57…`).
+- [x] Every new handler ships with tests, an `explain-rule` entry, a
   `HANDLER_REFERENCE.md` entry and an `AcceptanceTest`.
 
 ## Delivery & Milestones

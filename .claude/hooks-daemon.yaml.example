@@ -231,6 +231,12 @@ handlers:
       enabled: true
       priority: 37
 
+    # Backstop: a remote-docs file authored through Bash never reaches the
+    # write-time gate, so the index is checked at commit time.
+    remote_docs_commit_gate:
+      enabled: true
+      priority: 38
+
     tdd_enforcement:       # Enforces test-first development
       enabled: false       # Enable for strict TDD workflow
       priority: 32

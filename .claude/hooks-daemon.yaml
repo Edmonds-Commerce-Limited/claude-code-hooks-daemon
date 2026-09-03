@@ -430,6 +430,12 @@ handlers:
       enabled: true
       priority: 37
 
+    # The backstop for remote_docs_provenance, which keys on Write/Edit and
+    # so cannot see a heredoc or redirect into the tree.
+    remote_docs_commit_gate:
+      enabled: true
+      priority: 38
+
     tdd_enforcement:       # Enforces test-first development
       enabled: true
       priority: 35

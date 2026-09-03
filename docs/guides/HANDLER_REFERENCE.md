@@ -2437,6 +2437,29 @@ handlers:
 
 ---
 
+#### remote_docs_commit_gate
+
+| Property       | Value                     |
+| -------------- | ------------------------- |
+| **Config key** | `remote_docs_commit_gate` |
+| **Priority**   | 38                        |
+| **Type**       | Blocking                  |
+| **Event**      | PreToolUse                |
+
+Denies a `git commit` that would stage a remote-docs markdown file without valid provenance frontmatter. This is the backstop for `remote_docs_provenance`, which keys on `Write`/`Edit` and therefore cannot see a file authored through Bash — a heredoc, `>`, `>>` or `tee`. Whatever route a file took to disk, it cannot enter history unattributed.
+
+Every offending file is named at once with its specific problem, so a bulk import is one fix rather than one retry per file. Deletions are never blocked: removing a bad document must not be harder than adding one. A commit it cannot inspect (no repository, unreadable index) is allowed rather than blocked.
+
+```yaml
+handlers:
+  pre_tool_use:
+    remote_docs_commit_gate:
+      enabled: true
+      priority: 38
+```
+
+---
+
 #### remote_docs_routing
 
 | Property       | Value                 |

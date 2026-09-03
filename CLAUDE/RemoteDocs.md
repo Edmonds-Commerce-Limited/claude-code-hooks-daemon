@@ -117,7 +117,8 @@ filename from that gate would hole the invariant.
 
 | Surface                                | Enforces                                                                                                 |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `remote_docs_provenance` (PreToolUse)  | No write into the tree without valid provenance. **Blocks.**                                             |
+| `remote_docs_provenance` (PreToolUse)  | No `Write`/`Edit` into the tree without valid provenance. **Blocks.**                                    |
+| `remote_docs_commit_gate` (PreToolUse) | No `git commit` staging an unattributed document, whatever route it took to disk. **Blocks.**            |
 | `remote_docs_routing` (PreToolUse)     | Routes a `WebFetch` to a fresh vendored copy; warns at `Read` time about a stale or unreviewed document. |
 | `remote_docs_staleness` (SessionStart) | Reports documents past `stale_after` or with unparseable provenance. **Advises.**                        |
 
@@ -126,9 +127,12 @@ FACT — checkable offline, with no legitimate exception. Staleness is a
 JUDGEMENT a human may knowingly accept: an upstream that has not changed in a
 year is not a problem, and a pinned archival snapshot is stale on purpose.
 
-**Known gap:** a Bash heredoc or redirect into the tree bypasses the write-time
-gate, which keys on `Write`/`Edit`. Such a document surfaces at the next
-session start as having provenance that does not parse.
+**The Bash-write route is covered, but not at write time.** A heredoc or
+redirect into the tree never reaches `remote_docs_provenance`, which keys on
+`Write`/`Edit`. The commit gate judges the git index instead, so such a
+document cannot enter history; the session-start sweep reports one sitting in
+the working tree. What genuinely remains uncovered is the window between a
+Bash write and the next commit or session.
 
 ## Configuration
 

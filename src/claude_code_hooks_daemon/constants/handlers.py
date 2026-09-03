@@ -439,6 +439,14 @@ class HandlerID:
         config_key="contract_staleness",
         display_name="contract-staleness",
     )
+    # Remote-docs commit gate (PreToolUse handler) — Plan 00326: the backstop
+    # for the write-time gate, which keys on Write/Edit and so cannot see a
+    # heredoc or redirect into the tree.
+    REMOTE_DOCS_COMMIT_GATE = HandlerIDMeta(
+        class_name="RemoteDocsCommitGateHandler",
+        config_key="remote_docs_commit_gate",
+        display_name="remote-docs-commit-gate",
+    )
     # Remote-docs routing (PreToolUse handler) — Plan 00326 Tasks 5.1/5.3:
     # route a WebFetch to the vendored copy, and warn at Read time when that
     # copy has gone stale.

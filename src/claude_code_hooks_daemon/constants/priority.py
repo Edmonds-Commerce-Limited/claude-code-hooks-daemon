@@ -175,6 +175,9 @@ class Priority:
     # after the provenance gate; both are remote-docs concerns and neither
     # can fire on the same call as the other.
     REMOTE_DOCS_ROUTING = 37
+    # Plan 00326: the staged backstop. Sits with the other commit gates
+    # rather than with the write-time handlers, since it judges an index.
+    REMOTE_DOCS_COMMIT_GATE = 38
 
     # Plan 00270: the opt-in safe-prelude forcer opens the 36-55 workflow
     # band, right after its sibling verification_result_gate (34) so the

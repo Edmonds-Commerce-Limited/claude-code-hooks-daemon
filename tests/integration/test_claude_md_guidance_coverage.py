@@ -256,6 +256,13 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "SuggestStatusLineHandler": "T4 fires once at session start with the full remedy",
     "VersionCheckHandler": "T4 fires once at session start with the full remedy",
     "ContractStalenessHandler": "T4 fires once at session start with the full remedy",
+    "RemoteDocsCommitGateHandler": (
+        "T4 the deny names every offending staged file, its specific problem "
+        "and the capture command. The standing policy — that the tree is "
+        "captured rather than authored, and that a Bash-authored file is "
+        "caught here instead — is already in `remote_docs_provenance`'s "
+        "resident section, which names this gate explicitly"
+    ),
     "RemoteDocsRoutingHandler": (
         "T4 the deny names the local path, both dates and the refresh command, "
         "and the allow-with-hint names the exact capture command — the "
@@ -416,6 +423,14 @@ class TestAnExemptHandlerCannotQuietlyDeny:
     # genuinely covers them. Deliberately empty: every deny-capable handler
     # currently earns its own section. An addition here should be argued.
     _EXEMPT_DESPITE_DENYING: ClassVar[dict[str, str]] = {
+        "RemoteDocsCommitGateHandler": (
+            "remote_docs_provenance's section, which states the capture-not-"
+            "authoring rule this gate enforces at a second moment. That section "
+            "also warns that a Bash-authored file never reaches the write-time "
+            "gate, which is exactly what this one exists to catch, so the "
+            "standing policy an agent needs is already resident. Verified by "
+            "reading that section"
+        ),
         "RemoteDocsRoutingHandler": (
             "remote_docs_provenance's section, which states this handler's deny "
             "explicitly rather than implying it: that a WebFetch of an already-"

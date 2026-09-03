@@ -163,14 +163,14 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
     ),
     "RemoteDocsProvenanceHandler": (
         _BLIND,
-        "a heredoc/redirect authoring `remote-docs/**.md` lands a document with "
-        "no provenance and no complaint. Only partly mitigated today: "
-        "`store.read_document` re-parses provenance whenever the corpus is "
-        "read, so such a file is detectable, but the SessionStart sweep that "
-        "would make the detection automatic is Plan 00326 Phase 4 and is not "
-        "yet built. The consequence is an unattributed document rather than a "
-        "wrong one, and `remote-docs add` is the path of least resistance "
-        "anyway -- hand-authoring the tree is not a thing agents want to do",
+        "mitigated, not closed -- the same shape as `docs_qa_edit`. A "
+        "heredoc/redirect authoring `remote-docs/**.md` never reaches this "
+        "handler, and parsing redirect targets here would be a second, weaker "
+        "copy of Plan 00260's machinery. Instead `remote_docs_commit_gate` "
+        "judges the git INDEX, so an unattributed document cannot enter "
+        "history however it reached disk, and `remote_docs_staleness` reports "
+        "one sitting in the tree at session start. What genuinely remains is "
+        "the window between a bash write and the next commit or session",
     ),
     "MarkdownTableFormatterHandler": (
         _BLIND,
