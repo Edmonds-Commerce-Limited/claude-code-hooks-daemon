@@ -208,39 +208,32 @@ are no longer paid for by this plan.
   extraction of their HTML. Deferred from D18 because it changes the
   `FetchFn` contract from `str -> bytes` at every call site.
 
-**Not done here, deliberately** (D17): the `docs_qa/paths.py` classifier and
-the `document_rule_checks` registration adapter (drafted as Tasks 3.1–3.2)
-remain good ideas for `docs_qa`'s own sake — they would fold six duplicated
-`_matches_allowlist` copies and an `_run_edit`/`_run_staged`/`_run_sweep`
-triplication into one home — but nothing in this plan consumes them. File
-separately rather than smuggling the refactor in here. Task 3.3's
-`DocRecord` frontmatter and cache-version bump is moot for the same reason:
-the remote tree is never corpus-collected. Task 3.5's severity convention
-(BLOCK only when this edit made things worse) is a `docs_qa` staged-check
-concern; the handler is a straight deny on a fact, with no before/after to
-compare.
-
-- [ ] ⬜ **Task 3.7**: Config: `documentation.trees.remote` plus a new
-  `documentation.remote` block (`default_staleness`, `known_sources`). Each
-  knob is a mandatory 3-place mechanical change (config `models.py` →
-  `docs_qa` `policy.py` in three spots); `extra="forbid"` means the model edit
-  cannot be skipped. `Finding` has **no line-number field**, so the
-  provenance check names the offending frontmatter key in its message.
+**Not done here, deliberately** — the dropped Tasks 3.1–3.3 and 3.5, and why
+each is either moot or worth filing separately, are recorded in D17.
 
 ### Phase 4: Staleness
 
-- [ ] ⬜ **Task 4.1**: Staleness evaluator supporting time TTL, version pin,
-  hash revalidation and pinned/archival, with a project default
-  (`documentation.remote.default_staleness`) and per-document `staleness`
-  override. **Done when** it resolves every policy to a `stale_after` date
-  (or `never`) with a table-driven test per policy.
-- [ ] ⬜ **Task 4.2**: Staleness lives in the document as `stale_after`,
-  written by `add` and `refresh` (D16). `check` compares it to today and is
-  read-only; no command mutates a document to mark it stale. Point-of-use
-  delivery is Task 5.3.
-- [ ] ⬜ **Task 4.3**: SessionStart sweep reporting stale documents, modelled
-  on `contract_staleness.py` including its cache and its self-install vs
-  client-install distinction.
+- [x] 🟩 **Task 4.1**: Time TTL and pinned/archival resolve to a
+  `stale_after` date (or the `never` sentinel) at capture, from
+  `documentation.remote.default_staleness_days` or `--stale-after-days`.
+  Hash revalidation is `refresh`'s `source_sha256` short-circuit, which
+  reports `unchanged` and moves only `fetched_at`. **Version pin is not
+  built**: the `upstream_version` field exists in the schema but nothing
+  populates or compares it, because no vendored source in this repo
+  publishes a version to pin to. Left as schema-ready rather than
+  speculatively implemented.
+- [x] 🟩 **Task 4.2**: `stale_after` is written by `add` and `refresh`; a
+  refresh re-derives the window from the document's own record, so a
+  project that widened or narrowed one keeps its choice, and a pinned
+  document stays pinned. Nothing mutates a document to mark it stale (D16).
+- [x] 🟩 **Task 4.3**: `remote_docs_staleness` — a SessionStart advisory
+  reporting documents past `stale_after` or whose provenance no longer
+  parses (unreadable is not fresh, it is unknown). Silent when the tree is
+  absent, so a project vendoring nothing never sees it; the listing is
+  capped with a total so a large corpus cannot crowd out other session
+  advice. **No version cache** unlike `contract_staleness`: that handler
+  caches an external `claude --version` subprocess, whereas this reads
+  local files that are cheap and must not be served stale by a cache.
 - [ ] ⬜ **Task 4.4**: Ensure a client project's remote tree is treated as
   project-owned — unlike the daemon's vendored contract, a client's
   vendored docs *are* theirs to refresh.

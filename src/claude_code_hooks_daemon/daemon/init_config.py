@@ -276,6 +276,7 @@ class ConfigTemplate:
             "    ccy_supervisor_integrity: {enabled: true, priority: 58}  # Warn when the ccy supervisor is armed but its files are unsafe\n"
             "    plan_workflow_asset_checker: {enabled: true, priority: 59}  # Advise when plan_workflow is enabled but its assets are missing\n"
             "    contract_staleness: {enabled: true, priority: 60}  # Advise a hooks-contract refresh when Claude Code outruns the vendored audit\n"
+            "    remote_docs_staleness: {enabled: true, priority: 68}  # Report vendored remote docs past their stale_after date\n"
             "    skill_opportunity_detector: {enabled: false, priority: 61}  # TTL-gated advisory to run `skill-scan` (opt-in; reads transcripts)\n"
             "    secret_file_hygiene_checker: {enabled: true, priority: 62}  # On-disk hygiene (gitignore/tracked/permissions) for protected paths\n"
             "    model_fallback_detector: {enabled: false, priority: 63}  # Opt-in (Plan 00278): loud SessionStart alert on a recorded model fallback. Probably leave OFF — it reports a fallback that already happened and is noisy; the downgrade_indicator status line shows a LIVE downgrade instead. Enable only to capture diagnostic snapshots for tuning delegation config.\n"

@@ -2885,6 +2885,31 @@ handlers:
 
 ---
 
+#### remote_docs_staleness
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `remote_docs_staleness` |
+| **Priority**   | 68                      |
+| **Type**       | Advisory                |
+| **Event**      | SessionStart            |
+
+**Description:** Reports vendored documents in the remote-docs tree that are past their `stale_after` date, or whose provenance frontmatter no longer parses — an unreadable document is not fresh, it is unknown. Runs on new sessions only, walks the tree directly (it is deliberately outside the docs-QA corpus), and is silent when the tree is absent, so a project that vendors nothing never sees it. The listing is capped with a total, so a large corpus cannot crowd out the session's other advice.
+
+Advisory by design: staleness is a judgement a human may knowingly accept — an upstream that has not changed is not a problem, and a pinned (`stale_after: never`) snapshot is stale on purpose. Missing provenance, by contrast, is a fact and is blocked at write time by `remote_docs_provenance`.
+
+The freshness window comes from `documentation.remote.default_staleness_days` at capture time.
+
+```yaml
+handlers:
+  session_start:
+    remote_docs_staleness:
+      enabled: true
+      priority: 68
+```
+
+---
+
 #### skill_opportunity_detector
 
 | Property       | Value                        |

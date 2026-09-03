@@ -254,6 +254,10 @@ class Priority:
     # SessionStart priority after monorepo_detector (66), so ADVISORY_MAX
     # widens by one again.
     CONFIG_OPTIMISATION_REMINDER = 67
+    # Plan 00326 Task 4.3: vendored remote-docs staleness report -- next free
+    # SessionStart priority after config_optimisation_reminder (67), so
+    # ADVISORY_MAX widens by one again.
+    REMOTE_DOCS_STALENESS = 68
 
     # Advisory handlers (Priority: 55-65)
     CRITICAL_THINKING_ADVISORY = 55
@@ -306,7 +310,7 @@ class PriorityRange:
     # contract_staleness (60). Widened again to 66 for monorepo_detector
     # (Plan 00296 Task 3.4), and to 67 for config_optimisation_reminder
     # (Plan 00308). Documented in root CLAUDE.md's Priority Ranges.
-    ADVISORY_MAX = 67
+    ADVISORY_MAX = 68
 
     LOGGING_MIN = 100
     LOGGING_MAX = 199

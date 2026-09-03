@@ -479,6 +479,10 @@ handlers:
       enabled: true      # Silent unless installed Claude Code > META.json last_audited_claude_code_version
       priority: 60
 
+    remote_docs_staleness:  # Report vendored docs past their stale_after date (Plan 00326)
+      enabled: true         # Silent unless the remote-docs tree exists and something is stale
+      priority: 68
+
     skill_opportunity_detector:  # TTL-gated advisory: run `bin/hooks-daemon skill-scan` (Plan 00274)
       enabled: false             # Opt-in: the scan reads this machine's session transcripts
       priority: 61

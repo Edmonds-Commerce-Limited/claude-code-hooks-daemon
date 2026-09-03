@@ -13,6 +13,7 @@ from .model_fallback_detector import ModelFallbackDetectorHandler
 from .optimal_config_checker import OptimalConfigCheckerHandler
 from .plan_qa_sweep import PlanQaSweepHandler
 from .project_handler_load_checker import ProjectHandlerLoadCheckerHandler
+from .remote_docs_staleness import RemoteDocsStalenessHandler
 from .skill_opportunity_detector import SkillOpportunityDetectorHandler
 from .suggest_statusline import SuggestStatusLineHandler
 from .tool_disable_advisor import ToolDisableAdvisorHandler
@@ -35,6 +36,7 @@ __all__ = [
     "OptimalConfigCheckerHandler",
     "PlanQaSweepHandler",
     "ProjectHandlerLoadCheckerHandler",
+    "RemoteDocsStalenessHandler",
     "SecretFileHygieneCheckerHandler",
     "SkillOpportunityDetectorHandler",
     "SuggestStatusLineHandler",

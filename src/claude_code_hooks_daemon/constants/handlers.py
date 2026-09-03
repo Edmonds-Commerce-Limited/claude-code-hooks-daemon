@@ -439,6 +439,14 @@ class HandlerID:
         config_key="contract_staleness",
         display_name="contract-staleness",
     )
+    # Remote-docs staleness (SessionStart handler) — Plan 00326 Task 4.3:
+    # report vendored documents past their `stale_after` date, or whose
+    # provenance no longer parses. Advises; never blocks (D7).
+    REMOTE_DOCS_STALENESS = HandlerIDMeta(
+        class_name="RemoteDocsStalenessHandler",
+        config_key="remote_docs_staleness",
+        display_name="remote-docs-staleness",
+    )
     # Secret file hygiene checker (SessionStart handler) — Plan 00272 Task 6.1:
     # advise when a configured protected path exists but is not gitignored,
     # is git-tracked, or has group/world-readable permissions.

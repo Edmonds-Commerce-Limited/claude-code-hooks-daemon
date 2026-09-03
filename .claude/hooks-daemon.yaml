@@ -700,6 +700,10 @@ handlers:
       enabled: true      # Silent unless installed Claude Code > META.json last_audited_claude_code_version
       priority: 60
 
+    remote_docs_staleness:  # Report vendored docs past their stale_after date (Plan 00326)
+      enabled: true         # Silent unless the remote-docs tree exists and something is stale
+      priority: 68
+
     skill_opportunity_detector:  # TTL-gated advisory: run `bin/hooks-daemon skill-scan` (Plan 00274)
       enabled: true              # Dogfood-enabled 2026-08-26 (Task 5.2); ships disabled upstream
       priority: 61
