@@ -2423,6 +2423,8 @@ Denies a markdown `Write`/`Edit` inside the remote-docs tree whose content lacks
 
 That tree is **captured, not authored** — use `hooks-daemon remote-docs add <url>` to vendor a page and `remote-docs refresh` to pick up upstream changes. Hand-editing a vendored document silently falsifies its recorded `fidelity`, which is what separates a citable corpus from a cache.
 
+Capture prefers `agent-browser read` when a usable `agent-browser` is on `PATH`, because it negotiates markdown, retries with `.md` and consults `llms.txt` — better source material than a generic GET. Those captures record `fidelity: converted` (the text is extracted, not the response body). Without it, capture falls back to a plain HTTPS GET, records `fidelity: verbatim`, and prints a warning.
+
 The deny names every invalid field at once rather than one per retry. The tree location follows `documentation.trees.remote` (default `remote-docs/`).
 
 ```yaml

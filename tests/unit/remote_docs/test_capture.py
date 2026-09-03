@@ -182,3 +182,56 @@ class TestCapture:
                 fetch_fn=self._fetch(b"\xff\xfe\x00binary"),
                 now=_NOW,
             )
+
+
+class TestDeclaredFidelity:
+    """The fetcher declares its own claim; capture must not overwrite it.
+
+    A browser-rendered capture is a markdown rendering of the DOM, not the
+    upstream bytes. Recording it as ``verbatim`` would make a paraphrase
+    citable, which is the exact failure the field exists to prevent (D3).
+    """
+
+    def _fetch(self, body: bytes):
+        def fetch_fn(url: str) -> bytes:
+            return body
+
+        return fetch_fn
+
+    def test_a_raw_fetch_still_defaults_to_verbatim(self) -> None:
+        result = capture("https://example.com/p", fetch_fn=self._fetch(b"# X\n"), now=_NOW)
+
+        provenance = parse_provenance(result.content).provenance
+        assert provenance is not None
+        assert provenance.fidelity is Fidelity.VERBATIM
+
+    def test_a_declared_conversion_is_recorded_as_converted(self) -> None:
+        result = capture(
+            "https://example.com/p",
+            fetch_fn=self._fetch(b"# X\n"),
+            now=_NOW,
+            fidelity=Fidelity.CONVERTED,
+        )
+
+        provenance = parse_provenance(result.content).provenance
+        assert provenance is not None
+        assert provenance.fidelity is Fidelity.CONVERTED
+
+    def test_the_fetch_method_is_recorded_when_given(self) -> None:
+        """Which tool produced the bytes changes how much the hash means."""
+        result = capture(
+            "https://example.com/p",
+            fetch_fn=self._fetch(b"# X\n"),
+            now=_NOW,
+            fidelity=Fidelity.CONVERTED,
+            fetch_method="agent-browser",
+        )
+
+        provenance = parse_provenance(result.content).provenance
+        assert provenance is not None
+        assert provenance.fetch_method == "agent-browser"
+
+    def test_no_fetch_method_line_is_emitted_when_unknown(self) -> None:
+        result = capture("https://example.com/p", fetch_fn=self._fetch(b"# X\n"), now=_NOW)
+
+        assert "fetch_method:" not in result.content

@@ -10,10 +10,12 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from claude_code_hooks_daemon.remote_docs.capture import CaptureError
+from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
 from claude_code_hooks_daemon.remote_docs.store import (
     RefreshOutcome,
     check_staleness,
     list_documents,
+    read_document,
     refresh_document,
     write_capture,
 )
@@ -227,3 +229,46 @@ class TestListAndCheck:
         bad.write_text("# no frontmatter\n")
 
         assert check_staleness(tmp_path, today=date(2026, 9, 4)) != []
+
+
+class TestFidelityIsCarriedThrough:
+    """A rendering fetcher's lower claim must survive the trip to disk.
+
+    The store is where the document is finally written, so a fidelity that
+    got dropped anywhere along the way becomes a permanent overclaim in the
+    corpus rather than a transient one.
+    """
+
+    def test_write_capture_records_the_declared_fidelity(self, tmp_path: Path) -> None:
+        written = write_capture(
+            tmp_path,
+            "https://example.com/docs/page",
+            fetch_fn=_fetch(_BODY),
+            now=_NOW,
+            fidelity=Fidelity.CONVERTED,
+            fetch_method="agent-browser",
+        )
+
+        provenance = read_document(written).provenance
+        assert provenance is not None
+        assert provenance.fidelity is Fidelity.CONVERTED
+        assert provenance.fetch_method == "agent-browser"
+
+    def test_refresh_records_the_fidelity_of_the_refetch(self, tmp_path: Path) -> None:
+        """A refresh re-fetches, so the NEW fetcher's claim applies -- not the
+        claim recorded when the document was first captured.
+        """
+        written = _seed(tmp_path)
+
+        refresh_document(
+            written,
+            fetch_fn=_fetch(b"# Changed\n"),
+            now=_LATER,
+            fidelity=Fidelity.CONVERTED,
+            fetch_method="agent-browser",
+        )
+
+        provenance = read_document(written).provenance
+        assert provenance is not None
+        assert provenance.fidelity is Fidelity.CONVERTED
+        assert provenance.fetch_method == "agent-browser"

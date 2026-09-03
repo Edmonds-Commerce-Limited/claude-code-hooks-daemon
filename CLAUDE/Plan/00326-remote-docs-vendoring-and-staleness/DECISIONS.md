@@ -118,3 +118,61 @@ threaded once — which is also where the D10 amendment is fixed.
 tool's `tool_response`, so the only new hook surface is one PreToolUse
 handler with two branches (`WebFetch`, `Read`), and Phase 0 shrinks to
 confirming two input field names.
+
+## D18 — capture through `agent-browser read`, with a probed binary and an HTTPS fallback
+
+**Amends D2**, which named a raw HTTPS GET as the canonical capture. The GET
+remains the fallback and remains the only fetcher that may claim `verbatim`.
+
+`agent-browser read <url>` is preferred because it is *documentation-aware*
+in a way a generic GET is not: it negotiates `Accept: text/markdown`, retries
+the URL with `.md` appended, and consults the nearest ancestor `llms.txt`
+before falling back to text extracted from HTML. Vendoring docs as markdown
+is the whole point of the tree, so a fetcher that asks for markdown beats one
+that takes whatever a server hands an anonymous client. Measured here: a docs
+page captured 317 KB of structured markdown via `read`, against raw HTML via
+the GET.
+
+Three findings shaped the implementation, each of which contradicted an
+initial assumption:
+
+- **`read <url>` does NOT render JavaScript.** It is an HTTP fetch plus
+  extraction. The first version of this work justified the default by
+  claiming it rendered JS-heavy sites; that was wrong. Rendering requires
+  `open` first, which is a different shape and is not what this does. A
+  client-side-rendered page still captures thinly, and that limit is
+  recorded rather than papered over.
+- **The binary is not always spelled `agent-browser`.** Environments that
+  mandate an explicit browser mode ship suffixed wrappers and make the bare
+  name exit non-zero while leaving it on `PATH`. Presence therefore cannot
+  decide usability. A cheap `--version` probe can, costs no browser launch,
+  and keeps this environment-agnostic: candidates are tried in order and the
+  first that actually runs is used, so a plain upstream install picks
+  `agent-browser` and a mode-enforcing one picks a wrapper, with no
+  detection of either.
+- **A read starts a real browser process.** Without an explicit
+  `close --all` every capture leaks one until an idle timeout fires.
+
+**Fidelity is `converted`, never `verbatim`.** The content is extracted and
+normalised rather than returned as the response body, so claiming verbatim
+would be the precise overclaim D3 exists to prevent — even when upstream
+served markdown and the text looks untouched. `fetch_method` records which
+binary produced it, and records the one that actually ran rather than the
+first candidate, because provenance naming a tool that never executed is
+worse than none.
+
+**Losing the browser degrades, it does not fail.** No usable binary — absent
+or present-but-unusable, treated identically — falls back to the GET and
+prints a warning naming `agent-browser` and `PATH`. The warning is
+deliberately free of any container or project layout, because this daemon
+installs into arbitrary projects and advice that names one environment's
+Dockerfile is wrong everywhere else. Only the fetching actions (`add`,
+`refresh`) resolve a fetcher, so `list` and `check` never warn about a tool
+they were never going to use.
+
+**Deferred, not dropped:** `read --json` also reports a `source`
+(`accept-markdown`, `html-fallback`, ...), which is a sharper provenance
+signal than the binary name — it distinguishes upstream's own markdown from
+our extraction of their HTML. Recording it would change the `FetchFn`
+contract from `str -> bytes` everywhere, so it is left for a later task
+rather than smuggled in here.

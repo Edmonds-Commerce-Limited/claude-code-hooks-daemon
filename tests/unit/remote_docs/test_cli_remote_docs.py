@@ -135,3 +135,69 @@ class TestRefresh:
     def test_refresh_without_a_target_is_an_error(self, tmp_path: Path) -> None:
         """Neither --all nor a path: refuse rather than guess."""
         assert cmd_remote_docs(_args(tmp_path, "refresh")) == 2
+
+
+class TestFetcherSelection:
+    """agent-browser is the default; losing it must be visible, not silent."""
+
+    def _fetcher(self, warning: str | None):
+        from claude_code_hooks_daemon.remote_docs.fetchers import ResolvedFetcher
+        from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
+
+        return ResolvedFetcher(
+            fetch_fn=_fetch(),
+            fidelity=Fidelity.CONVERTED,
+            method="agent-browser",
+            warning=warning,
+        )
+
+    def test_the_resolved_fidelity_reaches_the_written_document(
+        self, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
+        from claude_code_hooks_daemon.remote_docs.store import read_document
+
+        cmd_remote_docs(
+            _args(
+                tmp_path,
+                "add",
+                url="https://example.com/p",
+                fetch_fn=None,
+                fetcher=self._fetcher(None),
+            )
+        )
+
+        document = read_document(_tree(tmp_path) / "example.com" / "p.md")
+        assert document.provenance is not None
+        assert document.provenance.fidelity is Fidelity.CONVERTED
+        assert document.provenance.fetch_method == "agent-browser"
+
+    def test_a_fallback_warning_is_printed_when_fetching(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        cmd_remote_docs(
+            _args(
+                tmp_path,
+                "add",
+                url="https://example.com/p",
+                fetch_fn=None,
+                fetcher=self._fetcher("agent-browser is not installed"),
+            )
+        )
+
+        assert "agent-browser is not installed" in capsys.readouterr().err
+
+    def test_no_warning_is_printed_for_an_action_that_never_fetches(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """`list` reads the tree. Warning about a fetcher it never uses is noise."""
+        cmd_remote_docs(
+            _args(
+                tmp_path,
+                "list",
+                fetch_fn=None,
+                fetcher=self._fetcher("agent-browser is not installed"),
+            )
+        )
+
+        assert "agent-browser is not installed" not in capsys.readouterr().err

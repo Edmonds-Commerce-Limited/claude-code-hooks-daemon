@@ -4889,27 +4889,6 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
-def _https_fetch(url: str) -> bytes:
-    """Fetch ``url`` over https only (Plan 00326 Task 2.1).
-
-    Same defence-in-depth shape as ``install/relay_deploy._default_fetch``:
-    the scheme is validated before ``urlopen`` is reached, so ``file:`` and
-    custom schemes are impossible by construction rather than by convention.
-    """
-    import urllib.parse
-    import urllib.request
-
-    from claude_code_hooks_daemon.remote_docs.capture import CaptureError
-
-    parsed = urllib.parse.urlparse(url)
-    if parsed.scheme != "https":
-        raise CaptureError(f"refusing to fetch non-https URL: {url!r}")
-    with urllib.request.urlopen(  # nosec B310 - scheme validated to https above
-        url, timeout=Timeout.VERSION_CHECK
-    ) as response:
-        return bytes(response.read())
-
-
 def _sensitive_content_guard() -> Any:
     """The project's configured sensitive-content scanner, or None.
 
@@ -4951,21 +4930,56 @@ def cmd_remote_docs(args: argparse.Namespace) -> int:
     if resolved_root is None:
         return 2
     tree = _remote_docs_tree(resolved_root)
-    fetch_fn = getattr(args, "fetch_fn", None) or _https_fetch
     now = getattr(args, "now", None)
     action = args.remote_docs_action
 
-    if action == "add":
-        return _remote_docs_add(args, tree, fetch_fn, now)
     if action == "list":
         return _remote_docs_list(tree)
     if action == "check":
         return _remote_docs_check(tree, now)
-    return _remote_docs_refresh(args, tree, fetch_fn, now)
+
+    # Only the fetching actions resolve a fetcher, so `list`/`check` never
+    # warn about a browser they were never going to use.
+    fetcher = _resolve_remote_docs_fetcher(args)
+    if fetcher.warning:
+        print(fetcher.warning, file=sys.stderr)
+
+    if action == "add":
+        return _remote_docs_add(args, tree, fetcher, now)
+    return _remote_docs_refresh(args, tree, fetcher, now)
+
+
+def _resolve_remote_docs_fetcher(args: argparse.Namespace) -> Any:
+    """The fetcher for this invocation: injected for tests, resolved otherwise.
+
+    ``agent-browser read`` is preferred because it is documentation-aware --
+    it negotiates markdown, retries with ``.md`` and consults ``llms.txt``
+    -- where a plain GET stores whatever a server hands an anonymous client.
+    """
+    from claude_code_hooks_daemon.remote_docs.fetchers import (
+        HTTPS_METHOD,
+        ResolvedFetcher,
+        resolve_fetcher,
+    )
+    from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
+
+    injected_fetcher = getattr(args, "fetcher", None)
+    if injected_fetcher is not None:
+        return injected_fetcher
+
+    injected_fn = getattr(args, "fetch_fn", None)
+    if injected_fn is not None:
+        return ResolvedFetcher(
+            fetch_fn=injected_fn,
+            fidelity=Fidelity.VERBATIM,
+            method=HTTPS_METHOD,
+        )
+
+    return resolve_fetcher()
 
 
 def _remote_docs_add(
-    args: argparse.Namespace, tree: Path, fetch_fn: Any, now: Any
+    args: argparse.Namespace, tree: Path, fetcher: Any, now: Any
 ) -> int:
     from claude_code_hooks_daemon.remote_docs.capture import (
         DEFAULT_STALE_AFTER_DAYS,
@@ -4981,7 +4995,9 @@ def _remote_docs_add(
         written = write_capture(
             tree,
             args.url,
-            fetch_fn=fetch_fn,
+            fetch_fn=fetcher.fetch_fn,
+            fidelity=fetcher.fidelity,
+            fetch_method=fetcher.method,
             now=now,
             licence=args.licence or UNREVIEWED,
             stale_after_days=(
@@ -5041,7 +5057,7 @@ def _remote_docs_check(tree: Path, now: Any) -> int:
 
 
 def _remote_docs_refresh(
-    args: argparse.Namespace, tree: Path, fetch_fn: Any, now: Any
+    args: argparse.Namespace, tree: Path, fetcher: Any, now: Any
 ) -> int:
     from claude_code_hooks_daemon.remote_docs.store import (
         RefreshOutcome,
@@ -5059,7 +5075,13 @@ def _remote_docs_refresh(
 
     failed = 0
     for target in targets:
-        outcome = refresh_document(target, fetch_fn=fetch_fn, now=now)
+        outcome = refresh_document(
+            target,
+            fetch_fn=fetcher.fetch_fn,
+            fidelity=fetcher.fidelity,
+            fetch_method=fetcher.method,
+            now=now,
+        )
         print(f"{target}: {outcome.value}")
         if outcome in (RefreshOutcome.FAILED, RefreshOutcome.UNREADABLE):
             failed += 1

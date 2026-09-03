@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.remote_docs.capture import (
 )
 from claude_code_hooks_daemon.remote_docs.provenance import (
     UNREVIEWED,
+    Fidelity,
     Provenance,
     ProvenanceError,
     parse_provenance,
@@ -100,6 +101,8 @@ def write_capture(
     licence: str = UNREVIEWED,
     stale_after_days: int | None = DEFAULT_STALE_AFTER_DAYS,
     content_guard: ContentGuard | None = None,
+    fidelity: Fidelity = Fidelity.VERBATIM,
+    fetch_method: str | None = None,
 ) -> Path:
     """Capture ``url`` and write it into ``tree_root``.
 
@@ -123,6 +126,8 @@ def write_capture(
         now=now,
         licence=licence,
         stale_after_days=stale_after_days,
+        fidelity=fidelity,
+        fetch_method=fetch_method,
     )
     if content_guard is not None:
         reason = content_guard(result.content)
@@ -145,8 +150,15 @@ def refresh_document(
     *,
     fetch_fn: FetchFn,
     now: datetime | None = None,
+    fidelity: Fidelity = Fidelity.VERBATIM,
+    fetch_method: str | None = None,
 ) -> RefreshOutcome:
     """Re-fetch one stored document from the URL recorded inside it.
+
+    ``fidelity`` describes the fetcher doing THIS refresh, not the one that
+    made the original capture: the body about to be written is the new
+    fetcher's output, so the new claim is the true one even when it differs
+    from what the document previously recorded.
 
     The recorded ``source_url`` is the input, so a refresh never needs the
     caller to remember where a file came from. A matching ``source_sha256``
@@ -170,6 +182,8 @@ def refresh_document(
             now=fetched_at,
             licence=previous.licence,
             stale_after_days=_stale_window_days(previous),
+            fidelity=fidelity,
+            fetch_method=fetch_method,
         )
     except CaptureError as exc:
         logger.debug("refresh fetch failed for %s: %s", path, exc)

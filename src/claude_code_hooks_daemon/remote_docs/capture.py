@@ -146,8 +146,12 @@ def _render_frontmatter(
     licence: str,
     stale_after: date | str,
     fidelity: Fidelity,
+    fetch_method: str | None,
 ) -> str:
     stale = stale_after if isinstance(stale_after, str) else stale_after.isoformat()
+    # Omitted rather than written empty when unknown: an absent optional field
+    # parses cleanly, whereas `fetch_method:` with no value does not.
+    method_line = f"fetch_method: {fetch_method}\n" if fetch_method else ""
     return (
         "---\n"
         f"source_url: {source_url}\n"
@@ -156,6 +160,7 @@ def _render_frontmatter(
         f"source_sha256: {source_sha256}\n"
         f"licence: {licence}\n"
         f"stale_after: {stale}\n"
+        f"{method_line}"
         "---\n\n"
     )
 
@@ -167,11 +172,17 @@ def capture(
     now: datetime | None = None,
     licence: str = UNREVIEWED,
     stale_after_days: int | None = DEFAULT_STALE_AFTER_DAYS,
+    fidelity: Fidelity = Fidelity.VERBATIM,
+    fetch_method: str | None = None,
 ) -> CaptureResult:
-    """Fetch ``url`` raw and render it as a provenance-bearing document.
+    """Fetch ``url`` and render it as a provenance-bearing document.
 
     ``stale_after_days`` of ``None`` records the :data:`NEVER` sentinel, for a
     deliberately frozen archival snapshot (D6).
+
+    ``fidelity`` defaults to verbatim because the default ``fetch_fn`` is a raw
+    fetch, but a fetcher that RENDERS or rewords must pass its own lower claim
+    -- nothing here may assert verbatim on another component's behalf (D3).
 
     Raises:
         CaptureError: the URL is not https, the fetch failed, or the response
@@ -208,10 +219,8 @@ def capture(
         source_sha256=digest,
         licence=licence,
         stale_after=stale_after,
-        # A raw fetch stores the upstream bytes unchanged. Anything that
-        # rewords the body must lower this itself -- nothing here may claim
-        # verbatim on another component's behalf (D3).
-        fidelity=Fidelity.VERBATIM,
+        fidelity=fidelity,
+        fetch_method=fetch_method,
     )
 
     return CaptureResult(
