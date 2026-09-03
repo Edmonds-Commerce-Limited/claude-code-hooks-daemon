@@ -359,6 +359,8 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 
 <!-- handler: remote-docs-provenance -->
 
+<!-- handler: remote-docs-routing -->
+
 <!-- handler: require-gh-issue-comments -->
 
 <!-- handler: require-gh-pr-comments -->
@@ -425,6 +427,7 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 | R-VERIFICATION-RESULT-NOT-CONSUMED | a verifier followed by a mutator with nothing consuming the result                                   | The verifier can fail and the mutator would still run                                                                                         | Gate with `&&`, an explicit exit-code check, or `set -euo pipefail`                                              |
 | R-BASH-SAFE-MODE-PRELUDE-MISSING   | a sequenced Bash invocation with no `set` safety prelude                                             | Errors in earlier statements can be silently ignored                                                                                          | Add `set -euo pipefail` at the top, or gate explicitly with `&&`/\`                                              |
 | R-REMOTE-DOCS-PROVENANCE           | a write into the remote-docs tree without valid provenance frontmatter                               | A vendored document with no recorded source is indistinguishable from something we wrote ourselves, and cannot be refreshed, dated or trusted | Capture with `hooks-daemon remote-docs add <url>` instead of hand-authoring                                      |
+| R-REMOTE-DOCS-VENDORED-COPY        | a WebFetch of a URL this project already holds a fresh vendored copy of                              | The local copy is faster, costs no network round trip, and is the corpus the remote-docs tree exists to build                                 | Read the local path named in the message, or refresh it if you need newer content                                |
 | R-GH-ISSUE-VIEW-NO-COMMENTS        | `gh issue view` without `--comments`                                                                 | Issue comments contain critical context, clarifications and updates not in the issue body                                                     | Add --comments, or include comments in --json fields                                                             |
 | R-GH-PR-VIEW-NO-COMMENTS           | `gh pr view` without `--comments`                                                                    | PR comments contain review feedback and discussion context not in the PR body                                                                 | Add --comments, or include comments in --json fields                                                             |
 | R-STAGED-LINT-FAILURE              | a staged file fails the cheap syntax check at commit time                                            | lint_on_edit only ever runs at Write/Edit time, so a git add of pre-existing content skips it entirely                                        | Fix the failing file(s) above and re-stage before committing                                                     |
