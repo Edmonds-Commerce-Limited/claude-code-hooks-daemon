@@ -46,20 +46,22 @@ Full option space, alternatives considered and triage: [BRAINSTORM.md](BRAINSTOR
 ## Goals
 
 - A remote documentation tree registered as a **first-class documentation
-  tree** with its own contract, distinct from the agent (`CLAUDE/`) and human
-  (`docs/`) trees, and excluded from documentation QA checks written for prose
+  tree** with its own contract, living outside the agent (`CLAUDE/`) and
+  human (`docs/`) trees so it inherits none of the rules written for prose
   this project authors and can fix.
 - A **provenance frontmatter schema** — `source_url`, `fetched_at`,
-  `fidelity`, `source_sha256`, plus optional `upstream_version`, `staleness`
-  and `licence` — that is machine-checkable and travels with the document.
+  `fidelity`, `source_sha256`, `licence`, `stale_after`, plus optional
+  `upstream_version`, `staleness` and `fetch_method` — that is
+  machine-checkable and travels with the document.
 - A **capture and refresh CLI** that fetches raw, hashes, converts to
   markdown, and writes the frontmatter, so the procedure lives in a script
   rather than in prose an agent re-derives each time.
 - A **write-time gate** that makes a file in the remote tree without valid
   provenance frontmatter impossible to commit.
-- **Staleness surfaced at the point of use** (in-band in the document) as
-  well as in the session-start sweep, with per-document policy and a
-  content-hash short-circuit that makes revalidation cheap.
+- **Staleness surfaced at the point of use** — a `stale_after` date in the
+  document, and an advisory the moment an agent reads a stale copy — as well
+  as in the session-start sweep, with per-document policy and a content-hash
+  short-circuit that makes revalidation cheap.
 - **Routing**: an agent about to fetch a URL the project has already vendored
   is told about the local copy.
 - The existing `contracts/claude-code-hooks/` vendoring **migrated onto this
@@ -77,12 +79,16 @@ Full option space, alternatives considered and triage: [BRAINSTORM.md](BRAINSTOR
 - **No non-markdown formats** (PDF, OpenAPI JSON, HTML archives).
 - **No shared cross-project or cross-machine cache.** The tree is per-repo.
 - **No mirroring of entire documentation sites.** Page-at-a-time capture.
-- Not a replacement for `WebSearch`; discovery stays a network operation.
+- **No `WebSearch` interception** (D14) and **no capture from the `WebFetch`
+  payload** (D15): discovery stays a network operation, and the only capture
+  path is the CLI's own raw fetch.
+- **No blocking domain allow-list** (D13): licence is declared per document
+  and reviewed, not gated at capture.
 
 ## Key design decisions
 
-The eleven decisions this plan rests on, each with its reasoning, live in
-[DECISIONS.md](DECISIONS.md). The four that most shape the work:
+The decisions this plan rests on, each with its reasoning, live in
+[DECISIONS.md](DECISIONS.md). The ones that most shape the work:
 
 - **D2/D3** — raw fetch is the canonical capture path, and every document
   records a `fidelity` field. Without these this is a cache; with them it is
@@ -91,101 +97,104 @@ The eleven decisions this plan rests on, each with its reasoning, live in
   session-start advisory in this repo demonstrably rotted.
 - **D10** — path exclusion is global across checks, so it cannot by itself
   give docs QA a remote-docs subset; per-check path scoping does not exist
-  today and is new capability.
-- **D11** — the web-tool payload shape is settled by capture, not assumption.
-
-## Open questions
-
-- **Does the PostToolUse payload for `WebFetch` carry the fetched content, or
-  only status/metadata?** Not answerable from the vendored contract, which is
-  organised per EVENT not per TOOL and documents no web-tool payload at all;
-  the daemon's own schema types `tool_response` as a deliberately
-  shape-agnostic object. No captured fixture exists. **Task 0.1 settles it
-  empirically** — it is a ~2-minute experiment and it gates Task 5.3 only.
-  Fallback if the response is status-only:
-  `TranscriptReader.get_tool_result_text_by_id(tool_use_id)`, which pairs the
-  `tool_use_id` PostToolUse *does* carry to its result text.
-- Should vendored third-party prose be **domain-allow-listed** to keep
-  licence-incompatible material out of the repository, or is a `licence`
-  field and reviewer judgement sufficient?
-- Does the remote tree belong at `docs/remote/` (discoverable, but inside the
-  human tree) or at a top-level `remote-docs/` (clean inheritance)? D1 settles
-  the *registration*; the *path* is still open — but the cost side is now
-  known: `docs/remote/` needs **no** markdown-location config, since
-  `markdown_organization` does a plain prefix test on `docs/` with no
-  allowlist beneath it. Only a new *top-level* directory would trip
-  `R-MARKDOWN-WRONG-LOCATION`.
+  today and is new capability (amended in DECISIONS.md: see Task 3.1).
+- **D11** — the web-tool `tool_input` field names are settled by capture,
+  not assumption.
+- **D12** — the tree is a top-level `remote-docs/`, never a `docs/`
+  subdirectory; its markdown-location allowance derives from the tree
+  registration, so no project needs a config entry for it.
+- **D15/D16** — nothing reads the `WebFetch` payload; the point-of-use
+  warning is a `stale_after` field plus a `Read`-time advisory, never a
+  command that mutates a document to mark it stale.
 
 ## Tasks
 
 ### Phase 0: De-risk before building
 
-- [ ] ⬜ **Task 0.1**: Settle the `WebFetch`/`WebSearch` payload question by
-  experiment, not by assumption. Enable `daemon.payload_capture` for
-  `PreToolUse`/`PostToolUse`, restart the **daemon** (not Claude Code),
-  perform one `WebFetch` and one `WebSearch`, and read
-  `untracked/payload-capture/PostToolUse.jsonl`. Record the verbatim
-  `tool_input` and `tool_response` shapes in a supporting document —
-  they are currently undocumented anywhere in this repository, and every
-  routing task depends on the field names.
+Phase 0 precedes Phase 5: Task 5.1 keys on the `WebFetch` `tool_input` URL
+field, which nothing in this repository documents.
+
+- [ ] ⬜ **Task 0.1**: Capture the web-tool payloads by experiment, not by
+  assumption. Enable `daemon.payload_capture` for `PreToolUse`/`PostToolUse`,
+  restart the **daemon** (not Claude Code), perform one `WebFetch` and one
+  `WebSearch`, and read `untracked/payload-capture/*.jsonl`. **Done when**
+  `PAYLOADS.md` in this folder holds the verbatim `tool_input` and
+  `tool_response` shapes for both tools and names the URL field Task 5.1
+  keys on. Nothing depends on the response shape (D15).
 - [ ] ⬜ **Task 0.2**: Feed the result back into the vendored contract if the
-  web tools prove to have documented payload shapes worth recording.
+  web tools prove to have payload shapes worth recording; otherwise record
+  in `PAYLOADS.md` why not. Either outcome closes the task.
 
 ### Phase 1: The remote tree and its provenance contract
 
 - [ ] ⬜ **Task 1.1**: Define the frontmatter schema as a typed, validated
-  structure — required (`source_url`, `fetched_at`, `fidelity`,
-  `source_sha256`) and optional (`upstream_version`, `staleness`,
-  `licence`, `fetch_method`, `retrieved_by`) fields, with `fidelity`
-  constrained to `verbatim | converted | summarised`.
+  structure — required `source_url`, `fetched_at`, `fidelity`
+  (`verbatim | converted | summarised`), `source_sha256`, `licence` (any
+  non-empty string; the sentinel `unreviewed` is the only value with
+  behaviour, D13) and `stale_after` (ISO date or `never`, D16); optional
+  `upstream_version`, `staleness`, `fetch_method`, `retrieved_by`. **Done
+  when** every field has a validator and a rejection test.
 - [ ] ⬜ **Task 1.2**: Implement the provenance parser, reusing
   `utils/markdown_format.py::_split_frontmatter` rather than adding a
   second frontmatter reader. Malformed frontmatter must be a typed
   result, never an exception that escapes.
-- [ ] ⬜ **Task 1.3**: Register the remote tree in configuration
-  (`documentation.trees.remote`) with its path, resolving the open
-  question on `docs/remote/` vs `remote-docs/`.
-- [ ] ⬜ **Task 1.4**: Keep ordinary docs-QA checks off vendored upstream prose
-  **without** blinding the remote-docs checks to it. `scope_exclude_globs`
-  drops a file from the corpus for *every* check, including new ones, so it
-  cannot do this alone. Follow the proven `source-tree-markdown` pattern:
-  exclude the remote tree from the corpus, and have the remote-docs checks
-  do their own pruned walk over it (`os.walk` with in-place `dirnames[:]`
-  pruning, re-using the shared exclusion primitives rather than
-  re-deriving them).
-- [ ] ⬜ **Task 1.5**: Add an `extra_allowed_markdown_paths` entry **only if** a
-  top-level path is chosen over `docs/remote/` — a `docs/` subdirectory needs
-  no allowance.
+- [ ] ⬜ **Task 1.3**: Register the tree: `documentation.trees.remote`
+  (default `remote-docs`), a `remote_docs_dir` axis and
+  `is_remote_docs_path()` on `ProjectLayout`, and a config-derived step in
+  `markdown_organization._check_builtin_paths` beside the agent and human
+  trees (D12). **Done when** a `Write` to `remote-docs/x.md` is not denied
+  by `R-MARKDOWN-WRONG-LOCATION` with no `extra_allowed_markdown_paths`
+  entry in any project.
+- [ ] ⬜ **Task 1.4**: Confirm ordinary docs-QA checks never see the tree. It
+  sits outside both corpus-collected trees, so no `scope_exclude_globs`
+  entry is needed (D10, amended); the remote checks walk it directly in
+  Phase 3. **Done when** `docs-qa --sweep` over a fixture remote file
+  reports zero findings from the existing eleven checks.
+- [ ] ⬜ **Task 1.5**: Add a `remote-docs` directory role to
+  `install/directory_role_rules.py` (globs from `layout.remote_docs_dir`)
+  so every install deploys `.claude/rules/remote-docs.md`: never hand-author
+  here, capture with the CLI, frontmatter is mandatory. **Done when**
+  `sync_directory_role_rules` deploys it and the human-docs rule does not
+  also match the tree.
 
 ### Phase 2: Capture and refresh CLI
 
 - [ ] ⬜ **Task 2.1**: `bin/hooks-daemon remote-docs add <url>` — raw https
   fetch, hash, markdown conversion, provenance frontmatter, write to the
   derived `<domain>/<page-name>.md` path. Injected `fetch_fn` for
-  testability, per `install/relay_deploy.py`.
+  testability, per `install/relay_deploy.py`. `licence` is filled from
+  `documentation.remote.known_sources` (domain → licence) or set to
+  `unreviewed`; `stale_after` from the resolved staleness policy. **Done
+  when** the written file parses clean under the Task 1.2 parser with no
+  manual edit.
 - [ ] ⬜ **Task 2.2**: Path derivation from URL — deterministic, collision-free,
   filesystem-safe, and readable. The page name need not be the URL slug.
+  **Done when** two distinct normalised URLs never derive the same path and
+  one URL (after Task 5.1's normalisation) always derives one path.
 - [ ] ⬜ **Task 2.3**: `remote-docs refresh <path|--all>` with the hash
-  short-circuit: unchanged upstream bumps `fetched_at` only and reports a
-  no-op.
-- [ ] ⬜ **Task 2.4**: `remote-docs list` and `remote-docs check` (staleness
-  report, non-zero exit when stale), suitable for CI.
-- [ ] ⬜ **Task 2.5**: Route captured content through a path that the existing
-  secret-scanning surface can see, so an authenticated page's contents
-  cannot be vendored unexamined.
+  short-circuit: unchanged upstream bumps `fetched_at`/`stale_after` only
+  and reports a no-op; changed upstream rewrites body and hash.
+- [ ] ⬜ **Task 2.4**: `remote-docs list` and `remote-docs check` — read-only,
+  CI-suitable: non-zero exit when any document is past `stale_after`; also
+  lists `licence: unreviewed` documents without affecting the exit code
+  (D7).
+- [ ] ⬜ **Task 2.5**: No `Write` hook sees a CLI write, so run the captured
+  body through `sensitive_content`'s own matcher (public patterns and secret
+  word list) before writing. **Done when** a fixture page carrying a matching
+  term is refused with the handler's index-only wording.
 
 ### Phase 3: The check family and its substrate
 
 Checks are pure functions registered declaratively (`CheckSpec(check_id, stage, run)`); a new module is added to the registry with exactly two edits
-in `docs_qa/checks/__init__.py`. Two `plan_qa` primitives that `docs_qa`
-lacks are worth porting *before* adding an eleventh scattered scope
-predicate.
+in `docs_qa/checks/__init__.py`. Tasks 3.1–3.3 are substrate and ship
+before 3.4–3.5, which depend on them.
 
 - [ ] ⬜ **Task 3.1**: Port a `docs_qa/paths.py` path classifier modelled on
   `plan_qa/paths.py` (`classify(path) -> kind`), folding in the six
-  duplicated `_matches_allowlist` copies so path scoping has ONE home. This
-  is also the cheapest place to thread per-check path scoping, which does
-  not exist today.
+  duplicated `_matches_allowlist` copies so path scoping has ONE home.
+  **Done when** `classify` returns `remote` for tree paths, `is_lintable_path`
+  (the EDIT dispatch predicate and `docs-qa --lint`) accepts them, and every
+  existing check skips `kind == remote` at EDIT and STAGED.
 - [ ] ⬜ **Task 3.2**: Port a `document_rule_checks`-style registration adapter
   (`docs_qa/checks/common.py`) so one rule function serves multiple stages,
   instead of the `_run_edit`/`_run_staged`/`_run_sweep` triplication now
@@ -196,32 +205,35 @@ predicate.
   independently and must stay in sync. Without the version bump a warm cache
   silently serves records with the new field empty and every dependent check
   reports clean.
-- [ ] ⬜ **Task 3.4**: The provenance check itself, at EDIT and STAGED stages,
-  with `Severity.BLOCK` for a *newly* invalid document. Note the two-key
-  deny rule: BLOCK severity alone does not deny — the resolved
-  `check_modes` entry must also be `block`, so ship the config default
-  alongside the check.
+- [ ] ⬜ **Task 3.4**: The provenance check at EDIT and STAGED stages, with
+  `Severity.BLOCK` for a *newly* invalid document (schema failure, `licence`
+  absent). Note the two-key deny rule: BLOCK severity alone does not deny —
+  the resolved `check_modes` entry must also be `block`, so ship the config
+  default alongside the check. `licence: unreviewed` is ADVISE (D13).
 - [ ] ⬜ **Task 3.5**: Respect the house severity convention — BLOCK only when
   this edit made things worse, ADVISE for unchanged-but-violating, silent
   when improving, and always ADVISE at SWEEP (no before/after exists there).
 - [ ] ⬜ **Task 3.6**: Rule IDs, `explain-rule` text and `HANDLER_REFERENCE.md`
   entries. Note `explain-rule` text is not a table — it lives in `Rule(...)`
   objects in the PreToolUse handlers, one `Rule` per gate.
-- [ ] ⬜ **Task 3.7**: Any new config knob is a mandatory 3-place mechanical
-  change (`config/models.py` → `docs_qa/policy.py` in three spots);
-  `extra="forbid"` means the model edit cannot be skipped. Also note
-  `Finding` carries **no line-number field** — `path` is a bare relative-path
-  string — so a per-line citation needs either a new field or a message
-  convention.
+- [ ] ⬜ **Task 3.7**: Config: `documentation.trees.remote` plus a new
+  `documentation.remote` block (`default_staleness`, `known_sources`). Each
+  knob is a mandatory 3-place mechanical change (`config/models.py` →
+  `docs_qa/policy.py` in three spots); `extra="forbid"` means the model edit
+  cannot be skipped. `Finding` has **no line-number field**, so the
+  provenance check names the offending frontmatter key in its message.
 
 ### Phase 4: Staleness
 
 - [ ] ⬜ **Task 4.1**: Staleness evaluator supporting time TTL, version pin,
-  hash revalidation and pinned/archival, with a project default and
-  per-document override.
-- [ ] ⬜ **Task 4.2**: In-band staleness banner — `remote-docs check` marks a
-  stale document in its own frontmatter/body so any agent reading it sees
-  the warning at the point of use (D5).
+  hash revalidation and pinned/archival, with a project default
+  (`documentation.remote.default_staleness`) and per-document `staleness`
+  override. **Done when** it resolves every policy to a `stale_after` date
+  (or `never`) with a table-driven test per policy.
+- [ ] ⬜ **Task 4.2**: Staleness lives in the document as `stale_after`,
+  written by `add` and `refresh` (D16). `check` compares it to today and is
+  read-only; no command mutates a document to mark it stale. Point-of-use
+  delivery is Task 5.3.
 - [ ] ⬜ **Task 4.3**: SessionStart sweep reporting stale documents, modelled
   on `contract_staleness.py` including its cache and its self-install vs
   client-install distinction.
@@ -231,18 +243,22 @@ predicate.
 
 ### Phase 5: Routing agents to the local copy
 
-- [ ] ⬜ **Task 5.1**: PreToolUse handler on `WebFetch`: URL already vendored
-  and fresh → deny with the local path; vendored but stale → allow (the
-  fetch is the refresh); not vendored → allow with a capture hint.
+One PreToolUse handler carries both branches; Task 0.1 supplies the
+`WebFetch` field name it reads.
+
+- [ ] ⬜ **Task 5.1**: `WebFetch` branch: normalise the URL (scheme, host
+  case, trailing slash, fragment, common tracking parameters) and look it
+  up in the tree. Vendored and fresh → deny with the local path; vendored
+  but stale → allow (the fetch is the refresh); not vendored → allow with a
+  capture hint naming the exact `remote-docs add <url>` command.
 - [ ] ⬜ **Task 5.2**: `get_claude_md()` guidance so agents learn the corpus
   exists without per-session prompting, plus a generated index so one
   grep answers "do we already have docs for X?".
-- [ ] ⬜ **Task 5.3**: *(Contingent on the open question)* PostToolUse
-  offer-to-vendor after a `WebFetch`. Drop this task if the payload does
-  not carry fetched content.
-- [ ] ⬜ **Task 5.4**: Decide whether `WebSearch` warrants an advisory at all —
-  a query is not a URL, so matching is fuzzy and the false-positive cost
-  may exceed the benefit.
+- [ ] ⬜ **Task 5.3**: `Read` branch: a remote-tree path whose `stale_after`
+  has passed → allow with an advisory naming `fetched_at`, `stale_after`
+  and the refresh command; `licence: unreviewed` is named in the same
+  advisory (D16). Fast path: a prefix test on the tree before any file I/O,
+  as `secret_file_guard` does.
 
 ### Phase 6: Migrate the existing vendored contract (dogfood)
 
@@ -260,7 +276,8 @@ predicate.
 ### Phase 7: Documentation and acceptance
 
 - [ ] ⬜ **Task 7.1**: Agent-tree deep-dive documenting the remote tree
-  contract, the schema and the fidelity rule.
+  contract, the schema and the fidelity rule, plus the remote-tree row in
+  `CLAUDE/DirectoryRoles.md`.
 - [ ] ⬜ **Task 7.2**: Human-tree guide covering capture, refresh and staleness
   policy configuration.
 - [ ] ⬜ **Task 7.3**: `AcceptanceTest` declarations on every new handler, per
@@ -273,11 +290,12 @@ predicate.
 - [ ] A markdown file in the remote tree without valid provenance frontmatter
   cannot be written via `Write`/`Edit` and cannot pass the commit gate.
 - [ ] `remote-docs add <url>` produces a file whose frontmatter records source
-  URL, fetch time, raw content hash and fidelity, with no manual editing.
+  URL, fetch time, raw content hash, fidelity, licence and `stale_after`,
+  with no manual editing.
 - [ ] `remote-docs refresh` on unchanged upstream content performs no rewrite
-  beyond `fetched_at`, and says so.
-- [ ] A stale document announces its staleness **in its own contents**, not
-  only in a report.
+  beyond `fetched_at`/`stale_after`, and says so.
+- [ ] A stale document announces its staleness **in its own contents**, and
+  an agent reading it through `Read` is told so at that moment.
 - [ ] Ordinary documentation-QA checks produce zero findings against vendored
   upstream prose.
 - [ ] An agent calling `WebFetch` on an already-vendored, fresh URL is
