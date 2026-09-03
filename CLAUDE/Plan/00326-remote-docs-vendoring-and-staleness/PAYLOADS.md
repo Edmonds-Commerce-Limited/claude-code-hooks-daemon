@@ -83,12 +83,20 @@ deterministic checkpoint belongs at the downstream `WebFetch`.
 
 `PostToolUse`: the same plus `duration_ms` and `tool_response`.
 
-Two of these are worth noting against the vendored contract, whose
-`PreToolUse.json` `input_example` lists neither: **`effort`** and
-**`prompt_id`** are present on real payloads. `PostToolUse.json` documents
-`duration_ms`, which is present as documented. This is a candidate finding
-for Task 0.2 — the contract's per-event `input_example`s are illustrative
-rather than exhaustive, so the gap may be deliberate.
+Two of these were flagged against the vendored contract: **`effort`** and
+**`prompt_id`**. `PostToolUse.json` documents `duration_ms`, which is
+present as documented.
+
+**Resolved in Task 0.2, and the original claim was half wrong.**
+`prompt_id` IS listed in `PreToolUse.json`'s `input_example` — only `effort`
+was absent. And the gap was not deliberate: `effort` is documented upstream
+verbatim (hooks.md — "Object with a `level` field holding the effort level
+in effect when the hook runs … Present for events that fire within a
+tool-use context, such as `PreToolUse`, `PostToolUse`, `Stop`, and
+`SubagentStop`"). It was therefore added to those four `input_example`s,
+sourced from the raw markdown as the refresh procedure requires — never
+from the observed payload alone, which would record an undocumented field
+as if documented.
 
 ## What this changes in the plan
 

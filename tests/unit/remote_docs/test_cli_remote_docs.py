@@ -8,6 +8,7 @@ injected fetcher, so no test touches the network.
 import argparse
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from claude_code_hooks_daemon.daemon.cli import cmd_remote_docs
 
@@ -208,6 +209,36 @@ class TestRemotePolicy:
         document = read_document(_tree(tmp_path) / "example.com" / "p.md")
         assert document.provenance is not None
         assert document.provenance.stale_after == date(2026, 9, 10)
+
+
+class TestUnscannedCaptureIsAnnounced:
+    """A capture that skips the secret scan must never do so quietly.
+
+    `write_capture` takes the scanner as an injected guard because the CLI
+    writes to disk directly, bypassing the Write-tool hook. If the guard
+    cannot be built the capture still proceeds — but fetching an
+    authenticated page would then vendor its secrets with nothing to show
+    the check was skipped.
+    """
+
+    def test_an_unavailable_guard_is_reported_on_stderr(self, capsys) -> None:
+        from claude_code_hooks_daemon.daemon.cli import _sensitive_content_guard
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content"
+            ".SensitiveContentHandler",
+            side_effect=RuntimeError("no project context"),
+        ):
+            assert _sensitive_content_guard() is None
+
+        assert "NOT being scanned" in capsys.readouterr().err
+
+    def test_an_available_guard_says_nothing(self, capsys) -> None:
+        from claude_code_hooks_daemon.daemon.cli import _sensitive_content_guard
+
+        _sensitive_content_guard()
+
+        assert capsys.readouterr().err == ""
 
 
 class TestGeneratedIndex:

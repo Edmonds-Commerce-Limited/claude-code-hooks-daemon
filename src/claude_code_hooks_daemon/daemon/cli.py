@@ -4897,9 +4897,12 @@ def _sensitive_content_guard() -> Any:
     keeps one definition of "sensitive" rather than a second, weaker copy
     (Plan 00326 Task 2.5).
 
-    Returns None when the handler cannot be built — capture then proceeds
-    unscanned rather than failing, which matches how the daemon degrades
-    elsewhere, and the CLI says so.
+    Returns None when the handler cannot be built. Capture then proceeds
+    UNSCANNED rather than failing, matching how the daemon degrades
+    elsewhere — but it says so on stderr rather than only at debug level. A
+    silent downgrade here would mean fetching an authenticated page vendors
+    its secrets with nothing to show that the check was skipped, which is
+    the one degradation in this subsystem worth interrupting someone over.
     """
     try:
         from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
@@ -4908,7 +4911,13 @@ def _sensitive_content_guard() -> Any:
 
         return SensitiveContentHandler().scan_text
     except (ImportError, RuntimeError, OSError) as exc:
-        logger.debug("sensitive-content guard unavailable for capture: %s", exc)
+        logger.warning("sensitive-content guard unavailable for capture: %s", exc)
+        print(
+            "remote-docs: WARNING — the sensitive-content scanner is "
+            f"unavailable ({exc}); this capture is NOT being scanned before "
+            "it reaches disk. Review the captured file before committing.",
+            file=sys.stderr,
+        )
         return None
 
 

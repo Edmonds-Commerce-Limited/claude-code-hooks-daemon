@@ -30,6 +30,9 @@
     "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
     "cwd": "/Users/...",
     "permission_mode": "default",
+    "effort": {
+      "level": "high"
+    },
     "hook_event_name": "PostToolUse",
     "tool_name": "Write",
     "tool_input": {

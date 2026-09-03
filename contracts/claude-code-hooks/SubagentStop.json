@@ -25,6 +25,9 @@
     "transcript_path": "~/.claude/projects/.../abc123.jsonl",
     "cwd": "/Users/...",
     "permission_mode": "default",
+    "effort": {
+      "level": "high"
+    },
     "hook_event_name": "SubagentStop",
     "stop_hook_active": false,
     "agent_id": "def456",

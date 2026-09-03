@@ -114,11 +114,12 @@ The decisions this plan rests on, each with its reasoning, live in
   model's **answer to the prompt**, not the page — no route exists from a
   `WebFetch` to the document it fetched. D2 confirmed by measurement, D15
   upgraded to fact.
-- [ ] ⬜ **Task 0.2**: Decide whether the vendored contract should record that
-  real `PreToolUse` payloads carry `effort` and `prompt_id`, which its
-  `input_example` omits (candidate finding logged in `PAYLOADS.md`). The
-  per-event examples may be illustrative by design; either outcome closes
-  the task.
+- [x] ✅ **Task 0.2**: Decided — yes, and the original finding was half
+  wrong. `prompt_id` was already listed; only `effort` was missing, and it
+  is documented upstream verbatim for exactly four events. Added to those
+  four `input_example`s, sourced from the raw markdown as the refresh
+  procedure requires — never from the observed payload alone, which would
+  record an undocumented field as if documented.
 
 ### Phase 1: The remote tree and its provenance contract
 

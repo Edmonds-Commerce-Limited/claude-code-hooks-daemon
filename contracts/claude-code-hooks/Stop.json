@@ -25,6 +25,9 @@
     "transcript_path": "~/.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
     "cwd": "/Users/...",
     "permission_mode": "default",
+    "effort": {
+      "level": "high"
+    },
     "hook_event_name": "Stop",
     "stop_hook_active": true,
     "last_assistant_message": "I've completed the refactoring. Here's a summary...",
