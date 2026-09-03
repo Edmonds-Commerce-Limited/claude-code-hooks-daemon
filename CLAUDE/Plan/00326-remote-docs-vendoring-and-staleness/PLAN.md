@@ -109,9 +109,12 @@ The eleven decisions this plan rests on, each with its reasoning, live in
   licence-incompatible material out of the repository, or is a `licence`
   field and reviewer judgement sufficient?
 - Does the remote tree belong at `docs/remote/` (discoverable, but inside the
-  human tree) or at a top-level `remote-docs/` (clean inheritance, costs a
-  markdown-location allowance)? D1 settles the *registration*; the *path* is
-  still open.
+  human tree) or at a top-level `remote-docs/` (clean inheritance)? D1 settles
+  the *registration*; the *path* is still open — but the cost side is now
+  known: `docs/remote/` needs **no** markdown-location config, since
+  `markdown_organization` does a plain prefix test on `docs/` with no
+  allowlist beneath it. Only a new *top-level* directory would trip
+  `R-MARKDOWN-WRONG-LOCATION`.
 
 ## Tasks
 
@@ -150,9 +153,9 @@ The eleven decisions this plan rests on, each with its reasoning, live in
   do their own pruned walk over it (`os.walk` with in-place `dirnames[:]`
   pruning, re-using the shared exclusion primitives rather than
   re-deriving them).
-- [ ] ⬜ **Task 1.5**: Confirm the chosen path does not trip
-  `R-MARKDOWN-WRONG-LOCATION`, adding an `extra_allowed_markdown_paths`
-  entry if it does.
+- [ ] ⬜ **Task 1.5**: Add an `extra_allowed_markdown_paths` entry **only if** a
+  top-level path is chosen over `docs/remote/` — a `docs/` subdirectory needs
+  no allowance.
 
 ### Phase 2: Capture and refresh CLI
 
@@ -202,7 +205,14 @@ predicate.
   this edit made things worse, ADVISE for unchanged-but-violating, silent
   when improving, and always ADVISE at SWEEP (no before/after exists there).
 - [ ] ⬜ **Task 3.6**: Rule IDs, `explain-rule` text and `HANDLER_REFERENCE.md`
-  entries.
+  entries. Note `explain-rule` text is not a table — it lives in `Rule(...)`
+  objects in the PreToolUse handlers, one `Rule` per gate.
+- [ ] ⬜ **Task 3.7**: Any new config knob is a mandatory 3-place mechanical
+  change (`config/models.py` → `docs_qa/policy.py` in three spots);
+  `extra="forbid"` means the model edit cannot be skipped. Also note
+  `Finding` carries **no line-number field** — `path` is a bare relative-path
+  string — so a per-line citation needs either a new field or a message
+  convention.
 
 ### Phase 4: Staleness
 
