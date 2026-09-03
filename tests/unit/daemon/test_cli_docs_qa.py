@@ -3,12 +3,13 @@
 import argparse
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.daemon.cli import cmd_docs_qa
+from claude_code_hooks_daemon.daemon.cli import cmd_docs_qa, main
 
 
 def _args(
@@ -371,3 +372,26 @@ class TestQuoteSourceStale:
         source.write_text(f"## Anchor\n\n{self._LONG_SENTENCE}\n")
         # No prior --sweep, so no untracked/docs-qa/index.json exists.
         assert cmd_docs_qa(_args(root, lint=source)) == 0
+
+
+class TestCheckStagedHelpText:
+    """``--check-staged`` is fully implemented; its help must not deny that.
+
+    ``cmd_docs_qa`` runs the STAGED stage (exercised by ``TestCheckStaged``
+    above), but the argparse ``help=`` string still advertised the flag as
+    unimplemented, so ``--help`` told the reader the opposite of the truth.
+    """
+
+    def test_help_does_not_claim_the_flag_is_unimplemented(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["hooks-daemon", "docs-qa", "--help"])
+
+        with pytest.raises(SystemExit):
+            main()
+
+        help_text = capsys.readouterr().out
+        assert "--check-staged" in help_text
+        assert "Not implemented" not in help_text

@@ -6278,7 +6278,7 @@ def main() -> int:
         "--check-staged",
         dest="check_staged",
         action="store_true",
-        help="Not implemented in this slice (Plan 00284 Task 3.1a); exits 2",
+        help="Run commit-gate checks against the staged tree",
     )
     parser_docs_qa.add_argument(
         "--lint",
