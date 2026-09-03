@@ -848,8 +848,12 @@ class DocumentationTreesConfig(BaseModel):
 
     agent: str = Field(default="CLAUDE", description="Root directory of the agent-facing tree")
     human: str = Field(default="docs", description="Root directory of the human-facing tree")
+    remote: str = Field(
+        default="remote-docs",
+        description="Root directory of the vendored remote-docs tree (Plan 00326)",
+    )
 
-    @field_validator("agent", "human")
+    @field_validator("agent", "human", "remote")
     @classmethod
     def validate_trees_are_repo_relative(cls, value: str) -> str:
         """Documentation tree roots are repository-relative (Plan 00303)."""

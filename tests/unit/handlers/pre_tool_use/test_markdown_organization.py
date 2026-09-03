@@ -91,6 +91,36 @@ class TestMarkdownOrganizationHandler:
         result = handler.normalize_path("")
         assert result == ""
 
+    def test_normalize_path_matches_markers_at_a_segment_boundary_only(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """A directory that merely ENDS with a marker name is not that marker.
+
+        The marker search strips everything before a known project directory
+        so an absolute path resolves to a project-relative one. Matching the
+        marker as a bare substring makes any directory whose name ends with
+        one collapse into it -- `remote-docs/` became `docs/`, silently
+        classifying a separate top-level tree as the human docs tree (found
+        while building Plan 00326's remote tree, whose default name is
+        exactly `remote-docs`).
+        """
+        assert handler.normalize_path("/tmp/proj/remote-docs/x.com/p.md") == (
+            "remote-docs/x.com/p.md"
+        )
+        # `my-src/` is not a marker at all, so its absolute prefix is left
+        # alone (the behaviour for any unrecognised directory). What matters
+        # is that it is not mistaken for `src/`.
+        my_src = handler.normalize_path("/tmp/proj/my-src/thing.md")
+        assert my_src != "src/thing.md"
+        assert my_src.endswith("my-src/thing.md")
+
+    def test_normalize_path_still_strips_a_genuine_marker_prefix(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """The boundary fix must not break what the marker search is for."""
+        assert handler.normalize_path("/home/user/project/docs/guide.md") == "docs/guide.md"
+        assert handler.normalize_path("/home/user/project/src/mod/x.md") == "src/mod/x.md"
+
     def test_is_adhoc_instruction_file_returns_true_for_claude_md(
         self, handler: MarkdownOrganizationHandler
     ) -> None:

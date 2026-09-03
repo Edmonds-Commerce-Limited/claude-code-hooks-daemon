@@ -124,6 +124,7 @@ _RULE_PLAN_SYNC = Rule(
 # PlanWorkflowQaConfig.completed_dir) so behaviour is unchanged either way.
 _FALLBACK_AGENT_DOCS_DIR: Final[str] = "CLAUDE"
 _FALLBACK_HUMAN_DOCS_DIR: Final[str] = "docs"
+_FALLBACK_REMOTE_DOCS_DIR: Final[str] = "remote-docs"
 _FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 _FALLBACK_PLAN_ARCHIVE_DIRS: Final[tuple[str, ...]] = ("Completed",)
 
@@ -248,6 +249,11 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         layout = self._project_layout
         return layout.human_docs_dir if layout is not None else _FALLBACK_HUMAN_DOCS_DIR
 
+    def _remote_docs_dir(self) -> str:
+        """Root of the vendored remote-docs tree (facade, or the matching default)."""
+        layout = self._project_layout
+        return layout.remote_docs_dir if layout is not None else _FALLBACK_REMOTE_DOCS_DIR
+
     def _plan_dir(self) -> str:
         """Configured plan directory (facade, or the matching default)."""
         layout = self._project_layout
@@ -265,6 +271,21 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             layout.plan_archive_dirs if layout is not None else _FALLBACK_PLAN_ARCHIVE_DIRS
         )
         return frozenset({name.lower() for name in archive_dirs} | set(_LEGACY_PLAN_ARCHIVE_EXTRAS))
+
+    @staticmethod
+    def _segment_aligned_index(haystack: str, marker: str) -> int | None:
+        """First index where ``marker`` begins a path segment, or None.
+
+        A segment begins at position 0 or immediately after a ``/``.
+        """
+        start = 0
+        while True:
+            idx = haystack.find(marker, start)
+            if idx == -1:
+                return None
+            if idx == 0 or haystack[idx - 1] == "/":
+                return idx
+            start = idx + 1
 
     def normalize_path(self, file_path: str) -> str:
         """Normalize file path to project-relative format.
@@ -292,13 +313,18 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             "src/",
             ".claude/",
             f"{self._human_docs_dir()}/",
+            f"{self._remote_docs_dir()}/",
             "eslint-rules/",
             "untracked/",
         ]
         for marker in project_markers:
-            if marker in normalized:
-                # Find the marker and strip everything before it
-                idx = normalized.find(marker)
+            # The marker must start a PATH SEGMENT: at position 0, or straight
+            # after a "/". A bare substring search collapses any directory
+            # whose name merely ends with a marker into it -- "remote-docs/"
+            # became "docs/", classifying a separate top-level tree as the
+            # human docs tree (Plan 00326).
+            idx = self._segment_aligned_index(normalized, marker)
+            if idx is not None:
                 if idx > 0:
                     normalized = normalized[idx:]
                 break
@@ -1137,6 +1163,14 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         # 3. Human-facing doc tree (facade: documentation.trees.human)
         human_dir_prefix = self._human_docs_dir().strip("/").lower() + "/"
         if normalized.lower().startswith(human_dir_prefix):
+            return False  # Allow
+
+        # 3.1. Vendored remote-docs tree (facade: documentation.trees.remote).
+        # Derived from the registration exactly as the agent and human trees
+        # are, so no project needs an `extra_allowed_markdown_paths` entry to
+        # capture upstream documentation (Plan 00326 D12).
+        remote_dir_prefix = self._remote_docs_dir().strip("/").lower() + "/"
+        if normalized.lower().startswith(remote_dir_prefix):
             return False  # Allow
 
         # 4. untracked/ - Temporary docs

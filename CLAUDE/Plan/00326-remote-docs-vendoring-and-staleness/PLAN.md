@@ -115,8 +115,7 @@ Phase 0 precedes Phase 5: Task 5.1 keys on the `WebFetch` `tool_input` URL
 field. **Settled — see [PAYLOADS.md](PAYLOADS.md): the field is
 `tool_input.url`.**
 
-- [x] ✅ **Task 0.1**: Web-tool payloads captured by experiment (Claude Code
-  v2.1.259 / daemon v3.61.0); capture re-disabled, raw payloads discarded.
+- [x] ✅ **Task 0.1**: Payloads captured (see [PAYLOADS.md](PAYLOADS.md)).
   `WebFetch`'s `tool_response.result` is the fast model's **answer to the
   prompt**, not the page — no route exists from a `WebFetch` to the document
   it fetched. D2 confirmed by measurement, D15 upgraded to fact.
@@ -128,28 +127,29 @@ field. **Settled — see [PAYLOADS.md](PAYLOADS.md): the field is
 
 ### Phase 1: The remote tree and its provenance contract
 
-- [x] ✅ **Task 1.1**: Schema in `remote_docs/provenance.py`: required
-  `source_url` (https only), `fetched_at` (tz-aware ISO), `fidelity`,
-  `source_sha256` (64 hex), `licence` (`unreviewed` sentinel, D13),
-  `stale_after` (ISO date or `never`, D16); optional `upstream_version`,
-  `fetch_method`, `retrieved_by`. Every field has a validator and a
-  rejection test.
+- [x] ✅ **Task 1.1**: Schema in `remote_docs/provenance.py`; every field has
+  a validator and a rejection test.
 - [x] ✅ **Task 1.2**: `parse_provenance()` returns a typed `ParseResult`,
-  never raising, and reports EVERY invalid field rather than the first.
-  Reuses the shared splitter, promoted to a public `split_frontmatter()` so
-  the project keeps exactly one frontmatter reader.
-- [ ] ⬜ **Task 1.3**: Register the tree: `documentation.trees.remote`
-  (default `remote-docs`), a `remote_docs_dir` axis and
-  `is_remote_docs_path()` on `ProjectLayout`, and a config-derived step in
-  `markdown_organization._check_builtin_paths` beside the agent and human
-  trees (D12). **Done when** a `Write` to `remote-docs/x.md` is not denied
-  by `R-MARKDOWN-WRONG-LOCATION` with no `extra_allowed_markdown_paths`
-  entry in any project.
+  never raising, reporting EVERY invalid field. Reuses the shared splitter,
+  promoted to a public `split_frontmatter()`.
+- [x] ✅ **Task 1.3**: Tree registered — `documentation.trees.remote` (default
+  `remote-docs`), a `remote_docs_dir` axis (defaulted and last, so the
+  addition is additive for existing call sites) plus `is_remote_docs_path()`
+  on `ProjectLayout`, and a config-derived allowance in
+  `markdown_organization`. `is_docs_path()` deliberately does NOT claim the
+  tree. Required fixing a latent `normalize_path` defect first (see Task
+  1.6) — without it the allowance branch was unreachable.
 - [ ] ⬜ **Task 1.4**: Confirm ordinary docs-QA checks never see the tree. It
   sits outside both corpus-collected trees, so no `scope_exclude_globs`
   entry is needed (D10, amended); the remote checks walk it directly in
   Phase 3. **Done when** `docs-qa --sweep` over a fixture remote file
   reports zero findings from the existing eleven checks.
+- [x] ✅ **Task 1.6**: Fix `markdown_organization.normalize_path`, which
+  matched its project markers as bare SUBSTRINGS — so `remote-docs/`
+  collapsed to `docs/` and the remote tree was silently classified as the
+  human docs tree. Markers now match only at a path-segment boundary, and
+  the remote tree is itself a marker. Found because Task 1.3's first
+  allowance test passed vacuously.
 - [ ] ⬜ **Task 1.5**: Add a `remote-docs` directory role to
   `install/directory_role_rules.py` (globs from `layout.remote_docs_dir`)
   so every install deploys `.claude/rules/remote-docs.md`: never hand-author

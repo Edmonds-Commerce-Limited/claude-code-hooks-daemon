@@ -72,6 +72,10 @@ _BUILTIN_VENDOR_DIRS: Final[tuple[str, ...]] = tuple(COMMON_VENDORED_BUILD_DIR_N
 # built with no config, mirroring ProjectRegistry.single_project()).
 _DEFAULT_AGENT_DOCS_DIR: Final[str] = "CLAUDE"
 _DEFAULT_HUMAN_DOCS_DIR: Final[str] = "docs"
+#: Top level by design (Plan 00326 D12): nested under ``docs/`` it would
+#: inherit the human-docs role rule's "keep it terse, summarise" instruction,
+#: which is the opposite of verbatim capture, and rule globs cannot be negated.
+_DEFAULT_REMOTE_DOCS_DIR: Final[str] = "remote-docs"
 _DEFAULT_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 _DEFAULT_PLAN_ARCHIVE_DIRS: Final[tuple[str, ...]] = ("Completed",)
 
@@ -163,6 +167,11 @@ class ProjectLayout:
             (``documentation.trees.agent``)
         human_docs_dir: Root of the human-facing doc tree
             (``documentation.trees.human``)
+        remote_docs_dir: Root of the vendored remote-docs tree
+            (``documentation.trees.remote``). Deliberately NOT part of
+            :meth:`is_docs_path`: it holds upstream prose this project did
+            not author and cannot fix, so consumers keyed on "is this our
+            documentation?" must not claim it (Plan 00326 D1/D12)
         plan_dir: The configured plan directory (``plan_workflow.directory``)
         plan_archive_dirs: Configured plan archive directory names
             (``plan_workflow.qa.completed_dir``/``cancelled_dir``, deduped)
@@ -176,6 +185,11 @@ class ProjectLayout:
     human_docs_dir: str
     plan_dir: str
     plan_archive_dirs: tuple[str, ...]
+    # Defaulted, and last, so adding this axis stays ADDITIVE for the many
+    # existing call sites that construct a layout positionally or without it.
+    # Mirrors how `_DEFAULT_HUMAN_DOCS_DIR` and the pydantic model each state
+    # the "docs" default in their own layer.
+    remote_docs_dir: str = _DEFAULT_REMOTE_DOCS_DIR
 
     def is_source_path(self, rel_path: str) -> bool:
         """True when ``rel_path`` has a declared/built-in source dir component."""
@@ -192,6 +206,14 @@ class ProjectLayout:
     def is_docs_path(self, rel_path: str) -> bool:
         """True when ``rel_path`` is under the agent or human doc tree."""
         return _is_under(rel_path, self.agent_docs_dir) or _is_under(rel_path, self.human_docs_dir)
+
+    def is_remote_docs_path(self, rel_path: str) -> bool:
+        """True when ``rel_path`` is under the vendored remote-docs tree.
+
+        Kept separate from :meth:`is_docs_path` on purpose — see the
+        ``remote_docs_dir`` attribute note.
+        """
+        return _is_under(rel_path, self.remote_docs_dir)
 
     def is_plan_path(self, rel_path: str) -> bool:
         """True when ``rel_path`` is under the configured plan directory."""
@@ -214,6 +236,7 @@ class ProjectLayout:
             vendor_dirs=frozenset(_BUILTIN_VENDOR_DIRS),
             agent_docs_dir=_DEFAULT_AGENT_DOCS_DIR,
             human_docs_dir=_DEFAULT_HUMAN_DOCS_DIR,
+            remote_docs_dir=_DEFAULT_REMOTE_DOCS_DIR,
             plan_dir=_DEFAULT_PLAN_DIR,
             plan_archive_dirs=_DEFAULT_PLAN_ARCHIVE_DIRS,
         )
@@ -244,6 +267,7 @@ class ProjectLayout:
             vendor_dirs=vendor_dirs,
             agent_docs_dir=doc_axes.agent_docs_dir,
             human_docs_dir=doc_axes.human_docs_dir,
+            remote_docs_dir=doc_axes.remote_docs_dir,
             plan_dir=doc_axes.plan_dir,
             plan_archive_dirs=doc_axes.plan_archive_dirs,
         )
@@ -269,6 +293,7 @@ class ProjectLayout:
             vendor_dirs=vendor_dirs,
             agent_docs_dir=config.documentation.trees.agent,
             human_docs_dir=config.documentation.trees.human,
+            remote_docs_dir=config.documentation.trees.remote,
             plan_dir=config.plan_workflow.directory,
             plan_archive_dirs=archive_dirs,
         )
