@@ -1,6 +1,6 @@
 # Plan 00326: remote docs vendoring and staleness
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-03
 **Owner**: joseph
 **Priority**: Medium
@@ -112,18 +112,19 @@ The decisions this plan rests on, each with its reasoning, live in
 ### Phase 0: De-risk before building
 
 Phase 0 precedes Phase 5: Task 5.1 keys on the `WebFetch` `tool_input` URL
-field, which nothing in this repository documents.
+field. **Settled — see [PAYLOADS.md](PAYLOADS.md): the field is
+`tool_input.url`.**
 
-- [ ] ⬜ **Task 0.1**: Capture the web-tool payloads by experiment, not by
-  assumption. Enable `daemon.payload_capture` for `PreToolUse`/`PostToolUse`,
-  restart the **daemon** (not Claude Code), perform one `WebFetch` and one
-  `WebSearch`, and read `untracked/payload-capture/*.jsonl`. **Done when**
-  `PAYLOADS.md` in this folder holds the verbatim `tool_input` and
-  `tool_response` shapes for both tools and names the URL field Task 5.1
-  keys on. Nothing depends on the response shape (D15).
-- [ ] ⬜ **Task 0.2**: Feed the result back into the vendored contract if the
-  web tools prove to have payload shapes worth recording; otherwise record
-  in `PAYLOADS.md` why not. Either outcome closes the task.
+- [x] ✅ **Task 0.1**: Web-tool payloads captured by experiment (Claude Code
+  v2.1.259 / daemon v3.61.0); capture re-disabled, raw payloads discarded.
+  `WebFetch`'s `tool_response.result` is the fast model's **answer to the
+  prompt**, not the page — no route exists from a `WebFetch` to the document
+  it fetched. D2 confirmed by measurement, D15 upgraded to fact.
+- [ ] ⬜ **Task 0.2**: Decide whether the vendored contract should record that
+  real `PreToolUse` payloads carry `effort` and `prompt_id`, which its
+  `input_example` omits (candidate finding logged in `PAYLOADS.md`). The
+  per-event examples may be illustrative by design; either outcome closes
+  the task.
 
 ### Phase 1: The remote tree and its provenance contract
 
@@ -218,8 +219,8 @@ before 3.4–3.5, which depend on them.
   objects in the PreToolUse handlers, one `Rule` per gate.
 - [ ] ⬜ **Task 3.7**: Config: `documentation.trees.remote` plus a new
   `documentation.remote` block (`default_staleness`, `known_sources`). Each
-  knob is a mandatory 3-place mechanical change (`config/models.py` →
-  `docs_qa/policy.py` in three spots); `extra="forbid"` means the model edit
+  knob is a mandatory 3-place mechanical change (config `models.py` →
+  `docs_qa` `policy.py` in three spots); `extra="forbid"` means the model edit
   cannot be skipped. `Finding` has **no line-number field**, so the
   provenance check names the offending frontmatter key in its message.
 
