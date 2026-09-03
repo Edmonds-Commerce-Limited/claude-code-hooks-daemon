@@ -49,24 +49,21 @@ Full option space, alternatives considered and triage: [BRAINSTORM.md](BRAINSTOR
   tree** with its own contract, living outside the agent (`CLAUDE/`) and
   human (`docs/`) trees so it inherits none of the rules written for prose
   this project authors and can fix.
-- A **provenance frontmatter schema** — `source_url`, `fetched_at`,
-  `fidelity`, `source_sha256`, `licence`, `stale_after`, plus optional
-  `upstream_version`, `staleness` and `fetch_method` — that is
-  machine-checkable and travels with the document.
-- A **capture and refresh CLI** that fetches raw, hashes, converts to
-  markdown, and writes the frontmatter, so the procedure lives in a script
-  rather than in prose an agent re-derives each time.
-- A **write-time gate** that makes a file in the remote tree without valid
-  provenance frontmatter impossible to commit.
+- A **provenance frontmatter schema** that is machine-checkable and travels
+  with the document (fields listed in [CLAUDE/RemoteDocs.md](../../RemoteDocs.md)).
+- A **capture and refresh CLI**, so the procedure lives in a script rather
+  than in prose an agent re-derives each time.
+- A **write-time gate** making a remote-tree file without valid provenance
+  impossible to commit.
 - **Staleness surfaced at the point of use** — a `stale_after` date in the
-  document, and an advisory the moment an agent reads a stale copy — as well
-  as in the session-start sweep, with per-document policy and a content-hash
-  short-circuit that makes revalidation cheap.
+  document and an advisory when an agent reads a stale copy — as well as in
+  the session-start sweep, with a content-hash short-circuit that makes
+  revalidation cheap.
 - **Routing**: an agent about to fetch a URL the project has already vendored
   is told about the local copy.
-- The existing `contracts/claude-code-hooks/` vendoring **migrated onto this
-  subsystem**, with its bespoke staleness handler retired or reduced to a
-  thin adapter.
+- ~~The existing `contracts/claude-code-hooks/` vendoring migrated onto this
+  subsystem~~ — **dropped (D20)**: it vendors derived schemas, not documents,
+  and its source doc is deliberately untracked.
 
 ## Non-Goals
 
@@ -87,23 +84,11 @@ Full option space, alternatives considered and triage: [BRAINSTORM.md](BRAINSTOR
 
 ## Key design decisions
 
-The decisions this plan rests on, each with its reasoning, live in
-[DECISIONS.md](DECISIONS.md). The ones that most shape the work:
-
-- **D2/D3** — raw fetch is the canonical capture path, and every document
-  records a `fidelity` field. Without these this is a cache; with them it is
-  a citable corpus.
-- **D5** — staleness is surfaced *in the document*, because the equivalent
-  session-start advisory in this repo demonstrably rotted.
-- **D12** — the tree is a top-level `remote-docs/`, never a `docs/`
-  subdirectory; its markdown-location allowance derives from the tree
-  registration, so no project needs a config entry for it.
-- **D15/D16** — nothing reads the `WebFetch` payload; the point-of-use
-  warning is a `stale_after` field plus a `Read`-time advisory, never a
-  command that mutates a document to mark it stale.
-- **D18/D19/D20** — capture prefers `agent-browser`, nudging is scoped to
-  declared domains, and `--verbatim` is demandable for work that must quote
-  upstream exactly.
+Every decision and its reasoning lives in [DECISIONS.md](DECISIONS.md) —
+D1–D20, including the four taken during implementation (D17–D20) that
+superseded parts of the original design. The single load-bearing one:
+**D3, the `fidelity` field**. Without it this is a cache; with it, a citable
+corpus.
 
 ## Tasks
 
@@ -133,20 +118,15 @@ The decisions this plan rests on, each with its reasoning, live in
   `is_docs_path()` deliberately does NOT claim the tree. Required fixing a
   latent `normalize_path` defect first (Task 1.6).
 - [x] ✅ **Task 1.4**: Confirmed by test — a remote doc yields zero sweep
-  findings, and a CONTROL test proves the same content in the human tree
-  does trip them, so the exclusion is real rather than an empty sweep. No
-  `scope_exclude_globs` entry needed: the tree is never corpus-collected.
-- [x] ✅ **Task 1.6**: Fix `markdown_organization.normalize_path`, which
-  matched its project markers as bare SUBSTRINGS — so `remote-docs/`
-  collapsed to `docs/` and the remote tree was silently classified as the
-  human docs tree. Markers now match only at a path-segment boundary, and
-  the remote tree is itself a marker. Found because Task 1.3's first
-  allowance test passed vacuously.
-- [x] ✅ **Task 1.5**: `remote-docs` directory role ships (globs derived from
-  `layout.remote_docs_dir`), so every install deploys
-  `.claude/rules/remote-docs.md`: captured not authored, never reworded,
-  frontmatter mandatory. A test asserts the human-docs rule does not also
-  match the tree.
+  findings, with a CONTROL test proving the same content in the human tree
+  DOES trip them, so the exclusion is real rather than an empty sweep.
+- [x] ✅ **Task 1.6**: Fixed `markdown_organization.normalize_path`, which
+  matched project markers as bare SUBSTRINGS — `remote-docs/` collapsed to
+  `docs/`. Markers now match only at a segment boundary. Found because Task
+  1.3's first allowance test passed vacuously.
+- [x] ✅ **Task 1.5**: `remote-docs` directory role ships, so every install
+  deploys `.claude/rules/remote-docs.md`. A test asserts the human-docs rule
+  does not also match the tree.
 
 ### Phase 2: Capture and refresh CLI
 
@@ -158,17 +138,16 @@ The decisions this plan rests on, each with its reasoning, live in
   URL digest disambiguates, so `?v=1` and `?v=2` cannot overwrite each
   other. An implied `index` is not lossy.
 - [x] ✅ **Task 2.3**: `remote-docs refresh <--path|--all>` with the hash
-  short-circuit — unchanged upstream moves `fetched_at`/`stale_after` only,
-  changed upstream rewrites the body. Refresh reads the URL from the file,
-  and carries the recorded `licence` across rather than re-deriving it.
-- [x] ✅ **Task 2.4**: `remote-docs list` and `remote-docs check` — read-only,
-  CI-suitable, exit 1 when any document is stale OR has unreadable
-  provenance (silence must not mean "clean" over an unparseable corpus).
+  short-circuit — unchanged upstream moves the dates only. Refresh reads the
+  URL from the file and carries the recorded `licence` across.
+- [x] ✅ **Task 2.4**: `remote-docs list` and `check` — read-only,
+  CI-suitable, exit 1 when a document is stale OR unreadable (silence must
+  not mean "clean" over an unparseable corpus).
 - [x] ✅ **Task 2.5**: `write_capture` takes an injected `content_guard`; the
   CLI wires in `SensitiveContentHandler.scan_text`, made public so there is
-  one definition of "sensitive" rather than a weaker second copy. A rejected
-  capture writes nothing, and the secret-word arm reports only an index,
-  never the term.
+  one definition of "sensitive". A rejected capture writes nothing, the
+  secret-word arm reports only an index, and an UNAVAILABLE guard is
+  announced on stderr rather than silently skipping the scan.
 
 ### Phase 3: The write-time gate
 
@@ -312,4 +291,26 @@ One PreToolUse handler carries both branches; Task 0.1 supplies the
 
 - Milestone A — Phases 1–3: the tree exists, provenance is enforced, capture works.
 - Milestone B — Phases 4–5: staleness is measured and surfaced; agents are routed to local copies.
-- Milestone C — Phases 6–7: the motivating case is migrated; docs and acceptance complete.
+- Milestone C — Phases 6–7: docs and acceptance complete. Phase 6's migration
+  was **reassessed rather than performed** (D20): the vendored contract has
+  nothing this subsystem can manage.
+
+**Shipped**: four handlers (`remote_docs_provenance`, `remote_docs_routing`,
+`remote_docs_commit_gate`, `remote_docs_staleness`), the `remote-docs`
+CLI (`add`/`list`/`check`/`refresh`, with `--verbatim`), the generated
+index, `documentation.trees.remote` + `documentation.remote`, agent- and
+human-tree documentation, and the v3.61.0 config-changes manifest.
+
+**Deliberately still open, neither blocked nor forgotten:**
+
+- **Task 3.8** — record the fetcher's reported `source` so a capture of a
+  markdown-serving site can claim `verbatim` honestly. Safe to defer: the
+  current behaviour UNDER-claims (`converted`), and `--verbatim` already
+  covers work that must quote exactly. Changes the `FetchFn` contract at
+  every call site, which is why it is not smuggled in here.
+- **Task 6.3** — fold the mechanisable half of the hooks-contract refresh
+  into the CLI, and clear the firing staleness advisory. The second half
+  needs a verified section-by-section extraction audit against the raw
+  markdown; rushing it is precisely the fabrication failure the procedure
+  exists to prevent, so it wants its own plan rather than a tail-end task
+  here.
