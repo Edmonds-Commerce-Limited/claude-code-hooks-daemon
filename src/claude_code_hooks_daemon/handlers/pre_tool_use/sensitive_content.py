@@ -210,6 +210,31 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 return {**entry, "_matched": match.group(0)}
         return None
 
+    def scan_text(self, content: str) -> str | None:
+        """Reason ``content`` must not be written, or None when it is clean.
+
+        Public because content can enter the repository by routes this
+        handler's own hook never sees. Plan 00326's ``remote-docs`` capture
+        writes a fetched upstream page straight to disk from a CLI, so
+        without this it could vendor an authenticated page's secrets with no
+        check at all.
+
+        The secret-word arm deliberately reports only an INDEX, never the
+        term (the same disclosure rule the deny path follows).
+        """
+        public_match = self._find_public_pattern_match(content)
+        if public_match is not None:
+            name = public_match.get(_PATTERN_KEY_NAME, "unnamed pattern")
+            return f"matches the sensitive-content pattern `{name}`"
+
+        terms = self._secret_terms()
+        for index, term in enumerate(terms, start=1):
+            if sr.find_first_match_index(content, (term,)) is not None:
+                return (
+                    f"matches entry {index} of {len(terms)} in the secret word list"
+                )
+        return None
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         haystacks = self._haystacks_for(hook_input)
         if not haystacks:

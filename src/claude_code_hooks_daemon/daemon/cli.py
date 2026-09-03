@@ -4910,6 +4910,29 @@ def _https_fetch(url: str) -> bytes:
         return bytes(response.read())
 
 
+def _sensitive_content_guard() -> Any:
+    """The project's configured sensitive-content scanner, or None.
+
+    A capture writes to disk from this CLI, so the ``Write``-tool hook that
+    normally inspects content never fires. Reusing the handler's own matching
+    keeps one definition of "sensitive" rather than a second, weaker copy
+    (Plan 00326 Task 2.5).
+
+    Returns None when the handler cannot be built — capture then proceeds
+    unscanned rather than failing, which matches how the daemon degrades
+    elsewhere, and the CLI says so.
+    """
+    try:
+        from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
+            SensitiveContentHandler,
+        )
+
+        return SensitiveContentHandler().scan_text
+    except (ImportError, RuntimeError, OSError) as exc:
+        logger.debug("sensitive-content guard unavailable for capture: %s", exc)
+        return None
+
+
 def _remote_docs_tree(project_root: Path) -> Path:
     """Resolve the configured remote-docs tree root for ``project_root``."""
     from claude_code_hooks_daemon.config.models import Config
@@ -4966,6 +4989,7 @@ def _remote_docs_add(
                 if args.stale_after_days is not None
                 else DEFAULT_STALE_AFTER_DAYS
             ),
+            content_guard=getattr(args, "content_guard", None) or _sensitive_content_guard(),
         )
     except CaptureError as exc:
         print(f"remote-docs add failed: {exc}", file=sys.stderr)

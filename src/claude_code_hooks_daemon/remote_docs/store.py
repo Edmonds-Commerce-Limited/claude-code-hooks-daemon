@@ -11,7 +11,7 @@ makes checking often actually affordable.
 """
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import Enum
@@ -33,6 +33,9 @@ from claude_code_hooks_daemon.remote_docs.provenance import (
 logger = logging.getLogger(__name__)
 
 _MARKDOWN_GLOB = "*.md"
+
+#: A sensitive-content scanner: content in, a rejection reason or None out.
+ContentGuard = Callable[[str], str | None]
 
 
 class RefreshOutcome(Enum):
@@ -96,14 +99,23 @@ def write_capture(
     now: datetime | None = None,
     licence: str = UNREVIEWED,
     stale_after_days: int | None = DEFAULT_STALE_AFTER_DAYS,
+    content_guard: ContentGuard | None = None,
 ) -> Path:
     """Capture ``url`` and write it into ``tree_root``.
+
+    ``content_guard`` is the project's sensitive-content scanner, injected
+    rather than imported so this module stays free of handler dependencies.
+    It matters because a capture writes to disk from a CLI, bypassing the
+    ``Write``-tool hook that would normally inspect content: without it,
+    fetching an authenticated page would vendor its secrets unexamined
+    (Task 2.5).
 
     Returns the written path.
 
     Raises:
-        CaptureError: propagated from :func:`capture`, plus any write failure,
-            so a caller has exactly one exception type to report.
+        CaptureError: propagated from :func:`capture`, a rejection from
+            ``content_guard``, or any write failure -- one exception type for
+            the caller to report.
     """
     result = capture(
         url,
@@ -112,6 +124,13 @@ def write_capture(
         licence=licence,
         stale_after_days=stale_after_days,
     )
+    if content_guard is not None:
+        reason = content_guard(result.content)
+        if reason is not None:
+            raise CaptureError(
+                f"refusing to vendor {url}: the fetched content {reason}. "
+                "Nothing was written."
+            )
     destination = tree_root / result.relative_path
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)

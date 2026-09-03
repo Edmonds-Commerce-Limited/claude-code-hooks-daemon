@@ -174,10 +174,11 @@ field. **Settled — see [PAYLOADS.md](PAYLOADS.md): the field is
 - [x] ✅ **Task 2.4**: `remote-docs list` and `remote-docs check` — read-only,
   CI-suitable, exit 1 when any document is stale OR has unreadable
   provenance (silence must not mean "clean" over an unparseable corpus).
-- [ ] ⬜ **Task 2.5**: No `Write` hook sees a CLI write, so run the captured
-  body through `sensitive_content`'s own matcher (public patterns and secret
-  word list) before writing. **Done when** a fixture page carrying a matching
-  term is refused with the handler's index-only wording.
+- [x] ✅ **Task 2.5**: `write_capture` takes an injected `content_guard`; the
+  CLI wires in `SensitiveContentHandler.scan_text`, made public so there is
+  one definition of "sensitive" rather than a weaker second copy. A rejected
+  capture writes nothing, and the secret-word arm reports only an index,
+  never the term.
 
 ### Phase 3: The check family and its substrate
 

@@ -9,6 +9,7 @@ one fetch and no rewrite -- the same trick the hand-rolled
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from claude_code_hooks_daemon.remote_docs.capture import CaptureError
 from claude_code_hooks_daemon.remote_docs.store import (
     RefreshOutcome,
     check_staleness,
@@ -56,6 +57,64 @@ class TestWrite:
         documents = list_documents(tmp_path)
         assert [doc.path for doc in documents] == [written]
         assert documents[0].provenance is not None
+
+
+class TestContentGuard:
+    """Task 2.5: a capture writes from a CLI, bypassing the Write-tool hook.
+
+    Without a guard here, fetching an authenticated page would vendor its
+    secrets into the repository with no check at all.
+    """
+
+    def test_a_rejected_capture_writes_nothing(self, tmp_path: Path) -> None:
+        def reject(content: str) -> str | None:
+            return "matches the sensitive-content pattern `aws-key`"
+
+        try:
+            write_capture(
+                tmp_path,
+                "https://example.com/p",
+                fetch_fn=_fetch(_BODY),
+                now=_NOW,
+                content_guard=reject,
+            )
+        except CaptureError as exc:
+            assert "aws-key" in str(exc)
+        else:
+            raise AssertionError("a rejected capture should raise")
+
+        assert list(tmp_path.rglob("*.md")) == []
+
+    def test_a_clean_capture_passes_the_guard(self, tmp_path: Path) -> None:
+        def allow(content: str) -> str | None:
+            return None
+
+        written = write_capture(
+            tmp_path,
+            "https://example.com/p",
+            fetch_fn=_fetch(_BODY),
+            now=_NOW,
+            content_guard=allow,
+        )
+
+        assert written.is_file()
+
+    def test_the_guard_sees_the_upstream_body(self, tmp_path: Path) -> None:
+        seen: list[str] = []
+
+        def record(content: str) -> str | None:
+            seen.append(content)
+            return None
+
+        write_capture(
+            tmp_path,
+            "https://example.com/p",
+            fetch_fn=_fetch(b"# Upstream\n\nsecret-ish payload\n"),
+            now=_NOW,
+            content_guard=record,
+        )
+
+        assert "secret-ish payload" in seen[0]
 
 
 class TestRefresh:
