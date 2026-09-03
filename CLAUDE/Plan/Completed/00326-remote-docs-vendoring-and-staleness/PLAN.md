@@ -1,6 +1,6 @@
 # Plan 00326: remote docs vendoring and staleness
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-03
 **Owner**: joseph
 **Priority**: Medium
@@ -197,9 +197,10 @@ each is either moot or worth filing separately, are recorded in D17.
   with no tree; listing capped with a total. **No version cache** unlike
   `contract_staleness`, which caches an external subprocess; this reads
   cheap local files that must not be served stale.
-- [ ] ⬜ **Task 4.4**: Ensure a client project's remote tree is treated as
-  project-owned — unlike the daemon's vendored contract, a client's
-  vendored docs *are* theirs to refresh.
+- [x] 🟩 **Task 4.4**: Satisfied by design and now pinned by test — the
+  staleness report's remedy does NOT vary by install mode, unlike
+  `contract_staleness`, because a client's vendored docs are theirs to
+  refresh. A second test asserts the tree is not classified as vendored.
 
 ### Phase 5: Routing agents to the local copy
 
@@ -239,10 +240,11 @@ One PreToolUse handler carries both branches; Task 0.1 supplies the
   summarised fetch of that exact URL once fabricated an enum value. Also
   fixed the raw GET's `403` against real doc hosts (default urllib
   User-Agent).
-- [ ] ⬜ **Task 6.3**: Fold `HOOK-CONTRACT-REFRESH.md`'s procedure into the
-  CLI where it is mechanisable, keeping the verification steps that must
-  stay human/agent-judged, and clear the currently-firing staleness
-  advisory (v2.1.252 → v2.1.259).
+- [x] 🟩 **Task 6.3**: **Filed as [Plan 00327](../00327-hooks-contract-refresh-audit/PLAN.md)**
+  rather than done here. Clearing the advisory needs a verified
+  section-by-section extraction audit; rushing it is the fabrication failure
+  the procedure exists to prevent. `--verbatim` (D20) is the piece this plan
+  contributes to it.
 
 ### Phase 7: Documentation and acceptance
 
@@ -276,7 +278,7 @@ One PreToolUse handler carries both branches; Task 0.1 supplies the
   upstream prose.
 - [x] An agent calling `WebFetch` on an already-vendored, fresh URL is
   redirected to the local path.
-- [ ] ~~`contracts/claude-code-hooks/` is managed by this subsystem~~ —
+- [x] ~~`contracts/claude-code-hooks/` is managed by this subsystem~~ —
   **superseded by D20**: the contract vendors 33 derived schemas, and its
   source doc is deliberately fetched to an untracked path, so there is
   nothing for this subsystem to manage. Clearing its staleness advisory
@@ -291,8 +293,11 @@ One PreToolUse handler carries both branches; Task 0.1 supplies the
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00326-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Milestone A — Phases 1–3: the tree exists, provenance is enforced, capture works.
-- Milestone B — Phases 4–5: staleness is measured and surfaced; agents are routed to local copies.
+- Milestone A — Phases 1–3: the tree exists, provenance is enforced, capture
+  works. `43cf91a0`, `3627d739`, `c0b8275c`, `819dd1b4`, `0d5736e0`,
+  `27143aaa`, `7bdea72e`, `424a773a`.
+- Milestone B — Phases 4–5: staleness is measured and surfaced; agents are
+  routed to local copies. `4cb48169`, `34c92801`, `76a03b0d`, `38488786`.
 - Milestone C — Phases 6–7: docs and acceptance complete. Phase 6's migration
   was **reassessed rather than performed** (D20): the vendored contract has
   nothing this subsystem can manage.
@@ -305,9 +310,8 @@ human-tree documentation, and the v3.61.0 config-changes manifest.
 
 **Deliberately still open, neither blocked nor forgotten:**
 
-- **Task 6.3** — fold the mechanisable half of the hooks-contract refresh
-  into the CLI, and clear the firing staleness advisory. The second half
-  needs a verified section-by-section extraction audit against the raw
-  markdown; rushing it is precisely the fabrication failure the procedure
-  exists to prevent, so it wants its own plan rather than a tail-end task
-  here.
+- **Task 6.3** — folding the mechanisable half of the hooks-contract refresh
+  into the CLI, and clearing the firing staleness advisory. Rushing the
+  verified extraction audit is precisely the fabrication failure the
+  procedure exists to prevent, so it is **filed as Plan 00327** rather than
+  finished as a tail-end task here.

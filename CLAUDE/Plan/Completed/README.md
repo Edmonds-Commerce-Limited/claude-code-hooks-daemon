@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00287: docs-qa pre-release punch list](00287-docs-qa-prerelease-punch-list/PLAN.md) - Complete at `94c41f61` (F1-F4 + N1 findings from the Plan 00284 post-completion review fixed; sweep re-verified at the 34-advisory baseline)
+
 - [00286: plan-qa staged status/location coherence](00286-plan-qa-staged-status-location-coherence/PLAN.md) - Complete at `c7633e3f` + the archiving commit (adds the `archived-status-coherence` commit-gate check reading STAGED blobs, catching the git-mv-stages-rename-not-edits sequence that briefly landed Plan 00284 archived as In Progress)
 
 - [00285: skill bootstrap reexec breaks sibling source](00285-skill-bootstrap-reexec-breaks-sibling-source/PLAN.md) - Complete at `1ffb5e4a` + `798a5bc2` (self-bootstrap re-exec broke `$(dirname "$0")` sibling sourcing; fixed via re-exec-proof `DAEMON_DIR` + an `audit_shell.py` guard)
