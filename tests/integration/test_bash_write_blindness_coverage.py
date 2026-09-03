@@ -161,6 +161,17 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "file. The markdown-LOCATION rule, by contrast, is still fully blind: "
         "it has no bash detection at all",
     ),
+    "RemoteDocsProvenanceHandler": (
+        _BLIND,
+        "a heredoc/redirect authoring `remote-docs/**.md` lands a document with "
+        "no provenance and no complaint. Only partly mitigated today: "
+        "`store.read_document` re-parses provenance whenever the corpus is "
+        "read, so such a file is detectable, but the SessionStart sweep that "
+        "would make the detection automatic is Plan 00326 Phase 4 and is not "
+        "yet built. The consequence is an unattributed document rather than a "
+        "wrong one, and `remote-docs add` is the path of least resistance "
+        "anyway -- hand-authoring the tree is not a thing agents want to do",
+    ),
     "MarkdownTableFormatterHandler": (
         _BLIND,
         "tables written by heredoc are never reformatted; PATH-only, and the "

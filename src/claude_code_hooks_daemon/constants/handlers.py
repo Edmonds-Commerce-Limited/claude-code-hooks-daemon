@@ -211,6 +211,14 @@ class HandlerID:
     )
     # Read-direction sibling of SENSITIVE_CONTENT (Plan 00272): denies any
     # tool call that would put a protected FILE's contents into context.
+    # Write-time provenance gate for the vendored remote-docs tree (Plan
+    # 00326 Task 3.4): a file with no recorded source cannot be refreshed,
+    # dated or trusted, and is indistinguishable from something we authored.
+    REMOTE_DOCS_PROVENANCE = HandlerIDMeta(
+        class_name="RemoteDocsProvenanceHandler",
+        config_key="remote_docs_provenance",
+        display_name="remote-docs-provenance",
+    )
     SECRET_FILE_GUARD = HandlerIDMeta(
         class_name="SecretFileGuardHandler",
         config_key="secret_file_guard",

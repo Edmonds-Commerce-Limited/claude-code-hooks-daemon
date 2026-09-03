@@ -2410,6 +2410,31 @@ handlers:
 
 ---
 
+#### remote_docs_provenance
+
+| Property       | Value                    |
+| -------------- | ------------------------ |
+| **Config key** | `remote_docs_provenance` |
+| **Priority**   | 36                       |
+| **Type**       | Blocking                 |
+| **Event**      | PreToolUse               |
+
+Denies a markdown `Write`/`Edit` inside the remote-docs tree whose content lacks valid provenance frontmatter: `source_url`, `fetched_at`, `fidelity`, `source_sha256`, `licence` and `stale_after`. Only the ADDED text is judged on an `Edit`, so removing content is never blocked.
+
+That tree is **captured, not authored** — use `hooks-daemon remote-docs add <url>` to vendor a page and `remote-docs refresh` to pick up upstream changes. Hand-editing a vendored document silently falsifies its recorded `fidelity`, which is what separates a citable corpus from a cache.
+
+The deny names every invalid field at once rather than one per retry. The tree location follows `documentation.trees.remote` (default `remote-docs/`).
+
+```yaml
+handlers:
+  pre_tool_use:
+    remote_docs_provenance:
+      enabled: true
+      priority: 36
+```
+
+---
+
 #### validate_instruction_content
 
 | Property       | Value                          |

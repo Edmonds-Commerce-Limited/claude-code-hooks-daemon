@@ -23,6 +23,37 @@ Supporting evidence: [subagent-reports/](subagent-reports/).
 | D15 | **No PostToolUse offer-to-vendor** (the drafted Task 5.3 is dropped, and no transcript fallback is built)                                                         | The contingency on the payload shape was a false dependency: no task needs the fetched content. D2 makes the CLI's own raw fetch the canonical capture, so a `WebFetch` payload could only ever yield `fidelity: summarised` material, and any route to it — the payload or `TranscriptReader.get_tool_result_text_by_id` — would be building the non-canonical path. The offer itself needs only the URL, which the PreToolUse branch (Task 5.1) already has; a second hint after the fetch would be two hints for one fetch.                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | D16 | Point-of-use staleness is a **`stale_after` frontmatter field plus a `Read`-time advisory**; `check` is read-only and nothing mutates a document to mark it stale | A `check` that writes a banner has the same rot as the report — the banner appears only if someone runs the command. A SessionStart handler mutating tracked files has no precedent and dirties the working tree on every session. A `stale_after` date computed at capture from the resolved policy makes staleness readable by any consumer (tool, `cat`, human) with no knowledge of the policy, and a PreToolUse `Read` advisory on the tree (prefix fast path, as `secret_file_guard` does) fires every time the file is read — the warning arrives with the content, so it cannot be skipped.                                                                                                                                                                                                                                                                                                                                                                        |
 
+## D17 — the enforcement surfaces are handlers, not a `docs_qa` check family
+
+**Supersedes the structural half of D9, and makes D10's amendment moot.**
+Taken during implementation, on evidence the earlier decision did not have.
+
+D9 chose to build the remote-docs checks inside `docs_qa`, because that is
+where `DocCorpus`, `ProjectLayout` and the `documentation:` config block
+live. Implementing Phases 1 and 2 showed the premise does not hold:
+
+- **The write-time gate needs no corpus.** It judges ONE file's content at
+  write time, which is exactly a `PreToolUse` handler's job. Routing it
+  through `docs_qa` means first solving D10's dispatch problem — the EDIT
+  handler keys on `is_lintable_path`, which is derived from corpus scope,
+  and the remote tree is deliberately outside it.
+- **The staleness sweep needs no corpus either.** `store.check_staleness`
+  already walks the tree directly and parses provenance, which is all the
+  sweep reports on.
+- **The corpus arguments were about avoiding a second scope predicate**, but
+  D12 removed the need for one: a top-level tree is never corpus-collected,
+  so nothing has to be excluded back out. Task 1.4 proves this by test.
+
+So the ports D9 recommended — `docs_qa/paths.py` and a
+`document_rule_checks` adapter — would be paid for entirely by this plan and
+used by nothing in it. They remain a good idea for `docs_qa`'s own sake and
+should be filed separately rather than smuggled in here.
+
+What this costs: the remote-docs rules do not get `check_modes` severity
+tuning for free, and a project wanting to soften the gate configures the
+handler instead. That is the ordinary handler contract, and D7 already says
+this gate blocks rather than advises, so the tuning was never load-bearing.
+
 ## Amendments to D1–D11
 
 - **D1 (under-applied, not wrong)** — its text already excluded a `docs/`

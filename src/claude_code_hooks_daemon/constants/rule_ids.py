@@ -365,6 +365,13 @@ class RuleID:
     #: A write to an untracked Claude auto-memory file (policy: forbidden).
     MARKDOWN_UNTRACKED_MEMORY: str = "R-MARKDOWN-UNTRACKED-MEMORY"
 
+    # ------------------------------------------------------------------
+    # remote_docs_provenance handler (Plan 00326) — 1 rule
+    # ------------------------------------------------------------------
+
+    #: A remote-docs write whose content lacks valid provenance frontmatter.
+    REMOTE_DOCS_PROVENANCE: str = "R-REMOTE-DOCS-PROVENANCE"
+
     #: plansDirectory misconfigured/out of sync with the daemon's plan_workflow config.
     MARKDOWN_PLAN_SYNC: str = "R-MARKDOWN-PLAN-SYNC"
 

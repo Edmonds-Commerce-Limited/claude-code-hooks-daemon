@@ -370,6 +370,11 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "ValidateInstructionContentHandler": "matches written content",
     "WebSearchYearHandler": "matches a WebSearch query",
     "MarkdownOrganizationHandler": "matches a markdown file path",
+    "RemoteDocsProvenanceHandler": (
+        "matches a markdown path inside the remote-docs tree plus the written "
+        "content's frontmatter, not a command string - there is no shell "
+        "spelling to evade"
+    ),
     "SecretFileGuardHandler": (
         "matches PROTECTED PATH MENTIONS (any token position, any tool), never a "
         "command name - respelling the READER (cat vs \\cat vs python -c) changes "

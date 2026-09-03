@@ -218,6 +218,13 @@ handlers:
       #   extra_mutators:
       #     - "terraform apply"
 
+    # Requires provenance frontmatter on every file in the remote-docs tree
+    # (source_url, fetched_at, fidelity, source_sha256, licence, stale_after).
+    # Inert until that tree exists — vendor a page with `remote-docs add <url>`.
+    remote_docs_provenance:
+      enabled: true
+      priority: 36
+
     tdd_enforcement:       # Enforces test-first development
       enabled: false       # Enable for strict TDD workflow
       priority: 32

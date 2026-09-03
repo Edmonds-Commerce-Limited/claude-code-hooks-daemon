@@ -99,6 +99,13 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "PlanQaEditHandler": "T1 denies plan documents that break the QA rules",
     "PlanTimeEstimatesHandler": "T1 denies time estimates in plan documents",
     "QaSuppressionHandler": "T1 denies QA suppression annotations",
+    "RemoteDocsProvenanceHandler": (
+        "T1 denies a remote-docs write with no provenance, and the guidance "
+        "carries what a deny reason cannot: that the tree is CAPTURED rather "
+        "than authored, so an agent reaches for `remote-docs add` instead of "
+        "hand-writing a plausible frontmatter block to satisfy the gate, and "
+        "checks the vendored corpus before fetching a URL at all"
+    ),
     "RootRecursionGuardHandler": "T1 denies recursive scanners rooted at /",
     "SecurityAntipatternHandler": "T1 denies known-dangerous constructs",
     "SedBlockerHandler": "T1 denies sed used to modify files",

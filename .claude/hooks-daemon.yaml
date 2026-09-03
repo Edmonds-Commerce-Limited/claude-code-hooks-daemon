@@ -416,6 +416,13 @@ handlers:
       #   extra_mutators:
       #     - "terraform apply"
 
+    # Plan 00326 Task 3.4: every file in the remote-docs tree must declare where
+    # it came from. Blocks (D7) because missing provenance is a checkable FACT,
+    # unlike staleness, which is a judgement a human may knowingly accept.
+    remote_docs_provenance:
+      enabled: true
+      priority: 36
+
     tdd_enforcement:       # Enforces test-first development
       enabled: true
       priority: 35

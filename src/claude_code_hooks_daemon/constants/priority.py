@@ -166,6 +166,12 @@ class Priority:
 
     MARKDOWN_ORGANIZATION = 35
 
+    # Plan 00326: sits immediately after markdown_organization, which decides
+    # whether the file may exist at that path at all. Location first, then
+    # content — a wrong-location message is more useful than a provenance one
+    # for a file that should not be there in the first place.
+    REMOTE_DOCS_PROVENANCE = 36
+
     # Plan 00270: the opt-in safe-prelude forcer opens the 36-55 workflow
     # band, right after its sibling verification_result_gate (34) so the
     # sibling speaks first — a specific verifier→mutator finding appears

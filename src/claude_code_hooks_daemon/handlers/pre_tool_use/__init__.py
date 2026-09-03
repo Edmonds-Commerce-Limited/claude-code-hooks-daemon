@@ -25,6 +25,7 @@ from .plan_time_estimates import PlanTimeEstimatesHandler
 from .plan_workflow import PlanWorkflowHandler
 from .qa_suppression import QaSuppressionHandler
 from .quarantine_artefact_read_guard import QuarantineArtefactReadGuardHandler
+from .remote_docs_provenance import RemoteDocsProvenanceHandler
 from .root_recursion_guard import RootRecursionGuardHandler
 from .security_antipattern import SecurityAntipatternHandler
 from .sed_blocker import SedBlockerHandler
@@ -61,6 +62,7 @@ __all__ = [
     "PlanWorkflowHandler",
     "QaSuppressionHandler",
     "QuarantineArtefactReadGuardHandler",
+    "RemoteDocsProvenanceHandler",
     "RootRecursionGuardHandler",
     "SecurityAntipatternHandler",
     "SedBlockerHandler",
