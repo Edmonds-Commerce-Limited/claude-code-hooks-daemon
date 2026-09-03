@@ -95,17 +95,15 @@ The decisions this plan rests on, each with its reasoning, live in
   a citable corpus.
 - **D5** — staleness is surfaced *in the document*, because the equivalent
   session-start advisory in this repo demonstrably rotted.
-- **D10** — path exclusion is global across checks, so it cannot by itself
-  give docs QA a remote-docs subset; per-check path scoping does not exist
-  today and is new capability (amended in DECISIONS.md: see Task 3.1).
-- **D11** — the web-tool `tool_input` field names are settled by capture,
-  not assumption.
 - **D12** — the tree is a top-level `remote-docs/`, never a `docs/`
   subdirectory; its markdown-location allowance derives from the tree
   registration, so no project needs a config entry for it.
 - **D15/D16** — nothing reads the `WebFetch` payload; the point-of-use
   warning is a `stale_after` field plus a `Read`-time advisory, never a
   command that mutates a document to mark it stale.
+- **D18/D19/D20** — capture prefers `agent-browser`, nudging is scoped to
+  declared domains, and `--verbatim` is demandable for work that must quote
+  upstream exactly.
 
 ## Tasks
 
@@ -130,8 +128,7 @@ field. **Settled — see [PAYLOADS.md](PAYLOADS.md): the field is
 - [x] ✅ **Task 1.1**: Schema in `remote_docs/provenance.py`; every field has
   a validator and a rejection test.
 - [x] ✅ **Task 1.2**: `parse_provenance()` returns a typed `ParseResult`,
-  never raising, reporting EVERY invalid field. Reuses the shared splitter,
-  promoted to a public `split_frontmatter()`.
+  never raising, reporting EVERY invalid field.
 - [x] ✅ **Task 1.3**: Tree registered — `documentation.trees.remote` (default
   `remote-docs`), a `remote_docs_dir` axis (defaulted and last, so the
   addition is additive for existing call sites) plus `is_remote_docs_path()`
@@ -275,15 +272,18 @@ One PreToolUse handler carries both branches; Task 0.1 supplies the
 
 ### Phase 7: Documentation and acceptance
 
-- [ ] ⬜ **Task 7.1**: Agent-tree deep-dive documenting the remote tree
-  contract, the schema and the fidelity rule, plus the remote-tree row in
-  `CLAUDE/DirectoryRoles.md`.
-- [ ] ⬜ **Task 7.2**: Human-tree guide covering capture, refresh and staleness
-  policy configuration.
-- [ ] ⬜ **Task 7.3**: `AcceptanceTest` declarations on every new handler, per
-  house convention.
-- [ ] ⬜ **Task 7.4**: Config-schema entries, defaults, and a `config-changes`
-  manifest entry for the upgrade path.
+- [x] 🟩 **Task 7.1**: `CLAUDE/RemoteDocs.md` (schema, fidelity rule, what
+  enforces it, the known Bash-write gap), plus the role-summary row and
+  per-role section in `CLAUDE/DirectoryRoles.md` and the `CLAUDE/CLAUDE.md`
+  routing row.
+- [x] 🟩 **Task 7.2**: `docs/guides/REMOTE_DOCS.md` — terse, human-register,
+  pointing into the agent tree for depth (R3), plus the `docs/CLAUDE.md`
+  routing row.
+- [x] 🟩 **Task 7.3**: All three handlers declare `AcceptanceTest`s,
+  including a near-miss ALLOW case each where they can deny.
+- [x] 🟩 **Task 7.4**: `CLAUDE/UPGRADES/config-changes/v3.61.0.yaml` — all
+  five new keys, each `dormant: true` because nothing activates until a
+  project captures its first document.
 
 ## Success Criteria
 

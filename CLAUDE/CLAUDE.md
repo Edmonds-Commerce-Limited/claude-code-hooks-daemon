@@ -24,6 +24,7 @@ that owns the depth for every fact. The audience split (agent tree vs human
 | [PlanJournalling.md](PlanJournalling.md)                               | Per-plan journalling reference                                                      |
 | [PlanWorkflow.md](PlanWorkflow.md)                                     | Planning workflow, templates, and standards                                         |
 | [QA.md](QA.md)                                                         | The QA pipeline — source of truth for QA workflow                                   |
+| [RemoteDocs.md](RemoteDocs.md)                                         | Vendoring upstream documentation: the provenance schema and the fidelity rule       |
 | [SELF_INSTALL.md](SELF_INSTALL.md)                                     | Self-install (dogfood) mode guide                                                   |
 | [Worktree.md](Worktree.md)                                             | Git worktree workflow                                                               |
 | [AcceptanceTests/](AcceptanceTests/GENERATING.md)                      | Acceptance test generation and validation                                           |

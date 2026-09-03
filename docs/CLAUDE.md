@@ -10,5 +10,6 @@
 | Troubleshooting                       | `docs/guides/TROUBLESHOOTING.md`   |
 | QA suite (human overview)             | `docs/QA.md`                       |
 | Plan system (human overview)          | `docs/PLAN_SYSTEM.md`              |
+| Vendoring remote docs (human guide)   | `docs/guides/REMOTE_DOCS.md`       |
 
 **When adding new content**: put it in the canonical file and add a link from any other file that needs to mention it. Do not copy-paste the content.
