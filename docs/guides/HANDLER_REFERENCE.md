@@ -2437,6 +2437,35 @@ handlers:
 
 ---
 
+#### remote_docs_routing
+
+| Property       | Value                 |
+| -------------- | --------------------- |
+| **Config key** | `remote_docs_routing` |
+| **Priority**   | 37                    |
+| **Type**       | Blocking              |
+| **Event**      | PreToolUse            |
+
+Routes work to the vendored copy of a page instead of re-fetching it, and warns when that copy has gone stale. Wholly inert until the remote-docs tree exists.
+
+**`WebFetch`** — a URL that is already vendored **and still fresh** is denied, naming the local path and the refresh command. A vendored copy that has gone **stale** is never blocked: there the fetch is effectively the refresh. An unvendored URL is always allowed.
+
+**The capture nudge is scoped to declared domains.** An unvendored URL only draws a "capture this" hint when its host is listed in `documentation.remote.known_sources` — the same map that pre-fills licences, reused so there is one list rather than two that drift. Everything else (a GitHub issue, a status page, a blog post) is left silent, because an advisory that is usually wrong is one people learn to ignore. The host match is exact, never a suffix. Declaring no domains turns nudging off without disabling routing.
+
+**`Read`** — a vendored document past its `stale_after` is allowed with an advisory naming when it was captured and how to refresh it, so the warning arrives with the content. An `unreviewed` licence is named in that same advisory, and fires even when the document is fresh.
+
+URL matching normalises both sides: host case, trailing slash, fragment, known tracking parameters, query order and default ports.
+
+```yaml
+handlers:
+  pre_tool_use:
+    remote_docs_routing:
+      enabled: true
+      priority: 37
+```
+
+---
+
 #### validate_instruction_content
 
 | Property       | Value                          |

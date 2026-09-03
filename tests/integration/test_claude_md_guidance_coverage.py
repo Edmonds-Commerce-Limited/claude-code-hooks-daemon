@@ -256,6 +256,14 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "SuggestStatusLineHandler": "T4 fires once at session start with the full remedy",
     "VersionCheckHandler": "T4 fires once at session start with the full remedy",
     "ContractStalenessHandler": "T4 fires once at session start with the full remedy",
+    "RemoteDocsRoutingHandler": (
+        "T4 the deny names the local path, both dates and the refresh command, "
+        "and the allow-with-hint names the exact capture command — the "
+        "fire-time message carries the whole decision. The standing policy an "
+        "agent needs BEFORE fetching (the corpus exists; check it first) is "
+        "already in `remote_docs_provenance`'s resident section, and a second "
+        "copy would be duplicated truth"
+    ),
     "RemoteDocsStalenessHandler": (
         "T4 the report names each stale document and both refresh commands, "
         "and it is silent in the overwhelming majority of projects (no "
@@ -407,7 +415,18 @@ class TestAnExemptHandlerCannotQuietlyDeny:
     # Exempt handlers that CAN deny, each naming the resident section that
     # genuinely covers them. Deliberately empty: every deny-capable handler
     # currently earns its own section. An addition here should be argued.
-    _EXEMPT_DESPITE_DENYING: ClassVar[dict[str, str]] = {}
+    _EXEMPT_DESPITE_DENYING: ClassVar[dict[str, str]] = {
+        "RemoteDocsRoutingHandler": (
+            "remote_docs_provenance's section, which states this handler's deny "
+            "explicitly rather than implying it: that a WebFetch of an already-"
+            "vendored, still-fresh URL is DENIED, that a STALE copy is never "
+            "blocked because the fetch is the refresh, and that an unvendored "
+            "URL is always allowed. Verified by reading that section, not "
+            "assumed. One resident section for one subject: a second copy of "
+            "the corpus policy would be duplicated truth, and the two would "
+            "drift"
+        )
+    }
 
     @staticmethod
     def _module_can_deny(handler_class: type[Handler]) -> bool:

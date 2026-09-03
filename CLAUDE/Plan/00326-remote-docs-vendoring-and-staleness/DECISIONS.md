@@ -119,6 +119,40 @@ tool's `tool_response`, so the only new hook surface is one PreToolUse
 handler with two branches (`WebFetch`, `Read`), and Phase 0 shrinks to
 confirming two input field names.
 
+## D19 — the capture nudge is scoped to DECLARED documentation domains
+
+**Amends Task 5.1**, which said an unvendored URL gets "a capture hint"
+unconditionally once the tree exists.
+
+Unconditional is wrong, and the reason is the advisory-decay problem. Most
+`WebFetch` calls are not documentation: a GitHub issue, a Stack Overflow
+answer, a status page, a blog post. A hint on all of them is wrong most of
+the time, and an advisory that is usually wrong is one people learn to skim
+past — at which point it also stops working for the cases where it was
+right.
+
+So the project declares which domains are documentation sources, and only
+those are nudged. Everything else is left alone entirely.
+
+**The declaration reuses `documentation.remote.known_sources`** rather than
+adding a parallel list. A domain you have recorded a licence for IS a domain
+you vendor from, and two lists meaning nearly the same thing drift apart —
+the failure this project's SSoT rules exist to prevent. To declare a source
+before its licence is reviewed, record the `unreviewed` sentinel as the
+value; that is already a legal licence string and already triggers the
+review advisory.
+
+**Declaration governs NUDGING, not ROUTING.** A URL we already hold a fresh
+copy of is still denied with the local path even if its domain was never
+declared — we demonstrably have the document, so the declaration adds
+nothing. The two concerns are separate: routing is about a copy that exists,
+nudging is about one that should.
+
+The host match is EXACT, never a suffix: `docs.example` must not match
+`evil-docs.example`. Declaring nothing opts out of nudging entirely without
+disabling routing, so the feature has an off switch that is not the
+handler's `enabled` flag.
+
 ## D18 — capture through `agent-browser read`, with a probed binary and an HTTPS fallback
 
 **Amends D2**, which named a raw HTTPS GET as the canonical capture. The GET

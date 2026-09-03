@@ -159,8 +159,15 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
             "whether the stored bytes are the upstream document or a paraphrase; "
             "editing it by hand makes that record false, and a paraphrase quoted "
             "as a citation is the failure this tree exists to prevent.\n\n"
-            "Before fetching a URL, check whether it is already vendored — "
-            "`bin/hooks-daemon remote-docs list` — and read the local copy."
+            "**A `WebFetch` of a URL already vendored and still fresh is "
+            "DENIED**, and the deny names the local path to read instead. A "
+            "vendored copy that has gone STALE is never blocked — there the "
+            "fetch is effectively the refresh. An unvendored URL is always "
+            "allowed; if its domain is one the project declared as a "
+            "documentation source (`documentation.remote.known_sources`), the "
+            "allow carries a hint to capture the page durably.\n\n"
+            "So: before fetching a URL, check whether it is already vendored "
+            "— `bin/hooks-daemon remote-docs list` — and read the local copy."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

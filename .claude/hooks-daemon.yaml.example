@@ -225,6 +225,12 @@ handlers:
       enabled: true
       priority: 36
 
+    # Routes a WebFetch to the vendored copy when one exists and is fresh.
+    # Inert until the remote-docs tree exists.
+    remote_docs_routing:
+      enabled: true
+      priority: 37
+
     tdd_enforcement:       # Enforces test-first development
       enabled: false       # Enable for strict TDD workflow
       priority: 32

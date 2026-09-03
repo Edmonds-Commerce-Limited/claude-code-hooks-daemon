@@ -243,19 +243,22 @@ each is either moot or worth filing separately, are recorded in D17.
 One PreToolUse handler carries both branches; Task 0.1 supplies the
 `WebFetch` field name it reads.
 
-- [ ] ⬜ **Task 5.1**: `WebFetch` branch: normalise the URL (scheme, host
-  case, trailing slash, fragment, common tracking parameters) and look it
-  up in the tree. Vendored and fresh → deny with the local path; vendored
-  but stale → allow (the fetch is the refresh); not vendored → allow with a
-  capture hint naming the exact `remote-docs add <url>` command.
+- [x] 🟩 **Task 5.1**: `WebFetch` branch. Normalises both sides (host case,
+  trailing slash, fragment, known tracking params, query order, default
+  port) and compares recorded `source_url`s — not derived paths, which are
+  lossy by design. Vendored and fresh → deny with the local path; vendored
+  but stale → allow, the fetch IS the refresh; unvendored on a **declared**
+  documentation domain → allow with the capture command (D19); anything
+  else → silent.
 - [ ] ⬜ **Task 5.2**: `get_claude_md()` guidance so agents learn the corpus
   exists without per-session prompting, plus a generated index so one
   grep answers "do we already have docs for X?".
-- [ ] ⬜ **Task 5.3**: `Read` branch: a remote-tree path whose `stale_after`
-  has passed → allow with an advisory naming `fetched_at`, `stale_after`
-  and the refresh command; `licence: unreviewed` is named in the same
-  advisory (D16). Fast path: a prefix test on the tree before any file I/O,
-  as `secret_file_guard` does.
+- [x] 🟩 **Task 5.3**: `Read` branch — a stale document is allowed with an
+  advisory naming `fetched_at`, `stale_after` and the refresh command, so
+  the warning arrives WITH the content and cannot be skipped (D16). An
+  `unreviewed` licence rides in the SAME advisory, and fires even when the
+  document is fresh: it is a standing fact, not a staleness symptom, and
+  the capture default IS the sentinel. Prefix test before any file I/O.
 
 ### Phase 6: Migrate the existing vendored contract (dogfood)
 

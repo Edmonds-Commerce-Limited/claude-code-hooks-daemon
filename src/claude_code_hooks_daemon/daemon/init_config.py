@@ -195,6 +195,7 @@ class ConfigTemplate:
             "    # Vendored remote docs must declare their source. Inert until the\n"
             "    # remote-docs tree exists, so it is safe to ship on.\n"
             "    remote_docs_provenance: {enabled: true, priority: 36}\n"
+            "    remote_docs_routing: {enabled: true, priority: 37}  # Route a WebFetch to the vendored copy\n"
             "\n"
             "    tdd_enforcement:  # Enforce test-first development\n"
             "      enabled: true\n"

@@ -171,6 +171,10 @@ class Priority:
     # content — a wrong-location message is more useful than a provenance one
     # for a file that should not be there in the first place.
     REMOTE_DOCS_PROVENANCE = 36
+    # Plan 00326 Task 5.1: routes a WebFetch to the vendored copy. Sits just
+    # after the provenance gate; both are remote-docs concerns and neither
+    # can fire on the same call as the other.
+    REMOTE_DOCS_ROUTING = 37
 
     # Plan 00270: the opt-in safe-prelude forcer opens the 36-55 workflow
     # band, right after its sibling verification_result_gate (34) so the

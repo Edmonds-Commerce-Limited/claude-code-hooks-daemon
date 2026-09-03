@@ -439,6 +439,14 @@ class HandlerID:
         config_key="contract_staleness",
         display_name="contract-staleness",
     )
+    # Remote-docs routing (PreToolUse handler) — Plan 00326 Tasks 5.1/5.3:
+    # route a WebFetch to the vendored copy, and warn at Read time when that
+    # copy has gone stale.
+    REMOTE_DOCS_ROUTING = HandlerIDMeta(
+        class_name="RemoteDocsRoutingHandler",
+        config_key="remote_docs_routing",
+        display_name="remote-docs-routing",
+    )
     # Remote-docs staleness (SessionStart handler) — Plan 00326 Task 4.3:
     # report vendored documents past their `stale_after` date, or whose
     # provenance no longer parses. Advises; never blocks (D7).

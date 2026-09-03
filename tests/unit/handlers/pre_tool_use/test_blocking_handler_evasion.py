@@ -370,6 +370,13 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "ValidateInstructionContentHandler": "matches written content",
     "WebSearchYearHandler": "matches a WebSearch query",
     "MarkdownOrganizationHandler": "matches a markdown file path",
+    "RemoteDocsRoutingHandler": (
+        "matches a WebFetch URL and a Read path, not a command string - there "
+        "is no shell spelling to evade. Respelling the URL is the real surface "
+        "and is covered by the lookup's own normalisation tests; a URL "
+        "respelled far enough to miss simply fetches, which is the pre-existing "
+        "behaviour rather than a bypassed protection"
+    ),
     "RemoteDocsProvenanceHandler": (
         "matches a markdown path inside the remote-docs tree plus the written "
         "content's frontmatter, not a command string - there is no shell "

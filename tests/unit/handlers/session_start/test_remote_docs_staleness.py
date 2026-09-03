@@ -111,6 +111,51 @@ class TestReport:
 
         assert any("bad.md" in line for line in handler.handle(_STARTUP).context)
 
+    def test_the_remedy_does_not_vary_by_install_mode(
+        self, handler: RemoteDocsStalenessHandler, tmp_path: Path
+    ) -> None:
+        """Task 4.4: a client's vendored docs ARE theirs to refresh.
+
+        `contract_staleness` splits its remedy — in a client install the
+        vendored contract lives under the upgrade-overwritten daemon tree,
+        so the advice is "upgrade the daemon". Remote docs are the opposite:
+        the tree is project-owned wherever it lives, so telling a client to
+        upgrade the daemon would be wrong, and there is nothing to branch on.
+        """
+        from unittest.mock import patch
+
+        _seed(tmp_path / "remote-docs", days=1)
+        handler.today_reader = lambda: date(2026, 12, 1)
+
+        with patch(
+            "claude_code_hooks_daemon.core.ProjectContext.self_install_mode",
+            return_value=True,
+        ):
+            maintainer = handler.handle(_STARTUP).context
+        with patch(
+            "claude_code_hooks_daemon.core.ProjectContext.self_install_mode",
+            return_value=False,
+        ):
+            client = handler.handle(_STARTUP).context
+
+        assert maintainer == client
+        assert not any("upgrade" in line.lower() for line in client)
+
+    def test_the_remote_tree_is_not_classified_as_vendored(self) -> None:
+        """Vendored means third-party and not ours to touch; this tree is ours.
+
+        Misclassifying it would make every vendor-skipping handler ignore the
+        tree, and would contradict `remote-docs refresh` being the supported
+        way to update it.
+        """
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        layout = ProjectLayout.built_in_default()
+        path = f"{layout.remote_docs_dir}/example.com/page.md"
+
+        assert layout.is_remote_docs_path(path) is True
+        assert layout.is_vendored_path(path) is False
+
     def test_a_large_corpus_report_is_bounded(
         self, handler: RemoteDocsStalenessHandler, tmp_path: Path
     ) -> None:

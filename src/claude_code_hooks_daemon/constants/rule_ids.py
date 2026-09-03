@@ -371,6 +371,7 @@ class RuleID:
 
     #: A remote-docs write whose content lacks valid provenance frontmatter.
     REMOTE_DOCS_PROVENANCE: str = "R-REMOTE-DOCS-PROVENANCE"
+    REMOTE_DOCS_VENDORED_COPY: str = "R-REMOTE-DOCS-VENDORED-COPY"
 
     #: plansDirectory misconfigured/out of sync with the daemon's plan_workflow config.
     MARKDOWN_PLAN_SYNC: str = "R-MARKDOWN-PLAN-SYNC"
