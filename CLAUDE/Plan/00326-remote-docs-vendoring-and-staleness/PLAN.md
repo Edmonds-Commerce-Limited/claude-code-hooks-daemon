@@ -128,17 +128,16 @@ field. **Settled — see [PAYLOADS.md](PAYLOADS.md): the field is
 
 ### Phase 1: The remote tree and its provenance contract
 
-- [ ] ⬜ **Task 1.1**: Define the frontmatter schema as a typed, validated
-  structure — required `source_url`, `fetched_at`, `fidelity`
-  (`verbatim | converted | summarised`), `source_sha256`, `licence` (any
-  non-empty string; the sentinel `unreviewed` is the only value with
-  behaviour, D13) and `stale_after` (ISO date or `never`, D16); optional
-  `upstream_version`, `staleness`, `fetch_method`, `retrieved_by`. **Done
-  when** every field has a validator and a rejection test.
-- [ ] ⬜ **Task 1.2**: Implement the provenance parser, reusing
-  `utils/markdown_format.py::_split_frontmatter` rather than adding a
-  second frontmatter reader. Malformed frontmatter must be a typed
-  result, never an exception that escapes.
+- [x] ✅ **Task 1.1**: Schema in `remote_docs/provenance.py`: required
+  `source_url` (https only), `fetched_at` (tz-aware ISO), `fidelity`,
+  `source_sha256` (64 hex), `licence` (`unreviewed` sentinel, D13),
+  `stale_after` (ISO date or `never`, D16); optional `upstream_version`,
+  `fetch_method`, `retrieved_by`. Every field has a validator and a
+  rejection test.
+- [x] ✅ **Task 1.2**: `parse_provenance()` returns a typed `ParseResult`,
+  never raising, and reports EVERY invalid field rather than the first.
+  Reuses the shared splitter, promoted to a public `split_frontmatter()` so
+  the project keeps exactly one frontmatter reader.
 - [ ] ⬜ **Task 1.3**: Register the tree: `documentation.trees.remote`
   (default `remote-docs`), a `remote_docs_dir` axis and
   `is_remote_docs_path()` on `ProjectLayout`, and a config-derived step in

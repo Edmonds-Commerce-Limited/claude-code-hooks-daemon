@@ -48,8 +48,12 @@ def _restore_thematic_breaks(content: str) -> str:
     )
 
 
-def _split_frontmatter(content: str) -> tuple[str, str]:
+def split_frontmatter(content: str) -> tuple[str, str]:
     """Split leading YAML frontmatter from the document body.
+
+    Public because it is the project's single frontmatter splitter: Plan
+    00326's remote-docs provenance parser reuses it rather than adding a
+    second, subtly different one.
 
     Returns ``("", content)`` when there is no frontmatter, otherwise
     ``(frontmatter_block, body)`` where ``frontmatter_block`` includes both
@@ -73,7 +77,7 @@ def format_markdown_text(content: str) -> str:
     to handle — the handler and injector fail safe (allow/skip), the CLI
     reports the error per file.
     """
-    frontmatter, body = _split_frontmatter(content)
+    frontmatter, body = split_frontmatter(content)
     formatted_body = mdformat.text(
         body,
         extensions=_MDFORMAT_EXTENSIONS,
