@@ -4945,8 +4945,16 @@ def cmd_remote_docs(args: argparse.Namespace) -> int:
         print(fetcher.warning, file=sys.stderr)
 
     if action == "add":
-        return _remote_docs_add(args, tree, fetcher, now)
+        return _remote_docs_add(args, tree, fetcher, now, _remote_docs_policy(resolved_root))
     return _remote_docs_refresh(args, tree, fetcher, now)
+
+
+def _remote_docs_policy(project_root: Path) -> Any:
+    """The project's ``documentation.remote`` block, or its defaults."""
+    from claude_code_hooks_daemon.config.models import Config
+
+    config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+    return config.documentation.remote
 
 
 def _resolve_remote_docs_fetcher(args: argparse.Namespace) -> Any:
@@ -4979,18 +4987,25 @@ def _resolve_remote_docs_fetcher(args: argparse.Namespace) -> Any:
 
 
 def _remote_docs_add(
-    args: argparse.Namespace, tree: Path, fetcher: Any, now: Any
+    args: argparse.Namespace, tree: Path, fetcher: Any, now: Any, policy: Any
 ) -> int:
-    from claude_code_hooks_daemon.remote_docs.capture import (
-        DEFAULT_STALE_AFTER_DAYS,
-        CaptureError,
-    )
+    from claude_code_hooks_daemon.remote_docs.capture import CaptureError
     from claude_code_hooks_daemon.remote_docs.provenance import UNREVIEWED
     from claude_code_hooks_daemon.remote_docs.store import write_capture
 
     if not args.url:
         print("remote-docs add: a URL is required", file=sys.stderr)
         return 2
+
+    # The flag is the narrower statement and wins; `known_sources` is the
+    # standing default that keeps the licence review once-per-source (D13).
+    licence = args.licence or policy.licence_for(args.url) or UNREVIEWED
+    stale_after_days = (
+        args.stale_after_days
+        if args.stale_after_days is not None
+        else policy.default_staleness_days
+    )
+
     try:
         written = write_capture(
             tree,
@@ -4999,22 +5014,18 @@ def _remote_docs_add(
             fidelity=fetcher.fidelity,
             fetch_method=fetcher.method,
             now=now,
-            licence=args.licence or UNREVIEWED,
-            stale_after_days=(
-                args.stale_after_days
-                if args.stale_after_days is not None
-                else DEFAULT_STALE_AFTER_DAYS
-            ),
+            licence=licence,
+            stale_after_days=stale_after_days,
             content_guard=getattr(args, "content_guard", None) or _sensitive_content_guard(),
         )
     except CaptureError as exc:
         print(f"remote-docs add failed: {exc}", file=sys.stderr)
         return 1
     print(f"captured {args.url} -> {written}")
-    if not args.licence:
+    if licence == UNREVIEWED:
         print(
-            f"  licence recorded as `{UNREVIEWED}` — set it once for this source "
-            "rather than per file"
+            f"  licence recorded as `{UNREVIEWED}` — record it once for this source "
+            "under documentation.remote.known_sources rather than per file"
         )
     return 0
 

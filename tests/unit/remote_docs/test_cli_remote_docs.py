@@ -137,6 +137,79 @@ class TestRefresh:
         assert cmd_remote_docs(_args(tmp_path, "refresh")) == 2
 
 
+class TestRemotePolicy:
+    """`documentation.remote` moves two judgements from per-file to per-project."""
+
+    def _configure(self, root: Path, body: str) -> None:
+        config_dir = root / ".claude"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "hooks-daemon.yaml").write_text(body, encoding="utf-8")
+
+    def test_a_known_source_prefills_the_licence(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.remote_docs.store import read_document
+
+        self._configure(
+            tmp_path,
+            "documentation:\n"
+            "  remote:\n"
+            "    known_sources:\n"
+            "      example.com: CC-BY-4.0\n",
+        )
+
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+
+        document = read_document(_tree(tmp_path) / "example.com" / "p.md")
+        assert document.provenance is not None
+        assert document.provenance.licence == "CC-BY-4.0"
+
+    def test_an_explicit_licence_still_wins_over_the_config(self, tmp_path: Path) -> None:
+        """The flag is the narrower statement; config is the standing default."""
+        from claude_code_hooks_daemon.remote_docs.store import read_document
+
+        self._configure(
+            tmp_path,
+            "documentation:\n  remote:\n    known_sources:\n      example.com: CC-BY-4.0\n",
+        )
+
+        cmd_remote_docs(
+            _args(tmp_path, "add", url="https://example.com/p", licence="MIT")
+        )
+
+        document = read_document(_tree(tmp_path) / "example.com" / "p.md")
+        assert document.provenance is not None
+        assert document.provenance.licence == "MIT"
+
+    def test_an_unknown_source_still_records_the_sentinel(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.remote_docs.provenance import UNREVIEWED
+        from claude_code_hooks_daemon.remote_docs.store import read_document
+
+        self._configure(
+            tmp_path,
+            "documentation:\n  remote:\n    known_sources:\n      other.example: CC-BY-4.0\n",
+        )
+
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+
+        document = read_document(_tree(tmp_path) / "example.com" / "p.md")
+        assert document.provenance is not None
+        assert document.provenance.licence == UNREVIEWED
+
+    def test_the_configured_staleness_window_is_applied(self, tmp_path: Path) -> None:
+        from datetime import date
+
+        from claude_code_hooks_daemon.remote_docs.store import read_document
+
+        self._configure(
+            tmp_path, "documentation:\n  remote:\n    default_staleness_days: 7\n"
+        )
+
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+
+        document = read_document(_tree(tmp_path) / "example.com" / "p.md")
+        assert document.provenance is not None
+        assert document.provenance.stale_after == date(2026, 9, 10)
+
+
 class TestFetcherSelection:
     """agent-browser is the default; losing it must be visible, not silent."""
 

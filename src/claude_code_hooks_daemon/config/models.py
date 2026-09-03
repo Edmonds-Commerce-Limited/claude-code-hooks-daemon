@@ -963,6 +963,72 @@ class DocumentationQaConfig(BaseModel):
     )
 
 
+class DocumentationRemoteConfig(BaseModel):
+    """Policy for the vendored remote-docs tree (Plan 00326 Task 3.7).
+
+    Both knobs exist to move a judgement from per-file to per-project.
+
+    ``known_sources`` records a licence review ONCE per domain instead of
+    once per capture. Without it every document carries the ``unreviewed``
+    sentinel and its advisory fires forever, which is how a warning becomes
+    background noise (D13).
+
+    ``default_staleness_days`` is the project's freshness window, so a
+    project tracking a fast-moving upstream says so in one place rather than
+    on every capture (D6).
+
+    Attributes:
+        default_staleness_days: Days a capture stays fresh before the
+            staleness advisory fires
+        known_sources: Domain to SPDX licence identifier, pre-filling the
+            ``licence`` frontmatter field at capture time
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    default_staleness_days: int = Field(
+        default=90,
+        gt=0,
+        description="Days a captured document stays fresh (0 would be stale on arrival)",
+    )
+    known_sources: dict[str, str] = Field(
+        default_factory=dict,
+        description="Domain to licence, pre-filling the licence field at capture time",
+    )
+
+    @field_validator("known_sources")
+    @classmethod
+    def _reject_blank_licences(cls, value: dict[str, str]) -> dict[str, str]:
+        """A blank licence satisfies the required field while saying nothing."""
+        for domain, licence in value.items():
+            if not licence.strip():
+                raise ValueError(
+                    f"known_sources[{domain!r}] has a blank licence; remove the entry "
+                    "or name a licence"
+                )
+        return value
+
+    def licence_for(self, url_or_host: str) -> str | None:
+        """The recorded licence for a URL or bare host, or None.
+
+        Accepts either form because callers hold a URL: making each one parse
+        the host itself is how two parsers drift apart. Matching is
+        case-insensitive, since host names are.
+        """
+        import urllib.parse
+
+        parsed = urllib.parse.urlparse(url_or_host)
+        host = (parsed.hostname or url_or_host).lower()
+        return next(
+            (
+                licence
+                for domain, licence in self.known_sources.items()
+                if domain.lower() == host
+            ),
+            None,
+        )
+
+
 class DocumentationConfig(BaseModel):
     """Configuration for the documentation SSoT enforcement system (Plan 00284).
 
@@ -986,6 +1052,7 @@ class DocumentationConfig(BaseModel):
     )
     trees: DocumentationTreesConfig = Field(default_factory=DocumentationTreesConfig)
     qa: DocumentationQaConfig = Field(default_factory=DocumentationQaConfig)
+    remote: DocumentationRemoteConfig = Field(default_factory=DocumentationRemoteConfig)
 
 
 class LayoutConfig(BaseModel):

@@ -1017,6 +1017,16 @@ documentation:
   trees:
     agent: CLAUDE
     human: docs
+    # Plan 00326: the vendored remote-docs tree. Top-level, never a docs/
+    # subdirectory — the human-docs role rule would otherwise instruct
+    # "keep it terse, summarise", the opposite of verbatim capture (D12).
+    remote: remote-docs
+  remote:
+    # Days a capture stays fresh before the staleness advisory fires.
+    default_staleness_days: 90
+    # Domain -> SPDX licence, pre-filling the `licence` frontmatter field so
+    # the review happens once per SOURCE rather than once per file (D13).
+    known_sources: {}
   qa:
     edit_mode: warn
     commit_gate_mode: warn

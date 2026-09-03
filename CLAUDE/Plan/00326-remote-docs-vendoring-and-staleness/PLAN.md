@@ -180,39 +180,46 @@ field. **Settled — see [PAYLOADS.md](PAYLOADS.md): the field is
   capture writes nothing, and the secret-word arm reports only an index,
   never the term.
 
-### Phase 3: The check family and its substrate
+### Phase 3: The write-time gate
 
-Checks are pure functions registered declaratively (`CheckSpec(check_id, stage, run)`); a new module is added to the registry with exactly two edits
-in `docs_qa/checks/__init__.py`. Tasks 3.1–3.3 are substrate and ship
-before 3.4–3.5, which depend on them.
+**D17 rewrote this phase.** The gate is a `PreToolUse` handler, not a
+`docs_qa` check family: it judges one file's content at write time, so it
+needs no corpus, and D12's top-level tree removed the need for a second
+scope predicate. Tasks 3.1–3.3 were substrate for the `docs_qa` route and
+are no longer paid for by this plan.
 
-- [ ] ⬜ **Task 3.1**: Port a `docs_qa/paths.py` path classifier modelled on
-  `plan_qa/paths.py` (`classify(path) -> kind`), folding in the six
-  duplicated `_matches_allowlist` copies so path scoping has ONE home.
-  **Done when** `classify` returns `remote` for tree paths, `is_lintable_path`
-  (the EDIT dispatch predicate and `docs-qa --lint`) accepts them, and every
-  existing check skips `kind == remote` at EDIT and STAGED.
-- [ ] ⬜ **Task 3.2**: Port a `document_rule_checks`-style registration adapter
-  (`docs_qa/checks/common.py`) so one rule function serves multiple stages,
-  instead of the `_run_edit`/`_run_staged`/`_run_sweep` triplication now
-  repeated across all eleven check modules.
-- [ ] ⬜ **Task 3.3**: Add frontmatter to `DocRecord`, **bump
-  `_CACHE_SCHEMA_VERSION` (2 → 3)**, and wire extraction into *both*
-  `build_and_save_corpus` and `refresh_own_record` — they build `DocRecord`
-  independently and must stay in sync. Without the version bump a warm cache
-  silently serves records with the new field empty and every dependent check
-  reports clean.
-- [ ] ⬜ **Task 3.4**: The provenance check at EDIT and STAGED stages, with
-  `Severity.BLOCK` for a *newly* invalid document (schema failure, `licence`
-  absent). Note the two-key deny rule: BLOCK severity alone does not deny —
-  the resolved `check_modes` entry must also be `block`, so ship the config
-  default alongside the check. `licence: unreviewed` is ADVISE (D13).
-- [ ] ⬜ **Task 3.5**: Respect the house severity convention — BLOCK only when
-  this edit made things worse, ADVISE for unchanged-but-violating, silent
-  when improving, and always ADVISE at SWEEP (no before/after exists there).
-- [ ] ⬜ **Task 3.6**: Rule IDs, `explain-rule` text and `HANDLER_REFERENCE.md`
-  entries. Note `explain-rule` text is not a table — it lives in `Rule(...)`
-  objects in the PreToolUse handlers, one `Rule` per gate.
+- [x] 🟩 **Task 3.4**: `remote_docs_provenance` — a blocking `PreToolUse`
+  handler denying a markdown `Write`/`Edit` in the tree whose content lacks
+  valid provenance. Names every invalid field at once, and points at
+  `remote-docs add` so the deny teaches the capture route rather than
+  inviting a hand-written frontmatter block. Only `new_string` is judged on
+  an `Edit`, so removing content is never blocked.
+- [x] 🟩 **Task 3.6**: `RuleID.REMOTE_DOCS_PROVENANCE`, the `Rule(...)`
+  verbose text behind `explain-rule`, and the `HANDLER_REFERENCE.md` entry.
+- [x] 🟩 **Task 3.7**: `documentation.remote` — `default_staleness_days`
+  (`gt=0`, so a window cannot mark captures stale on arrival) and
+  `known_sources` (domain → licence, matched case-insensitively and
+  accepting a URL directly, since callers hold URLs). Precedence is
+  `--licence` flag > `known_sources` > `unreviewed` sentinel: the flag is
+  the narrower statement, the config is the standing default (D13).
+- [ ] ⬜ **Task 3.8**: Record the fetcher's reported `source`
+  (`accept-markdown` vs `html-fallback`) in provenance — a sharper signal
+  than the binary name, distinguishing upstream's own markdown from our
+  extraction of their HTML. Deferred from D18 because it changes the
+  `FetchFn` contract from `str -> bytes` at every call site.
+
+**Not done here, deliberately** (D17): the `docs_qa/paths.py` classifier and
+the `document_rule_checks` registration adapter (drafted as Tasks 3.1–3.2)
+remain good ideas for `docs_qa`'s own sake — they would fold six duplicated
+`_matches_allowlist` copies and an `_run_edit`/`_run_staged`/`_run_sweep`
+triplication into one home — but nothing in this plan consumes them. File
+separately rather than smuggling the refactor in here. Task 3.3's
+`DocRecord` frontmatter and cache-version bump is moot for the same reason:
+the remote tree is never corpus-collected. Task 3.5's severity convention
+(BLOCK only when this edit made things worse) is a `docs_qa` staged-check
+concern; the handler is a straight deny on a fact, with no before/after to
+compare.
+
 - [ ] ⬜ **Task 3.7**: Config: `documentation.trees.remote` plus a new
   `documentation.remote` block (`default_staleness`, `known_sources`). Each
   knob is a mandatory 3-place mechanical change (config `models.py` →

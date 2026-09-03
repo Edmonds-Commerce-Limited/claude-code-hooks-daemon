@@ -726,6 +726,11 @@ handlers:
 #   trees:
 #     agent: CLAUDE
 #     human: docs
+#     remote: remote-docs        # vendored upstream docs (Plan 00326)
+#   remote:
+#     default_staleness_days: 90 # freshness window applied at capture time
+#     known_sources:             # domain -> licence, pre-fills the frontmatter
+#       docs.python.org: PSF-2.0
 #   qa:
 #     edit_mode: warn            # warn | block
 #     commit_gate_mode: warn     # warn | block (STAGED stage not yet implemented)
