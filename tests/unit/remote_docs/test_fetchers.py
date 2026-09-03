@@ -147,6 +147,77 @@ class TestResolution:
         assert "PATH" in warning
 
 
+class TestHttpsFetch:
+    """The raw GET has to survive contact with real documentation hosts."""
+
+    def test_it_sends_a_user_agent(self) -> None:
+        """Default `Python-urllib/3.x` is 403'd by real doc hosts.
+
+        Found against code.claude.com, which the hooks-contract refresh
+        procedure fetches with `curl` -- so the procedure worked while this
+        fetcher did not.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from claude_code_hooks_daemon.remote_docs.fetchers import https_fetch
+
+        response = MagicMock()
+        response.read.return_value = b"body"
+        response.__enter__ = lambda self: response
+        response.__exit__ = lambda *_args: False
+
+        with patch("urllib.request.urlopen", return_value=response) as urlopen:
+            https_fetch("https://example.com/doc.md")
+
+        request = urlopen.call_args[0][0]
+        assert request.get_header("User-agent")
+
+    def test_it_still_refuses_a_non_https_url(self) -> None:
+        from claude_code_hooks_daemon.remote_docs.fetchers import https_fetch
+
+        with pytest.raises(CaptureError, match="non-https"):
+            https_fetch("http://example.com/doc.md")
+
+    def test_it_refuses_a_file_url(self) -> None:
+        """Scheme validation happens before urlopen, by construction."""
+        from claude_code_hooks_daemon.remote_docs.fetchers import https_fetch
+
+        with pytest.raises(CaptureError, match="non-https"):
+            https_fetch("file:///etc/passwd")
+
+
+class TestVerbatimIsDemandable:
+    """Some captures need the response body, not an extraction of it.
+
+    The hooks-contract refresh (docs/guides/HOOK-CONTRACT-REFRESH.md) exists
+    because a summarising fetch layer once FABRICATED a contract enum value
+    that appeared nowhere in the raw text. For that work, "close enough" is
+    the failure mode, so the caller must be able to demand raw bytes rather
+    than accept whatever the best available fetcher produces.
+    """
+
+    def test_verbatim_bypasses_the_browser_even_when_available(self) -> None:
+        runner = _Runner()
+
+        resolved = resolve_fetcher(which=_only(*BINARY_CANDIDATES), runner=runner, verbatim=True)
+
+        assert resolved.method == HTTPS_METHOD
+        assert resolved.fidelity is Fidelity.VERBATIM
+
+    def test_verbatim_does_not_warn_about_the_missing_browser(self) -> None:
+        """It is a deliberate choice here, not a degraded fallback."""
+        resolved = resolve_fetcher(which=_only(*BINARY_CANDIDATES), runner=_Runner(), verbatim=True)
+
+        assert resolved.warning is None
+
+    def test_verbatim_does_not_probe_for_a_browser_at_all(self) -> None:
+        runner = _Runner()
+
+        resolve_fetcher(which=_only(*BINARY_CANDIDATES), runner=runner, verbatim=True)
+
+        assert runner.calls == []
+
+
 class TestCandidateProbing:
     """A binary on PATH is not necessarily a binary that runs.
 

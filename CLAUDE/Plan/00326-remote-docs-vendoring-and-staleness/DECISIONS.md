@@ -119,6 +119,66 @@ tool's `tool_response`, so the only new hook surface is one PreToolUse
 handler with two branches (`WebFetch`, `Read`), and Phase 0 shrinks to
 confirming two input field names.
 
+## D20 — `--verbatim` is demandable, and Phase 6 is narrower than drafted
+
+Three findings, taken while assessing Phase 6 against the real vendored
+contract rather than against the plan's description of it.
+
+**1. Verbatim had to become demandable.** D18 made `agent-browser` the
+default, which records `fidelity: converted`. But
+`docs/guides/HOOK-CONTRACT-REFRESH.md` has a non-negotiable rule — RAW fetch
+only — because during the Plan 00271 audit a summarising fetch of that exact
+URL FABRICATED a `permissionDecision: "escalate"` value appearing nowhere in
+the raw text. For that work "close enough" is the failure mode. The corpus
+never lied (`converted` said so), but there was no way to *demand* the
+response body. `remote-docs add --verbatim` now forces the raw GET, probes
+no browser, and issues no fallback warning — using the GET is the CHOICE
+there, not a degradation.
+
+**2. The raw GET was broken against real documentation hosts.** It sent
+the default `Python-urllib/3.x` User-Agent and got `403 Forbidden` from
+code.claude.com — the very host the contract procedure fetches, which works
+because it uses `curl`. So the documented procedure worked while our
+fetcher did not. Now sends an honest identifying User-Agent (not a browser
+impersonation: a host that wants to refuse automated capture should be able
+to) and an `Accept` preferring markdown.
+
+**3. Phase 6's migration is mostly inapplicable, and this is the finding
+rather than a failure.** The vendored contract is 33 hand-derived JSON
+schemas; `META.json` records the provenance of the SOURCE DOC they were
+derived from, and that doc is deliberately fetched to an untracked path
+each refresh rather than stored. So:
+
+- **Task 6.1 is a compatibility check, not a migration.** The provenance
+  schema does express META's provenance fields — `docs_url` → `source_url`,
+  `fetch_date` → `fetched_at`, `docs_sha256` → `source_sha256`,
+  `last_audited_claude_code_version` → `upstream_version`, confirming the
+  version-pin field is the right shape. `docs_bytes`, `event_count` and
+  `refresh_procedure` have no provenance equivalent and should not get one:
+  they are contract-specific, not provenance.
+- **Task 6.2 should NOT retire `contract_staleness`.** It answers "has
+  Claude Code moved on since we audited?" — a VERSION comparison against an
+  external tool. `remote_docs_staleness` answers "is this document past its
+  date?". Retiring the former would lose a signal the latter does not
+  carry. Version-pin staleness is exactly the Task 4.1 gap left
+  schema-ready and unimplemented.
+- **Vendoring the 317 KB source doc into git is not obviously right** and
+  is left to a human: the refresh procedure deliberately fetches it to
+  `untracked/`, and only its hash is durable.
+
+**Live finding worth acting on separately:** the current upstream hash is
+`e2462deb…`, META records `d514bf57…`. Upstream has changed since the
+2026-09-01 audit. Bumping the version without performing the verified
+extraction is precisely what the procedure forbids, so this is reported,
+not done.
+
+**Evidence for the deferred Task 3.8.** The `agent-browser` capture of that
+URL produced a sha256 IDENTICAL to the raw GET (`e2462deb…`), with
+`source: accept-markdown` — upstream served markdown and the browser passed
+it through unchanged. So `converted` is over-cautious for that source, and
+recording `source` would let a capture claim `verbatim` honestly when it is
+one. Measured on one URL, so treat it as evidence rather than a rule.
+
 ## D19 — the capture nudge is scoped to DECLARED documentation domains
 
 **Amends Task 5.1**, which said an unvendored URL gets "a capture hint"

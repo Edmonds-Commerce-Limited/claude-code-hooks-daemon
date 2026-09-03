@@ -5001,7 +5001,7 @@ def _resolve_remote_docs_fetcher(args: argparse.Namespace) -> Any:
             method=HTTPS_METHOD,
         )
 
-    return resolve_fetcher()
+    return resolve_fetcher(verbatim=bool(getattr(args, "verbatim", False)))
 
 
 def _remote_docs_add(
@@ -6572,6 +6572,15 @@ def main() -> int:
         type=int,
         default=None,
         help="Freshness window in days for this capture",
+    )
+    parser_remote_docs.add_argument(
+        "--verbatim",
+        action="store_true",
+        help=(
+            "Store the raw response body instead of an extraction of it "
+            "(records fidelity: verbatim). Use when the capture must be "
+            "quotable exactly, e.g. a contract or specification"
+        ),
     )
     parser_remote_docs.add_argument(
         "--project-root",

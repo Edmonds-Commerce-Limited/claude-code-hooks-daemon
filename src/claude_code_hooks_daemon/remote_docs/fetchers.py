@@ -50,6 +50,9 @@ HTTPS_METHOD: Final[str] = "https-get"
 _READ: Final[str] = "read"
 _JSON_FLAG: Final[str] = "--json"
 _FETCH_TIMEOUT_SECONDS: Final[int] = 60
+# Identifies the fetcher honestly rather than impersonating a browser: a host
+# that wants to refuse automated capture should be able to.
+_USER_AGENT: Final[str] = "claude-code-hooks-daemon-remote-docs/1.0 (+vendoring documentation)"
 
 Which = Callable[[str], str | None]
 Runner = Callable[..., Any]
@@ -91,8 +94,20 @@ def https_fetch(url: str) -> bytes:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme != "https":
         raise CaptureError(f"refusing to fetch non-https URL: {url!r}")
+
+    # Real documentation hosts 403 the default `Python-urllib/3.x`. Found
+    # against code.claude.com, whose docs the hooks-contract refresh fetches
+    # with curl -- so the documented procedure worked while this did not.
+    # `Accept` asks for markdown first, matching what the tree stores.
+    request = urllib.request.Request(  # nosec B310 - scheme validated to https above
+        url,
+        headers={
+            "User-Agent": _USER_AGENT,
+            "Accept": "text/markdown, text/plain;q=0.9, text/html;q=0.8, */*;q=0.5",
+        },
+    )
     with urllib.request.urlopen(  # nosec B310 - scheme validated to https above
-        url, timeout=_FETCH_TIMEOUT_SECONDS
+        request, timeout=_FETCH_TIMEOUT_SECONDS
     ) as response:
         return bytes(response.read())
 
@@ -216,12 +231,27 @@ def resolve_fetcher(
     https_fetch_fn: FetchFn | None = None,
     runner: Runner | None = None,
     binaries: Sequence[str] = BINARY_CANDIDATES,
+    verbatim: bool = False,
 ) -> ResolvedFetcher:
     """Pick the best available fetcher, saying so when the best is missing.
+
+    ``verbatim`` demands the response body rather than the best extraction
+    available: no browser is probed and no warning is issued, because using
+    the raw GET is the CHOICE here rather than a degraded fallback. Work that
+    must quote upstream exactly needs this -- see
+    ``docs/guides/HOOK-CONTRACT-REFRESH.md``, which exists because a
+    summarising fetch layer once fabricated a contract enum value.
 
     ``which`` and ``https_fetch_fn`` are injected so this is testable without a
     browser, a network, or a PATH that happens to be right.
     """
+    if verbatim:
+        return ResolvedFetcher(
+            fetch_fn=https_fetch_fn or https_fetch,
+            fidelity=Fidelity.VERBATIM,
+            method=HTTPS_METHOD,
+        )
+
     locate = which or shutil.which
     probe = runner or subprocess.run
 

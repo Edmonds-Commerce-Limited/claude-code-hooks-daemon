@@ -256,12 +256,18 @@ One PreToolUse handler carries both branches; Task 0.1 supplies the
 
 ### Phase 6: Migrate the existing vendored contract (dogfood)
 
-- [ ] ⬜ **Task 6.1**: Express `contracts/claude-code-hooks/META.json` in the
-  new provenance schema, confirming `upstream_version` pinning and
-  `fidelity: converted` are expressible.
-- [ ] ⬜ **Task 6.2**: Retire `contract_staleness.py` or reduce it to a thin
-  adapter over the general staleness evaluator, preserving its
-  client-install advisory wording.
+- [x] 🟩 **Task 6.1**: Compatibility confirmed, not migrated (D20). The
+  schema expresses META's provenance fields including the
+  `upstream_version` pin; `docs_bytes`/`event_count`/`refresh_procedure`
+  are contract-specific and deliberately have no provenance equivalent.
+- [x] 🟩 **Task 6.2**: **Superseded — `contract_staleness` stays** (D20). It
+  compares an external tool's VERSION; `remote_docs_staleness` compares a
+  date. Retiring it would lose a signal the other does not carry.
+- [x] 🟩 **Task 6.4** (new): `remote-docs add --verbatim` forces the raw
+  GET, because the contract refresh forbids a summarising fetch — a
+  summarised fetch of that exact URL once fabricated an enum value. Also
+  fixed the raw GET's `403` against real doc hosts (default urllib
+  User-Agent).
 - [ ] ⬜ **Task 6.3**: Fold `HOOK-CONTRACT-REFRESH.md`'s procedure into the
   CLI where it is mechanisable, keeping the verification steps that must
   stay human/agent-judged, and clear the currently-firing staleness
