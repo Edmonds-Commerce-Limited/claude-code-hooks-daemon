@@ -66,18 +66,37 @@ what exists.
 ### Phase 1: Wire the facade
 
 - [ ] ⬜ **Task 1.1**: Route the canonical-set consumers through
-  `ProjectLayout.is_vendored_path()` instead of the raw constant. Establish
-  which of the current readers are genuinely project-scoped (so should honour
-  a declaration) and which are language-convention literals that should not.
+  `ProjectLayout.is_vendored_path()` instead of the raw constant. Established
+  by measurement, so this starts from data rather than a fresh survey — of 44
+  modules carrying a vendor notion:
+
+  | Category                                   | Count |
+  | ------------------------------------------ | ----- |
+  | routed through the canonical set only      | 5     |
+  | canonical set AND a bare literal           | 8     |
+  | bare literal only, of which:               | 31    |
+  | — per-language strategies (`strategies/*`) | 23    |
+  | — **not** a language strategy              | **8** |
+
+  The 23 language-strategy literals are legitimately per-language (a Go
+  project's `vendor/` is not a JS project's `node_modules`) and are the
+  Non-Goal above. The actionable set is the 8 non-strategy literal-only
+  modules — `config/models.py`, `core/workspace.py`, `lint_on_edit`,
+  `markdown_organization`, `qa_suppression`, `security_antipattern`,
+  `tdd_enforcement`, `secret_file_hygiene_checker` — plus the 8 that use BOTH
+  the canonical set and a bare literal, which need a reason for carrying each.
+
 - [ ] ⬜ **Task 1.2**: Give docs QA a route to the declaration. Today
   `DocumentationPolicy` has no vendor field, so `corpus._is_excluded` could
   not honour one even if asked. This decides whether the policy grows a field
   or the corpus takes the layout facade.
+
 - [ ] ⬜ **Task 1.3**: Resolve layout PER PROJECT, not from the root block. A
   project's `layout:` never inherits the top-level one (Plan 00300 —
   "the ROOT project's layout only, not a global fallback"), so a monorepo
   sub-project's `vendor_dirs` would otherwise be ignored the same way every
   declaration is ignored today.
+
 - [ ] ⬜ **Task 1.4**: A test that a DECLARED vendor dir excludes a tree.
   Its absence is why this shipped inert: the field, the merge and the facade
   are all covered, and nothing asserted that declaring one changes any
