@@ -42,6 +42,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.docs_qa.corpus import matches_scope_exclude
 from claude_code_hooks_daemon.docs_qa.types import (
     CheckContext,
     CheckSpec,
@@ -254,6 +255,12 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         if not path.is_file():
             continue
         rel_path = str(path.relative_to(context.project_root))
+        # This SWEEP globs the rules directory itself instead of reading the
+        # corpus, so it inherits none of the corpus's exclusions -- the
+        # project's configured ones have to be applied here explicitly, or a
+        # scope-excluded rules file is reported with no way to silence it.
+        if matches_scope_exclude(rel_path, tuple(context.policy.qa.scope_exclude_globs)):
+            continue
         try:
             content = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:

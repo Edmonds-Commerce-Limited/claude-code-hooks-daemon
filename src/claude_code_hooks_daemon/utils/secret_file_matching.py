@@ -764,6 +764,59 @@ def directory_contains_protected(
     return None
 
 
+_CD_EXECUTABLE: Final[str] = "cd"
+_AND_SEPARATOR: Final[str] = "&&"
+# A substitution in the cd TARGET runs a command and puts its output on the
+# argument, so `cd $(cat <protected>)` really does disclose. A bare `cd` does
+# not, and that difference is the whole basis for stripping the prefix.
+_SUBSTITUTION_MARKERS: Final[tuple[str, ...]] = ("$(", "`", "${", _PROCESS_SUBSTITUTION)
+
+
+def _strip_leading_cd(command: str, patterns: tuple[str, ...]) -> str | None:
+    """Remove ONE leading ``cd <dir> &&``, or return ``None`` to leave the
+    command untouched.
+
+    A trusted consumer stopped being exempt the moment it was reached via
+    ``cd <dir> && ...``, because the compound rule voids the exemption before
+    the consumer is ever examined. That shape is not incidental: a tool whose
+    project root is resolved by walking up from cwd can only be invoked from
+    its own directory. It is the same failing-closed case ``git -C <path>``
+    already carries an exemption for.
+
+    The prefix is safe to remove because ``cd`` names a directory and sets
+    cwd — it neither reads nor transmits the protected file. Nothing else is
+    relaxed: the REMAINDER goes through the unchanged separator and
+    process-substitution rules, so a disclosure chained after the consumer is
+    still caught by the rule that caught it before.
+
+    Deliberately narrow, because each restriction removes a way to launder a
+    command through the prefix:
+
+    * ``&&`` only, not ``;`` — ``&&`` proves the ``cd`` succeeded, so the
+      consumer runs where the caller intended.
+    * Exactly ``cd`` plus ONE argument. A redirection or extra word is not
+      this shape.
+    * No substitution in the target (above).
+    * The target must not itself be a protected path — not a disclosure, but
+      a mistake or a probe, and refusing costs a legitimate caller nothing.
+    * Stripped ONCE. Recursion would peel an arbitrary chain one command at a
+      time; after one strip a second ``cd`` leaves a separator behind and the
+      compound is judged whole.
+    """
+    head, separator, remainder = command.partition(_AND_SEPARATOR)
+    if not separator:
+        return None
+    words = head.split()
+    if len(words) != 2 or words[0] != _CD_EXECUTABLE:
+        return None
+    target = words[1]
+    if any(marker in head for marker in _SUBSTITUTION_MARKERS):
+        return None
+    if path_is_protected(target.strip("\"'"), patterns):
+        return None
+    return remainder.strip() or None
+
+
 def is_exempt_invocation(
     command: str,
     consumers: tuple[ConsumerSpec, ...],
@@ -786,11 +839,14 @@ def is_exempt_invocation(
 
     An exemption applies only to a SINGLE command: any separator (``;``,
     ``&&``, ``||``, a pipe, a newline) or process substitution voids it —
-    the compound as a whole is judged by the deny rule instead.
+    the compound as a whole is judged by the deny rule instead. A single
+    leading ``cd <dir> &&`` is removed before that judgement (see
+    ``_strip_leading_cd``); everything after it faces the unchanged rule.
     """
     stripped = command.strip()
     if not stripped:
         return False
+    stripped = _strip_leading_cd(stripped, patterns) or stripped
     if _PROCESS_SUBSTITUTION in stripped:
         return False
     if any(separator in stripped for separator in _COMMAND_SEPARATORS):

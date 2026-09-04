@@ -370,6 +370,44 @@ class TestEditStageWorseOnly:
         assert _run_edit(context_no_content) == []
 
 
+class TestSweepHonoursConfiguredScopeExclusions:
+    """Sibling of the module-doc-budget defect, found by auditing for it.
+
+    This SWEEP globs `.claude/rules/*.md` itself rather than reading the
+    corpus, so it inherited none of the corpus's exclusions and consulted
+    `scope_exclude_globs` nowhere. Narrower blast radius than
+    module-doc-budget (a project-owned directory, not a vendored tree), but
+    the same bug: a project that scope-excluded a rules file still got it
+    reported on every sweep with no way to silence it.
+    """
+
+    def test_an_excluded_rules_file_is_not_reported(self, tmp_path: Path) -> None:
+        _rules_path(tmp_path, "fences.md").write_text(_FENCE_BODY)
+        context = sweep_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(
+                qa=DocumentationQaPolicy(scope_exclude_globs=(".claude/rules/fences.md",))
+            ),
+            corpus=DocCorpus(project_root=tmp_path, documents={}),
+        )
+        assert _run_sweep(context) == []
+
+    def test_an_unexcluded_rules_file_is_still_reported(self, tmp_path: Path) -> None:
+        """Guard against over-fixing: the exclusion silences one file, not
+        the check."""
+        _rules_path(tmp_path, "fences.md").write_text(_FENCE_BODY)
+        _rules_path(tmp_path, "other.md").write_text(_FENCE_BODY)
+        context = sweep_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(
+                qa=DocumentationQaPolicy(scope_exclude_globs=(".claude/rules/fences.md",))
+            ),
+            corpus=DocCorpus(project_root=tmp_path, documents={}),
+        )
+        findings = _run_sweep(context)
+        assert [finding.path for finding in findings] == [".claude/rules/other.md"]
+
+
 class TestSweepStage:
     def test_reports_every_violation_present_as_advise(self, tmp_path: Path) -> None:
         _rules_path(tmp_path, "fences.md").write_text(_FENCE_BODY)

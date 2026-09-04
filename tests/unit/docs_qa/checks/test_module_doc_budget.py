@@ -527,7 +527,9 @@ class TestConfiguredScopeExclusionsAreHonoured:
 
         context = sweep_context(
             project_root=tmp_path,
-            policy=DocumentationPolicy(qa=DocumentationQaPolicy(scope_exclude_globs=("CLAUDE.md",))),
+            policy=DocumentationPolicy(
+                qa=DocumentationQaPolicy(scope_exclude_globs=("CLAUDE.md",))
+            ),
             corpus=DocCorpus(project_root=tmp_path),
         )
         assert _run_sweep(context) == []

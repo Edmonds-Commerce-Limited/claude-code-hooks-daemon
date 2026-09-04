@@ -478,6 +478,99 @@ class TestExemptions:
             "cat .claude/block-words.secret", sfm.DEFAULT_ALLOWED_CONSUMERS
         )
 
+
+class TestLeadingCdPrefix:
+    """Client report: a trusted consumer stopped being exempt the moment it
+    was reached via ``cd <dir> && ...``.
+
+    The reported command was
+    ``cd /workspace/infra/ansible && ansible-playbook ... --vault-password-file <path>``.
+    ``ansible-playbook`` is a shipped consumer and ``--vault-password-file``
+    a recognised path flag, but the separator check voided the exemption
+    before either was consulted, so the compound fell through to the generic
+    deny. The shape is forced rather than incidental: those vault scripts
+    resolve their project root by walking up from cwd, so they have to be
+    invoked from the project directory.
+
+    This is the same failing-closed shape ``git -C <path> rm --cached``
+    already has an exemption for -- an agent working from another cwd.
+
+    A bare ``cd`` cannot disclose anything: it names a directory and sets
+    cwd. What must NOT follow is any weakening of the compound rule itself,
+    so the prefix is stripped and the REMAINDER is re-judged by the same
+    function -- which still voids on every separator. The attack cases below
+    pin that.
+    """
+
+    _VAULT = "ansible-playbook site.yml --vault-password-file vault-pass-dev.secret"
+
+    def test_the_reported_command_is_exempt(self) -> None:
+        cmd = f"cd /workspace/infra/ansible && {self._VAULT}"
+        assert sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_a_relative_cd_is_exempt_too(self) -> None:
+        assert sfm.is_exempt_invocation(
+            f"cd infra/ansible && {self._VAULT}", sfm.DEFAULT_ALLOWED_CONSUMERS
+        )
+
+    def test_a_trailing_disclosure_after_the_consumer_is_still_denied(self) -> None:
+        """The attack the separator rule exists to stop. Stripping the cd
+        must not smuggle it through: the remainder still holds a separator,
+        so the same rule that caught it before still catches it."""
+        cmd = f"cd /infra && {self._VAULT} && cat vault-pass-dev.secret"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_a_disclosure_chained_with_a_pipe_is_still_denied(self) -> None:
+        cmd = f"cd /infra && {self._VAULT} | tee leaked.txt"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_cd_does_not_launder_an_untrusted_command(self) -> None:
+        """The prefix buys the REMAINDER nothing it would not have had on
+        its own -- `cat <protected>` is denied either way."""
+        cmd = "cd /infra && cat vault-pass-dev.secret"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_a_command_substitution_in_the_cd_target_is_denied(self) -> None:
+        """`cd $(cat <protected>)` DOES disclose -- the substitution runs and
+        its output reaches the process table and any error message. A bare
+        `cd` is safe; this is not a bare `cd`."""
+        cmd = f"cd $(cat vault-pass-dev.secret) && {self._VAULT}"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_a_backtick_substitution_in_the_cd_target_is_denied(self) -> None:
+        cmd = f"cd `cat vault-pass-dev.secret` && {self._VAULT}"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_only_one_cd_prefix_is_stripped(self) -> None:
+        """Recursion would let an arbitrary chain be peeled one command at a
+        time. Exactly one prefix is removed; a second leaves a separator in
+        the remainder and the compound is judged as a whole."""
+        cmd = f"cd /a && cd /b && {self._VAULT}"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_a_semicolon_prefix_is_not_covered(self) -> None:
+        """Deliberately narrow: `&&` proves the cd SUCCEEDED, so the consumer
+        runs where it was meant to. With `;` it runs regardless of where it
+        lands, which is a different shape and was not the one reported."""
+        cmd = f"cd /infra ; {self._VAULT}"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_cd_with_no_argument_is_not_a_prefix(self) -> None:
+        assert not sfm.is_exempt_invocation(f"cd && {self._VAULT}", sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_a_protected_path_as_the_cd_target_is_denied(self) -> None:
+        """Not a disclosure, but not a shape worth exempting either: a
+        directory argument that is itself a protected path is a mistake or
+        a probe, and refusing it costs a legitimate caller nothing."""
+        cmd = f"cd .claude/block-words.secret && {self._VAULT}"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_the_prefix_does_not_rescue_a_denied_subcommand(self) -> None:
+        """A consumer's disclosure-purposed subcommand stays denied through
+        the prefix, exactly as it would without one."""
+        cmd = "cd /infra && ansible-vault view --vault-password-file vault-pass-dev.secret"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
     def test_project_extends_consumers_via_config_shape(self) -> None:
         consumers = sfm.merge_allowed_consumers(
             [{"command": "my-deploy-tool", "path_flags": ["--secret-file"]}]
