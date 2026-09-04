@@ -104,6 +104,39 @@ class TestSuggestSeedEntries:
 
         assert suggest_seed_entries(repo) == []
 
+    def test_a_declared_vendor_dir_is_excluded(self, repo: Path) -> None:
+        """Plan 00331: the exclusion set was the canonical constant unioned
+        with seed's own extras at module scope, so a declared
+        `layout.vendor_dirs` never reached it -- and a vendored ansible role
+        tree (commonly gitignored) got suggested as a seed candidate.
+
+        `roles` is not in the canonical set, so a test using `node_modules`
+        or `dist` (above) would pass without the fix.
+        """
+        directory = repo / "roles"
+        directory.mkdir()
+        (directory / ".env.local").write_text("nested\n", encoding="utf-8")
+
+        assert suggest_seed_entries(repo, vendor_dirs=frozenset({"roles"})) == []
+
+    def test_an_undeclared_dir_of_that_name_is_still_suggested(self, repo: Path) -> None:
+        """The exclusion must come from the DECLARATION, not from the name."""
+        directory = repo / "roles"
+        directory.mkdir()
+        (directory / ".env.local").write_text("nested\n", encoding="utf-8")
+
+        assert [entry.path for entry in suggest_seed_entries(repo)] == ["roles/.env.local"]
+
+    def test_a_declaration_does_not_displace_the_built_ins(self, repo: Path) -> None:
+        """Seed's own extras (`.git`, caches, `untracked`) are not part of the
+        vendor axis and must survive a `mode: replace` vendor declaration."""
+        directory = repo / "node_modules"
+        directory.mkdir()
+        (directory / ".env.local").write_text("nested\n", encoding="utf-8")
+
+        entries = suggest_seed_entries(repo, vendor_dirs=frozenset({"node_modules", "roles"}))
+        assert entries == []
+
     def test_excluded_directory_names_has_exact_membership(self) -> None:
         """Plan 00288 Task 3.2: core plus seed's own tool-cache/VCS/daemon
         extras (measurement doc §3)."""

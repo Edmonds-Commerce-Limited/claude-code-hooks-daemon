@@ -17,6 +17,7 @@ project owns, which is a far worse outcome than pasting four lines.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,8 @@ from claude_code_hooks_daemon.core.worktree_seed import (
     parse_seed_config,
 )
 from claude_code_hooks_daemon.utils.worktree_seed_suggestions import diff_seed_config
+
+logger = logging.getLogger(__name__)
 
 _KEY_SEPARATOR: Final = "."
 
@@ -98,6 +101,46 @@ def _value_at_key(key: str, config: dict[str, Any]) -> Any | None:
     return current
 
 
+def _declared_vendor_dirs(config: dict[str, Any]) -> frozenset[str]:
+    """Effective ``layout.vendor_dirs`` for a raw config mapping (Plan 00331).
+
+    Validates ONLY the ``layout:`` block rather than the whole ``Config``:
+    this runs from a reporting command against a config file that may be
+    partial or mid-edit, and whole-config validation fails fast on unrelated
+    grounds (a missing git remote, for one). A malformed ``layout:`` falls
+    back to the built-in set for the same reason a malformed ``seed:`` yields
+    no entries -- a report must not turn a typo into a crash -- and says so
+    at WARNING, so the fallback is visible rather than silent.
+
+    Always returns the set that is actually in effect, never ``None``: the
+    caller cannot distinguish "nothing declared" from "declaration rejected"
+    and should not have to, and an error-signalling ``None`` here would be
+    indistinguishable from the legitimate no-declaration case.
+
+    The additive/replace merge is NOT re-derived here; ``ProjectLayout``
+    owns it, and re-deriving it is the exact defect this plan exists to fix.
+    """
+    from pydantic import ValidationError
+
+    from claude_code_hooks_daemon.config.models import LayoutConfig
+    from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+    built_in = ProjectLayout.built_in_default()
+    raw_layout = config.get("layout")
+    if not isinstance(raw_layout, dict):
+        return built_in.vendor_dirs
+    try:
+        layout_config = LayoutConfig.model_validate(raw_layout)
+    except ValidationError as exc:
+        logger.warning(
+            "Malformed `layout:` block in hooks-daemon.yaml -- reporting seed drift "
+            "against the built-in vendored-directory set instead: %s",
+            exc,
+        )
+        return built_in.vendor_dirs
+    return ProjectLayout.for_project(layout_config, built_in).vendor_dirs
+
+
 def build_seed_report(root: Path, config: dict[str, Any]) -> WorktreeSeedReport:
     """Compare a project's configured seed entries with its repository.
 
@@ -112,7 +155,7 @@ def build_seed_report(root: Path, config: dict[str, Any]) -> WorktreeSeedReport:
     """
     raw_seed = _value_at_key(SEED_CONFIG_KEY, config)
     configured = parse_seed_config(raw_seed)
-    drift = diff_seed_config(root, configured)
+    drift = diff_seed_config(root, configured, vendor_dirs=_declared_vendor_dirs(config))
 
     return WorktreeSeedReport(
         configured=tuple(configured),

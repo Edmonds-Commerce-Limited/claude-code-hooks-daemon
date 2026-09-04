@@ -209,6 +209,13 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
         if matches_skip_path(file_path, self.SKIP_PATHS):
             return False
 
+        # SKIP_PATHS is a ClassVar built from the canonical constant at import
+        # time, so a declared `layout.vendor_dirs` cannot reach it (Plan
+        # 00331). Checked separately rather than by making the ClassVar
+        # dynamic, which would change this handler's published surface.
+        if self._project_layout is not None and self._project_layout.is_vendored_path(file_path):
+            return False
+
         # File must exist. A formality for Write/Edit; load-bearing for Bash,
         # where the target is PREDICTED from the command and a failed command
         # leaves nothing behind.

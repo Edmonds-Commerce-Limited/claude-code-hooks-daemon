@@ -35,7 +35,11 @@ _SKIP_DIR_NAMES: frozenset[str] = CORE_VENDORED_BUILD_DIR_NAMES
 _MAX_WALK_DEPTH = 4
 
 
-def _find_manifest_dirs(root: Path, max_depth: int = _MAX_WALK_DEPTH) -> list[tuple[Path, str]]:
+def _find_manifest_dirs(
+    root: Path,
+    max_depth: int = _MAX_WALK_DEPTH,
+    skip_dir_names: frozenset[str] = _SKIP_DIR_NAMES,
+) -> list[tuple[Path, str]]:
     """Return ``(directory, kind)`` for every recognised manifest found below ``root``.
 
     Does not walk into vendored/build directories, dotdirs, or a directory
@@ -47,6 +51,12 @@ def _find_manifest_dirs(root: Path, max_depth: int = _MAX_WALK_DEPTH) -> list[tu
     Args:
         root: Directory to search BELOW (root itself is never reported).
         max_depth: Maximum number of directory levels below ``root`` to visit.
+        skip_dir_names: Directory names never descended into. Defaults to the
+            canonical set; the handler passes the project's EFFECTIVE
+            ``layout.vendor_dirs`` so a DECLARED vendor directory is skipped
+            too (Plan 00331). A vendored ansible role carrying its own
+            ``package.json`` is not a sub-project of this repo, and declaring
+            the directory vendored is how a project says so.
 
     Returns:
         Manifest-bearing directories in a stable, depth-first, sorted order.
@@ -65,7 +75,7 @@ def _find_manifest_dirs(root: Path, max_depth: int = _MAX_WALK_DEPTH) -> list[tu
         for entry in entries:
             if not entry.is_dir():
                 continue
-            if entry.name in _SKIP_DIR_NAMES or entry.name.startswith("."):
+            if entry.name in skip_dir_names or entry.name.startswith("."):
                 continue
             if (entry / ".git").exists():
                 # A nested git repository is a different repository, not a
@@ -127,7 +137,14 @@ class MonorepoDetectorHandler(SessionStartHandlerBase):
         if root_manifest is not None:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
-        found = _find_manifest_dirs(project_root)
+        found = _find_manifest_dirs(
+            project_root,
+            skip_dir_names=(
+                _SKIP_DIR_NAMES
+                if self._project_layout is None
+                else self._project_layout.vendor_dirs
+            ),
+        )
         if not found:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 

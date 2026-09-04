@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.conftest import layout_declaring_vendor_dirs
 
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.core.workspace import ProjectRegistry
@@ -218,6 +219,36 @@ class TestValidateEslintOnWriteHandler:
         }
 
         assert handler.matches(hook_input) is False
+
+    def test_does_not_match_a_declared_vendor_dir(
+        self, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00331: `SKIP_PATHS` is a ClassVar built from the canonical
+        constant at import, so a declared `layout.vendor_dirs` never reached
+        it. `roles` is not in the canonical set, so a test using `dist/` or
+        `node_modules/` would pass without the fix."""
+        role_dir = tmp_path / "infra" / "roles"
+        role_dir.mkdir(parents=True)
+        test_file = role_dir / "task.ts"
+        test_file.write_text("const x = 1;")
+        handler._project_layout = layout_declaring_vendor_dirs("roles")
+
+        hook_input = {"tool_name": "Write", "tool_input": {"file_path": str(test_file)}}
+
+        assert handler.matches(hook_input) is False
+
+    def test_matches_an_undeclared_dir_of_that_name(
+        self, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        """The skip must come from the DECLARATION, not from the name."""
+        role_dir = tmp_path / "infra" / "roles"
+        role_dir.mkdir(parents=True)
+        test_file = role_dir / "task.ts"
+        test_file.write_text("const x = 1;")
+
+        hook_input = {"tool_name": "Write", "tool_input": {"file_path": str(test_file)}}
+
+        assert handler.matches(hook_input) is True
 
     @pytest.mark.parametrize(
         "skip_path",

@@ -248,6 +248,14 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         if matches_skip_path(file_path, strategy.skip_paths):
             return False
 
+        # A strategy's `skip_paths` is per-LANGUAGE and built from the
+        # canonical constant, so a project's declared `layout.vendor_dirs`
+        # cannot reach it (Plan 00331). Applied here rather than threaded
+        # through all 13 strategies: the per-language literals are correct
+        # as they stand, and this plan does not touch them.
+        if self._project_layout is not None and self._project_layout.is_vendored_path(file_path):
+            return False
+
         # File must exist. For Write/Edit this is a formality -- PostToolUse runs
         # after the write. For Bash it is load-bearing: the target is PREDICTED
         # from the command text, and a command that failed (or was never going to

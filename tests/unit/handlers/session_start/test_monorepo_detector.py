@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from tests.conftest import layout_declaring_vendor_dirs
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegistry
@@ -149,6 +150,37 @@ class TestMonorepoDetectorHandle:
         decision, context = self._handle(handler, tmp_path)
         assert decision == Decision.ALLOW
         assert context == []
+
+    def test_skips_a_declared_vendor_directory(
+        self, handler: MonorepoDetectorHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00331: the skip set was the canonical constant, so a declared
+        `layout.vendor_dirs` never reached the walk.
+
+        A vendored ansible-galaxy role carrying its own `package.json` is not
+        a sub-project of this repo, and declaring `roles` vendored is how a
+        project says so. `roles` is not in the canonical set, so a test using
+        `node_modules` (above) would pass without the fix.
+        """
+        handler._project_layout = layout_declaring_vendor_dirs("roles")
+        nested = tmp_path / "infra" / "roles" / "lts.vault"
+        nested.mkdir(parents=True)
+        (nested / "package.json").write_text("{}")
+
+        decision, context = self._handle(handler, tmp_path)
+        assert decision == Decision.ALLOW
+        assert context == []
+
+    def test_reports_an_undeclared_directory_of_that_name(
+        self, handler: MonorepoDetectorHandler, tmp_path: Path
+    ) -> None:
+        """The skip must come from the DECLARATION, not from the name."""
+        nested = tmp_path / "infra" / "roles" / "lts.vault"
+        nested.mkdir(parents=True)
+        (nested / "package.json").write_text("{}")
+
+        _, context = self._handle(handler, tmp_path)
+        assert context, "an undeclared manifest dir should still be advised"
 
     def test_does_not_descend_into_nested_git_repos(
         self, handler: MonorepoDetectorHandler, tmp_path: Path

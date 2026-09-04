@@ -5,6 +5,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.conftest import layout_declaring_vendor_dirs
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler
@@ -159,6 +160,42 @@ class TestMatches:
             "tool_input": {"file_path": str(test_file)},
         }
         assert handler.matches(hook_input) is False
+
+    def test_does_not_match_a_declared_vendor_dir(
+        self, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00331: the skip set came from each strategy's `skip_paths`,
+        which is built from the canonical constant -- so a declared
+        `layout.vendor_dirs` never reached it.
+
+        Checked at the HANDLER rather than by threading a layout through all
+        13 lint strategies: `skip_paths` is a per-language surface, and
+        per-language literals are this plan's explicit Non-Goal.
+        """
+        role_dir = tmp_path / "infra" / "roles" / "lts.vault"
+        role_dir.mkdir(parents=True)
+        test_file = role_dir / "task.py"
+        test_file.write_text("x = 1")
+        handler._project_layout = layout_declaring_vendor_dirs("roles")
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_an_undeclared_dir_of_that_name(
+        self, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """The skip must come from the DECLARATION, not from the name."""
+        role_dir = tmp_path / "infra" / "roles" / "lts.vault"
+        role_dir.mkdir(parents=True)
+        test_file = role_dir / "task.py"
+        test_file.write_text("x = 1")
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        assert handler.matches(hook_input) is True
 
     def test_does_not_match_no_file_path(self, handler: LintOnEditHandler) -> None:
         hook_input: dict[str, Any] = {

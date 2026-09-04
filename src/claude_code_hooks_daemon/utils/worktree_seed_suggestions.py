@@ -103,9 +103,20 @@ class SeedConfigDrift:
         return bool(self.unconfigured or self.missing)
 
 
-def _is_excluded(relative: Path) -> bool:
-    """True when any segment names a dependency, build or cache directory."""
-    return any(part in _EXCLUDED_DIRECTORY_NAMES for part in relative.parts)
+def _is_excluded(relative: Path, vendor_dirs: frozenset[str] | None) -> bool:
+    """True when any segment names a dependency, build or cache directory.
+
+    ``vendor_dirs`` replaces only the VENDOR half of the set (Plan 00331);
+    seed's own extras -- ``.git``, the tool caches, ``untracked`` -- are a
+    different category with no config axis and always apply, so a
+    ``mode: replace`` vendor declaration cannot switch them off.
+    """
+    excluded = (
+        _EXCLUDED_DIRECTORY_NAMES
+        if vendor_dirs is None
+        else (vendor_dirs | _SEED_EXTRA_EXCLUDED_DIRECTORY_NAMES)
+    )
+    return any(part in excluded for part in relative.parts)
 
 
 def _looks_like_local_config(relative: Path) -> bool:
@@ -129,11 +140,18 @@ def _ignored_paths(root: Path) -> list[str]:
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
-def suggest_seed_entries(root: Path) -> list[SeedEntry]:
+def suggest_seed_entries(
+    root: Path, *, vendor_dirs: frozenset[str] | None = None
+) -> list[SeedEntry]:
     """Return the seed entries this repository's contents suggest.
 
     Args:
         root: The repository root to scan.
+        vendor_dirs: The project's EFFECTIVE ``layout.vendor_dirs``. ``None``
+            keeps the canonical set. Supplied so a DECLARED vendor directory
+            is not offered as a seed candidate (Plan 00331) — a vendored
+            ansible-role tree is commonly gitignored, so without this the
+            report suggests seeding third-party content into every worktree.
 
     Returns:
         Proposed entries in deterministic path order, each using
@@ -147,7 +165,7 @@ def suggest_seed_entries(root: Path) -> list[SeedEntry]:
         relative = Path(line)
         if len(relative.parts) > _MAX_SUGGESTION_DEPTH:
             continue
-        if _is_excluded(relative):
+        if _is_excluded(relative, vendor_dirs):
             continue
         if not _looks_like_local_config(relative):
             continue
@@ -156,7 +174,9 @@ def suggest_seed_entries(root: Path) -> list[SeedEntry]:
     return [SeedEntry(path=path, mode=DEFAULT_SEED_MODE) for path in sorted(candidates)]
 
 
-def diff_seed_config(root: Path, configured: list[SeedEntry]) -> SeedConfigDrift:
+def diff_seed_config(
+    root: Path, configured: list[SeedEntry], *, vendor_dirs: frozenset[str] | None = None
+) -> SeedConfigDrift:
     """Compare a project's configured entries with what the repository suggests.
 
     A configured entry whose mode differs from the suggested default is NOT
@@ -175,7 +195,9 @@ def diff_seed_config(root: Path, configured: list[SeedEntry]) -> SeedConfigDrift
     configured_paths = {entry.path for entry in configured}
 
     unconfigured = tuple(
-        entry for entry in suggest_seed_entries(root) if entry.path not in configured_paths
+        entry
+        for entry in suggest_seed_entries(root, vendor_dirs=vendor_dirs)
+        if entry.path not in configured_paths
     )
     missing = tuple(entry for entry in configured if not (root / entry.path).exists())
 
