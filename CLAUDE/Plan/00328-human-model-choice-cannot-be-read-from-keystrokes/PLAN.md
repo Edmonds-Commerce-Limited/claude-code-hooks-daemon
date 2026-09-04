@@ -1,6 +1,6 @@
 # Plan 00328: human model choice cannot be read from keystrokes
 
-**Status**: Not Started
+**Status**: In Progress — Phase 1 delivered; Phase 2 (detection channel) open
 **Created**: 2026-09-04
 **Owner**: joseph
 **Priority**: High
@@ -56,16 +56,22 @@ currently flails.
 
 ### Phase 1: Stop the escalation (independent of detection)
 
-- [ ] ⬜ **Task 1.1**: A restore whose next reading does not show the target
+- [x] ✅ **Task 1.1**: A restore whose next reading does not show the target
   family has FAILED. Treat one failure as proof the family is unavailable and
   stop restoring for the session. Needs no new input channel, and would have
   prevented the coupled `/effort` and the `/compact` in the reproduction.
-- [ ] ⬜ **Task 1.2**: Do not arm the coupled effort correction for a `/model`
+  Delivered: `_settle_awaited_restore` records the awaited `session:family` at
+  injection time and judges the first reading rendered after it;
+  `model_restore_due` returns `None` once the origin family is known
+  unavailable.
+- [x] ✅ **Task 1.2**: Do not arm the coupled effort correction for a `/model`
   injection that did not land. Effort was driven to fable's floor while the
-  session was still on opus.
-- [ ] ⬜ **Task 1.3**: `flag_compact_due` must not read a FAILED restore as a
+  session was still on opus. Delivered: a missed restore clears
+  `_coupled_effort_pending`.
+- [x] ✅ **Task 1.3**: `flag_compact_due` must not read a FAILED restore as a
   downgrade flip-flop. A flip-flop means the classifier re-fired; an episode
-  still open because the restore never took is a different fact.
+  still open because the restore never took is a different fact. Delivered:
+  the same unavailable-family gate short-circuits `flag_compact_due`.
 
 ### Phase 2: A detection channel that works
 
@@ -96,6 +102,6 @@ currently flails.
      JOURNAL/00328-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Milestone A — Phase 1: a futile restore stops at one attempt and escalates
-  no further.
+  no further. Delivered in `c4e22ac0`.
 - Milestone B — Phase 2: human intent is read from a channel that carries it,
   and the keystroke machinery it replaces is deleted.
