@@ -1,5 +1,5 @@
-version: "3.61.0"
-date: "2026-09-03"
+version: "3.62.0"
+date: "UNRELEASED"
 breaking: false
 upgrade_guide: null
 config_changes:
