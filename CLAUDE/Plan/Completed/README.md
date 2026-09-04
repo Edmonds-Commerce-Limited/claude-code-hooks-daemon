@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00288: project-layout config SSoT](00288-project-layout-config-ssot/PLAN.md) - Complete at `3aa68a72`…`e8dea14b` + the archiving commit (top-level `layout:` block and `ProjectLayout` facade as the single access API for directory truths)
+
 - [00287: docs-qa pre-release punch list](00287-docs-qa-prerelease-punch-list/PLAN.md) - Complete at `94c41f61` (F1-F4 + N1 findings from the Plan 00284 post-completion review fixed; sweep re-verified at the 34-advisory baseline)
 
 - [00286: plan-qa staged status/location coherence](00286-plan-qa-staged-status-location-coherence/PLAN.md) - Complete at `c7633e3f` + the archiving commit (adds the `archived-status-coherence` commit-gate check reading STAGED blobs, catching the git-mv-stages-rename-not-edits sequence that briefly landed Plan 00284 archived as In Progress)

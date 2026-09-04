@@ -1,6 +1,6 @@
 # Plan 00331: vendor dirs config is inert
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-04
 **Owner**: joseph
 **Priority**: High
@@ -285,7 +285,12 @@ first sight, which is a fair verdict on an undocumented asymmetry:
   end from a real YAML against a tree holding BOTH a third-party role and one
   the project maintains: the third-party doc is silent, the project's own is
   reported.
-- [ ] A monorepo sub-project's declared `vendor_dirs` is honoured.
+- [x] A monorepo sub-project's declared `vendor_dirs` is honoured — for the
+  handlers, via `Handler.layout_for()`. Pinned by a paired test at
+  `error_hiding_blocker`: the declaring sub-project's `roles/` is skipped and
+  an identically-shaped SIBLING's is not, which a root-layout read cannot
+  satisfy. Docs QA is excluded by the Task 1.3 scope decision, not covered by
+  this criterion.
 - [x] A project can exclude vendored paths from `daemon.exclude_paths` and
   any per-handler `exclude_paths` by REFERENCING the vendor truth
   (`{vendor-dirs}`) rather than restating the directory names. This replaces
@@ -301,7 +306,14 @@ first sight, which is a fair verdict on an undocumented asymmetry:
      JOURNAL/00331-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Milestone A — a declared `vendor_dirs` changes behaviour, root and
-  per-project.
-- Milestone B — `daemon.exclude_paths` reaches docs QA and plan QA.
+  per-project. Delivered `6b4fa867` (docs QA + the first behaviour tests),
+  `f802a92e` and `36a63c5f` (the remaining canonical-set consumers),
+  `ba7269d5` (per-project resolution via `Handler.layout_for()`).
+- Milestone B — WITHDRAWN as stated, and delivered in a different shape as
+  `d1ee238f`. "`daemon.exclude_paths` reaches docs QA and plan QA" assumed
+  that key means "hide this from everything"; it does not, and absorbing it
+  would have silently dropped doc findings in fixture trees. The owner's
+  no-distributed-source-of-truth ruling replaced it with the `{vendor-dirs}`
+  predicate reference — see the Phase 2 note.
 - Milestone C — a first-party library inside a vendor tree can be re-included
-  without the pruning walkers hiding it.
+  without the pruning walkers hiding it. Delivered `91f5b740`.

@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00331: vendor dirs config is inert](00331-vendor-dirs-config-is-inert/PLAN.md) - Not Started (a project can declare `layout.vendor_dirs` and nothing happens: `ProjectLayout.is_vendored_path()` has zero production consumers, so every reader takes the raw builtin constant and a declared vendor tree is unexcludable — plus `!` negation for first-party libs vendored inside one)
-
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
 
 - [00329: post upgrade truth changes report bloat](00329-post-upgrade-truth-changes-report-bloat/PLAN.md) - Not Started (the upgrade flow's truth-changes reconciliation hands the agent up to 89KB / 74 entries with no bound and no supersession collapsing, so superseded truths are replayed and the step is skimmed rather than performed)
@@ -182,6 +180,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00331: vendor dirs config is inert](Completed/00331-vendor-dirs-config-is-inert/PLAN.md) - Complete at `6b4fa867`…`ba7269d5` + the archiving commit (`layout.vendor_dirs` was a facade with zero production consumers, so declaring one did nothing; every reader now routes through it, resolved from the file's owning project)
+
 - [00326: remote docs vendoring and staleness](Completed/00326-remote-docs-vendoring-and-staleness/PLAN.md) - Complete at `43cf91a0` through `ef342df4` (upstream docs vendored as markdown carrying provenance frontmatter, with a `fidelity` field that separates a citable corpus from a cache; four handlers gate writes and commits, route `WebFetch` to the local copy, and report staleness)
 
 - [00324: skill invoke scripts never referenced](Completed/00324-skill-invoke-scripts-never-referenced/PLAN.md) - Complete (four skills kept 52-317 lines of procedure in an `invoke.sh` their SKILL.md never named, so every invocation ran on the summary and two of them discarded the caller's arguments)
@@ -238,8 +238,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00292: codex cli dual host research](Completed/00292-codex-cli-dual-host-research/PLAN.md) - Complete (research-only, 9-agent Sonnet workflow: Codex CLI hooks are verdict-based but cover only shell/apply_patch/MCP calls today; 6 of our 31 wired events have any counterpart; recommendation in FINDINGS.md — host-adapter + verdict degradation, deferred until Codex Edit/Write hook coverage lands)
 
-- [00288: project-layout config SSoT](Completed/00288-project-layout-config-ssot/PLAN.md) - Complete at `3aa68a72`…`e8dea14b` + the archiving commit (top-level `layout:` block and `ProjectLayout` facade as the single access API for directory truths)
-
 - [00289: docs gold standard zero findings](Completed/00289-docs-gold-standard-zero-findings/PLAN.md) - Complete at `671b6eb7` + `01312f29` + the archiving commit (whole-repo `docs-qa --sweep` driven from 34 advisories to zero: two checker bug fixes, a new `scope_exclude_globs` corpus exclusion, a live-template link fix, root `CLAUDE.md` `@`-import conversion, module-doc thinning/promotion, and the `release-agent.md` duplicate)
 
 ## Blocked / On Hold Plans
@@ -281,15 +279,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 331 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 269 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 270 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 45 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 44 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 45 + 269 + 7 = **321 folders**, spanning
+- **Folder-to-number reconciliation**: 44 + 270 + 7 = **321 folders**, spanning
   **318 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
