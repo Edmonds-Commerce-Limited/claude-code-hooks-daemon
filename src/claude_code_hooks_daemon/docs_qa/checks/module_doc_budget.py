@@ -101,15 +101,16 @@ _QUOTE_BLOCK_RE: Final[re.Pattern[str]] = re.compile(
 # tracked ``skills/hooks-daemon/`` source in self-install mode), so it is
 # excluded by full path prefix via corpus.is_vendored_daemon_install_path
 # instead, applied separately below.
-_EXCLUDED_DIR_NAMES: Final[frozenset[str]] = (
-    frozenset(
-        {
-            "untracked",
-            ".git",
-            Path(ProjectPath.CLAUDE_WORKTREES_DIR).name,
-        }
-    )
-    | COMMON_VENDORED_BUILD_DIR_NAMES
+#: This check's OWN excluded basenames, WITHOUT the vendored/build set.
+#: Kept separate (Plan 00331) because the vendored half is configurable --
+#: unioning it in at module scope froze it to the BUILT-IN names, so a
+#: project's declared ``layout.vendor_dirs`` could never reach the prune.
+_OWN_EXCLUDED_DIR_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "untracked",
+        ".git",
+        Path(ProjectPath.CLAUDE_WORKTREES_DIR).name,
+    }
 )
 
 
@@ -230,6 +231,12 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     # declared a tree out of scope was still judged when editing inside it.
     if matches_scope_exclude(rel_path, tuple(context.policy.qa.scope_exclude_globs)):
         return []
+    # The SWEEP arm gets this from its prune; the EDIT arm walks nothing, so
+    # it has to test the path's own segments (Plan 00331). The doc's own
+    # basename is excluded from the test -- `vendor_dirs` names DIRECTORIES,
+    # and the last segment here is always `CLAUDE.md`.
+    if any(part in context.policy.vendor_dirs for part in Path(rel_path).parts[:-1]):
+        return []
     registered = rel_path in context.policy.qa.registered_module_docs
     grandfathered = _matches_allowlist(rel_path, context.policy.qa.grandfather_allowlist)
     finding = _finding_for(
@@ -239,7 +246,11 @@ def _run_edit(context: CheckContext) -> list[Finding]:
 
 
 def _iter_module_doc_paths(
-    project_root: Path, agent_tree: str, scope_exclude_globs: tuple[str, ...] = ()
+    project_root: Path,
+    agent_tree: str,
+    scope_exclude_globs: tuple[str, ...] = (),
+    *,
+    vendor_dirs: frozenset[str] = COMMON_VENDORED_BUILD_DIR_NAMES,
 ) -> list[str]:
     """Every module-scoped CLAUDE.md on disk.
 
@@ -257,9 +268,16 @@ def _iter_module_doc_paths(
     ``_is_excluded``. Omitting it was a defect: a project that vendored a
     dependency carrying its own CLAUDE.md (an ansible-galaxy role, in the
     report) got a permanent sweep advisory that the one documented
-    suppression could not silence. The hardcoded ``_EXCLUDED_DIR_NAMES``
-    could not stand in for it either -- those are well-known BASENAMES, and
-    a vendored path the project chose is not guessable.
+    suppression could not silence. ``_OWN_EXCLUDED_DIR_NAMES`` could not
+    stand in for it either -- those are well-known BASENAMES, and a vendored
+    path the project chose is not guessable.
+
+    ``vendor_dirs`` is the project's EFFECTIVE vendored-directory set
+    (``ProjectLayout.vendor_dirs``, reaching here via
+    ``DocumentationPolicy``). It is a parameter rather than a module
+    constant because it is configurable: folding it into a module-scope
+    frozenset froze the prune to the BUILT-IN names, which is what left a
+    declared ``layout.vendor_dirs`` inert here (Plan 00331).
 
     Applied as a PRUNE, matching the hardcoded set: an excluded directory is
     never entered, rather than being walked and filtered afterwards. A
@@ -269,13 +287,14 @@ def _iter_module_doc_paths(
     filename-shape pattern like ``CLAUDE.md`` matches no directory) is
     caught by the post-filter below.
     """
+    excluded_dir_names = _OWN_EXCLUDED_DIR_NAMES | vendor_dirs
     matches: list[str] = []
     for dirpath, dirnames, filenames in os.walk(project_root):
         rel_dir_parts = Path(dirpath).relative_to(project_root).parts
         dirnames[:] = [
             name
             for name in dirnames
-            if name not in _EXCLUDED_DIR_NAMES
+            if name not in excluded_dir_names
             and not is_vendored_daemon_install_path((*rel_dir_parts, name))
             and not _dir_is_scope_excluded((*rel_dir_parts, name), scope_exclude_globs)
         ]
@@ -313,6 +332,7 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         context.project_root,
         context.policy.trees.agent,
         tuple(context.policy.qa.scope_exclude_globs),
+        vendor_dirs=context.policy.vendor_dirs,
     ):
         abs_path = context.project_root / rel_path
         if not abs_path.is_file():

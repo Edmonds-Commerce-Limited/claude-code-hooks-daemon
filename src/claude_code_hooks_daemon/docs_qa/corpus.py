@@ -186,9 +186,14 @@ def matches_scope_exclude(rel_path: str, patterns: tuple[str, ...]) -> bool:
 def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> bool:
     """Corpus SCOPE exclusions (DESIGN §2.1): changelog, releases, plan
     archives, (Task 3.3 T2) transient agent-worktree checkouts, (Task 3.6) a
-    vendored daemon install, (F3, Plan 00287) common vendored-dependency or
+    vendored daemon install, (F3, Plan 00287) vendored-dependency or
     build-output directories inside the configured trees, and (Plan 00289)
-    a project-configured ``scope_exclude_globs`` entry."""
+    a project-configured ``scope_exclude_globs`` entry.
+
+    The vendored/build test reads ``policy.vendor_dirs``, not the canonical
+    constant directly (Plan 00331): the constant is only the BUILT-IN half,
+    so testing it made a declared ``layout.vendor_dirs`` inert here — the
+    config existed and could not reach the check."""
     if len(rel_parts) == 1 and rel_parts[0] == _CHANGELOG_FILENAME:
         return True
     if rel_parts and rel_parts[0] == _RELEASES_DIR_NAME:
@@ -197,7 +202,7 @@ def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> boo
         return True
     if is_vendored_daemon_install_path(rel_parts):
         return True
-    if any(part in COMMON_VENDORED_BUILD_DIR_NAMES for part in rel_parts[:-1]):
+    if any(part in policy.vendor_dirs for part in rel_parts[:-1]):
         return True
     plan_completed = (policy.trees.agent, _PLAN_SUBDIR_NAME, _PLAN_COMPLETED_DIR_NAME)
     plan_cancelled = (policy.trees.agent, _PLAN_SUBDIR_NAME, _PLAN_CANCELLED_DIR_NAME)

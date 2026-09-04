@@ -47,9 +47,12 @@ is a fact about the facade's current composition, not a bug in this check.
   data, not documentation.
 - Vendored/worktree/daemon-install paths — the SAME corpus exclusion
   primitives ``module-doc-budget`` already relies on
-  (:data:`~docs_qa.corpus.COMMON_VENDORED_BUILD_DIR_NAMES`,
-  :func:`~docs_qa.corpus.is_vendored_daemon_install_path`) are reused
-  here rather than re-derived — confirmed scope, not reinvented.
+  (:func:`~docs_qa.corpus.is_vendored_daemon_install_path`) are reused
+  here rather than re-derived — confirmed scope, not reinvented. The
+  vendored-directory NAMES come from ``DocumentationPolicy.vendor_dirs``
+  (Plan 00331), which is the canonical set plus whatever the project
+  declared in ``layout.vendor_dirs`` — not the constant directly, or the
+  declaration could never reach this walk.
 
 **Severity is always ADVISE** (R13: deterministic sweep-only checks ship
 advisory; there is no before/after here for a worse-only BLOCK judgement).
@@ -92,9 +95,13 @@ _README_FILENAME: Final[str] = "README.md"
 # rather than the doc corpus (source/test-dir markdown is deliberately
 # OUTSIDE docs_qa.corpus's audience-tree scope), so the exclusion set has
 # to be re-applied here, not just its outcome.
-_EXCLUDED_DIR_NAMES: Final[frozenset[str]] = (
-    frozenset({"untracked", ".git", Path(ProjectPath.CLAUDE_WORKTREES_DIR).name})
-    | COMMON_VENDORED_BUILD_DIR_NAMES
+#
+# These are this check's OWN basenames only, WITHOUT the vendored/build
+# set: that half is configurable (``layout.vendor_dirs``), so unioning it
+# in here would freeze the prune to the BUILT-IN names and make a project's
+# declaration inert (Plan 00331). It is passed to the walk instead.
+_OWN_EXCLUDED_DIR_NAMES: Final[frozenset[str]] = frozenset(
+    {"untracked", ".git", Path(ProjectPath.CLAUDE_WORKTREES_DIR).name}
 )
 
 # Test-fixture directory conventions, mirrored from
@@ -130,21 +137,28 @@ def _matches_allowlist(rel_path: str, patterns: tuple[str, ...]) -> bool:
     return any(fnmatch(rel_path, pattern) for pattern in patterns)
 
 
-def _iter_markdown_paths(project_root: Path) -> list[str]:
+def _iter_markdown_paths(
+    project_root: Path, *, vendor_dirs: frozenset[str] = COMMON_VENDORED_BUILD_DIR_NAMES
+) -> list[str]:
     """Every ``.md`` path under ``project_root``, minus the walk exclusions.
 
     Pruned ``os.walk`` (not ``Path.rglob``, which cannot skip a matched
     directory) -- the same idiom ``module_doc_budget`` uses, for the same
     reason: never physically descend a huge vendored/worktree tree only to
     discard the results a moment later.
+
+    ``vendor_dirs`` is the project's EFFECTIVE vendored set, threaded from
+    ``DocumentationPolicy`` rather than read from the canonical constant, so
+    a declared ``layout.vendor_dirs`` prunes here too (Plan 00331).
     """
+    excluded_dir_names = _OWN_EXCLUDED_DIR_NAMES | vendor_dirs
     matches: list[str] = []
     for dirpath, dirnames, filenames in os.walk(project_root):
         rel_dir_parts = Path(dirpath).relative_to(project_root).parts
         dirnames[:] = [
             name
             for name in dirnames
-            if name not in _EXCLUDED_DIR_NAMES
+            if name not in excluded_dir_names
             and not is_vendored_daemon_install_path((*rel_dir_parts, name))
         ]
         for filename in filenames:
@@ -178,7 +192,9 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         return []
 
     findings: list[Finding] = []
-    for rel_path in _iter_markdown_paths(context.project_root):
+    for rel_path in _iter_markdown_paths(
+        context.project_root, vendor_dirs=context.policy.vendor_dirs
+    ):
         basename = rel_path.rsplit("/", 1)[-1]
         if basename in (_CLAUDE_MD_FILENAME, _README_FILENAME):
             continue

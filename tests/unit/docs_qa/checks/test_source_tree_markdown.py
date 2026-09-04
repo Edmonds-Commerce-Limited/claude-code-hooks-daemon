@@ -162,6 +162,46 @@ class TestScopeExcludeGlobs:
         assert [f.path for f in _run_sweep(context)] == ["src/pkg/NOTES.md"]
 
 
+class TestDeclaredVendorDirsArePruned:
+    """Plan 00331: this check walks the tree itself, so it needs the
+    configurable vendor set too -- the sibling of the same gap in
+    ``module_doc_budget``.
+
+    It is the sharper case of the two, because the walk exclusion here was
+    doubly stale: the check already RECEIVES a ``ProjectLayout`` (it must, to
+    know which dirs are source/test), and still pruned on a module-scope
+    frozenset built from the built-in names. A project could therefore
+    declare ``roles`` as vendored, watch this check consult its layout, and
+    still get a finding from inside the tree it had declared.
+    """
+
+    def _vendored_source_markdown(self, root: Path) -> None:
+        vendored = root / "src" / "roles" / "lts.vault-scripts"
+        vendored.mkdir(parents=True)
+        (vendored / "NOTES.md").write_text("vendored notes")
+
+    def test_a_declared_vendor_dir_is_not_reported(self, tmp_path: Path) -> None:
+        self._vendored_source_markdown(tmp_path)
+        layout = ProjectLayout(
+            source_dirs=("src",),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset({"node_modules", "vendor", "roles"}),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=(),
+        )
+        policy = DocumentationPolicy(vendor_dirs=layout.vendor_dirs)
+        assert _run_sweep(_context(tmp_path, layout=layout, policy=policy)) == []
+
+    def test_an_undeclared_dir_of_that_name_is_still_reported(self, tmp_path: Path) -> None:
+        """The skip must come from the declaration, not from the name."""
+        self._vendored_source_markdown(tmp_path)
+        context = _context(tmp_path, layout=_layout(source_dirs=("src",)))
+        assert [f.path for f in _run_sweep(context)] == ["src/roles/lts.vault-scripts/NOTES.md"]
+
+
 class TestGrandfatherAllowlist:
     def test_grandfathered_path_is_suppressed(self, tmp_path: Path) -> None:
         (tmp_path / "src" / "pkg").mkdir(parents=True)

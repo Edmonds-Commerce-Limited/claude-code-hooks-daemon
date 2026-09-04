@@ -274,6 +274,46 @@ class TestRegisterAll:
         assert pre_handlers
         assert all(h._project_layout is layout for h in pre_handlers)
 
+    def test_register_all_routes_layout_vendor_dirs_into_the_docs_policy(
+        self, registry: HandlerRegistry, router: EventRouter
+    ) -> None:
+        """Plan 00331: the declaration must reach the docs-QA policy.
+
+        `project_layout` and `documentation` were injected independently, so
+        a handler received a layout whose `vendor_dirs` its docs policy knew
+        nothing about -- and the docs policy is what `corpus._is_excluded`
+        consults. Injecting both without connecting them is what made a
+        declared vendor dir inert.
+        """
+        from claude_code_hooks_daemon.config.models import DocumentationConfig
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=("tests",),
+            config_dirs=("config",),
+            vendor_dirs=frozenset({"node_modules", "roles"}),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+
+        registry.register_all(
+            router,
+            project_layout=layout,
+            documentation=DocumentationConfig(enabled=True),
+        )
+
+        documented = [
+            handler
+            for handlers in router.get_all_handlers().values()
+            for handler in handlers
+            if getattr(handler, "_documentation", None) is not None
+        ]
+        assert documented, "no documentation-tagged handler registered"
+        assert all("roles" in h._documentation.vendor_dirs for h in documented)
+
     def test_register_all_defaults_project_layout_to_none(
         self, registry: HandlerRegistry, router: EventRouter
     ) -> None:

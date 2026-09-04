@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.docs_qa.policy import (
     DEFAULT_AGENT_TREE,
     DEFAULT_HUMAN_TREE,
@@ -91,6 +92,47 @@ class TestPolicyFromConfig:
         policy = policy_from_config(DocumentationConfig())
         assert isinstance(policy, DocumentationPolicy)
         assert policy.qa.generated_docs[0].glob == ".claude/HOOKS-DAEMON.md"
+
+
+class TestVendorDirs:
+    """Plan 00331: the route by which a declared ``layout.vendor_dirs``
+    reaches docs QA.
+
+    The field shipped declarable and inert -- ``ProjectLayout`` merged it and
+    exposed ``is_vendored_path()``, but ``DocumentationPolicy`` carried no
+    vendor axis at all, so ``corpus._is_excluded`` tested the raw canonical
+    frozenset and no declaration could ever reach it.
+
+    The merge itself stays in ``ProjectLayout`` (it owns the
+    ``additive``/``replace`` semantics). What arrives here is the EFFECTIVE
+    set, already merged -- so this policy honours exactly what it is handed
+    rather than re-deriving it.
+    """
+
+    def test_defaults_to_the_canonical_set(self) -> None:
+        assert DocumentationPolicy().vendor_dirs == CORE_VENDORED_BUILD_DIR_NAMES
+
+    def test_omitting_the_argument_keeps_the_canonical_set(self) -> None:
+        """A caller with no layout to hand must not lose the built-ins."""
+        assert policy_from_config(_FakeDocumentationConfig()).vendor_dirs == (
+            CORE_VENDORED_BUILD_DIR_NAMES
+        )
+
+    def test_supplied_dirs_are_used_verbatim(self) -> None:
+        """`replace` mode must survive the trip.
+
+        If this re-unioned with the canonical set, a project declaring
+        `mode: replace` would silently keep every built-in name -- the
+        opposite of what it asked for.
+        """
+        policy = policy_from_config(_FakeDocumentationConfig(), vendor_dirs=("roles",))
+        assert policy.vendor_dirs == frozenset({"roles"})
+
+    def test_an_additive_declaration_arrives_merged(self) -> None:
+        effective = (*sorted(CORE_VENDORED_BUILD_DIR_NAMES), "roles")
+        policy = policy_from_config(_FakeDocumentationConfig(), vendor_dirs=effective)
+        assert "roles" in policy.vendor_dirs
+        assert CORE_VENDORED_BUILD_DIR_NAMES <= policy.vendor_dirs
 
 
 class TestPlainDataclasses:

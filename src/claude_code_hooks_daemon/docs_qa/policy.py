@@ -13,6 +13,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
+
 DEFAULT_AGENT_TREE = "CLAUDE"
 DEFAULT_HUMAN_TREE = "docs"
 DEFAULT_RESIDENT_AT_IMPORTS: tuple[str, ...] = ("CLAUDE.md",)
@@ -51,11 +53,23 @@ class DocumentationQaPolicy:
 
 @dataclass(frozen=True)
 class DocumentationPolicy:
-    """Top-level documentation QA policy (mirrors ``DocumentationConfig``)."""
+    """Top-level documentation QA policy (mirrors ``DocumentationConfig``).
+
+    ``vendor_dirs`` is the one axis here with no ``documentation:`` config
+    home: it mirrors ``layout.vendor_dirs``, which is a project-wide truth
+    (Plan 00288) rather than a docs-QA setting. It arrives as PLAIN VALUES
+    from the caller for the same reason every other field does — importing
+    ``ProjectLayout`` would couple this package to ``core``, and
+    ``core.project_layout`` already imports ``docs_qa.corpus``, so the
+    coupling would close a cycle.
+    """
 
     enabled: bool = False
     trees: DocumentationTreesPolicy = field(default_factory=DocumentationTreesPolicy)
     qa: DocumentationQaPolicy = field(default_factory=DocumentationQaPolicy)
+    #: Effective vendored/build directory NAMES. Defaults to the canonical
+    #: constant so a caller with no layout to hand loses nothing.
+    vendor_dirs: frozenset[str] = CORE_VENDORED_BUILD_DIR_NAMES
 
 
 class TreesConfigProtocol(Protocol):
@@ -122,11 +136,29 @@ class DocumentationConfigProtocol(Protocol):
     def qa(self) -> QaConfigProtocol: ...
 
 
-def policy_from_config(config: DocumentationConfigProtocol) -> DocumentationPolicy:
-    """Build a plain-values :class:`DocumentationPolicy` from the typed config."""
+def policy_from_config(
+    config: DocumentationConfigProtocol,
+    *,
+    vendor_dirs: Sequence[str] | None = None,
+) -> DocumentationPolicy:
+    """Build a plain-values :class:`DocumentationPolicy` from the typed config.
+
+    Args:
+        config: The ``documentation:`` block, structurally typed.
+        vendor_dirs: The project's EFFECTIVE vendored/build directory names,
+            ordinarily ``ProjectLayout.vendor_dirs``. Already merged by the
+            caller — the ``additive``/``replace`` semantics belong to
+            ``ProjectLayout``, so this is used verbatim and never re-unioned
+            with the canonical set (re-unioning would silently defeat
+            ``mode: replace``). ``None`` means "no layout available", which
+            keeps the canonical default rather than emptying the set.
+    """
     qa = config.qa
     return DocumentationPolicy(
         enabled=config.enabled,
+        vendor_dirs=(
+            CORE_VENDORED_BUILD_DIR_NAMES if vendor_dirs is None else frozenset(vendor_dirs)
+        ),
         trees=DocumentationTreesPolicy(agent=config.trees.agent, human=config.trees.human),
         qa=DocumentationQaPolicy(
             edit_mode=qa.edit_mode,

@@ -456,7 +456,22 @@ class HandlerRegistry:
                                     policy_from_config,
                                 )
 
-                                doc_attrs = {"documentation": policy_from_config(documentation)}
+                                # The layout's vendor_dirs travels WITH the
+                                # policy (Plan 00331). Injecting the two
+                                # independently is what left a declared
+                                # `layout.vendor_dirs` inert: docs QA's
+                                # exclusion reads the policy, so a layout the
+                                # handler also holds never reached the check.
+                                doc_attrs = {
+                                    "documentation": policy_from_config(
+                                        documentation,
+                                        vendor_dirs=(
+                                            None
+                                            if project_layout is None
+                                            else tuple(project_layout.vendor_dirs)
+                                        ),
+                                    )
+                                }
                                 for attr_key, attr_val in doc_attrs.items():
                                     setattr(instance, f"_{attr_key}", attr_val)
 

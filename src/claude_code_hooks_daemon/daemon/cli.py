@@ -4802,7 +4802,12 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
         return 2
     project_root = resolved_root
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
-    policy = policy_from_config(config.documentation)
+    layout = ProjectLayout.from_config(config)
+    # A declared `layout.vendor_dirs` must exclude a tree from the CLI sweep
+    # too (Plan 00331) -- the sweep is the surface a human runs by hand, so
+    # honouring the declaration only at handler-dispatch time would report
+    # findings the edit-time check has already agreed to skip.
+    policy = policy_from_config(config.documentation, vendor_dirs=tuple(layout.vendor_dirs))
 
     if getattr(args, "check_staged", False):
         clean_scope = CLEAN_SCOPE_CORPUS
@@ -4864,7 +4869,6 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
         untracked_dir = _daemon_untracked_dir(project_root)
         index_path = untracked_dir / "docs-qa" / "index.json"
         corpus = build_and_save_corpus(project_root, policy, index_path)
-        layout = ProjectLayout.from_config(config)
         context = sweep_context(
             project_root=project_root, policy=policy, corpus=corpus, layout=layout
         )

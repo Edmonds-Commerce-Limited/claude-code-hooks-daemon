@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.docs_qa.checks.module_doc_budget import (
     CHECK_ID,
     CHECKS,
@@ -559,6 +560,91 @@ class TestConfiguredScopeExclusionsAreHonoured:
         self._write_role_doc(tmp_path)
 
         assert _iter_module_doc_paths(tmp_path, "CLAUDE", (self._ROLES_GLOB,)) == []
+
+
+class TestDeclaredVendorDirsArePruned:
+    """Plan 00331: this check reads the CANONICAL set, so a declared
+    ``layout.vendor_dirs`` never reached it.
+
+    The sibling defect to the ``scope_exclude_globs`` gap above, and the same
+    client tree. ``scope_exclude_globs`` gave them a workaround; declaring the
+    directory as vendored is the mechanism they should have been able to use,
+    and it silently did nothing.
+
+    ``roles`` is used deliberately -- it is NOT in
+    ``CORE_VENDORED_BUILD_DIR_NAMES`` and must never be added to it (the
+    canonical set admits only names no consumer could be wrong to skip), so a
+    test using ``vendor/`` or ``node_modules`` would pass without the fix.
+    """
+
+    _DECLARED = frozenset(CORE_VENDORED_BUILD_DIR_NAMES | {"roles"})
+
+    def _write_role_doc(self, root: Path) -> Path:
+        doc = root / "infra" / "roles" / "lts.vault-scripts" / "CLAUDE.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(_LONG_BODY)
+        return doc
+
+    def test_sweep_skips_a_module_doc_under_a_declared_vendor_dir(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        self._write_role_doc(tmp_path)
+
+        context = sweep_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(vendor_dirs=self._DECLARED),
+            corpus=DocCorpus(project_root=tmp_path),
+        )
+        assert _run_sweep(context) == []
+
+    def test_edit_skips_a_module_doc_under_a_declared_vendor_dir(self, tmp_path: Path) -> None:
+        doc = self._write_role_doc(tmp_path)
+
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(vendor_dirs=self._DECLARED),
+            file_path=doc,
+            file_content=_LONG_BODY,
+            file_exists_before=False,
+        )
+        assert _run_edit(context) == []
+
+    def test_the_walk_prunes_rather_than_post_filters(self, tmp_path: Path) -> None:
+        """Same reason the hardcoded set prunes: a vendored tree must never
+        be ENTERED, or a client pays the walk cost on every session start to
+        produce findings that are then discarded."""
+        (tmp_path / "CLAUDE").mkdir()
+        self._write_role_doc(tmp_path)
+
+        assert _iter_module_doc_paths(tmp_path, "CLAUDE", vendor_dirs=self._DECLARED) == []
+
+    def test_an_undeclared_vendor_dir_is_still_reported(self, tmp_path: Path) -> None:
+        """The skip must come from the DECLARATION, not from the name --
+        otherwise this passes just as well if `roles` were quietly added to
+        the canonical set, which is the Non-Goal."""
+        (tmp_path / "CLAUDE").mkdir()
+        self._write_role_doc(tmp_path)
+
+        context = sweep_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            corpus=DocCorpus(project_root=tmp_path),
+        )
+        assert [finding.path for finding in _run_sweep(context)] == [
+            "infra/roles/lts.vault-scripts/CLAUDE.md"
+        ]
+
+    def test_a_declaration_does_not_displace_the_canonical_set(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        vendored = tmp_path / "node_modules" / "pkg"
+        vendored.mkdir(parents=True)
+        (vendored / "CLAUDE.md").write_text(_LONG_BODY)
+
+        context = sweep_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(vendor_dirs=self._DECLARED),
+            corpus=DocCorpus(project_root=tmp_path),
+        )
+        assert _run_sweep(context) == []
 
 
 class TestMissingFilePathOrContent:

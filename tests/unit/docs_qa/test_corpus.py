@@ -132,6 +132,47 @@ class TestIsInScope:
         canonical core -- no separate membership to drift out of sync."""
         assert COMMON_VENDORED_BUILD_DIR_NAMES == CORE_VENDORED_BUILD_DIR_NAMES
 
+    def test_a_declared_vendor_dir_is_excluded(self, tmp_path: Path) -> None:
+        """Plan 00331: `layout.vendor_dirs` shipped declarable and inert.
+
+        The client case: an ansible-galaxy role tree is third-party code, but
+        `roles` is not in the canonical set and cannot be added to it (its
+        inclusion criterion admits only names no consumer could ever be wrong
+        to skip). The CONFIG axis exists for exactly this, and did nothing.
+        """
+        _scaffold(tmp_path)
+        policy = DocumentationPolicy(vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"})
+        assert not is_in_scope(
+            tmp_path / "docs" / "roles" / "vault" / "README.md", tmp_path, policy
+        )
+
+    def test_a_declaration_does_not_displace_the_canonical_set(self, tmp_path: Path) -> None:
+        """Additive is the default mode, so the built-ins must survive it."""
+        _scaffold(tmp_path)
+        policy = DocumentationPolicy(vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"})
+        assert not is_in_scope(tmp_path / "docs" / "node_modules" / "README.md", tmp_path, policy)
+
+    def test_an_undeclared_dir_of_that_name_stays_in_scope(self, tmp_path: Path) -> None:
+        """The exclusion must come from the DECLARATION, not from the name.
+
+        Without this the previous two tests would still pass if `roles` were
+        quietly added to the canonical set -- which is the Non-Goal.
+        """
+        _scaffold(tmp_path)
+        assert is_in_scope(
+            tmp_path / "docs" / "roles" / "vault" / "README.md", tmp_path, DocumentationPolicy()
+        )
+
+    def test_iter_corpus_paths_never_returns_a_declared_vendor_dir(self, tmp_path: Path) -> None:
+        """`is_in_scope` is the primitive; the sweep is what a human sees."""
+        _scaffold(tmp_path)
+        role_doc = tmp_path / "docs" / "roles" / "vault" / "README.md"
+        role_doc.parent.mkdir(parents=True)
+        role_doc.write_text("# vendored role\n")
+        policy = DocumentationPolicy(vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"})
+        assert role_doc not in iter_corpus_paths(tmp_path, policy)
+        assert role_doc in iter_corpus_paths(tmp_path, DocumentationPolicy())
+
     def test_unscoped_directory_is_excluded(self, tmp_path: Path) -> None:
         _scaffold(tmp_path)
         assert not is_in_scope(tmp_path / "src" / "notes.md", tmp_path, DocumentationPolicy())

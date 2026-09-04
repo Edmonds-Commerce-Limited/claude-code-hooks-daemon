@@ -1,6 +1,6 @@
 # Plan 00331: vendor dirs config is inert
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-04
 **Owner**: joseph
 **Priority**: High
@@ -81,15 +81,31 @@ what exists.
   The 23 language-strategy literals are legitimately per-language (a Go
   project's `vendor/` is not a JS project's `node_modules`) and are the
   Non-Goal above. The actionable set is the 8 non-strategy literal-only
-  modules — `config/models.py`, `core/workspace.py`, `lint_on_edit`,
+  modules — `config.models`, `core.workspace`, `lint_on_edit`,
   `markdown_organization`, `qa_suppression`, `security_antipattern`,
   `tdd_enforcement`, `secret_file_hygiene_checker` — plus the 8 that use BOTH
   the canonical set and a bare literal, which need a reason for carrying each.
 
-- [ ] ⬜ **Task 1.2**: Give docs QA a route to the declaration. Today
-  `DocumentationPolicy` has no vendor field, so `corpus._is_excluded` could
-  not honour one even if asked. This decides whether the policy grows a field
-  or the corpus takes the layout facade.
+  Three of the canonical-set consumers were routed under Task 1.2, since
+  their fix WAS the docs-QA route: `docs_qa/corpus.py`,
+  `docs_qa/checks/module_doc_budget.py` and
+  `docs_qa/checks/source_tree_markdown.py`.
+
+- [x] ✅ **Task 1.2**: Give docs QA a route to the declaration. Resolved by
+  growing `DocumentationPolicy` a `vendor_dirs` field, NOT by handing the
+  corpus a `ProjectLayout`: `core.project_layout` already imports
+  `docs_qa.corpus`, so the facade route would close an import cycle, and it
+  would break the package's deliberate plain-values decoupling. The merge
+  stays in `ProjectLayout` (it owns `additive`/`replace`); what travels is
+  the EFFECTIVE set, used verbatim — re-unioning it with the canonical
+  constant on arrival would have silently defeated `mode: replace`.
+
+  Wired at both entry points: the registry (`policy_from_config` now takes
+  the injected `project_layout`'s dirs) and the `docs-qa` CLI. Three readers
+  moved off the raw constant — `corpus._is_excluded`, and the two checks
+  that run their OWN pruned `os.walk` rather than reading the corpus
+  (`module_doc_budget`, `source_tree_markdown`), each of which had frozen the
+  built-in names into a module-scope frozenset.
 
 - [ ] ⬜ **Task 1.3**: Resolve layout PER PROJECT, not from the root block. A
   project's `layout:` never inherits the top-level one (Plan 00300 —
@@ -97,10 +113,29 @@ what exists.
   sub-project's `vendor_dirs` would otherwise be ignored the same way every
   declaration is ignored today.
 
-- [ ] ⬜ **Task 1.4**: A test that a DECLARED vendor dir excludes a tree.
+  **Blocked on a scope decision, and deliberately not done on sight.** docs
+  QA has NO per-project concept at all: zero references to `project_registry`
+  anywhere in the package, against 8 handlers that resolve per-project via
+  `resolve_workspace`. Its corpus is one project-root-wide index and its doc
+  trees are single root-level directories, so "this sub-project's vendor
+  dirs" has nowhere to attach. Introducing per-project resolution into docs
+  QA is a substantially larger change than wiring the vendor axis, and the
+  cheap-looking middle ground — unioning every declared project's
+  `vendor_dirs` — is worse than doing nothing: project A declaring `roles`
+  would silently hide project B's `roles/` documentation, which is the
+  hiding-without-telling failure this plan exists to end.
+
+- [x] ✅ **Task 1.4**: A test that a DECLARED vendor dir excludes a tree.
   Its absence is why this shipped inert: the field, the merge and the facade
   are all covered, and nothing asserted that declaring one changes any
   consumer's behaviour.
+
+  16 tests. Each behaviour test is paired with a guard asserting that an
+  UNDECLARED directory of the same name is still reported — without it the
+  suite would pass equally well if `roles` were quietly added to the
+  canonical set, which is this plan's Non-Goal. `roles` is used throughout
+  for the same reason: a test written against `vendor/` or `node_modules`
+  passes without the fix.
 
 ### Phase 2: Honour daemon.exclude_paths
 
@@ -134,8 +169,15 @@ what exists.
 
 ## Success Criteria
 
-- [ ] Declaring `layout.vendor_dirs: [roles]` stops docs QA reporting inside
-  an ansible-galaxy role tree — the client's case, end to end.
+- [x] Declaring `layout.vendor_dirs: [roles]` stops docs QA reporting inside
+  an ansible-galaxy role tree — the client's case, end to end. Verified
+  against a real on-disk YAML driving the production chain
+  (`Config.load_or_default` → `ProjectLayout.from_config` →
+  `policy_from_config` → `build_and_save_corpus` → `run_stage(SWEEP)`), and
+  verified RED on the pre-fix tree: there the config parsed and
+  `ProjectLayout` merged `roles` into `vendor_dirs` CORRECTLY, and the sweep
+  reported the finding anyway. That is the diagnosis in one run — the facade
+  was never broken, it simply had no consumer.
 - [ ] A first-party library vendored inside a vendor directory is still
   checked when re-included by negation.
 - [ ] A monorepo sub-project's declared `vendor_dirs` is honoured.
