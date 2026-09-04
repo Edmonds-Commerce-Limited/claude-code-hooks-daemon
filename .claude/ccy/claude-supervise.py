@@ -2898,6 +2898,16 @@ class CompactStateMachine:
         # vouch for a silent substitution in another.
         self._manual_selector_ts: float | None = None
         self._manual_selector_session: str | None = None
+        # Plan 00328: an injected `/model <family>` whose landing has not been
+        # observed yet (`session:family` + when), and the families a restore
+        # has been PROVEN unable to reach. A PTY write succeeding is not the
+        # model changing: on an allowance-exhausted account the switch returns
+        # 429 and the session stays put. One failure is enough -- the reason
+        # is unknowable from here, and retrying a family that did not come
+        # back is what turned a rate limit into a `/compact`.
+        self._restore_awaiting: str | None = None
+        self._restore_awaiting_ts: float | None = None
+        self._unavailable_families: list[str] = []
         # Shared-marker debt: a typed /model whose daemon-facing marker file
         # has not been written yet because no tick so far could name the
         # session (no fresh reading, no tracked session). decide_once retries
@@ -2936,7 +2946,13 @@ class CompactStateMachine:
         self._effort_last_fired_ts = time.time() if now_wall is None else now_wall
         self._effort_pending = None
 
-    def mark_model_restore(self, now_wall: float | None = None) -> None:
+    def mark_model_restore(
+        self,
+        now_wall: float | None = None,
+        *,
+        family: str | None = None,
+        session: str | None = None,
+    ) -> None:
         """Count a fired auto-restore /model flip-back for cap/backoff purposes.
 
         Called by the HOST only after a SUCCESSFUL AUTO-RESTORE injection
@@ -2946,9 +2962,17 @@ class CompactStateMachine:
         (see ``model_restore_due``). The post-flip effort correction is
         handled unconditionally by the coupled-effort mechanism, not by this
         method -- see ``arm_coupled_effort``.
+
+        "SUCCESSFUL" here means the PTY WRITE succeeded, which is NOT the same
+        as the model changing (Plan 00328). ``family``/``session`` record what
+        the injection asked for so the next reading can be checked against it
+        -- see ``note_model_reading``.
         """
         self._model_restores += 1
         self._model_restore_last_ts = time.time() if now_wall is None else now_wall
+        if family and session:
+            self._restore_awaiting = f"{session}:{family}"
+            self._restore_awaiting_ts = self._model_restore_last_ts
 
     def model_restore_due(self, now_wall: float) -> str | None:
         """Return the family to restore to when the flip-back is due, else None.
@@ -2969,6 +2993,12 @@ class CompactStateMachine:
         ):
             return None
         if now_wall - self._downgrade_started_ts < delay:
+            return None
+        if self._downgrade_from_family in self._unavailable_families:
+            # Plan 00328: already proven unreachable this process. Retrying
+            # types a command at the human that cannot work, and on an
+            # allowance-exhausted account surfaces an API error in their
+            # session.
             return None
         if self._model_restores >= _MAX_MODEL_RESTORES:
             return None
@@ -3001,6 +3031,13 @@ class CompactStateMachine:
         if not self._policy.flag_compact_enabled:
             return False
         if self._downgrade_episode is None or self._model_restores < 1:
+            return False
+        if self._downgrade_from_family in self._unavailable_families:
+            # Plan 00328: a flip-flop means a restore LANDED and the
+            # classifier then re-fired. An episode still open because the
+            # restore never took is a different fact, and compacting over it
+            # rewrites the human's context to fix something a `/compact`
+            # cannot reach.
             return False
         if self._flag_compactions >= _MAX_FLAG_COMPACTIONS:
             return False
@@ -3354,6 +3391,34 @@ class CompactStateMachine:
         self._manual_model_note = None
         return note
 
+    def _settle_awaited_restore(self, *, family: str, session: str, reading_ts: float) -> None:
+        """Decide whether an injected restore actually LANDED (Plan 00328).
+
+        The first reading rendered AFTER the injection is the verdict, and it
+        needs no theory about why: the family is either on screen or it is
+        not. A miss marks the family unreachable, which stops both the retry
+        and the flip-flop `/compact` that read the still-open episode as a
+        classifier re-fire. It also drops the coupled effort correction, which
+        targets the floor of a family that never arrived -- in the field that
+        drove effort to fable's `low` while the session sat on opus.
+
+        Readings older than the injection are ignored: the sidecar only
+        refreshes on a status render, so a stale one says nothing yet.
+        """
+        awaiting = self._restore_awaiting
+        if awaiting is None or self._restore_awaiting_ts is None:
+            return
+        awaited_session, _, awaited_family = awaiting.partition(":")
+        if session != awaited_session or reading_ts <= self._restore_awaiting_ts:
+            return
+        self._restore_awaiting = None
+        self._restore_awaiting_ts = None
+        if family == awaited_family:
+            return
+        if awaited_family not in self._unavailable_families:
+            self._unavailable_families.append(awaited_family)
+        self._coupled_effort_pending = None
+
     def note_model_reading(self, reading: SidecarReading, *, now_wall: float) -> None:
         """Track the foreground model; recompute the floor-based effort episode.
 
@@ -3400,6 +3465,7 @@ class CompactStateMachine:
         # exactly the tick this needs it: the family we fell FROM identifies a
         # landing the supervisor itself caused. See `supervisor_restore` below.
         restore_target = self._downgrade_from_family
+        self._settle_awaited_restore(family=family, session=session, reading_ts=reading.ts)
         if self._downgrade_episode is not None:
             ep_session, _, ep_family = self._downgrade_episode.partition(":")
             if session != ep_session or _family_rank(family) > _family_rank(ep_family):
@@ -3620,6 +3686,9 @@ class CompactStateMachine:
             "manual_model_ts": self._manual_model_ts,
             "manual_selector_ts": self._manual_selector_ts,
             "manual_selector_session": self._manual_selector_session,
+            "restore_awaiting": self._restore_awaiting,
+            "restore_awaiting_ts": self._restore_awaiting_ts,
+            "unavailable_families": list(self._unavailable_families),
             "manual_model_note": self._manual_model_note,
             "manual_marker_pending": self._manual_marker_pending,
             "manual_effort_active": self._manual_effort_active,
@@ -3719,6 +3788,17 @@ class CompactStateMachine:
         if "manual_selector_session" in state:
             raw = state["manual_selector_session"]
             self._manual_selector_session = None if raw is None else str(raw)
+        if "restore_awaiting" in state:
+            raw = state["restore_awaiting"]
+            self._restore_awaiting = None if raw is None else str(raw)
+        if "restore_awaiting_ts" in state:
+            raw = state["restore_awaiting_ts"]
+            self._restore_awaiting_ts = None if raw is None else _coerce_float(raw)
+        if "unavailable_families" in state:
+            raw = state["unavailable_families"]
+            self._unavailable_families = (
+                [str(item) for item in raw] if isinstance(raw, list) else []
+            )
         if "manual_model_note" in state:
             raw = state["manual_model_note"]
             self._manual_model_note = None if raw is None else str(raw)
@@ -5114,7 +5194,11 @@ def _apply_post_injection_bookkeeping(
         # the manual test-trigger switch has its own signal-consumption
         # lifecycle and must not eat into that budget.
         if outcome.model_switch_is_auto_restore:
-            machine.mark_model_restore()
+            machine.mark_model_restore(
+                now_wall,
+                family=outcome.model_switch_family,
+                session=outcome.model_switch_session,
+            )
         # BOTH paths owe the coupled effort correction, unconditionally.
         if outcome.model_switch_family is not None:
             machine.arm_coupled_effort(
