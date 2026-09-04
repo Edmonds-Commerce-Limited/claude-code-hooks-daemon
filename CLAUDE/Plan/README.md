@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00328: human model choice cannot be read from keystrokes](00328-human-model-choice-cannot-be-read-from-keystrokes/PLAN.md) - Not Started (a live dogfood on an allowance-exhausted account proved Plan 00316's keystroke-derived recognition cannot see a model change made through Claude Code's picker or autocomplete; the supervisor overrode the human's choice, hit a 429, and escalated to an unrequested `/compact`)
+
 - [00327: hooks contract refresh audit](00327-hooks-contract-refresh-audit/PLAN.md) - Not Started (upstream's hooks documentation has changed since the 2.1.252 audit — `e2462deb…` vs META's `d514bf57…` — so the vendored contract needs its verified section-by-section extraction audit, and the mechanisable half of the refresh procedure folded into a `contract-status` command)
 
 - [00319: supervisor release review followups](00319-supervisor-release-review-followups/PLAN.md) - Not Started (the ten non-blocking findings surviving the v3.60.0 code-review gate, grouped into silent failures, unbounded per-session growth, and writer/reader contract drift; the three BLOCKING siblings shipped in 55dd5b2e)
