@@ -180,6 +180,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00332: docs qa vendor truth per project](Completed/00332-docs-qa-vendor-truth-per-project/PLAN.md) - Complete at `116207c7` + the archiving commit (a monorepo sub-project's `layout.vendor_dirs` never reached docs QA, which was handed one flat set from the ROOT block; the vendored-path predicate is now resolved per-path against the owning project, longest root winning)
+
 - [00331: vendor dirs config is inert](Completed/00331-vendor-dirs-config-is-inert/PLAN.md) - Complete at `6b4fa867`…`ba7269d5` + the archiving commit (`layout.vendor_dirs` was a facade with zero production consumers, so declaring one did nothing; every reader now routes through it, resolved from the file's owning project)
 
 - [00326: remote docs vendoring and staleness](Completed/00326-remote-docs-vendoring-and-staleness/PLAN.md) - Complete at `43cf91a0` through `ef342df4` (upstream docs vendored as markdown carrying provenance frontmatter, with a `fidelity` field that separates a citable corpus from a cache; four handlers gate writes and commits, route `WebFetch` to the local copy, and report staleness)
@@ -238,8 +240,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00292: codex cli dual host research](Completed/00292-codex-cli-dual-host-research/PLAN.md) - Complete (research-only, 9-agent Sonnet workflow: Codex CLI hooks are verdict-based but cover only shell/apply_patch/MCP calls today; 6 of our 31 wired events have any counterpart; recommendation in FINDINGS.md — host-adapter + verdict degradation, deferred until Codex Edit/Write hook coverage lands)
 
-- [00289: docs gold standard zero findings](Completed/00289-docs-gold-standard-zero-findings/PLAN.md) - Complete at `671b6eb7` + `01312f29` + the archiving commit (whole-repo `docs-qa --sweep` driven from 34 advisories to zero: two checker bug fixes, a new `scope_exclude_globs` corpus exclusion, a live-template link fix, root `CLAUDE.md` `@`-import conversion, module-doc thinning/promotion, and the `release-agent.md` duplicate)
-
 ## Blocked / On Hold Plans
 
 - **00032, 00034, 00035** - On hold pending upstream Claude Code delegate mode fix (GitHub #23447, #25037)
@@ -277,9 +277,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 331 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 332 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 270 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 271 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
 - **Active**: 44 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
@@ -287,12 +287,12 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 44 + 270 + 7 = **321 folders**, spanning
-  **318 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 44 + 271 + 7 = **322 folders**, spanning
+  **319 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  331 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  332 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a

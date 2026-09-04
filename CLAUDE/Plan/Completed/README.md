@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00289: docs gold standard zero findings](00289-docs-gold-standard-zero-findings/PLAN.md) - Complete at `671b6eb7` + `01312f29` + the archiving commit (whole-repo `docs-qa --sweep` driven from 34 advisories to zero: two checker bug fixes, a new `scope_exclude_globs` corpus exclusion, a live-template link fix, root `CLAUDE.md` `@`-import conversion, module-doc thinning/promotion, and the `release-agent.md` duplicate)
+
 - [00288: project-layout config SSoT](00288-project-layout-config-ssot/PLAN.md) - Complete at `3aa68a72`…`e8dea14b` + the archiving commit (top-level `layout:` block and `ProjectLayout` facade as the single access API for directory truths)
 
 - [00287: docs-qa pre-release punch list](00287-docs-qa-prerelease-punch-list/PLAN.md) - Complete at `94c41f61` (F1-F4 + N1 findings from the Plan 00284 post-completion review fixed; sweep re-verified at the 34-advisory baseline)
