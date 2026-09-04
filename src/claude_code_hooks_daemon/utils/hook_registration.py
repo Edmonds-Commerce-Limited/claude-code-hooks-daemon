@@ -290,6 +290,21 @@ def validate_hook_commands(settings: dict[str, object]) -> list[str]:
             issues.append(
                 f"{json_key} command does not end with {expected_suffix}: " f"got {command!r}"
             )
+        elif not command.startswith(BASH_INVOCATION_PREFIX):
+            # Plan 00102 Phase 6. Ending with the right wrapper path was the
+            # only thing checked here, and a BARE path satisfies that — so the
+            # single most common way a registration breaks (a wrapper whose
+            # exec bit was dropped, invoked directly) was invisible to the
+            # validator whose job is to notice exactly that.
+            #
+            # Any `bash`-led invocation passes, not just the canonical string:
+            # a deliberate `bash -x` for debugging still makes the exec bit
+            # irrelevant, which is the property being asserted. Reporting it
+            # would turn a working custom invocation into a false fault.
+            issues.append(
+                f"{json_key} command is not invoked through bash, so it depends "
+                f"on the wrapper's executable bit: got {command!r}"
+            )
 
     return issues
 
@@ -312,7 +327,14 @@ _HOOK_COMMAND_TYPE = "command"
 # `prompt`/`agent` hooks have a `type` and no `command` key at all, and that
 # absence is how they are told apart from a daemon registration.
 _HOOK_COMMAND_KEY = "command"
-_HOOK_COMMAND_TEMPLATE = 'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash_key}'
+# Public because it is the SSoT for the command SHAPE, and three places must
+# render byte-identical strings: this reconciler, install.py's emitter (pinned
+# by a drift test) and the Tier 2 migrator, which has to REBUILD a command
+# rather than merely prefix one — a relative legacy path must come out
+# anchored, not as `bash .claude/hooks/x` (Plan 00102 Phase 6).
+HOOK_COMMAND_TEMPLATE = 'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash_key}'
+# The `bash ` lead-in, shared with the migrator's already-migrated check.
+BASH_INVOCATION_PREFIX = "bash "
 _DEFAULT_HOOK_TIMEOUT_SECONDS = 60
 # PreToolUse / PostToolUse carry an explicit per-invocation timeout; all other
 # forwarders use Claude Code's default. Kept in lockstep with install.py's
@@ -338,7 +360,7 @@ def _build_hook_registration(bash_key: str) -> list[dict[str, Any]]:
     """Build the settings.json ``hooks[event]`` value for a single forwarder."""
     command: dict[str, Any] = {
         "type": _HOOK_COMMAND_TYPE,
-        "command": _HOOK_COMMAND_TEMPLATE.format(bash_key=bash_key),
+        "command": HOOK_COMMAND_TEMPLATE.format(bash_key=bash_key),
     }
     if bash_key in _BASH_KEYS_WITH_TIMEOUT:
         command["timeout"] = _DEFAULT_HOOK_TIMEOUT_SECONDS

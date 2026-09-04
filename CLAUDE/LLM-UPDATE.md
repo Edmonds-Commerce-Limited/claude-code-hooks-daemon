@@ -794,7 +794,7 @@ cd .claude/hooks-daemon
 .claude/hooks-daemon/bin/hooks-daemon status
 
 # 3. Hook test
-echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | ../../.claude/hooks/pre-tool-use
+echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | bash ../../.claude/hooks/pre-tool-use
 ```
 
 ### Full Verification (for major upgrades)
@@ -854,7 +854,7 @@ git -C .claude/hooks-daemon stash pop
 ls -la .claude/hooks/
 
 # 3. Test hook directly
-echo '{"tool_name":"Bash","tool_input":{"command":"test"}}' | .claude/hooks/pre-tool-use
+echo '{"tool_name":"Bash","tool_input":{"command":"test"}}' | bash .claude/hooks/pre-tool-use
 ```
 
 If hooks still fail: Restart Claude Code session (only needed if new event types were added).

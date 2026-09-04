@@ -91,11 +91,21 @@ generate_settings_json() {
     # Last-resort inert fallback for the (unreachable in practice) case where no
     # venv python is available. Registers only the long-standing core hooks; the
     # session-start hook_registration_checker self-heals the rest (Plan 00185).
+    #
+    # Every command here MUST be `bash`-invoked and anchored to
+    # $CLAUDE_PROJECT_DIR (Plan 00102 Phase 6). This block used to emit bare
+    # RELATIVE paths, which nothing downstream could repair: the Tier 2
+    # migrator only rewrote commands already carrying the variable, and the
+    # reconciler only ADDS missing events rather than fixing present ones. So
+    # "the self-heal will sort it out" held for the missing events and not for
+    # these, and a fallback install stayed cwd-dependent and exec-bit-dependent
+    # for good. The delimiter is quoted, so $CLAUDE_PROJECT_DIR survives to
+    # settings.json for Claude Code to expand rather than being expanded here.
     cat > "$target" <<'SETTINGS_EOF'
 {
   "statusLine": {
     "type": "command",
-    "command": ".claude/hooks/status-line"
+    "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/status-line"
   },
   "hooks": {
     "PreToolUse": [
@@ -103,7 +113,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/pre-tool-use",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-tool-use",
             "timeout": 60
           }
         ]
@@ -114,7 +124,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/post-tool-use",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-tool-use",
             "timeout": 60
           }
         ]
@@ -125,7 +135,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/session-start"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-start"
           }
         ]
       }
@@ -135,7 +145,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/notification"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/notification"
           }
         ]
       }
@@ -145,7 +155,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/permission-request"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/permission-request"
           }
         ]
       }
@@ -155,7 +165,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/pre-compact"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-compact"
           }
         ]
       }
@@ -165,7 +175,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/session-end"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-end"
           }
         ]
       }
@@ -175,7 +185,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/stop"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop"
           }
         ]
       }
@@ -185,7 +195,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/subagent-stop"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/subagent-stop"
           }
         ]
       }
@@ -195,7 +205,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/user-prompt-submit"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/user-prompt-submit"
           }
         ]
       }
@@ -205,7 +215,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/setup"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/setup"
           }
         ]
       }
@@ -215,7 +225,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/permission-denied"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/permission-denied"
           }
         ]
       }
@@ -225,7 +235,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/cwd-changed"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/cwd-changed"
           }
         ]
       }
@@ -235,7 +245,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/worktree-create"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/worktree-create"
           }
         ]
       }
@@ -245,7 +255,7 @@ generate_settings_json() {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/worktree-remove"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/worktree-remove"
           }
         ]
       }

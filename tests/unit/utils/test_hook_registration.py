@@ -38,7 +38,12 @@ def _build_settings_with_all_hooks() -> dict:
                 "hooks": [
                     {
                         "type": "command",
-                        "command": f'"$CLAUDE_PROJECT_DIR"/.claude/hooks/{event_id.bash_key}',
+                        # The canonical shape the daemon actually emits. This
+                        # helper used to build the BARE form, so every test
+                        # asserting "no issues" was asserting it against a
+                        # settings.json shaped like the defect (Plan 00102
+                        # Phase 6).
+                        "command": f'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/{event_id.bash_key}',
                         "timeout": 60,
                     }
                 ]
@@ -272,9 +277,14 @@ class TestValidateHookCommandsWithNativeHooks:
 
     @staticmethod
     def _daemon() -> dict:
+        """A CORRECT daemon registration, so it carries the `bash` invocation.
+
+        These tests assert "no issues", which only means what it should if the
+        fixture is the shape the daemon actually emits (Plan 00102 Phase 6).
+        """
         return {
             "type": "command",
-            "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/stop',
+            "command": 'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/stop',
         }
 
     def test_native_hook_in_separate_entry_is_not_a_duplicate(self) -> None:
@@ -627,3 +637,56 @@ class TestReconcileSettingsHooks:
         new_settings, result = reconcile_settings_hooks({"hooks": "broken"})
         assert result.changed is True
         assert set(new_settings["hooks"].keys()) == self._wired_json_keys()
+
+
+class TestValidateHookCommandsRejectsBarePaths:
+    """Plan 00102 Phase 6: a bare-path command must be REPORTED.
+
+    ``validate_hook_commands`` only ever checked that a command ENDS WITH
+    ``/.claude/hooks/<key>``, which a bare path satisfies perfectly. So the
+    checker whose job is to notice a broken registration could not notice the
+    single most common way one breaks — a wrapper whose exec bit was dropped
+    and whose command never went through ``bash``.
+    """
+
+    def test_a_bare_path_command_is_reported(self) -> None:
+        settings = _build_settings_with_all_hooks()
+        settings["hooks"]["Stop"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/stop',
+                    }
+                ]
+            }
+        ]
+
+        issues = validate_hook_commands(settings)
+
+        assert len(issues) == 1
+        assert "Stop" in issues[0]
+
+    def test_the_canonical_bash_form_is_accepted(self) -> None:
+        assert validate_hook_commands(_build_settings_with_all_hooks()) == []
+
+    def test_an_interpreter_with_extra_args_is_accepted(self) -> None:
+        """A deliberate ``bash -x`` for debugging is not a defect.
+
+        The property that matters is that the exec bit is irrelevant, and any
+        ``bash``-led invocation has it. Demanding the exact canonical string
+        would turn a working custom invocation into a reported fault.
+        """
+        settings = _build_settings_with_all_hooks()
+        settings["hooks"]["Stop"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": 'bash -x "$CLAUDE_PROJECT_DIR"/.claude/hooks/stop',
+                    }
+                ]
+            }
+        ]
+
+        assert validate_hook_commands(settings) == []

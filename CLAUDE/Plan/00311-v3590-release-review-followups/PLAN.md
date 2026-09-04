@@ -61,6 +61,29 @@ deferred: N1, N2, N5.
   incremental structure, despite the maintenance cost, is judged safer to
   touch than a rewrite.
 
+  **A fifth gate has since been added, which is evidence FOR the
+  re-derivation rather than against it.** The shipped default glob matches by
+  substring, and a dotted Python module path incidentally produces the
+  substring it keys on — so the guard denied any file that imported the
+  guard's own module, and the only way to reference the handler was an
+  indirect module-object import. Fixed at `c8ce2d7a` by exempting a token
+  that appears as the target of an `import` statement, since an import cannot
+  read a file's contents.
+
+  Two things about that incident belong in this task's evidence:
+
+  - It is the same failure this task predicts — a live false positive
+    answered with one more special case, making the sixth incident likelier
+    rather than less likely.
+  - The fix is incomplete by construction, and deliberately so. It covers the
+    Write/Edit content surface only; the SAME false positive still fires on
+    the Bash surface, where a `git commit` message mentioning the module in
+    dotted form is denied as a protected-path mention. That was worked around
+    at the time by naming the file rather than the module, which is a better
+    commit message anyway — but it means the underlying heuristic is still
+    wrong, in a second place, and no gate added to `find_protected_mention`
+    will reach it.
+
 - [ ] ⬜ **Task 1.4 (R5, incremental re-review)**:
   `src/claude_code_hooks_daemon/utils/secret_file_matching.py::_is_git_rm_cached`
   special-cases `words[1] == "-C"` (jumping the subcommand index to 3)

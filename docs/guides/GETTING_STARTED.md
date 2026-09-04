@@ -115,7 +115,7 @@ Test a destructive git command (should be blocked):
 
 ```bash
 echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}' \
-  | .claude/hooks/pre-tool-use
+  | bash .claude/hooks/pre-tool-use
 ```
 
 Expected: A JSON response with `"permissionDecision": "deny"` and a reason explaining why the command was blocked.
@@ -124,7 +124,7 @@ Test a safe command (should be allowed):
 
 ```bash
 echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}' \
-  | .claude/hooks/pre-tool-use
+  | bash .claude/hooks/pre-tool-use
 ```
 
 Expected: `{}` (empty JSON, meaning "allow").
@@ -135,7 +135,7 @@ The check above proves the pipeline is connected, but an "allow" looks identical
 
 ```bash
 echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}' \
-  | .claude/hooks/pre-tool-use
+  | bash .claude/hooks/pre-tool-use
 ```
 
 Expected: a JSON response denying the command, with a reason from the `destructive_git` handler. Nothing is executed — the hook only inspects the command.

@@ -187,17 +187,17 @@ git commit -m "Install Claude Code Hooks Daemon" && git push
 
 # Test destructive git is blocked
 echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}' \
-  | .claude/hooks/pre-tool-use
+  | bash .claude/hooks/pre-tool-use
 # Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
 
 # Test sed is blocked
 echo '{"tool_name": "Bash", "tool_input": {"command": "sed -i s/foo/bar/ file.txt"}}' \
-  | .claude/hooks/pre-tool-use
+  | bash .claude/hooks/pre-tool-use
 # Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
 
 # Test normal commands pass through
 echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}' \
-  | .claude/hooks/pre-tool-use
+  | bash .claude/hooks/pre-tool-use
 # Expected: {} (empty = allow)
 ```
 
@@ -210,9 +210,9 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}' \
 A successful installation meets ALL of these conditions:
 
 1. **Daemon running**: `.claude/hooks-daemon/bin/hooks-daemon status` shows `RUNNING`
-2. **Hooks deployed**: `.claude/hooks/pre-tool-use` and other hook scripts exist and are executable
-3. **Blocking works**: `echo '{"tool_name":"Bash","tool_input":{"command":"git reset --hard"}}' | .claude/hooks/pre-tool-use` returns a `deny` decision
-4. **Safe commands pass**: `echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | .claude/hooks/pre-tool-use` returns `{}` (allow)
+2. **Hooks deployed**: `.claude/hooks/pre-tool-use` and the other hook scripts exist. The executable bit is NOT a requirement — `settings.json` invokes each wrapper as `bash <path>` precisely so a dropped `+x` cannot break hooks (Plan 00102)
+3. **Blocking works**: `echo '{"tool_name":"Bash","tool_input":{"command":"git reset --hard"}}' | bash .claude/hooks/pre-tool-use` returns a `deny` decision
+4. **Safe commands pass**: `echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | bash .claude/hooks/pre-tool-use` returns `{}` (allow)
 5. **No DEGRADED MODE**: `.claude/hooks-daemon/bin/hooks-daemon logs` shows no "DEGRADED MODE" warnings
 6. **Git clean**: `.claude/hooks-daemon/` is excluded via `.gitignore`, not tracked by git
 
@@ -588,7 +588,7 @@ python3 --version
 
 ```bash
 # Test hook manually
-echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}' | .claude/hooks/pre-tool-use
+echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}' | bash .claude/hooks/pre-tool-use
 
 # Check handler config
 grep -A 1 "destructive_git:" .claude/hooks-daemon.yaml

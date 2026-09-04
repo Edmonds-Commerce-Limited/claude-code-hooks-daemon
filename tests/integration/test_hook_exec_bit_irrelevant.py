@@ -82,3 +82,67 @@ def test_bash_invocation_succeeds_without_exec_bit(tmp_path: Path) -> None:
     assert (
         result.returncode != _EXIT_PERMISSION_DENIED
     ), f"Got exit 126 (Permission denied). stderr={result.stderr!r}"
+
+
+_STATUS_LINE_SCRIPT = _PROJECT_ROOT / ".claude" / "hooks" / "status-line"
+_STATUS_LINE_PAYLOAD = (
+    '{"hook_event_name":"Status","session_id":"exec-bit-probe",'
+    '"model":{"id":"claude-opus-5","display_name":"Opus 5"},'
+    '"workspace":{"current_dir":"/tmp","project_dir":"/tmp"}}'
+)
+
+
+def test_status_line_direct_invocation_fails_without_exec_bit(tmp_path: Path) -> None:
+    """The status line is not special: dropping +x breaks it the same way.
+
+    Plan 00102 Phase 6. Tier 1 exempted this one wrapper on the claim that
+    "Claude Code's status-line invocation is a separate code path". It is not
+    a separate code path — Claude Code documents `statusLine` as a shell
+    command — and this test pins the half of the claim that IS checkable
+    locally: the file obeys the same kernel permission rule as every other
+    wrapper, so exempting it left a real liability rather than describing one
+    that did not exist.
+    """
+    copy = tmp_path / "status-line"
+    shutil.copy(_STATUS_LINE_SCRIPT, copy)
+    copy.chmod(_NON_EXECUTABLE_MODE)
+
+    try:
+        result = subprocess.run(
+            [str(copy)],
+            input=_STATUS_LINE_PAYLOAD,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except PermissionError:
+        return
+
+    assert result.returncode != 0, (
+        "Sanity: direct invocation of a non-executable status-line must fail. "
+        f"Got returncode={result.returncode}, stderr={result.stderr!r}"
+    )
+
+
+def test_status_line_bash_invocation_succeeds_without_exec_bit(tmp_path: Path) -> None:
+    """`bash <path>` runs the status line with no +x, which is the fix."""
+    copy = tmp_path / "status-line"
+    shutil.copy(_STATUS_LINE_SCRIPT, copy)
+    copy.chmod(_NON_EXECUTABLE_MODE)
+
+    result = subprocess.run(
+        ["bash", str(copy)],
+        input=_STATUS_LINE_PAYLOAD,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=Timeout.VALIDATION_CHECK,
+    )
+
+    assert "Permission denied" not in result.stderr, (
+        "bash <path> must NOT produce a Permission denied error for the "
+        f"status line when the exec bit is dropped. stderr={result.stderr!r}"
+    )
+    assert (
+        result.returncode != _EXIT_PERMISSION_DENIED
+    ), f"Got exit 126 (Permission denied). stderr={result.stderr!r}"

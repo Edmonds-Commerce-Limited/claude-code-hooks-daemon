@@ -16,6 +16,15 @@ Design choices:
 - **Targeted.** Only commands that match the daemon-wrapper bare-path
   shape are rewritten. Hand-edited custom scripts and ``bash`` invocations
   with extra args are left strictly alone.
+- **Rebuilt, not prefixed.** A legacy command is re-rendered from the shared
+  ``HOOK_COMMAND_TEMPLATE`` using its wrapper basename. Prefixing would leave
+  a RELATIVE legacy path resolving against the process cwd — fixing the exec
+  bit while leaving the working-directory half of the defect in place.
+
+Scope covers the top-level ``statusLine`` key as well as ``settings["hooks"]``.
+Both are shell commands invoked the same way, and covering only the latter
+left the status line as the one registration no upgrade could repair
+(Plan 00102 Phase 6).
 """
 
 from __future__ import annotations
@@ -28,6 +37,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.utils.hook_registration import (
+    BASH_INVOCATION_PREFIX,
+    HOOK_COMMAND_TEMPLATE,
+)
+
 logger = logging.getLogger(__name__)
 
 # Public: the suffix appended to ``settings.json`` for the one-shot backup.
@@ -36,33 +50,64 @@ BACKUP_SUFFIX = ".bak.pre-bash-migration"
 # Daemon-wrapper bare-path commands look like:
 #   "$CLAUDE_PROJECT_DIR"/.claude/hooks/<bash-key>
 # A migrated command starts with ``bash `` (note the trailing space).
-_BASH_PREFIX = "bash "
-_DAEMON_WRAPPER_FRAGMENT = "/.claude/hooks/"
+_BASH_PREFIX = BASH_INVOCATION_PREFIX
+_WRAPPER_DIR_FRAGMENT = ".claude/hooks/"
 
-# A legacy command must look like a daemon wrapper AND not already be
-# wrapped in ``bash ``. We check via simple string operations rather than
-# a regex — the shape is anchored enough that a regex would obscure intent.
-_LEGACY_PATH_PATTERN = re.compile(
-    r'^"?\$\{?CLAUDE_PROJECT_DIR\}?"?/\.claude/hooks/[a-z][a-z0-9-]*$'
+# The top-level settings key the status line registers under. It sits OUTSIDE
+# ``settings["hooks"]``, which is the whole reason it needs naming here: the
+# migrator's walk covered the hooks block only, so an upgraded client kept a
+# bare status-line command indefinitely (Plan 00102 Phase 6).
+_STATUS_LINE_KEY = "statusLine"
+
+# Two legacy shapes, both capturing the bash_key so the command can be
+# REBUILT rather than merely prefixed.
+#
+# The anchored form is what a pre-Phase-1 `install.py` wrote. The RELATIVE
+# form is what `scripts/install_version.sh`'s fallback wrote, and excluding it
+# was a silent hole: that fallback's output is the one install shape nothing
+# else repairs, because `reconcile_settings_hooks` only ADDS missing events
+# and never rewrites present ones.
+_ANCHORED_PATH_PATTERN = re.compile(
+    r'^"?\$\{?CLAUDE_PROJECT_DIR\}?"?/\.claude/hooks/([a-z][a-z0-9-]*)$'
 )
+_RELATIVE_PATH_PATTERN = re.compile(r"^\.{0,2}/?\.claude/hooks/([a-z][a-z0-9-]*)$")
+
+
+def legacy_command_bash_key(command: str) -> str | None:
+    """Return the wrapper basename if ``command`` is a legacy bare path, else None.
+
+    A command qualifies as legacy when it points at the daemon wrapper
+    directory, has no ``bash`` (or other interpreter) prefix, and has no extra
+    arguments. Any other shape — custom user script, already-wrapped command,
+    empty string — returns None so we never touch hand-rolled config.
+
+    Returns the KEY rather than a bool because a relative legacy command
+    cannot be fixed by prefixing: ``bash .claude/hooks/x`` still resolves
+    against the process cwd. Only the key lets the canonical, anchored command
+    be rebuilt.
+    """
+    if not command:
+        return None
+    if command.startswith(_BASH_PREFIX):
+        return None
+    if _WRAPPER_DIR_FRAGMENT not in command:
+        return None
+    stripped = command.strip()
+    for pattern in (_ANCHORED_PATH_PATTERN, _RELATIVE_PATH_PATTERN):
+        match = pattern.match(stripped)
+        if match is not None:
+            return match.group(1)
+    return None
+
+
+def canonical_hook_command(bash_key: str) -> str:
+    """The one command shape every source must emit, rendered from the SSoT."""
+    return HOOK_COMMAND_TEMPLATE.format(bash_key=bash_key)
 
 
 def is_legacy_hook_command(command: str) -> bool:
-    """Return True iff ``command`` is a bare daemon-wrapper path needing migration.
-
-    A command qualifies as legacy when it points at the daemon wrapper
-    directory using the standard ``$CLAUDE_PROJECT_DIR`` form, has no
-    ``bash`` (or other interpreter) prefix, and has no extra arguments.
-    Any other shape — custom user script, already-wrapped command, empty
-    string — returns False so we never touch hand-rolled config.
-    """
-    if not command:
-        return False
-    if command.startswith(_BASH_PREFIX):
-        return False
-    if _DAEMON_WRAPPER_FRAGMENT not in command:
-        return False
-    return _LEGACY_PATH_PATTERN.match(command.strip()) is not None
+    """Whether ``command`` is a bare daemon-wrapper path needing migration."""
+    return legacy_command_bash_key(command) is not None
 
 
 @dataclass(frozen=True)
@@ -114,9 +159,14 @@ def _migrate_hooks_block(
                     new_inner.append(command_entry)
                     continue
                 command = command_entry.get("command", "")
-                if isinstance(command, str) and is_legacy_hook_command(command):
+                bash_key = legacy_command_bash_key(command) if isinstance(command, str) else None
+                if bash_key is not None:
                     new_command_entry = dict(command_entry)
-                    new_command_entry["command"] = _BASH_PREFIX + command
+                    # Rebuilt from the key, not prefixed. A relative legacy
+                    # command prefixed with `bash ` would still resolve
+                    # against the process cwd — a migration reporting success
+                    # having fixed only half the defect.
+                    new_command_entry["command"] = canonical_hook_command(bash_key)
                     new_inner.append(new_command_entry)
                     event_was_migrated = True
                 else:
@@ -128,6 +178,28 @@ def _migrate_hooks_block(
         if event_was_migrated:
             migrated_events.append(event_key)
     return new_block, sorted(migrated_events)
+
+
+def _migrate_status_line(settings: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a repaired ``statusLine`` block, or None when nothing to do.
+
+    Every other key in the block is carried over — ``refreshInterval`` is
+    load-bearing (Plan 00175: without it the clock stalls and the multithread
+    indicator under-counts), so rebuilding the block from scratch would
+    silently degrade the status line while "fixing" it.
+    """
+    status_line = settings.get(_STATUS_LINE_KEY)
+    if not isinstance(status_line, dict):
+        return None
+    command = status_line.get("command")
+    if not isinstance(command, str):
+        return None
+    bash_key = legacy_command_bash_key(command)
+    if bash_key is None:
+        return None
+    repaired = dict(status_line)
+    repaired["command"] = canonical_hook_command(bash_key)
+    return repaired
 
 
 def migrate_settings_to_bash_invocation(settings_path: Path) -> MigrationResult:
@@ -158,10 +230,15 @@ def migrate_settings_to_bash_invocation(settings_path: Path) -> MigrationResult:
         return MigrationResult(migrated=False)
 
     hooks_block = settings.get("hooks")
-    if not isinstance(hooks_block, dict):
-        return MigrationResult(migrated=False)
+    # A malformed or absent hooks block does not end the pass: the status line
+    # lives under its own top-level key, so it stays repairable regardless.
+    new_hooks_block, events_migrated = (
+        _migrate_hooks_block(hooks_block) if isinstance(hooks_block, dict) else (None, [])
+    )
+    new_status_line = _migrate_status_line(settings)
+    if new_status_line is not None:
+        events_migrated = sorted([*events_migrated, _STATUS_LINE_KEY])
 
-    new_hooks_block, events_migrated = _migrate_hooks_block(hooks_block)
     if not events_migrated:
         return MigrationResult(migrated=False)
 
@@ -174,7 +251,10 @@ def migrate_settings_to_bash_invocation(settings_path: Path) -> MigrationResult:
         backup_created = backup_path
 
     new_settings = dict(settings)
-    new_settings["hooks"] = new_hooks_block
+    if new_hooks_block is not None:
+        new_settings["hooks"] = new_hooks_block
+    if new_status_line is not None:
+        new_settings[_STATUS_LINE_KEY] = new_status_line
     settings_path.write_text(json.dumps(new_settings, indent=2) + "\n", encoding="utf-8")
 
     return MigrationResult(

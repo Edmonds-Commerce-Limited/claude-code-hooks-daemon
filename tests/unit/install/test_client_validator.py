@@ -439,8 +439,18 @@ class TestCleanupStaleRuntimeFiles:
 
 
 def _build_valid_settings() -> dict:
-    """Build a settings.json dict with all hooks properly registered."""
-    from claude_code_hooks_daemon.utils.hook_registration import HOOK_EVENTS_IN_SETTINGS
+    """Build a settings.json dict with all hooks properly registered.
+
+    Rendered through the shared ``HOOK_COMMAND_TEMPLATE`` rather than an
+    inline f-string. "Valid" here has to mean the shape the daemon actually
+    emits, and a hand-written copy drifts from it silently — this helper held
+    the bare-path form for the whole of Plan 00102 Tier 1, so every assertion
+    of "no warnings" was made against a settings.json shaped like the defect.
+    """
+    from claude_code_hooks_daemon.utils.hook_registration import (
+        HOOK_COMMAND_TEMPLATE,
+        HOOK_EVENTS_IN_SETTINGS,
+    )
 
     hooks: dict = {}
     for json_key, bash_key in HOOK_EVENTS_IN_SETTINGS.items():
@@ -449,7 +459,7 @@ def _build_valid_settings() -> dict:
                 "hooks": [
                     {
                         "type": "command",
-                        "command": f'"$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash_key}',
+                        "command": HOOK_COMMAND_TEMPLATE.format(bash_key=bash_key),
                         "timeout": 60,
                     }
                 ]

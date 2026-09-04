@@ -208,10 +208,17 @@ The status line hook is registered in `.claude/settings.json`:
 {
   "statusLine": {
     "type": "command",
-    "command": ".claude/hooks/status-line"
+    "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/status-line",
+    "refreshInterval": 1
   }
 }
 ```
+
+The `bash <path>` invocation is not cosmetic. Claude Code runs a `statusLine`
+command through a shell exactly as it runs the event hooks, so invoking the
+wrapper through `bash` makes its executable bit irrelevant — `bash` reads the
+file as data and the kernel never checks `+x` (Plan 00102). A bare path
+re-exposes the status line to every route that silently strips that bit.
 
 ### Daemon Configuration (`hooks-daemon.yaml`)
 

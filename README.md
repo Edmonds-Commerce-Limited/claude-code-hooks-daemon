@@ -223,10 +223,16 @@ It shows the repo name, account, model and effort level, context usage, time, gi
 {
   "statusLine": {
     "type": "command",
-    "command": ".claude/hooks/status-line"
+    "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/status-line",
+    "refreshInterval": 1
   }
 }
 ```
+
+`bash <path>` rather than the bare path, so the status line keeps working if the
+wrapper's executable bit is dropped — which happens routinely on
+`core.fileMode=false` repos, Windows clones and archive transfers.
+`$CLAUDE_PROJECT_DIR` keeps it correct regardless of the working directory.
 
 If you haven't configured it yet, the daemon will suggest it on your next new session. If the daemon ever fails to start, the status line shows `⚠️ DAEMON FAILED` so the problem is immediately visible rather than silently degraded.
 

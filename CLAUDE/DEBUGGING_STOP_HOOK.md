@@ -292,7 +292,7 @@ If the event name reaching the dispatcher is not the exact PascalCase token (e.g
 To verify: the event name is not constructed anywhere in Python — it is the `hook_event_name` field Claude Code puts in the payload, forwarded verbatim by `.claude/hooks/stop` and routed by `EventRouter` (`src/claude_code_hooks_daemon/core/router.py`). Probe the live daemon and read back what it thinks the event was:
 
 ```bash
-echo '{"hook_event_name":"Stop","stop_hook_active":false}' | .claude/hooks/stop
+echo '{"hook_event_name":"Stop","stop_hook_active":false}' | bash .claude/hooks/stop
 ```
 
 ### 5. ALLOW Decision Returned by Handler

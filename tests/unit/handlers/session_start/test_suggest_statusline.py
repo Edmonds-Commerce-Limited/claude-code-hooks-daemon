@@ -79,7 +79,36 @@ class TestSuggestStatusLineHandler:
         context_text = "\n".join(result.context)
         assert "```json" in context_text
         assert '"type": "command"' in context_text
-        assert '"command": ".claude/hooks/status-line"' in context_text
+        assert "/.claude/hooks/status-line" in context_text
+
+    def test_the_recommended_command_is_bash_invoked(
+        self, handler: SuggestStatusLineHandler
+    ) -> None:
+        """Plan 00102 Phase 6: this snippet is advice a human pastes.
+
+        It previously recommended a bare relative path, so following our own
+        guidance produced a status line that broke when the exec bit was
+        dropped AND when a Bash tool call changed directory. A stale example
+        does not merely fail to fix the defect — it keeps reintroducing it by
+        hand, in the one place we have the user's full attention.
+        """
+        context_text = "\n".join(handler.handle({}).context)
+
+        assert 'bash \\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/status-line' in context_text
+
+    def test_the_recommended_snippet_is_valid_json(self, handler: SuggestStatusLineHandler) -> None:
+        """Escaping a quote inside a JSON string is easy to get wrong by hand.
+
+        The command value now contains literal double quotes, so the snippet
+        only stays copy-pasteable if they are escaped correctly — parse it
+        rather than trusting inspection.
+        """
+        context_text = "\n".join(handler.handle({}).context)
+
+        snippet = context_text.split("```json")[1].split("```")[0]
+        parsed = json.loads(snippet)
+
+        assert parsed["statusLine"]["command"].startswith("bash ")
 
     def test_suggestion_includes_refresh_interval(self, handler: SuggestStatusLineHandler) -> None:
         """The example config recommends refreshInterval and explains why.

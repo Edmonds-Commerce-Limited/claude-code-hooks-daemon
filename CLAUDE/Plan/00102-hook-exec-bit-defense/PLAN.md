@@ -1,6 +1,6 @@
 # Plan 00102: Hook Executable-Bit Defense (Multi-Tier Safety Net)
 
-**Status**: Dormant (only Task 5.3 remains — release-time acceptance gate, executes with the next /release)
+**Status**: In Progress (Phase 6 — the statusLine and fallback-installer holes in Tier 1; Task 5.3 still awaits the next /release)
 **Created**: 2026-04-29
 **Priority**: High
 **Recommended Executor**: Sonnet
@@ -73,7 +73,7 @@ See `TRIAGE.md` for the analysis and rationale. Decisions made:
 - [x] ✅ **Task 1.1**: Locate the `command:` emitter in `install.py` (around lines 528–565) — confirm the exact dict-literal format.
 - [x] ✅ **Task 1.2**: Write failing test in `tests/unit/install/test_installer_hook_paths.py` asserting the emitter produces `bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/<event>` form (RED).
 - [x] ✅ **Task 1.3**: Update `install.py` emitter to produce the `bash <path>` form via `_hook_cmd()` helper (GREEN — 2/2 pass).
-- [x] ✅ **Task 1.4**: Update this repo's own dogfood `.claude/settings.json` — all 10 hook events now use `bash <path>`; statusLine left untouched (exempt by Claude Code design).
+- [x] ✅ **Task 1.4**: Update this repo's own dogfood `.claude/settings.json` — all 10 hook events use `bash <path>`. This task also left statusLine bare, on a stated "exempt by Claude Code design" rationale that was never true; Phase 6 disproves it and closes the gap.
 - [x] ✅ **Task 1.5**: Acceptance integration test added at `tests/integration/test_hook_exec_bit_irrelevant.py` — copies real `pre-tool-use` wrapper, drops +x, asserts direct invocation fails AND `bash <path>` does NOT produce Permission denied. 2/2 pass.
 - [x] ✅ **Task 1.6**: Run `./scripts/qa/llm_qa.py all` — 11/11 PASSED, coverage 95.0%, daemon RUNNING.
 
@@ -108,6 +108,73 @@ See `TRIAGE.md` for the analysis and rationale. Decisions made:
 - [ ] ⬜ **Task 5.3**: Acceptance-test the full flow at release time — covered by `/release` skill's mandatory acceptance gate.
 - [x] ✅ **Task 5.4**: Plan 00091 marked Cancelled (superseded by 00102), moved to `Completed/`, README's Cancelled Plans section updated with cross-reference.
 
+### Phase 6 — Tier 1 was never finished: statusLine and the fallback installer
+
+Tier 1 claims the exec bit is irrelevant. It is not, in two places Phase 1
+missed. Task 1.4 recorded the first as deliberate — "statusLine left untouched
+(exempt by Claude Code design)" — and that rationale appears nowhere in
+`TRIAGE.md` or any of the four brainstorm reports. It was asserted at
+implementation time and is false.
+
+**The exemption, disproved three ways.** Claude Code's own documentation says
+`statusLine` "runs any shell script you configure", that `type: "command"`
+means "run this shell command", and that "because `statusLine` executes a
+shell command, Claude Code runs it under the same workspace trust rule as
+hooks". Its Windows example uses the exact interpreter-plus-path shape this
+tier is about — `powershell -NoProfile -File <path>`. And locally: the
+tracked command is `"$CLAUDE_PROJECT_DIR"/.claude/hooks/status-line`, which
+names no existing file, so a direct `execve` would fail with ENOENT — yet the
+status line renders, so it is reaching a shell. The `chmod +x` advice in those
+docs applies to the bare-path form, which is the failure mode this plan
+exists to remove.
+
+**The second hole is larger and is not about statusLine.**
+`scripts/install_version.sh`'s last-resort fallback writes RELATIVE bare paths
+for every hook, not just the status line. Two failures compound: the path
+resolves against the process cwd rather than the project, and nothing repairs
+it — `_LEGACY_PATH_PATTERN` requires a `$CLAUDE_PROJECT_DIR` prefix so Tier 2
+skips these entirely, while `reconcile_settings_hooks` only fills in MISSING
+events and never rewrites present ones. A fallback install stays exec-bit
+dependent forever. Introduced by `2c417449`, whose subject calls it the "SSoT
+bash fallback" — a name describing an intent the content never had.
+
+**Why both survived Phase 1's tests.** `test_settings_hook_paths.py` does
+inspect the statusLine command, but asserts only that it contains
+`$CLAUDE_PROJECT_DIR` and `.claude/hooks/` — it passes with or without the
+`bash ` prefix. The fallback heredoc has no test at all. Separately,
+`validate_hook_commands` checks only that a command ENDS WITH
+`/.claude/hooks/<key>`, so no validator anywhere detects a bare-path command
+for any event.
+
+- [x] ✅ **Task 6.1**: Assert the missing shapes FIRST (RED) — statusLine
+  emitted by `install.py`, the tracked `.claude/settings.json`, the
+  `install_version.sh` fallback, and the migrator's handling of the top-level
+  `statusLine` key. These are the assertions whose absence let both defects
+  through, so they are the deliverable as much as the fix is.
+
+- [x] ✅ **Task 6.2**: `install.py` emits statusLine via the same `_hook_cmd`
+  helper as every other hook, and the comment asserting the exemption goes.
+
+- [x] ✅ **Task 6.3**: `scripts/install_version.sh`'s fallback emits
+  `bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/<key>` for every entry including
+  the status line.
+
+- [x] ✅ **Task 6.4**: `suggest_statusline.py` recommends the `bash <path>`
+  form. This is the advice a human reads and pastes, so leaving it stale would
+  keep reintroducing the defect by hand.
+
+- [x] ✅ **Task 6.5**: The tracked `.claude/settings.json` uses the `bash`
+  form for its own statusLine — dogfooding, and the fixture two tests read.
+
+- [x] ✅ **Task 6.6**: `migrate_settings_to_bash_invocation` also migrates the
+  top-level `statusLine` key, and matches the relative bare-path shape the
+  fallback installer produces. Without both, an already-installed client never
+  self-heals.
+
+- [x] ✅ **Task 6.7**: `validate_hook_commands` reports a command that is not
+  invoked through `bash`, statusLine included, so a future regression is
+  caught by the checker rather than by a client's broken hooks.
+
 ## Success Criteria
 
 - [ ] After installing or upgrading, hooks fire correctly even if `.claude/hooks/*` are mode 0644.
@@ -116,6 +183,9 @@ See `TRIAGE.md` for the analysis and rationale. Decisions made:
 - [ ] Auto-migration is idempotent (second SessionStart is a no-op).
 - [ ] Hand-edited non-daemon command paths in `settings.json` are not touched.
 - [ ] `git_filemode_checker` advisory fires once per new session for repos with `core.fileMode=false`.
+- [ ] The status line survives its wrapper being mode 0644, on a fresh install and after auto-migration.
+- [ ] Every command the fallback installer writes is absolute and `bash`-invoked, so a fallback install is not a permanently unrepaired one.
+- [ ] A bare-path command is REPORTED by the checker for any event, statusLine included.
 - [ ] All 10 QA checks pass.
 - [ ] Daemon restarts cleanly with new code.
 - [ ] Plan 00091 is closed as superseded.

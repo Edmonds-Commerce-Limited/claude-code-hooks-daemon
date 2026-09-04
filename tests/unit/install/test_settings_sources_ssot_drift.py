@@ -29,7 +29,7 @@ from claude_code_hooks_daemon.constants.events import STATUS_LINE_JSON_KEY, wire
 from claude_code_hooks_daemon.utils.hook_registration import (
     _BASH_KEYS_WITH_TIMEOUT,
     _DEFAULT_HOOK_TIMEOUT_SECONDS,
-    _HOOK_COMMAND_TEMPLATE,
+    HOOK_COMMAND_TEMPLATE,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -98,7 +98,7 @@ def test_install_py_timeout_value_matches_reconciler() -> None:
 
 
 def test_install_py_command_template_matches_reconciler() -> None:
-    # install.py's _hook_cmd f-string and the reconciler's _HOOK_COMMAND_TEMPLATE
+    # install.py's _hook_cmd f-string and the reconciler's HOOK_COMMAND_TEMPLATE
     # must render byte-identical commands, else fresh-install and self-heal would
     # register different command strings for the same event.
     text = (_REPO_ROOT / "install.py").read_text()
@@ -106,4 +106,4 @@ def test_install_py_command_template_matches_reconciler() -> None:
     assert match is not None, "could not locate the _hook_cmd template in install.py"
     # Normalise both to the same placeholder form for comparison.
     install_template = match.group(1)[2:-1]  # strip the f'...' wrapper
-    assert install_template == _HOOK_COMMAND_TEMPLATE
+    assert install_template == HOOK_COMMAND_TEMPLATE

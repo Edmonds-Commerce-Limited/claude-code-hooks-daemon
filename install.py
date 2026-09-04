@@ -305,6 +305,13 @@ _STOP_EVENT_NAMES = ("Stop", "SubagentStop")
 # .worktreePath from the daemon response and print it RAW (Plan 00188).
 _WORKTREE_CREATE_EVENT_NAME = "WorktreeCreate"
 
+# The status-line wrapper's basename. It is NOT a member of the forwarder map
+# below — that map drives both the generic forwarder generator and the `hooks`
+# settings block, and the status line belongs to neither: it has bespoke
+# plain-text logic and registers under the top-level `statusLine` key. It is
+# still invoked the same way, hence the shared name (Plan 00102 Phase 6).
+_STATUS_LINE_BASH_KEY = "status-line"
+
 # Single source of truth for install.py: bash_key -> JSON event name for every
 # daemon forwarder hook (StatusLine excluded — it uses the custom status-line
 # script + top-level statusLine settings key). create_all_hooks() generates a
@@ -695,8 +702,13 @@ def create_settings_json(project_root: Path, force: bool = False) -> None:
     # exec bit on .claude/hooks/* is irrelevant — bash reads the script as
     # data, the kernel never has to honour +x. This eliminates a whole class
     # of silent breakage (core.fileMode=false, Windows clones, tarball
-    # transfers, IDE-save mode loss, `cp` without `-p`). The status-line is
-    # exempt — Claude Code's status-line invocation is a separate code path.
+    # transfers, IDE-save mode loss, `cp` without `-p`).
+    #
+    # The status line goes through the SAME helper (Phase 6). It was once
+    # exempted here as "a separate code path", which is not true: Claude Code
+    # documents statusLine as a shell command, and the exempted string
+    # `"$CLAUDE_PROJECT_DIR"/.claude/hooks/status-line` names no file on disk,
+    # so it could only ever have worked by being expanded by a shell.
     def _hook_cmd(bash_key: str) -> str:
         return f'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash_key}'
 
@@ -713,7 +725,7 @@ def create_settings_json(project_root: Path, force: bool = False) -> None:
     settings = {
         "statusLine": {
             "type": "command",
-            "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/status-line',
+            "command": _hook_cmd(_STATUS_LINE_BASH_KEY),
         },
         "hooks": hooks_section,
     }

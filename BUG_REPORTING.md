@@ -129,7 +129,7 @@ If you can't run the debug script, provide:
 
 ```bash
 # Test a hook manually
-echo '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' | .claude/hooks/pre-tool-use
+echo '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' | bash .claude/hooks/pre-tool-use
 ```
 
 ## Common Issues
@@ -145,7 +145,7 @@ This is **normal behaviour** with lazy startup:
 To see it running, check status immediately after a hook call:
 
 ```bash
-echo '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' | .claude/hooks/pre-tool-use && \
+echo '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' | bash .claude/hooks/pre-tool-use && \
 .claude/hooks-daemon/bin/hooks-daemon status
 ```
 

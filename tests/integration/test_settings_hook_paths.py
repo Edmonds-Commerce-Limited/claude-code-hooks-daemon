@@ -69,3 +69,30 @@ def test_hook_paths_point_to_claude_hooks_directory():
                             assert ".claude/hooks/" in cmd, (
                                 f"{event_name} hook should reference .claude/hooks/, " f"got: {cmd}"
                             )
+
+
+def test_every_command_including_status_line_is_bash_invoked():
+    """Plan 00102 Phase 6: the exec bit must be irrelevant for EVERY command.
+
+    The two tests above check `$CLAUDE_PROJECT_DIR` and `.claude/hooks/`, and
+    both pass whether or not the command is invoked through `bash`. That gap
+    is why the tracked statusLine stayed bare through all of Plan 00102 Tier 1
+    while every event hook was migrated: the one test that looked at the
+    statusLine command could not see the property that mattered.
+    """
+    settings_file = Path(__file__).parent.parent.parent / ".claude" / "settings.json"
+    with open(settings_file) as f:
+        settings = json.load(f)
+
+    commands = {"statusLine": settings["statusLine"]["command"]}
+    for event_name, hook_configs in settings["hooks"].items():
+        for hook_config in hook_configs:
+            for hook in hook_config.get("hooks", []):
+                if hook.get("type") == "command" and "command" in hook:
+                    commands[event_name] = hook["command"]
+
+    bare = {name: cmd for name, cmd in commands.items() if not cmd.startswith("bash ")}
+    assert not bare, (
+        "every settings.json command must be invoked via `bash <path>` so a "
+        f"dropped exec bit cannot break it — bare: {bare!r}"
+    )

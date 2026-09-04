@@ -306,3 +306,137 @@ class TestMalformedSettings:
         assert result.migrated is True
         on_disk = json.loads(settings_path.read_text())
         assert on_disk["hooks"]["PreToolUse"][0]["hooks"][0] == "string-not-dict"
+
+
+_RELATIVE_PRE_TOOL_USE = ".claude/hooks/pre-tool-use"
+_LEGACY_STATUS_LINE = '"$CLAUDE_PROJECT_DIR"/.claude/hooks/status-line'
+_NEW_STATUS_LINE = 'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/status-line'
+
+
+class TestRelativeBarePathsAreLegacyToo:
+    """Plan 00102 Phase 6.
+
+    ``scripts/install_version.sh``'s last-resort fallback writes RELATIVE bare
+    paths, and the predicate's anchored pattern required a
+    ``$CLAUDE_PROJECT_DIR`` prefix — so the one install shape that most needed
+    repairing was the one shape the migrator refused to touch. Nothing else
+    repairs it either: ``reconcile_settings_hooks`` only adds MISSING events.
+    """
+
+    def test_relative_daemon_wrapper_path_is_legacy(self) -> None:
+        assert is_legacy_hook_command(_RELATIVE_PRE_TOOL_USE) is True
+
+    def test_a_relative_path_is_migrated_to_an_anchored_bash_command(
+        self, settings_path: Path
+    ) -> None:
+        """Rewritten to the canonical form, not merely prefixed with ``bash``.
+
+        Prefixing alone would leave the command resolving against the process
+        cwd, so it would still break the moment a Bash tool call changed
+        directory — a migration that reports success while fixing only half
+        the defect.
+        """
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {"hooks": [{"type": "command", "command": _RELATIVE_PRE_TOOL_USE}]}
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = migrate_settings_to_bash_invocation(settings_path)
+
+        assert result.migrated is True
+        migrated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert migrated["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == _NEW_PRE_TOOL_USE
+
+    def test_a_relative_path_outside_the_wrapper_dir_is_left_alone(self) -> None:
+        """The widening must not swallow ordinary relative user scripts."""
+        assert is_legacy_hook_command("scripts/my-own-hook.sh") is False
+
+
+class TestStatusLineIsMigratedToo:
+    """The top-level ``statusLine`` key is a command like any other.
+
+    It sits outside ``settings["hooks"]``, so the migrator's walk never
+    reached it and an upgraded client kept a bare status-line command
+    indefinitely — the last exec-bit liability Tier 1 was supposed to remove.
+    """
+
+    def test_a_bare_status_line_is_migrated(self, settings_path: Path) -> None:
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "statusLine": {"type": "command", "command": _LEGACY_STATUS_LINE},
+                    "hooks": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = migrate_settings_to_bash_invocation(settings_path)
+
+        assert result.migrated is True
+        assert "statusLine" in result.events_migrated
+        migrated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert migrated["statusLine"]["command"] == _NEW_STATUS_LINE
+
+    def test_an_already_migrated_status_line_is_a_no_op(self, settings_path: Path) -> None:
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "statusLine": {"type": "command", "command": _NEW_STATUS_LINE},
+                    "hooks": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        assert migrate_settings_to_bash_invocation(settings_path).migrated is False
+
+    def test_other_status_line_keys_are_preserved(self, settings_path: Path) -> None:
+        """``refreshInterval`` is load-bearing (Plan 00175) — never drop it."""
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "statusLine": {
+                        "type": "command",
+                        "command": _LEGACY_STATUS_LINE,
+                        "refreshInterval": 1,
+                    },
+                    "hooks": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        migrate_settings_to_bash_invocation(settings_path)
+
+        migrated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert migrated["statusLine"]["refreshInterval"] == 1
+        assert migrated["statusLine"]["type"] == "command"
+
+    def test_a_custom_status_line_command_is_left_alone(self, settings_path: Path) -> None:
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "statusLine": {"type": "command", "command": _CUSTOM_USER_SCRIPT},
+                    "hooks": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        assert migrate_settings_to_bash_invocation(settings_path).migrated is False
+
+    def test_a_malformed_status_line_value_is_a_no_op(self, settings_path: Path) -> None:
+        settings_path.write_text(
+            json.dumps({"statusLine": "not-a-dict", "hooks": {}}), encoding="utf-8"
+        )
+
+        assert migrate_settings_to_bash_invocation(settings_path).migrated is False

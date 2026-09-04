@@ -161,7 +161,7 @@ class SuggestStatusLineHandler(SessionStartHandlerBase):
                 "{",
                 '  "statusLine": {',
                 '    "type": "command",',
-                '    "command": ".claude/hooks/status-line",',
+                '    "command": "bash \\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/status-line",',
                 f'    "refreshInterval": {_RECOMMENDED_REFRESH_INTERVAL_S}',
                 "  }",
                 "}",
