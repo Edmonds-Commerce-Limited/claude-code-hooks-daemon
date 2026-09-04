@@ -48,9 +48,7 @@ class TestValidDocument:
         result = parse_provenance(_frontmatter())
 
         assert result.provenance is not None
-        assert result.provenance.fetched_at == datetime(
-            2026, 9, 3, 10, 0, tzinfo=UTC
-        )
+        assert result.provenance.fetched_at == datetime(2026, 9, 3, 10, 0, tzinfo=UTC)
 
     def test_stale_after_date_is_parsed(self) -> None:
         result = parse_provenance(_frontmatter())

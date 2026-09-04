@@ -128,21 +128,33 @@ def _load_frontmatter(content: str) -> tuple[dict[str, Any] | None, ProvenanceEr
     """Split and YAML-parse the frontmatter block, never raising."""
     block, body = split_frontmatter(content)
     if not block:
-        return None, ProvenanceError(
-            _FIELD_FRONTMATTER,
-            "no YAML frontmatter found; a remote document must open with a "
-            "--- delimited provenance block",
-        ), ""
+        return (
+            None,
+            ProvenanceError(
+                _FIELD_FRONTMATTER,
+                "no YAML frontmatter found; a remote document must open with a "
+                "--- delimited provenance block",
+            ),
+            "",
+        )
     # Strip the two --- delimiter lines; split_frontmatter returns them.
     inner = block.split("\n", 1)[1].rsplit("---", 1)[0]
     try:
         loaded = yaml.safe_load(inner)
     except yaml.YAMLError as exc:
-        return None, ProvenanceError(_FIELD_FRONTMATTER, f"frontmatter is not valid YAML: {exc}"), ""
+        return (
+            None,
+            ProvenanceError(_FIELD_FRONTMATTER, f"frontmatter is not valid YAML: {exc}"),
+            "",
+        )
     if not isinstance(loaded, dict):
-        return None, ProvenanceError(
-            _FIELD_FRONTMATTER, "frontmatter must be a mapping of field names to values"
-        ), ""
+        return (
+            None,
+            ProvenanceError(
+                _FIELD_FRONTMATTER, "frontmatter must be a mapping of field names to values"
+            ),
+            "",
+        )
     return loaded, None, body
 
 

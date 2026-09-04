@@ -162,9 +162,7 @@ class TestCapture:
         assert body.decode() in result.content
 
     def test_relative_path_is_derived_from_the_url(self) -> None:
-        result = capture(
-            "https://example.com/docs/page", fetch_fn=self._fetch(b"# X\n"), now=_NOW
-        )
+        result = capture("https://example.com/docs/page", fetch_fn=self._fetch(b"# X\n"), now=_NOW)
 
         assert result.relative_path == "example.com/docs/page.md"
 

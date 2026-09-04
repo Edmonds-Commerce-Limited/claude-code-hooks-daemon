@@ -267,8 +267,7 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
             # Same advisory, deliberately: a second notice for one Read is
             # how one of them stops being read (D16).
             lines.append(
-                f"  licence is `{UNREVIEWED}` — check it before quoting this "
-                "anywhere it matters"
+                f"  licence is `{UNREVIEWED}` — check it before quoting this " "anywhere it matters"
             )
         return lines
 

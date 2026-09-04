@@ -36,9 +36,7 @@ stale_after: 2026-12-01
 @pytest.fixture(autouse=True)
 def _mock_project_context():
     """The handler resolves the workspace root at construction time."""
-    with patch(
-        "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root"
-    ) as mock:
+    with patch("claude_code_hooks_daemon.core.project_context.ProjectContext.project_root") as mock:
         mock.return_value = _ROOT
         yield mock
 
@@ -76,16 +74,12 @@ class TestScope:
 
 
 class TestGate:
-    def test_valid_provenance_is_allowed(
-        self, handler: RemoteDocsProvenanceHandler
-    ) -> None:
+    def test_valid_provenance_is_allowed(self, handler: RemoteDocsProvenanceHandler) -> None:
         hook_input = _write("remote-docs/example.com/p.md", _VALID)
 
         assert handler.matches(hook_input) is False
 
-    def test_missing_frontmatter_is_denied(
-        self, handler: RemoteDocsProvenanceHandler
-    ) -> None:
+    def test_missing_frontmatter_is_denied(self, handler: RemoteDocsProvenanceHandler) -> None:
         hook_input = _write("remote-docs/example.com/p.md", "# Just prose\n")
 
         assert handler.matches(hook_input) is True

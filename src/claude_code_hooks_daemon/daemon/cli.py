@@ -5094,9 +5094,7 @@ def _remote_docs_check(tree: Path, now: Any) -> int:
     return 1
 
 
-def _remote_docs_refresh(
-    args: argparse.Namespace, tree: Path, fetcher: Any, now: Any
-) -> int:
+def _remote_docs_refresh(args: argparse.Namespace, tree: Path, fetcher: Any, now: Any) -> int:
     from claude_code_hooks_daemon.remote_docs.store import (
         RefreshOutcome,
         list_documents,

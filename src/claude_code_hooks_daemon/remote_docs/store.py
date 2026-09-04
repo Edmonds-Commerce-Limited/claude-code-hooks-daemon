@@ -133,8 +133,7 @@ def write_capture(
         reason = content_guard(result.content)
         if reason is not None:
             raise CaptureError(
-                f"refusing to vendor {url}: the fetched content {reason}. "
-                "Nothing was written."
+                f"refusing to vendor {url}: the fetched content {reason}. " "Nothing was written."
             )
     destination = tree_root / result.relative_path
     try:

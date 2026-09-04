@@ -440,7 +440,7 @@ class TestAnExemptHandlerCannotQuietlyDeny:
             "assumed. One resident section for one subject: a second copy of "
             "the corpus policy would be duplicated truth, and the two would "
             "drift"
-        )
+        ),
     }
 
     @staticmethod

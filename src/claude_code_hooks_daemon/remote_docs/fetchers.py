@@ -26,6 +26,7 @@ No fetcher is reached from a handler. The daemon's CLI injects one; the
 handlers stay offline and testable.
 """
 
+import functools
 import json
 import shutil
 import subprocess  # nosec B404 - no shell is used; see _invoke
@@ -122,9 +123,7 @@ def _invoke(command: list[str], runner: Runner) -> Any:
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        raise CaptureError(
-            f"{command[0]} timed out after {_FETCH_TIMEOUT_SECONDS}s"
-        ) from exc
+        raise CaptureError(f"{command[0]} timed out after {_FETCH_TIMEOUT_SECONDS}s") from exc
     except FileNotFoundError as exc:
         raise CaptureError(f"{command[0]} could not be executed: {exc}") from exc
 
@@ -272,9 +271,10 @@ def resolve_fetcher(
         if locate(binary) is None or not _is_usable(binary, probe):
             continue
         return ResolvedFetcher(
-            fetch_fn=lambda url, _binary=binary: _fetch_with_source(
-                url, binary=_binary, runner=runner
-            ),
+            # `partial` rather than a lambda: it binds `binary` eagerly (the
+            # lambda needed a default-argument trick for that) and, unlike a
+            # lambda, carries a type mypy can check against `FetchFn`.
+            fetch_fn=functools.partial(_fetch_with_source, binary=binary, runner=runner),
             # Extracted and normalised text is not the response body, however
             # faithful it looks.
             fidelity=Fidelity.CONVERTED,

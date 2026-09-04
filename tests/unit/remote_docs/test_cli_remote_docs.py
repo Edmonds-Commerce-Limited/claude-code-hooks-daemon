@@ -52,9 +52,7 @@ class TestAdd:
         assert (_tree(tmp_path) / "example.com" / "docs" / "page.md").is_file()
 
     def test_add_records_a_declared_licence(self, tmp_path: Path) -> None:
-        cmd_remote_docs(
-            _args(tmp_path, "add", url="https://example.com/p", licence="CC-BY-4.0")
-        )
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p", licence="CC-BY-4.0"))
 
         content = (_tree(tmp_path) / "example.com" / "p.md").read_text()
         assert "licence: CC-BY-4.0" in content
@@ -68,9 +66,7 @@ class TestAdd:
         def boom(url: str) -> bytes:
             raise OSError("network down")
 
-        code = cmd_remote_docs(
-            _args(tmp_path, "add", url="https://example.com/p", fetch_fn=boom)
-        )
+        code = cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p", fetch_fn=boom))
 
         assert code == 1
 
@@ -91,9 +87,7 @@ class TestListAndCheck:
 
     def test_check_exits_nonzero_when_a_document_is_stale(self, tmp_path: Path) -> None:
         """Non-zero on stale is what makes the check usable in CI."""
-        cmd_remote_docs(
-            _args(tmp_path, "add", url="https://example.com/p", stale_after_days=1)
-        )
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p", stale_after_days=1))
 
         later = _args(tmp_path, "check", now=datetime(2027, 1, 1, tzinfo=UTC))
         assert cmd_remote_docs(later) == 1
@@ -172,9 +166,7 @@ class TestRemotePolicy:
             "documentation:\n  remote:\n    known_sources:\n      example.com: CC-BY-4.0\n",
         )
 
-        cmd_remote_docs(
-            _args(tmp_path, "add", url="https://example.com/p", licence="MIT")
-        )
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p", licence="MIT"))
 
         document = read_document(_tree(tmp_path) / "example.com" / "p.md")
         assert document.provenance is not None
@@ -200,9 +192,7 @@ class TestRemotePolicy:
 
         from claude_code_hooks_daemon.remote_docs.store import read_document
 
-        self._configure(
-            tmp_path, "documentation:\n  remote:\n    default_staleness_days: 7\n"
-        )
+        self._configure(tmp_path, "documentation:\n  remote:\n    default_staleness_days: 7\n")
 
         cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
 
@@ -268,9 +258,7 @@ class TestGeneratedIndex:
         def boom(url: str) -> bytes:
             raise OSError("network down")
 
-        cmd_remote_docs(
-            _args(tmp_path, "add", url="https://example.com/p", fetch_fn=boom)
-        )
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p", fetch_fn=boom))
 
         index = self._index(tmp_path)
         if index.exists():
@@ -297,9 +285,7 @@ class TestFetcherSelection:
             warning=warning,
         )
 
-    def test_the_resolved_fidelity_reaches_the_written_document(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_resolved_fidelity_reaches_the_written_document(self, tmp_path: Path) -> None:
         from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
         from claude_code_hooks_daemon.remote_docs.store import read_document
 
@@ -318,9 +304,7 @@ class TestFetcherSelection:
         assert document.provenance.fidelity is Fidelity.CONVERTED
         assert document.provenance.fetch_method == "agent-browser"
 
-    def test_a_fallback_warning_is_printed_when_fetching(
-        self, tmp_path: Path, capsys
-    ) -> None:
+    def test_a_fallback_warning_is_printed_when_fetching(self, tmp_path: Path, capsys) -> None:
         cmd_remote_docs(
             _args(
                 tmp_path,

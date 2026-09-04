@@ -230,9 +230,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         terms = self._secret_terms()
         for index, term in enumerate(terms, start=1):
             if sr.find_first_match_index(content, (term,)) is not None:
-                return (
-                    f"matches entry {index} of {len(terms)} in the secret word list"
-                )
+                return f"matches entry {index} of {len(terms)} in the secret word list"
         return None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

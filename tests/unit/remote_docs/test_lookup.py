@@ -115,9 +115,7 @@ class TestFind:
 
         assert find_document(tmp_path, "https://EXAMPLE.com/docs/page") is not None
 
-    def test_a_document_captured_with_a_decorated_url_is_still_found(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_document_captured_with_a_decorated_url_is_still_found(self, tmp_path: Path) -> None:
         """Normalisation applies to the STORED url too, not just the query.
 
         Capturing `...page#install` and later fetching the bare URL must

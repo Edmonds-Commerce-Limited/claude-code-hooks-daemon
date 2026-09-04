@@ -76,7 +76,11 @@ def normalise_url(url: str) -> str:
             host = f"{host}:{port}"
 
         query = urlencode(
-            sorted(pair for pair in parse_qsl(split.query, keep_blank_values=True) if not _is_tracking(pair[0]))
+            sorted(
+                pair
+                for pair in parse_qsl(split.query, keep_blank_values=True)
+                if not _is_tracking(pair[0])
+            )
         )
 
         path = split.path

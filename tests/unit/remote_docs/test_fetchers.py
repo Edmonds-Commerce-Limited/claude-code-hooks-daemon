@@ -23,6 +23,7 @@ import pytest
 
 from claude_code_hooks_daemon.remote_docs.capture import CaptureError
 from claude_code_hooks_daemon.remote_docs.fetchers import (
+    _FETCH_TIMEOUT_SECONDS,
     BINARY_CANDIDATES,
     HTTPS_METHOD,
     agent_browser_fetch,
@@ -332,7 +333,7 @@ class TestAgentBrowserFetch:
 
         def runner(cmd: list[str], **_kwargs: Any) -> Any:
             if "read" in cmd:
-                raise subprocess.TimeoutExpired(cmd="agent-browser", timeout=30)
+                raise subprocess.TimeoutExpired(cmd="agent-browser", timeout=_FETCH_TIMEOUT_SECONDS)
             return _Completed()
 
         with pytest.raises(CaptureError, match="timed out"):

@@ -58,9 +58,7 @@ class TestScope:
     def test_it_matches_a_git_commit(self, handler: RemoteDocsCommitGateHandler) -> None:
         assert handler.matches(_commit()) is True
 
-    def test_it_ignores_other_bash_commands(
-        self, handler: RemoteDocsCommitGateHandler
-    ) -> None:
+    def test_it_ignores_other_bash_commands(self, handler: RemoteDocsCommitGateHandler) -> None:
         assert handler.matches({"tool_name": "Bash", "tool_input": {"command": "ls"}}) is False
 
     def test_it_ignores_other_tools(self, handler: RemoteDocsCommitGateHandler) -> None:
@@ -78,9 +76,7 @@ class TestGate:
     def test_a_valid_vendored_document_is_allowed(
         self, handler: RemoteDocsCommitGateHandler, tmp_path: Path
     ) -> None:
-        handler.staged_reader = lambda: [
-            _write(tmp_path, "remote-docs/example.com/p.md", _VALID)
-        ]
+        handler.staged_reader = lambda: [_write(tmp_path, "remote-docs/example.com/p.md", _VALID)]
 
         assert handler.handle(_commit()).decision is Decision.ALLOW
 
@@ -164,9 +160,7 @@ class TestResilience:
 
         assert handler.handle(_commit()).decision is Decision.ALLOW
 
-    def test_the_real_staged_reader_survives_a_missing_repository(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_real_staged_reader_survives_a_missing_repository(self, tmp_path: Path) -> None:
         """`git diff --cached` outside a repository must not block the commit.
 
         Patched BEFORE construction: the readers are bound in `__init__`, so

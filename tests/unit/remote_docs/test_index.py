@@ -64,9 +64,7 @@ class TestRender:
         assert first == second
         assert first.index("example.com/a.md") < first.index("example.com/b.md")
 
-    def test_an_unreadable_document_is_listed_rather_than_hidden(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_unreadable_document_is_listed_rather_than_hidden(self, tmp_path: Path) -> None:
         """Omitting it would make the index quietly disagree with the tree."""
         bad = tmp_path / "example.com" / "bad.md"
         bad.parent.mkdir(parents=True)

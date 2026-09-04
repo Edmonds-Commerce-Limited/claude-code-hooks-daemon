@@ -42,9 +42,7 @@ def _fetch(body: bytes = b"# Upstream\n"):
 
 @pytest.fixture(autouse=True)
 def _mock_project_context(tmp_path: Path):
-    with patch(
-        "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root"
-    ) as mock:
+    with patch("claude_code_hooks_daemon.core.project_context.ProjectContext.project_root") as mock:
         mock.return_value = tmp_path
         yield mock
 
@@ -279,9 +277,7 @@ class TestReadBranch:
 
 
 class TestScope:
-    def test_other_tools_are_ignored(
-        self, handler: RemoteDocsRoutingHandler, tree: Path
-    ) -> None:
+    def test_other_tools_are_ignored(self, handler: RemoteDocsRoutingHandler, tree: Path) -> None:
         _seed(tree)
 
         assert handler.matches({"tool_name": "Bash", "tool_input": {"command": "ls"}}) is False

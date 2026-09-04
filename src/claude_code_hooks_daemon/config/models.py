@@ -1020,11 +1020,7 @@ class DocumentationRemoteConfig(BaseModel):
         parsed = urllib.parse.urlparse(url_or_host)
         host = (parsed.hostname or url_or_host).lower()
         return next(
-            (
-                licence
-                for domain, licence in self.known_sources.items()
-                if domain.lower() == host
-            ),
+            (licence for domain, licence in self.known_sources.items() if domain.lower() == host),
             None,
         )
 

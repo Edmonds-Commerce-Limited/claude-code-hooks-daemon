@@ -237,7 +237,9 @@ def capture(
         ) from exc
 
     stale_after: date | str = (
-        NEVER if stale_after_days is None else (fetched_at.date() + timedelta(days=stale_after_days))
+        NEVER
+        if stale_after_days is None
+        else (fetched_at.date() + timedelta(days=stale_after_days))
     )
     digest = hashlib.sha256(raw).hexdigest()
 
