@@ -239,6 +239,13 @@ case "$SUBCOMMAND" in
         bash "$SKILL_DIR/scripts/init-handlers.sh" "$@"
         ;;
 
+    optimise|optimize)
+        # Prints the review procedure for Claude to follow (like `report`).
+        # `optimize` is accepted so the US spelling does not hit the
+        # unknown-subcommand branch.
+        bash "$SKILL_DIR/scripts/optimise-invoke.sh" "$@"
+        ;;
+
     report)
         # LLM-driven investigation report — outputs prompt for Claude to follow
         cat "$SKILL_DIR/report.md" | sed "s/\$ARGUMENTS/$*/"
@@ -266,6 +273,7 @@ case "$SUBCOMMAND" in
         echo "Available commands:"
         echo "  install [--force]     Install daemon (fresh clone)"
         echo "  restart               Restart daemon (required after config changes)"
+        echo "  optimise              Config-optimisation review (closes every upgrade)"
         echo "  regen-docs            Force-regenerate HOOKS-DAEMON.md + CLAUDE.md block"
         echo "  rule-explain ID       Full detail for a rule ID, or --list every rule"
         echo "  health                Check daemon health and status"
