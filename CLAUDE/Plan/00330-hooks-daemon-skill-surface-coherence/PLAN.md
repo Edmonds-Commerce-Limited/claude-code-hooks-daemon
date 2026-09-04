@@ -66,18 +66,37 @@ this plan generalises.
   human use. Classify each: routed, documented-only, or retire. Evidence
   before opinion — the owner reports never using several, and which ones is a
   question for the data.
+
 - [ ] ⬜ **Task 1.2**: Inventory what `optimise` covers against the handler
   registry. The headline is 21 of 110, but the fair denominator is smaller:
   status-line components and always-on handlers are not things it should
   score. Produce the real actionable gap.
+
 - [ ] ⬜ **Task 1.3**: Confirm the five scored areas are still the right
   taxonomy for a registry-derived checklist, or replace them. A hardcoded
   list can carry an arbitrary grouping; a derived one needs a rule that
   assigns any new handler to an area without human judgement.
-- [ ] ⬜ **Task 1.4**: Record — do not fix — that neither docs QA nor plan QA
-  consults the project-wide `daemon.exclude_paths`, which many other handler
-  families honour via `utils/path_exclusion.py`. Found during the Plan 00329
-  scope-exclusion audit. Distinct, pre-existing, and needs its own plan.
+
+- [ ] ⬜ **Task 1.4**: Decide whether docs QA and plan QA should honour the
+  project-wide `daemon.exclude_paths`. Verified: **zero** references to it in
+  either package, against 12 handler modules that do honour it via
+  `utils/path_exclusion.py`. It matters because the shipped guidance
+  repeatedly offers `daemon.exclude_paths` as the project-wide way to exempt
+  paths, so a user configuring "ignored dirs" through it gets silence from
+  docs QA — the same symptom as the reported `scope_exclude_globs` bug fixed
+  in `0054105b`.
+
+  Mechanically small: `path_exclusion` is pure stdlib (so importing it does
+  not break docs_qa's deliberate daemon/pydantic decoupling), and
+  `policy_from_config` has only two production callers.
+
+  NOT done on sight, because the blast radius runs the other way. Projects
+  set `daemon.exclude_paths` broadly to exempt deliberately-bad fixture trees
+  from the CONTENT blockers. Honouring it in docs QA would make those trees
+  silently stop producing documentation findings — plausibly unwanted, and
+  invisible when it happens. That is the argument for docs QA having its own
+  narrower `scope_exclude_globs` in the first place. Settle the intent before
+  changing the semantics; an owner decision, not an implementation detail.
 
 ### Phase 2: Make optimise registry-derived
 
