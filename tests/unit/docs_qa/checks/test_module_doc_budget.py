@@ -464,6 +464,101 @@ class TestSweepStage:
         assert findings[0].path == "src/claude_code_hooks_daemon/skills/hooks-daemon/CLAUDE.md"
 
 
+class TestConfiguredScopeExclusionsAreHonoured:
+    """Client bug: a project configured ignored directories and this check
+    kept reporting module docs inside them.
+
+    Cause: this check enumerates with its OWN ``os.walk`` rather than going
+    through ``docs_qa.corpus``, and prunes only the hardcoded
+    ``_EXCLUDED_DIR_NAMES``. The configured ``scope_exclude_globs`` was
+    consulted nowhere in either stage. ``corpus.matches_scope_exclude`` is
+    public for exactly this case -- ``source_tree_markdown`` already applies
+    it to paths outside the corpus's scope; this check simply never did.
+    """
+
+    # The reported path shape, deliberately. An earlier draft of these tests
+    # used ``vendor/`` and ``third_party/`` and passed against the UNFIXED
+    # code -- both are already in ``COMMON_VENDORED_BUILD_DIR_NAMES``, so the
+    # hardcoded prune was doing the work and the configured exclusion was
+    # never exercised at all. An ansible-galaxy role directory is covered by
+    # no hardcoded rule, which is exactly why the client had to configure one.
+    _ROLES_GLOB = "infra/ansible/roles/**"
+    _EXCLUDED = DocumentationQaPolicy(scope_exclude_globs=(_ROLES_GLOB,))
+    _DOC_REL = "infra/ansible/roles/lts.vault-scripts/shellscripts/CLAUDE.md"
+
+    @staticmethod
+    def _write_role_doc(tmp_path: Path) -> Path:
+        doc = tmp_path / TestConfiguredScopeExclusionsAreHonoured._DOC_REL
+        doc.parent.mkdir(parents=True)
+        doc.write_text(_LONG_BODY)
+        return doc
+
+    def test_sweep_skips_a_module_doc_under_an_excluded_dir(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        self._write_role_doc(tmp_path)
+
+        context = sweep_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(qa=self._EXCLUDED),
+            corpus=DocCorpus(project_root=tmp_path),
+        )
+        assert _run_sweep(context) == []
+
+    def test_edit_skips_a_module_doc_under_an_excluded_dir(self, tmp_path: Path) -> None:
+        """The EDIT arm had no exclusion test at all, so fixing only the
+        walk would still report a doc the project declared out of scope."""
+        doc = self._write_role_doc(tmp_path)
+
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(qa=self._EXCLUDED),
+            file_path=doc,
+            file_content=_LONG_BODY,
+            file_exists_before=False,
+        )
+        assert _run_edit(context) == []
+
+    def test_a_filename_shape_pattern_is_honoured_too(self, tmp_path: Path) -> None:
+        """``matches_scope_exclude`` matches the bare basename as well as the
+        full path, so a slash-less pattern must work here identically."""
+        (tmp_path / "CLAUDE").mkdir()
+        (tmp_path / "infra").mkdir()
+        (tmp_path / "infra" / "CLAUDE.md").write_text(_LONG_BODY)
+
+        context = sweep_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(qa=DocumentationQaPolicy(scope_exclude_globs=("CLAUDE.md",))),
+            corpus=DocCorpus(project_root=tmp_path),
+        )
+        assert _run_sweep(context) == []
+
+    def test_a_doc_outside_the_exclusion_is_still_reported(self, tmp_path: Path) -> None:
+        """Guard against over-fixing: the exclusion must not silence the
+        check generally, only inside the configured directories."""
+        (tmp_path / "CLAUDE").mkdir()
+        self._write_role_doc(tmp_path)
+        (tmp_path / "src" / "foo").mkdir(parents=True)
+        (tmp_path / "src" / "foo" / "CLAUDE.md").write_text(_LONG_BODY)
+
+        context = sweep_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(qa=self._EXCLUDED),
+            corpus=DocCorpus(project_root=tmp_path),
+        )
+        findings = _run_sweep(context)
+        assert [finding.path for finding in findings] == ["src/foo/CLAUDE.md"]
+
+    def test_the_walk_does_not_descend_into_an_excluded_dir(self, tmp_path: Path) -> None:
+        """Pruning, not post-filtering: the point of the hardcoded set is
+        that a heavy directory is never ENTERED. A configured exclusion
+        should buy the same, or a client's vendored tree is still walked on
+        every session start even though its findings are discarded."""
+        (tmp_path / "CLAUDE").mkdir()
+        self._write_role_doc(tmp_path)
+
+        assert _iter_module_doc_paths(tmp_path, "CLAUDE", (self._ROLES_GLOB,)) == []
+
+
 class TestMissingFilePathOrContent:
     def test_missing_file_path_or_content_produces_no_findings(self, tmp_path: Path) -> None:
         context_no_path = CheckContext(

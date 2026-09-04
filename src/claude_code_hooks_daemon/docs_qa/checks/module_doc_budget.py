@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.docs_qa.corpus import (
     COMMON_VENDORED_BUILD_DIR_NAMES,
     is_module_doc_path,
     is_vendored_daemon_install_path,
+    matches_scope_exclude,
 )
 from claude_code_hooks_daemon.docs_qa.types import (
     CheckContext,
@@ -225,6 +226,10 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     rel_path = str(context.file_path.relative_to(context.project_root))
     if not is_module_doc_path(rel_path, context.policy.trees.agent):
         return []
+    # The EDIT arm had no exclusion test at all, so a project that had
+    # declared a tree out of scope was still judged when editing inside it.
+    if matches_scope_exclude(rel_path, tuple(context.policy.qa.scope_exclude_globs)):
+        return []
     registered = rel_path in context.policy.qa.registered_module_docs
     grandfathered = _matches_allowlist(rel_path, context.policy.qa.grandfather_allowlist)
     finding = _finding_for(
@@ -233,7 +238,9 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     return [finding] if finding is not None else []
 
 
-def _iter_module_doc_paths(project_root: Path, agent_tree: str) -> list[str]:
+def _iter_module_doc_paths(
+    project_root: Path, agent_tree: str, scope_exclude_globs: tuple[str, ...] = ()
+) -> list[str]:
     """Every module-scoped CLAUDE.md on disk.
 
     F3 (Plan 00287): uses a PRUNED ``os.walk`` rather than ``Path.rglob`` --
@@ -243,6 +250,24 @@ def _iter_module_doc_paths(project_root: Path, agent_tree: str) -> list[str]:
     post-filter below. Pruning removes an excluded directory from
     ``dirnames`` in place (the documented ``os.walk`` idiom), so the walk
     never enters it at all.
+
+    ``scope_exclude_globs`` is the project's configured exclusion (Plan
+    00289), applied here BECAUSE this check walks the tree itself instead of
+    reading ``docs_qa.corpus`` -- so it does not inherit the corpus's own
+    ``_is_excluded``. Omitting it was a defect: a project that vendored a
+    dependency carrying its own CLAUDE.md (an ansible-galaxy role, in the
+    report) got a permanent sweep advisory that the one documented
+    suppression could not silence. The hardcoded ``_EXCLUDED_DIR_NAMES``
+    could not stand in for it either -- those are well-known BASENAMES, and
+    a vendored path the project chose is not guessable.
+
+    Applied as a PRUNE, matching the hardcoded set: an excluded directory is
+    never entered, rather than being walked and filtered afterwards. A
+    directory-scoped pattern (``roles/**``) therefore has to match the
+    directory itself, so it is tested with its ``/`` suffix stripped from
+    the glob's trailing ``/**`` -- and a doc that slips past the prune (a
+    filename-shape pattern like ``CLAUDE.md`` matches no directory) is
+    caught by the post-filter below.
     """
     matches: list[str] = []
     for dirpath, dirnames, filenames in os.walk(project_root):
@@ -252,18 +277,43 @@ def _iter_module_doc_paths(project_root: Path, agent_tree: str) -> list[str]:
             for name in dirnames
             if name not in _EXCLUDED_DIR_NAMES
             and not is_vendored_daemon_install_path((*rel_dir_parts, name))
+            and not _dir_is_scope_excluded((*rel_dir_parts, name), scope_exclude_globs)
         ]
         if _CLAUDE_MD_FILENAME not in filenames:
             continue
         rel_path = "/".join((*rel_dir_parts, _CLAUDE_MD_FILENAME))
+        if matches_scope_exclude(rel_path, scope_exclude_globs):
+            continue
         if is_module_doc_path(rel_path, agent_tree):
             matches.append(rel_path)
     return sorted(matches)
 
 
+def _dir_is_scope_excluded(rel_parts: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
+    """Whether a DIRECTORY is inside a configured scope exclusion.
+
+    ``matches_scope_exclude`` judges a FILE path. A pattern written to cover
+    a subtree (``infra/ansible/roles/**``) does not match the directory
+    ``infra/ansible/roles`` itself, so pruning on the raw pattern alone would
+    still descend the tree. Testing the directory against the pattern with a
+    trailing ``/**`` removed closes that, and keeps the prune equivalent to
+    the post-filter rather than broader than it.
+    """
+    rel_dir = "/".join(rel_parts)
+    for pattern in patterns:
+        subtree_root = pattern[:-3] if pattern.endswith("/**") else pattern
+        if fnmatch(rel_dir, subtree_root) or fnmatch(rel_dir, pattern):
+            return True
+    return False
+
+
 def _run_sweep(context: CheckContext) -> list[Finding]:
     findings: list[Finding] = []
-    for rel_path in _iter_module_doc_paths(context.project_root, context.policy.trees.agent):
+    for rel_path in _iter_module_doc_paths(
+        context.project_root,
+        context.policy.trees.agent,
+        tuple(context.policy.qa.scope_exclude_globs),
+    ):
         abs_path = context.project_root / rel_path
         if not abs_path.is_file():
             continue
