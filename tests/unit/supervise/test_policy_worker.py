@@ -218,6 +218,31 @@ def test_run_worker_recognizes_typed_model_command_from_raw_input(tmp_path: Path
     assert outcome.machine_state["manual_model_family"] == "opus"
 
 
+def test_run_worker_recognizes_the_bare_model_picker_from_raw_input(tmp_path: Path) -> None:
+    """A bare `/model` opens Claude Code's picker and names no family, so the
+    worker must arm the wildcard latch instead. Recognition and plumbing are
+    asserted here END TO END through the worker's own JSON path: a gap in any
+    single hop would leave the fix inert in production while the state-machine
+    unit tests still passed."""
+    sidecar_dir = tmp_path / "context-sidecar"
+    in_stream = io.StringIO(_mod._facts_to_json(_facts_with_raw_input(b"/model\r")) + "\n")
+    out_stream = io.StringIO()
+
+    _mod.run_worker(
+        in_stream,
+        out_stream,
+        dry_run=True,
+        sidecar_dir=sidecar_dir,
+        policy=_mod.CompactPolicy(),
+    )
+
+    outcome = _mod._outcome_from_json(out_stream.getvalue().strip())
+    assert outcome.machine_state is not None
+    assert outcome.machine_state["manual_selector_ts"] == 1000.0
+    # No family was typed, so the family-specific latch must stay untouched.
+    assert outcome.machine_state["manual_model_family"] is None
+
+
 def test_run_worker_recognition_persists_across_ticks_until_submitted(tmp_path: Path) -> None:
     """A typed line split across multiple ticks (no Enter yet) must stay
     non-empty until submitted -- the worker's recognizer state must persist
