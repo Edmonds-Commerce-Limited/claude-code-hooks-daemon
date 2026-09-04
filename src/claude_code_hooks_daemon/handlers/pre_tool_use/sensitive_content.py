@@ -21,12 +21,13 @@ as this repo's own source code.
 
 import re
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils import secret_redaction as sr
@@ -152,6 +153,12 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         exclude_paths: glob patterns exempted from scanning, additive with
             the project-wide ``daemon.exclude_paths``.
     """
+
+    # PROJECT-scoped: the exclusion check consults the OWNING project's
+    # vendored set via `layout_for()` (Plan 00331 Task 1.3), and the REPO
+    # contract forbids a repo-singular handler consuming per-project
+    # resolution.
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
 
     def __init__(self) -> None:
         super().__init__(

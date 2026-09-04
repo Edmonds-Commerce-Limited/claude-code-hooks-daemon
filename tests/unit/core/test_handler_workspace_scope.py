@@ -17,12 +17,29 @@ from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor impor
 from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
     ValidateEslintOnWriteHandler,
 )
+from claude_code_hooks_daemon.handlers.pre_tool_use import (
+    secret_file_guard as secret_file_guard_module,
+)
 from claude_code_hooks_daemon.handlers.pre_tool_use.british_english import BritishEnglishHandler
+from claude_code_hooks_daemon.handlers.pre_tool_use.comment_changelog import (
+    CommentChangelogHandler,
+)
+from claude_code_hooks_daemon.handlers.pre_tool_use.comment_size import CommentSizeHandler
+from claude_code_hooks_daemon.handlers.pre_tool_use.error_hiding_blocker import (
+    ErrorHidingBlockerHandler,
+)
 from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import (
     MarkdownOrganizationHandler,
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.npm_command import NpmCommandHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_workflow import PlanWorkflowHandler
+from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import QaSuppressionHandler
+from claude_code_hooks_daemon.handlers.pre_tool_use.security_antipattern import (
+    SecurityAntipatternHandler,
+)
+from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
+    SensitiveContentHandler,
+)
 from claude_code_hooks_daemon.handlers.pre_tool_use.tdd_enforcement import TddEnforcementHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.worktree_file_copy import (
     WorktreeFileCopyHandler,
@@ -80,6 +97,31 @@ class TestProjectLevelHandlersDeclareProjectScope:
 
     def test_worktree_file_copy_is_project_scoped(self) -> None:
         assert WorktreeFileCopyHandler.workspace_scope is WorkspaceScope.PROJECT
+
+    def test_content_blockers_are_project_scoped(self) -> None:
+        """Plan 00331 Task 1.3: these seven judge whether to scan ONE file,
+        and consult the owning project's vendored set via `layout_for()`.
+
+        They inherited the REPO default while doing so, which the contract
+        above forbids -- a repo-singular handler must not consume
+        per-project resolution. The direction of the error is worth keeping
+        in mind: REPO is the safe-looking default, so a handler acquires
+        this violation by adding a `layout_for()` call and changing nothing
+        else.
+        """
+        for handler_class in (
+            ErrorHidingBlockerHandler,
+            CommentSizeHandler,
+            CommentChangelogHandler,
+            QaSuppressionHandler,
+            SecurityAntipatternHandler,
+            SensitiveContentHandler,
+            secret_file_guard_module.SecretFileGuardHandler,
+        ):
+            assert handler_class.workspace_scope is WorkspaceScope.PROJECT, (
+                f"{handler_class.__name__} calls layout_for() but declares "
+                f"{handler_class.workspace_scope}"
+            )
 
 
 class TestRepoLevelHandlersDeclareRepoScope:

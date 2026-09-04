@@ -20,7 +20,7 @@ logic lives once in the handler while strategies carry only config.
 """
 
 import re
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_path
@@ -213,6 +214,12 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
         languages: list[str] | None - restrict to specific languages.
         exclude_paths: list[str] | None - additional glob excludes.
     """
+
+    # PROJECT-scoped: the exclusion check consults the OWNING project's
+    # vendored set via `layout_for()` (Plan 00331 Task 1.3), and the REPO
+    # contract forbids a repo-singular handler consuming per-project
+    # resolution.
+    workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.PROJECT
 
     def __init__(self) -> None:
         super().__init__(
