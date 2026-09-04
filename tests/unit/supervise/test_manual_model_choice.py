@@ -783,7 +783,7 @@ def test_human_input_line_selector_edge_ignores_a_longer_command() -> None:
     assert line.take_model_selector_submitted() is False
 
 
-@pytest.mark.parametrize("typed", [b"/mod\r", b"/modl\r", b"/mode\r", b"/model\r"])
+@pytest.mark.parametrize("typed", [b"/modl\r", b"/mdel\r", b"/model\r"])
 def test_autocompleted_model_command_still_arms_the_picker_latch(typed: bytes) -> None:
     """Field evidence (2026-09-04 dogfood): the worker observed `'/modl'`, not
     `/model`.
@@ -804,9 +804,23 @@ def test_autocompleted_model_command_still_arms_the_picker_latch(typed: bytes) -
 
 
 @pytest.mark.parametrize("typed", [b"/m\r", b"/mo\r", b"/compact\r", b"/goal\r", b"hello\r"])
-def test_short_or_unrelated_prefixes_do_not_arm_the_picker_latch(typed: bytes) -> None:
-    """`/mo` is short enough to be heading somewhere else; the guess has to stop
-    somewhere, and a two-character stem is where."""
+def test_short_or_unrelated_stems_do_not_arm_the_picker_latch(typed: bytes) -> None:
+    """The guess has to stop somewhere, and a two-character stem is where."""
+    line = _mod.HumanInputLine()
+    line.feed(typed)
+    assert line.take_model_selector_submitted() is False
+
+
+@pytest.mark.parametrize("typed", [b"/mod\r", b"/mode\r"])
+def test_a_partial_prefix_of_model_does_not_arm_the_picker_latch(typed: bytes) -> None:
+    """A PREFIX is ambiguous -- it may be heading for another command entirely.
+
+    Verified against this environment rather than assumed: `/mode` is a real
+    skill in THIS repo and is a prefix of `/model`, so accepting prefixes
+    would arm the wildcard on a command that has nothing to do with models,
+    silently disabling the fable restore for the latch window. A non-prefix
+    subsequence like `/modl` carries no such ambiguity.
+    """
     line = _mod.HumanInputLine()
     line.feed(typed)
     assert line.take_model_selector_submitted() is False

@@ -730,17 +730,27 @@ class HumanInputLine:
         exact and prefix matching missed a deliberate human choice and the
         auto-restore overrode it.
 
+        A partial PREFIX is deliberately NOT enough, which is what keeps the
+        guess honest. A prefix is ambiguous -- it may be heading for a
+        different command entirely, and this project ships a `/mode` skill
+        that is a prefix of `/model`. A non-prefix subsequence is not
+        ambiguous in the same way: it can only be a misspelling that fuzzy
+        matching resolved, so the human was aiming HERE. Hence: the exact
+        command, or a stem that is a subsequence but NOT a prefix.
+
         Guessing towards "the human is changing model" is the safe direction:
         the ruling is that a human-driven selection must never be overridden,
-        so a false positive costs only a restore we were told not to make.
-        ``_MIN_COMMAND_STEM`` keeps the guess off short stems, which are
-        heading anywhere; no other shipped slash command is a subsequence of
-        ``/model`` at that length.
+        so a false positive costs only a restore we were told not to make. But
+        a false positive also disables the fable restore for the latch window,
+        so the guess is worth narrowing where it can be narrowed honestly.
+        ``_MIN_COMMAND_STEM`` keeps it off short stems besides.
         """
         text = bytes(self._buffer).decode("utf-8", errors="ignore").strip()
-        if len(text) < _MIN_COMMAND_STEM or len(text) > len(command):
+        if text == command:
+            return True
+        if len(text) < _MIN_COMMAND_STEM or len(text) >= len(command):
             return False
-        return _is_subsequence(text, command)
+        return _is_subsequence(text, command) and not command.startswith(text)
 
     def take_compact_submitted(self) -> bool:
         """Return True once if a human `/compact` was submitted, then clear it.
