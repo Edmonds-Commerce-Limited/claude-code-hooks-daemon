@@ -383,8 +383,17 @@ def _summarize_tests(data: QaReport) -> str:
     passed = s.get("passed", 0)
     failed = s.get("failed", 0)
     skipped = s.get("skipped", 0)
+    # Shown whenever non-zero rather than always, so the common green line
+    # stays unchanged. pytest counts a fixture/setup/teardown blow-up as an
+    # ERROR, not a failure, so a summary reading "0 failed" was compatible
+    # with a red run and the named node id below had nothing to explain it.
+    errors = s.get("errors", 0)
     cov = data.get("coverage", {}).get("percent_covered", 0)
-    line = f"{passed} passed, {failed} failed, {skipped} skipped | coverage: {cov:.1f}%"
+    error_part = f", {errors} errored" if errors else ""
+    line = (
+        f"{passed} passed, {failed} failed{error_part}, "
+        f"{skipped} skipped | coverage: {cov:.1f}%"
+    )
 
     # Name the failures (Plan 00226). A count alone forces a full re-run to
     # find out what broke, and a re-run may not reproduce an order-dependent

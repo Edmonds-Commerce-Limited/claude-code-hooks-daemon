@@ -146,6 +146,10 @@ summary = {
     "passed": report["passed"],
     "failed": report["failed"],
     "skipped": report["skipped"],
+    # Carried separately from "failed" because pytest counts them separately:
+    # a fixture that blows up during setup or teardown is an ERROR, and
+    # omitting it here let tests.json report a red run as green.
+    "errors": report["errors"],
     "passed_all": report["passed_all"],
 }
 

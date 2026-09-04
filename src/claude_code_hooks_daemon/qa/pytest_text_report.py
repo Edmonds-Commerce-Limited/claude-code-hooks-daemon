@@ -30,6 +30,13 @@ _FAILED_LINE_PATTERN = re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.MULTILINE)
 _PASSED_COUNT_PATTERN = re.compile(r"(\d+) passed")
 _FAILED_COUNT_PATTERN = re.compile(r"(\d+) failed")
 _SKIPPED_COUNT_PATTERN = re.compile(r"(\d+) skipped")
+# pytest counts a fixture/setup/teardown failure as an ERROR and never as a
+# "failed", so a summary can read "17820 passed, 5 skipped, 1 error" with the
+# word "failed" absent entirely. Scraping only the failed count therefore read
+# a red run as green while the short summary's `ERROR <node id>` line still
+# landed in ``failed_tests`` — a report naming a broken test and declaring
+# itself passing in the same breath. Matches both "1 error" and "2 errors".
+_ERROR_COUNT_PATTERN = re.compile(r"(\d+) error")
 
 
 def strip_ansi(text: str) -> str:
@@ -58,6 +65,7 @@ def parse_pytest_text_output(content: str) -> dict[str, Any]:
     passed = _count(_PASSED_COUNT_PATTERN, plain)
     failed = _count(_FAILED_COUNT_PATTERN, plain)
     skipped = _count(_SKIPPED_COUNT_PATTERN, plain)
+    errors = _count(_ERROR_COUNT_PATTERN, plain)
 
     # De-duplicated while preserving order: a node id can appear both in the
     # short summary and in a rerun/verbose section of the same output.
@@ -67,10 +75,13 @@ def parse_pytest_text_output(content: str) -> dict[str, Any]:
             failed_tests.append(node_id)
 
     return {
-        "total": passed + failed + skipped,
+        "total": passed + failed + skipped + errors,
         "passed": passed,
         "failed": failed,
         "skipped": skipped,
-        "passed_all": failed == 0,
+        "errors": errors,
+        # An ERRORED run is a red run. Deriving this from the failed count
+        # alone let a suite whose fixtures blew up report itself as green.
+        "passed_all": failed == 0 and errors == 0,
         "failed_tests": failed_tests,
     }
