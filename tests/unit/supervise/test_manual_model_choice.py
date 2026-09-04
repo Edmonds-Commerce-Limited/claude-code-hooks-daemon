@@ -552,6 +552,75 @@ def test_submitted_slash_lines_are_observable() -> None:
     assert line.take_slash_submitted() == []
 
 
+# ── Scope: ONLY the automated fable security downgrade ──────────────────────
+
+
+def test_opus_to_sonnet_drop_is_not_the_supervisors_business(tmp_path: Path) -> None:
+    """Owner ruling (2026-09-04, from a live dogfood): this family exists ONLY
+    to counteract the automated fable security downgrade, NOTHING more.
+
+    Field evidence -- the human picked Sonnet and the supervisor typed
+    `/model opus` at them 4s later, then forced `/effort xhigh`:
+
+        07:14:55 would-model: downgrade quiet delay elapsed -> injected '/model opus'
+        07:14:58 would-effort: model switch requires coupled effort -> '/effort xhigh'
+
+    A drop that did not START at fable is not the security fallback, so no
+    episode opens: no restore, and no forced xhigh either.
+    """
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _write_sidecar(sidecar_dir, model_id="claude-sonnet-5", effort="high", ts=_NOW - 0.5)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "noop"
+    later = _decide(sidecar_dir, machine, facts=_facts(_NOW + 10_000.0))
+    assert later.decision_value == "noop"
+    assert machine.export_state()["downgrade_episode"] is None
+
+
+def test_opus_to_haiku_drop_is_also_ignored(tmp_path: Path) -> None:
+    """The rule is 'started at fable', not 'dropped by only one rank'."""
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _write_sidecar(sidecar_dir, model_id="claude-haiku-4-5", effort="low", ts=_NOW - 0.5)
+    _decide(sidecar_dir, machine)
+    assert machine.export_state()["downgrade_episode"] is None
+
+
+def test_the_fable_security_downgrade_is_still_restored(tmp_path: Path) -> None:
+    """The one case the family exists for must keep working exactly as before."""
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 0.5)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "would-effort"
+    later = _NOW + _mod._DEFAULT_MODEL_RESTORE_DELAY_SECONDS + 1.0
+    machine.mark_effort_injection(now_wall=_NOW)
+    machine.mark_audit_injection()
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=later - 1.0)
+    restore = _decide(sidecar_dir, machine, facts=_facts(later))
+    assert restore.decision_value == "would-model"
+    assert restore.payload == "/model fable"
+
+
+def test_a_fable_drop_all_the_way_to_sonnet_still_counts(tmp_path: Path) -> None:
+    """The fallback target is opus today, but the rule keys on where the drop
+    STARTED -- so a fallback to anything below fable is still covered."""
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _write_sidecar(sidecar_dir, model_id="claude-sonnet-5", effort="high", ts=_NOW - 0.5)
+    _decide(sidecar_dir, machine)
+    assert machine.export_state()["downgrade_episode"] is not None
+
+
 # ── The `/model` PICKER: a manual choice with no family in the typed text ────
 
 
@@ -607,7 +676,7 @@ def test_model_selector_latch_expires(tmp_path: Path) -> None:
 
 
 def test_model_selector_latch_is_consumed_by_the_family_that_lands(tmp_path: Path) -> None:
-    """One picker interaction sanctions ONE change. A later family move with
+    """One picker interaction sanctions ONE change. A later fable drop with
     nothing newly typed is a silent substitution the classifier must catch."""
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
@@ -616,10 +685,14 @@ def test_model_selector_latch_is_consumed_by_the_family_that_lands(tmp_path: Pat
     _decide(sidecar_dir, machine, facts=_facts(human_model_selector=True))
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 0.5)
     _decide(sidecar_dir, machine, facts=_facts(_NOW + 1.0))
-    # Nothing typed since; a further unrequested drop opens a real episode.
-    _write_sidecar(sidecar_dir, model_id="claude-sonnet-5", effort="high", ts=_NOW + 1.5)
-    outcome = _decide(sidecar_dir, machine, facts=_facts(_NOW + 2.0))
-    assert outcome.decision_value == "would-effort"
+    assert machine.export_state()["manual_selector_ts"] is None
+    # Back on fable, then a further unrequested drop: the spent latch must not
+    # vouch for it, so a real episode opens.
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW + 1.5)
+    _decide(sidecar_dir, machine, facts=_facts(_NOW + 2.0))
+    _write_sidecar(sidecar_dir, model_id="claude-sonnet-5", effort="high", ts=_NOW + 2.5)
+    _decide(sidecar_dir, machine, facts=_facts(_NOW + 3.0))
+    assert machine.export_state()["downgrade_episode"] is not None
 
 
 def test_supervisor_auto_restore_does_not_spend_the_picker_latch(tmp_path: Path) -> None:
@@ -704,10 +777,46 @@ def test_typed_model_command_also_retires_a_pending_picker_latch() -> None:
     assert machine.export_state()["manual_selector_ts"] is None
 
 
-def test_human_input_line_selector_edge_requires_an_exact_bare_command() -> None:
+def test_human_input_line_selector_edge_ignores_a_longer_command() -> None:
     line = _mod.HumanInputLine()
     line.feed(b"/modelfoo\r")
     assert line.take_model_selector_submitted() is False
+
+
+@pytest.mark.parametrize("typed", [b"/mod\r", b"/modl\r", b"/mode\r", b"/model\r"])
+def test_autocompleted_model_command_still_arms_the_picker_latch(typed: bytes) -> None:
+    """Field evidence (2026-09-04 dogfood): the worker observed `'/modl'`, not
+    `/model`.
+
+    Claude Code's slash autocomplete completes the word in its OWN UI, so the
+    completed text never crosses the PTY -- only the prefix the human actually
+    typed, plus the menu keystrokes. Exact matching therefore misses the real
+    submission, which is how a deliberate model change went unrecognised and
+    got overridden.
+
+    Erring towards "assume human" is the correct direction here: the owner
+    ruling is that a human-driven selection must NEVER be overridden, so a
+    false positive costs only a restore we were told not to make anyway.
+    """
+    line = _mod.HumanInputLine()
+    line.feed(typed)
+    assert line.take_model_selector_submitted() is True
+
+
+@pytest.mark.parametrize("typed", [b"/m\r", b"/mo\r", b"/compact\r", b"/goal\r", b"hello\r"])
+def test_short_or_unrelated_prefixes_do_not_arm_the_picker_latch(typed: bytes) -> None:
+    """`/mo` is short enough to be heading somewhere else; the guess has to stop
+    somewhere, and a two-character stem is where."""
+    line = _mod.HumanInputLine()
+    line.feed(typed)
+    assert line.take_model_selector_submitted() is False
+
+
+def test_autocompleted_model_command_is_still_observed_as_a_slash_line() -> None:
+    """The diagnostic that CAUGHT this must keep recording the raw bytes."""
+    line = _mod.HumanInputLine()
+    line.feed(b"/modl\r")
+    assert line.take_slash_submitted() == ["/modl"]
 
 
 def test_model_selector_state_round_trips_through_export_import() -> None:

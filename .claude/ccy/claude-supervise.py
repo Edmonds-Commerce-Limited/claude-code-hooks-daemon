@@ -98,13 +98,18 @@ forwarding and child/worker lifecycle is intentionally minimal, audited in
   * injecting a `TickOutcome` the worker already decided on
     (`_apply_decision`), and adopting the worker's post-tick state.
 
-A model change the HUMAN makes is never fought by the auto-restore, and
-there are two shapes of it. A typed `/model <family>` latches that family;
-a bare `/model` opens Claude Code's own PICKER, whose arrow-key navigation
-carries no text at all, so it instead arms a short-lived WILDCARD that
-sanctions whichever family lands next. Recognising only the first shape
-missed the commonest way a human switches model -- someone out of allowance
-on one family picked another and the supervisor flipped it straight back.
+A model change the HUMAN makes is NEVER overridden, in any direction, by any
+mechanism here (owner ruling, 2026-09-04). Two shapes of it are recognised. A
+typed `/model <family>` latches that family; anything that OPENS Claude Code's
+model UI -- a bare `/model`, or the fuzzy stem an autocomplete completed, such
+as the real `/modl` a dogfood caught -- arms a short-lived WILDCARD that
+sanctions whichever family lands next, because the picker is navigated with
+arrow keys that carry no text. Recognising only the first shape missed the
+commonest way a human switches model, and the auto-restore then flipped their
+choice straight back.
+
+Note the auto-restore itself is scoped to drops that START at fable (the
+security fallback); see the SCOPE note above `_MODEL_FAMILY_RANKS`.
 
 Typed-command recognition (`/compact`, `/model <x>`, the bare-`/model`
 picker, `/effort <x>`) runs
@@ -536,8 +541,22 @@ _CSI_FINAL_MIN, _CSI_FINAL_MAX = 0x40, 0x7E
 _CSI_FINAL_TILDE = 0x7E  # '~' terminates edit/function keys and paste markers
 _CSI_ARROW_UP = 0x41  # 'A'
 _CSI_ARROW_DOWN = 0x42  # 'B'
+# Shortest submitted stem treated as an autocompleted slash command (see
+# `_buffer_opens_command_ui`). `/mod` is unambiguous; `/mo` is not.
+_MIN_COMMAND_STEM = 4
 _PASTE_START_PARAMS = (0x32, 0x30, 0x30)  # "200"
 _PASTE_END_PARAMS = (0x32, 0x30, 0x31)  # "201"
+
+
+def _is_subsequence(stem: str, whole: str) -> bool:
+    """True when every character of ``stem`` appears in ``whole``, in order.
+
+    The matching rule Claude Code's own slash autocomplete uses, reproduced so
+    a misspelt stem the human typed can still be tied back to the command they
+    actually ran -- the PTY never carries the completed word.
+    """
+    remaining = iter(whole)
+    return all(char in remaining for char in stem)
 
 
 class HumanInputLine:
@@ -623,7 +642,7 @@ class HumanInputLine:
                 model_arg = self._buffer_command_arg(_MODEL_COMMAND)
                 if model_arg:
                     self._model_submitted = model_arg
-                elif self._buffer_is_bare_command(_MODEL_COMMAND):
+                elif self._buffer_opens_command_ui(_MODEL_COMMAND):
                     self._model_selector_submitted = True
                 effort_arg = self._buffer_command_arg(_EFFORT_COMMAND)
                 if effort_arg:
@@ -699,9 +718,29 @@ class HumanInputLine:
         arg = text[len(prefix) :].strip()
         return arg or None
 
-    def _buffer_is_bare_command(self, command: str) -> bool:
-        """True when the submitted line is exactly ``command`` with no argument."""
-        return bytes(self._buffer).decode("utf-8", errors="ignore").strip() == command
+    def _buffer_opens_command_ui(self, command: str) -> bool:
+        """True when the submitted line is ``command``, or a prefix of it.
+
+        A SUBSEQUENCE counts, not just a prefix, because Claude Code's slash
+        autocomplete completes the word in its own UI and matches FUZZILY: the
+        completed text never crosses the PTY, so only the stem the human
+        actually typed is observable -- and that stem may be misspelt. A live
+        dogfood caught exactly this: the worker logged ``'/modl'`` (an 'l'
+        where 'el' belongs) while the session really did switch model, so both
+        exact and prefix matching missed a deliberate human choice and the
+        auto-restore overrode it.
+
+        Guessing towards "the human is changing model" is the safe direction:
+        the ruling is that a human-driven selection must never be overridden,
+        so a false positive costs only a restore we were told not to make.
+        ``_MIN_COMMAND_STEM`` keeps the guess off short stems, which are
+        heading anywhere; no other shipped slash command is a subsequence of
+        ``/model`` at that length.
+        """
+        text = bytes(self._buffer).decode("utf-8", errors="ignore").strip()
+        if len(text) < _MIN_COMMAND_STEM or len(text) > len(command):
+            return False
+        return _is_subsequence(text, command)
 
     def take_compact_submitted(self) -> bool:
         """Return True once if a human `/compact` was submitted, then clear it.
@@ -1176,6 +1215,15 @@ _NOOP_LOG_PREFIX = "noop"
 
 
 # ── Effort restore on model downgrade (Plan 00278) ──────────────────────────
+# SCOPE, and it is NARROW (owner ruling, 2026-09-04, after a live dogfood):
+# this machinery exists to counteract the AUTOMATED FABLE SECURITY DOWNGRADE
+# and nothing else. A drop that did not start at fable -- opus → sonnet, say --
+# is the human's own business and is ignored outright: no episode, no restore,
+# no forced xhigh. Do not widen this back to "any ranked drop". That is what it
+# used to be, and it made the supervisor type `/model opus` at a human who had
+# just chosen Sonnet, then overwrite their effort. See
+# `_TOP_FAMILY_RANK` in note_model_reading for the enforcing condition.
+#
 # A session downgraded from a higher-ranked model family (e.g. a
 # security-triggered fable → opus switch) inherits its previous effort
 # setting; "fable low" must fall through to "opus xhigh", not "opus low".
@@ -3402,38 +3450,47 @@ class CompactStateMachine:
             and self._selector_model_matches(session, now_wall)
         )
         manual_match = typed_match or selector_match
-        if (
-            prev_session == session
+        family_changed = (
+            prev_session == session and prev_family is not None and family != prev_family
+        )
+        if manual_match and family_changed:
+            # A human-driven model change is never overridden, in ANY
+            # direction. Any episode still open on this session dies with it:
+            # left alive it would restore over the choice a moment later,
+            # which is exactly the override the ruling forbids.
+            if self._downgrade_episode is not None:
+                ep_session, _, _ = self._downgrade_episode.partition(":")
+                if ep_session == session:
+                    self._downgrade_episode = None
+                    self._downgrade_from_family = None
+                    self._downgrade_started_ts = None
+            if selector_match and not typed_match:
+                # The picker path only learns the family HERE, so this is the
+                # first tick that can name one for the daemon-facing marker
+                # the status line reads.
+                self._manual_marker_pending = family
+            self._manual_model_note = f"manual change ({family}) — no restore"
+        elif (
+            family_changed
+            # SCOPE (owner ruling, 2026-09-04, after a live dogfood): this
+            # family counteracts the automated fable SECURITY downgrade and
+            # NOTHING ELSE. The drop must therefore START at fable -- an
+            # opus -> sonnet move is the human's business, not ours, and
+            # treating it as an episode is how the supervisor came to type
+            # `/model opus` at a human who had just picked Sonnet, then force
+            # their effort to xhigh. Keyed on the ORIGIN, not the destination,
+            # so a fallback to something other than opus is still covered.
             and prev_family is not None
+            and _family_rank(prev_family) == _TOP_FAMILY_RANK
             and _family_rank(family) < _family_rank(prev_family)
         ):
-            if manual_match:
-                # Plan 00316: a rank drop matching a recently-typed /model
-                # command is the human's OWN deliberate choice, not a silent
-                # substitution -- never open a downgrade episode for it (no
-                # auto-restore, no forced xhigh floor). A stale episode left
-                # open from an earlier silent drop on this session is cleared
-                # too, since the manual choice must win outright.
-                if self._downgrade_episode is not None:
-                    ep_session, _, _ = self._downgrade_episode.partition(":")
-                    if ep_session == session:
-                        self._downgrade_episode = None
-                        self._downgrade_from_family = None
-                        self._downgrade_started_ts = None
-                if selector_match and not typed_match:
-                    # The picker path only learns the family HERE, so this is
-                    # the first tick that can name one for the daemon-facing
-                    # marker the status line reads.
-                    self._manual_marker_pending = family
-                self._manual_model_note = f"manual change ({family}) — no restore"
-            else:
-                if self._downgrade_episode is None:
-                    # A fresh episode: remember where we fell FROM and when, for
-                    # the delayed /model flip-back (Task 2b.3). A further drop
-                    # inside an open episode keeps the original from/started.
-                    self._downgrade_from_family = prev_family
-                    self._downgrade_started_ts = now_wall
-                self._downgrade_episode = f"{session}:{family}"
+            if self._downgrade_episode is None:
+                # A fresh episode: remember where we fell FROM and when, for
+                # the delayed /model flip-back (Task 2b.3). A further drop
+                # inside an open episode keeps the original from/started.
+                self._downgrade_from_family = prev_family
+                self._downgrade_started_ts = now_wall
+            self._downgrade_episode = f"{session}:{family}"
         if manual_match:
             # Latch consumed: the typed choice has been observed landing. A
             # LATER family change with nothing newly typed is a silent
