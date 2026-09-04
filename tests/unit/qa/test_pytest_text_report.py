@@ -22,8 +22,8 @@ from claude_code_hooks_daemon.qa.pytest_text_report import parse_pytest_text_out
 # The banner is part of the capture, not decoration: only the text BELOW it is
 # scraped for node ids, because the captured stream also carries subprocess
 # log output and an unrelated line beginning with "ERROR" was otherwise read
-# as a verdict. The project sets `-ra`, so pytest always emits this section
-# when it has something to report.
+# as a verdict. pytest emits this section for failures and errors by default,
+# independently of the project's `-ra` setting.
 _SUMMARY_BANNER = (
     "\x1b[36m\x1b[1m=========================== short test summary info "
     "============================\x1b[0m\n"

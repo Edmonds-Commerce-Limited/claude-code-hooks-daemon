@@ -72,9 +72,9 @@ _GREEN_OUTPUT = (
 #: The short-summary banner is part of the shape, not decoration. Only the
 #: text BELOW it is scraped for node ids, because the captured stream also
 #: carries subprocess log output and a stray line beginning with "ERROR" was
-#: otherwise read as a verdict. Faithful to the real runner: it resolves
-#: `configfile: pyproject.toml`, whose addopts carry `-ra`, so a failing run
-#: always prints this section.
+#: otherwise read as a verdict. Faithful to the real runner: pytest prints
+#: this section for failures and errors by default, so a failing
+#: project-handler run always carries it.
 _SUMMARY_BANNER = (
     "=========================== short test summary info ============================\n"
 )

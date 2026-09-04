@@ -34,10 +34,15 @@ _FAILED_LINE_PATTERN = re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.MULTILINE)
 # was being read as a failing test and named in a run that passed cleanly.
 # Re-running the named test then proved nothing, because it had never failed.
 #
-# Safe to require: the project sets `-ra` in addopts, so pytest emits this
-# section whenever it has anything to report. No banner therefore means no
-# verdict to scrape, and the counts (parsed separately, from the totals line)
-# remain the sole basis for pass/fail either way.
+# Safe to require: pytest emits this section for failures and errors by
+# DEFAULT, verified by running a failing suite with addopts overridden to
+# empty — the output is byte-identical once colour is stripped. The project's
+# `-ra` only widens which OTHER outcomes get listed, so it is not load-bearing
+# here and removing it would not blind this parser.
+#
+# No banner therefore means no verdict to scrape. The counts are parsed
+# separately from the totals line and remain the sole basis for pass/fail
+# either way, so a missing banner can never turn a red run green.
 _SUMMARY_SECTION_MARKER = "short test summary info"
 
 _PASSED_COUNT_PATTERN = re.compile(r"(\d+) passed")
