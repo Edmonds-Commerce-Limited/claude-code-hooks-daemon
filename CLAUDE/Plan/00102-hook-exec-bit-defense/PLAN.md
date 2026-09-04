@@ -183,9 +183,9 @@ for any event.
 - [ ] Auto-migration is idempotent (second SessionStart is a no-op).
 - [ ] Hand-edited non-daemon command paths in `settings.json` are not touched.
 - [ ] `git_filemode_checker` advisory fires once per new session for repos with `core.fileMode=false`.
-- [ ] The status line survives its wrapper being mode 0644, on a fresh install and after auto-migration.
-- [ ] Every command the fallback installer writes is absolute and `bash`-invoked, so a fallback install is not a permanently unrepaired one.
-- [ ] A bare-path command is REPORTED by the checker for any event, statusLine included.
+- [x] The status line survives its wrapper being mode 0644, on a fresh install and after auto-migration — `test_hook_exec_bit_irrelevant.py` copies the real wrapper, drops `+x`, and asserts direct invocation breaks while `bash <path>` does not.
+- [x] Every command the fallback installer writes is absolute and `bash`-invoked, so a fallback install is not a permanently unrepaired one — asserted against the heredoc the script actually ships, which had no test of any kind before.
+- [x] A bare-path command is REPORTED by the checker for any event, statusLine included.
 - [ ] All 10 QA checks pass.
 - [ ] Daemon restarts cleanly with new code.
 - [ ] Plan 00091 is closed as superseded.
