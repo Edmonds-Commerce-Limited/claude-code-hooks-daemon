@@ -647,6 +647,75 @@ class TestDeclaredVendorDirsArePruned:
         assert _run_sweep(context) == []
 
 
+class TestVendorExceptionsSurviveThePrune:
+    """Plan 00331 Phase 3: the prune is what would silently defeat this.
+
+    This check does NOT post-filter -- it removes vendored directories from
+    `os.walk` in place, so it never descends them. A first-party library
+    declared inside a vendored tree is therefore unreachable unless the prune
+    itself asks whether the directory could contain an exception. That is the
+    exact reason git cannot re-include a file whose parent is excluded, and
+    the failure is silent: the doc simply never appears.
+    """
+
+    _DECLARED = frozenset(CORE_VENDORED_BUILD_DIR_NAMES | {"roles"})
+    _EXCEPTION = ("infra/roles/ours/**",)
+
+    def _write_two_roles(self, root: Path) -> None:
+        for owner in ("ours", "theirs"):
+            doc = root / "infra" / "roles" / owner / "CLAUDE.md"
+            doc.parent.mkdir(parents=True)
+            doc.write_text(_LONG_BODY)
+
+    def test_the_walk_reaches_a_doc_inside_a_vendored_tree(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        self._write_two_roles(tmp_path)
+
+        assert _iter_module_doc_paths(
+            tmp_path, "CLAUDE", vendor_dirs=self._DECLARED, vendor_exceptions=self._EXCEPTION
+        ) == ["infra/roles/ours/CLAUDE.md"]
+
+    def test_sweep_reports_the_excepted_doc_and_not_its_neighbour(self, tmp_path: Path) -> None:
+        """Descending is not including: the sibling reached by the same walk
+        must still be treated as vendored."""
+        (tmp_path / "CLAUDE").mkdir()
+        self._write_two_roles(tmp_path)
+
+        context = sweep_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(
+                vendor_dirs=self._DECLARED, vendor_exceptions=self._EXCEPTION
+            ),
+            corpus=DocCorpus(project_root=tmp_path),
+        )
+        assert [finding.path for finding in _run_sweep(context)] == ["infra/roles/ours/CLAUDE.md"]
+
+    def test_edit_judges_the_excepted_doc(self, tmp_path: Path) -> None:
+        """The author editing their own library must get the normal feedback,
+        not silence -- silence here is the bug, not the feature."""
+        doc = tmp_path / "infra" / "roles" / "ours" / "CLAUDE.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(_LONG_BODY)
+
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(
+                vendor_dirs=self._DECLARED, vendor_exceptions=self._EXCEPTION
+            ),
+            file_path=doc,
+            file_content=_LONG_BODY,
+            file_exists_before=False,
+        )
+        assert _run_edit(context) != []
+
+    def test_no_exception_still_prunes_the_whole_tree(self, tmp_path: Path) -> None:
+        """Zero-config must not make the walker descend every vendored tree."""
+        (tmp_path / "CLAUDE").mkdir()
+        self._write_two_roles(tmp_path)
+
+        assert _iter_module_doc_paths(tmp_path, "CLAUDE", vendor_dirs=self._DECLARED) == []
+
+
 class TestMissingFilePathOrContent:
     def test_missing_file_path_or_content_produces_no_findings(self, tmp_path: Path) -> None:
         context_no_path = CheckContext(

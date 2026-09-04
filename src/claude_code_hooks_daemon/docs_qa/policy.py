@@ -70,6 +70,11 @@ class DocumentationPolicy:
     #: Effective vendored/build directory NAMES. Defaults to the canonical
     #: constant so a caller with no layout to hand loses nothing.
     vendor_dirs: frozenset[str] = CORE_VENDORED_BUILD_DIR_NAMES
+    #: Repo-relative path globs carved OUT of ``vendor_dirs`` — a first-party
+    #: library the project maintains inside an otherwise third-party tree.
+    #: A different dialect from ``vendor_dirs`` on purpose; see
+    #: :mod:`~claude_code_hooks_daemon.utils.vendor_paths`.
+    vendor_exceptions: tuple[str, ...] = ()
 
 
 class TreesConfigProtocol(Protocol):
@@ -140,6 +145,7 @@ def policy_from_config(
     config: DocumentationConfigProtocol,
     *,
     vendor_dirs: Sequence[str] | None = None,
+    vendor_exceptions: Sequence[str] = (),
 ) -> DocumentationPolicy:
     """Build a plain-values :class:`DocumentationPolicy` from the typed config.
 
@@ -152,6 +158,10 @@ def policy_from_config(
             with the canonical set (re-unioning would silently defeat
             ``mode: replace``). ``None`` means "no layout available", which
             keeps the canonical default rather than emptying the set.
+        vendor_exceptions: ``ProjectLayout.vendor_exceptions`` — repo-relative
+            path globs carved OUT of ``vendor_dirs``. Empty is the correct
+            default here, unlike ``vendor_dirs``: there is no built-in set of
+            first-party carve-outs for a caller to lose.
     """
     qa = config.qa
     return DocumentationPolicy(
@@ -159,6 +169,7 @@ def policy_from_config(
         vendor_dirs=(
             CORE_VENDORED_BUILD_DIR_NAMES if vendor_dirs is None else frozenset(vendor_dirs)
         ),
+        vendor_exceptions=tuple(vendor_exceptions),
         trees=DocumentationTreesPolicy(agent=config.trees.agent, human=config.trees.human),
         qa=DocumentationQaPolicy(
             edit_mode=qa.edit_mode,

@@ -1094,11 +1094,37 @@ class LayoutConfig(BaseModel):
     )
     vendor_dirs: list[str] = Field(
         default_factory=list,
-        description="Extra vendored/build directory names, extending the canonical set",
+        description="Extra vendored/build directory NAMES, extending the canonical set",
+    )
+    vendor_exceptions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Repo-relative path globs that are NOT vendored even inside a vendor_dirs "
+            "name, e.g. a first-party library maintained in place"
+        ),
     )
     mode: Literal["additive", "replace"] = Field(
         default="additive", description="additive: extend built-ins; replace: SET lists stand alone"
     )
+
+    @field_validator("vendor_exceptions")
+    @classmethod
+    def _validate_vendor_exceptions(cls, value: list[str]) -> list[str]:
+        """Reject absolute paths and `..` escapes, as every config path is.
+
+        A glob is still a repository-relative path, so it inherits the same
+        portability rule: an absolute path in committed config is correct on
+        exactly one machine, and a path leaving the repository describes
+        something the repository does not carry.
+
+        The wildcard segments are left alone -- only the LITERAL leading part
+        is normalised, since `_repo_relative_path` would otherwise try to
+        resolve `**` as a directory name.
+        """
+        for entry in value:
+            literal, _, _remainder = entry.partition("*")
+            _repo_relative_path(literal or ".", "layout.vendor_exceptions entry")
+        return value
 
 
 def _repo_relative_path(value: str, label: str) -> str:

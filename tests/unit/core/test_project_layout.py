@@ -4,7 +4,7 @@ import dataclasses
 
 import pytest
 
-from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.config.models import Config, LayoutConfig
 from claude_code_hooks_daemon.core.project_layout import ProjectLayout, main_repo_code_dirs
 from claude_code_hooks_daemon.docs_qa.corpus import COMMON_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.strategies.tdd.common import COMMON_TEST_DIRECTORIES
@@ -115,6 +115,113 @@ class TestMembershipHelpers:
     def test_is_vendored_path_false_for_unrelated_path(self) -> None:
         layout = ProjectLayout.from_config(Config())
         assert layout.is_vendored_path("src/foo.py") is False
+
+
+class TestVendorExceptions:
+    """Plan 00331 Phase 3: a first-party library living INSIDE a vendored tree.
+
+    The owner's case: a vendor directory holds third-party code plus one or
+    two libraries the project actually maintains in place. Skipping the whole
+    tree hides work they do daily; not skipping it drowns them in findings
+    about code they did not write.
+
+    The two keys use DIFFERENT dialects deliberately. `vendor_dirs` holds
+    NAMES because a name is a CONVENTION (`node_modules` is vendored wherever
+    it appears); `vendor_exceptions` holds repo-relative path GLOBS because an
+    exception is a SPECIFIC thing the project owns, and a bare basename would
+    wrongly match it at any depth.
+    """
+
+    @staticmethod
+    def _layout(exceptions: tuple[str, ...]) -> ProjectLayout:
+        return ProjectLayout.for_project(
+            LayoutConfig(vendor_dirs=["roles"], vendor_exceptions=list(exceptions)),
+            ProjectLayout.built_in_default(),
+        )
+
+    def test_an_excepted_path_is_not_vendored(self) -> None:
+        layout = self._layout(("infra/roles/ours/**",))
+        assert layout.is_vendored_path("infra/roles/ours/tasks/main.py") is False
+
+    def test_a_sibling_inside_the_same_vendor_dir_stays_vendored(self) -> None:
+        """The exception must be surgical, not switch the vendor dir off."""
+        layout = self._layout(("infra/roles/ours/**",))
+        assert layout.is_vendored_path("infra/roles/theirs/tasks/main.py") is True
+
+    def test_the_exception_root_itself_is_not_vendored(self) -> None:
+        """`a/b/**` conventionally covers the directory it names, not just its
+        contents -- otherwise a file directly in `ours/` is still hidden."""
+        layout = self._layout(("infra/roles/ours/**",))
+        assert layout.is_vendored_path("infra/roles/ours/README.md") is False
+
+    def test_no_exceptions_leaves_the_vendor_dir_wholly_vendored(self) -> None:
+        layout = self._layout(())
+        assert layout.is_vendored_path("infra/roles/ours/tasks/main.py") is True
+
+    def test_an_exception_outside_any_vendor_dir_changes_nothing(self) -> None:
+        """An exception is a carve-out from the vendor set, not an independent
+        include list -- a path that was never vendored cannot become MORE
+        included, and must not accidentally read as vendored either."""
+        layout = self._layout(("src/ours/**",))
+        assert layout.is_vendored_path("src/ours/main.py") is False
+        assert layout.is_vendored_path("src/other/main.py") is False
+
+    def test_a_bare_name_exception_is_anchored_not_matched_at_any_depth(self) -> None:
+        """The dialect difference, asserted rather than merely documented: an
+        exception is repo-relative, so `ours` means the top-level `ours/`, NOT
+        every directory called `ours`."""
+        layout = self._layout(("ours/**",))
+        assert layout.is_vendored_path("infra/roles/ours/main.py") is True
+
+
+class TestPruneSafety:
+    """A pruning walker must not prune a directory that could CONTAIN an
+    exception.
+
+    This is the constraint that silently defeats the whole feature if missed.
+    Git itself cannot re-include a file whose parent directory is excluded,
+    because it never descends -- and two docs-QA checks prune directories out
+    of `os.walk` for exactly the performance reason git does.
+    """
+
+    @staticmethod
+    def _layout(exceptions: tuple[str, ...]) -> ProjectLayout:
+        return ProjectLayout.for_project(
+            LayoutConfig(vendor_dirs=["roles"], vendor_exceptions=list(exceptions)),
+            ProjectLayout.built_in_default(),
+        )
+
+    def test_an_ancestor_of_an_exception_may_contain_one(self) -> None:
+        layout = self._layout(("infra/roles/ours/**",))
+        assert layout.may_contain_vendor_exception("infra") is True
+        assert layout.may_contain_vendor_exception("infra/roles") is True
+
+    def test_the_exception_directory_itself_may_contain_one(self) -> None:
+        layout = self._layout(("infra/roles/ours/**",))
+        assert layout.may_contain_vendor_exception("infra/roles/ours") is True
+
+    def test_a_descendant_of_an_exception_may_contain_one(self) -> None:
+        """Once inside the exception, everything below it is first-party."""
+        layout = self._layout(("infra/roles/ours/**",))
+        assert layout.may_contain_vendor_exception("infra/roles/ours/tasks") is True
+
+    def test_an_unrelated_directory_may_not(self) -> None:
+        layout = self._layout(("infra/roles/ours/**",))
+        assert layout.may_contain_vendor_exception("infra/roles/theirs") is False
+        assert layout.may_contain_vendor_exception("other") is False
+
+    def test_no_exceptions_means_nothing_is_prune_unsafe(self) -> None:
+        """Zero-config must not make every walker descend everything."""
+        layout = self._layout(())
+        assert layout.may_contain_vendor_exception("infra/roles") is False
+
+    def test_a_leading_wildcard_exception_is_conservatively_unprunable(self) -> None:
+        """`**/ours/**` could match beneath ANY directory, so no directory can
+        be proven safe to prune. Conservative on purpose: over-descending
+        costs time, while over-pruning silently hides a project's own code.
+        A project wanting the pruning back writes an anchored path."""
+        layout = self._layout(("**/ours/**",))
+        assert layout.may_contain_vendor_exception("anything/at/all") is True
 
     def test_is_docs_path_true_for_agent_tree(self) -> None:
         layout = ProjectLayout.from_config(Config())

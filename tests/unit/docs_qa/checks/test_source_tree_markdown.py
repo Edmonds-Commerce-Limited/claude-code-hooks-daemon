@@ -202,6 +202,52 @@ class TestDeclaredVendorDirsArePruned:
         assert [f.path for f in _run_sweep(context)] == ["src/roles/lts.vault-scripts/NOTES.md"]
 
 
+class TestVendorExceptionsSurviveThePrune:
+    """Plan 00331 Phase 3, the sibling walker.
+
+    Same prune hazard as `module_doc_budget`: this check removes vendored
+    directories from `os.walk` in place, so an exception beneath one is
+    unreachable unless the prune asks first.
+    """
+
+    _EXCEPTION = ("src/roles/ours/**",)
+
+    def _layout_with_exception(self) -> ProjectLayout:
+        return ProjectLayout(
+            source_dirs=("src",),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset({"node_modules", "vendor", "roles"}),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=(),
+            vendor_exceptions=self._EXCEPTION,
+        )
+
+    def _write_two_roles(self, root: Path) -> None:
+        for owner in ("ours", "theirs"):
+            notes = root / "src" / "roles" / owner / "NOTES.md"
+            notes.parent.mkdir(parents=True)
+            notes.write_text("notes")
+
+    def test_the_excepted_tree_is_reported_and_its_neighbour_is_not(self, tmp_path: Path) -> None:
+        self._write_two_roles(tmp_path)
+        layout = self._layout_with_exception()
+        policy = DocumentationPolicy(
+            vendor_dirs=layout.vendor_dirs, vendor_exceptions=layout.vendor_exceptions
+        )
+        findings = _run_sweep(_context(tmp_path, layout=layout, policy=policy))
+        assert [f.path for f in findings] == ["src/roles/ours/NOTES.md"]
+
+    def test_without_the_exception_the_whole_tree_stays_pruned(self, tmp_path: Path) -> None:
+        """The discriminating half: same tree, same vendor_dirs, no exception."""
+        self._write_two_roles(tmp_path)
+        layout = self._layout_with_exception()
+        policy = DocumentationPolicy(vendor_dirs=layout.vendor_dirs)
+        assert _run_sweep(_context(tmp_path, layout=layout, policy=policy)) == []
+
+
 class TestGrandfatherAllowlist:
     def test_grandfathered_path_is_suppressed(self, tmp_path: Path) -> None:
         (tmp_path / "src" / "pkg").mkdir(parents=True)

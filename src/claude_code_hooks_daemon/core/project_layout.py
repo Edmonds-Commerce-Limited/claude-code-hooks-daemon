@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Final
 
 from claude_code_hooks_daemon.docs_qa.corpus import COMMON_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.strategies.tdd.common import COMMON_TEST_DIRECTORIES
+from claude_code_hooks_daemon.utils import vendor_paths
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import Config, LayoutConfig
@@ -111,14 +112,19 @@ def _has_dir_component(rel_path: str, dirs: tuple[str, ...]) -> bool:
 
 def _dirs_from_layout_config(
     layout_config: LayoutConfig | None,
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], frozenset[str]]:
-    """Effective (source_dirs, test_dirs, config_dirs, vendor_dirs) for one `layout:` block.
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], frozenset[str], tuple[str, ...]]:
+    """Effective directory axes for one `layout:` block.
 
-    Shared by the root project (`from_config`) and every declared project
-    (`for_project`) so the additive/replace merge rule (see `_merge`) is
-    computed in exactly one place. `layout_config=None` means "declares
-    nothing" -- additive mode over the built-ins, i.e. the built-ins
+    Returns (source_dirs, test_dirs, config_dirs, vendor_dirs,
+    vendor_exceptions). Shared by the root project (`from_config`) and every
+    declared project (`for_project`) so the additive/replace merge rule (see
+    `_merge`) is computed in exactly one place. `layout_config=None` means
+    "declares nothing" -- additive mode over the built-ins, i.e. the built-ins
     unchanged.
+
+    `vendor_exceptions` is NOT run through `_merge`: there is no built-in set
+    of first-party carve-outs to extend, so a project's list always stands
+    alone and `mode` has nothing to act on.
     """
     if layout_config is None:
         return (
@@ -126,6 +132,7 @@ def _dirs_from_layout_config(
             _BUILTIN_TEST_DIRS,
             _BUILTIN_CONFIG_DIRS,
             frozenset(_BUILTIN_VENDOR_DIRS),
+            (),
         )
     mode = layout_config.mode
     return (
@@ -133,6 +140,7 @@ def _dirs_from_layout_config(
         _merge(mode, tuple(layout_config.test_dirs), _BUILTIN_TEST_DIRS),
         _merge(mode, tuple(layout_config.config_dirs), _BUILTIN_CONFIG_DIRS),
         frozenset(_merge(mode, tuple(layout_config.vendor_dirs), _BUILTIN_VENDOR_DIRS)),
+        tuple(layout_config.vendor_exceptions),
     )
 
 
@@ -190,6 +198,17 @@ class ProjectLayout:
     # Mirrors how `_DEFAULT_HUMAN_DOCS_DIR` and the pydantic model each state
     # the "docs" default in their own layer.
     remote_docs_dir: str = _DEFAULT_REMOTE_DOCS_DIR
+    #: Repo-relative path globs that are NOT vendored despite sitting under a
+    #: ``vendor_dirs`` name (Plan 00331). Defaulted and last for the same
+    #: reason ``remote_docs_dir`` is: adding an axis stays ADDITIVE for the
+    #: many call sites that construct a layout positionally or without it.
+    #:
+    #: A different DIALECT from ``vendor_dirs`` on purpose. A vendored
+    #: directory NAME is a convention -- ``node_modules`` is vendored wherever
+    #: it appears -- so it matches any path segment. An exception is a
+    #: SPECIFIC thing the project owns, of which there is exactly one, so it
+    #: is a repo-relative path and a bare basename does NOT match at depth.
+    vendor_exceptions: tuple[str, ...] = ()
 
     def is_source_path(self, rel_path: str) -> bool:
         """True when ``rel_path`` has a declared/built-in source dir component."""
@@ -200,8 +219,34 @@ class ProjectLayout:
         return _has_dir_component(rel_path, self.test_dirs)
 
     def is_vendored_path(self, rel_path: str) -> bool:
-        """True when ``rel_path`` has a declared/canonical vendor dir component."""
-        return any(part in self.vendor_dirs for part in _path_parts(rel_path))
+        """True when ``rel_path`` has a declared/canonical vendor dir component
+        and is not carved out by :attr:`vendor_exceptions`.
+
+        The single vendor question, so every consumer gets the exceptions for
+        free rather than each re-deriving them (Plan 00331).
+        """
+        if not any(part in self.vendor_dirs for part in _path_parts(rel_path)):
+            return False
+        return not vendor_paths.matches_vendor_exception(rel_path, self.vendor_exceptions)
+
+    def may_contain_vendor_exception(self, rel_dir: str) -> bool:
+        """Whether a vendor exception could live at or beneath ``rel_dir``.
+
+        The prune-safety companion to :meth:`is_vendored_path`. A walker that
+        prunes a vendored directory out of ``os.walk`` never descends into it,
+        so an exception beneath it becomes unreachable and the project's own
+        code stays invisible -- the same reason git cannot re-include a file
+        whose parent directory is excluded. A pruning walker must therefore
+        ask this BEFORE pruning.
+
+        Conservative by design: a pattern with a leading wildcard
+        (``**/ours/**``) has no literal prefix and so could match beneath any
+        directory, making nothing provably safe to prune. Over-descending
+        costs time; over-pruning silently hides first-party code, and only one
+        of those failures announces itself. A project that wants the pruning
+        back writes an anchored path.
+        """
+        return vendor_paths.may_contain_vendor_exception(rel_dir, self.vendor_exceptions)
 
     def is_docs_path(self, rel_path: str) -> bool:
         """True when ``rel_path`` is under the agent or human doc tree."""
@@ -259,12 +304,15 @@ class ProjectLayout:
             layout_config: This project's own `layout:` block, or None.
             doc_axes: Supplies the doc/plan axes only.
         """
-        source_dirs, test_dirs, config_dirs, vendor_dirs = _dirs_from_layout_config(layout_config)
+        source_dirs, test_dirs, config_dirs, vendor_dirs, vendor_exceptions = (
+            _dirs_from_layout_config(layout_config)
+        )
         return cls(
             source_dirs=source_dirs,
             test_dirs=test_dirs,
             config_dirs=config_dirs,
             vendor_dirs=vendor_dirs,
+            vendor_exceptions=vendor_exceptions,
             agent_docs_dir=doc_axes.agent_docs_dir,
             human_docs_dir=doc_axes.human_docs_dir,
             remote_docs_dir=doc_axes.remote_docs_dir,
@@ -285,12 +333,15 @@ class ProjectLayout:
         archive_dirs = tuple(
             dict.fromkeys(name for name in (qa.completed_dir, qa.cancelled_dir) if name)
         )
-        source_dirs, test_dirs, config_dirs, vendor_dirs = _dirs_from_layout_config(config.layout)
+        source_dirs, test_dirs, config_dirs, vendor_dirs, vendor_exceptions = (
+            _dirs_from_layout_config(config.layout)
+        )
         return cls(
             source_dirs=source_dirs,
             test_dirs=test_dirs,
             config_dirs=config_dirs,
             vendor_dirs=vendor_dirs,
+            vendor_exceptions=vendor_exceptions,
             agent_docs_dir=config.documentation.trees.agent,
             human_docs_dir=config.documentation.trees.human,
             remote_docs_dir=config.documentation.trees.remote,

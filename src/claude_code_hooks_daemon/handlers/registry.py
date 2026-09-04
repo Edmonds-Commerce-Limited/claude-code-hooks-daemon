@@ -470,6 +470,11 @@ class HandlerRegistry:
                                             if project_layout is None
                                             else tuple(project_layout.vendor_dirs)
                                         ),
+                                        vendor_exceptions=(
+                                            ()
+                                            if project_layout is None
+                                            else project_layout.vendor_exceptions
+                                        ),
                                     )
                                 }
                                 for attr_key, attr_val in doc_attrs.items():

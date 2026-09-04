@@ -4807,7 +4807,11 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     # too (Plan 00331) -- the sweep is the surface a human runs by hand, so
     # honouring the declaration only at handler-dispatch time would report
     # findings the edit-time check has already agreed to skip.
-    policy = policy_from_config(config.documentation, vendor_dirs=tuple(layout.vendor_dirs))
+    policy = policy_from_config(
+        config.documentation,
+        vendor_dirs=tuple(layout.vendor_dirs),
+        vendor_exceptions=layout.vendor_exceptions,
+    )
 
     if getattr(args, "check_staged", False):
         clean_scope = CLEAN_SCOPE_CORPUS

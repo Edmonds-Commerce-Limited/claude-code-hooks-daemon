@@ -38,6 +38,7 @@ from claude_code_hooks_daemon.docs_qa.structured_blocks import (
     extract_structured_block_locations,
 )
 from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
+from claude_code_hooks_daemon.utils.vendor_paths import matches_vendor_exception
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _CHANGELOG_FILENAME: Final[str] = "CHANGELOG.md"
@@ -202,7 +203,9 @@ def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> boo
         return True
     if is_vendored_daemon_install_path(rel_parts):
         return True
-    if any(part in policy.vendor_dirs for part in rel_parts[:-1]):
+    if any(part in policy.vendor_dirs for part in rel_parts[:-1]) and not matches_vendor_exception(
+        "/".join(rel_parts), policy.vendor_exceptions
+    ):
         return True
     plan_completed = (policy.trees.agent, _PLAN_SUBDIR_NAME, _PLAN_COMPLETED_DIR_NAME)
     plan_cancelled = (policy.trees.agent, _PLAN_SUBDIR_NAME, _PLAN_CANCELLED_DIR_NAME)

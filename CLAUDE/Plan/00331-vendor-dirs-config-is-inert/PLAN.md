@@ -137,35 +137,100 @@ what exists.
   for the same reason: a test written against `vendor/` or `node_modules`
   passes without the fix.
 
-### Phase 2: Honour daemon.exclude_paths
+### Phase 2: One vendor truth, referenced explicitly
 
-- [ ] ⬜ **Task 2.1**: Make docs QA and plan QA consult
-  `daemon.exclude_paths` via `utils/path_exclusion` (pure stdlib, so it does
-  not break docs_qa's deliberate daemon/pydantic decoupling). Verified: zero
-  references in either package against 12 handler modules that honour it,
-  while the shipped guidance offers it as the project-wide exemption.
-- [ ] ⬜ **Task 2.2**: Confirm the interaction with `scope_exclude_globs`
-  is additive and that neither key silently overrides the other, matching how
-  `daemon.exclude_paths` composes elsewhere.
+**Superseded by the owner's SSoT ruling (2026-09-04).** The original Phase 2
+was "make docs QA and plan QA consult `daemon.exclude_paths`". That is now
+NOT the plan, and the reasoning matters more than the outcome.
+
+`daemon.exclude_paths` is a DIFFERENT key with a different purpose: projects
+set it broadly to exempt deliberately-bad FIXTURE trees from the CONTENT
+blockers. Absorbing it into docs QA would make those trees silently stop
+producing documentation findings — a coverage loss with no signal, in a key
+the project set for unrelated reasons. Recorded as the argument for docs QA
+having its own narrower `scope_exclude_globs` in the first place (Plan 00330
+Task 1.4).
+
+The owner's objection was the real one: every exclusion list that wants to
+skip vendored paths currently has to RESTATE the vendor set by hand, which is
+a distributed source of truth. The fix is not to make one key implicitly
+absorb another; it is to let any exclusion list REFERENCE the single vendor
+truth.
+
+- [ ] ⬜ **Task 2.1**: A `{vendor-dirs}` token usable in any exclusion list
+  (`daemon.exclude_paths`, a per-handler `exclude_paths`,
+  `documentation.qa.scope_exclude_globs`). Resolved as a PREDICATE
+  REFERENCE, not a glob expansion: it matches exactly when
+  `ProjectLayout.is_vendored_path()` is true.
+
+  Predicate rather than expansion is the load-bearing choice. Expanding to
+  `**/<name>/**` globs would put the vendor NAMES into each list — the
+  distributed truth again, one indirection later — and could not express the
+  exceptions of Task 3.1 without `!` negation and a cross-key precedence
+  rule. A reference has neither problem.
+
+- [ ] ⬜ **Task 2.2**: Confirm a list mixing `{vendor-dirs}` with ordinary
+  globs composes additively, and that the token is inert (never an error)
+  where a consumer already skips vendored content by its own policy.
 
 ### Phase 3: Re-include a first-party library inside a vendor tree
 
-- [ ] ⬜ **Task 3.1**: Add gitignore-style `!` negation to
-  `utils/path_exclusion`. The module already advertises a "gitignore-style
-  subset", so this makes it MORE conventional rather than inventing an idiom.
-- [ ] ⬜ **Task 3.2**: Make the directory-PRUNING walkers negation-aware.
+**Design note (owner, 2026-09-04).** An earlier draft of this phase used
+gitignore-style `!` negation in `utils/path_exclusion`. Dropped: negation
+spans several independent config keys with no inherent ordering, so it forces
+an invented cross-key precedence rule (the old Task 3.3), and the vendor axis
+is now wired end-to-end so a layout-scoped answer reaches every consumer for
+free.
+
+The two keys use DIFFERENT dialects, deliberately, and this must be
+documented rather than left to inference — it read as an inconsistency on
+first sight, which is a fair verdict on an undocumented asymmetry:
+
+- `vendor_dirs` holds directory NAMES, matched against any path segment. A
+  name is a CONVENTION: `node_modules` is vendored wherever it appears.
+
+- `vendor_exceptions` holds repo-relative path GLOBS. An exception is a
+  SPECIFIC thing the project owns — there is exactly one
+  `infra/ansible/roles/our-own-role` — so a bare basename would be wrong
+  precisely because it would match at any depth.
+
+- [x] ✅ **Task 3.1**: `layout.vendor_exceptions` — repo-relative path globs
+  that are NOT vendored even when they sit under a `vendor_dirs` name.
+  Validated with the existing `_repo_relative_path` rule (absolute paths and
+  `..` escapes rejected), so it inherits the portability guarantee the rest
+  of the config already has.
+
+- [x] ✅ **Task 3.2**: Make the directory-PRUNING walkers exception-aware.
   This is the constraint that will silently defeat the feature if missed: git
   itself cannot re-include a file whose parent directory is excluded, because
-  it never descends. `docs_qa/checks/module_doc_budget.py` prunes directories
-  from `os.walk` (including via `_dir_is_scope_excluded`), so a pruned
-  `vendor/` makes `!vendor/our-lib/**` unreachable and the first-party tree
-  stays invisible. A pruning walker must not prune a directory that could
-  contain a re-inclusion.
-- [ ] ⬜ **Task 3.3**: Decide precedence when a path matches both an
-  exclusion and a negation across DIFFERENT config keys (a `vendor_dirs`
-  entry and a `daemon.exclude_paths` negation). Within one gitignore file
-  last-match-wins; across independent keys there is no inherent order, so one
-  must be chosen and documented.
+  it never descends. `docs_qa/checks/module_doc_budget.py` and
+  `source_tree_markdown.py` both prune directories from `os.walk`, so a
+  pruned `roles/` makes an exception beneath it unreachable and the
+  first-party tree stays invisible. A pruning walker must not prune a
+  directory that could CONTAIN an exception.
+
+  Delivered with a DISCRIMINATING test pair rather than a single assertion:
+  the same tree and the same `vendor_dirs`, differing only in whether an
+  exception is declared, must yield the doc versus nothing. A lone
+  "the exception is reported" test would pass just as well against a walker
+  that had stopped pruning altogether.
+
+  Needed at the point of USE as well as at the prune, because descending is
+  not including: a sibling reached only because its parent had to be walked
+  for an exception is still vendored, so both walkers re-test each file.
+
+- [x] ✅ **Task 3.3**: Document the two dialects at the config surface, since
+  the asymmetry is inherent rather than accidental (see the design note).
+  Stated on `LayoutConfig`, on `ProjectLayout.vendor_exceptions` and in
+  `utils/vendor_paths`' module docstring, and PINNED by a test that a bare
+  `ours/**` does NOT match `infra/roles/ours/` — the dialect difference
+  asserted rather than only described.
+
+  `utils/vendor_paths` exists because BOTH the facade and docs QA need the
+  same answer and neither may import the other: `core.project_layout`
+  already imports `docs_qa.corpus`, so a `docs_qa` → `core` import would
+  close a cycle. One implementation both read, rather than the parallel
+  copies that made `vendor_dirs` inert to begin with.
 
 ## Success Criteria
 
@@ -178,8 +243,11 @@ what exists.
   `ProjectLayout` merged `roles` into `vendor_dirs` CORRECTLY, and the sweep
   reported the finding anyway. That is the diagnosis in one run — the facade
   was never broken, it simply had no consumer.
-- [ ] A first-party library vendored inside a vendor directory is still
-  checked when re-included by negation.
+- [x] A first-party library vendored inside a vendor directory is still
+  checked when re-included by `layout.vendor_exceptions`. Verified end to
+  end from a real YAML against a tree holding BOTH a third-party role and one
+  the project maintains: the third-party doc is silent, the project's own is
+  reported.
 - [ ] A monorepo sub-project's declared `vendor_dirs` is honoured.
 - [ ] A path excluded via `daemon.exclude_paths` is invisible to docs QA and
   plan QA.

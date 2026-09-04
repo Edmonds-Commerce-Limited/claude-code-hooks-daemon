@@ -173,6 +173,30 @@ class TestIsInScope:
         assert role_doc not in iter_corpus_paths(tmp_path, policy)
         assert role_doc in iter_corpus_paths(tmp_path, DocumentationPolicy())
 
+    def test_a_vendor_exception_is_back_in_scope(self, tmp_path: Path) -> None:
+        """Plan 00331 Phase 3: a first-party library inside a vendored tree.
+
+        Declaring the tree vendored must not hide a library the project
+        maintains in place -- that is documentation they own and want checked.
+        """
+        _scaffold(tmp_path)
+        policy = DocumentationPolicy(
+            vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"},
+            vendor_exceptions=("docs/roles/ours/**",),
+        )
+        assert is_in_scope(tmp_path / "docs" / "roles" / "ours" / "README.md", tmp_path, policy)
+
+    def test_a_sibling_of_the_exception_stays_excluded(self, tmp_path: Path) -> None:
+        """The carve-out must be surgical, not switch the vendor dir off."""
+        _scaffold(tmp_path)
+        policy = DocumentationPolicy(
+            vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"},
+            vendor_exceptions=("docs/roles/ours/**",),
+        )
+        assert not is_in_scope(
+            tmp_path / "docs" / "roles" / "theirs" / "README.md", tmp_path, policy
+        )
+
     def test_unscoped_directory_is_excluded(self, tmp_path: Path) -> None:
         _scaffold(tmp_path)
         assert not is_in_scope(tmp_path / "src" / "notes.md", tmp_path, DocumentationPolicy())
