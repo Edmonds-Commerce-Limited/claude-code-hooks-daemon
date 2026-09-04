@@ -541,22 +541,12 @@ _CSI_FINAL_MIN, _CSI_FINAL_MAX = 0x40, 0x7E
 _CSI_FINAL_TILDE = 0x7E  # '~' terminates edit/function keys and paste markers
 _CSI_ARROW_UP = 0x41  # 'A'
 _CSI_ARROW_DOWN = 0x42  # 'B'
-# Shortest submitted stem treated as an autocompleted slash command (see
-# `_buffer_opens_command_ui`). `/mod` is unambiguous; `/mo` is not.
-_MIN_COMMAND_STEM = 4
+# How much of a slash command must be typed for `_buffer_opens_command_ui` to
+# count it. `/mod` is enough to mean `/model`; it also matches this repo's own
+# `/mode` skill, and that false positive is fine -- see the method.
+_COMMAND_STEM_CHARS = 4
 _PASTE_START_PARAMS = (0x32, 0x30, 0x30)  # "200"
 _PASTE_END_PARAMS = (0x32, 0x30, 0x31)  # "201"
-
-
-def _is_subsequence(stem: str, whole: str) -> bool:
-    """True when every character of ``stem`` appears in ``whole``, in order.
-
-    The matching rule Claude Code's own slash autocomplete uses, reproduced so
-    a misspelt stem the human typed can still be tied back to the command they
-    actually ran -- the PTY never carries the completed word.
-    """
-    remaining = iter(whole)
-    return all(char in remaining for char in stem)
 
 
 class HumanInputLine:
@@ -719,38 +709,19 @@ class HumanInputLine:
         return arg or None
 
     def _buffer_opens_command_ui(self, command: str) -> bool:
-        """True when the submitted line is ``command``, or a prefix of it.
+        """True when the submitted line looks like the human opening ``command``.
 
-        A SUBSEQUENCE counts, not just a prefix, because Claude Code's slash
-        autocomplete completes the word in its own UI and matches FUZZILY: the
-        completed text never crosses the PTY, so only the stem the human
-        actually typed is observable -- and that stem may be misspelt. A live
-        dogfood caught exactly this: the worker logged ``'/modl'`` (an 'l'
-        where 'el' belongs) while the session really did switch model, so both
-        exact and prefix matching missed a deliberate human choice and the
-        auto-restore overrode it.
+        A STEM counts, not just the exact word, because Claude Code's slash
+        autocomplete completes it in its own UI: the completed text never
+        crosses the PTY, so only what the human actually typed is observable,
+        misspellings included. A live dogfood logged ``'/modl'`` while the
+        session really did switch model.
 
-        A partial PREFIX is deliberately NOT enough, which is what keeps the
-        guess honest. A prefix is ambiguous -- it may be heading for a
-        different command entirely, and this project ships a `/mode` skill
-        that is a prefix of `/model`. A non-prefix subsequence is not
-        ambiguous in the same way: it can only be a misspelling that fuzzy
-        matching resolved, so the human was aiming HERE. Hence: the exact
-        command, or a stem that is a subsequence but NOT a prefix.
-
-        Guessing towards "the human is changing model" is the safe direction:
-        the ruling is that a human-driven selection must never be overridden,
-        so a false positive costs only a restore we were told not to make. But
-        a false positive also disables the fable restore for the latch window,
-        so the guess is worth narrowing where it can be narrowed honestly.
-        ``_MIN_COMMAND_STEM`` keeps it off short stems besides.
+        Deliberately blunt. Over-matching costs a restore we were told not to
+        make anyway, so there is nothing here worth a cleverer rule.
         """
         text = bytes(self._buffer).decode("utf-8", errors="ignore").strip()
-        if text == command:
-            return True
-        if len(text) < _MIN_COMMAND_STEM or len(text) >= len(command):
-            return False
-        return _is_subsequence(text, command) and not command.startswith(text)
+        return text.startswith(command[:_COMMAND_STEM_CHARS])
 
     def take_compact_submitted(self) -> bool:
         """Return True once if a human `/compact` was submitted, then clear it.

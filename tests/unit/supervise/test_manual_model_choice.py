@@ -777,26 +777,27 @@ def test_typed_model_command_also_retires_a_pending_picker_latch() -> None:
     assert machine.export_state()["manual_selector_ts"] is None
 
 
-def test_human_input_line_selector_edge_ignores_a_longer_command() -> None:
-    line = _mod.HumanInputLine()
-    line.feed(b"/modelfoo\r")
-    assert line.take_model_selector_submitted() is False
+def test_the_stem_match_is_deliberately_blunt() -> None:
+    """`/mode` is a real skill in this repo and `/modelfoo` is nothing at all;
+    both arm the latch, and that is the intended trade. Arming only suppresses
+    a restore we were told not to make, so precision here buys nothing worth
+    the rules it would cost."""
+    for typed in (b"/mode\r", b"/modelfoo\r"):
+        line = _mod.HumanInputLine()
+        line.feed(typed)
+        assert line.take_model_selector_submitted() is True
 
 
-@pytest.mark.parametrize("typed", [b"/modl\r", b"/mdel\r", b"/model\r"])
-def test_autocompleted_model_command_still_arms_the_picker_latch(typed: bytes) -> None:
+@pytest.mark.parametrize("typed", [b"/mod\r", b"/modl\r", b"/model\r"])
+def test_a_model_command_stem_arms_the_picker_latch(typed: bytes) -> None:
     """Field evidence (2026-09-04 dogfood): the worker observed `'/modl'`, not
     `/model`.
 
     Claude Code's slash autocomplete completes the word in its OWN UI, so the
-    completed text never crosses the PTY -- only the prefix the human actually
-    typed, plus the menu keystrokes. Exact matching therefore misses the real
-    submission, which is how a deliberate model change went unrecognised and
-    got overridden.
-
-    Erring towards "assume human" is the correct direction here: the owner
-    ruling is that a human-driven selection must NEVER be overridden, so a
-    false positive costs only a restore we were told not to make anyway.
+    completed text never crosses the PTY -- only what the human actually
+    typed, misspellings included. Matching the exact word therefore misses a
+    real submission, which is how a deliberate model change went unrecognised
+    and got overridden.
     """
     line = _mod.HumanInputLine()
     line.feed(typed)
@@ -804,23 +805,7 @@ def test_autocompleted_model_command_still_arms_the_picker_latch(typed: bytes) -
 
 
 @pytest.mark.parametrize("typed", [b"/m\r", b"/mo\r", b"/compact\r", b"/goal\r", b"hello\r"])
-def test_short_or_unrelated_stems_do_not_arm_the_picker_latch(typed: bytes) -> None:
-    """The guess has to stop somewhere, and a two-character stem is where."""
-    line = _mod.HumanInputLine()
-    line.feed(typed)
-    assert line.take_model_selector_submitted() is False
-
-
-@pytest.mark.parametrize("typed", [b"/mod\r", b"/mode\r"])
-def test_a_partial_prefix_of_model_does_not_arm_the_picker_latch(typed: bytes) -> None:
-    """A PREFIX is ambiguous -- it may be heading for another command entirely.
-
-    Verified against this environment rather than assumed: `/mode` is a real
-    skill in THIS repo and is a prefix of `/model`, so accepting prefixes
-    would arm the wildcard on a command that has nothing to do with models,
-    silently disabling the fable restore for the latch window. A non-prefix
-    subsequence like `/modl` carries no such ambiguity.
-    """
+def test_unrelated_lines_do_not_arm_the_picker_latch(typed: bytes) -> None:
     line = _mod.HumanInputLine()
     line.feed(typed)
     assert line.take_model_selector_submitted() is False
