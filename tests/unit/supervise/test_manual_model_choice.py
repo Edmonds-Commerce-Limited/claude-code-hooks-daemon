@@ -32,6 +32,7 @@ def _facts(
     input_line_empty: bool = True,
     human_model_command: str | None = None,
     human_effort_command: str | None = None,
+    human_model_selector: bool = False,
 ) -> object:
     return _mod.TickFacts(
         now_wall=now,
@@ -41,6 +42,7 @@ def _facts(
         work_idle=True,
         human_model_command=human_model_command,
         human_effort_command=human_effort_command,
+        human_model_selector=human_model_selector,
     )
 
 
@@ -113,6 +115,29 @@ def test_human_input_line_ignores_bare_model_with_no_argument() -> None:
     line = _mod.HumanInputLine()
     line.feed(b"/model\r")
     assert line.take_model_submitted() is None
+
+
+def test_human_input_line_reports_a_bare_model_as_a_selector_submission() -> None:
+    """A bare `/model` names no family, but it IS a deliberate switch starting.
+
+    Field defect: `/model` + Enter opens Claude Code's own picker, and the
+    family is then chosen with arrow keys that carry no text. Recognising only
+    `/model <arg>` therefore missed the most common way a human switches
+    model, and the auto-restore flipped the session straight back.
+    """
+    line = _mod.HumanInputLine()
+    line.feed(b"/model\r")
+    assert line.take_model_selector_submitted() is True
+    # Consume-once, like every other typed-command edge.
+    assert line.take_model_selector_submitted() is False
+
+
+def test_human_input_line_selector_edge_not_raised_by_a_targeted_model_command() -> None:
+    """`/model opus` latches the FAMILY; it must not also arm the wildcard."""
+    line = _mod.HumanInputLine()
+    line.feed(b"/model opus\r")
+    assert line.take_model_submitted() == "opus"
+    assert line.take_model_selector_submitted() is False
 
 
 def test_human_input_line_ignores_unrelated_text() -> None:
@@ -467,7 +492,7 @@ def test_manual_model_state_round_trips_through_export_import() -> None:
     machine.note_manual_model_command("opus", now_wall=_NOW)
     clone = _machine()
     clone.import_state(machine.export_state())
-    assert clone._manual_model_matches("opus", _NOW + 1.0) is True
+    assert clone._typed_model_matches("opus", _NOW + 1.0) is True
 
 
 def test_legacy_state_without_manual_fields_defaults_safely() -> None:
@@ -478,7 +503,7 @@ def test_legacy_state_without_manual_fields_defaults_safely() -> None:
     legacy_state.pop("manual_effort_active", None)
     fresh = _machine()
     fresh.import_state(legacy_state)
-    assert fresh._manual_model_matches("opus", _NOW) is False
+    assert fresh._typed_model_matches("opus", _NOW) is False
     fresh.arm_coupled_effort(session=_SESSION, family="fable")
     assert fresh.coupled_effort_pending == f"{_SESSION}:fable:low"
 
@@ -525,3 +550,97 @@ def test_submitted_slash_lines_are_observable() -> None:
     line.feed(b"/mod\t\r")
     assert line.take_slash_submitted() == ["/model opus", "/mod\t"]
     assert line.take_slash_submitted() == []
+
+
+# ── The `/model` PICKER: a manual choice with no family in the typed text ────
+
+
+def test_model_selector_choice_suppresses_the_auto_restore(tmp_path: Path) -> None:
+    """Field defect: a human out of fable allowance switches to opus through
+    the picker, and the supervisor flips the session straight back."""
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    # The human submits a bare `/model` and picks Opus from the picker; the
+    # arrow keys that choose it carry no text, so this edge is all we get.
+    _decide(sidecar_dir, machine, facts=_facts(human_model_selector=True))
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 0.5)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "noop"
+    later = _decide(sidecar_dir, machine, facts=_facts(_NOW + 10_000.0))
+    assert later.decision_value != "would-model"
+
+
+def test_model_selector_choice_writes_the_shared_manual_marker(tmp_path: Path) -> None:
+    """The status-line downgrade badge must not contradict the picker either.
+
+    The family is unknown when the picker opens, so the marker can only be
+    written once a reading names what actually landed.
+    """
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _decide(sidecar_dir, machine, facts=_facts(human_model_selector=True))
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 0.5)
+    _decide(sidecar_dir, machine, facts=_facts(_NOW + 1.0))
+    marker_path = tmp_path / _mod._MANUAL_MODEL_MARKER_SUBDIR / f"{_SESSION}.json"
+    assert marker_path.exists()
+    assert json.loads(marker_path.read_text(encoding="utf-8"))["family"] == "opus"
+
+
+def test_model_selector_latch_expires(tmp_path: Path) -> None:
+    """The picker latch is a WILDCARD -- any family landing counts as chosen --
+    so it expires far sooner than the typed-command backstop. Past it, a rank
+    drop is a silent substitution again."""
+    assert _mod._MANUAL_MODEL_SELECTOR_WINDOW_SECONDS < _mod._MANUAL_MODEL_WINDOW_SECONDS
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _decide(sidecar_dir, machine, facts=_facts(human_model_selector=True))
+    stale = _NOW + _mod._MANUAL_MODEL_SELECTOR_WINDOW_SECONDS + 30.0
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=stale - 0.5)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(stale))
+    assert outcome.decision_value == "would-effort"
+
+
+def test_model_selector_latch_is_consumed_by_the_family_that_lands(tmp_path: Path) -> None:
+    """One picker interaction sanctions ONE change. A later family move with
+    nothing newly typed is a silent substitution the classifier must catch."""
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _decide(sidecar_dir, machine, facts=_facts(human_model_selector=True))
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 0.5)
+    _decide(sidecar_dir, machine, facts=_facts(_NOW + 1.0))
+    # Nothing typed since; a further unrequested drop opens a real episode.
+    _write_sidecar(sidecar_dir, model_id="claude-sonnet-5", effort="high", ts=_NOW + 1.5)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(_NOW + 2.0))
+    assert outcome.decision_value == "would-effort"
+
+
+def test_model_selector_state_round_trips_through_export_import() -> None:
+    machine = _machine()
+    machine.note_manual_model_selector(now_wall=_NOW)
+    restored = _machine()
+    restored.import_state(machine.export_state())
+    assert restored.export_state()["manual_selector_ts"] == _NOW
+
+
+def test_tick_facts_model_selector_round_trips_through_json() -> None:
+    facts = _facts(human_model_selector=True)
+    assert _mod._facts_from_json(_mod._facts_to_json(facts)).human_model_selector is True
+
+
+def test_tick_facts_model_selector_defaults_to_false() -> None:
+    facts = _mod.TickFacts(
+        now_wall=_NOW,
+        idle=True,
+        input_line_empty=True,
+        human_compact_submitted=False,
+        work_idle=True,
+    )
+    assert facts.human_model_selector is False
