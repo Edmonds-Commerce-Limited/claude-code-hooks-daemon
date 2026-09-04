@@ -329,6 +329,7 @@ class SecurityAntipatternHandler(PreToolUseHandlerBase):
             file_path,
             handler_patterns=self._exclude_paths,
             project_patterns=self._project_exclude_paths,
+            layout=self._project_layout,
         )
 
     def _format_reason(

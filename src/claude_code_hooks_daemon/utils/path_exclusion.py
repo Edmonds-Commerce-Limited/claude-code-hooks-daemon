@@ -26,8 +26,35 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Iterable, Sequence
+from typing import Protocol
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
+from claude_code_hooks_daemon.utils.vendor_paths import VENDOR_DIRS_TOKEN, is_vendored_path
+
+
+class VendoredPathJudge(Protocol):
+    """Structural view of the one method this module needs from a layout.
+
+    A ``Protocol`` rather than an import: ``ProjectLayout`` lives in ``core``
+    and this module is deliberately stdlib-only (see the module docstring),
+    so importing the facade would couple every exclusion caller to ``core``.
+    ``ProjectLayout`` satisfies this structurally, with nothing to declare.
+    """
+
+    def is_vendored_path(self, rel_path: str) -> bool: ...
+
+
+def _resolves_vendor_token(file_path: str, layout: VendoredPathJudge | None) -> bool:
+    """Whether ``file_path`` is vendored, for a ``{vendor-dirs}`` entry.
+
+    With no layout available the effective vendor set is the built-in one,
+    which is the same fallback :func:`vendored_exclude_globs` already makes
+    for a ``None`` ``vendor_dirs`` -- consistent rather than a special case.
+    """
+    if layout is not None:
+        return layout.is_vendored_path(file_path)
+    return is_vendored_path(file_path, CORE_VENDORED_BUILD_DIR_NAMES)
+
 
 # Compiled-pattern cache: the same handful of client globs are matched on every
 # Write/Edit, so translating + compiling once per pattern is worth it.
@@ -171,6 +198,7 @@ def path_matches_globs(
     patterns: Sequence[str] | None,
     *,
     project_root: str | os.PathLike[str] | None = None,
+    layout: VendoredPathJudge | None = None,
 ) -> bool:
     """Return True if ``file_path`` matches any glob in ``patterns``.
 
@@ -186,6 +214,10 @@ def path_matches_globs(
         patterns: Glob patterns. ``None`` or empty never matches.
         project_root: Optional project root; enables project-relative and
             leading-``/`` anchored matching.
+        layout: Anything answering ``is_vendored_path`` (ordinarily a
+            ``ProjectLayout``), used to resolve a
+            :data:`~utils.vendor_paths.VENDOR_DIRS_TOKEN` entry. Omitting it
+            falls back to the built-in vendored set.
 
     Returns:
         True if any pattern matches any candidate form of the path.
@@ -195,6 +227,19 @@ def path_matches_globs(
     candidates = _candidate_paths(file_path, project_root)
     for pattern in patterns:
         if not pattern:
+            continue
+        if pattern == VENDOR_DIRS_TOKEN:
+            # A predicate reference, not a glob: see VENDOR_DIRS_TOKEN.
+            #
+            # Judged on the FIRST candidate only, not `any` of them.
+            # `_candidate_paths` puts the project-relative form first when a
+            # root is known, and that is the form `vendor_exceptions` is
+            # written against. Asking `any` would let the raw absolute form
+            # answer "vendored" while the exception -- which can only match
+            # the relative form -- never gets a say, making a declared
+            # carve-out silently unreachable.
+            if _resolves_vendor_token(candidates[0], layout):
+                return True
             continue
         compiled = _compiled(pattern)
         if any(compiled.fullmatch(candidate) for candidate in candidates):
@@ -207,6 +252,7 @@ def is_path_excluded(
     patterns: Sequence[str] | None,
     *,
     project_root: str | os.PathLike[str] | None = None,
+    layout: VendoredPathJudge | None = None,
 ) -> bool:
     """Return True if ``file_path`` matches any exclusion glob in ``patterns``.
 
@@ -224,7 +270,7 @@ def is_path_excluded(
     Returns:
         True if any pattern matches any candidate form of the path.
     """
-    return path_matches_globs(file_path, patterns, project_root=project_root)
+    return path_matches_globs(file_path, patterns, project_root=project_root, layout=layout)
 
 
 def handler_excludes_path(
@@ -233,6 +279,7 @@ def handler_excludes_path(
     handler_patterns: Sequence[str] | None,
     project_patterns: Sequence[str] | None,
     defaults: Sequence[str] | None = None,
+    layout: VendoredPathJudge | None = None,
 ) -> bool:
     """Whether a handler should skip ``file_path`` given all three exclude sources.
 
@@ -256,6 +303,11 @@ def handler_excludes_path(
         project_patterns: Project-wide ``daemon.exclude_paths``, injected by the
             registry after construction.
         defaults: The handler's built-in exclusions, if it has any.
+        layout: The handler's injected ``_project_layout``, used to resolve a
+            :data:`~utils.vendor_paths.VENDOR_DIRS_TOKEN` entry in any of the
+            three sources. A project writes ``{vendor-dirs}`` instead of
+            restating the vendored directory names by hand, which is what
+            made those names a distributed source of truth.
 
     Returns:
         True when any source matches, so the handler should not act on this path.
@@ -267,4 +319,4 @@ def handler_excludes_path(
     # configures exclusions.
     if not patterns:
         return False
-    return is_path_excluded(file_path, patterns, project_root=resolve_project_root())
+    return is_path_excluded(file_path, patterns, project_root=resolve_project_root(), layout=layout)

@@ -26,10 +26,28 @@ the whole reason both keys can coexist:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from fnmatch import fnmatch
+from typing import Final
 
 _SUBTREE_SUFFIX = "/**"
+
+#: Written in an exclusion list to mean "whatever this project considers
+#: vendored" (Plan 00331 Phase 2). Resolved as a PREDICATE REFERENCE, not a
+#: glob expansion: expanding it would copy the vendor NAMES into each list —
+#: the distributed source of truth again, one indirection later — and could
+#: not express an exception without negation syntax and a cross-key
+#: precedence rule. A reference has neither problem.
+#:
+#: Honoured by :func:`~utils.path_exclusion.handler_excludes_path` and so by
+#: ``daemon.exclude_paths`` and every per-handler ``exclude_paths``.
+#:
+#: Deliberately NOT wired into ``documentation.qa.scope_exclude_globs``: docs
+#: QA already skips every vendored path by its own policy, so the token would
+#: be inert there. A test asserting otherwise passed on the FIRST run without
+#: any token support at all, which is how the redundancy was caught —
+#: shipping it would have been config surface that does nothing.
+VENDOR_DIRS_TOKEN: Final[str] = "{vendor-dirs}"
 
 
 def _is_under(path: str, root: str) -> bool:
@@ -43,6 +61,32 @@ def _is_under(path: str, root: str) -> bool:
     if not root_norm:
         return True
     return path_norm == root_norm or path_norm.startswith(root_norm + "/")
+
+
+def is_vendored_path(
+    rel_path: str, vendor_dirs: Iterable[str], vendor_exceptions: Sequence[str] = ()
+) -> bool:
+    """The single vendor question, in plain values.
+
+    A path is vendored when any of its segments NAMES a vendored directory
+    and it is not carved out by an exception.
+    ``ProjectLayout.is_vendored_path`` delegates here so the facade and every
+    plain-values caller give the same answer rather than each deriving one --
+    the parallel-copies failure this plan exists to end.
+
+    Args:
+        rel_path: Repository-relative path.
+        vendor_dirs: Effective vendored directory NAMES.
+        vendor_exceptions: Repo-relative carve-out globs.
+
+    Returns:
+        True when the path should be treated as third-party content.
+    """
+    names = set(vendor_dirs)
+    parts = tuple(part for part in rel_path.split("/") if part and part != ".")
+    if not any(part in names for part in parts):
+        return False
+    return not matches_vendor_exception(rel_path, vendor_exceptions)
 
 
 def matches_vendor_exception(rel_path: str, patterns: Sequence[str]) -> bool:

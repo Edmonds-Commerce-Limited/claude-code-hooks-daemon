@@ -225,9 +225,7 @@ class ProjectLayout:
         The single vendor question, so every consumer gets the exceptions for
         free rather than each re-deriving them (Plan 00331).
         """
-        if not any(part in self.vendor_dirs for part in _path_parts(rel_path)):
-            return False
-        return not vendor_paths.matches_vendor_exception(rel_path, self.vendor_exceptions)
+        return vendor_paths.is_vendored_path(rel_path, self.vendor_dirs, self.vendor_exceptions)
 
     def may_contain_vendor_exception(self, rel_dir: str) -> bool:
         """Whether a vendor exception could live at or beneath ``rel_dir``.

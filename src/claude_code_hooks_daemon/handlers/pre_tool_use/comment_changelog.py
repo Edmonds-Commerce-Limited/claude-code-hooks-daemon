@@ -270,6 +270,7 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
             handler_patterns=self._exclude_paths,
             project_patterns=self._project_exclude_paths,
             defaults=_default_exclude_globs(self._project_layout),
+            layout=self._project_layout,
         )
 
     def _find_violations(

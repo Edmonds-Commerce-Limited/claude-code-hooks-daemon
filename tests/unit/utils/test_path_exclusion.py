@@ -12,7 +12,9 @@ they share, so grep for its callers rather than trusting a number in prose.
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -25,6 +27,8 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     resolve_project_root,
     vendored_exclude_globs,
 )
+from claude_code_hooks_daemon.utils.vendor_paths import VENDOR_DIRS_TOKEN
+from tests.conftest import layout_declaring_vendor_dirs
 
 
 class TestVendoredExcludeGlobs:
@@ -59,6 +63,119 @@ class TestVendoredExcludeGlobs:
         """Distinct from `None`: an explicitly empty set is `mode: replace`
         with nothing declared, which must not silently restore the built-ins."""
         assert vendored_exclude_globs(()) == ()
+
+
+class TestVendorDirsToken:
+    """Plan 00331 Phase 2: `{vendor-dirs}` in any exclusion list.
+
+    The owner's SSoT objection: every exclusion list that wants to skip
+    vendored paths had to RESTATE the vendored directory names by hand. The
+    token lets a list REFERENCE the one vendor truth instead.
+
+    Resolved as a PREDICATE REFERENCE, not a glob expansion — expanding it
+    would copy the names into each list, which is the distributed truth again
+    one indirection later, and could not express `vendor_exceptions`.
+    """
+
+    def test_the_token_matches_a_vendored_path(self) -> None:
+        assert handler_excludes_path(
+            "/proj/node_modules/pkg/index.js",
+            handler_patterns=[VENDOR_DIRS_TOKEN],
+            project_patterns=None,
+        )
+
+    def test_the_token_does_not_match_first_party_code(self) -> None:
+        assert not handler_excludes_path(
+            "/proj/src/main.py", handler_patterns=[VENDOR_DIRS_TOKEN], project_patterns=None
+        )
+
+    def test_the_token_follows_a_declared_vendor_dir(self) -> None:
+        """The point of a reference rather than an expansion: a project's own
+        declaration reaches every list that names the token."""
+        layout = layout_declaring_vendor_dirs("roles")
+        assert handler_excludes_path(
+            "/proj/infra/roles/lts.vault/main.py",
+            handler_patterns=[VENDOR_DIRS_TOKEN],
+            project_patterns=None,
+            layout=layout,
+        )
+
+    def test_the_token_honours_a_vendor_exception(self) -> None:
+        """A glob expansion could not express this at all without negation.
+
+        Goes through `is_path_excluded` so the project root can be passed
+        explicitly: `vendor_exceptions` entries are repo-RELATIVE, so they can
+        only be judged against the relative form of the path.
+        `handler_excludes_path` resolves that root from `ProjectContext`,
+        which a unit test does not initialise.
+        """
+        layout = dataclasses.replace(
+            layout_declaring_vendor_dirs("roles"),
+            vendor_exceptions=("infra/roles/ours/**",),
+        )
+        assert not is_path_excluded(
+            "/proj/infra/roles/ours/main.py",
+            [VENDOR_DIRS_TOKEN],
+            project_root="/proj",
+            layout=layout,
+        )
+        assert is_path_excluded(
+            "/proj/infra/roles/theirs/main.py",
+            [VENDOR_DIRS_TOKEN],
+            project_root="/proj",
+            layout=layout,
+        )
+
+    def test_the_exception_is_judged_on_the_relative_form(self) -> None:
+        """Regression guard for the `any(candidate)` bug.
+
+        Both the absolute and the project-relative form are candidates, and
+        BOTH contain a `roles` segment, so both read as vendored on names
+        alone. Only the relative one can match a repo-relative exception --
+        so asking whether ANY candidate is vendored lets the absolute form
+        answer first and the carve-out never applies.
+        """
+        layout = dataclasses.replace(
+            layout_declaring_vendor_dirs("roles"),
+            vendor_exceptions=("infra/roles/ours/**",),
+        )
+        assert not path_matches_globs(
+            "/deep/nested/checkout/infra/roles/ours/main.py",
+            [VENDOR_DIRS_TOKEN],
+            project_root="/deep/nested/checkout",
+            layout=layout,
+        )
+
+    def test_without_a_layout_the_token_falls_back_to_the_built_ins(self) -> None:
+        """The same fallback `vendored_exclude_globs(None)` makes, so "no
+        layout available" means one thing across this module rather than two."""
+        assert handler_excludes_path(
+            "/proj/node_modules/x.js",
+            handler_patterns=[VENDOR_DIRS_TOKEN],
+            project_patterns=None,
+        )
+
+    def test_the_token_composes_with_ordinary_globs(self) -> None:
+        """Additive, like every other exclusion source here -- mixing the two
+        must not make either stop working."""
+        patterns = [VENDOR_DIRS_TOKEN, "**/generated/**"]
+        assert handler_excludes_path(
+            "/proj/node_modules/x.js", handler_patterns=patterns, project_patterns=None
+        )
+        assert handler_excludes_path(
+            "/proj/src/generated/x.py", handler_patterns=patterns, project_patterns=None
+        )
+        assert not handler_excludes_path(
+            "/proj/src/real.py", handler_patterns=patterns, project_patterns=None
+        )
+
+    def test_the_token_works_from_the_project_wide_source_too(self) -> None:
+        """`daemon.exclude_paths` is the list the owner named specifically."""
+        assert handler_excludes_path(
+            "/proj/node_modules/x.js",
+            handler_patterns=None,
+            project_patterns=[VENDOR_DIRS_TOKEN],
+        )
 
 
 class TestPathMatchesGlobs:
@@ -271,7 +388,7 @@ class TestHandlerExcludesPath:
 
     def test_the_three_sources_are_additive_not_overriding(self) -> None:
         """None of the three sources may mask another — all must still match."""
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "handler_patterns": ["**/h/**"],
             "project_patterns": ["**/p/**"],
             "defaults": ["**/d/**"],

@@ -157,7 +157,7 @@ a distributed source of truth. The fix is not to make one key implicitly
 absorb another; it is to let any exclusion list REFERENCE the single vendor
 truth.
 
-- [ ] ⬜ **Task 2.1**: A `{vendor-dirs}` token usable in any exclusion list
+- [x] ✅ **Task 2.1**: A `{vendor-dirs}` token usable in any exclusion list
   (`daemon.exclude_paths`, a per-handler `exclude_paths`,
   `documentation.qa.scope_exclude_globs`). Resolved as a PREDICATE
   REFERENCE, not a glob expansion: it matches exactly when
@@ -169,9 +169,29 @@ truth.
   exceptions of Task 3.1 without `!` negation and a cross-key precedence
   rule. A reference has neither problem.
 
-- [ ] ⬜ **Task 2.2**: Confirm a list mixing `{vendor-dirs}` with ordinary
+- [x] ✅ **Task 2.2**: Confirm a list mixing `{vendor-dirs}` with ordinary
   globs composes additively, and that the token is inert (never an error)
   where a consumer already skips vendored content by its own policy.
+
+  The scope check changed the answer. The token is wired into
+  `handler_excludes_path` — so `daemon.exclude_paths` and every per-handler
+  `exclude_paths` — and deliberately NOT into
+  `documentation.qa.scope_exclude_globs`: docs QA already skips every
+  vendored path by its own policy, so the token is inert there and adding it
+  would ship config surface that does nothing.
+
+  Caught by the test, not by inspection: the `scope_exclude_globs` token
+  test passed on its FIRST run with no token support in that path at all.
+  A green test before the implementation is evidence the test is not
+  measuring the implementation.
+
+  One real defect surfaced while wiring it. Both the absolute and the
+  project-relative form of a path are matching candidates and both contain
+  the vendored segment, so asking whether ANY candidate is vendored let the
+  absolute form answer first — and since an exception can only match the
+  RELATIVE form, a declared carve-out became silently unreachable. Resolved
+  on the first (most-relative) candidate only, with a regression test that
+  fails on the `any` version.
 
 ### Phase 3: Re-include a first-party library inside a vendor tree
 
@@ -249,8 +269,13 @@ first sight, which is a fair verdict on an undocumented asymmetry:
   the project maintains: the third-party doc is silent, the project's own is
   reported.
 - [ ] A monorepo sub-project's declared `vendor_dirs` is honoured.
-- [ ] A path excluded via `daemon.exclude_paths` is invisible to docs QA and
-  plan QA.
+- [x] A project can exclude vendored paths from `daemon.exclude_paths` and
+  any per-handler `exclude_paths` by REFERENCING the vendor truth
+  (`{vendor-dirs}`) rather than restating the directory names. This replaces
+  the original criterion — "a path excluded via `daemon.exclude_paths` is
+  invisible to docs QA and plan QA" — which was withdrawn with its Phase 2
+  (see the Phase 2 note: that key means something different, and absorbing
+  it would silently drop doc findings in fixture trees).
 
 ## Delivery & Milestones
 
