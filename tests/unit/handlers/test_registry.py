@@ -312,7 +312,55 @@ class TestRegisterAll:
             if getattr(handler, "_documentation", None) is not None
         ]
         assert documented, "no documentation-tagged handler registered"
-        assert all("roles" in h._documentation.vendor_dirs for h in documented)
+        # Plan 00332: the policy now carries per-project scopes. With only a
+        # root layout supplied the declaration must still arrive, on the root
+        # scope -- the fallback exists precisely so this Plan 00331
+        # behaviour survives a caller that passes no registry.
+        assert all("roles" in h._documentation.vendor_scopes[0].vendor_dirs for h in documented)
+
+    def test_register_all_routes_a_sub_projects_vendor_dirs_into_the_docs_policy(
+        self, registry: HandlerRegistry, router: EventRouter, tmp_path: Path
+    ) -> None:
+        """Plan 00332: with a registry present, each declared project's own
+        vendor truth reaches the policy under its own root.
+
+        The sibling assertion is the discriminating one: a repo-wide union
+        would put `roles` on the root scope, hiding every other project's
+        `roles/` documentation.
+        """
+        from claude_code_hooks_daemon.config.models import DocumentationConfig, LayoutConfig
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+        from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegistry
+
+        project_registry = ProjectRegistry(
+            project_root=tmp_path,
+            projects=(
+                DeclaredProject(
+                    name="api",
+                    root=tmp_path / "apps" / "api",
+                    layout=LayoutConfig(vendor_dirs=["roles"]),
+                ),
+            ),
+            root_layout=ProjectLayout.built_in_default(),
+        )
+
+        registry.register_all(
+            router,
+            project_registry=project_registry,
+            documentation=DocumentationConfig(enabled=True),
+        )
+
+        documented = [
+            handler
+            for handlers in router.get_all_handlers().values()
+            for handler in handlers
+            if getattr(handler, "_documentation", None) is not None
+        ]
+        assert documented, "no documentation-tagged handler registered"
+        for handler in documented:
+            scopes = {scope.root: scope for scope in handler._documentation.vendor_scopes}
+            assert "roles" in scopes["apps/api"].vendor_dirs
+            assert "roles" not in scopes[""].vendor_dirs
 
     def test_register_all_defaults_project_layout_to_none(
         self, registry: HandlerRegistry, router: EventRouter

@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.constants.config import ConfigKey, resolve_priorit
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
+from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import DocumentationConfig, PlanWorkflowConfig
@@ -116,6 +117,41 @@ def is_discoverable_handler(attr: object) -> TypeGuard[type[Handler]]:
         and attr is not Handler
         and not attr.__name__.startswith(_PRIVATE_PREFIX)
         and not inspect.isabstract(attr)
+    )
+
+
+def _vendor_scopes_for_policy(
+    project_registry: "ProjectRegistry | None",
+    project_layout: "ProjectLayout | None",
+) -> tuple[VendorScope, ...] | None:
+    """Vendor scopes for the docs policy, from whichever facade is available.
+
+    The registry is preferred: only it knows each declared project's root, so
+    only it can express a monorepo sub-project's vendor truth (Plan 00332).
+
+    Falling back to the ROOT LAYOUT rather than to None is load-bearing.
+    ``register_all`` takes the two facades independently, so a caller may
+    pass a layout and no registry -- and returning None there would hand the
+    policy the canonical built-in set, silently discarding a declared
+    ``layout.vendor_dirs``. That is precisely the inert-config defect Plan
+    00331 existed to fix, so reintroducing it as a fallback path would undo
+    that plan for any such caller.
+
+    Returns:
+        Scopes, or None when neither facade was supplied (the caller then
+        keeps the canonical default, which is the correct answer for "no
+        layout information available at all").
+    """
+    if project_registry is not None:
+        return project_registry.vendor_scopes()
+    if project_layout is None:
+        return None
+    return (
+        VendorScope(
+            root="",
+            vendor_dirs=project_layout.vendor_dirs,
+            vendor_exceptions=project_layout.vendor_exceptions,
+        ),
     )
 
 
@@ -456,24 +492,24 @@ class HandlerRegistry:
                                     policy_from_config,
                                 )
 
-                                # The layout's vendor_dirs travels WITH the
-                                # policy (Plan 00331). Injecting the two
+                                # The vendor truth travels WITH the policy
+                                # (Plan 00331). Injecting the two
                                 # independently is what left a declared
                                 # `layout.vendor_dirs` inert: docs QA's
                                 # exclusion reads the policy, so a layout the
                                 # handler also holds never reached the check.
+                                #
+                                # Sourced from the REGISTRY, not the root
+                                # layout (Plan 00332): the root layout can
+                                # only say what the repository as a whole
+                                # calls vendored, so a monorepo sub-project's
+                                # declaration was inert here for exactly the
+                                # same reason.
                                 doc_attrs = {
                                     "documentation": policy_from_config(
                                         documentation,
-                                        vendor_dirs=(
-                                            None
-                                            if project_layout is None
-                                            else tuple(project_layout.vendor_dirs)
-                                        ),
-                                        vendor_exceptions=(
-                                            ()
-                                            if project_layout is None
-                                            else project_layout.vendor_exceptions
+                                        vendor_scopes=_vendor_scopes_for_policy(
+                                            project_registry, project_layout
                                         ),
                                     )
                                 }

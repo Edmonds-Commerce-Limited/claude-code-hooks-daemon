@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.docs_qa.context import edit_context, sweep_context
 from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy, DocumentationQaPolicy
 from claude_code_hooks_daemon.docs_qa.types import CheckContext, CheckStage, Finding, Severity
+from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 
 def _run_edit(context: CheckContext) -> list[Finding]:
@@ -591,7 +592,7 @@ class TestDeclaredVendorDirsArePruned:
 
         context = sweep_context(
             project_root=tmp_path,
-            policy=DocumentationPolicy(vendor_dirs=self._DECLARED),
+            policy=DocumentationPolicy(vendor_scopes=(VendorScope(vendor_dirs=self._DECLARED),)),
             corpus=DocCorpus(project_root=tmp_path),
         )
         assert _run_sweep(context) == []
@@ -601,7 +602,7 @@ class TestDeclaredVendorDirsArePruned:
 
         context = edit_context(
             project_root=tmp_path,
-            policy=DocumentationPolicy(vendor_dirs=self._DECLARED),
+            policy=DocumentationPolicy(vendor_scopes=(VendorScope(vendor_dirs=self._DECLARED),)),
             file_path=doc,
             file_content=_LONG_BODY,
             file_exists_before=False,
@@ -615,7 +616,12 @@ class TestDeclaredVendorDirsArePruned:
         (tmp_path / "CLAUDE").mkdir()
         self._write_role_doc(tmp_path)
 
-        assert _iter_module_doc_paths(tmp_path, "CLAUDE", vendor_dirs=self._DECLARED) == []
+        assert (
+            _iter_module_doc_paths(
+                tmp_path, "CLAUDE", vendor_scopes=(VendorScope(vendor_dirs=self._DECLARED),)
+            )
+            == []
+        )
 
     def test_an_undeclared_vendor_dir_is_still_reported(self, tmp_path: Path) -> None:
         """The skip must come from the DECLARATION, not from the name --
@@ -641,7 +647,7 @@ class TestDeclaredVendorDirsArePruned:
 
         context = sweep_context(
             project_root=tmp_path,
-            policy=DocumentationPolicy(vendor_dirs=self._DECLARED),
+            policy=DocumentationPolicy(vendor_scopes=(VendorScope(vendor_dirs=self._DECLARED),)),
             corpus=DocCorpus(project_root=tmp_path),
         )
         assert _run_sweep(context) == []
@@ -672,7 +678,11 @@ class TestVendorExceptionsSurviveThePrune:
         self._write_two_roles(tmp_path)
 
         assert _iter_module_doc_paths(
-            tmp_path, "CLAUDE", vendor_dirs=self._DECLARED, vendor_exceptions=self._EXCEPTION
+            tmp_path,
+            "CLAUDE",
+            vendor_scopes=(
+                VendorScope(vendor_dirs=self._DECLARED, vendor_exceptions=self._EXCEPTION),
+            ),
         ) == ["infra/roles/ours/CLAUDE.md"]
 
     def test_sweep_reports_the_excepted_doc_and_not_its_neighbour(self, tmp_path: Path) -> None:
@@ -684,7 +694,9 @@ class TestVendorExceptionsSurviveThePrune:
         context = sweep_context(
             project_root=tmp_path,
             policy=DocumentationPolicy(
-                vendor_dirs=self._DECLARED, vendor_exceptions=self._EXCEPTION
+                vendor_scopes=(
+                    VendorScope(vendor_dirs=self._DECLARED, vendor_exceptions=self._EXCEPTION),
+                )
             ),
             corpus=DocCorpus(project_root=tmp_path),
         )
@@ -700,7 +712,9 @@ class TestVendorExceptionsSurviveThePrune:
         context = edit_context(
             project_root=tmp_path,
             policy=DocumentationPolicy(
-                vendor_dirs=self._DECLARED, vendor_exceptions=self._EXCEPTION
+                vendor_scopes=(
+                    VendorScope(vendor_dirs=self._DECLARED, vendor_exceptions=self._EXCEPTION),
+                )
             ),
             file_path=doc,
             file_content=_LONG_BODY,
@@ -713,7 +727,12 @@ class TestVendorExceptionsSurviveThePrune:
         (tmp_path / "CLAUDE").mkdir()
         self._write_two_roles(tmp_path)
 
-        assert _iter_module_doc_paths(tmp_path, "CLAUDE", vendor_dirs=self._DECLARED) == []
+        assert (
+            _iter_module_doc_paths(
+                tmp_path, "CLAUDE", vendor_scopes=(VendorScope(vendor_dirs=self._DECLARED),)
+            )
+            == []
+        )
 
 
 class TestMissingFilePathOrContent:

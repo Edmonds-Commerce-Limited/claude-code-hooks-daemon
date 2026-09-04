@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.docs_qa.policy import (
     DocumentationQaPolicy,
     DocumentationTreesPolicy,
 )
+from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 
 def _scaffold(root: Path) -> None:
@@ -141,7 +142,9 @@ class TestIsInScope:
         to skip). The CONFIG axis exists for exactly this, and did nothing.
         """
         _scaffold(tmp_path)
-        policy = DocumentationPolicy(vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"})
+        policy = DocumentationPolicy(
+            vendor_scopes=(VendorScope(vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"}),)
+        )
         assert not is_in_scope(
             tmp_path / "docs" / "roles" / "vault" / "README.md", tmp_path, policy
         )
@@ -149,7 +152,9 @@ class TestIsInScope:
     def test_a_declaration_does_not_displace_the_canonical_set(self, tmp_path: Path) -> None:
         """Additive is the default mode, so the built-ins must survive it."""
         _scaffold(tmp_path)
-        policy = DocumentationPolicy(vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"})
+        policy = DocumentationPolicy(
+            vendor_scopes=(VendorScope(vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"}),)
+        )
         assert not is_in_scope(tmp_path / "docs" / "node_modules" / "README.md", tmp_path, policy)
 
     def test_an_undeclared_dir_of_that_name_stays_in_scope(self, tmp_path: Path) -> None:
@@ -169,7 +174,9 @@ class TestIsInScope:
         role_doc = tmp_path / "docs" / "roles" / "vault" / "README.md"
         role_doc.parent.mkdir(parents=True)
         role_doc.write_text("# vendored role\n")
-        policy = DocumentationPolicy(vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"})
+        policy = DocumentationPolicy(
+            vendor_scopes=(VendorScope(vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"}),)
+        )
         assert role_doc not in iter_corpus_paths(tmp_path, policy)
         assert role_doc in iter_corpus_paths(tmp_path, DocumentationPolicy())
 
@@ -181,8 +188,12 @@ class TestIsInScope:
         """
         _scaffold(tmp_path)
         policy = DocumentationPolicy(
-            vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"},
-            vendor_exceptions=("docs/roles/ours/**",),
+            vendor_scopes=(
+                VendorScope(
+                    vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"},
+                    vendor_exceptions=("docs/roles/ours/**",),
+                ),
+            )
         )
         assert is_in_scope(tmp_path / "docs" / "roles" / "ours" / "README.md", tmp_path, policy)
 
@@ -190,8 +201,12 @@ class TestIsInScope:
         """The carve-out must be surgical, not switch the vendor dir off."""
         _scaffold(tmp_path)
         policy = DocumentationPolicy(
-            vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"},
-            vendor_exceptions=("docs/roles/ours/**",),
+            vendor_scopes=(
+                VendorScope(
+                    vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES | {"roles"},
+                    vendor_exceptions=("docs/roles/ours/**",),
+                ),
+            )
         )
         assert not is_in_scope(
             tmp_path / "docs" / "roles" / "theirs" / "README.md", tmp_path, policy

@@ -12,6 +12,7 @@ from claude_code_hooks_daemon.docs_qa.policy import (
     GeneratedDocEntry,
 )
 from claude_code_hooks_daemon.docs_qa.types import CheckContext, CheckStage, Finding
+from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 _EMPTY_LAYOUT = ProjectLayout(
     source_dirs=(),
@@ -192,7 +193,7 @@ class TestDeclaredVendorDirsArePruned:
             plan_dir="CLAUDE/Plan",
             plan_archive_dirs=(),
         )
-        policy = DocumentationPolicy(vendor_dirs=layout.vendor_dirs)
+        policy = DocumentationPolicy(vendor_scopes=(VendorScope(vendor_dirs=layout.vendor_dirs),))
         assert _run_sweep(_context(tmp_path, layout=layout, policy=policy)) == []
 
     def test_an_undeclared_dir_of_that_name_is_still_reported(self, tmp_path: Path) -> None:
@@ -235,7 +236,11 @@ class TestVendorExceptionsSurviveThePrune:
         self._write_two_roles(tmp_path)
         layout = self._layout_with_exception()
         policy = DocumentationPolicy(
-            vendor_dirs=layout.vendor_dirs, vendor_exceptions=layout.vendor_exceptions
+            vendor_scopes=(
+                VendorScope(
+                    vendor_dirs=layout.vendor_dirs, vendor_exceptions=layout.vendor_exceptions
+                ),
+            )
         )
         findings = _run_sweep(_context(tmp_path, layout=layout, policy=policy))
         assert [f.path for f in findings] == ["src/roles/ours/NOTES.md"]
@@ -244,7 +249,7 @@ class TestVendorExceptionsSurviveThePrune:
         """The discriminating half: same tree, same vendor_dirs, no exception."""
         self._write_two_roles(tmp_path)
         layout = self._layout_with_exception()
-        policy = DocumentationPolicy(vendor_dirs=layout.vendor_dirs)
+        policy = DocumentationPolicy(vendor_scopes=(VendorScope(vendor_dirs=layout.vendor_dirs),))
         assert _run_sweep(_context(tmp_path, layout=layout, policy=policy)) == []
 
 

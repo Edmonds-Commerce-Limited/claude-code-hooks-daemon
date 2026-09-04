@@ -4781,6 +4781,7 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     """
     from claude_code_hooks_daemon.config.models import Config
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+    from claude_code_hooks_daemon.core.workspace import ProjectRegistry
     from claude_code_hooks_daemon.docs_qa.context import (
         edit_context,
         staged_context,
@@ -4806,11 +4807,12 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     # A declared `layout.vendor_dirs` must exclude a tree from the CLI sweep
     # too (Plan 00331) -- the sweep is the surface a human runs by hand, so
     # honouring the declaration only at handler-dispatch time would report
-    # findings the edit-time check has already agreed to skip.
+    # findings the edit-time check has already agreed to skip. That argument
+    # applies unchanged to a sub-project's declaration (Plan 00332), which is
+    # why the scopes come from the registry rather than the root layout.
     policy = policy_from_config(
         config.documentation,
-        vendor_dirs=tuple(layout.vendor_dirs),
-        vendor_exceptions=layout.vendor_exceptions,
+        vendor_scopes=ProjectRegistry.from_config(config, project_root).vendor_scopes(),
     )
 
     if getattr(args, "check_staged", False):

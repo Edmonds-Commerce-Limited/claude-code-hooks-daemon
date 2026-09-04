@@ -38,7 +38,7 @@ from claude_code_hooks_daemon.docs_qa.structured_blocks import (
     extract_structured_block_locations,
 )
 from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
-from claude_code_hooks_daemon.utils.vendor_paths import matches_vendor_exception
+from claude_code_hooks_daemon.utils.vendor_paths import is_vendored_path_in_scopes
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _CHANGELOG_FILENAME: Final[str] = "CHANGELOG.md"
@@ -191,10 +191,12 @@ def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> boo
     build-output directories inside the configured trees, and (Plan 00289)
     a project-configured ``scope_exclude_globs`` entry.
 
-    The vendored/build test reads ``policy.vendor_dirs``, not the canonical
+    The vendored/build test reads ``policy.vendor_scopes``, not the canonical
     constant directly (Plan 00331): the constant is only the BUILT-IN half,
     so testing it made a declared ``layout.vendor_dirs`` inert here — the
-    config existed and could not reach the check."""
+    config existed and could not reach the check. Scopes rather than one flat
+    set (Plan 00332) so a monorepo sub-project's declaration governs its own
+    tree and no one else's."""
     if len(rel_parts) == 1 and rel_parts[0] == _CHANGELOG_FILENAME:
         return True
     if rel_parts and rel_parts[0] == _RELEASES_DIR_NAME:
@@ -203,8 +205,10 @@ def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> boo
         return True
     if is_vendored_daemon_install_path(rel_parts):
         return True
-    if any(part in policy.vendor_dirs for part in rel_parts[:-1]) and not matches_vendor_exception(
-        "/".join(rel_parts), policy.vendor_exceptions
+    # The BASENAME is excluded from the vendored test -- `vendor_dirs` names
+    # DIRECTORIES, so a file merely called `vendor` is not vendored.
+    if rel_parts[:-1] and is_vendored_path_in_scopes(
+        "/".join(rel_parts[:-1]), policy.vendor_scopes
     ):
         return True
     plan_completed = (policy.trees.agent, _PLAN_SUBDIR_NAME, _PLAN_COMPLETED_DIR_NAME)

@@ -24,12 +24,14 @@ Usage:
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import Config, LayoutConfig
@@ -247,6 +249,50 @@ class ProjectRegistry:
         yield "", self.root_layout
         for project in self.projects:
             yield project.name, ProjectLayout.for_project(project.layout, self.root_layout)
+
+    def vendor_scopes(self) -> tuple[VendorScope, ...]:
+        """Every project's vendor truth, keyed by the repo-relative root it governs.
+
+        The registry is the only place that knows BOTH a project's declared
+        root and its resolved layout, which is why this cannot live where it
+        is consumed. :meth:`iter_layouts` yields the project NAME, and a name
+        cannot be matched against a path -- so it cannot serve here.
+
+        Built for ``docs_qa``, which may not import ``ProjectLayout``
+        (``core.project_layout`` already imports ``docs_qa.corpus``, so the
+        reverse closes a cycle). Handing over plain
+        :class:`~utils.vendor_paths.VendorScope` values keeps that boundary
+        while still giving docs QA a per-path answer (Plan 00332).
+
+        Returns:
+            The root project's scope first, then one per declared project.
+            Order carries no meaning -- resolution is longest-root-wins, so a
+            reader must not infer precedence from position.
+        """
+        scopes = [
+            VendorScope(
+                root="",
+                vendor_dirs=self.root_layout.vendor_dirs,
+                vendor_exceptions=self.root_layout.vendor_exceptions,
+            )
+        ]
+        for project in self.projects:
+            layout = ProjectLayout.for_project(project.layout, self.root_layout)
+            relative = os.path.relpath(project.root, self.project_root).replace("\\", "/")
+            if relative == ".." or relative.startswith("../"):
+                # A project declared OUTSIDE the repository root governs no
+                # path the walkers will ever visit. Skipped rather than
+                # keyed by a `..` root, which `_is_under` would read as a
+                # literal segment and never match.
+                continue
+            scopes.append(
+                VendorScope(
+                    root="" if relative == "." else relative,
+                    vendor_dirs=layout.vendor_dirs,
+                    vendor_exceptions=layout.vendor_exceptions,
+                )
+            )
+        return tuple(scopes)
 
     def all_source_dirs(self) -> tuple[str, ...]:
         """Union of `source_dirs` across the root project and every declared project.

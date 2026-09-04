@@ -17,7 +17,14 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.core.workspace import DeclaredProject, Workspace
+from claude_code_hooks_daemon.config.models import LayoutConfig
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
+from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+from claude_code_hooks_daemon.core.workspace import (
+    DeclaredProject,
+    ProjectRegistry,
+    Workspace,
+)
 
 
 class TestManifestConventionAtADeclaredRoot:
@@ -146,3 +153,59 @@ class TestWorkspaceValueType:
 
         assert workspace.root == tmp_path
         assert workspace.kind == "node"
+
+
+class TestVendorScopes:
+    """Plan 00332 Task 2.3: the registry is the one place that knows both a
+    project's declared root AND its resolved layout, so it is the only place
+    that can build the scopes docs QA needs as plain values."""
+
+    @staticmethod
+    def _registry(tmp_path: Path) -> ProjectRegistry:
+        return ProjectRegistry(
+            project_root=tmp_path,
+            projects=(
+                DeclaredProject(
+                    name="api",
+                    root=tmp_path / "apps" / "api",
+                    layout=LayoutConfig(vendor_dirs=["roles"]),
+                ),
+            ),
+            root_layout=ProjectLayout.built_in_default(),
+        )
+
+    def test_the_root_project_is_always_present(self, tmp_path: Path) -> None:
+        """Keyed by `""`, so a path owned by no declared project still has a
+        vendor answer rather than falling through to "nothing is vendored"."""
+        scopes = self._registry(tmp_path).vendor_scopes()
+
+        root = next(scope for scope in scopes if scope.root == "")
+        assert CORE_VENDORED_BUILD_DIR_NAMES <= root.vendor_dirs
+
+    def test_a_declared_project_is_keyed_by_its_repo_relative_root(self, tmp_path: Path) -> None:
+        """Repo-relative, not absolute and not the project NAME.
+
+        `iter_layouts` yields the name, which is why it cannot serve here:
+        a name cannot be matched against a path.
+        """
+        scopes = self._registry(tmp_path).vendor_scopes()
+
+        api = next(scope for scope in scopes if scope.root == "apps/api")
+        assert "roles" in api.vendor_dirs
+
+    def test_the_root_scope_does_not_gain_the_sub_projects_declaration(
+        self, tmp_path: Path
+    ) -> None:
+        """The discriminating case: a union would put `roles` on the root
+        scope and hide every sibling's `roles/` content."""
+        scopes = self._registry(tmp_path).vendor_scopes()
+
+        root = next(scope for scope in scopes if scope.root == "")
+        assert "roles" not in root.vendor_dirs
+
+    def test_a_single_project_repo_yields_only_the_root_scope(self, tmp_path: Path) -> None:
+        registry = ProjectRegistry.single_project(
+            tmp_path, root_layout=ProjectLayout.built_in_default()
+        )
+
+        assert [scope.root for scope in registry.vendor_scopes()] == [""]

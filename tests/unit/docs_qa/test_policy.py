@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.docs_qa.policy import (
     DocumentationTreesPolicy,
     policy_from_config,
 )
+from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 
 class TestDefaults:
@@ -110,11 +111,11 @@ class TestVendorDirs:
     """
 
     def test_defaults_to_the_canonical_set(self) -> None:
-        assert DocumentationPolicy().vendor_dirs == CORE_VENDORED_BUILD_DIR_NAMES
+        assert DocumentationPolicy().vendor_scopes[0].vendor_dirs == CORE_VENDORED_BUILD_DIR_NAMES
 
     def test_omitting_the_argument_keeps_the_canonical_set(self) -> None:
         """A caller with no layout to hand must not lose the built-ins."""
-        assert policy_from_config(_FakeDocumentationConfig()).vendor_dirs == (
+        assert policy_from_config(_FakeDocumentationConfig()).vendor_scopes[0].vendor_dirs == (
             CORE_VENDORED_BUILD_DIR_NAMES
         )
 
@@ -125,14 +126,20 @@ class TestVendorDirs:
         `mode: replace` would silently keep every built-in name -- the
         opposite of what it asked for.
         """
-        policy = policy_from_config(_FakeDocumentationConfig(), vendor_dirs=("roles",))
-        assert policy.vendor_dirs == frozenset({"roles"})
+        policy = policy_from_config(
+            _FakeDocumentationConfig(),
+            vendor_scopes=(VendorScope(vendor_dirs=frozenset(("roles",))),),
+        )
+        assert policy.vendor_scopes[0].vendor_dirs == frozenset({"roles"})
 
     def test_an_additive_declaration_arrives_merged(self) -> None:
         effective = (*sorted(CORE_VENDORED_BUILD_DIR_NAMES), "roles")
-        policy = policy_from_config(_FakeDocumentationConfig(), vendor_dirs=effective)
-        assert "roles" in policy.vendor_dirs
-        assert CORE_VENDORED_BUILD_DIR_NAMES <= policy.vendor_dirs
+        policy = policy_from_config(
+            _FakeDocumentationConfig(),
+            vendor_scopes=(VendorScope(vendor_dirs=frozenset(effective)),),
+        )
+        assert "roles" in policy.vendor_scopes[0].vendor_dirs
+        assert CORE_VENDORED_BUILD_DIR_NAMES <= policy.vendor_scopes[0].vendor_dirs
 
 
 class TestPlainDataclasses:

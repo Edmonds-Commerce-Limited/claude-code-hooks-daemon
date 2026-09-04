@@ -27,10 +27,36 @@ the whole reason both keys can coexist:
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from typing import Final
 
 _SUBTREE_SUFFIX = "/**"
+
+
+@dataclass(frozen=True)
+class VendorScope:
+    """One project's vendor truth, keyed by the project root it governs.
+
+    A monorepo sub-project declares its own ``layout.vendor_dirs``, and that
+    declaration must govern paths inside it and nowhere else (Plan 00332).
+    Carrying the owning ROOT alongside the sets is what makes that possible:
+    a bare pair of sets can only express a repo-wide answer, which is why
+    docs QA -- handed exactly such a pair -- could not see a sub-project's
+    declaration at all.
+
+    Attributes:
+        root: Repository-relative project root. ``""`` is the root project.
+        vendor_dirs: That project's EFFECTIVE vendored directory NAMES,
+            already merged by ``ProjectLayout`` (so ``mode: replace`` is
+            honoured; re-unioning here would silently defeat it).
+        vendor_exceptions: That project's repo-relative carve-out globs.
+    """
+
+    root: str = ""
+    vendor_dirs: frozenset[str] = field(default_factory=frozenset)
+    vendor_exceptions: tuple[str, ...] = ()
+
 
 #: Written in an exclusion list to mean "whatever this project considers
 #: vendored" (Plan 00331 Phase 2). Resolved as a PREDICATE REFERENCE, not a
@@ -112,6 +138,67 @@ def matches_vendor_exception(rel_path: str, patterns: Sequence[str]) -> bool:
         if pattern.endswith(_SUBTREE_SUFFIX) and _is_under(path, pattern[: -len(_SUBTREE_SUFFIX)]):
             return True
     return False
+
+
+def resolve_vendor_scope(rel_path: str, scopes: Sequence[VendorScope]) -> VendorScope | None:
+    """The scope of the project that OWNS ``rel_path``, or None.
+
+    LONGEST matching root wins, not the first match. A project declared
+    inside another project's tree must govern its own files, and first-match
+    would make the answer depend on the order of the ``projects:`` entries in
+    the YAML -- so re-ordering two declarations would silently change which
+    vendor set applies.
+
+    Args:
+        rel_path: Repository-relative path.
+        scopes: Every declared project's scope, in any order.
+
+    Returns:
+        The owning scope, or None when no scope contains the path. None is
+        distinct from "the root scope": a repo may declare ONLY
+        sub-projects, and a caller must be able to tell "nothing governs
+        this" from "the repo-wide answer governs this".
+    """
+    candidate = rel_path.strip("/")
+    best: VendorScope | None = None
+    for scope in scopes:
+        if not _is_under(candidate, scope.root):
+            continue
+        if best is None or len(scope.root.strip("/")) > len(best.root.strip("/")):
+            best = scope
+    return best
+
+
+def is_vendored_path_in_scopes(rel_path: str, scopes: Sequence[VendorScope]) -> bool:
+    """Whether ``rel_path`` is vendored according to its OWNING project.
+
+    Deliberately NOT a union across scopes. Unioning every declared
+    project's ``vendor_dirs`` would let project A declaring ``roles`` hide
+    project B's ``roles/`` content -- hiding a project's files because a
+    DIFFERENT project made a declaration, which is the failure this whole
+    design avoids (Plan 00332; the reasoning Plan 00331 mistakenly used to
+    rule the work out rather than to rule out the union).
+    """
+    scope = resolve_vendor_scope(rel_path, scopes)
+    if scope is None:
+        return False
+    return is_vendored_path(rel_path, scope.vendor_dirs, scope.vendor_exceptions)
+
+
+def may_contain_vendor_exception_in_scopes(rel_dir: str, scopes: Sequence[VendorScope]) -> bool:
+    """Prune-safety across every scope, not just the one that owns ``rel_dir``.
+
+    Asking only the OWNING scope is the trap this function exists to close.
+    ``apps/`` is owned by the root scope, which may declare no exceptions at
+    all -- so the root alone answers "prunable", the walker never descends,
+    and the exceptions of a project declared BELOW it become unreachable.
+    That is the same failure as pruning a vendored directory that contains an
+    exception, one level up, and it is silent: the project's own code simply
+    stops being checked.
+
+    So every scope gets a say, and any "yes" wins.
+    """
+    return any(may_contain_vendor_exception(rel_dir, scope.vendor_exceptions) for scope in scopes)
 
 
 def _literal_prefix(pattern: str) -> str:

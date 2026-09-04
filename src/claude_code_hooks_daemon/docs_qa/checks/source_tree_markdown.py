@@ -83,8 +83,9 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Severity,
 )
 from claude_code_hooks_daemon.utils.vendor_paths import (
-    matches_vendor_exception,
-    may_contain_vendor_exception,
+    VendorScope,
+    is_vendored_path_in_scopes,
+    may_contain_vendor_exception_in_scopes,
 )
 
 CHECK_ID: Final[str] = "source-tree-markdown"
@@ -144,8 +145,9 @@ def _matches_allowlist(rel_path: str, patterns: tuple[str, ...]) -> bool:
 def _iter_markdown_paths(
     project_root: Path,
     *,
-    vendor_dirs: frozenset[str] = COMMON_VENDORED_BUILD_DIR_NAMES,
-    vendor_exceptions: tuple[str, ...] = (),
+    vendor_scopes: tuple[VendorScope, ...] = (
+        VendorScope(root="", vendor_dirs=COMMON_VENDORED_BUILD_DIR_NAMES),
+    ),
 ) -> list[str]:
     """Every ``.md`` path under ``project_root``, minus the walk exclusions.
 
@@ -154,28 +156,20 @@ def _iter_markdown_paths(
     reason: never physically descend a huge vendored/worktree tree only to
     discard the results a moment later.
 
-    ``vendor_dirs`` is the project's EFFECTIVE vendored set, threaded from
-    ``DocumentationPolicy`` rather than read from the canonical constant, so
-    a declared ``layout.vendor_dirs`` prunes here too (Plan 00331).
+    ``vendor_scopes`` carries each declared project's EFFECTIVE vendored set
+    alongside the root it governs, threaded from ``DocumentationPolicy``
+    rather than read from the canonical constant -- so a declared
+    ``layout.vendor_dirs`` prunes here too (Plan 00331), and a monorepo
+    sub-project's declaration prunes only its own tree (Plan 00332).
     """
-    excluded_dir_names = _OWN_EXCLUDED_DIR_NAMES | vendor_dirs
     matches: list[str] = []
     for dirpath, dirnames, filenames in os.walk(project_root):
         rel_dir_parts = Path(dirpath).relative_to(project_root).parts
         dirnames[:] = [
             name
             for name in dirnames
-            # A vendored directory that could CONTAIN a first-party exception
-            # must still be descended (Plan 00331 Phase 3): pruning it makes
-            # the exception unreachable, the same way git cannot re-include a
-            # file whose parent directory is excluded.
-            if (
-                name not in excluded_dir_names
-                or may_contain_vendor_exception("/".join((*rel_dir_parts, name)), vendor_exceptions)
-            )
-            and not is_vendored_daemon_install_path((*rel_dir_parts, name))
+            if _walk_into((*rel_dir_parts, name), vendor_scopes=vendor_scopes)
         ]
-        vendored_dir = any(part in vendor_dirs for part in rel_dir_parts)
         for filename in filenames:
             if not filename.endswith(_MARKDOWN_SUFFIX):
                 continue
@@ -183,10 +177,31 @@ def _iter_markdown_paths(
             # Descending is not including: a file reached only because its
             # parent had to be walked for an exception is still vendored
             # unless it IS the exception.
-            if vendored_dir and not matches_vendor_exception(rel_path, vendor_exceptions):
+            if rel_dir_parts and is_vendored_path_in_scopes(rel_path, vendor_scopes):
                 continue
             matches.append(rel_path)
     return sorted(matches)
+
+
+def _walk_into(rel_parts: tuple[str, ...], *, vendor_scopes: tuple[VendorScope, ...]) -> bool:
+    """Whether the walker must descend into this directory.
+
+    A vendored directory that could CONTAIN a first-party exception must
+    still be descended (Plan 00331 Phase 3): pruning it makes the exception
+    unreachable, the same way git cannot re-include a file whose parent
+    directory is excluded.
+
+    Takes the directory's PATH rather than its name (Plan 00332): with
+    per-project vendor truth the same basename can be vendored in one
+    project and ordinary in another, so the test is no longer set membership.
+    """
+    rel_dir = "/".join(rel_parts)
+    excluded = rel_parts[-1] in _OWN_EXCLUDED_DIR_NAMES or is_vendored_path_in_scopes(
+        rel_dir, vendor_scopes
+    )
+    if excluded and not may_contain_vendor_exception_in_scopes(rel_dir, vendor_scopes):
+        return False
+    return not is_vendored_daemon_install_path(rel_parts)
 
 
 def _finding(rel_path: str) -> Finding:
@@ -216,8 +231,7 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
     findings: list[Finding] = []
     for rel_path in _iter_markdown_paths(
         context.project_root,
-        vendor_dirs=context.policy.vendor_dirs,
-        vendor_exceptions=context.policy.vendor_exceptions,
+        vendor_scopes=context.policy.vendor_scopes,
     ):
         basename = rel_path.rsplit("/", 1)[-1]
         if basename in (_CLAUDE_MD_FILENAME, _README_FILENAME):

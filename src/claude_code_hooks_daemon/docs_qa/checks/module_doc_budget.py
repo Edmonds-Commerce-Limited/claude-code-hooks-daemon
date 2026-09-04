@@ -57,8 +57,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
     DEFAULT_PLAN_DOC_BLOCK_LINES,
 )
 from claude_code_hooks_daemon.utils.vendor_paths import (
-    matches_vendor_exception,
-    may_contain_vendor_exception,
+    VendorScope,
+    is_vendored_path_in_scopes,
+    may_contain_vendor_exception_in_scopes,
 )
 
 logger = logging.getLogger(__name__)
@@ -239,9 +240,9 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     # it has to test the path's own segments (Plan 00331). The doc's own
     # basename is excluded from the test -- `vendor_dirs` names DIRECTORIES,
     # and the last segment here is always `CLAUDE.md`.
-    if any(
-        part in context.policy.vendor_dirs for part in Path(rel_path).parts[:-1]
-    ) and not matches_vendor_exception(rel_path, context.policy.vendor_exceptions):
+    if is_vendored_path_in_scopes(
+        "/".join(Path(rel_path).parts[:-1]), context.policy.vendor_scopes
+    ):
         return []
     registered = rel_path in context.policy.qa.registered_module_docs
     grandfathered = _matches_allowlist(rel_path, context.policy.qa.grandfather_allowlist)
@@ -256,8 +257,9 @@ def _iter_module_doc_paths(
     agent_tree: str,
     scope_exclude_globs: tuple[str, ...] = (),
     *,
-    vendor_dirs: frozenset[str] = COMMON_VENDORED_BUILD_DIR_NAMES,
-    vendor_exceptions: tuple[str, ...] = (),
+    vendor_scopes: tuple[VendorScope, ...] = (
+        VendorScope(root="", vendor_dirs=COMMON_VENDORED_BUILD_DIR_NAMES),
+    ),
 ) -> list[str]:
     """Every module-scoped CLAUDE.md on disk.
 
@@ -294,24 +296,17 @@ def _iter_module_doc_paths(
     filename-shape pattern like ``CLAUDE.md`` matches no directory) is
     caught by the post-filter below.
     """
-    excluded_dir_names = _OWN_EXCLUDED_DIR_NAMES | vendor_dirs
     matches: list[str] = []
     for dirpath, dirnames, filenames in os.walk(project_root):
         rel_dir_parts = Path(dirpath).relative_to(project_root).parts
         dirnames[:] = [
             name
             for name in dirnames
-            # A vendored directory that could CONTAIN a first-party exception
-            # must still be descended (Plan 00331 Phase 3) -- pruning it makes
-            # the exception unreachable, which is exactly why git cannot
-            # re-include a file whose parent directory is excluded. The
-            # exception itself is then applied per-file below.
-            if (
-                name not in excluded_dir_names
-                or may_contain_vendor_exception("/".join((*rel_dir_parts, name)), vendor_exceptions)
+            if _walk_into(
+                (*rel_dir_parts, name),
+                vendor_scopes=vendor_scopes,
+                scope_exclude_globs=scope_exclude_globs,
             )
-            and not is_vendored_daemon_install_path((*rel_dir_parts, name))
-            and not _dir_is_scope_excluded((*rel_dir_parts, name), scope_exclude_globs)
         ]
         if _CLAUDE_MD_FILENAME not in filenames:
             continue
@@ -321,13 +316,41 @@ def _iter_module_doc_paths(
         # Descending is not including: a doc reached only because its parent
         # had to be walked for an exception is still vendored unless it IS
         # the exception.
-        if any(part in vendor_dirs for part in rel_dir_parts) and not matches_vendor_exception(
-            rel_path, vendor_exceptions
-        ):
+        if is_vendored_path_in_scopes(rel_path, vendor_scopes):
             continue
         if is_module_doc_path(rel_path, agent_tree):
             matches.append(rel_path)
     return sorted(matches)
+
+
+def _walk_into(
+    rel_parts: tuple[str, ...],
+    *,
+    vendor_scopes: tuple[VendorScope, ...],
+    scope_exclude_globs: tuple[str, ...],
+) -> bool:
+    """Whether the walker must descend into this directory.
+
+    A vendored directory that could CONTAIN a first-party exception must
+    still be descended (Plan 00331 Phase 3) -- pruning it makes the exception
+    unreachable, which is exactly why git cannot re-include a file whose
+    parent directory is excluded. The exception itself is then applied
+    per-file by the caller.
+
+    Extracted from the comprehension it used to inline (Plan 00332) because
+    per-scope resolution needs the directory's own PATH, not just its name:
+    the same basename can be vendored in one project and ordinary in
+    another, so the test can no longer be a set membership.
+    """
+    rel_dir = "/".join(rel_parts)
+    excluded = rel_parts[-1] in _OWN_EXCLUDED_DIR_NAMES or is_vendored_path_in_scopes(
+        rel_dir, vendor_scopes
+    )
+    if excluded and not may_contain_vendor_exception_in_scopes(rel_dir, vendor_scopes):
+        return False
+    return not is_vendored_daemon_install_path(rel_parts) and not _dir_is_scope_excluded(
+        rel_parts, scope_exclude_globs
+    )
 
 
 def _dir_is_scope_excluded(rel_parts: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
@@ -354,8 +377,7 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         context.project_root,
         context.policy.trees.agent,
         tuple(context.policy.qa.scope_exclude_globs),
-        vendor_dirs=context.policy.vendor_dirs,
-        vendor_exceptions=context.policy.vendor_exceptions,
+        vendor_scopes=context.policy.vendor_scopes,
     ):
         abs_path = context.project_root / rel_path
         if not abs_path.is_file():

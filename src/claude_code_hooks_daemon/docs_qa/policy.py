@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
+from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 DEFAULT_AGENT_TREE = "CLAUDE"
 DEFAULT_HUMAN_TREE = "docs"
@@ -55,26 +56,30 @@ class DocumentationQaPolicy:
 class DocumentationPolicy:
     """Top-level documentation QA policy (mirrors ``DocumentationConfig``).
 
-    ``vendor_dirs`` is the one axis here with no ``documentation:`` config
-    home: it mirrors ``layout.vendor_dirs``, which is a project-wide truth
-    (Plan 00288) rather than a docs-QA setting. It arrives as PLAIN VALUES
-    from the caller for the same reason every other field does — importing
-    ``ProjectLayout`` would couple this package to ``core``, and
-    ``core.project_layout`` already imports ``docs_qa.corpus``, so the
-    coupling would close a cycle.
+    ``vendor_scopes`` is the one axis here with no ``documentation:`` config
+    home: it mirrors ``layout.vendor_dirs``/``vendor_exceptions``, which are
+    project-wide truths (Plan 00288) rather than docs-QA settings. They
+    arrive as PLAIN VALUES from the caller for the same reason every other
+    field does — importing ``ProjectLayout`` would couple this package to
+    ``core``, and ``core.project_layout`` already imports ``docs_qa.corpus``,
+    so the coupling would close a cycle.
     """
 
     enabled: bool = False
     trees: DocumentationTreesPolicy = field(default_factory=DocumentationTreesPolicy)
     qa: DocumentationQaPolicy = field(default_factory=DocumentationQaPolicy)
-    #: Effective vendored/build directory NAMES. Defaults to the canonical
-    #: constant so a caller with no layout to hand loses nothing.
-    vendor_dirs: frozenset[str] = CORE_VENDORED_BUILD_DIR_NAMES
-    #: Repo-relative path globs carved OUT of ``vendor_dirs`` — a first-party
-    #: library the project maintains inside an otherwise third-party tree.
-    #: A different dialect from ``vendor_dirs`` on purpose; see
-    #: :mod:`~claude_code_hooks_daemon.utils.vendor_paths`.
-    vendor_exceptions: tuple[str, ...] = ()
+    #: One entry per declared project, each carrying the ROOT it governs
+    #: alongside its vendored names and carve-outs. A flat pair of sets
+    #: replaced this and could only express a repo-wide answer, so a
+    #: monorepo sub-project's declaration was invisible here (Plan 00332).
+    #: Resolution is per-path and never a union — see
+    #: :func:`~utils.vendor_paths.is_vendored_path_in_scopes`.
+    #:
+    #: The default is the canonical set at the repository root, so a caller
+    #: with no layout to hand loses nothing.
+    vendor_scopes: tuple[VendorScope, ...] = (
+        VendorScope(root="", vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES, vendor_exceptions=()),
+    )
 
 
 class TreesConfigProtocol(Protocol):
@@ -144,32 +149,31 @@ class DocumentationConfigProtocol(Protocol):
 def policy_from_config(
     config: DocumentationConfigProtocol,
     *,
-    vendor_dirs: Sequence[str] | None = None,
-    vendor_exceptions: Sequence[str] = (),
+    vendor_scopes: Sequence[VendorScope] | None = None,
 ) -> DocumentationPolicy:
     """Build a plain-values :class:`DocumentationPolicy` from the typed config.
 
     Args:
         config: The ``documentation:`` block, structurally typed.
-        vendor_dirs: The project's EFFECTIVE vendored/build directory names,
-            ordinarily ``ProjectLayout.vendor_dirs``. Already merged by the
-            caller — the ``additive``/``replace`` semantics belong to
-            ``ProjectLayout``, so this is used verbatim and never re-unioned
-            with the canonical set (re-unioning would silently defeat
-            ``mode: replace``). ``None`` means "no layout available", which
-            keeps the canonical default rather than emptying the set.
-        vendor_exceptions: ``ProjectLayout.vendor_exceptions`` — repo-relative
-            path globs carved OUT of ``vendor_dirs``. Empty is the correct
-            default here, unlike ``vendor_dirs``: there is no built-in set of
-            first-party carve-outs for a caller to lose.
+        vendor_scopes: One :class:`~utils.vendor_paths.VendorScope` per
+            declared project, ordinarily built from
+            ``ProjectRegistry.iter_layouts()``. Each scope's ``vendor_dirs``
+            is the EFFECTIVE set already merged by ``ProjectLayout`` — the
+            ``additive``/``replace`` semantics belong to the facade, so these
+            are used verbatim and never re-unioned with the canonical set
+            (re-unioning would silently defeat ``mode: replace``).
+
+            ``None`` means "no layout available" and keeps the canonical set
+            at the repository root, rather than emptying it. An explicitly
+            EMPTY sequence is different and is honoured: it means nothing is
+            vendored anywhere.
     """
     qa = config.qa
     return DocumentationPolicy(
         enabled=config.enabled,
-        vendor_dirs=(
-            CORE_VENDORED_BUILD_DIR_NAMES if vendor_dirs is None else frozenset(vendor_dirs)
+        vendor_scopes=(
+            DocumentationPolicy.vendor_scopes if vendor_scopes is None else tuple(vendor_scopes)
         ),
-        vendor_exceptions=tuple(vendor_exceptions),
         trees=DocumentationTreesPolicy(agent=config.trees.agent, human=config.trees.human),
         qa=DocumentationQaPolicy(
             edit_mode=qa.edit_mode,
