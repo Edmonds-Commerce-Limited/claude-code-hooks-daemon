@@ -15,6 +15,7 @@ pattern rather than disabling the handler.
 from typing import Any
 
 import pytest
+from tests.conftest import layout_declaring_vendor_dirs
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision
@@ -464,6 +465,39 @@ class TestGuardClauses:
         handler._exclude_paths = ["src/generated/**"]
         content = "# Prior 1.0.0: fixed. Prior 0.9.0: original.\n"
         hook_input = _make_write_input("/workspace/src/generated/mod.py", content)
+        assert handler.matches(hook_input) is False
+
+
+class TestDeclaredVendorDirsAreExcluded:
+    """Plan 00331: this handler's default excludes were built from the
+    canonical constant at MODULE IMPORT, so a declared `layout.vendor_dirs`
+    could not reach them.
+
+    `roles` is used deliberately -- it is not in the canonical set, so a test
+    using `vendor/` or `third_party/` (both already covered above) would pass
+    without the fix.
+    """
+
+    # Assembled from parts so this file's own source never carries a literal
+    # changelog-narrative comment -- comment_changelog would deny the write.
+    _CONTENT = "# " + "Prior" + " 2.0.0: fixed. " + "Prior" + " 1.5.0: original.\n"
+
+    def test_a_declared_vendor_dir_is_skipped(self) -> None:
+        handler = CommentChangelogHandler()
+        handler._project_layout = layout_declaring_vendor_dirs("roles")
+        hook_input = _make_write_input("/workspace/infra/roles/lib.py", self._CONTENT)
+        assert handler.matches(hook_input) is False
+
+    def test_an_undeclared_dir_of_that_name_is_still_judged(self) -> None:
+        """The skip must come from the DECLARATION, not from the name."""
+        handler = CommentChangelogHandler()
+        hook_input = _make_write_input("/workspace/infra/roles/lib.py", self._CONTENT)
+        assert handler.matches(hook_input) is True
+
+    def test_the_canonical_set_survives_a_declaration(self) -> None:
+        handler = CommentChangelogHandler()
+        handler._project_layout = layout_declaring_vendor_dirs("roles")
+        hook_input = _make_write_input("/workspace/third_party/lib.py", self._CONTENT)
         assert handler.matches(hook_input) is False
 
 

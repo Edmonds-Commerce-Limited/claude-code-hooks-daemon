@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 
 # Compiled-pattern cache: the same handful of client globs are matched on every
 # Write/Edit, so translating + compiling once per pattern is worth it.
@@ -96,6 +98,38 @@ def _candidate_paths(file_path: str, project_root: str | os.PathLike[str] | None
         if rel != ".." and not rel.startswith("../"):
             candidates.insert(0, rel)
     return candidates
+
+
+def vendored_exclude_globs(vendor_dirs: Iterable[str] | None = None) -> tuple[str, ...]:
+    """Vendored/build directory NAMES as ``**/<name>/**`` exclusion globs.
+
+    Three content blockers (``comment_size``, ``comment_changelog``,
+    ``error_hiding_blocker``) each built this identical tuple at module
+    scope from :data:`CORE_VENDORED_BUILD_DIR_NAMES`. Computing it at import
+    time froze it to the BUILT-IN names, so a project's declared
+    ``layout.vendor_dirs`` could never reach their defaults (Plan 00331) —
+    the same defect that made the config inert in docs QA.
+
+    Takes plain strings rather than a ``ProjectLayout`` on purpose: this
+    module is deliberately stdlib-only (see the module docstring), and
+    importing the facade here would couple every exclusion caller to
+    ``core``.
+
+    Args:
+        vendor_dirs: The project's EFFECTIVE vendored directory names,
+            ordinarily ``ProjectLayout.vendor_dirs``. ``None`` means "no
+            layout available" and keeps the canonical set. An explicitly
+            EMPTY iterable is distinct from ``None``: it is ``mode: replace``
+            with nothing declared, and must exclude nothing rather than
+            silently restoring the built-ins.
+
+    Returns:
+        Sorted glob patterns. Sorted because a frozenset has no order, and
+        an unstable pattern tuple would make the same config produce
+        different (if equivalent) exclusion lists between runs.
+    """
+    names = CORE_VENDORED_BUILD_DIR_NAMES if vendor_dirs is None else vendor_dirs
+    return tuple(f"**/{name}/**" for name in sorted(names))
 
 
 def merge_exclude_patterns(*groups: Sequence[str] | None) -> list[str]:

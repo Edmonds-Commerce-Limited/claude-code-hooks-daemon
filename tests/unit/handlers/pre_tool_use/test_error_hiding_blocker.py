@@ -3,6 +3,7 @@
 from typing import Any
 
 import pytest
+from tests.conftest import layout_declaring_vendor_dirs
 
 from claude_code_hooks_daemon.handlers.pre_tool_use.error_hiding_blocker import (
     ErrorHidingBlockerHandler,
@@ -358,6 +359,24 @@ class TestErrorHidingBlockerExcludePaths:
     ) -> None:
         """Plan 00288 Task 3.2: newly-accepted core deltas (measurement §3)."""
         assert handler.matches(make_write_input(f"/proj/{vendored_dir}/x.sh", _SHELL_HIDE)) is False
+
+    def test_declared_vendor_dir_is_skipped(self, handler: ErrorHidingBlockerHandler) -> None:
+        """Plan 00331: the defaults were frozen to the canonical set at
+        module import, so a declared `layout.vendor_dirs` could not reach
+        them. `roles` is not in the canonical set, so a test written against
+        `vendor/` would pass without the fix."""
+        handler._project_layout = layout_declaring_vendor_dirs("roles")
+        assert handler.matches(make_write_input("/proj/infra/roles/x.sh", _SHELL_HIDE)) is False
+
+    def test_undeclared_dir_of_that_name_is_still_blocked(
+        self, handler: ErrorHidingBlockerHandler
+    ) -> None:
+        """The skip must come from the DECLARATION, not from the name."""
+        assert handler.matches(make_write_input("/proj/infra/roles/x.sh", _SHELL_HIDE)) is True
+
+    def test_canonical_set_survives_a_declaration(self, handler: ErrorHidingBlockerHandler) -> None:
+        handler._project_layout = layout_declaring_vendor_dirs("roles")
+        assert handler.matches(make_write_input("/proj/third_party/x.sh", _SHELL_HIDE)) is False
 
     def test_real_source_still_blocked(self, handler: ErrorHidingBlockerHandler) -> None:
         assert handler.matches(make_write_input("/proj/src/deploy.sh", _SHELL_HIDE)) is True

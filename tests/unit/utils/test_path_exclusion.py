@@ -16,13 +16,49 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     is_path_excluded,
     merge_exclude_patterns,
     path_matches_globs,
     resolve_project_root,
+    vendored_exclude_globs,
 )
+
+
+class TestVendoredExcludeGlobs:
+    """Plan 00331: the vendored half of a handler's default excludes must be
+    computable from the project's EFFECTIVE vendor set, not frozen to the
+    canonical constant at module import.
+
+    Three content blockers built the identical
+    ``tuple(f"**/{name}/**" for name in sorted(CORE_VENDORED_BUILD_DIR_NAMES))``
+    at module scope, which is what made a declared ``layout.vendor_dirs``
+    unable to reach them.
+    """
+
+    def test_defaults_to_the_canonical_set(self) -> None:
+        globs = vendored_exclude_globs()
+        assert len(globs) == len(CORE_VENDORED_BUILD_DIR_NAMES)
+        assert "**/node_modules/**" in globs
+
+    def test_uses_the_supplied_set_verbatim(self) -> None:
+        assert vendored_exclude_globs(("roles",)) == ("**/roles/**",)
+
+    def test_output_is_sorted_for_a_stable_pattern_order(self) -> None:
+        """A frozenset has no order, so without the sort the same config
+        would produce different pattern tuples between runs."""
+        assert vendored_exclude_globs(frozenset({"b", "a", "c"})) == (
+            "**/a/**",
+            "**/b/**",
+            "**/c/**",
+        )
+
+    def test_an_empty_declaration_excludes_nothing(self) -> None:
+        """Distinct from `None`: an explicitly empty set is `mode: replace`
+        with nothing declared, which must not silently restore the built-ins."""
+        assert vendored_exclude_globs(()) == ()
 
 
 class TestPathMatchesGlobs:

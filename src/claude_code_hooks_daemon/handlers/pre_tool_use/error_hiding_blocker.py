@@ -9,7 +9,7 @@ ErrorHidingStrategy implementations.  The handler has ZERO language awareness.
 
 import re
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -18,7 +18,6 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
@@ -33,7 +32,11 @@ from claude_code_hooks_daemon.strategies.error_hiding.registry import (
 )
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
+    vendored_exclude_globs,
 )
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 
 # Config key hint shown in the denial message
 _CONFIG_HINT_HANDLER = "handlers.pre_tool_use.error_hiding_blocker"
@@ -66,10 +69,19 @@ _FIXTURE_EXCLUDE_GLOBS: Final[tuple[str, ...]] = (
     "**/tests/assets/**",
     "**/__fixtures__/**",
 )
-_DEFAULT_EXCLUDE_GLOBS: Final[tuple[str, ...]] = (
-    tuple(f"**/{name}/**" for name in sorted(CORE_VENDORED_BUILD_DIR_NAMES))
-    + _FIXTURE_EXCLUDE_GLOBS
-)
+
+
+def _default_exclude_globs(layout: "ProjectLayout | None") -> tuple[str, ...]:
+    """Built-in excludes for one dispatch: vendored dirs + fixture dirs.
+
+    Computed per call, not at module import (Plan 00331): the vendored half
+    is configurable via ``layout.vendor_dirs``, and freezing it at import
+    time meant a project could declare a directory vendored and this handler
+    would still judge every file inside it. The fixture half has no config
+    axis and is a plain constant.
+    """
+    vendored = vendored_exclude_globs(None if layout is None else layout.vendor_dirs)
+    return vendored + _FIXTURE_EXCLUDE_GLOBS
 
 
 class ErrorHidingBlockerHandler(PreToolUseHandlerBase):
@@ -160,7 +172,7 @@ class ErrorHidingBlockerHandler(PreToolUseHandlerBase):
             file_path,
             handler_patterns=self._exclude_paths,
             project_patterns=self._project_exclude_paths,
-            defaults=_DEFAULT_EXCLUDE_GLOBS,
+            defaults=_default_exclude_globs(self._project_layout),
         )
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:

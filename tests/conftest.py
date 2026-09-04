@@ -10,8 +10,10 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 from claude_code_hooks_daemon.core.response_schemas import (
     get_response_schema,
     is_valid_response,
@@ -239,6 +241,29 @@ class GitIndexWatch:
 def git_index_watch() -> GitIndexWatch:
     """Watch whether code under test takes git's index lock. See GitIndexWatch."""
     return GitIndexWatch()
+
+
+def layout_declaring_vendor_dirs(*names: str) -> ProjectLayout:
+    """A `ProjectLayout` whose `vendor_dirs` is the canonical set plus `names`.
+
+    Shared because several handlers need the same "a project declared this
+    directory vendored" setup (Plan 00331), and each was otherwise going to
+    grow its own copy of an eight-field construction.
+
+    Additive, matching `layout:`'s default `mode` -- so a test using it also
+    proves the built-ins were not displaced, which is the failure a
+    replace-shaped helper would hide.
+    """
+    return ProjectLayout(
+        source_dirs=(),
+        test_dirs=("tests",),
+        config_dirs=("config",),
+        vendor_dirs=frozenset(CORE_VENDORED_BUILD_DIR_NAMES | set(names)),
+        agent_docs_dir="CLAUDE",
+        human_docs_dir="docs",
+        plan_dir="CLAUDE/Plan",
+        plan_archive_dirs=("Completed",),
+    )
 
 
 @pytest.fixture

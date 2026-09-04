@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.conftest import layout_declaring_vendor_dirs
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision
@@ -310,6 +311,30 @@ class TestGuardClauses:
         skip_directories -- this specifically exercises the new
         handler_excludes_path(defaults=...) wiring, not the pre-existing
         strategy-level skip."""
+        content = "x = 1  # " + ("y" * 401) + "\n"
+        hook_input = _make_write_input("/workspace/third_party/lib/mod.py", content)
+        assert handler.matches(hook_input) is False
+
+    def test_matches_false_for_a_declared_vendor_dir(self, handler: CommentSizeHandler) -> None:
+        """Plan 00331: the defaults were frozen to the canonical set at
+        module import, so a declared `layout.vendor_dirs` could not reach
+        them. `roles` is not in the canonical set, so a test written against
+        `third_party/` (above) would pass without the fix."""
+        handler._project_layout = layout_declaring_vendor_dirs("roles")
+        content = "x = 1  # " + ("y" * 401) + "\n"
+        hook_input = _make_write_input("/workspace/infra/roles/mod.py", content)
+        assert handler.matches(hook_input) is False
+
+    def test_matches_true_for_an_undeclared_dir_of_that_name(
+        self, handler: CommentSizeHandler
+    ) -> None:
+        """The skip must come from the DECLARATION, not from the name."""
+        content = "x = 1  # " + ("y" * 401) + "\n"
+        hook_input = _make_write_input("/workspace/infra/roles/mod.py", content)
+        assert handler.matches(hook_input) is True
+
+    def test_canonical_set_survives_a_declaration(self, handler: CommentSizeHandler) -> None:
+        handler._project_layout = layout_declaring_vendor_dirs("roles")
         content = "x = 1  # " + ("y" * 401) + "\n"
         hook_input = _make_write_input("/workspace/third_party/lib/mod.py", content)
         assert handler.matches(hook_input) is False
