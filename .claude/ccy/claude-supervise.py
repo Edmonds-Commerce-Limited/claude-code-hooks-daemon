@@ -106,8 +106,8 @@ sanctions whichever family lands next. Recognising only the first shape
 missed the commonest way a human switches model -- someone out of allowance
 on one family picked another and the supervisor flipped it straight back.
 
-Typed-command recognition (`/compact`, `/model <x>`, `/model` picker,
-`/effort <x>`) runs
+Typed-command recognition (`/compact`, `/model <x>`, the bare-`/model`
+picker, `/effort <x>`) runs
 WORKER-SIDE: the host only forwards raw stdin bytes into a bounded
 `RawInputTap`, drained each tick into `TickFacts.human_raw_input`; the
 `--worker` subprocess owns the `HumanInputLine` parser that recognises
@@ -2861,10 +2861,14 @@ class CompactStateMachine:
         self._manual_model_family: str | None = None
         self._manual_model_ts: float | None = None
         # When the human last opened Claude Code's model PICKER (a submitted
-        # bare `/model`). No family: the picker's arrow keys carry no text, so
-        # the only honest reading is that whichever family lands next was
-        # chosen. Hence a much shorter window than the typed latch above.
+        # bare `/model`), and which session was foreground when they did. No
+        # family: the picker's arrow keys carry no text, so the only honest
+        # reading is that whichever family lands next was chosen. Hence a much
+        # shorter window than the typed latch above -- and a session key, like
+        # `_downgrade_episode` has, so a wildcard armed in one session cannot
+        # vouch for a silent substitution in another.
         self._manual_selector_ts: float | None = None
+        self._manual_selector_session: str | None = None
         # Shared-marker debt: a typed /model whose daemon-facing marker file
         # has not been written yet because no tick so far could name the
         # session (no fresh reading, no tracked session). decide_once retries
@@ -3231,6 +3235,10 @@ class CompactStateMachine:
         self._manual_model_ts = now_wall
         self._manual_marker_pending = canonical
         self._manual_effort_active = None
+        # Picker opened, escaped, then a family typed instead: one interaction,
+        # one latch. The typed match would win anyway, but leaving the wildcard
+        # live is one more way it outlives the moment it was armed for.
+        self._retire_selector_latch()
 
     def note_manual_model_selector(self, *, now_wall: float) -> None:
         """Record that the human opened the model PICKER (a bare ``/model``).
@@ -3243,9 +3251,17 @@ class CompactStateMachine:
 
         Deliberately does NOT clear the manual-effort latch (unlike
         ``note_manual_model_command``): opening the picker is not yet a model
-        change, and the human may simply escape out of it.
+        change, and the human may simply escape out of it. That clearing
+        happens where the switch is OBSERVED instead, in ``note_model_reading``.
+
+        Scoped to the session that is foreground as the picker opens. ``None``
+        (no reading tracked yet) matches any session rather than none: failing
+        to latch would resurrect the very bug this exists to fix, and a session
+        the supervisor has never seen a reading for is one the human is
+        certainly the one sitting in.
         """
         self._manual_selector_ts = now_wall
+        self._manual_selector_session = self._last_model_session
 
     @property
     def manual_marker_pending(self) -> str | None:
@@ -3281,12 +3297,23 @@ class CompactStateMachine:
             and now_wall - self._manual_model_ts <= _MANUAL_MODEL_WINDOW_SECONDS
         )
 
-    def _selector_model_matches(self, now_wall: float) -> bool:
-        """True when the human recently opened the picker -- family-agnostic."""
+    def _selector_model_matches(self, session: str, now_wall: float) -> bool:
+        """True when the human recently opened the picker IN ``session``.
+
+        Family-agnostic by necessity, session-scoped by choice: an unscoped
+        wildcard disarmed the auto-restore for a session the human never
+        touched.
+        """
         return (
             self._manual_selector_ts is not None
             and now_wall - self._manual_selector_ts <= _MANUAL_MODEL_SELECTOR_WINDOW_SECONDS
+            and self._manual_selector_session in (None, session)
         )
+
+    def _retire_selector_latch(self) -> None:
+        """Drop the picker wildcard -- its interaction is over, however it ended."""
+        self._manual_selector_ts = None
+        self._manual_selector_session = None
 
     def take_manual_model_note(self) -> str | None:
         """Return, once, the reason a manual match suppressed a downgrade episode.
@@ -3340,6 +3367,10 @@ class CompactStateMachine:
         prev_family = self._last_model_family
         self._last_model_session = session
         self._last_model_family = family
+        # Captured BEFORE the episode-clearing block below, which nulls it on
+        # exactly the tick this needs it: the family we fell FROM identifies a
+        # landing the supervisor itself caused. See `supervisor_restore` below.
+        restore_target = self._downgrade_from_family
         if self._downgrade_episode is not None:
             ep_session, _, ep_family = self._downgrade_episode.partition(":")
             if session != ep_session or _family_rank(family) > _family_rank(ep_family):
@@ -3351,11 +3382,24 @@ class CompactStateMachine:
         # family CHANGE: matching the unchanged family already on screen would
         # consume it on the very tick it was armed, leaving nothing to sanction
         # the switch that follows a second later.
+        # An UPGRADE back to exactly the family we fell from is the supervisor's
+        # own flip-back landing, not a human choice. It must not spend the
+        # wildcard: the human opens the picker BECAUSE they saw the bounce, so a
+        # pending restore landing mid-interaction is the likely ordering -- and
+        # spending it there would leave their actual pick unlatched and bounced
+        # again, which is the whole defect this latch exists to stop.
+        supervisor_restore = (
+            restore_target is not None
+            and family == restore_target
+            and prev_family is not None
+            and _family_rank(family) > _family_rank(prev_family)
+        )
         selector_match = (
             prev_family is not None
             and prev_session == session
             and family != prev_family
-            and self._selector_model_matches(now_wall)
+            and not supervisor_restore
+            and self._selector_model_matches(session, now_wall)
         )
         manual_match = typed_match or selector_match
         if (
@@ -3396,7 +3440,14 @@ class CompactStateMachine:
             # substitution again -- the spent latch must not re-classify it.
             self._manual_model_family = None
             self._manual_model_ts = None
-            self._manual_selector_ts = None
+            if selector_match:
+                # Same rule `arm_coupled_effort` applies to every other model
+                # change: a new spell re-applies its own default effort over a
+                # manual /effort set under the PREVIOUS one. The typed path does
+                # this when the command is noted; the picker names no family
+                # then, so observing the switch is the only place it can.
+                self._manual_effort_active = None
+            self._retire_selector_latch()
         if self._manual_effort_active is not None:
             # Plan 00316 Task 2.1: a manual /effort always wins -- neither the
             # downgrade-episode xhigh floor nor the per-model default fires
@@ -3530,6 +3581,7 @@ class CompactStateMachine:
             "manual_model_family": self._manual_model_family,
             "manual_model_ts": self._manual_model_ts,
             "manual_selector_ts": self._manual_selector_ts,
+            "manual_selector_session": self._manual_selector_session,
             "manual_model_note": self._manual_model_note,
             "manual_marker_pending": self._manual_marker_pending,
             "manual_effort_active": self._manual_effort_active,
@@ -3626,6 +3678,9 @@ class CompactStateMachine:
         if "manual_selector_ts" in state:
             raw = state["manual_selector_ts"]
             self._manual_selector_ts = None if raw is None else _coerce_float(raw)
+        if "manual_selector_session" in state:
+            raw = state["manual_selector_session"]
+            self._manual_selector_session = None if raw is None else str(raw)
         if "manual_model_note" in state:
             raw = state["manual_model_note"]
             self._manual_model_note = None if raw is None else str(raw)
@@ -5263,6 +5318,7 @@ def run_worker(
             append_worker_error(
                 f"diagnostic typed-slash observed: {typed_slash!r} "
                 f"(recognised model={facts.human_model_command!r} "
+                f"picker={facts.human_model_selector!r} "
                 f"effort={facts.human_effort_command!r})"
             )
         try:

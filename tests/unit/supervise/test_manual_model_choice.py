@@ -622,12 +622,103 @@ def test_model_selector_latch_is_consumed_by_the_family_that_lands(tmp_path: Pat
     assert outcome.decision_value == "would-effort"
 
 
+def test_supervisor_auto_restore_does_not_spend_the_picker_latch(tmp_path: Path) -> None:
+    """The exact field sequence, and the reason the wildcard needs a guard.
+
+    The human opens the picker BECAUSE they saw the bounce, so a pending
+    auto-restore landing mid-interaction is the likely ordering, not the rare
+    one. The restore is a family change and an UPGRADE, so it slips past the
+    downgrade branch -- and if it consumed the latch, the human's actual pick
+    would arrive unlatched and get bounced all over again.
+    """
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    # A genuine silent substitution opens an episode.
+    _write_sidecar(sidecar_dir, model_id="claude-sonnet-5", effort="high", ts=_NOW - 4.0)
+    _decide(sidecar_dir, machine, facts=_facts(_NOW - 3.5))
+    # The human opens the picker...
+    _decide(sidecar_dir, machine, facts=_facts(_NOW - 3.0, human_model_selector=True))
+    # ...and the supervisor's own restore lands first, back to where we fell from.
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW - 2.0)
+    _decide(sidecar_dir, machine, facts=_facts(_NOW - 1.5))
+    # Now the human's actual choice lands. It must still count as manual.
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 0.5)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "noop"
+    later = _decide(sidecar_dir, machine, facts=_facts(_NOW + 10_000.0))
+    assert later.decision_value != "would-model"
+
+
+def test_picker_latch_does_not_cross_into_another_session(tmp_path: Path) -> None:
+    """The wildcard is scoped to the session that was foreground when the picker
+    opened. Unscoped, it disarmed the auto-restore for a session the human never
+    touched -- `_downgrade_episode` is session-keyed for the same reason."""
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _decide(sidecar_dir, machine, facts=_facts(human_model_selector=True))
+    # Foreground moves to a different session, which then suffers a REAL silent
+    # drop. The other session's picker must not vouch for it.
+    (sidecar_dir / f"{_SESSION}.json").unlink()
+    _write_sidecar(sidecar_dir, session_id="other-sess", model_id="claude-fable-5", ts=_NOW)
+    _decide(sidecar_dir, machine, facts=_facts(_NOW + 1.0))
+    _write_sidecar(
+        sidecar_dir,
+        session_id="other-sess",
+        model_id="claude-sonnet-5",
+        effort="high",
+        ts=_NOW + 1.5,
+    )
+    outcome = _decide(sidecar_dir, machine, facts=_facts(_NOW + 2.0))
+    assert outcome.decision_value == "would-effort"
+
+
+def test_picker_switch_clears_a_manual_effort_from_the_previous_spell(tmp_path: Path) -> None:
+    """Both routes to a manual model change must start a fresh model spell.
+
+    A typed `/model` clears the manual `/effort` latch at note time; the picker
+    can only do it where the switch is OBSERVED. Without this the two paths
+    diverge permanently and a picker switch silently inherits the old model's
+    effort.
+    """
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _decide(sidecar_dir, machine, facts=_facts(human_effort_command="low"))
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _decide(sidecar_dir, machine, facts=_facts(human_model_selector=True))
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 0.5)
+    _decide(sidecar_dir, machine, facts=_facts(_NOW + 1.0))
+    assert machine.export_state()["manual_effort_active"] is None
+
+
+def test_typed_model_command_also_retires_a_pending_picker_latch() -> None:
+    """Picker opened, escaped, then a family typed instead: one interaction, one
+    latch. Leaving the wildcard live is one more way it outlives its moment."""
+    machine = _machine()
+    machine.note_manual_model_selector(now_wall=_NOW)
+    machine.note_manual_model_command("opus", now_wall=_NOW + 1.0)
+    assert machine.export_state()["manual_selector_ts"] is None
+
+
+def test_human_input_line_selector_edge_requires_an_exact_bare_command() -> None:
+    line = _mod.HumanInputLine()
+    line.feed(b"/modelfoo\r")
+    assert line.take_model_selector_submitted() is False
+
+
 def test_model_selector_state_round_trips_through_export_import() -> None:
     machine = _machine()
     machine.note_manual_model_selector(now_wall=_NOW)
     restored = _machine()
     restored.import_state(machine.export_state())
     assert restored.export_state()["manual_selector_ts"] == _NOW
+    assert restored.export_state()["manual_selector_session"] == (
+        machine.export_state()["manual_selector_session"]
+    )
 
 
 def test_tick_facts_model_selector_round_trips_through_json() -> None:
