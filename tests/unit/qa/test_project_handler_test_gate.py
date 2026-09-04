@@ -69,9 +69,19 @@ _GREEN_OUTPUT = (
     "\x1b[32m in 4.79s\x1b[0m\x1b[32m ==============================\x1b[0m\n"
 )
 
+#: The short-summary banner is part of the shape, not decoration. Only the
+#: text BELOW it is scraped for node ids, because the captured stream also
+#: carries subprocess log output and a stray line beginning with "ERROR" was
+#: otherwise read as a verdict. Faithful to the real runner: it resolves
+#: `configfile: pyproject.toml`, whose addopts carry `-ra`, so a failing run
+#: always prints this section.
+_SUMMARY_BANNER = (
+    "=========================== short test summary info ============================\n"
+)
+
 _RED_OUTPUT = (
-    "collected 61 items\n"
-    "FAILED .claude/project-handlers/stop/test_release_blocker.py::"
+    "collected 61 items\n" + _SUMMARY_BANNER + "FAILED "
+    ".claude/project-handlers/stop/test_release_blocker.py::"
     "TestTheStateFileIsTheAuthority::test_a_dirty_tree_with_no_state_file_allows_the_stop\n"
     "======================== 1 failed, 60 passed in 3.99s =========================\n"
 )

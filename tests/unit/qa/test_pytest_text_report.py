@@ -18,7 +18,18 @@ from __future__ import annotations
 from claude_code_hooks_daemon.qa.pytest_text_report import parse_pytest_text_output
 
 # Captured verbatim from `pytest --tb=short --no-cov` on a fixture package.
-_REAL_RED_OUTPUT = (
+#
+# The banner is part of the capture, not decoration: only the text BELOW it is
+# scraped for node ids, because the captured stream also carries subprocess
+# log output and an unrelated line beginning with "ERROR" was otherwise read
+# as a verdict. The project sets `-ra`, so pytest always emits this section
+# when it has something to report.
+_SUMMARY_BANNER = (
+    "\x1b[36m\x1b[1m=========================== short test summary info "
+    "============================\x1b[0m\n"
+)
+
+_REAL_RED_OUTPUT = _SUMMARY_BANNER + (
     "\x1b[31mFAILED\x1b[0m untracked/pytestfix/test_sample_failures.py::"
     "\x1b[1mtest_one_that_fails\x1b[0m - assert 1 == 2\n"
     "\x1b[31mFAILED\x1b[0m untracked/pytestfix/test_sample_failures.py::"
@@ -90,7 +101,11 @@ class TestDegradesSafely:
 
     def test_plain_uncoloured_output_still_parses(self) -> None:
         """CI often disables colour; the same parser must cope."""
-        plain = "FAILED tests/unit/test_thing.py::test_case - AssertionError\n1 failed in 0.1s\n"
+        plain = (
+            "=========================== short test summary info "
+            "============================\n"
+            "FAILED tests/unit/test_thing.py::test_case - AssertionError\n1 failed in 0.1s\n"
+        )
         report = parse_pytest_text_output(plain)
         assert report["failed_tests"] == ["tests/unit/test_thing.py::test_case"]
         assert report["failed"] == 1
@@ -100,7 +115,7 @@ class TestDegradesSafely:
 # raised during teardown. pytest counts this as an ERROR, not a failure: the
 # summary line says "1 error" and never says "failed", while the short summary
 # still names the node id. That asymmetry is the whole point of these tests.
-_REAL_ERROR_OUTPUT = (
+_REAL_ERROR_OUTPUT = _SUMMARY_BANNER + (
     "\x1b[31mERROR\x1b[0m untracked/pytestfix/test_sample_error.py::"
     "\x1b[1mtest_passes_but_teardown_errors\x1b[0m - RuntimeError: teardown boom\n"
     "\x1b[31m========================== \x1b[32m2 passed\x1b[0m, "
@@ -166,3 +181,49 @@ class TestErroredRunsAreNotReportedAsGreen:
 
         assert report["passed_all"] is False
         assert report["failed"] == 2
+
+
+# A GREEN run whose captured stream also carries a stray line beginning with
+# "ERROR". pytest tees subprocess stdout/stderr into the same log, and this
+# project's suite starts real daemon processes, so arbitrary log lines land
+# here alongside pytest's own output. `PYTEST_CURRENT_TEST` carries the node
+# id, which is how such a line can name a real test.
+_GREEN_OUTPUT_WITH_STRAY_ERROR_LOG = (
+    "ERROR    tests/integration/test_daemon_smoke.py::TestDaemonSmoke::"
+    "test_daemon_processes_session_start_hook (call) socket closed early\n"
+    "\x1b[32m\x1b[1m17820 passed\x1b[0m, \x1b[33m5 skipped\x1b[0m"
+    "\x1b[32m in 214.11s\x1b[0m\n"
+)
+
+
+class TestOnlyPytestsOwnVerdictIsScraped:
+    """A stray log line must not manufacture a failing test.
+
+    ``^(?:FAILED|ERROR)\\s+(\\S+)`` was applied to the ENTIRE captured stream,
+    which is pytest's output plus anything subprocesses wrote to the inherited
+    file descriptors. A daemon log line starting with ``ERROR`` therefore
+    produced a failing node id in a run that passed cleanly — the report named
+    a test that never failed, and re-running that test in isolation proved
+    nothing because it was green all along.
+
+    Scoping the scrape to pytest's own ``short test summary info`` section is
+    correct whatever the stray line happened to be: anything outside that
+    section is by definition not pytest's verdict.
+    """
+
+    def test_a_stray_error_log_line_names_no_failure(self) -> None:
+        report = parse_pytest_text_output(_GREEN_OUTPUT_WITH_STRAY_ERROR_LOG)
+
+        assert report["failed_tests"] == []
+
+    def test_such_a_run_is_still_green(self) -> None:
+        report = parse_pytest_text_output(_GREEN_OUTPUT_WITH_STRAY_ERROR_LOG)
+
+        assert report["passed_all"] is True
+        assert report["passed"] == 17820
+
+    def test_the_invariant_holds_for_the_stray_log_case_too(self) -> None:
+        """The same self-consistency rule, against the other way of breaking it."""
+        report = parse_pytest_text_output(_GREEN_OUTPUT_WITH_STRAY_ERROR_LOG)
+
+        assert not (report["failed_tests"] and report["passed_all"])

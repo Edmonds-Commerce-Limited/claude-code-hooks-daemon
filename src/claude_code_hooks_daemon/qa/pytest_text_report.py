@@ -27,6 +27,19 @@ _ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*m")
 # itself contain " - ".
 _FAILED_LINE_PATTERN = re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.MULTILINE)
 
+# pytest's own verdict lives under this banner, and ONLY the text below it is
+# scraped for node ids. The captured stream is pytest's output plus whatever
+# subprocesses wrote to the inherited file descriptors, and this project's
+# suite starts real daemon processes — so a log line beginning with "ERROR"
+# was being read as a failing test and named in a run that passed cleanly.
+# Re-running the named test then proved nothing, because it had never failed.
+#
+# Safe to require: the project sets `-ra` in addopts, so pytest emits this
+# section whenever it has anything to report. No banner therefore means no
+# verdict to scrape, and the counts (parsed separately, from the totals line)
+# remain the sole basis for pass/fail either way.
+_SUMMARY_SECTION_MARKER = "short test summary info"
+
 _PASSED_COUNT_PATTERN = re.compile(r"(\d+) passed")
 _FAILED_COUNT_PATTERN = re.compile(r"(\d+) failed")
 _SKIPPED_COUNT_PATTERN = re.compile(r"(\d+) skipped")
@@ -42,6 +55,25 @@ _ERROR_COUNT_PATTERN = re.compile(r"(\d+) error")
 def strip_ansi(text: str) -> str:
     """Remove SGR escape sequences so patterns match the plain text."""
     return _ANSI_ESCAPE_PATTERN.sub("", text)
+
+
+def _summary_section(plain: str) -> str:
+    """The text below pytest's short-summary banner, or "" when absent.
+
+    Args:
+        plain: ANSI-stripped pytest output.
+
+    Returns:
+        Everything after the banner line. An empty string when there is no
+        banner, which means pytest reported no failures or errors — returning
+        the whole text there is what let an unrelated log line be read as a
+        verdict.
+    """
+    index = plain.find(_SUMMARY_SECTION_MARKER)
+    if index == -1:
+        return ""
+    newline = plain.find("\n", index)
+    return "" if newline == -1 else plain[newline + 1 :]
 
 
 def _count(pattern: re.Pattern[str], text: str) -> int:
@@ -70,7 +102,7 @@ def parse_pytest_text_output(content: str) -> dict[str, Any]:
     # De-duplicated while preserving order: a node id can appear both in the
     # short summary and in a rerun/verbose section of the same output.
     failed_tests: list[str] = []
-    for node_id in _FAILED_LINE_PATTERN.findall(plain):
+    for node_id in _FAILED_LINE_PATTERN.findall(_summary_section(plain)):
         if node_id not in failed_tests:
             failed_tests.append(node_id)
 
