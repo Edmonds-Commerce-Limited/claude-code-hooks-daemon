@@ -17,9 +17,6 @@ from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor impor
 from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
     ValidateEslintOnWriteHandler,
 )
-from claude_code_hooks_daemon.handlers.pre_tool_use import (
-    secret_file_guard as secret_file_guard_module,
-)
 from claude_code_hooks_daemon.handlers.pre_tool_use.british_english import BritishEnglishHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.comment_changelog import (
     CommentChangelogHandler,
@@ -34,6 +31,9 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import
 from claude_code_hooks_daemon.handlers.pre_tool_use.npm_command import NpmCommandHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_workflow import PlanWorkflowHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import QaSuppressionHandler
+from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
+    SecretFileGuardHandler,
+)
 from claude_code_hooks_daemon.handlers.pre_tool_use.security_antipattern import (
     SecurityAntipatternHandler,
 )
@@ -116,7 +116,7 @@ class TestProjectLevelHandlersDeclareProjectScope:
             QaSuppressionHandler,
             SecurityAntipatternHandler,
             SensitiveContentHandler,
-            secret_file_guard_module.SecretFileGuardHandler,
+            SecretFileGuardHandler,
         ):
             assert handler_class.workspace_scope is WorkspaceScope.PROJECT, (
                 f"{handler_class.__name__} calls layout_for() but declares "

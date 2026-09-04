@@ -271,6 +271,39 @@ def _tokenise(command: str) -> list[str]:
     return [token for token in re.split(pattern, command) if token]
 
 
+#: A Python import statement's dotted MODULE path. Anchored per line, and the
+#: grammar admits only identifier characters and dots -- notably no ``/``,
+#: which is what makes the exemption below unable to hide a filesystem path.
+_IMPORT_MODULE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[ \t]*(?:from|import)[ \t]+([A-Za-z_][A-Za-z0-9_.]*)", re.MULTILINE
+)
+
+
+def _import_module_tokens(command: str) -> set[str]:
+    """Dotted module paths named by Python ``import``/``from`` statements.
+
+    A module path is not a filesystem path, and importing a module cannot
+    read a file -- so a module whose dotted name happens to contain a
+    protected stem is not a mention. The shipped ``*.secret*`` default
+    substring-matches ``...pre_tool_use.secret_file_guard``, which made it
+    impossible to add an import of this package's own guard module to any
+    file that was not already on the handler's ``exclude_paths``. A client
+    with a ``.secret``-containing module path hits the same wall and cannot
+    be expected to enumerate its files.
+
+    Scoped to import STATEMENTS rather than to dotted tokens generally,
+    because this module's stated trade-off is that over-blocking is cheap and
+    under-blocking is not. A path can never be spelled as a module: the
+    grammar has no ``/``, so this cannot turn into a false negative.
+
+    Applied only by :func:`find_protected_mention`, not the ``_strict``
+    variant: strict serves the quarantine-artefact globs, whose hyphenated
+    markers cannot collide with a Python module name in the first place, so
+    changing it would be a fix for a problem it does not have.
+    """
+    return set(_IMPORT_MODULE_RE.findall(command))
+
+
 def _normalised_token_forms(token: str) -> list[str]:
     """Spellings of a token to match against protected globs."""
     forms = [token]
@@ -534,7 +567,10 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
         return None
     project_root = resolve_project_root()
     stem_pairs = _pattern_literal_stems(patterns)
+    import_modules = _import_module_tokens(command)
     for token in _tokenise(command):
+        if token in import_modules:
+            continue
         for form in _normalised_token_forms(token):
             for pattern in patterns:
                 if path_matches_globs(form, (pattern,), project_root=project_root):

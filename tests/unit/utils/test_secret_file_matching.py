@@ -384,6 +384,57 @@ class TestBashMentionsProtectedPath:
         assert matched in self.PATTERNS
 
 
+class TestPythonImportStatements:
+    """A dotted Python MODULE path is not a filesystem path.
+
+    Found dogfooding: the shipped default glob ``*.secret*`` substring-matches
+    the module path ``...handlers.pre_tool_use.secret_file_guard``, so NO file
+    could add an import of the guard's own module — the existing test files
+    survive only because they predate the guard and are on its
+    ``exclude_paths``. Any client with a ``.secret``-containing module path
+    hits the same wall, and cannot be expected to enumerate them.
+
+    Narrowed to import STATEMENTS rather than to dotted tokens generally, so
+    it cannot produce a false negative: importing a module name cannot read a
+    file, and the module-path grammar admits no ``/``, so no filesystem path
+    can be spelled as one. That matters because this module's stated
+    trade-off is that over-blocking is cheap and under-blocking is not.
+    """
+
+    PROTECTED = ("*.secret*",)
+
+    def test_a_from_import_of_such_a_module_is_not_a_mention(self) -> None:
+        command = (
+            "from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard "
+            "import SecretFileGuardHandler"
+        )
+        assert sfm.find_protected_mention(command, self.PROTECTED) is None
+
+    def test_a_plain_import_of_such_a_module_is_not_a_mention(self) -> None:
+        command = "import claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard"
+        assert sfm.find_protected_mention(command, self.PROTECTED) is None
+
+    def test_a_real_protected_path_alongside_an_import_is_still_caught(self) -> None:
+        """The exemption must not become a carrier: a genuine path in the same
+        content is still a mention."""
+        command = (
+            "from a.b.secret_file_guard import X\n"
+            "data = open('.claude/block-words.secret').read()\n"
+        )
+        assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
+
+    def test_a_path_shaped_token_outside_an_import_is_still_a_mention(self) -> None:
+        """Scoped to import statements, not to dotted tokens: a bare filename
+        carrying the stem is still judged normally."""
+        assert sfm.find_protected_mention("cat foo.secret", self.PROTECTED) == "*.secret*"
+
+    def test_a_slash_path_can_never_be_spelled_as_a_module(self) -> None:
+        """The module grammar admits no `/`, which is what makes the exemption
+        unable to hide a filesystem path."""
+        command = "import .claude/block-words.secret"
+        assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
+
+
 class TestExemptions:
     PATTERNS = sfm.DEFAULT_PROTECTED_PATTERNS
 
