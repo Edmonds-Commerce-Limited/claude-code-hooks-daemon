@@ -22,7 +22,7 @@ from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
-from claude_code_hooks_daemon.core.workspace import resolve_layout, resolve_workspace
+from claude_code_hooks_daemon.core.workspace import resolve_workspace
 from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
 from claude_code_hooks_daemon.utils.path_exclusion import (
@@ -287,7 +287,7 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
             file_path,
             handler_patterns=self._exclude_paths,
             project_patterns=self._project_exclude_paths,
-            layout=self._project_layout,
+            layout=self.layout_for(file_path),
         ):
             return False
 
@@ -318,13 +318,7 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         # declares none) must never be shadowed by a sibling's or the root's.
         # Zero-config / no `projects:` declared resolves to the same
         # `_project_layout` as before this task (pinned by tests).
-        root_for_fallback = resolve_project_root()
-        layout = resolve_layout(
-            self._project_registry,
-            Path(file_path),
-            Path(root_for_fallback) if root_for_fallback else Path(),
-            fallback_root_layout=self._project_layout,
-        )
+        layout = self.layout_for(file_path)
         if layout.is_test_path(file_path):
             return False
 

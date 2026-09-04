@@ -225,12 +225,13 @@ class CommentSizeHandler(PreToolUseHandlerBase):
         return None
 
     def _is_excluded(self, file_path: str) -> bool:
+        layout = self.layout_for(file_path)
         return handler_excludes_path(
             file_path,
             handler_patterns=self._exclude_paths,
             project_patterns=self._project_exclude_paths,
-            defaults=_default_exclude_globs(self._project_layout),
-            layout=self._project_layout,
+            defaults=_default_exclude_globs(layout),
+            layout=layout,
         )
 
     def _breaching_spans(self, content: str, strategy: CommentStrategy) -> list[CommentSpan]:

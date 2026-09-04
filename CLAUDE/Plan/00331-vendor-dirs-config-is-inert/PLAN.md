@@ -65,7 +65,7 @@ what exists.
 
 ### Phase 1: Wire the facade
 
-- [ ] ⬜ **Task 1.1**: Route the canonical-set consumers through
+- [x] ✅ **Task 1.1**: Route the canonical-set consumers through
   `ProjectLayout.is_vendored_path()` instead of the raw constant. Established
   by measurement, so this starts from data rather than a fresh survey — of 44
   modules carrying a vendor notion:
@@ -107,23 +107,40 @@ what exists.
   (`module_doc_budget`, `source_tree_markdown`), each of which had frozen the
   built-in names into a module-scope frozenset.
 
-- [ ] ⬜ **Task 1.3**: Resolve layout PER PROJECT, not from the root block. A
+- [x] ✅ **Task 1.3**: Resolve layout PER PROJECT, not from the root block. A
   project's `layout:` never inherits the top-level one (Plan 00300 —
   "the ROOT project's layout only, not a global fallback"), so a monorepo
   sub-project's `vendor_dirs` would otherwise be ignored the same way every
   declaration is ignored today.
 
-  **Blocked on a scope decision, and deliberately not done on sight.** docs
-  QA has NO per-project concept at all: zero references to `project_registry`
-  anywhere in the package, against 8 handlers that resolve per-project via
-  `resolve_workspace`. Its corpus is one project-root-wide index and its doc
-  trees are single root-level directories, so "this sub-project's vendor
-  dirs" has nowhere to attach. Introducing per-project resolution into docs
-  QA is a substantially larger change than wiring the vendor axis, and the
-  cheap-looking middle ground — unioning every declared project's
-  `vendor_dirs` — is worse than doing nothing: project A declaring `roles`
-  would silently hide project B's `roles/` documentation, which is the
-  hiding-without-telling failure this plan exists to end.
+  **Done for the handler half; the docs-QA half stays out of scope (below).**
+  This turned out to be a defect Task 1.1 INTRODUCED rather than a gap it
+  left: `WorkspaceScope.PROJECT` already requires a project-shaped question
+  to resolve via the injected `_project_registry`, and Task 1.1 wired 12 call
+  sites to `self._project_layout` — the ROOT. Both answers agree in a
+  single-project repo, which is exactly why it read as correct.
+
+  Fixed by lifting `tdd_enforcement`'s one-off `resolve_layout` block onto
+  the base class as `Handler.layout_for(file_path)` — it was already the
+  only production caller, so this generalises a proven shape rather than
+  inventing one — and routing all 12 sites through it: the 9
+  `handler_excludes_path(layout=…)` callers, the two `is_vendored_path`
+  checks (`lint_on_edit`, `validate_eslint_on_write`) and the three content
+  blockers' `_default_exclude_globs`. `monorepo_detector` and
+  `worktree_seed_suggestions` deliberately keep the root layout: both answer
+  a repo-WIDE question, where per-file resolution has no meaning.
+
+  **The docs-QA half is a scope decision, deliberately not done on sight.**
+  docs QA has NO per-project concept at all: zero references to
+  `project_registry` anywhere in the package, against 8 handlers that resolve
+  per-project via `resolve_workspace`. Its corpus is one project-root-wide
+  index and its doc trees are single root-level directories, so "this
+  sub-project's vendor dirs" has nowhere to attach. Introducing per-project
+  resolution into docs QA is a substantially larger change than wiring the
+  vendor axis, and the cheap-looking middle ground — unioning every declared
+  project's `vendor_dirs` — is worse than doing nothing: project A declaring
+  `roles` would silently hide project B's `roles/` documentation, which is
+  the hiding-without-telling failure this plan exists to end.
 
 - [x] ✅ **Task 1.4**: A test that a DECLARED vendor dir excludes a tree.
   Its absence is why this shipped inert: the field, the merge and the facade

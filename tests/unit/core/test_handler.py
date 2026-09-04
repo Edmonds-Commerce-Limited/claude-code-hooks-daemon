@@ -1,6 +1,7 @@
 """Comprehensive tests for Handler base class."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -266,6 +267,70 @@ class TestProjectLevelInjectionSlotsAreInitialised:
         )
         handler._project_layout = layout
         assert handler._project_layout is layout
+
+
+class TestLayoutForPath:
+    """Plan 00331 Task 1.3: a vendor judgement must use the OWNING project's
+    layout, not blindly the root's.
+
+    `WorkspaceScope.PROJECT` already requires this -- a project-shaped
+    question resolves via the injected `_project_registry`, never the root.
+    Plan 00331's own Task 1.1 wiring read `self._project_layout` directly,
+    which is the root, so a monorepo sub-project declaring its own
+    `layout.vendor_dirs` was ignored exactly the way the whole config was
+    before this plan.
+    """
+
+    @staticmethod
+    def _sub_project_registry(tmp_path: Path) -> Any:
+        from claude_code_hooks_daemon.config.models import LayoutConfig
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+        from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegistry
+
+        return ProjectRegistry(
+            project_root=tmp_path,
+            projects=(
+                DeclaredProject(
+                    name="api",
+                    root=tmp_path / "apps" / "api",
+                    layout=LayoutConfig(vendor_dirs=["roles"]),
+                ),
+            ),
+            root_layout=ProjectLayout.built_in_default(),
+        )
+
+    def test_a_sub_projects_own_vendor_dirs_are_honoured(self, tmp_path: Path) -> None:
+        handler = ConcreteHandler(handler_id="bare")
+        handler._project_registry = self._sub_project_registry(tmp_path)
+
+        layout = handler.layout_for(str(tmp_path / "apps" / "api" / "roles" / "x.py"))
+        assert layout.is_vendored_path("apps/api/roles/x.py") is True
+
+    def test_a_sibling_project_does_not_inherit_that_declaration(self, tmp_path: Path) -> None:
+        """One project's layout must never leak into another's (Plan 00300)."""
+        handler = ConcreteHandler(handler_id="bare")
+        handler._project_registry = self._sub_project_registry(tmp_path)
+
+        layout = handler.layout_for(str(tmp_path / "apps" / "web" / "roles" / "x.py"))
+        assert layout.is_vendored_path("apps/web/roles/x.py") is False
+
+    def test_no_registry_falls_back_to_the_injected_root_layout(self, tmp_path: Path) -> None:
+        """Zero-config and unit-test paths must keep the previous answer."""
+        from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler = ConcreteHandler(handler_id="bare")
+        handler._project_layout = ProjectLayout.built_in_default()
+
+        layout = handler.layout_for(str(tmp_path / "node_modules" / "x.js"))
+        assert layout.vendor_dirs == frozenset(CORE_VENDORED_BUILD_DIR_NAMES)
+
+    def test_no_registry_and_no_layout_still_returns_the_built_ins(self, tmp_path: Path) -> None:
+        """Never None: a caller asking a vendor question needs an answer, and
+        a None here would make every call site re-implement the fallback."""
+        handler = ConcreteHandler(handler_id="bare")
+
+        assert handler.layout_for(str(tmp_path / "x.py")).is_vendored_path("node_modules/x.js")
 
 
 class TestHandlerProperties:

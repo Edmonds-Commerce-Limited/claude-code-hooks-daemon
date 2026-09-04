@@ -161,6 +161,41 @@ class Handler(ABC):
         self._project_layout = None
         self._project_registry = None
 
+    def layout_for(self, file_path: str) -> ProjectLayout:
+        """The `ProjectLayout` owning ``file_path`` (Plan 00300/00331).
+
+        :attr:`_project_layout` is the ROOT project's layout. Reading it
+        directly answers a project-shaped question with the repository's
+        answer, which :class:`WorkspaceScope`'s ``PROJECT`` contract forbids:
+        a monorepo sub-project declaring its own ``layout.vendor_dirs`` would
+        be ignored exactly the way the whole config was before Plan 00331.
+
+        Never returns None. A caller asking a layout question needs an
+        answer, and returning None would make every call site re-implement
+        the same fallback -- which is how the parallel copies this plan
+        deleted came about.
+
+        Args:
+            file_path: The file being acted on.
+
+        Returns:
+            The owning project's layout; the injected root layout when no
+            registry is available (a unit test exercising a handler
+            directly); the built-in defaults when there is neither.
+        """
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core.workspace import resolve_layout
+        from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+
+        root = resolve_project_root()
+        return resolve_layout(
+            self._project_registry,
+            Path(file_path),
+            Path(root) if root else Path(),
+            fallback_root_layout=self._project_layout,
+        )
+
     def __repr__(self) -> str:
         """Return string representation."""
         parts = [

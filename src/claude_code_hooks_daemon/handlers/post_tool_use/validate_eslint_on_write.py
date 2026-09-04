@@ -213,7 +213,7 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
         # time, so a declared `layout.vendor_dirs` cannot reach it (Plan
         # 00331). Checked separately rather than by making the ClassVar
         # dynamic, which would change this handler's published surface.
-        if self._project_layout is not None and self._project_layout.is_vendored_path(file_path):
+        if self.layout_for(file_path).is_vendored_path(file_path):
             return False
 
         # File must exist. A formality for Write/Edit; load-bearing for Bash,

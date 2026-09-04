@@ -3,7 +3,7 @@
 from typing import Any
 
 import pytest
-from tests.conftest import layout_declaring_vendor_dirs
+from tests.conftest import layout_declaring_vendor_dirs, registry_declaring_vendor_dirs
 
 from claude_code_hooks_daemon.handlers.pre_tool_use.error_hiding_blocker import (
     ErrorHidingBlockerHandler,
@@ -377,6 +377,33 @@ class TestErrorHidingBlockerExcludePaths:
     def test_canonical_set_survives_a_declaration(self, handler: ErrorHidingBlockerHandler) -> None:
         handler._project_layout = layout_declaring_vendor_dirs("roles")
         assert handler.matches(make_write_input("/proj/third_party/x.sh", _SHELL_HIDE)) is False
+
+    def test_a_sub_projects_own_declaration_is_honoured(
+        self, handler: ErrorHidingBlockerHandler
+    ) -> None:
+        """Plan 00331 Task 1.3: the vendor set comes from the file's OWNING
+        project, resolved through the injected registry.
+
+        Task 1.1 wired these defaults to `self._project_layout` -- the ROOT
+        layout -- which `WorkspaceScope.PROJECT` forbids for a project-shaped
+        question. In a single-project repo both answers agree, so only a
+        monorepo shows the difference.
+        """
+        handler._project_registry = registry_declaring_vendor_dirs(
+            "/proj", "/proj/apps/api", "roles"
+        )
+        assert handler.matches(make_write_input("/proj/apps/api/roles/x.sh", _SHELL_HIDE)) is False
+
+    def test_a_sibling_sub_project_does_not_inherit_it(
+        self, handler: ErrorHidingBlockerHandler
+    ) -> None:
+        """The discriminating half: reading the ROOT layout would skip this
+        too, because a root-wide vendor set knows nothing about who declared
+        it."""
+        handler._project_registry = registry_declaring_vendor_dirs(
+            "/proj", "/proj/apps/api", "roles"
+        )
+        assert handler.matches(make_write_input("/proj/apps/web/roles/x.sh", _SHELL_HIDE)) is True
 
     def test_real_source_still_blocked(self, handler: ErrorHidingBlockerHandler) -> None:
         assert handler.matches(make_write_input("/proj/src/deploy.sh", _SHELL_HIDE)) is True

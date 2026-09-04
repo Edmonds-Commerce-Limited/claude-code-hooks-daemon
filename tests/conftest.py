@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import LayoutConfig
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -19,6 +20,7 @@ from claude_code_hooks_daemon.core.response_schemas import (
     is_valid_response,
     validate_response,
 )
+from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegistry
 
 
 @pytest.fixture
@@ -263,6 +265,35 @@ def layout_declaring_vendor_dirs(*names: str) -> ProjectLayout:
         human_docs_dir="docs",
         plan_dir="CLAUDE/Plan",
         plan_archive_dirs=("Completed",),
+    )
+
+
+def registry_declaring_vendor_dirs(
+    project_root: str, sub_project_root: str, *names: str
+) -> ProjectRegistry:
+    """A registry where ONE declared sub-project treats `names` as vendored.
+
+    The monorepo counterpart to :func:`layout_declaring_vendor_dirs`, which
+    only ever produces a ROOT layout and so cannot tell a correct per-file
+    resolution from a handler that reads the root and ignores the registry.
+    Both answers are identical in a single-project repo -- which is why Plan
+    00331's Task 1.1 wiring looked right while violating
+    `WorkspaceScope.PROJECT`'s "resolve via the injected registry" contract.
+
+    Deliberately declares ONE project and leaves its siblings undeclared, so
+    a test can pair "the declaring project skips it" with "a sibling of the
+    same shape does not" -- the discriminating half.
+    """
+    return ProjectRegistry(
+        project_root=Path(project_root),
+        projects=(
+            DeclaredProject(
+                name="declaring",
+                root=Path(sub_project_root),
+                layout=LayoutConfig(vendor_dirs=list(names)),
+            ),
+        ),
+        root_layout=ProjectLayout.built_in_default(),
     )
 
 

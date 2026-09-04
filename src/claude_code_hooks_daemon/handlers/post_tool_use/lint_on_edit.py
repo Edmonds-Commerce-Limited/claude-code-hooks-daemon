@@ -236,7 +236,7 @@ class LintOnEditHandler(PostToolUseHandlerBase):
             file_path,
             handler_patterns=self._exclude_paths,
             project_patterns=self._project_exclude_paths,
-            layout=self._project_layout,
+            layout=self.layout_for(file_path),
         ):
             return False
 
@@ -254,7 +254,7 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         # cannot reach it (Plan 00331). Applied here rather than threaded
         # through all 13 strategies: the per-language literals are correct
         # as they stand, and this plan does not touch them.
-        if self._project_layout is not None and self._project_layout.is_vendored_path(file_path):
+        if self.layout_for(file_path).is_vendored_path(file_path):
             return False
 
         # File must exist. For Write/Edit this is a formality -- PostToolUse runs

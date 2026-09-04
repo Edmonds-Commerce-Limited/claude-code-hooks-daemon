@@ -230,7 +230,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             path,
             handler_patterns=self._exclude_paths,
             project_patterns=self._project_exclude_paths,
-            layout=self._project_layout,
+            layout=self.layout_for(path),
         ):
             return None
         content = str(tool_input.get(_FIELD_CONTENT, "") or tool_input.get(_FIELD_NEW_STRING, ""))

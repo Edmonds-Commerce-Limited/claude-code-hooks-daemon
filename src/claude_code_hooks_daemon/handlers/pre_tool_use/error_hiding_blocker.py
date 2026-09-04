@@ -168,12 +168,13 @@ class ErrorHidingBlockerHandler(PreToolUseHandlerBase):
 
     def _is_excluded(self, file_path: str) -> bool:
         """Return True if file_path matches a default or client-configured exclude glob."""
+        layout = self.layout_for(file_path)
         return handler_excludes_path(
             file_path,
             handler_patterns=self._exclude_paths,
             project_patterns=self._project_exclude_paths,
-            defaults=_default_exclude_globs(self._project_layout),
-            layout=self._project_layout,
+            defaults=_default_exclude_globs(layout),
+            layout=layout,
         )
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
