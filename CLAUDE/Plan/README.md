@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00333: no writes outside project root](00333-no-writes-outside-project-root/PLAN.md) - In Progress (every path guard works in repo-relative coordinates and the conversion failure means "allow", so `/workspace/notes.md` is denied while `/tmp/notes.md` is silently permitted; adds a dedicated containment guard over both the Write/Edit and Bash surfaces, plus `untracked/scratch/` as the sanctioned location)
+
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
 
 - [00329: post upgrade truth changes report bloat](00329-post-upgrade-truth-changes-report-bloat/PLAN.md) - Not Started (the upgrade flow's truth-changes reconciliation hands the agent up to 89KB / 74 entries with no bound and no supersession collapsing, so superseded truths are replayed and the step is skimmed rather than performed)
