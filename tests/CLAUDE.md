@@ -7,6 +7,14 @@ This is the daemon's own test suite: an upstream dependency, not part of your
 project. Editing files here breaks your installation, is overwritten on the
 next daemon update, and creates conflicts that prevent future upgrades.
 
+**Unless this repository IS the daemon.** In self-install (dogfood) mode the
+daemon's tests and the project are the same checkout, so adding a regression
+test here is the normal way to work — see
+[SELF_INSTALL.md](../CLAUDE/SELF_INSTALL.md). The heading above is addressed to
+a CLIENT project that installed the daemon under `.claude/hooks-daemon/`. Same
+caution as the sibling note in [../src/CLAUDE.md](../src/CLAUDE.md): check which
+case you are in before treating an instruction to add a test here as wrong.
+
 ## Do This Instead
 
 - **Tests for your custom handlers** — project-level handlers support

@@ -7,6 +7,16 @@ This is the daemon's own source code: an upstream dependency, not part of your
 project. Editing files here breaks your installation, is overwritten on the
 next daemon update, and creates conflicts that prevent future upgrades.
 
+**Unless this repository IS the daemon.** In self-install (dogfood) mode the
+daemon's source and the project are the same checkout, so there is no upstream
+to be overwritten by and editing here is the normal way to work — see
+[SELF_INSTALL.md](../CLAUDE/SELF_INSTALL.md). The heading above is addressed to
+a CLIENT project that installed the daemon under `.claude/hooks-daemon/`; it is
+not a claim that these files are untouchable everywhere. Check which case you
+are in before concluding an instruction to edit `src/` is a mistake: two
+sub-agents working on daemon source have now read this page as forbidding their
+assigned task, and one classified it as injected content.
+
 ## Do This Instead
 
 - **Custom handler behaviour** — create project-level handlers in YOUR repo
