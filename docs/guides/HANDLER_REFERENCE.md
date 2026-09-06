@@ -936,7 +936,9 @@ handlers:
 | **Type**       | Blocking              |
 | **Event**      | PreToolUse            |
 
-**Description:** Denies a write whose target is named outside the repository root, on both the `Write`/`Edit`/`NotebookEdit` surface and the Bash surface (`>`, `>>`, `tee`, a heredoc, or a `cp`/`mv` destination). Every other path rule in the daemon is expressed in repo-relative coordinates, so an out-of-root path escapes all of them at once rather than violating any one of them. Outside the repository nothing is version-controlled, reviewed or durable — a container's temp directory is wiped on restart.
+**Description:** Denies a write whose target is named outside the repository root, on both the `Write`/`Edit`/`NotebookEdit` surface and the Bash surface. Every other path rule in the daemon is expressed in repo-relative coordinates, so an out-of-root path escapes all of them at once rather than violating any one of them. Outside the repository nothing is version-controlled, reviewed or durable — a container's temp directory is wiped on restart.
+
+**Bash coverage is exhaustive, not illustrative.** Resolved via `get_bash_write_targets`: `>`, `>>`, `tee`, a heredoc, and `cp`/`mv`/`install`/`dd` destinations. **Not resolved:** `rsync`, `tar`, `curl -o` and `mkdir` targets — a known gap, tracked as Plan 00333 Task 4.5, held back because widening that accessor affects 22 dependent handlers. **Not resolvable in principle:** a nested `sh -c "... > /tmp/x"` or an interpreter one-liner, since resolving either requires executing the command. A clean Bash command is therefore not evidence a write stayed in the repository, only that no recognised shape named a path outside it.
 
 **Not covered, deliberately:** reading any path; a temp file a program creates for itself at runtime (pytest's `tmp_path`, a package manager's build directory), because a PreToolUse hook receives a command string rather than syscalls; and a target the daemon cannot resolve without executing the command (`> "$OUT"`), which yields no path rather than a guessed one.
 

@@ -97,6 +97,14 @@ does not exist.
   (7 snippets across the debugging, QA, install and update guides).
 - [ ] 🔄 **Task 4.4**: Migrate the acceptance-test corpus off `/tmp` — ~21 handler
   modules whose `AcceptanceTest` commands the guard would now intercept.
+- [ ] ⬜ **Task 4.5**: Widen `get_bash_write_targets` to resolve `rsync`, `tar`,
+  `curl -o` and `mkdir` targets. Measured gap (see JOURNAL 15:45): those four
+  reach an out-of-root path unjudged today. Held back deliberately — the
+  accessor is shared infrastructure with 22 dependent handlers and a documented
+  conservative contract, so widening it is its own change with its own blast
+  radius, not a footnote to this one. `sh -c` and interpreter one-liners are
+  NOT in scope: resolving them needs execution, which a PreToolUse accessor
+  must never do.
 
 ### Phase 5: Verify
 
