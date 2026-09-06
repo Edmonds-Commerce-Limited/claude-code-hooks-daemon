@@ -51,13 +51,17 @@ _PIPED_INTERPRETERS = ("bash", "sh", "zsh", "ksh", "dash", "python", "perl", "ru
 # heredoc exemption -- they must never join _PIPED_INTERPRETERS, which builds
 # the pipe pattern itself (`| eval` is not the shape being matched there).
 #
-# `-` is deliberately ABSENT. The exemption exists to stop `git commit -F -`
-# being denied for a message that merely DESCRIBES the anti-pattern, and `-`
-# is that command's own argument -- treating it as an executor would re-break
-# the exact false positive this machinery was built to kill.
+# `-` is deliberately ABSENT, though listing it would be INERT rather than
+# harmful: `quoted_heredoc_receivers` already drops every word beginning with
+# `-`, so `git commit -F -`'s own `-` never reaches this comparison. The
+# spellings that genuinely execute all name the interpreter as a separate
+# word (`sh - <<'EOF'`, `python3 - <<'EOF'`, `bash -s -- <<'EOF'`), and each
+# is caught on that word.
 #
 # Matched by EQUALITY, not prefix: `.` as a prefix would swallow every
 # receiver beginning with a dot, such as an ordinary `.md` output path.
+# Punctuation is not this list's problem -- `_command_word` normalises the
+# receiver before it gets here, which is what makes equality sufficient.
 _HEREDOC_EXECUTORS: Final[tuple[str, ...]] = ("eval", "source", ".", "stdin", "/dev/stdin")
 
 # Pattern: (curl|wget) ... | [sudo [flags]] [path/]<interpreter>

@@ -695,3 +695,47 @@ class TestQuotedHeredocBodyIsData:
     def test_a_git_commit_heredoc_is_still_allowed_after_the_widening(self, handler):
         command = f"git commit -F - <<'MSG'\ndo not {self._PIPED}\nMSG"
         assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is False
+
+    # Widening the receiver VOCABULARY was only half the problem: the receiver
+    # WORD was never normalised, so shell punctuation defeated both lists at
+    # once. bash resolves each of these to an interpreter; the helper reported
+    # `(bash`, `"bash"`, `ba"sh"` and so on, which matched neither list, so the
+    # body was blanked. Five of these turn on _PIPED_INTERPRETERS and so were
+    # already open before the _HEREDOC_EXECUTORS fix. All were denied at
+    # v3.61.0, and all parse under `bash -n`.
+
+    @pytest.mark.parametrize(
+        ("label", "receiver"),
+        [
+            ("subshell", "(bash"),
+            ("double quoted", '"bash"'),
+            ("single quoted", "'bash'"),
+            ("backslash escaped", "\\bash"),
+            ("partially quoted", 'ba"sh"'),
+        ],
+    )
+    def test_punctuated_interpreter_receivers_are_still_blocked(self, handler, label, receiver):
+        command = f"{receiver} <<'EOF'\n{self._PIPED}\nEOF"
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True, (
+            f"{label} receiver {receiver!r} executes the body and must not be exempted"
+        )
+
+    def test_a_subshell_eval_of_a_quoted_heredoc_is_blocked(self, handler):
+        command = f"(eval \"$(cat <<'EOF'\n{self._PIPED}\nEOF\n)\")"
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
+
+    def test_a_quoted_eval_of_a_quoted_heredoc_is_blocked(self, handler):
+        command = f"\"eval\" \"$(cat <<'EOF'\n{self._PIPED}\nEOF\n)\""
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
+
+    def test_normalisation_does_not_swallow_the_data_bodies(self, handler):
+        """The whole point of the exemption must survive the normalisation."""
+        for command in (
+            f"git commit -F - <<'MSG'\nnever {self._PIPED}\nMSG",
+            f"git tag -F - v1 <<'MSG'\nnever {self._PIPED}\nMSG",
+            f"cat > untracked/scratch/n.md <<'EOF'\nnever {self._PIPED}\nEOF",
+            f"tee untracked/scratch/n.md <<'EOF'\nnever {self._PIPED}\nEOF",
+        ):
+            assert (
+                handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is False
+            ), command

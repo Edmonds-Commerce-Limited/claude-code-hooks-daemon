@@ -91,6 +91,31 @@ _INERT_BODY_PLACEHOLDER = "HEREDOC_BODY"
 # matched whole before the single `|` can claim its first character.
 _RECEIVER_SEPARATORS: tuple[str, ...] = ("&&", "||", ";", "|", "&")
 
+#: Grouping and escaping characters bash strips off the front of a command
+#: word while deciding what command it names. `(` and `{` open a subshell or
+#: brace group, `` ` `` and `$` open a substitution, `\` escapes the next
+#: character -- in none of these does the punctuation belong to the command's
+#: name.
+_WORD_GROUPING_PREFIXES = "(){}`\\$"
+
+
+def _command_word(word: str) -> str:
+    """The command name bash would resolve ``word`` to.
+
+    Quoting is a property of the SHELL SYNTAX, not of the command being named:
+    ``"bash"``, ``'bash'``, ``ba"sh"``, ``\\bash`` and ``(bash`` all invoke
+    bash. A caller comparing a receiver against a list of interpreter names has
+    to compare what bash resolves, or the list is defeated by punctuation that
+    changes nothing about what runs.
+
+    Reducing only the basename -- the previous behaviour -- made this helper
+    UNDER-report, which grants an exemption. That inverts the safe direction
+    its own contract promises: over-reporting withholds an exemption, and
+    withholding is the cheap error.
+    """
+    unquoted = word.replace('"', "").replace("'", "")
+    return unquoted.lstrip(_WORD_GROUPING_PREFIXES).rsplit("/", 1)[-1]
+
 
 def value_can_substitute(value: str) -> bool:
     """Whether bash will EXECUTE something inside this quoted argument value.
@@ -211,7 +236,7 @@ def quoted_heredoc_receivers(command: str) -> list[str]:
         last_line = preceding.rsplit("\n", 1)[-1]
         segment = split_unquoted(last_line, _RECEIVER_SEPARATORS)[-1]
         receivers.extend(
-            word.rsplit("/", 1)[-1] for word in segment.split() if word and not word.startswith("-")
+            _command_word(word) for word in segment.split() if word and not word.startswith("-")
         )
     return receivers
 
