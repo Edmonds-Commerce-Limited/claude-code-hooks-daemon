@@ -8,7 +8,7 @@ development immediately after install.
 import difflib
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.config.models import Config
@@ -24,23 +24,11 @@ from claude_code_hooks_daemon.install.agent_assets import (
     spec_by_name,
     spec_source_path,
 )
-from claude_code_hooks_daemon.install.core_docs import deploy_core_docs
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PLAN_DIR_NAME: Final[str] = "CLAUDE/Plan"
 
-#: The ``CORE_DOC_NAMES`` entry whose override filename ``workflow_docs``
-#: configures. It is the only core document with a config key of its own, so it
-#: is the only one a project can knowingly rename.
-_PLAN_WORKFLOW_DOC_NAME: Final[str] = "PlanWorkflow"
-
-#: Mirrors ``PlanWorkflowConfig.workflow_docs``'s own default, for the callers
-#: that have no config to read. Kept in step by
-#: ``tests/unit/install/test_core_doc_deployment.py``, because a default that
-#: drifts from the config model's is a document deployed somewhere the handler
-#: does not quote -- the defect Plan 00334 exists to remove.
-_DEFAULT_WORKFLOW_DOCS: Final[str] = "CLAUDE/PlanWorkflow.md"
 _COMPLETED_DIR_NAME: Final[str] = "Completed"
 
 _TEMPLATES_DIR_NAME: Final[str] = "templates"
@@ -231,7 +219,6 @@ def bootstrap_plan_workflow(
     project_root: Path,
     plan_dir_name: str = _DEFAULT_PLAN_DIR_NAME,
     deploy_scripts_library: bool = False,
-    workflow_docs: str = _DEFAULT_WORKFLOW_DOCS,
 ) -> BootstrapResult:
     """Bootstrap the plan directory structure for a project.
 
@@ -266,12 +253,13 @@ def bootstrap_plan_workflow(
             ``plan_workflow.scripts.enabled`` value — defaults to False so a
             direct caller (e.g. a test, or a caller unaware of the option)
             never deploys it by accident.
-        workflow_docs: The workflow document's path relative to project root.
-            Callers MUST pass the configured ``plan_workflow.workflow_docs``
-            value, for the same single-source-of-truth reason as
-            ``plan_dir_name``: this is the path the handler quotes to the
-            agent, so it is the path the document has to be deployed at. Its
-            parent directory also decides where the other core documents land.
+    Note:
+        Core documents are NOT deployed from here. They are gated per document
+        on the subsystem whose guidance names each one (``install/core_docs.py``
+        and its own ``deploy_core_docs_if_enabled`` decision site), because
+        ``plan_workflow.enabled`` is opt-in and defaults to False — hanging
+        them off this bootstrap left a stock install with no
+        ``CLAUDE/Worktree.md`` while ``worktree_file_copy`` went on naming it.
 
     Returns:
         BootstrapResult with success status and messages
@@ -328,49 +316,7 @@ def bootstrap_plan_workflow(
     # ROOT, not the plan dir — Claude Code resolves agents at .claude/agents/.
     _deploy_dedupe_agent(project_root, result)
 
-    # Deploy the core documents the workflow's own guidance names (Plan 00334).
-    # Turning the plan workflow ON is what makes `workflow_docs` point at
-    # CLAUDE/PlanWorkflow.md and makes the handler tell the agent to read it, so
-    # this is the moment that document has to start existing: a client was
-    # found enforcing a workflow whose documentation was never created.
-    # Relative to the PROJECT ROOT, like the agent above — a core document is
-    # not a plan-directory asset. The configured `workflow_docs` decides WHERE,
-    # for the same reason `plan_dir_name` decides where the plan directory
-    # goes: a document deployed anywhere other than the path guidance quotes is
-    # the original defect with an extra step.
-    _deploy_core_docs(project_root, result, workflow_docs)
-
     return result
-
-
-def _deploy_core_docs(project_root: Path, result: BootstrapResult, workflow_docs: str) -> None:
-    """Refresh daemon-owned core docs and seed the client-owned overrides.
-
-    Delegates to ``install/core_docs.py``, which owns the DAEMON-owned versus
-    CLIENT-owned split. Kept as a thin adapter so the messages join this
-    bootstrap's own reporting rather than being returned separately.
-
-    ``workflow_docs`` is the configured path the plan-workflow handler quotes
-    to the agent, and it decides both halves of where the documents land: its
-    PARENT is the project's agent-facing docs directory (so a project whose
-    tree is not ``CLAUDE/`` is honoured, rather than acquiring a stray
-    ``CLAUDE/`` that ``markdown_organization`` would refuse a write to), and
-    its FILENAME is the override to seed for ``PlanWorkflow`` (so a project
-    that renamed the document still gets the file it was promised). The other
-    core documents have no config key of their own, so they keep their
-    canonical names in that same directory.
-    """
-    # PurePosixPath, not Path: `workflow_docs` is a repository-relative POSIX
-    # path from config, not a path on the installing machine's filesystem.
-    # A bare filename yields a parent of ".", which joins back to the project
-    # root -- the correct reading of a document configured at the top level.
-    docs_path = PurePosixPath(workflow_docs)
-    core_result = deploy_core_docs(
-        project_root,
-        str(docs_path.parent),
-        {_PLAN_WORKFLOW_DOC_NAME: docs_path.name},
-    )
-    result.messages.extend(core_result.messages)
 
 
 def _deploy_dedupe_agent(project_root: Path, result: BootstrapResult) -> None:
@@ -578,5 +524,4 @@ def deploy_plan_workflow_if_enabled(
         project_root,
         plan_cfg.directory,
         deploy_scripts_library=plan_cfg.scripts.enabled,
-        workflow_docs=plan_cfg.workflow_docs,
     )

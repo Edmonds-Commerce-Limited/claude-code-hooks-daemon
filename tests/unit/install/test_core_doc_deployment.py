@@ -27,18 +27,28 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.install import core_docs
 from claude_code_hooks_daemon.install.core_docs import (
     CORE_DOC_NAMES,
     CORE_SUFFIX,
     core_reference_line,
     core_template_path,
-)
-from claude_code_hooks_daemon.install.plan_workflow import (
-    bootstrap_plan_workflow,
-    deploy_plan_workflow_if_enabled,
+    deploy_core_docs_if_enabled,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
+#: Every subsystem that names a core document, switched on. The invariant is
+#: about the promise being kept when the guidance is REACHABLE, so the tests
+#: that check "is this document deployed" have to enable the guidance first.
+_ALL_SUBSYSTEMS_ON = "plan_workflow:\n  enabled: true\ndocumentation:\n  enabled: true\n"
+
+
+def _write_config(project_root: Path, body: str) -> Path:
+    config_path = project_root / "hooks-daemon.yaml"
+    config_path.write_text(body, encoding="utf-8")
+    return config_path
+
 
 #: The client-relative documents daemon guidance names, with the surface that
 #: names each. Grown whenever guidance starts naming another client document.
@@ -58,14 +68,14 @@ _GUIDANCE_NAMED_DOCS: tuple[tuple[str, str], ...] = (
 class TestFreshClientInstallHasTheWorkflowDoc:
     """The reproduction, at the level a client actually experiences it."""
 
-    def test_bootstrap_creates_the_document_config_points_at(self, tmp_path: Path) -> None:
-        """A fresh project, bootstrapped exactly as install does it.
+    def test_install_creates_the_document_config_points_at(self, tmp_path: Path) -> None:
+        """A fresh project, deployed exactly as install does it.
 
-        ``workflow_docs`` defaults to this path and the handler tells the agent
-        to read it, so the bootstrap that turns the workflow on must also
-        produce the document the workflow is described in.
+        ``workflow_docs`` points at this path and the handler tells the agent
+        to read it, so the install that turns the workflow on must also produce
+        the document the workflow is described in.
         """
-        bootstrap_plan_workflow(tmp_path)
+        deploy_core_docs_if_enabled(tmp_path, _write_config(tmp_path, _ALL_SUBSYSTEMS_ON))
 
         workflow_doc = tmp_path / "CLAUDE" / "PlanWorkflow.md"
 
@@ -76,25 +86,26 @@ class TestFreshClientInstallHasTheWorkflowDoc:
             "documentation does not exist."
         )
 
-    def test_the_deployed_document_is_not_this_project_s_own(self, tmp_path: Path) -> None:
-        """The core document must be GENERIC.
+    @pytest.mark.parametrize("name", CORE_DOC_NAMES)
+    def test_the_shipped_document_is_not_this_project_s_own(self, name: str) -> None:
+        """Every core document must be GENERIC.
 
-        This repo's own ``CLAUDE/PlanWorkflow.md`` opens by naming "the Claude
-        Code Hooks Daemon project". Shipping it verbatim would push this repo's
-        identity into every client, so the deployed document has to be the
-        genericised core, not a copy of ours.
+        This project's own documents open by naming "the Claude Code Hooks
+        Daemon project". Shipping one verbatim would push this repo's identity
+        into every client, so each deployed document has to be the genericised
+        core rather than a copy of ours.
+
+        Asserted against the BUNDLED TEMPLATE, not the seeded override. The
+        override is daemon-written boilerplate that could never carry the
+        phrase, so checking it was a guard that could not fail — the template
+        is the file a genericisation pass can actually get wrong.
         """
-        bootstrap_plan_workflow(tmp_path)
-
-        workflow_doc = tmp_path / "CLAUDE" / "PlanWorkflow.md"
-        pytest.importorskip("claude_code_hooks_daemon")
-
-        assert workflow_doc.is_file()
-        text = workflow_doc.read_text(encoding="utf-8")
+        text = core_template_path(name).read_text(encoding="utf-8")
 
         assert "Claude Code Hooks Daemon project" not in text, (
-            "the deployed workflow document names THIS project. It is seeded "
-            "into unrelated client repositories, so it must be genericised."
+            f"the shipped {name} core document names THIS project. It is "
+            "deployed into unrelated client repositories, so it must be "
+            "genericised."
         )
 
 
@@ -111,7 +122,7 @@ class TestNamedClientDocsAreEnsured:
     def test_a_named_document_is_deployed(
         self, tmp_path: Path, doc_path: str, named_by: str
     ) -> None:
-        bootstrap_plan_workflow(tmp_path)
+        deploy_core_docs_if_enabled(tmp_path, _write_config(tmp_path, _ALL_SUBSYSTEMS_ON))
 
         assert (tmp_path / doc_path).is_file(), (
             f"{named_by} tells the agent to read {doc_path}, but no install "
@@ -152,7 +163,7 @@ class TestTheDeployFollowsTheConfiguredPath:
     def test_the_document_lands_where_workflow_docs_points(self, tmp_path: Path) -> None:
         config_path = self._write_config(tmp_path, "docs/agent/PlanWorkflow.md")
 
-        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+        deploy_core_docs_if_enabled(tmp_path, config_path)
 
         assert (tmp_path / "docs/agent/PlanWorkflow.md").is_file(), (
             "the deploy wrote the workflow document to a hardcoded CLAUDE/ "
@@ -167,7 +178,7 @@ class TestTheDeployFollowsTheConfiguredPath:
         so a core deployed to a different tree leaves that link dangling."""
         config_path = self._write_config(tmp_path, "docs/agent/PlanWorkflow.md")
 
-        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+        deploy_core_docs_if_enabled(tmp_path, config_path)
 
         assert (tmp_path / "docs/agent/core/PlanWorkflow.core.md").is_file()
 
@@ -178,7 +189,7 @@ class TestTheDeployFollowsTheConfiguredPath:
         daemon's own handler would refuse a write to."""
         config_path = self._write_config(tmp_path, "docs/agent/PlanWorkflow.md")
 
-        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+        deploy_core_docs_if_enabled(tmp_path, config_path)
 
         assert not (tmp_path / "CLAUDE" / "PlanWorkflow.md").exists()
         assert not (tmp_path / "CLAUDE" / "core").exists()
@@ -193,7 +204,7 @@ class TestTheDeployFollowsTheConfiguredPath:
         """
         config_path = self._write_config(tmp_path, "docs/agent/Planning.md")
 
-        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+        deploy_core_docs_if_enabled(tmp_path, config_path)
 
         assert (tmp_path / "docs/agent/Planning.md").is_file()
 
@@ -202,7 +213,7 @@ class TestTheDeployFollowsTheConfiguredPath:
         the core keeps its canonical name, so the link has to survive."""
         config_path = self._write_config(tmp_path, "docs/agent/Planning.md")
 
-        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+        deploy_core_docs_if_enabled(tmp_path, config_path)
 
         text = (tmp_path / "docs/agent/Planning.md").read_text(encoding="utf-8")
 
@@ -214,7 +225,7 @@ class TestTheDeployFollowsTheConfiguredPath:
         creating a literal ``./`` directory or raising."""
         config_path = self._write_config(tmp_path, "PlanWorkflow.md")
 
-        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+        deploy_core_docs_if_enabled(tmp_path, config_path)
 
         assert (tmp_path / "PlanWorkflow.md").is_file()
         assert (tmp_path / "core" / "PlanWorkflow.core.md").is_file()
@@ -224,10 +235,107 @@ class TestTheDeployFollowsTheConfiguredPath:
         config_path = tmp_path / "hooks-daemon.yaml"
         config_path.write_text("plan_workflow:\n  enabled: true\n", encoding="utf-8")
 
-        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+        deploy_core_docs_if_enabled(tmp_path, config_path)
 
         assert (tmp_path / "CLAUDE" / "PlanWorkflow.md").is_file()
         assert (tmp_path / "CLAUDE" / "core" / "PlanWorkflow.core.md").is_file()
+
+
+class TestTheDeployIsNotGatedOnTheWrongSubsystem:
+    """A stock install must still get the documents its guidance names.
+
+    ``plan_workflow.enabled`` defaults to FALSE — it is opt-in. Hanging every
+    core document off the plan-workflow bootstrap therefore fixed the reported
+    client (who had enabled it) and left a stock install exactly as broken:
+    ``worktree_file_copy`` ships in the default profile and names
+    ``CLAUDE/Worktree.md`` in its rule text unconditionally, so the document
+    has to exist whether or not the project tracks plans.
+
+    Each document is gated on the subsystem whose guidance NAMES it, which is
+    the only gate that means anything: the promise is made by the surface that
+    quotes the path, so that surface decides whether it has to be kept.
+    """
+
+    @staticmethod
+    def _config(project_root: Path, body: str) -> Path:
+        config_path = project_root / "hooks-daemon.yaml"
+        config_path.write_text(body, encoding="utf-8")
+        return config_path
+
+    def test_a_stock_install_still_gets_the_worktree_document(self, tmp_path: Path) -> None:
+        config_path = self._config(tmp_path, "plan_workflow:\n  enabled: false\n")
+
+        deploy_core_docs_if_enabled(tmp_path, config_path)
+
+        assert (tmp_path / "CLAUDE" / "Worktree.md").is_file(), (
+            "worktree_file_copy's BLOCKING rule text names CLAUDE/Worktree.md "
+            "in every install, but the document was only deployed when the "
+            "plan workflow — an opt-in that defaults to off — was enabled."
+        )
+
+    def test_the_plan_document_waits_for_its_own_subsystem(self, tmp_path: Path) -> None:
+        """Nothing is scattered into a project that did not ask for it: the
+        plan-workflow document is guidance for a workflow that is switched
+        off, and no surface quotes its path while it is."""
+        config_path = self._config(tmp_path, "plan_workflow:\n  enabled: false\n")
+
+        deploy_core_docs_if_enabled(tmp_path, config_path)
+
+        assert not (tmp_path / "CLAUDE" / "PlanWorkflow.md").exists()
+
+    def test_the_docs_ruleset_follows_the_documentation_subsystem(self, tmp_path: Path) -> None:
+        """docs_qa names CLAUDE/DocumentationStrategy.md in a runtime finding,
+        and docs_qa is switched on by `documentation.enabled` — which is
+        independent of the plan workflow entirely."""
+        config_path = self._config(
+            tmp_path, "documentation:\n  enabled: true\nplan_workflow:\n  enabled: false\n"
+        )
+
+        deploy_core_docs_if_enabled(tmp_path, config_path)
+
+        assert (tmp_path / "CLAUDE" / "DocumentationStrategy.md").is_file()
+        assert (tmp_path / "CLAUDE" / "core" / "DocumentationStrategy.core.md").is_file()
+
+    def test_a_disabled_subsystem_deploys_no_ruleset(self, tmp_path: Path) -> None:
+        config_path = self._config(tmp_path, "documentation:\n  enabled: false\n")
+
+        deploy_core_docs_if_enabled(tmp_path, config_path)
+
+        assert not (tmp_path / "CLAUDE" / "DocumentationStrategy.md").exists()
+
+    def test_nothing_is_created_when_no_document_is_enabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A project that enables nothing must not acquire empty directories.
+
+        Unreachable with today's roster, because ``Worktree`` is unconditional
+        — which is exactly why it needs exercising deliberately rather than
+        being left as a branch nobody has ever run. The roster is data; the
+        moment every entry becomes conditional this is the code that decides
+        whether the project gets a bare ``CLAUDE/core/`` it never asked for.
+        """
+        monkeypatch.setattr(
+            core_docs,
+            "CORE_DOCS",
+            (core_docs.CoreDoc("PlanWorkflow", lambda config: config.plan_workflow.enabled),),
+        )
+        config_path = self._config(tmp_path, "plan_workflow:\n  enabled: false\n")
+
+        result = core_docs.deploy_core_docs_if_enabled(tmp_path, config_path)
+
+        assert result.success
+        assert not (tmp_path / "CLAUDE").exists(), (
+            "a project with no core documents enabled was given an empty "
+            "CLAUDE/ tree it never asked for."
+        )
+        assert result.messages == ["No core documents enabled in config (deployment skipped)"]
+
+    def test_an_absent_config_is_not_an_error(self, tmp_path: Path) -> None:
+        """Mirrors ``deploy_plan_workflow_if_enabled``: a missing file yields
+        model defaults rather than a failure, so a first install works."""
+        result = deploy_core_docs_if_enabled(tmp_path, tmp_path / "nonexistent.yaml")
+
+        assert result.success
 
 
 class TestThisRepoConsumesWhatItShips:

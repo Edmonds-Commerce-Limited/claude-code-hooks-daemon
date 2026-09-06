@@ -58,10 +58,12 @@ from __future__ import annotations
 
 import logging
 import shutil
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Final
+
+from claude_code_hooks_daemon.config.models import Config
 
 logger = logging.getLogger(__name__)
 
@@ -100,19 +102,62 @@ _DOC_MODE: Final[int] = 0o644
 #: documents are not there") points away from the actual cause.
 _DIR_MODE: Final[int] = 0o755
 
-#: The core documents this daemon ships, by base name. Each entry produces a
-#: daemon-owned ``CLAUDE/core/<name>.core.md`` and, when absent, a client-owned
-#: ``CLAUDE/<name>.md`` that references it.
+
+@dataclass(frozen=True)
+class CoreDoc:
+    """A core document and the switch that decides whether it is deployed.
+
+    The gate is the subsystem whose guidance NAMES the document, which is the
+    only gate that means anything here: the promise is made by the surface
+    that quotes the path, so that surface decides whether it has to be kept.
+
+    Getting this wrong is not hypothetical — hanging every document off the
+    plan-workflow bootstrap fixed the reported client, who had enabled it, and
+    left a stock install exactly as broken, because ``plan_workflow.enabled``
+    defaults to FALSE.
+
+    Attributes:
+        name: Base name, e.g. ``"PlanWorkflow"``.
+        is_named_by_active_guidance: Whether this project has the subsystem
+            that quotes this document's path switched on.
+    """
+
+    name: str
+    is_named_by_active_guidance: Callable[[Config], bool]
+
+
+#: The core documents this daemon ships. Each entry produces a daemon-owned
+#: ``<docs>/core/<name>.core.md`` and, when absent, a client-owned
+#: ``<docs>/<name>.md`` that references it.
 #:
 #: A name belongs here when daemon guidance NAMES the client document: a path
 #: quoted to a reader is a promise the daemon makes, so it must be one the
-#: daemon also keeps. ``tests/unit/install/test_core_doc_deployment.py`` pins
-#: that correspondence.
-CORE_DOC_NAMES: Final[tuple[str, ...]] = (
-    "PlanWorkflow",
-    "Worktree",
-    "DocumentationStrategy",
+#: daemon also keeps. ``test_core_doc_deployment.py`` pins that correspondence
+#: for the documents listed here, and ``test_shipped_asset_citations.py``
+#: scans for the ones nobody thought to list.
+CORE_DOCS: Final[tuple[CoreDoc, ...]] = (
+    # plan_workflow.py and config/models.py both name CLAUDE/PlanWorkflow.md,
+    # and both are inert while the workflow is off.
+    CoreDoc("PlanWorkflow", lambda config: config.plan_workflow.enabled),
+    # worktree_file_copy names CLAUDE/Worktree.md in its BLOCKING rule text,
+    # built once in __init__ with no config in hand -- so the reference is
+    # emitted unconditionally wherever that safety handler is loaded, and the
+    # document has to be unconditional to match it.
+    CoreDoc("Worktree", lambda _config: True),
+    # docs_qa/checks/rules_file_shape.py names CLAUDE/DocumentationStrategy.md
+    # in a runtime FINDING, and docs_qa runs on `documentation.enabled` --
+    # independent of the plan workflow entirely.
+    CoreDoc("DocumentationStrategy", lambda config: config.documentation.enabled),
 )
+
+#: Every shipped core document, gates ignored. The manifest for packaging
+#: checks and for callers with no config to consult.
+CORE_DOC_NAMES: Final[tuple[str, ...]] = tuple(doc.name for doc in CORE_DOCS)
+
+#: The one core document with a config key of its own
+#: (``plan_workflow.workflow_docs``), and so the only one a project can
+#: knowingly rename. The others keep canonical names in the same directory.
+_PLAN_WORKFLOW_DOC_NAME: Final[str] = "PlanWorkflow"
 
 
 @dataclass
@@ -204,6 +249,7 @@ def deploy_core_docs(
     project_root: Path,
     docs_dir: str = PROJECT_DOCS_DIR,
     override_filenames: Mapping[str, str] | None = None,
+    names: tuple[str, ...] = CORE_DOC_NAMES,
 ) -> CoreDocsResult:
     """Refresh daemon-owned core documents and seed client-owned overrides.
 
@@ -234,6 +280,9 @@ def deploy_core_docs(
             name, for a project that has renamed one. Only documents with a
             config key of their own can be renamed knowingly, so an absent
             entry means the canonical ``<name>.md``.
+        names: Which core documents to deploy. Defaults to all of them;
+            :func:`deploy_core_docs_if_enabled` narrows it to the ones whose
+            guidance this project actually has switched on.
 
     Returns:
         CoreDocsResult naming what was refreshed and what was seeded.
@@ -242,19 +291,33 @@ def deploy_core_docs(
 
     docs_path = project_root / docs_dir
     core_path = docs_path / _CORE_DIR_BASENAME
-    core_path.mkdir(parents=True, exist_ok=True)
-    docs_path.mkdir(parents=True, exist_ok=True)
-    core_path.chmod(_DIR_MODE)
 
-    for name in CORE_DOC_NAMES:
+    # Whether the docs tree already existed decides whether we may set its
+    # mode, so it has to be answered BEFORE the mkdir that would create it.
+    # A directory the project already had is the project's business -- one that
+    # deliberately locked its docs tree down should not find it quietly widened
+    # by an upgrade.
+    docs_existed = docs_path.is_dir()
+
+    core_path.mkdir(parents=True, exist_ok=True)
+    core_path.chmod(_DIR_MODE)
+    if not docs_existed:
+        # `CLAUDE/` is created as a SIDE EFFECT of `parents=True` above, so it
+        # silently takes the umask while its child gets an explicit mode. The
+        # documents a client actually reads and edits are the overrides living
+        # here, so leaving this at 0700 makes exactly the wrong half
+        # unreadable -- and the symptom ("the documents are not there") points
+        # away from the cause.
+        docs_path.chmod(_DIR_MODE)
+
+    for name in names:
         template = core_template_path(name)
         if not template.is_file():
             # A packaging defect, not a client problem: the bundle shipped
             # without a template its own manifest names. Reported at ERROR and
-            # in the messages, but it does NOT fail the deploy -- the caller is
-            # the plan-workflow bootstrap, and taking down mkplan.bash and the
-            # plan directory over a missing document would trade the tooling
-            # for the documentation about it.
+            # in the messages, but it does NOT fail the deploy -- aborting here
+            # would take the remaining documents down with it, trading working
+            # deployment for one missing file.
             #
             # Nothing is being hidden by that choice: the case is caught at
             # BUILD time by test_core_docs.py's manifest-completeness check,
@@ -274,6 +337,48 @@ def deploy_core_docs(
         )
 
     return result
+
+
+def deploy_core_docs_if_enabled(project_root: Path, config_path: Path) -> CoreDocsResult:
+    """Deploy each core document iff the guidance naming it is active (SSoT).
+
+    The single deployment decision site, mirroring
+    ``deploy_plan_workflow_if_enabled`` — so what lands on disk can never drift
+    from the config the daemon actually reads.
+
+    Deliberately NOT hung off the plan-workflow bootstrap, which is where this
+    started and where it was wrong: ``plan_workflow.enabled`` is opt-in and
+    defaults to False, so a stock install deployed nothing at all while
+    ``worktree_file_copy`` — a safety handler in the default profile — went on
+    naming ``CLAUDE/Worktree.md`` in its rule text. That fixed one client and
+    left the class untouched.
+
+    Both halves of the path come from config for the same reason (see
+    :func:`deploy_core_docs`): the document must land where the reader is sent.
+
+    Args:
+        project_root: Absolute path to the project root.
+        config_path: Path to the project's ``hooks-daemon.yaml``. A missing
+            file yields the model defaults rather than an error, so a first
+            install works.
+
+    Returns:
+        CoreDocsResult naming what was refreshed and what was seeded.
+    """
+    config = Config.load_or_default(config_path)
+    names = tuple(doc.name for doc in CORE_DOCS if doc.is_named_by_active_guidance(config))
+    if not names:
+        result = CoreDocsResult()
+        result.messages.append("No core documents enabled in config (deployment skipped)")
+        return result
+
+    workflow_docs = PurePosixPath(config.plan_workflow.workflow_docs)
+    return deploy_core_docs(
+        project_root,
+        str(workflow_docs.parent),
+        {_PLAN_WORKFLOW_DOC_NAME: workflow_docs.name},
+        names,
+    )
 
 
 def _refresh_core_doc(

@@ -312,6 +312,25 @@ FASTPATH_PLAN_WORKFLOW_PY
         print_warning "Plan workflow deployment had issues (non-fatal)"
     fi
 
+    # Plan 00334: refresh the daemon-owned core documents on the fast path too.
+    # This is the path that carries an upstream correction to an install set up
+    # long ago, so skipping it here would freeze every already-at-target client
+    # on the documents they were first seeded with.
+    if "$VENV_PYTHON" - "$PROJECT_ROOT" "$TARGET_CONFIG" <<'FASTPATH_CORE_DOCS_PY'; then
+import sys
+from pathlib import Path
+
+from claude_code_hooks_daemon.install.core_docs import deploy_core_docs_if_enabled
+
+result = deploy_core_docs_if_enabled(Path(sys.argv[1]), Path(sys.argv[2]))
+for msg in result.messages:
+    print(f"  -> {msg}")
+FASTPATH_CORE_DOCS_PY
+        print_success "Core document deployment complete"
+    else
+        print_warning "Core document deployment had issues (non-fatal)"
+    fi
+
     # Plan 00147/00148: refresh AND arm the ccy supervisor on the idempotent fast
     # path too, so already-at-target re-runs deliver the current claude-supervise.py
     # and ensure ccy.env exports CCY_CLAUDE_WRAPPER (an existing wrapper is kept).
@@ -905,6 +924,32 @@ SLOWPATH_PLAN_WORKFLOW_PY
     print_success "Plan workflow deployment complete"
 else
     print_warning "Plan workflow deployment had issues (non-fatal)"
+fi
+
+# ============================================================
+# Step 14a: Core document deployment (config-driven SSoT — Plan 00334)
+# ============================================================
+#
+# Daemon-owned core documents are refreshed on every upgrade, which is what
+# lets an upstream correction reach an install set up long ago; the client's
+# own override document beside each one is never touched. Gated per document
+# on the subsystem whose guidance names it, NOT on the plan workflow above.
+
+log_step "14a" "Deploying core documents (per-subsystem gates)"
+
+if "$VENV_PYTHON" - "$PROJECT_ROOT" "$TARGET_CONFIG" <<'SLOWPATH_CORE_DOCS_PY'; then
+import sys
+from pathlib import Path
+
+from claude_code_hooks_daemon.install.core_docs import deploy_core_docs_if_enabled
+
+result = deploy_core_docs_if_enabled(Path(sys.argv[1]), Path(sys.argv[2]))
+for msg in result.messages:
+    print(f"  -> {msg}")
+SLOWPATH_CORE_DOCS_PY
+    print_success "Core document deployment complete"
+else
+    print_warning "Core document deployment had issues (non-fatal)"
 fi
 
 # ============================================================

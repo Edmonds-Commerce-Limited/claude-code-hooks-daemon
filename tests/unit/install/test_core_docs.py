@@ -18,6 +18,8 @@ both directions are asserted here rather than assumed:
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -89,7 +91,24 @@ class TestDeployedPermissionsAreReadable:
     inaccessible -- a failure that reads as "the deploy did not run".
     """
 
-    def test_the_core_directory_is_traversable(self, tmp_path: Path) -> None:
+    @pytest.fixture
+    def restrictive_umask(self) -> Iterator[None]:
+        """Pin the umask so these assertions test the CODE, not the runner.
+
+        Without this the checks pass or fail on whatever umask CI happens to
+        use — which is how the parent-directory half of this bug survived the
+        first fix: the child directory was chmod'd explicitly and the parent
+        inherited a permissive umask locally, so nothing showed.
+        """
+        previous = os.umask(0o077)
+        try:
+            yield
+        finally:
+            os.umask(previous)
+
+    def test_the_core_directory_is_traversable(
+        self, tmp_path: Path, restrictive_umask: None
+    ) -> None:
         deploy_core_docs(tmp_path)
 
         mode = (tmp_path / CORE_DOCS_DIR).stat().st_mode & 0o777
@@ -99,6 +118,42 @@ class TestDeployedPermissionsAreReadable:
             "traverse it, so the documents inside are unreadable regardless "
             "of their own mode."
         )
+
+    def test_the_docs_directory_is_traversable(
+        self, tmp_path: Path, restrictive_umask: None
+    ) -> None:
+        """The PARENT matters as much as the child, and is easier to forget.
+
+        ``CLAUDE/`` is created as a side effect of ``mkdir(parents=True)`` on
+        ``CLAUDE/core/``, so it silently takes the umask while its child gets
+        an explicit mode. The documents a client actually reads and edits are
+        the overrides that live in this directory, so leaving it at 0700 makes
+        exactly the wrong half unreadable.
+        """
+        deploy_core_docs(tmp_path)
+
+        mode = (tmp_path / "CLAUDE").stat().st_mode & 0o777
+
+        assert mode & 0o055 == 0o055, (
+            f"CLAUDE/ deployed as {mode:o}: group and other cannot traverse "
+            "it, so the override documents inside are unreadable regardless "
+            "of their own mode."
+        )
+
+    def test_an_existing_docs_directory_is_left_alone(self, tmp_path: Path) -> None:
+        """A directory the project already had is the project's business.
+
+        The permission fix must not become a licence to restyle a tree the
+        daemon did not create — a project that deliberately locked its docs
+        directory down would find it quietly widened by an upgrade.
+        """
+        docs = tmp_path / "CLAUDE"
+        docs.mkdir()
+        docs.chmod(0o700)
+
+        deploy_core_docs(tmp_path)
+
+        assert docs.stat().st_mode & 0o777 == 0o700
 
     @pytest.mark.parametrize("name", CORE_DOC_NAMES)
     def test_the_documents_are_world_readable(self, tmp_path: Path, name: str) -> None:

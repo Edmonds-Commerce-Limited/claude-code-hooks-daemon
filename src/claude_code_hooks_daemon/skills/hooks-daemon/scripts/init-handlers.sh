@@ -2,8 +2,9 @@
 #
 # DAEMON-OWNED FILE - do not edit. Deployed into your project by the
 # claude-code-hooks-daemon installer and refreshed on every upgrade, so local
-# changes are discarded. See CLAUDE/LLM-INSTALL.md, "Which Files Under
-# .claude/ Are Yours?", for the full list and the linter exclusions.
+# changes are discarded. See the daemon clone's CLAUDE/LLM-INSTALL.md,
+# "Which Files Under .claude/ Are Yours?", for the full list and the
+# linter exclusions.
 #
 # init-handlers.sh - Scaffold new project-level handlers
 #
@@ -193,4 +194,4 @@ echo "  3. Refactor for clarity (REFACTOR phase)"
 echo "  4. Restart daemon to load handler:"
 echo "     $DAEMON_DIR/bin/hooks-daemon restart"
 echo ""
-echo "See CLAUDE/HANDLER_DEVELOPMENT.md for complete TDD workflow."
+echo "See the daemon clone's CLAUDE/HANDLER_DEVELOPMENT.md for the complete TDD workflow."

@@ -3,9 +3,14 @@
 > **This file is DAEMON-OWNED.** It is deployed to `CLAUDE/core/Worktree.core.md`
 > and overwritten wholesale on every install and upgrade, so a local edit is
 > discarded the next time the daemon deploys — never hand-edit it. Your own
-> `CLAUDE/Worktree.md` is seeded once, is never touched again, and pulls this
-> file in via `@CLAUDE/core/Worktree.core.md`. Put anything this project does
-> differently there, not here.
+> `CLAUDE/Worktree.md` is seeded once, is never touched again, and opens with a
+> markdown link to this file. Put anything this project does differently there,
+> not here.
+>
+> A plain markdown link, deliberately, not an `@`-import: `@` auto-resolves
+> only inside a `CLAUDE.md` chain, and this document sits outside one, so it
+> would not be a mechanism here — while eagerly re-inlining a large file into
+> every session is a real cost. The forced read is a convention either way.
 >
 > Wrapper paths below are written as `.claude/hooks-daemon/bin/hooks-daemon` —
 > the location for a standard install. A self-install checkout, where the
@@ -1157,8 +1162,8 @@ worktree-child-auth-refactor-config-fix
   (`cp`/`mv`/`rsync` between a worktree and the main repo)
 - This project's own layout configuration: `layout.source_dirs` /
   `layout.test_dirs` / `layout.config_dirs` in `.claude/hooks-daemon.yaml`
-- Plan workflow (if this project uses it): `@CLAUDE/core/PlanWorkflow.core.md`
-  via `CLAUDE/PlanWorkflow.md`
+- Plan workflow (if this project uses it): `CLAUDE/core/PlanWorkflow.core.md`,
+  reached via `CLAUDE/PlanWorkflow.md`
 
 ---
 

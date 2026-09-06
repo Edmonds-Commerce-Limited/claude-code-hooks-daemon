@@ -2,8 +2,9 @@
 #
 # DAEMON-OWNED FILE - do not edit. Deployed into your project by the
 # claude-code-hooks-daemon installer and refreshed on every upgrade, so local
-# changes are discarded. See CLAUDE/LLM-INSTALL.md, "Which Files Under
-# .claude/ Are Yours?", for the full list and the linter exclusions.
+# changes are discarded. See the daemon clone's CLAUDE/LLM-INSTALL.md,
+# "Which Files Under .claude/ Are Yours?", for the full list and the
+# linter exclusions.
 #
 # hooks-daemon optimise - Analyse hooks daemon config and recommend improvements
 
@@ -89,7 +90,7 @@ Read the config file at the CONFIG path printed above.
 
 If the file does not exist, output:
   ERROR: Config file not found at <CONFIG>
-  Is the hooks daemon installed? See CLAUDE/LLM-INSTALL.md
+  Is the hooks daemon installed? See the daemon clone's CLAUDE/LLM-INSTALL.md
 Then stop.
 
 Parse the YAML to understand which handlers are enabled under each event type section

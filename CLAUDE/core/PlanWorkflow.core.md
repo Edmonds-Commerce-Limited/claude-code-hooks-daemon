@@ -5,8 +5,19 @@
 > daemon deploy/upgrade — do not hand-edit it, any local change is lost on the
 > next refresh. Project-specific additions belong in this project's own
 > `CLAUDE/PlanWorkflow.md` (the file named by the `plan_workflow.workflow_docs`
-> config key), which should `@`-reference this document and layer on top of it
-> only what is genuinely specific to this project.
+> config key), which opens with a markdown link to this document and layers on
+> top of it only what is genuinely specific to this project.
+>
+> A plain markdown link, deliberately, not an `@`-import: `@` auto-resolves
+> only inside a `CLAUDE.md` chain, and this document sits outside one, so it
+> would not be a mechanism here — while eagerly re-inlining a large file into
+> every session is a real cost. The forced read is a convention either way.
+>
+> Directory names below are written at their **defaults**. The agent-facing
+> tree (`documentation.trees.agent`, default `CLAUDE/`) and the plan directory
+> (`plan_workflow.directory`, default `CLAUDE/Plan/`) are both per-project
+> configuration; read `.claude/hooks-daemon.yaml` for the values this project
+> actually uses and substitute as you read.
 
 This document defines the planning workflow supported and enforced by the
 Claude Code Hooks Daemon's `plan_workflow` configuration. Developers and AI

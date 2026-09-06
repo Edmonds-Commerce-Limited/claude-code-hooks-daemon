@@ -82,7 +82,7 @@ def get_acceptance_tests(self) -> list[AcceptanceTest]:
     return []  # Or add actual tests
 ```
 
-See: `CLAUDE/HANDLER_DEVELOPMENT.md` for details on v2.13.0 changes.
+See: the daemon clone's `CLAUDE/HANDLER_DEVELOPMENT.md` for details on v2.13.0 changes.
 
 **2. Import Error**
 
@@ -248,7 +248,7 @@ export HOOKS_DAEMON_LOG_LEVEL=DEBUG
 cat untracked/scratch/hook_debug_*.log | grep -A10 "event_type"
 ```
 
-See: `CLAUDE/DEBUGGING_HOOKS.md` for complete debugging workflow.
+See: the daemon clone's `CLAUDE/DEBUGGING_HOOKS.md` for the complete debugging workflow.
 
 ## Configuration Issues
 

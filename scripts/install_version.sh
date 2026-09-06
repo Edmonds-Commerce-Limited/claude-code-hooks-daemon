@@ -598,6 +598,33 @@ else
 fi
 
 # ============================================================
+# Step 14a: Core document deployment (config-driven SSoT — Plan 00334)
+# ============================================================
+#
+# A path the daemon QUOTES to a reader is a promise it has to keep. Each core
+# document is deployed when the subsystem whose guidance names it is switched
+# on — deliberately NOT alongside the plan workflow above, which is opt-in and
+# defaults to off: that left a stock install with no CLAUDE/Worktree.md while
+# worktree_file_copy went on naming it in its BLOCKING rule text.
+
+log_step "14a" "Deploying core documents (per-subsystem gates)"
+
+if "$VENV_PYTHON" - "$PROJECT_ROOT" "$TARGET_CONFIG" <<'DEPLOY_CORE_DOCS_PY'; then
+import sys
+from pathlib import Path
+
+from claude_code_hooks_daemon.install.core_docs import deploy_core_docs_if_enabled
+
+result = deploy_core_docs_if_enabled(Path(sys.argv[1]), Path(sys.argv[2]))
+for msg in result.messages:
+    print(f"  -> {msg}")
+DEPLOY_CORE_DOCS_PY
+    print_success "Core document deployment complete"
+else
+    print_warning "Core document deployment had issues (non-fatal)"
+fi
+
+# ============================================================
 # Step 14b: Deploy ccy PTY supervisor (config-gated — Plan 00147)
 # ============================================================
 #

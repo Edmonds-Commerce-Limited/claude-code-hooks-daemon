@@ -214,9 +214,9 @@ See example project handlers:
 
 For comprehensive handler development guide:
 
-- See: `CLAUDE/HANDLER_DEVELOPMENT.md`
-- See: `CLAUDE/PROJECT_HANDLERS.md`
-- See: `CLAUDE/DEBUGGING_HOOKS.md` (event flow debugging)
+- See: the daemon clone's `CLAUDE/HANDLER_DEVELOPMENT.md`
+- See: the daemon clone's `CLAUDE/PROJECT_HANDLERS.md`
+- See: the daemon clone's `CLAUDE/DEBUGGING_HOOKS.md` (event flow debugging)
 
 ## Next Steps After Scaffolding
 

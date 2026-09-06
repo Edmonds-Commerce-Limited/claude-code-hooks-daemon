@@ -81,9 +81,7 @@ class TestPlanWorkflowHandler:
         }
         assert handler.matches(default_hook_input) is False
 
-    def test_guidance_names_the_configured_workflow_doc(
-        self, handler: PlanWorkflowHandler
-    ) -> None:
+    def test_guidance_names_the_configured_workflow_doc(self, handler: PlanWorkflowHandler) -> None:
         """The quoted path must be the CONFIGURED one (Plan 00334 Decision 7).
 
         ``plan_workflow.workflow_docs`` is what the bootstrap now deploys, so a
