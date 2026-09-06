@@ -193,6 +193,41 @@ pass every self-install test and still be broken for every user.
 - [ ] Confirm the dogfood daemon still reports RUNNING
 - [ ] See: [CLAUDE/development/CLIENT-MODE-TESTING.md](../development/CLIENT-MODE-TESTING.md)
 
+### 6. Review Findings Are Filed, Never Surfaced
+
+Applies to ANY review — a `code-reviewer` dispatch, a peer session's report, a
+self-review — not just the release gate.
+
+- [ ] Every BLOCKING finding is fixed before the change ships
+- [ ] Every NON-BLOCKING finding is filed as a plan (`CLAUDE/Plan/NNNNN-*`)
+  with file:line, severity and remediation
+- [ ] The review report and any probe/reproduction scripts are copied into
+  that plan's folder
+
+**Filing is automatic and needs NO human approval.** It is not a scope
+question to put to the human, and "shall I file these?" is not a question to
+ask — asking is itself the deferral this rule exists to prevent. File the
+plan in the same session that produced the findings, before reporting the
+work complete. The human decides when the follow-up is SCHEDULED; they do not
+decide whether a finding is RECORDED.
+
+**Why the evidence must move with it**: review reports and probes normally
+land in `untracked/`, which is gitignored and does not survive a container
+restart. The corpus proving a finding real is therefore the first thing lost,
+and a finding no one can still reproduce gets quietly closed as stale. The
+plan folder is tracked; put them there.
+
+A "non-blocking" finding is one that does not stop THIS change shipping. That
+is a statement about urgency, not about whether the defect is real — so it
+gets recorded exactly like any other. Findings that evaporate into scrollback
+are the silent tech debt that makes the next review more expensive.
+
+The release pipeline's application of this rule is in
+[CLAUDE/development/RELEASING.md](../development/RELEASING.md) ("Review Early,
+Never Drop Findings"), which adds the release-specific sequencing: file as the
+closing act of the release, because fixing in place after a review PASS means
+the shipped tree is not the tree that was reviewed.
+
 ## Common Change Types
 
 ### Refactoring

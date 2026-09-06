@@ -182,6 +182,12 @@ Two non-negotiable rules close that gap:
    lost. Copy the report and any probes into the follow-up plan's own folder
    (which IS tracked) as part of filing it.
 
+   This rule is not release-specific — it governs ANY review. The general
+   statement, and the Definition of Done item that carries it, is
+   [CLAUDE/CodeLifecycle/General.md](../CodeLifecycle/General.md) ("Review
+   Findings Are Filed, Never Surfaced"); what this section adds is the
+   release-specific sequencing above.
+
 ## 🚨 Absolute Paths Only (NON-NEGOTIABLE)
 
 **Every command in the release flow MUST use absolute paths. NEVER `cd` into a subdirectory.**
