@@ -161,11 +161,26 @@ Two non-negotiable rules close that gap:
    audit against the diff *before* the QA/acceptance gates, so findings can be
    fixed and re-verified in one pass rather than triggering a downstream
    FAIL-FAST re-run.
+
 2. **Never drop a finding.** Every review finding is either (a) fixed before the
    release ships, or (b) captured as a tracked MUST-FIX item in a follow-up plan
    (`CLAUDE/Plan/NNNNN-*`) with file:line, severity, and remediation, and fixed
    **immediately after** the release to close the loop. A review whose findings
    evaporate into scrollback is wasted work.
+
+   **Filing that plan is automatic and needs NO human approval.** It is not a
+   scope decision to put to the human, and "shall I file it?" is not a question
+   to ask — deferring a non-blocking finding is exactly how it becomes silent
+   tech debt, which is the failure this section exists to prevent. File the plan
+   as the closing act of the release, in the same session, before reporting the
+   release complete. The human decides when the follow-up work is *scheduled*;
+   they do not decide whether the finding gets *recorded*.
+
+   **Preserve the evidence with it.** Review reports and probe harnesses
+   normally land in `untracked/`, which is gitignored and does not survive a
+   container restart — so the corpus proving a finding real is the first thing
+   lost. Copy the report and any probes into the follow-up plan's own folder
+   (which IS tracked) as part of filing it.
 
 ## 🚨 Absolute Paths Only (NON-NEGOTIABLE)
 
