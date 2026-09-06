@@ -167,6 +167,113 @@ class TestTheBashSurface:
         assert handler.matches(_bash(command)) is False
 
 
+class TestDestinationFlagsAndPositionalTargets:
+    """The shapes `get_bash_write_targets` does not resolve (Plan 00333 T4.5).
+
+    That accessor's premise is "content this command AUTHORED", which is why
+    Plan 00260 excluded `cp`/`mv` from the content linters: a copy relocates
+    bytes it did not write, so blaming it would report a defect it did not
+    introduce. Containment has the opposite premise — any path the command
+    WRITES TO loses the file just as thoroughly whether it authored the bytes
+    or moved them. Different premise, different target set, so this extraction
+    is handler-local rather than a widening of shared infrastructure that 22
+    other handlers depend on.
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "command"),
+        [
+            ("curl -o", "curl -sSL https://example.com/x -o /tmp/x.sh"),
+            ("curl --output", "curl https://example.com/x --output /tmp/x.sh"),
+            ("curl --output=", "curl https://example.com/x --output=/tmp/x.sh"),
+            ("wget -O", "wget https://example.com/x -O /tmp/x.sh"),
+            ("tar -cf", "tar -cf /tmp/a.tar src"),
+            ("tar -c -f", "tar -c -f /tmp/a.tar src"),
+            ("mkdir", "mkdir -p /tmp/newdir"),
+            ("rsync", "rsync -a src/ /tmp/dest/"),
+            ("scp", "scp local.txt /tmp/remote.txt"),
+        ],
+    )
+    def test_an_out_of_root_destination_matches(
+        self, handler: ProjectContainmentHandler, label: str, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True, f"{label} reached out-of-root unjudged"
+
+    @pytest.mark.parametrize(
+        ("label", "command"),
+        [
+            ("curl in-repo", "curl https://example.com/x -o /repo/untracked/scratch/x.sh"),
+            ("tar in-repo", "tar -cf /repo/untracked/scratch/a.tar src"),
+            ("mkdir in-repo", "mkdir -p /repo/untracked/scratch/sub"),
+            ("rsync in-repo", "rsync -a src/ /repo/untracked/scratch/"),
+        ],
+    )
+    def test_an_in_repo_destination_does_not_match(
+        self, handler: ProjectContainmentHandler, label: str, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+
+class TestOutputFlagsAreCommandKeyed:
+    """`-o` does not mean "output file" everywhere, and guessing that it does
+    is how a containment guard starts denying reads.
+
+    `grep -o` means only-matching and takes NO argument, so a blind "token
+    after -o" rule would read the PATTERN as a destination. With a pattern
+    like `/tmp/foo` that is a denial of a command that writes nothing at all.
+    """
+
+    def test_grep_only_matching_is_not_a_destination(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        assert handler.matches(_bash("grep -o /tmp/foo somefile.txt")) is False
+
+    def test_sort_output_flag_is_not_assumed(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """An unlisted command's `-o` is left alone rather than guessed at."""
+        assert handler.matches(_bash("somecmd -o /tmp/out.txt")) is False
+
+    def test_tar_without_a_create_flag_is_reading_not_writing(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """`tar -xf /tmp/a.tar` EXTRACTS FROM that path — it is a read."""
+        assert handler.matches(_bash("tar -xf /tmp/a.tar")) is False
+
+
+class TestNestedShells:
+    """A quoted inner command is still a command."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'sh -c "echo hi > /tmp/x"',
+            'bash -c "echo hi > /tmp/x"',
+            "sh -c 'curl https://example.com -o /tmp/x'",
+        ],
+    )
+    def test_a_write_inside_a_nested_shell_matches(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+
+    def test_a_nested_shell_writing_in_repo_does_not_match(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        assert handler.matches(_bash('sh -c "echo hi > /repo/untracked/x"')) is False
+
+    def test_an_interpreter_one_liner_is_out_of_scope(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """Deliberately NOT matched, and asserted so the limit is visible.
+
+        Resolving what `python3 -c` writes means running it, which a PreToolUse
+        hook must never do. The resident guidance states this rather than
+        letting a clean command imply containment.
+        """
+        assert handler.matches(_bash("python3 -c \"open('/tmp/x','w')\"")) is False
+
+
 class TestReadsAreNeverBlocked:
     @pytest.mark.parametrize("tool", ["Read", "Grep", "Glob"])
     def test_a_read_shaped_tool_never_matches(

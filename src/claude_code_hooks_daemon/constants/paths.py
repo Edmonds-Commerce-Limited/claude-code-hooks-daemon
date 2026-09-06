@@ -66,6 +66,34 @@ class ProjectPath:
     # daemon would advise what it then blocks.
     SCRATCH_DIR = f"{DaemonPath.UNTRACKED_DIR}/scratch"
 
+    #: Absolute roots that are wiped between container runs (Plan 00333). The
+    #: `project_containment` handler does not read this -- it is deny-by-default
+    #: and needs no list of bad places. This exists for the Claude Code
+    #: `permissions.deny` BACKSTOP, which cannot express a whitelist: its rules
+    #: evaluate deny before allow with the first match winning, so a broad deny
+    #: cannot carry an allow exception for the project, there is no negation
+    #: syntax, and there is no writes counterpart to
+    #: `blockReadsOutsideWorkingDirectories`. Enumeration is therefore the only
+    #: shape available at that layer, and this constant is what keeps the
+    #: enumeration honest instead of hand-maintained.
+    EPHEMERAL_ROOTS: tuple[str, ...] = ("/tmp", "/var/tmp", "/dev/shm")
+
+    @staticmethod
+    def claude_code_deny_rule(root: str) -> str:
+        """The `permissions.deny` rule denying writes under an absolute root.
+
+        Args:
+            root: Absolute path, e.g. ``/tmp``.
+
+        Returns:
+            A rule such as ``Edit(//tmp/**)``. Three details are load-bearing
+            and none is guessable: the tool is ``Edit`` (``Write`` is not a
+            permission-rule tool name and would match nothing), the leading
+            ``//`` marks an ABSOLUTE path where a single slash would anchor to
+            the settings file's own location, and ``/**`` makes it recursive.
+        """
+        return f"Edit(/{root}/**)"
+
     # Worktree directories
     WORKTREES_DIR = "untracked/worktrees"  # manually managed worktrees
     CLAUDE_WORKTREES_DIR = ".claude/worktrees"  # Claude Code managed worktrees (not configurable)

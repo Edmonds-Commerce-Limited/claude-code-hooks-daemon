@@ -38,7 +38,9 @@ and is pinned by its own tests. Containment is a separate premise, so it gets a
 separate handler rather than weakening an existing one to make room.
 """
 
+import logging
 import os
+import shlex
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -53,7 +55,8 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
-from claude_code_hooks_daemon.core.utils import get_bash_write_targets
+from claude_code_hooks_daemon.core.utils import get_bash_command, get_bash_write_targets
+from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 #: Repo-relative home for scratch, shared with `pipe_blocker` so the handler
 #: that DENIES an out-of-repo write and the handler that RECOMMENDS a capture
@@ -73,6 +76,42 @@ SCRATCH_DIR = ProjectPath.SCRATCH_DIR
 #: path can fail the second while passing the first.
 _CLAUDE_CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 _DEFAULT_CLAUDE_HOME = ".claude"
+
+logger = logging.getLogger(__name__)
+
+#: Commands whose ``-o``-style flag genuinely names an OUTPUT FILE, keyed by
+#: command. Command-keyed rather than a bare flag list because ``-o`` does not
+#: mean "output" everywhere: ``grep -o`` is only-matching and takes no argument
+#: at all, so a blind "token after -o" rule would read grep's PATTERN as a
+#: destination and deny a command that writes nothing. A wrong path is worse
+#: than no path — the same contract ``get_bash_write_targets`` states.
+_OUTPUT_FLAG_COMMANDS: dict[str, frozenset[str]] = {
+    "curl": frozenset({"-o", "--output"}),
+    "wget": frozenset({"-O", "--output-document"}),
+}
+
+#: Commands whose LAST positional argument is the destination.
+_POSITIONAL_DEST_COMMANDS = frozenset({"rsync", "scp"})
+
+#: Commands where EVERY non-flag argument is a path being created.
+_ALL_ARG_DEST_COMMANDS = frozenset({"mkdir"})
+
+#: Shells that take a command string to execute. The quoted inner command is
+#: still a command, so it is re-extracted rather than treated as an opaque
+#: argument — otherwise `sh -c "echo x > /tmp/y"` walks straight through.
+_NESTED_SHELL_COMMANDS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+_NESTED_SHELL_FLAG = "-c"
+_MAX_NESTED_DEPTH = 2
+
+#: `tar` is the awkward one: the same `-f` names the archive whether reading or
+#: writing, so the file is only a DESTINATION when a create flag is present.
+#: `tar -xf /tmp/a.tar` extracts FROM that path and is a read.
+_ARCHIVE_COMMAND = "tar"
+_ARCHIVE_CREATE_FLAGS = frozenset({"-c", "--create"})
+_ARCHIVE_FILE_FLAGS = frozenset({"-f", "--file"})
+
+#: Separators that end one command and begin the next.
+_SEGMENT_SEPARATORS: tuple[str, ...] = ("&&", "||", ";", "|", "\n")
 
 #: Tool inputs that NAME a write target, and the key each uses. ``get_file_path``
 #: covers only Write and Edit, so relying on it alone would leave NotebookEdit
@@ -190,6 +229,140 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         # WRONG path would attribute a write to a file never touched.
         targets.extend(get_bash_write_targets(hook_input))
 
+        # Shapes that accessor deliberately does not resolve. Its premise is
+        # "content this command AUTHORED", which is why Plan 00260 excluded
+        # cp/mv from the content linters: a copy relocates bytes it did not
+        # write, so blaming it would report a defect it did not introduce.
+        # Containment has the opposite premise -- a file lands outside the repo
+        # just as thoroughly whether the command authored it or fetched it --
+        # so the extra destinations are resolved HERE rather than by widening
+        # shared infrastructure that 22 other handlers depend on.
+        command = get_bash_command(hook_input)
+        if command:
+            targets.extend(self._destination_targets(command))
+
+        return targets
+
+    def _destination_targets(self, command: str, depth: int = 0) -> list[str]:
+        """Paths named as a destination by a flag or a positional argument.
+
+        Args:
+            command: The Bash command text.
+            depth: Nested-shell recursion depth, bounded by ``_MAX_NESTED_DEPTH``.
+
+        Returns:
+            Every destination path this command plainly names. Conservative in
+            the same direction as the shared accessor: an unrecognised command
+            yields nothing rather than a guess.
+        """
+        targets: list[str] = []
+
+        for segment in split_unquoted(command, _SEGMENT_SEPARATORS):
+            tokens = self._tokenise(segment)
+            if not tokens:
+                continue
+
+            name = Path(tokens[0]).name
+            arguments = tokens[1:]
+
+            if name in _OUTPUT_FLAG_COMMANDS:
+                targets.extend(self._flag_targets(arguments, _OUTPUT_FLAG_COMMANDS[name]))
+            elif name == _ARCHIVE_COMMAND:
+                targets.extend(self._archive_targets(arguments))
+            elif name in _ALL_ARG_DEST_COMMANDS:
+                targets.extend(argument for argument in arguments if not argument.startswith("-"))
+            elif name in _POSITIONAL_DEST_COMMANDS:
+                positional = [a for a in arguments if not a.startswith("-")]
+                if positional:
+                    targets.append(positional[-1])
+            elif name in _NESTED_SHELL_COMMANDS and depth < _MAX_NESTED_DEPTH:
+                targets.extend(self._nested_shell_targets(arguments, depth))
+
+        return targets
+
+    @staticmethod
+    def _tokenise(segment: str) -> list[str]:
+        """Shell-tokenise a segment, or return nothing when it cannot be read.
+
+        An unbalanced quote raises rather than tokenising. Returning nothing is
+        the conservative answer and matches the accessor's contract: the guard
+        would rather miss a write than invent a path. Logged at debug so the
+        skip is observable instead of silent.
+        """
+        try:
+            return shlex.split(segment)
+        except ValueError as exc:
+            logger.debug("Could not tokenise segment for containment check: %s", exc)
+            return []
+
+    @staticmethod
+    def _flag_targets(arguments: list[str], flags: frozenset[str]) -> list[str]:
+        """Values of ``--flag value`` and ``--flag=value`` output options."""
+        targets: list[str] = []
+        expecting = False
+
+        for argument in arguments:
+            if expecting:
+                targets.append(argument)
+                expecting = False
+                continue
+            if argument in flags:
+                expecting = True
+                continue
+            for flag in flags:
+                if argument.startswith(f"{flag}="):
+                    targets.append(argument[len(flag) + 1 :])
+                    break
+
+        return targets
+
+    @classmethod
+    def _archive_targets(cls, arguments: list[str]) -> list[str]:
+        """The archive path, but only when `tar` is CREATING one.
+
+        Short flags bundle (``-cf out.tar``), so membership is tested per
+        character rather than against the whole token.
+        """
+        creating = any(cls._short_flag_has(a, "c") or a in _ARCHIVE_CREATE_FLAGS for a in arguments)
+        if not creating:
+            return []
+
+        for index, argument in enumerate(arguments):
+            names_file = cls._short_flag_has(argument, "f") or argument in _ARCHIVE_FILE_FLAGS
+            if names_file and index + 1 < len(arguments):
+                return [arguments[index + 1]]
+            if argument.startswith("--file="):
+                return [argument[len("--file=") :]]
+
+        return []
+
+    @staticmethod
+    def _short_flag_has(argument: str, letter: str) -> bool:
+        """Is ``letter`` set in a bundled short-flag token such as ``-czf``?"""
+        return (
+            argument.startswith("-")
+            and not argument.startswith("--")
+            and letter in argument[1:]
+        )
+
+    def _nested_shell_targets(self, arguments: list[str], depth: int) -> list[str]:
+        """Re-extract from a shell's ``-c`` command string.
+
+        The inner string is a command, not an opaque argument, so it gets both
+        the shared accessor (for redirects and cp/mv) and this extractor again.
+        """
+        if _NESTED_SHELL_FLAG not in arguments:
+            return []
+
+        index = arguments.index(_NESTED_SHELL_FLAG)
+        if index + 1 >= len(arguments):
+            return []
+
+        inner = arguments[index + 1]
+        targets = list(
+            get_bash_write_targets({"tool_name": ToolName.BASH, "tool_input": {"command": inner}})
+        )
+        targets.extend(self._destination_targets(inner, depth + 1))
         return targets
 
     @staticmethod
@@ -266,18 +439,23 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         return (
             "## project_containment — nothing is written outside the repository\n\n"
             "A `Write`, `Edit` or `NotebookEdit` whose `file_path` is outside the "
-            "repository root is **blocked**, and so is a Bash command that plainly "
-            "names an out-of-root write target: `>`, `>>`, `tee`, a heredoc, or a "
-            "`cp`/`mv`/`install`/`dd` destination.\n\n"
-            "**That Bash list is exhaustive, not illustrative.** `rsync`, `tar`, "
-            "`curl -o` and `mkdir` targets are NOT resolved today, and a nested "
-            "`sh -c \"... > /tmp/x\"` or an interpreter one-liner "
-            "(`python3 -c \"open('/tmp/x','w')\"`) cannot be — resolving those "
-            "needs executing the command, which a PreToolUse hook must never do. "
-            "So a clean Bash command is not evidence the write stayed in the repo; "
-            "it is only evidence that no *recognised* shape named a path outside "
-            "it. Put scratch in the right place because it belongs there, not "
-            "because you were stopped.\n\n"
+            "repository root is **blocked**, and so is a Bash command that names an "
+            "out-of-root destination:\n\n"
+            "- redirects and pipes: `>`, `>>`, `tee`\n"
+            "- a heredoc target\n"
+            "- `cp` / `mv` / `install` / `dd` destinations\n"
+            "- `curl -o|--output`, `wget -O|--output-document`\n"
+            "- `tar` creating an archive (`-cf`), `mkdir`, `rsync`/`scp` destinations\n"
+            "- any of the above inside a nested `sh -c \"...\"` / `bash -c \"...\"`\n\n"
+            "**That list is exhaustive, not illustrative — and one gap remains.** An "
+            "interpreter one-liner (`python3 -c \"open('/tmp/x','w')\"`) is NOT "
+            "caught and cannot be: resolving what it writes means running it, which "
+            "a PreToolUse hook must never do. So a clean Bash command is not "
+            "evidence the write stayed in the repo; it is evidence that no "
+            "*recognised* shape named a path outside it. Put scratch in the right "
+            "place because it belongs there, not because you were stopped.\n\n"
+            "An output flag is read per COMMAND, never generically: `grep -o` is "
+            "only-matching and names no file, so it is untouched.\n\n"
             f"**Write scratch to `{SCRATCH_DIR}/`**: inside the working tree so it "
             "survives a container restart, and gitignored so it never reaches review. "
             "A container's temp directory has neither property — work written there "

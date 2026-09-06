@@ -97,14 +97,15 @@ does not exist.
   (7 snippets across the debugging, QA, install and update guides).
 - [ ] 🔄 **Task 4.4**: Migrate the acceptance-test corpus off `/tmp` — ~21 handler
   modules whose `AcceptanceTest` commands the guard would now intercept.
-- [ ] ⬜ **Task 4.5**: Widen `get_bash_write_targets` to resolve `rsync`, `tar`,
-  `curl -o` and `mkdir` targets. Measured gap (see JOURNAL 15:45): those four
-  reach an out-of-root path unjudged today. Held back deliberately — the
-  accessor is shared infrastructure with 22 dependent handlers and a documented
-  conservative contract, so widening it is its own change with its own blast
-  radius, not a footnote to this one. `sh -c` and interpreter one-liners are
-  NOT in scope: resolving them needs execution, which a PreToolUse accessor
-  must never do.
+- [x] ✅ **Task 4.5**: Catch destination-naming bashisms — `curl -o|--output`,
+  `wget -O`, `tar` creating an archive, `mkdir`, `rsync`/`scp`, and any of them
+  nested inside `sh -c`/`bash -c`. Handler-local rather than a widened shared
+  accessor (Decision 7), command-keyed rather than generic (Decision 8).
+  Interpreter one-liners remain out of scope: resolving them needs execution,
+  which a PreToolUse hook must never do.
+- [x] ✅ **Task 4.6**: Pin the Claude Code `permissions.deny` backstop to
+  `ProjectPath.EPHEMERAL_ROOTS` by test, in both directions, so the two layers
+  cannot drift (Decision 9).
 
 ### Phase 5: Verify
 
@@ -154,15 +155,40 @@ untracked auto-memory: containment asks whether a path is DURABLE, that rule
 asks whether it is REVIEWABLE, and memory fails the second while passing the
 first. Configurable off for an environment that does not map it durably.
 
-### Decision 7: the accessor is not widened as a side-effect
+### Decision 7: destination extraction is handler-local, not a widened accessor
 
-`get_bash_write_targets` resolves `>`, `>>`, `tee`, heredocs and
-`cp`/`mv`/`install`/`dd`, but not `rsync`, `tar`, `curl -o` or `mkdir` (Task
-4.5). Closing those means editing shared infrastructure with a documented
-conservative contract and 22 dependent handlers — a change with its own blast
-radius, not a footnote to this one. The limit is DECLARED in the resident
-guidance instead, because the failure this repo has already paid for is the
-false claim of coverage, not the missing check.
+`get_bash_write_targets` answers "what content did this command AUTHOR", which
+is why Plan 00260 excluded `cp`/`mv` from the content linters: a copy relocates
+bytes it did not write, so blaming it would report a defect it did not
+introduce. Containment asks a different question — a file lands outside the
+repository just as thoroughly whether the command authored it or fetched it.
+
+Two different premises want two different target sets, so the extra
+destinations (`curl -o`, `wget -O`, `tar -cf`, `mkdir`, `rsync`/`scp`, nested
+`sh -c`) are resolved in the handler. Widening the shared accessor to serve
+containment would have changed the verdicts of 22 dependent handlers — a
+linter would start firing on `curl -o x.py`, a file it did not author, which is
+precisely the mistake Plan 00260 documented.
+
+### Decision 8: output flags are command-keyed, never generic
+
+`-o` does not mean "output file" everywhere. `grep -o` is only-matching and
+takes no argument, so a blind "token after `-o`" rule reads grep's PATTERN as a
+destination and denies a command that writes nothing. Likewise `tar -xf`
+extracts FROM a path and is a read; only a create flag makes the archive a
+destination. Same contract as the shared accessor: a wrong path is worse than
+no path.
+
+### Decision 9: the Claude Code layer is a backstop, not a second whitelist
+
+Verified against the official documentation: a write-whitelist is **not
+expressible** in Claude Code settings. Rules evaluate deny → ask → allow with
+the first match winning, so a broad `Edit(//**)` deny cannot carry an allow
+exception for the project; there is no negation syntax; and there is no writes
+counterpart to `blockReadsOutsideWorkingDirectories`. Enumeration is the only
+available shape there, which is exactly why the daemon handler — deny-by-default
+and whitelist-shaped — remains the control. The enumeration is pinned to
+`ProjectPath.EPHEMERAL_ROOTS` by test so the two layers cannot drift.
 
 ## Success Criteria
 
