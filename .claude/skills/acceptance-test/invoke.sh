@@ -58,14 +58,14 @@ case "${FILTER}" in
 esac
 
 # Generate JSON playbook
-./bin/hooks-daemon generate-playbook --format json \$FILTER_TYPE \$FILTER_HANDLER > /tmp/acceptance_tests.json
+./bin/hooks-daemon generate-playbook --format json \$FILTER_TYPE \$FILTER_HANDLER > untracked/scratch/acceptance_tests.json
 \`\`\`
 
 **Expected**: Valid JSON array of test objects
 
 Verify JSON is valid and count tests:
 \`\`\`bash
-TOTAL_TESTS=\$(python3 -c "import json; print(len(json.load(open('/tmp/acceptance_tests.json'))))")
+TOTAL_TESTS=\$(python3 -c "import json; print(len(json.load(open('untracked/scratch/acceptance_tests.json'))))")
 echo "Total tests: \$TOTAL_TESTS"
 \`\`\`
 
@@ -77,7 +77,7 @@ echo "Total tests: \$TOTAL_TESTS"
 
 ### Read the playbook
 \`\`\`bash
-cat /tmp/acceptance_tests.json
+cat untracked/scratch/acceptance_tests.json
 \`\`\`
 
 ### For each test, follow this pattern:
@@ -171,7 +171,7 @@ Enter FAIL-FAST cycle: TDD fix -> QA -> restart -> retest ALL from beginning.
 
 After reporting results:
 \`\`\`bash
-rm -f /tmp/acceptance_tests.json
+rm -f untracked/scratch/acceptance_tests.json
 \`\`\`
 
 ---
