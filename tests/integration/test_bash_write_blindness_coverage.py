@@ -90,6 +90,14 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "vocabulary reaching disk via heredoc body is not scanned. Advisory "
         "only -- the resident guidance names the routes it covers",
     ),
+    "ProjectContainmentHandler": (
+        _COVERED,
+        "reads get_bash_write_targets alongside the Write/Edit/NotebookEdit "
+        "path, so a redirect, tee, heredoc or cp destination outside the repo "
+        "is judged by the same rule as the Write tool; the accessor's own "
+        "conservatism bounds it, and a target needing shell expansion yields "
+        "no path rather than a guessed one",
+    ),
     "AbsolutePathHandler": (
         _OUT_OF_FRAME,
         "premise is about a TOOL ARGUMENT being absolute, not a file on disk; "

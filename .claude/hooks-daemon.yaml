@@ -312,6 +312,17 @@ handlers:
       enabled: true
       priority: 15
 
+    project_containment:   # Nothing is written outside the repository root
+      enabled: true
+      priority: 14
+      options:
+        # Empty on purpose (Plan 00333): a declared exemption is a decision,
+        # an assumed one is a hole. Scratch belongs in untracked/scratch/.
+        allowed_external_paths: []
+        # ccy maps the Claude home back into the bind mount, so it is durable
+        # here — the reason /tmp is refused does not apply to it.
+        allow_claude_home: true
+
     curl_pipe_shell:       # Blocks dangerous curl | sh patterns
       enabled: true
       priority: 16

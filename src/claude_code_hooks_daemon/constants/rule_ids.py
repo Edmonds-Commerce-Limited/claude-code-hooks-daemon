@@ -226,6 +226,15 @@ class RuleID:
     WORKTREE_FILE_COPY: str = "R-WORKTREE-FILE-COPY"
 
     # ------------------------------------------------------------------
+    # project_containment handler
+    # ------------------------------------------------------------------
+
+    #: A write whose target is named outside the repository root. Every other
+    #: path rule is expressed in repo-relative coordinates, so such a target
+    #: escapes them all rather than violating any one of them.
+    WRITE_OUTSIDE_PROJECT_ROOT: str = "R-WRITE-OUTSIDE-PROJECT-ROOT"
+
+    # ------------------------------------------------------------------
     # plan_number_helper handler — 2 rules
     # ------------------------------------------------------------------
 

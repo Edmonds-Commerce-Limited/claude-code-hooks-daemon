@@ -927,6 +927,49 @@ handlers:
 
 ---
 
+#### project_containment
+
+| Property       | Value                 |
+| -------------- | --------------------- |
+| **Config key** | `project_containment` |
+| **Priority**   | 14                    |
+| **Type**       | Blocking              |
+| **Event**      | PreToolUse            |
+
+**Description:** Denies a write whose target is named outside the repository root, on both the `Write`/`Edit`/`NotebookEdit` surface and the Bash surface (`>`, `>>`, `tee`, a heredoc, or a `cp`/`mv` destination). Every other path rule in the daemon is expressed in repo-relative coordinates, so an out-of-root path escapes all of them at once rather than violating any one of them. Outside the repository nothing is version-controlled, reviewed or durable — a container's temp directory is wiped on restart.
+
+**Not covered, deliberately:** reading any path; a temp file a program creates for itself at runtime (pytest's `tmp_path`, a package manager's build directory), because a PreToolUse hook receives a command string rather than syscalls; and a target the daemon cannot resolve without executing the command (`> "$OUT"`), which yields no path rather than a guessed one.
+
+**Claude Code's own state directory is allowed** (`$CLAUDE_CONFIG_DIR`, else `~/.claude`) — it is not scratch, and where it is mapped into the bind mount it has the durability this rule protects. Set `allow_claude_home: false` in an environment that does not map it durably. This is independent of `markdown_organization`'s block on `~/.claude/projects/*/memory/*.md`: containment asks whether a path is durable, the memory rule asks whether it is reviewable, and a path can fail the second while passing the first.
+
+**Sanctioned location:** `untracked/scratch/` — inside the working tree so it survives a container restart, and gitignored so it never reaches review.
+
+**Example trigger:**
+
+```
+Write tool targeting /tmp/notes.md
+```
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    project_containment:
+      enabled: true
+      priority: 14
+      options:
+        # mode: replace — absolute paths outside the repo a write may target.
+        # Empty by default: a declared exemption is a decision, an assumed one
+        # is a hole.
+        allowed_external_paths: []
+        # Allow writes to Claude Code's own state directory. Set false where
+        # that directory is not mapped durably.
+        allow_claude_home: true
+```
+
+---
+
 #### lock_file_edit_blocker
 
 | Property       | Value                    |
@@ -3592,6 +3635,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `daemon_location_guard`        | PreToolUse        | 11       | cd into .claude/hooks-daemon/                                        |
 | `absolute_path`                | PreToolUse        | 12       | Relative paths in Read/Write/Edit                                    |
 | `error_hiding_blocker`         | PreToolUse        | 13       | Code that silently swallows errors                                   |
+| `project_containment`          | PreToolUse        | 14       | Writes whose target is named outside the repository root             |
 | `security_antipattern`         | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds) |
 | `artifact_publish_blocker`     | PreToolUse        | 14       | Publishing an artefact (a claude.ai URL outside the project)         |
 | `write_clobber_guard`          | PreToolUse        | 16       | Write to an existing file not read this session                      |

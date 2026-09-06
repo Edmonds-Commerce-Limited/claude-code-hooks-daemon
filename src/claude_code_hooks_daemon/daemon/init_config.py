@@ -156,6 +156,9 @@ class ConfigTemplate:
             "    root_recursion_guard: {enabled: true, priority: 16}  # Block recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME\n"
             "    pipe_blocker: {enabled: true, priority: 15}      # Block dangerous pipe patterns\n"
             "    worktree_file_copy: {enabled: true, priority: 15}  # Prevent worktree file copies\n"
+            # Plan 00333: an out-of-root path escapes every other path rule at
+            # once, because they are all expressed in repo-relative coordinates.
+            "    project_containment: {enabled: true, priority: 14}  # No writes outside the repo\n"
             "    dangerous_permissions: {enabled: true, priority: 15}  # Block chmod 777, chown root\n"
             "    git_stash: {enabled: true, priority: 20}         # Warn about git stash\n"
             # On by default (Plan 00275): "Fixes #123" auto-closes the issue on

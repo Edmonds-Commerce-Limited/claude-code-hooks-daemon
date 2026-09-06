@@ -170,6 +170,19 @@ handlers:
       enabled: true
       priority: 16
 
+    project_containment:   # Nothing is written outside the repository root
+      enabled: true
+      priority: 14
+      options:
+        # Absolute paths outside the repo that a write may still target.
+        # Empty by default: a declared exemption is a decision, an assumed
+        # one is a hole. Scratch belongs in untracked/scratch/ instead.
+        allowed_external_paths: []
+        # Claude Code's own state directory ($CLAUDE_CONFIG_DIR, else
+        # ~/.claude). Allowed by default -- it is not scratch, and where it is
+        # mapped into a bind mount it is durable. Set false if yours is not.
+        allow_claude_home: true
+
     # CODE QUALITY HANDLERS (Priority 25-45) - Optional but recommended
     qa_suppression:        # Unified multi-language QA suppression blocker (11 languages)
       enabled: false       # Enable for strict code quality control

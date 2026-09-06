@@ -149,6 +149,11 @@ class HandlerID:
         config_key="worktree_file_copy",
         display_name="prevent-worktree-file-copying",
     )
+    PROJECT_CONTAINMENT = HandlerIDMeta(
+        class_name="ProjectContainmentHandler",
+        config_key="project_containment",
+        display_name="enforce-project-containment",
+    )
     WORKTREE_CREATE = HandlerIDMeta(
         class_name="WorktreeCreateHandler",
         config_key="worktree_create",

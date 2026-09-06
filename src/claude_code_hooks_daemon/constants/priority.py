@@ -76,6 +76,12 @@ class Priority:
     # since all four in this band match disjoint hazards.
     FLAGGABLE_CONTENT_CHANNEL_GUARD = 14
     QUARANTINE_ARTEFACT_READ_GUARD = 14
+    # Plan 00333: same band, same premise as the four above -- content leaving
+    # the project, judged by path rather than by workflow preference. It must
+    # also precede every repo-relative path rule (markdown_organization is 35),
+    # because for an out-of-root target those rules have nothing to say: the
+    # path left the coordinate system they are defined in.
+    PROJECT_CONTAINMENT = 14
 
     ROOT_RECURSION_GUARD = 16
     # Runs after the blocking safety handlers on purpose: a Read they DENY never
