@@ -46,7 +46,7 @@ _CONFIG_HINT_HANDLER = "handlers.pre_tool_use.error_hiding_blocker"
 # concept -- the language dimension lives in the strategy registry.
 _ERROR_HIDING_RULE = Rule(
     rule_id=RuleID.ERROR_HIDING,
-    blocked="an error-hiding pattern (bare except, || true, empty catch, _ = err, ...)",
+    blocked="an error-hiding pattern (bare except, || true, empty catch, result, _ := ..., ...)",
     why="Silent failure makes bugs invisible, delays diagnosis, and corrupts state",
     fix="Handle the error explicitly: log it, return it, or propagate it",
     verbose=(
