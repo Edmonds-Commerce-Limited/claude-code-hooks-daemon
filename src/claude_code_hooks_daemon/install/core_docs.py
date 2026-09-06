@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
@@ -67,18 +68,20 @@ logger = logging.getLogger(__name__)
 _TEMPLATES_DIR_NAME: Final[str] = "templates"
 _CORE_TEMPLATES_DIR_NAME: Final[str] = "core"
 
-#: Where core documents land in a project, relative to its root. A sibling
-#: directory rather than a filename convention, so ``ls CLAUDE/`` visibly
-#: separates "ours to edit" from "the daemon's, do not touch".
-CORE_DOCS_DIR: Final[str] = "CLAUDE/core"
-
-#: Where the client-owned override documents land.
+#: Default agent-facing docs directory -- the value every caller gets unless it
+#: passes the project's configured one. It is a DEFAULT, not a fixed location:
+#: see :func:`deploy_core_docs` for why hardcoding it was a defect.
 PROJECT_DOCS_DIR: Final[str] = "CLAUDE"
 
-#: ``CORE_DOCS_DIR`` relative to an override document's own location. The
-#: override sits in ``CLAUDE/`` and its core in ``CLAUDE/core/``, so a link
-#: between them is one segment, not the full path.
+#: Core documents live in a sibling directory rather than behind a filename
+#: convention, so ``ls`` on the docs tree visibly separates "ours to edit" from
+#: "the daemon's, do not touch".
 _CORE_DIR_BASENAME: Final[str] = _CORE_TEMPLATES_DIR_NAME
+
+#: Where core documents land under the DEFAULT docs directory. A convenience
+#: for the common case only -- code that honours a project's configuration must
+#: compose the path from the docs dir it was given, not read this.
+CORE_DOCS_DIR: Final[str] = f"{PROJECT_DOCS_DIR}/{_CORE_DIR_BASENAME}"
 
 #: Suffix marking a daemon-owned core document.
 CORE_SUFFIX: Final[str] = ".core.md"
@@ -108,6 +111,7 @@ _DIR_MODE: Final[int] = 0o755
 CORE_DOC_NAMES: Final[tuple[str, ...]] = (
     "PlanWorkflow",
     "Worktree",
+    "DocumentationStrategy",
 )
 
 
@@ -135,7 +139,7 @@ def core_template_path(name: str) -> Path:
     )
 
 
-def core_reference_line(name: str) -> str:
+def core_reference_line(name: str, docs_dir: str = PROJECT_DOCS_DIR) -> str:
     """The line a project's override document uses to point at its core.
 
     A plain markdown link, NOT an ``@``-import, and the distinction was
@@ -156,15 +160,22 @@ def core_reference_line(name: str) -> str:
     referencing its core -- an unverified convention being indistinguishable
     from a broken one until someone reads the file.
 
-    The link is relative to the override document's own location
-    (``CLAUDE/X.md`` -> ``core/X.core.md``), which R6 permits as a
+    The link TARGET is relative to the override document's own location
+    (``<docs>/X.md`` -> ``core/X.core.md``), which R6 permits as a
     verified-relative link and which resolves in a client project regardless
-    of where its repository sits.
+    of where its repository sits, and regardless of which directory the
+    project's docs tree is. Only the human-readable LABEL spells the tree out,
+    which is why ``docs_dir`` is threaded here rather than read from the
+    default: a label naming ``CLAUDE/`` in a project that uses ``docs/agent/``
+    sends the reader to a directory that does not exist.
     """
-    return f"[{CORE_DOCS_DIR}/{name}{CORE_SUFFIX}]({_CORE_DIR_BASENAME}/{name}{CORE_SUFFIX})"
+    return (
+        f"[{docs_dir}/{_CORE_DIR_BASENAME}/{name}{CORE_SUFFIX}]"
+        f"({_CORE_DIR_BASENAME}/{name}{CORE_SUFFIX})"
+    )
 
 
-def override_seed_content(name: str) -> str:
+def override_seed_content(name: str, docs_dir: str = PROJECT_DOCS_DIR) -> str:
     """Initial body for a project's own (client-owned) document.
 
     Deliberately almost empty. It exists to make the core document reachable
@@ -174,7 +185,7 @@ def override_seed_content(name: str) -> str:
     return (
         f"# {name}\n"
         "\n"
-        f"**Read first:** {core_reference_line(name)} — the daemon's core\n"
+        f"**Read first:** {core_reference_line(name, docs_dir)} — the daemon's core\n"
         "guidance for this subject, and the baseline everything below extends.\n"
         "\n"
         f"That file is DAEMON-owned: it is overwritten wholesale on every\n"
@@ -189,26 +200,51 @@ def override_seed_content(name: str) -> str:
     )
 
 
-def deploy_core_docs(project_root: Path) -> CoreDocsResult:
+def deploy_core_docs(
+    project_root: Path,
+    docs_dir: str = PROJECT_DOCS_DIR,
+    override_filenames: Mapping[str, str] | None = None,
+) -> CoreDocsResult:
     """Refresh daemon-owned core documents and seed client-owned overrides.
 
     Idempotent, and safe on every install and upgrade: core documents are
     overwritten unconditionally, override documents are created only when
     absent.
 
+    ``docs_dir`` and ``override_filenames`` both exist for one reason: the
+    document must land where the project's configuration POINTS. Deploying to a
+    fixed ``CLAUDE/PlanWorkflow.md`` while ``plan_workflow.workflow_docs`` names
+    something else recreates the defect this module was written to fix, with an
+    extra step -- the file exists, just never where the reader was sent. It also
+    scatters markdown into a directory ``markdown_organization`` would refuse a
+    write to, since that handler derives the allowed agent tree from the same
+    configuration.
+
+    The precedent is ``bootstrap_plan_workflow``'s ``plan_dir_name``, whose
+    docstring says it MUST be passed the configured value "so the bootstrap
+    honours a project that tracks plans elsewhere (single source of truth)". A
+    second hardcoded directory is how the two drift apart.
+
     Args:
         project_root: Absolute path to the project root.
+        docs_dir: Agent-facing docs directory, relative to ``project_root``.
+            Callers that have the project's config MUST pass the configured
+            value; the default is for callers that genuinely have none.
+        override_filenames: Per-document override filename, keyed by core-doc
+            name, for a project that has renamed one. Only documents with a
+            config key of their own can be renamed knowingly, so an absent
+            entry means the canonical ``<name>.md``.
 
     Returns:
         CoreDocsResult naming what was refreshed and what was seeded.
     """
     result = CoreDocsResult()
 
-    core_dir = project_root / CORE_DOCS_DIR
-    docs_dir = project_root / PROJECT_DOCS_DIR
-    core_dir.mkdir(parents=True, exist_ok=True)
-    docs_dir.mkdir(parents=True, exist_ok=True)
-    core_dir.chmod(_DIR_MODE)
+    docs_path = project_root / docs_dir
+    core_path = docs_path / _CORE_DIR_BASENAME
+    core_path.mkdir(parents=True, exist_ok=True)
+    docs_path.mkdir(parents=True, exist_ok=True)
+    core_path.chmod(_DIR_MODE)
 
     for name in CORE_DOC_NAMES:
         template = core_template_path(name)
@@ -228,13 +264,21 @@ def deploy_core_docs(project_root: Path) -> CoreDocsResult:
             logger.error("Core doc template not found: %s", template)
             continue
 
-        _refresh_core_doc(template, core_dir, name, result)
-        _seed_override_doc(docs_dir, name, result)
+        _refresh_core_doc(template, core_path, name, docs_dir, result)
+        _seed_override_doc(
+            docs_path,
+            name,
+            docs_dir,
+            (override_filenames or {}).get(name, f"{name}.md"),
+            result,
+        )
 
     return result
 
 
-def _refresh_core_doc(template: Path, core_dir: Path, name: str, result: CoreDocsResult) -> None:
+def _refresh_core_doc(
+    template: Path, core_dir: Path, name: str, docs_dir: str, result: CoreDocsResult
+) -> None:
     """Copy the bundled core document over any existing one.
 
     Daemon-owned, so this overwrites without asking -- the same contract as
@@ -245,22 +289,26 @@ def _refresh_core_doc(template: Path, core_dir: Path, name: str, result: CoreDoc
     shutil.copy2(template, target)
     target.chmod(_DOC_MODE)
     result.refreshed_core.append(target.name)
-    result.messages.append(f"Refreshed {CORE_DOCS_DIR}/{target.name} (daemon-owned)")
+    result.messages.append(
+        f"Refreshed {docs_dir}/{_CORE_DIR_BASENAME}/{target.name} (daemon-owned)"
+    )
 
 
-def _seed_override_doc(docs_dir: Path, name: str, result: CoreDocsResult) -> None:
+def _seed_override_doc(
+    docs_path: Path, name: str, docs_dir: str, filename: str, result: CoreDocsResult
+) -> None:
     """Create the project's own document, only when it does not exist.
 
     Client-owned. An existing file is left completely alone -- including one a
     project wrote itself before the daemon ever shipped a core version, which
     is the case that makes an unconditional write unacceptable.
     """
-    target = docs_dir / f"{name}.md"
+    target = docs_path / filename
     if target.exists():
-        result.messages.append(f"{PROJECT_DOCS_DIR}/{target.name} already exists (kept)")
+        result.messages.append(f"{docs_dir}/{target.name} already exists (kept)")
         return
 
-    target.write_text(override_seed_content(name), encoding="utf-8")
+    target.write_text(override_seed_content(name, docs_dir), encoding="utf-8")
     target.chmod(_DOC_MODE)
     result.seeded_overrides.append(target.name)
-    result.messages.append(f"Created {PROJECT_DOCS_DIR}/{target.name} (yours -- customise freely)")
+    result.messages.append(f"Created {docs_dir}/{target.name} (yours -- customise freely)")

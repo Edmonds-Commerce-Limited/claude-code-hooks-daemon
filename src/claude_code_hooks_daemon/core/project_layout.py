@@ -78,6 +78,7 @@ _DEFAULT_HUMAN_DOCS_DIR: Final[str] = "docs"
 #: which is the opposite of verbatim capture, and rule globs cannot be negated.
 _DEFAULT_REMOTE_DOCS_DIR: Final[str] = "remote-docs"
 _DEFAULT_PLAN_DIR: Final[str] = "CLAUDE/Plan"
+_DEFAULT_WORKFLOW_DOCS: Final[str] = "CLAUDE/PlanWorkflow.md"
 _DEFAULT_PLAN_ARCHIVE_DIRS: Final[tuple[str, ...]] = ("Completed",)
 
 
@@ -183,6 +184,8 @@ class ProjectLayout:
         plan_dir: The configured plan directory (``plan_workflow.directory``)
         plan_archive_dirs: Configured plan archive directory names
             (``plan_workflow.qa.completed_dir``/``cancelled_dir``, deduped)
+        workflow_docs: The configured plan-workflow document
+            (``plan_workflow.workflow_docs``) — a FILE, not a directory
     """
 
     source_dirs: tuple[str, ...]
@@ -209,6 +212,15 @@ class ProjectLayout:
     #: SPECIFIC thing the project owns, of which there is exactly one, so it
     #: is a repo-relative path and a bare basename does NOT match at depth.
     vendor_exceptions: tuple[str, ...] = ()
+    #: The configured plan-workflow document (``plan_workflow.workflow_docs``).
+    #: Defaulted and last for the same additive reason as the two axes above.
+    #:
+    #: A FILE rather than a directory, unlike every other axis here, because
+    #: that is what the config names and what handler guidance quotes to the
+    #: agent. Plan 00334 deploys the document to exactly this path, so a
+    #: handler that hardcodes ``CLAUDE/PlanWorkflow.md`` instead sends the
+    #: reader somewhere the daemon did not put it.
+    workflow_docs: str = _DEFAULT_WORKFLOW_DOCS
 
     def is_source_path(self, rel_path: str) -> bool:
         """True when ``rel_path`` has a declared/built-in source dir component."""
@@ -295,8 +307,9 @@ class ProjectLayout:
         declares none) -- deliberately never from `doc_axes`' own declared
         lists, so one project's layout can never leak into a sibling's. The
         doc/plan axes (`agent_docs_dir`, `human_docs_dir`, `plan_dir`,
-        `plan_archive_dirs`) are not yet a per-project concept and are reused
-        from `doc_axes` (ordinarily the registry's `root_layout`).
+        `plan_archive_dirs`, `workflow_docs`) are not yet a per-project concept
+        and are reused from `doc_axes` (ordinarily the registry's
+        `root_layout`).
 
         Args:
             layout_config: This project's own `layout:` block, or None.
@@ -316,6 +329,7 @@ class ProjectLayout:
             remote_docs_dir=doc_axes.remote_docs_dir,
             plan_dir=doc_axes.plan_dir,
             plan_archive_dirs=doc_axes.plan_archive_dirs,
+            workflow_docs=doc_axes.workflow_docs,
         )
 
     @classmethod
@@ -345,6 +359,7 @@ class ProjectLayout:
             remote_docs_dir=config.documentation.trees.remote,
             plan_dir=config.plan_workflow.directory,
             plan_archive_dirs=archive_dirs,
+            workflow_docs=config.plan_workflow.workflow_docs,
         )
 
 

@@ -33,7 +33,10 @@ from claude_code_hooks_daemon.install.core_docs import (
     core_reference_line,
     core_template_path,
 )
-from claude_code_hooks_daemon.install.plan_workflow import bootstrap_plan_workflow
+from claude_code_hooks_daemon.install.plan_workflow import (
+    bootstrap_plan_workflow,
+    deploy_plan_workflow_if_enabled,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -44,6 +47,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _GUIDANCE_NAMED_DOCS: tuple[tuple[str, str], ...] = (
     ("CLAUDE/PlanWorkflow.md", "handlers/pre_tool_use/plan_workflow.py"),
     ("CLAUDE/Worktree.md", "handlers/pre_tool_use/worktree_file_copy.py"),
+    # Named in a runtime FINDING message, unguarded -- the reader is sent
+    # there at the moment a check fires, which is the worst moment for the
+    # path to resolve to nothing. The docs_qa engine enforces R1-R13 in every
+    # client, so the ruleset had to become something a client actually holds.
+    ("CLAUDE/DocumentationStrategy.md", "docs_qa/checks/rules_file_shape.py"),
 )
 
 
@@ -110,6 +118,116 @@ class TestNamedClientDocsAreEnsured:
             "path creates it. Either deploy the document or guard the "
             "reference with an existence check, as plan_number_helper does."
         )
+
+
+class TestTheDeployFollowsTheConfiguredPath:
+    """The document must land where the config POINTS, not at a fixed path.
+
+    ``workflow_docs`` is the string the handler quotes to the agent, and it is
+    per-project configuration -- a project whose agent-facing doc tree is not
+    ``CLAUDE/`` sets it accordingly. Deploying to a hardcoded ``CLAUDE/`` while
+    guidance names the configured path recreates the original defect with an
+    extra step: the file exists, just never where the reader was sent.
+
+    The precedent is one line away in the same function. ``plan_dir_name`` is
+    threaded through ``bootstrap_plan_workflow`` as a parameter whose docstring
+    says it MUST be passed the configured value "so the bootstrap honours a
+    project that tracks plans elsewhere (single source of truth)". A core
+    document is no different, and a second hardcoded directory is how the two
+    drift apart.
+    """
+
+    @staticmethod
+    def _write_config(project_root: Path, workflow_docs: str) -> Path:
+        config_path = project_root / "hooks-daemon.yaml"
+        config_path.write_text(
+            "plan_workflow:\n"
+            "  enabled: true\n"
+            "  directory: docs/agent/Plan\n"
+            f"  workflow_docs: {workflow_docs}\n",
+            encoding="utf-8",
+        )
+        return config_path
+
+    def test_the_document_lands_where_workflow_docs_points(self, tmp_path: Path) -> None:
+        config_path = self._write_config(tmp_path, "docs/agent/PlanWorkflow.md")
+
+        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+
+        assert (tmp_path / "docs/agent/PlanWorkflow.md").is_file(), (
+            "the deploy wrote the workflow document to a hardcoded CLAUDE/ "
+            "while plan_workflow.workflow_docs names docs/agent/. The handler "
+            "quotes the CONFIGURED path to the agent, so the document exists "
+            "somewhere the reader is never sent -- the original defect, one "
+            "step removed."
+        )
+
+    def test_the_core_lands_beside_it(self, tmp_path: Path) -> None:
+        """The override's link to its core is relative (``core/X.core.md``),
+        so a core deployed to a different tree leaves that link dangling."""
+        config_path = self._write_config(tmp_path, "docs/agent/PlanWorkflow.md")
+
+        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+
+        assert (tmp_path / "docs/agent/core/PlanWorkflow.core.md").is_file()
+
+    def test_nothing_is_written_to_the_default_tree(self, tmp_path: Path) -> None:
+        """A project that moved its doc tree should not also acquire a stray
+        ``CLAUDE/`` -- ``markdown_organization`` derives the allowed agent tree
+        from the same configuration, so files there are in a location the
+        daemon's own handler would refuse a write to."""
+        config_path = self._write_config(tmp_path, "docs/agent/PlanWorkflow.md")
+
+        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+
+        assert not (tmp_path / "CLAUDE" / "PlanWorkflow.md").exists()
+        assert not (tmp_path / "CLAUDE" / "core").exists()
+
+    def test_a_renamed_document_is_still_deployed(self, tmp_path: Path) -> None:
+        """``workflow_docs`` configures a FILE, not just a directory.
+
+        Honouring only the directory would deploy ``PlanWorkflow.md`` beside a
+        config naming ``Planning.md`` — the promise still unkept, just harder
+        to spot. This is the one core document a project can knowingly rename,
+        because it is the only one with a config key of its own.
+        """
+        config_path = self._write_config(tmp_path, "docs/agent/Planning.md")
+
+        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+
+        assert (tmp_path / "docs/agent/Planning.md").is_file()
+
+    def test_a_renamed_document_still_points_at_its_core(self, tmp_path: Path) -> None:
+        """Renaming the override must not orphan it from the core it extends;
+        the core keeps its canonical name, so the link has to survive."""
+        config_path = self._write_config(tmp_path, "docs/agent/Planning.md")
+
+        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+
+        text = (tmp_path / "docs/agent/Planning.md").read_text(encoding="utf-8")
+
+        assert core_reference_line("PlanWorkflow", "docs/agent") in text
+
+    def test_a_top_level_document_lands_at_the_project_root(self, tmp_path: Path) -> None:
+        """A bare filename has no directory part. ``PurePosixPath.parent`` is
+        ``.`` there, which must join back to the project root rather than
+        creating a literal ``./`` directory or raising."""
+        config_path = self._write_config(tmp_path, "PlanWorkflow.md")
+
+        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+
+        assert (tmp_path / "PlanWorkflow.md").is_file()
+        assert (tmp_path / "core" / "PlanWorkflow.core.md").is_file()
+
+    def test_the_default_is_unchanged(self, tmp_path: Path) -> None:
+        """The overwhelmingly common case must keep working untouched."""
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text("plan_workflow:\n  enabled: true\n", encoding="utf-8")
+
+        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+
+        assert (tmp_path / "CLAUDE" / "PlanWorkflow.md").is_file()
+        assert (tmp_path / "CLAUDE" / "core" / "PlanWorkflow.core.md").is_file()
 
 
 class TestThisRepoConsumesWhatItShips:

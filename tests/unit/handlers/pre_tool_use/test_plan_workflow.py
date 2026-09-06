@@ -81,6 +81,52 @@ class TestPlanWorkflowHandler:
         }
         assert handler.matches(default_hook_input) is False
 
+    def test_guidance_names_the_configured_workflow_doc(
+        self, handler: PlanWorkflowHandler
+    ) -> None:
+        """The quoted path must be the CONFIGURED one (Plan 00334 Decision 7).
+
+        ``plan_workflow.workflow_docs`` is what the bootstrap now deploys, so a
+        hardcoded ``CLAUDE/PlanWorkflow.md`` in the guidance sends the reader to
+        a path that does not exist in a project that configured another — the
+        very defect this plan exists to remove, surviving in the one string an
+        agent actually reads.
+        """
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="docs/agent",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+            workflow_docs="docs/agent/Planning.md",
+        )
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/001-test-plan/PLAN.md"},
+        }
+
+        result = handler.handle(hook_input)
+
+        guidance = "\n".join(result.context or [])
+        assert "docs/agent/Planning.md" in guidance
+        assert "CLAUDE/PlanWorkflow.md" not in guidance
+
+    def test_guidance_defaults_to_the_canonical_doc(self, handler: PlanWorkflowHandler) -> None:
+        """The overwhelmingly common case is unchanged."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/001-test-plan/PLAN.md"},
+        }
+
+        result = handler.handle(hook_input)
+
+        assert "CLAUDE/PlanWorkflow.md" in "\n".join(result.context or [])
+
     def test_matches_write_with_windows_path(self, handler: PlanWorkflowHandler) -> None:
         """Handler matches Write operation with Windows-style path."""
         hook_input: dict[str, Any] = {

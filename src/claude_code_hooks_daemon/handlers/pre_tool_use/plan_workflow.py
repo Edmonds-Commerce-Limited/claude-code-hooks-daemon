@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 # Fallback plan directory, used only when no ProjectLayout facade was
 # injected. Mirrors PlanWorkflowConfig.directory's default exactly.
 _FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
+_FALLBACK_WORKFLOW_DOCS: Final[str] = "CLAUDE/PlanWorkflow.md"
 
 #: Acceptance-test fixture directory, below the sanctioned scratch root.
 _FIXTURE_DIR: Final[str] = "acceptance-test-planwf"
@@ -49,6 +50,17 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
         layout = self._project_layout
         return layout.plan_dir if layout is not None else _FALLBACK_PLAN_DIR
 
+    def _workflow_docs(self) -> str:
+        """Configured workflow document (facade, or the matching default).
+
+        Quoting this rather than a literal is what keeps the guidance honest:
+        the plan-workflow bootstrap deploys the document to exactly this path
+        (Plan 00334), so a hardcoded ``CLAUDE/PlanWorkflow.md`` would name a
+        file that does not exist in any project configured otherwise.
+        """
+        layout = self._project_layout
+        return layout.workflow_docs if layout is not None else _FALLBACK_WORKFLOW_DOCS
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing PLAN.md in the configured plan directory."""
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
@@ -75,7 +87,7 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
             "  • Include Success Criteria section\n"
             "  • Break tasks into manageable phases\n"
             "  • Update task status as you work\n\n"
-            "See CLAUDE/PlanWorkflow.md for full guidelines."
+            f"See {self._workflow_docs()} for full guidelines."
         )
 
         return GatingResult(decision=Decision.ALLOW, context=[guidance])

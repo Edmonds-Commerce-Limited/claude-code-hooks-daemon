@@ -102,10 +102,12 @@ ruled out.
 
 ### Phase 4: The remaining core set
 
-- [ ] ⬜ **Task 4.1**: Select the set from the shippable candidates and record
-  WHY each is in or out — the roster is a decision, not a sweep.
+- [x] ✅ **Task 4.1**: Roster selected and recorded, with the reason each
+  document is in or out (Decision 6).
 - [ ] ⬜ **Task 4.2**: Genericise and ship the selected documents, one sub-agent
   per document.
+- [ ] ⬜ **Task 4.3**: Deploy to the path the CONFIG names, not a hardcoded
+  `CLAUDE/` (Decision 7) — found by auditing the Phase 2 work, reproduced RED.
 
 ### Phase 5: Verify
 
@@ -173,6 +175,72 @@ packaging defect, and the completeness test in `test_core_docs.py` catches it
 before release, which is where such a defect belongs. Failing the deploy in a
 client would trade the plan tooling — `mkplan.bash`, the plan directory — for
 the documentation about it, which is the worse of the two losses.
+
+### Decision 6: ship what the daemon ENFORCES in the client's repo; link to what the client merely CONSULTS
+
+The tempting roster test is "is this document generic enough to ship?", and it
+is the wrong one — nearly all of them are. The test that actually separates
+them is what the daemon DOES with the subject:
+
+**In** — the daemon enforces a policy inside the client's own repository, so
+the client must be able to read its canonical statement AND extend it with
+their own rulings:
+
+| Document                | Enforced by             | Named at                                                               |
+| ----------------------- | ----------------------- | ---------------------------------------------------------------------- |
+| `PlanWorkflow`          | `plan_workflow` handler | `plan_workflow.py:78`, `config/models.py:809`                          |
+| `Worktree`              | `worktree_file_copy`    | `worktree_file_copy.py:57`                                             |
+| `DocumentationStrategy` | the `docs_qa` engine    | `docs_qa/checks/rules_file_shape.py:172`, `skills/docs-qa/SKILL.md:14` |
+
+`DocumentationStrategy` was not on the original list and is the sharpest case
+of the four offenders: `rules_file_shape.py:172` names it in a runtime FINDING
+message, unguarded, and `documentation.trees.agent`/`.human`/`.remote` are
+per-project configuration — the daemon enforces a model whose canonical
+statement no client has ever received.
+
+**Out** — documents ABOUT the daemon. A client consults them; they do not
+customise them, and a seeded copy would be a second version to keep in step:
+`HANDLER_DEVELOPMENT`, `PROJECT_HANDLERS`, `DEBUGGING_HOOKS`, `SELF_INSTALL`,
+`LLM-INSTALL`, `LLM-UPDATE`, `ARCHITECTURE`, `QA`.
+
+**`DirectoryRoles` is out for a different reason and it is the one that set
+the principle.** It looks like the same defect, but `directory_role_rules.py`
+computes an install-mode-aware link that RESOLVES, and it records the warning
+that seeding a document drags in its dependency graph. Deploying is not the
+only correct fix — guarding (`plan_number_helper`) and repointing
+(`directory_role_rules`) are equally valid ways to keep the promise.
+
+**`PlanJournalling` is deferred, not dismissed.** It is already deployed, so
+there is no missing-document bug, but it is seeded ONCE with no core/override
+split, which strands every existing client on the version they were seeded
+with — the freeze half of Decision 1. This repo's copy is currently
+byte-identical to the shipped template, with no guard against that changing.
+Folding it in is right, but its deploy location is plan-directory-relative
+(`plan_dir.parent`), not docs-tree-relative, so the migration moves a working
+deploy for any project with a non-default plan directory. That is a design
+question of its own and belongs in its own plan.
+
+### Decision 7: deploy to the path the CONFIG names, never a hardcoded one
+
+Found by auditing this plan's own Phase 2 work, reproduced RED before fixing.
+`deploy_core_docs` wrote to a hardcoded `CLAUDE/`, while
+`plan_workflow.workflow_docs` — the path the handler QUOTES to the agent — is
+per-project configuration. For a project whose docs tree is not `CLAUDE/`,
+the document was created somewhere the reader is never sent: the original
+defect with an extra step, and harder to see because the file does exist.
+
+It also scattered markdown into a directory the daemon itself would refuse a
+write to, since `markdown_organization` derives the allowed agent tree from
+the same configuration.
+
+The precedent was one line away in the same function. `plan_dir_name` is
+threaded through `bootstrap_plan_workflow` as a parameter whose docstring says
+it MUST be passed the configured value "so the bootstrap honours a project
+that tracks plans elsewhere (single source of truth)". The fix applies that
+rule to documents: the parent of `workflow_docs` is the docs directory, and
+its filename is the override to seed — so a project that renamed the document
+also gets the file it was promised. The other core documents have no config
+key of their own and keep canonical names in that same directory.
 
 ### Decision 4: guidance must not name a document the daemon does not ensure
 
