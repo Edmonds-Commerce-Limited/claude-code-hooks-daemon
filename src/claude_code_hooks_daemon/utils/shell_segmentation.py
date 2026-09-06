@@ -211,9 +211,7 @@ def quoted_heredoc_receivers(command: str) -> list[str]:
         last_line = preceding.rsplit("\n", 1)[-1]
         segment = split_unquoted(last_line, _RECEIVER_SEPARATORS)[-1]
         receivers.extend(
-            word.rsplit("/", 1)[-1]
-            for word in segment.split()
-            if word and not word.startswith("-")
+            word.rsplit("/", 1)[-1] for word in segment.split() if word and not word.startswith("-")
         )
     return receivers
 

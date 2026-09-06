@@ -33,9 +33,7 @@ _ROOT = Path("/repo")
 @pytest.fixture(autouse=True)
 def _project_root() -> Any:
     """Pin the repository root so the boundary under test is deterministic."""
-    with patch(
-        "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root"
-    ) as mock:
+    with patch("claude_code_hooks_daemon.core.project_context.ProjectContext.project_root") as mock:
         mock.return_value = _ROOT
         yield mock
 
@@ -75,9 +73,7 @@ class TestHandlerIdentity:
         assert handler.terminal is True
 
     def test_it_exposes_its_rule(self, handler: ProjectContainmentHandler) -> None:
-        assert [rule.rule_id for rule in handler.get_rules()] == [
-            RuleID.WRITE_OUTSIDE_PROJECT_ROOT
-        ]
+        assert [rule.rule_id for rule in handler.get_rules()] == [RuleID.WRITE_OUTSIDE_PROJECT_ROOT]
 
 
 class TestTheWriteEditSurface:
@@ -159,9 +155,7 @@ class TestTheBashSurface:
             'echo hi > "$OUT"',
         ],
     )
-    def test_these_do_not_match(
-        self, handler: ProjectContainmentHandler, command: str
-    ) -> None:
+    def test_these_do_not_match(self, handler: ProjectContainmentHandler, command: str) -> None:
         """In order: an in-root write, two reads, and a target the daemon
         cannot resolve without executing the command."""
         assert handler.matches(_bash(command)) is False
@@ -228,9 +222,7 @@ class TestOutputFlagsAreCommandKeyed:
     ) -> None:
         assert handler.matches(_bash("grep -o /tmp/foo somefile.txt")) is False
 
-    def test_sort_output_flag_is_not_assumed(
-        self, handler: ProjectContainmentHandler
-    ) -> None:
+    def test_sort_output_flag_is_not_assumed(self, handler: ProjectContainmentHandler) -> None:
         """An unlisted command's `-o` is left alone rather than guessed at."""
         assert handler.matches(_bash("somecmd -o /tmp/out.txt")) is False
 
@@ -301,9 +293,7 @@ class TestTheDenial:
         assert result.reason is not None
         assert "untracked/scratch" in result.reason
 
-    def test_it_names_every_offending_bash_target(
-        self, handler: ProjectContainmentHandler
-    ) -> None:
+    def test_it_names_every_offending_bash_target(self, handler: ProjectContainmentHandler) -> None:
         """A command can write two files; reporting one sends the reader back
         for a second denial."""
         result = handler.handle(_bash("echo a > /tmp/one.txt && echo b > /tmp/two.txt"))
@@ -334,9 +324,7 @@ class TestTheAllowlist:
 
         assert handler.matches(_write("/tmp/blessed-not-really/notes.md")) is True
 
-    def test_an_unrelated_path_is_still_denied(
-        self, handler: ProjectContainmentHandler
-    ) -> None:
+    def test_an_unrelated_path_is_still_denied(self, handler: ProjectContainmentHandler) -> None:
         handler._allowed_external_paths = ["/tmp/blessed"]
 
         assert handler.matches(_write("/tmp/elsewhere/notes.md")) is True

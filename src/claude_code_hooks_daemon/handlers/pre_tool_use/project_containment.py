@@ -340,11 +340,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
     @staticmethod
     def _short_flag_has(argument: str, letter: str) -> bool:
         """Is ``letter`` set in a bundled short-flag token such as ``-czf``?"""
-        return (
-            argument.startswith("-")
-            and not argument.startswith("--")
-            and letter in argument[1:]
-        )
+        return argument.startswith("-") and not argument.startswith("--") and letter in argument[1:]
 
     def _nested_shell_targets(self, arguments: list[str], depth: int) -> list[str]:
         """Re-extract from a shell's ``-c`` command string.
@@ -447,7 +443,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             "- `cp` / `mv` / `install` / `dd` destinations\n"
             "- `curl -o|--output`, `wget -O|--output-document`\n"
             "- `tar` creating an archive (`-cf`), `mkdir`, `rsync`/`scp` destinations\n"
-            "- any of the above inside a nested `sh -c \"...\"` / `bash -c \"...\"`\n\n"
+            '- any of the above inside a nested `sh -c "..."` / `bash -c "..."`\n\n'
             "**That list is exhaustive, not illustrative — and one gap remains.** An "
             "interpreter one-liner (`python3 -c \"open('/tmp/x','w')\"`) is NOT "
             "caught and cannot be: resolving what it writes means running it, which "
@@ -467,7 +463,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             "itself at runtime (pytest's `tmp_path`, a package manager's build dir) — "
             "this rule judges paths your command NAMES, not what a tool does "
             "internally; and a target the daemon cannot resolve without executing "
-            "the command (`> \"$OUT\"`), which yields no path rather than a guess.\n\n"
+            'the command (`> "$OUT"`), which yields no path rather than a guess.\n\n'
             "**Claude Code's own state directory is allowed** (`$CLAUDE_CONFIG_DIR`, "
             "else `~/.claude`). It is not scratch, and it is not ephemeral where it is "
             "mapped into the bind mount. That does NOT re-open Claude auto-memory: "
@@ -513,9 +509,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Bash redirect to a path outside the repository",
-                command=(
-                    "Run the bash command: echo probe > /tmp/acceptance-test-containment.txt"
-                ),
+                command=("Run the bash command: echo probe > /tmp/acceptance-test-containment.txt"),
                 description="Blocks the Bash side-door as well as the Write tool",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

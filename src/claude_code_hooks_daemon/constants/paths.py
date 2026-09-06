@@ -76,7 +76,12 @@ class ProjectPath:
     #: `blockReadsOutsideWorkingDirectories`. Enumeration is therefore the only
     #: shape available at that layer, and this constant is what keeps the
     #: enumeration honest instead of hand-maintained.
-    EPHEMERAL_ROOTS: tuple[str, ...] = ("/tmp", "/var/tmp", "/dev/shm")
+    #: nosec B108 - these paths are the SUBJECT of a deny rule, never a
+    #: destination. Bandit's check cannot tell "writes here" from "forbids
+    #: writing here", and this is the second: the enumeration is emitted into
+    #: `permissions.deny`. Suppressed for the same reason `daemon/paths.py`
+    #: suppresses it, with the opposite polarity.
+    EPHEMERAL_ROOTS: tuple[str, ...] = ("/tmp", "/var/tmp", "/dev/shm")  # nosec B108
 
     @staticmethod
     def claude_code_deny_rule(root: str) -> str:

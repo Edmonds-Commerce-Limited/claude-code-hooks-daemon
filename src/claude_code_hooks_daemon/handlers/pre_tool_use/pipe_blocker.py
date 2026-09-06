@@ -771,7 +771,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         """
         source = source_segment or "command"
         return (
-            f'  mkdir -p {ProjectPath.SCRATCH_DIR}\n'
+            f"  mkdir -p {ProjectPath.SCRATCH_DIR}\n"
             f'  TEMP_FILE="{ProjectPath.SCRATCH_DIR}/output_$$.txt"\n'
             f'  {source} > "$TEMP_FILE" 2>&1\n'
             f"  EXIT_CODE=$?\n"

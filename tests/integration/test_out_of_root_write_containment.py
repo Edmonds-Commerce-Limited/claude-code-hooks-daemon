@@ -85,9 +85,7 @@ def full_chain(project_context: Path) -> EventRouter:
 class TestAnOutOfRootWriteIsDenied:
     """The defect, stated directly, on the Write/Edit surface."""
 
-    def test_a_write_to_the_container_temp_dir_is_denied(
-        self, full_chain: EventRouter
-    ) -> None:
+    def test_a_write_to_the_container_temp_dir_is_denied(self, full_chain: EventRouter) -> None:
         """The shape the owner reported: scratch that outlives the container."""
         result = full_chain.route(
             EventType.PRE_TOOL_USE,
@@ -100,9 +98,7 @@ class TestAnOutOfRootWriteIsDenied:
             "system, so nothing judged it at all."
         )
 
-    def test_the_denial_comes_from_the_containment_guard(
-        self, full_chain: EventRouter
-    ) -> None:
+    def test_the_denial_comes_from_the_containment_guard(self, full_chain: EventRouter) -> None:
         """Denied for the right reason, not incidentally by another handler."""
         result = full_chain.route(
             EventType.PRE_TOOL_USE,
@@ -111,9 +107,7 @@ class TestAnOutOfRootWriteIsDenied:
 
         assert result.terminated_by == _GUARD_NAME
 
-    def test_the_denial_names_the_sanctioned_location(
-        self, full_chain: EventRouter
-    ) -> None:
+    def test_the_denial_names_the_sanctioned_location(self, full_chain: EventRouter) -> None:
         """A guard that blocks without naming the alternative just obstructs."""
         result = full_chain.route(
             EventType.PRE_TOOL_USE,
@@ -184,9 +178,7 @@ class TestTheGuardDoesNotOverreach:
 
         assert result.terminated_by != _GUARD_NAME
 
-    def test_reading_an_out_of_root_path_is_not_denied(
-        self, full_chain: EventRouter
-    ) -> None:
+    def test_reading_an_out_of_root_path_is_not_denied(self, full_chain: EventRouter) -> None:
         """Blocking reads would break diagnosis and gain nothing durable."""
         result = full_chain.route(EventType.PRE_TOOL_USE, make_read_input("/tmp/whatever.log"))
 
