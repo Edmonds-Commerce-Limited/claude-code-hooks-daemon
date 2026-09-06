@@ -497,21 +497,21 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
-<!-- handler: markdown-table-formatter -->
-
-- markdown_table_formatter — markdown tables are auto-aligned
-
 <!-- handler: budget-exhaustion-detector -->
 
 - budget_exhaustion_detector — hidden agent budgets are surfaced
 
-<!-- handler: recovery-cron-advisor -->
-
-- recovery_cron_advisor — failsafe recovery cron lifecycle advisory
-
 <!-- handler: goal-injection -->
 
 - goal_injection — plan-start goal signal for the ccy supervisor
+
+<!-- handler: markdown-table-formatter -->
+
+- markdown_table_formatter — markdown tables are auto-aligned
+
+<!-- handler: recovery-cron-advisor -->
+
+- recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
 <!-- handler: ccy-supervisor-integrity -->
 
