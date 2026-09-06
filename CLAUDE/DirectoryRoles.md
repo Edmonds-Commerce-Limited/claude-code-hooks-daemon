@@ -143,6 +143,31 @@ durable belongs here: a write-up worth keeping is promoted into a doc tree or
 a plan folder and committed; everything else is cleaned up once acted on.
 This space sits outside the documentation corpus entirely.
 
+**`untracked/scratch/` is the sanctioned home for scratch** — commit-message
+files, command captures, probes, prototypes. It is created at daemon start if
+absent (`utils/scratch_dir.py`) and gitignored.
+
+**Scratch stays inside the repository.** `project_containment` denies a write
+whose target is named outside the repository root, on the Write/Edit surface
+and the Bash surface alike. The reason is durability rather than tidiness: a
+container's temp directory is wiped on restart while the working tree is
+usually a bind mount, so work written outside is lost, invisible to git and
+outside review. "It's only scratch" is not a reason to leave — there is no
+throwaway location, so nothing is lost by writing it somewhere durable, and
+the judgement of whether a file will turn out to matter stops being one you
+have to make correctly in advance.
+
+Two things are deliberately NOT blocked: reading any path, and a temp file a
+program creates for itself at runtime (pytest's `tmp_path`, a package
+manager's build directory). A PreToolUse hook receives a command string rather
+than syscalls, so it judges paths a command NAMES and nothing else.
+
+Claude Code's own state directory (`$CLAUDE_CONFIG_DIR`, else `~/.claude`) is
+allowed: it is not scratch, and where it is mapped into a bind mount it has the
+durability this rule protects. That is independent of the separate block on
+untracked Claude auto-memory, which asks whether knowledge is REVIEWABLE rather
+than whether a path is DURABLE.
+
 ### Project root
 
 The root `CLAUDE.md` is resident in every session, so it stays lean: stable

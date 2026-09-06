@@ -60,32 +60,43 @@ does not exist.
 
 ### Phase 1: Reproduction (RED)
 
-- [ ] ⬜ **Task 1.1**: Failing test proving a `Write` to an absolute path outside
-  the repo root is allowed through the whole PreToolUse chain.
-- [ ] ⬜ **Task 1.2**: Failing test proving the same for a Bash write target
+- [x] ✅ **Task 1.1**: Failing test proving a `Write` to an absolute path outside
+  the repo root is allowed through the whole PreToolUse chain. The result was
+  sharper than expected: `handlers_matched=[]` — nothing even considered it.
+- [x] ✅ **Task 1.2**: Failing test proving the same for a Bash write target
   (`> /tmp/x`, `tee`, heredoc, and a `cp` target).
 
 ### Phase 2: The guard
 
-- [ ] ⬜ **Task 2.1**: New PreToolUse handler denying out-of-root write targets,
-  keyed on `get_file_path` and `get_bash_write_targets`.
-- [ ] ⬜ **Task 2.2**: Register the rule ID and wire config options.
-- [ ] ⬜ **Task 2.3**: Satisfy every enumerated handler meta-test.
-- [ ] ⬜ **Task 2.4**: Deny message names `untracked/scratch/` and states why.
+- [x] ✅ **Task 2.1**: New PreToolUse handler denying out-of-root write targets,
+  keyed on the named target of Write/Edit/NotebookEdit and on
+  `get_bash_write_targets`.
+- [x] ✅ **Task 2.2**: Register the rule ID and wire config options.
+- [x] ✅ **Task 2.3**: Satisfy every enumerated handler meta-test — 14 of them,
+  including the command-respelling evasion triage a survey of the test tree
+  had missed.
+- [x] ✅ **Task 2.4**: Deny message names `untracked/scratch/` and states why.
+- [x] ✅ **Task 2.5**: Allow Claude Code's own state directory (owner ruling),
+  configurable off, without re-opening untracked Claude auto-memory.
 
 ### Phase 3: The affordance
 
-- [ ] ⬜ **Task 3.1**: Bootstrap `untracked/` + `untracked/scratch/` when absent,
+- [x] ✅ **Task 3.1**: Bootstrap `untracked/` + `untracked/scratch/` when absent,
   with the `*` / `!.gitignore` ignore file, and verify it is ignored.
-- [ ] ⬜ **Task 3.2**: Document the scratch convention in the agent tree.
+- [x] ✅ **Task 3.2**: Document the scratch convention in the agent tree
+  (`DirectoryRoles.md`, the canonical per-directory ruleset).
 
 ### Phase 4: Stop recommending /tmp
 
-- [ ] ⬜ **Task 4.1**: `pipe_blocker._temp_file_block` (`:766`) emits an
-  in-repo scratch path instead of `/tmp/output_$$.txt`.
-- [ ] ⬜ **Task 4.2**: Replace the ambiguous *"an untracked location"* phrasing
+- [x] ✅ **Task 4.1**: `pipe_blocker._temp_file_block` emits an in-repo scratch
+  path instead of `/tmp/output_$$.txt`, from a shared `ProjectPath` constant so
+  the denying and recommending handlers cannot drift apart.
+- [x] ✅ **Task 4.2**: Replace the ambiguous *"an untracked location"* phrasing
   in `src/CLAUDE.md` and `tests/CLAUDE.md` with the named directory.
-- [ ] ⬜ **Task 4.3**: Sweep remaining `/tmp` recommendations in agent-facing docs.
+- [x] ✅ **Task 4.3**: Sweep remaining `/tmp` recommendations in agent-facing docs
+  (7 snippets across the debugging, QA, install and update guides).
+- [ ] 🔄 **Task 4.4**: Migrate the acceptance-test corpus off `/tmp` — ~21 handler
+  modules whose `AcceptanceTest` commands the guard would now intercept.
 
 ### Phase 5: Verify
 
