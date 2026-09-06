@@ -7,9 +7,12 @@ from claude_code_hooks_daemon.strategies.tdd.common import (
     is_in_common_test_directory,
     matches_directory,
 )
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Kotlin"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-tdd-kotlin"
 _EXTENSIONS: tuple[str, ...] = (".kt",)
 _SOURCE_DIRECTORIES: tuple[str, ...] = ("/src/main/",)
 _SKIP_DIRECTORIES: tuple[str, ...] = ("build/", ".gradle/", "vendor/")
@@ -58,12 +61,14 @@ class KotlinTddStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="TDD enforcement for Kotlin source file",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-tdd-kotlin/src/main/kotlin/com/example/UserService.kt "
+                    f"{scratch_path(_FIXTURE_DIR, 'src', 'main', 'kotlin', 'com', 'example', 'UserService.kt')} "
                     "with content 'package com.example\\n\\nclass UserService'"
                 ),
                 description="Blocks Kotlin source file creation without corresponding test file",
@@ -73,12 +78,13 @@ class KotlinTddStrategy:
                     r"Kotlin",
                     r"test file",
                 ],
-                safety_notes="Uses /tmp path - safe. Handler blocks Write before file is created.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Write before file is created."
+                ),
                 test_type=TestType.BLOCKING,
-                setup_commands=[
-                    "mkdir -p /tmp/acceptance-test-tdd-kotlin/src/main/kotlin/com/example"
-                ],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-tdd-kotlin"],
+                setup_commands=[f"mkdir -p {fixture_root}/src/main/kotlin/com/example"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

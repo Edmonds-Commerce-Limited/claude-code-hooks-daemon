@@ -8,7 +8,7 @@ import logging
 import os
 import subprocess  # nosec B404 - subprocess used for eslint validation only (trusted tool)
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -36,11 +36,18 @@ from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Where a Node workspace keeps its tool binaries. Used as a FALLBACK when the
 # resolver yields no bin dirs (no manifest found), so a pinned workspace_root
 # without a package.json still gets `tsx` on PATH exactly as it always did.
 _NODE_BIN_SUBPATH = ("node_modules", ".bin")
+
+#: Acceptance-test fixture directory for the Write-tool test, below the
+#: sanctioned scratch root. The sibling Bash-route test below uses its own
+#: literal directory since that command is a real shell invocation, not
+#: prose an agent renders through the Write tool.
+_FIXTURE_DIR: Final[str] = "acceptance-test-eslint"
 
 logger = logging.getLogger(__name__)
 
@@ -404,7 +411,7 @@ is not evidence that a `.ts` file is clean."""
                 title="ESLint validation on TypeScript file write",
                 command=(
                     "Use the Write tool to create file "
-                    "untracked/scratch/acceptance-test-eslint/test.ts "
+                    f"{scratch_path(_FIXTURE_DIR, 'test.ts')} "
                     'with content "const x = 1;"'
                 ),
                 description=(
@@ -419,8 +426,8 @@ is not evidence that a `.ts` file is clean."""
                     "scratch directory for validation testing"
                 ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p untracked/scratch/acceptance-test-eslint"],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-eslint"],
+                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

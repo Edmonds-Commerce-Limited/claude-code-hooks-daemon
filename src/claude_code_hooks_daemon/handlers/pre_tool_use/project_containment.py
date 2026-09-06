@@ -56,6 +56,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_bash_write_targets
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 #: Repo-relative home for scratch, shared with `pipe_blocker` so the handler
@@ -531,7 +532,12 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="The same scratch write, inside the repository",
                 command=(
-                    f"Use the Write tool to write to {SCRATCH_DIR}/acceptance-probe.md "
+                    # Absolute, unlike the tracked guidance that names the same
+                    # directory relatively (Decision 10): the playbook renders
+                    # this verbatim for an agent, and a relative file_path is
+                    # denied by AbsolutePathHandler first -- which would turn
+                    # this ALLOW case into a pass for entirely the wrong reason.
+                    f"Use the Write tool to write to {scratch_path('acceptance-probe.md')} "
                     "with content '# probe'"
                 ),
                 description=(

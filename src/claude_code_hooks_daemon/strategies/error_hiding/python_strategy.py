@@ -3,8 +3,11 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.error_hiding.protocol import ErrorHidingPattern
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "Python"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-error-hiding-python"
 _EXTENSIONS: tuple[str, ...] = (".py",)
 
 _PATTERNS: tuple[ErrorHidingPattern, ...] = (
@@ -59,12 +62,14 @@ class PythonErrorHidingStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Python: bare except: pass hides all exceptions",
                 command=(
                     "Write(\n"
-                    "  file_path='/tmp/acceptance-test-error-hiding/python/bad.py',\n"
+                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'bad.py')}',\n"
                     "  content='try:\\n    do_something()\\nexcept:\\n    pass\\n'\n"
                     ")"
                 ),
@@ -77,8 +82,10 @@ class PythonErrorHidingStrategy:
                     r"BLOCKED \[R-ERROR-HIDING\]",
                     r"bare except",
                 ],
-                safety_notes="Uses Write tool to a /tmp path",
+                safety_notes="Inside the gitignored scratch directory - safe",
                 test_type=TestType.BLOCKING,
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
@@ -86,7 +93,7 @@ class PythonErrorHidingStrategy:
                 title="Python: proper exception handling is allowed",
                 command=(
                     "Write(\n"
-                    "  file_path='/tmp/acceptance-test-error-hiding/python/good.py',\n"
+                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'good.py')}',\n"
                     "  content='import logging\\n\\n\\n"
                     "def run(task):\\n    try:\\n        task()\\n"
                     '    except ValueError:\\n        logging.exception(\\"task failed\\")\\n'
@@ -96,8 +103,10 @@ class PythonErrorHidingStrategy:
                 description=("Allows Python file with proper exception handling via Write tool"),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses Write tool to a /tmp path",
+                safety_notes="Inside the gitignored scratch directory - safe",
                 test_type=TestType.ADVISORY,
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

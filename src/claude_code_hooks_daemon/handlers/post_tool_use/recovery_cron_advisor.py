@@ -49,6 +49,7 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # ─── Lifecycle phase ──────────────────────────────────────────────────────────
 
@@ -69,6 +70,15 @@ class LifecyclePhase(Enum):
 # fallback — see RecoveryCronAdvisorHandler._plan_dir() and
 # _plan_path_pattern() below.
 _FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
+
+# Acceptance-test fixture, below the sanctioned scratch root. Plan 00320/
+# 00321: the plan number MUST stay outside the real allocated range -- this
+# fixture flips a PLAN.md to In Progress, which is a real goal-emission
+# trigger; when it used 00099 the resulting goal named a plan that genuinely
+# exists (00099-python-fingerprint-venv-isolation), so a stale goal read as
+# plausible and cost a long investigation.
+_FIXTURE_DIR: Final[str] = "acceptance-test-recovcron"
+_FIXTURE_PLAN_SUBPATH: Final[str] = "CLAUDE/Plan/99099-test"
 
 
 def _plan_path_pattern(plan_dir: str) -> re.Pattern[str]:
@@ -603,21 +613,21 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         """Return acceptance tests for the three lifecycle phases."""
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
-        # Plan 00320/00321: the number MUST stay outside the real allocated
-        # range. This fixture flips a PLAN.md to In Progress, which is a real
-        # goal-emission trigger; when it used 00099 the resulting goal named a
-        # plan that genuinely exists (00099-python-fingerprint-venv-isolation),
-        # so a stale goal read as plausible and cost a long investigation.
-        # Plan 00333: inside the gitignored scratch directory, not /tmp --
-        # project_containment denies a Bash write named outside the repo root.
-        plan_dir = "untracked/scratch/acceptance-test-recovcron/CLAUDE/Plan/99099-test"
+        # Plan 00333: two spellings of the same fixture path. `plan_dir`/
+        # `plan_path` are relative -- correct for the Bash setup/cleanup
+        # commands below, which run from the repo root. `plan_path_abs` is
+        # absolute -- required for the Write/Edit tool prose in `command`:
+        # AbsolutePathHandler denies a relative file_path before this
+        # handler is ever reached.
+        plan_dir = f"untracked/scratch/{_FIXTURE_DIR}/{_FIXTURE_PLAN_SUBPATH}"
         plan_path = f"{plan_dir}/PLAN.md"
+        plan_path_abs = scratch_path(_FIXTURE_DIR, _FIXTURE_PLAN_SUBPATH, "PLAN.md")
 
         return [
             AcceptanceTest(
                 title="Plan creation: writing new PLAN.md triggers recovery cron setup",
                 command=(
-                    f"Use the Write tool to write to {plan_path}"
+                    f"Use the Write tool to write to {plan_path_abs}"
                     " with content '# Plan 99099: Test\\n\\n**Status**: Not Started'"
                 ),
                 description=(
@@ -643,14 +653,14 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-recovcron"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="Plan progress-update: editing PLAN.md task status triggers cron check",
                 command=(
-                    f"Use the Edit tool on {plan_path}"
+                    f"Use the Edit tool on {plan_path_abs}"
                     " to change '⬜ **Task 1.1**' to '✅ **Task 1.1**'"
                 ),
                 description=(
@@ -677,14 +687,14 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                         f"\\n\\n- [ ] ⬜ **Task 1.1**: Todo' > {plan_path}"
                     ),
                 ],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-recovcron"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="Plan completion: writing Status Complete warns before cron teardown",
                 command=(
-                    f"Use the Write tool to write to {plan_path}"
+                    f"Use the Write tool to write to {plan_path_abs}"
                     " with content '# Plan 99099\\n\\n**Status**: Complete'"
                 ),
                 description=(
@@ -705,7 +715,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-recovcron"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

@@ -11,6 +11,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Pattern that identifies the daemon's internal docs directory.
 # In normal installs, the daemon is cloned to .claude/hooks-daemon/, which brings
@@ -19,6 +20,9 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 _DAEMON_CLAUDE_PATTERN = "hooks-daemon/CLAUDE/"
 
 _TARGET_TOOLS = {ToolName.READ, ToolName.WRITE, ToolName.EDIT}
+
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-daemon-docs"
 
 
 def _get_file_path(hook_input: dict[str, Any]) -> str:
@@ -88,14 +92,14 @@ class DaemonDocsGuardHandler(PreToolUseHandlerBase):
         """Return acceptance tests for daemon docs guard."""
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
+        fixture_file = scratch_path(
+            _FIXTURE_DIR, ".claude", "hooks-daemon", "CLAUDE", "PlanWorkflow.md"
+        )
+
         return [
             AcceptanceTest(
                 title="Read from hooks-daemon CLAUDE dir warns about wrong path",
-                command=(
-                    "Use the Read tool to read the file "
-                    "untracked/scratch/acceptance-test-daemon-docs/.claude/hooks-daemon/"
-                    "CLAUDE/PlanWorkflow.md"
-                ),
+                command=f"Use the Read tool to read the file {fixture_file}",
                 description="Warns about reading from daemon internal docs (advisory, allows read)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"WRONG CLAUDE", r"hooks-daemon"],
@@ -105,13 +109,12 @@ class DaemonDocsGuardHandler(PreToolUseHandlerBase):
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[
-                    "mkdir -p untracked/scratch/acceptance-test-daemon-docs/"
-                    ".claude/hooks-daemon/CLAUDE",
+                    f"mkdir -p untracked/scratch/{_FIXTURE_DIR}/.claude/hooks-daemon/CLAUDE",
                     "echo '# Test PlanWorkflow' > "
-                    "untracked/scratch/acceptance-test-daemon-docs/.claude/hooks-daemon/"
+                    f"untracked/scratch/{_FIXTURE_DIR}/.claude/hooks-daemon/"
                     "CLAUDE/PlanWorkflow.md",
                 ],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-daemon-docs"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

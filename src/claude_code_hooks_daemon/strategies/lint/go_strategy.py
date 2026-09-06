@@ -3,12 +3,15 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Go"
 _EXTENSIONS: tuple[str, ...] = (".go",)
 _DEFAULT_LINT_COMMAND = "go vet {file}"
 _EXTENDED_LINT_COMMAND = "golangci-lint run {file}"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-lint-go"
 
 
 class GoLintStrategy:
@@ -47,21 +50,25 @@ class GoLintStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Go lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-go/valid.go "
+                    f"{scratch_path(_FIXTURE_DIR, 'valid.go')} "
                     'with content "package main\\nfunc main() {}"'
                 ),
                 description="Valid Go code should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses /tmp path - safe. Creates temporary Go file.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Creates temporary Go file."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-go"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-go"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
@@ -69,17 +76,20 @@ class GoLintStrategy:
                 title="Go lint - invalid code blocked",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-go/invalid.go "
+                    f"{scratch_path(_FIXTURE_DIR, 'invalid.go')} "
                     'with content "package main\\nfunc main() {\\n    x := \\"unclosed"'
                 ),
                 description="Invalid Go code (unclosed string) should be blocked",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Go lint FAILED", r"invalid.go"],
-                safety_notes="Uses /tmp path - safe. Creates temporary Go file with syntax error.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. "
+                    "Creates temporary Go file with syntax error."
+                ),
                 test_type=TestType.BLOCKING,
                 required_tools=["go"],
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-go"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-go"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

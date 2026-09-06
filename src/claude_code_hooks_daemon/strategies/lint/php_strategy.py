@@ -3,12 +3,15 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "PHP"
 _EXTENSIONS: tuple[str, ...] = (".php",)
 _DEFAULT_LINT_COMMAND = "php -l {file}"
 _EXTENDED_LINT_COMMAND = "phpstan analyse {file}"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-lint-php"
 
 
 class PhpLintStrategy:
@@ -47,21 +50,25 @@ class PhpLintStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="PHP lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-php/valid.php "
+                    f"{scratch_path(_FIXTURE_DIR, 'valid.php')} "
                     "with content \"<?php echo 'hello'; ?>\""
                 ),
                 description="Valid PHP code should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses /tmp path - safe. Creates temporary PHP file.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Creates temporary PHP file."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-php"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-php"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
@@ -69,7 +76,7 @@ class PhpLintStrategy:
                 title="PHP lint - invalid code blocked",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-php/invalid.php "
+                    f"{scratch_path(_FIXTURE_DIR, 'invalid.php')} "
                     "with content \"<?php\\necho 'hello'\\necho 'world';\""
                 ),
                 description=(
@@ -80,11 +87,14 @@ class PhpLintStrategy:
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"PHP lint FAILED", r"invalid.php"],
-                safety_notes="Uses /tmp path - safe. Creates temporary PHP file with syntax error.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. "
+                    "Creates temporary PHP file with syntax error."
+                ),
                 test_type=TestType.BLOCKING,
                 required_tools=["php"],
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-php"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-php"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

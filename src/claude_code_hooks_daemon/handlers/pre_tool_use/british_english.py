@@ -14,12 +14,16 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Fallback doc-tree dirs, used only when no ProjectLayout facade was
 # injected. Mirror the Config defaults exactly (DocumentationTreesConfig
 # agent/human), same convention as markdown_organization's fallbacks.
 _FALLBACK_AGENT_DOCS_DIR: Final[str] = "CLAUDE"
 _FALLBACK_HUMAN_DOCS_DIR: Final[str] = "docs"
+
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR: Final[str] = "acceptance-test-british"
 
 # Non-layout extra: a directory this project checks that is NOT a
 # documentation-tree truth (it is a handler BEHAVIOUR default, Plan 00288
@@ -211,7 +215,7 @@ class BritishEnglishHandler(PreToolUseHandlerBase):
                 title="American spellings in markdown",
                 command=(
                     "Use the Write tool to write to "
-                    "untracked/scratch/acceptance-test-british/docs/style-guide.md"
+                    f"{scratch_path(_FIXTURE_DIR, 'docs', 'style-guide.md')}"
                     " with content 'The color of the organization logo should favor readability.'"
                 ),
                 description="Advises British spellings but allows operation (advisory)",
@@ -222,8 +226,8 @@ class BritishEnglishHandler(PreToolUseHandlerBase):
                     "allows write but warns."
                 ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p untracked/scratch/acceptance-test-british/docs"],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-british"],
+                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}/docs"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

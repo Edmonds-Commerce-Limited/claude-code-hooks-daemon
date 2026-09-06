@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     vendored_exclude_globs,
 )
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
@@ -56,6 +57,10 @@ _MODE_BLOCK: Final[str] = "block"
 _MODE_WARN: Final[str] = "warn"
 _DEFAULT_MAX_COMMENT_LINE_CHARS: Final[int] = 400
 _DEFAULT_MAX_COMMENT_BLOCK_LINES: Final[int] = 40
+
+#: Acceptance-test fixture directories, below the sanctioned scratch root.
+_FIXTURE_DIR: Final[str] = "acceptance-test-comment-size"
+_FIXTURE_DIR_OK: Final[str] = "acceptance-test-comment-size-ok"
 
 # Built-in default excludes so the "vendor/build/fixture dirs are skipped by
 # default" guidance in get_claude_md() below is actually true (Plan 00288
@@ -426,7 +431,7 @@ class CommentSizeHandler(PreToolUseHandlerBase):
                 title="comment_size: over-long trailing comment on a new file is blocked",
                 command=(
                     "Use the Write tool to create "
-                    "untracked/scratch/acceptance-test-comment-size/example.py whose "
+                    f"{scratch_path(_FIXTURE_DIR, 'example.py')} whose "
                     "content has a trailing '#' comment on one line longer than 400 characters"
                 ),
                 description=(
@@ -445,8 +450,8 @@ class CommentSizeHandler(PreToolUseHandlerBase):
                     "Write before file is created."
                 ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p untracked/scratch/acceptance-test-comment-size"],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-comment-size"],
+                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
@@ -454,7 +459,7 @@ class CommentSizeHandler(PreToolUseHandlerBase):
                 title="comment_size: a normal, reasonably-sized comment is allowed",
                 command=(
                     "Use the Write tool to create "
-                    "untracked/scratch/acceptance-test-comment-size-ok/example.py whose "
+                    f"{scratch_path(_FIXTURE_DIR_OK, 'example.py')} whose "
                     "content has an ordinary short '#' comment (well under 400 chars, "
                     "well under 40 lines) explaining a single function"
                 ),
@@ -469,8 +474,8 @@ class CommentSizeHandler(PreToolUseHandlerBase):
                     "is created, not blocked."
                 ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p untracked/scratch/acceptance-test-comment-size-ok"],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-comment-size-ok"],
+                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR_OK}"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR_OK}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

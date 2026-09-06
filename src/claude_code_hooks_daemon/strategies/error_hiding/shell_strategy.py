@@ -3,8 +3,11 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.error_hiding.protocol import ErrorHidingPattern
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "Shell"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-error-hiding-shell"
 _EXTENSIONS: tuple[str, ...] = (".sh", ".bash")
 
 _PATTERNS: tuple[ErrorHidingPattern, ...] = (
@@ -71,12 +74,14 @@ class ShellErrorHidingStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Shell: || true hides command failure",
                 command=(
                     "Write(\n"
-                    "  file_path='/tmp/acceptance-test-error-hiding/shell/bad.sh',\n"
+                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'bad.sh')}',\n"
                     "  content='#!/bin/bash\\nsome_command || true\\n'\n"
                     ")"
                 ),
@@ -89,8 +94,10 @@ class ShellErrorHidingStrategy:
                     r"BLOCKED \[R-ERROR-HIDING\]",
                     r"\|\| true",
                 ],
-                safety_notes="Uses Write tool to a /tmp path",
+                safety_notes="Inside the gitignored scratch directory - safe",
                 test_type=TestType.BLOCKING,
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
@@ -98,7 +105,7 @@ class ShellErrorHidingStrategy:
                 title="Shell: clean script with explicit error handling is allowed",
                 command=(
                     "Write(\n"
-                    "  file_path='/tmp/acceptance-test-error-hiding/shell/good.sh',\n"
+                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'good.sh')}',\n"
                     "  content='#!/bin/bash\\nset -euo pipefail\\n"
                     "cmd || { echo failed >&2; exit 1; }\\n'\n"
                     ")"
@@ -106,8 +113,10 @@ class ShellErrorHidingStrategy:
                 description=("Allows shell script with proper error handling via Write tool"),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses Write tool to a /tmp path",
+                safety_notes="Inside the gitignored scratch directory - safe",
                 test_type=TestType.ADVISORY,
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

@@ -3,10 +3,13 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Rust"
 _EXTENSIONS: tuple[str, ...] = (".rs",)
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-lint-rust"
 _DEFAULT_LINT_COMMAND = (
     "rustc --edition 2021 --crate-type lib --emit=metadata "
     "--out-dir /tmp/claude-hooks-daemon-rust-lint {file}"
@@ -74,21 +77,25 @@ class RustLintStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Rust lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-rust/valid.rs "
+                    f"{scratch_path(_FIXTURE_DIR, 'valid.rs')} "
                     'with content "pub fn hello() {}"'
                 ),
                 description="Valid Rust code should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses /tmp path - safe. Creates temporary Rust file.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Creates temporary Rust file."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-rust"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-rust"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
@@ -96,17 +103,20 @@ class RustLintStrategy:
                 title="Rust lint - invalid code blocked",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-rust/invalid.rs "
+                    f"{scratch_path(_FIXTURE_DIR, 'invalid.rs')} "
                     'with content "pub fn hello( {}"'
                 ),
                 description="Invalid Rust code (missing closing paren) should be blocked",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Rust lint FAILED", r"invalid.rs"],
-                safety_notes="Uses /tmp path - safe. Creates temporary Rust file with syntax error.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. "
+                    "Creates temporary Rust file with syntax error."
+                ),
                 test_type=TestType.BLOCKING,
                 required_tools=["rustc"],
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-rust"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-rust"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

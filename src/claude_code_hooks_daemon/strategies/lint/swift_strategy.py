@@ -3,12 +3,15 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Swift"
 _EXTENSIONS: tuple[str, ...] = (".swift",)
 _DEFAULT_LINT_COMMAND = "swiftc -typecheck {file}"
 _EXTENDED_LINT_COMMAND = "swiftlint lint {file}"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-lint-swift"
 
 
 class SwiftLintStrategy:
@@ -47,21 +50,26 @@ class SwiftLintStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Swift lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-swift/valid.swift "
+                    f"{scratch_path(_FIXTURE_DIR, 'valid.swift')} "
                     'with content "print(\\"hello\\")"'
                 ),
                 description="Valid Swift code should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses /tmp path - safe. Creates temporary Swift file.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. "
+                    "Creates temporary Swift file."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-swift"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-swift"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
@@ -69,17 +77,20 @@ class SwiftLintStrategy:
                 title="Swift lint - invalid code blocked",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-swift/invalid.swift "
+                    f"{scratch_path(_FIXTURE_DIR, 'invalid.swift')} "
                     'with content "print(\\"hello"'
                 ),
                 description="Invalid Swift code (unclosed string) should be blocked",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Swift lint FAILED", r"invalid.swift"],
-                safety_notes="Uses /tmp path - safe. Creates temporary Swift file with syntax error.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. "
+                    "Creates temporary Swift file with syntax error."
+                ),
                 test_type=TestType.BLOCKING,
                 required_tools=["swiftc"],
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-swift"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-swift"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

@@ -9,7 +9,7 @@ This handler blocks Write and Edit tools when targeting lock files across all ma
 language ecosystems (PHP, JavaScript, Python, Ruby, Rust, Go, .NET, Swift).
 """
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
@@ -19,6 +19,10 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR: Final[str] = "acceptance-test-locks"
 
 _RULE = Rule(
     rule_id=RuleID.LOCK_FILE_EDIT,
@@ -232,7 +236,7 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
                 title="Write to package-lock.json",
                 command=(
                     "Use the Write tool to write to "
-                    "untracked/scratch/acceptance-test-locks/package-lock.json "
+                    f"{scratch_path(_FIXTURE_DIR, 'package-lock.json')} "
                     "with content '{}'"
                 ),
                 description="Blocks direct editing of package-lock.json (corruption risk)",
@@ -247,15 +251,15 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
                     "Write before file is created."
                 ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p untracked/scratch/acceptance-test-locks"],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-locks"],
+                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="Edit Cargo.lock",
                 command=(
-                    "Use the Edit tool on untracked/scratch/acceptance-test-locks/Cargo.lock "
+                    f"Use the Edit tool on {scratch_path(_FIXTURE_DIR, 'Cargo.lock')} "
                     "with old_string 'old' and new_string 'new'"
                 ),
                 description="Blocks direct editing of Cargo.lock",
@@ -271,10 +275,10 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
                 ),
                 test_type=TestType.BLOCKING,
                 setup_commands=[
-                    "mkdir -p untracked/scratch/acceptance-test-locks",
-                    "echo 'old content' > untracked/scratch/acceptance-test-locks/Cargo.lock",
+                    f"mkdir -p untracked/scratch/{_FIXTURE_DIR}",
+                    f"echo 'old content' > untracked/scratch/{_FIXTURE_DIR}/Cargo.lock",
                 ],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-locks"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

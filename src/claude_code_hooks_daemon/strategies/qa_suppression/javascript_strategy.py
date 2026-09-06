@@ -2,8 +2,12 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
 # ── Language-specific constants ──────────────────────────────────
 _LANGUAGE_NAME = "JavaScript/TypeScript"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-qa-js"
 _EXTENSIONS: tuple[str, ...] = (".js", ".jsx", ".ts", ".tsx")
 _FORBIDDEN_PATTERNS: tuple[str, ...] = (
     r"//\s*eslint-" + "disable",
@@ -64,11 +68,13 @@ class JavaScriptQaSuppressionStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="JavaScript/TypeScript QA suppression blocked",
                 command=(
-                    'Write file_path="/tmp/acceptance-test-qa-js/example.ts"'
+                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "example.ts")}"'
                     ' content="// eslint-' + "disable" + ' no-console\\nconst x = 1;"'
                 ),
                 description="Should block JavaScript/TypeScript QA suppression comment",
@@ -79,9 +85,9 @@ class JavaScriptQaSuppressionStrategy:
                     "JavaScript/TypeScript",
                 ],
                 test_type=TestType.BLOCKING,
-                safety_notes="Uses /tmp path - safe",
-                setup_commands=["mkdir -p /tmp/acceptance-test-qa-js"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-qa-js"],
+                safety_notes="Inside the gitignored scratch directory - safe",
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

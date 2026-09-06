@@ -26,10 +26,61 @@ from claude_code_hooks_daemon.constants.paths import DaemonPath, ProjectPath
 
 logger = logging.getLogger(__name__)
 
+#: Separator for assembled path strings. These are agent-facing text, not
+#: filesystem operations, so they are joined rather than built with Path --
+#: which would render backslashes if this ever ran on Windows.
+_PATH_SEPARATOR = "/"
+
+#: Claude Code sets this in the hook environment. Used UNEXPANDED so the text
+#: stays identical on every machine while still resolving absolutely for the
+#: reader -- see :func:`scratch_path` for why both properties are required.
+_PROJECT_DIR_VAR = "$CLAUDE_PROJECT_DIR"
+
 #: ``*`` keeps every scratch file out of git; ``!.gitignore`` keeps the rule
 #: itself tracked, so a fresh checkout arrives with the policy already in place
 #: rather than depending on the daemon having run first.
 SCRATCH_IGNORE_CONTENT = "*\n!.gitignore\n"
+
+
+def scratch_path(*segments: str) -> str:
+    """Return a scratch path that resolves ABSOLUTELY on whatever machine runs it.
+
+    Use for any scratch path quoted in agent-facing text — most importantly an
+    ``AcceptanceTest.command``, which the playbook renders verbatim for a
+    tester to follow.
+
+    Two constraints pull in opposite directions here, and satisfying only one
+    is how both known defects happened:
+
+    - It must be ABSOLUTE when executed. A relative ``untracked/scratch/x.py``
+      in a Write instruction is denied by ``AbsolutePathHandler`` (terminal,
+      priority 12) before the handler under test is consulted, so the test
+      observes the wrong rule and can never pass. The original ``/tmp``
+      spelling worked because it was absolute, not merely because it existed.
+    - It must NOT name the RENDERING machine's root. The playbook is followed
+      in client installs too, so a baked-in ``/workspace/...`` instructs a
+      tester to write to a path outside their own project — pinned by
+      ``tests/integration/test_generated_docs_are_path_agnostic.py``.
+
+    ``$CLAUDE_PROJECT_DIR`` satisfies both: it is machine-independent as text
+    and expands to the reader's own project root, which is the convention the
+    surrounding acceptance tests already use (``markdown_organization``,
+    ``sed_blocker``).
+
+    Do NOT use this in ``get_claude_md()``. That text is committed into tracked
+    docs as prose rather than executed, so it names the plain relative
+    ``ProjectPath.SCRATCH_DIR``.
+
+    Args:
+        *segments: Path segments below the scratch directory, e.g.
+            ``("acceptance-test-lint-python", "valid.py")``.
+
+    Returns:
+        A path rooted at ``$CLAUDE_PROJECT_DIR``, e.g.
+        ``$CLAUDE_PROJECT_DIR/untracked/scratch/fixture/x.py``.
+    """
+    base = f"{_PROJECT_DIR_VAR}{_PATH_SEPARATOR}{ProjectPath.SCRATCH_DIR}"
+    return _PATH_SEPARATOR.join((base, *segments))
 
 
 def ensure_scratch_dir(project_root: Path) -> bool:

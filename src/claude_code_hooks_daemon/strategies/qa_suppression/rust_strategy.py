@@ -2,8 +2,12 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
 # ── Language-specific constants ──────────────────────────────────
 _LANGUAGE_NAME = "Rust"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-qa-rust"
 _EXTENSIONS: tuple[str, ...] = (".rs",)
 _FORBIDDEN_PATTERNS: tuple[str, ...] = (
     r"#\[" + r"allow\(",
@@ -56,20 +60,22 @@ class RustQaSuppressionStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Rust QA suppression blocked",
                 command=(
-                    'Write file_path="/tmp/acceptance-test-qa-rust/example.rs"'
+                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "example.rs")}"'
                     ' content="#[' + "allow(" + 'unused_variables)]\\nfn main() {}"'
                 ),
                 description="Should block Rust QA suppression attribute",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "Rust"],
                 test_type=TestType.BLOCKING,
-                safety_notes="Uses /tmp path - safe",
-                setup_commands=["mkdir -p /tmp/acceptance-test-qa-rust"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-qa-rust"],
+                safety_notes="Inside the gitignored scratch directory - safe",
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

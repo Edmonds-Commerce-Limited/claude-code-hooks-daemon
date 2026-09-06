@@ -7,9 +7,12 @@ from claude_code_hooks_daemon.strategies.tdd.common import (
     is_in_common_test_directory,
     matches_directory,
 )
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Ruby"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-tdd-ruby"
 _EXTENSIONS: tuple[str, ...] = (".rb",)
 _SOURCE_DIRECTORIES: tuple[str, ...] = ("/lib/", "/app/")
 _SKIP_DIRECTORIES: tuple[str, ...] = ("vendor/", ".bundle/")
@@ -59,21 +62,26 @@ class RubyTddStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="TDD enforcement for Ruby source file",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-tdd-ruby/lib/services/user_service.rb "
+                    f"{scratch_path(_FIXTURE_DIR, 'lib', 'services', 'user_service.rb')} "
                     "with content 'class UserService\\nend'"
                 ),
                 description="Blocks Ruby source file creation without corresponding test file",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED \[R-TDD-TEST-FIRST\]", r"Ruby", r"test file"],
-                safety_notes="Uses /tmp path - safe. Handler blocks Write before file is created.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Write before file is created."
+                ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p /tmp/acceptance-test-tdd-ruby/lib/services"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-tdd-ruby"],
+                setup_commands=[f"mkdir -p {fixture_root}/lib/services"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

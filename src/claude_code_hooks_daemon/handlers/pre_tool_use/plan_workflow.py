@@ -14,10 +14,14 @@ from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.remedy import remedy_markdown_list
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Fallback plan directory, used only when no ProjectLayout facade was
 # injected. Mirrors PlanWorkflowConfig.directory's default exactly.
 _FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
+
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR: Final[str] = "acceptance-test-planwf"
 
 
 class PlanWorkflowHandler(PreToolUseHandlerBase):
@@ -135,7 +139,7 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
                 title="Writing to PLAN.md file",
                 command=(
                     "Use the Write tool to write to "
-                    "untracked/scratch/acceptance-test-planwf/CLAUDE/Plan/099-test/PLAN.md"
+                    f"{scratch_path(_FIXTURE_DIR, 'CLAUDE', 'Plan', '099-test', 'PLAN.md')}"
                     " with content '# Plan 099: Test Plan\\n\\n**Status**: Not Started'"
                 ),
                 description="Provides plan workflow guidance when writing PLAN.md (advisory)",
@@ -151,7 +155,7 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-planwf"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

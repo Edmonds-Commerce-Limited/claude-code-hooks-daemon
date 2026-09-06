@@ -7,9 +7,12 @@ from claude_code_hooks_daemon.strategies.tdd.common import (
     is_in_common_test_directory,
     matches_directory,
 )
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Go"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-tdd-go"
 _EXTENSIONS: tuple[str, ...] = (".go",)
 _SOURCE_DIRECTORIES: tuple[str, ...] = ("/src/", "/cmd/", "/pkg/", "/internal/")
 _SKIP_DIRECTORIES: tuple[str, ...] = ("vendor/", "testdata/")
@@ -58,21 +61,26 @@ class GoTddStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="TDD enforcement for Go source file",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-tdd-go/src/myapp/server.go "
+                    f"{scratch_path(_FIXTURE_DIR, 'src', 'myapp', 'server.go')} "
                     "with content 'package main\\n\\nfunc main() {}'"
                 ),
                 description="Blocks Go source file creation without corresponding test file",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED \[R-TDD-TEST-FIRST\]", r"Go", r"test file"],
-                safety_notes="Uses /tmp path - safe. Handler blocks Write before file is created.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Write before file is created."
+                ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p /tmp/acceptance-test-tdd-go/src/myapp"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-tdd-go"],
+                setup_commands=[f"mkdir -p {fixture_root}/src/myapp"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

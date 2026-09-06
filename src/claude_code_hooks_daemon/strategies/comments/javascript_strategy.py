@@ -9,8 +9,11 @@ from claude_code_hooks_daemon.strategies.comments.syntax import (
     SLASH_DOC_SYNTAX,
     CommentSyntax,
 )
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "JavaScript/TypeScript"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-comment-changelog-js"
 _EXTENSIONS: tuple[str, ...] = (".js", ".jsx", ".ts", ".tsx")
 
 
@@ -42,12 +45,14 @@ class JavaScriptCommentStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="JavaScript/TypeScript: changelog narrative in a comment is blocked",
                 command=(
                     "Use the Write tool to create "
-                    "/tmp/acceptance-test-comment-changelog-js/example.ts whose "
+                    f"{scratch_path(_FIXTURE_DIR, 'example.ts')} whose "
                     "content has a trailing '//' comment reading changelog-style "
                     "history: 'Prior 1.4.2: fixed a race. Prior 1.4.1: original "
                     "broken behaviour.'"
@@ -58,10 +63,13 @@ class JavaScriptCommentStrategy:
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["changelog", "comment", "BLOCKED"],
-                safety_notes="Uses /tmp path - safe. Handler blocks Write before file is created.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Handler "
+                    "blocks Write before file is created."
+                ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p /tmp/acceptance-test-comment-changelog-js"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-comment-changelog-js"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

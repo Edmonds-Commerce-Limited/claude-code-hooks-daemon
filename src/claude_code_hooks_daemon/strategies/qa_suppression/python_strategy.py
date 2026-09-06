@@ -2,8 +2,12 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
 # ── Language-specific constants ──────────────────────────────────
 _LANGUAGE_NAME = "Python"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-qa-python"
 _EXTENSIONS: tuple[str, ...] = (".py",)
 _FORBIDDEN_PATTERNS: tuple[str, ...] = (
     r"#\s*type:\s*" + "ignore",
@@ -63,20 +67,22 @@ class PythonQaSuppressionStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Python QA suppression blocked",
                 command=(
-                    'Write file_path="/tmp/acceptance-test-qa-python/example.py"'
+                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "example.py")}"'
                     ' content="x = 1  # type: ' + "ignore" + '"'
                 ),
                 description="Should block Python QA suppression comment",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "Python"],
                 test_type=TestType.BLOCKING,
-                safety_notes="Uses /tmp path - safe",
-                setup_commands=["mkdir -p /tmp/acceptance-test-qa-python"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-qa-python"],
+                safety_notes="Inside the gitignored scratch directory - safe",
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

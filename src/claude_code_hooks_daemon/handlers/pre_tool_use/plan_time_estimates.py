@@ -2,7 +2,7 @@
 
 import re
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -17,6 +17,10 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR: Final[str] = "acceptance-test-plantime"
 
 # Single source of truth for the one rule this handler enforces (Plan 00116,
 # Decision B: a handler with one conceptual violation gets one Rule).
@@ -224,7 +228,7 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
                 title="Block time estimates in plan",
                 command=(
                     "Use the Write tool to write to "
-                    "untracked/scratch/acceptance-test-plantime/Plan/001-test/PLAN.md"
+                    f"{scratch_path(_FIXTURE_DIR, 'Plan', '001-test', 'PLAN.md')}"
                     " with content '# Plan 001\\n\\n**Estimated Effort**: 4 hours\\n\\nTask list here.'"
                 ),
                 description="Blocks time estimates in plan documents (plans focus on WHAT not WHEN)",
@@ -235,8 +239,8 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
                     "Write before file is created."
                 ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p untracked/scratch/acceptance-test-plantime/Plan/001-test"],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-plantime"],
+                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}/Plan/001-test"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

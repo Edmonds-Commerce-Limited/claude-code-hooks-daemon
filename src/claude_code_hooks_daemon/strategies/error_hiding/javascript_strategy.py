@@ -3,8 +3,11 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.error_hiding.protocol import ErrorHidingPattern
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "JavaScript/TypeScript"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-error-hiding-js"
 _EXTENSIONS: tuple[str, ...] = (".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs")
 
 _PATTERNS: tuple[ErrorHidingPattern, ...] = (
@@ -47,12 +50,14 @@ class JavaScriptErrorHidingStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="JavaScript: empty catch block swallows exceptions",
                 command=(
                     "Write(\n"
-                    "  file_path='/tmp/acceptance-test-error-hiding/js/bad.js',\n"
+                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'bad.js')}',\n"
                     "  content='try { doSomething(); } catch (e) {}'\n"
                     ")"
                 ),
@@ -62,8 +67,10 @@ class JavaScriptErrorHidingStrategy:
                     r"BLOCKED \[R-ERROR-HIDING\]",
                     r"empty catch block",
                 ],
-                safety_notes="Uses Write tool to a /tmp path",
+                safety_notes="Inside the gitignored scratch directory - safe",
                 test_type=TestType.BLOCKING,
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
@@ -71,7 +78,7 @@ class JavaScriptErrorHidingStrategy:
                 title="JavaScript: catch block with error handling is allowed",
                 command=(
                     "Write(\n"
-                    "  file_path='/tmp/acceptance-test-error-hiding/js/good.js',\n"
+                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'good.js')}',\n"
                     "  content='try { doSomething(); } "
                     "catch (e) { console.error(e); throw e; }'\n"
                     ")"
@@ -79,8 +86,10 @@ class JavaScriptErrorHidingStrategy:
                 description=("Allows JS file with proper catch block handling via Write tool"),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses Write tool to a /tmp path",
+                safety_notes="Inside the gitignored scratch directory - safe",
                 test_type=TestType.ADVISORY,
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

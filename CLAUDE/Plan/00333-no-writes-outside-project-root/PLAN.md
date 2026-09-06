@@ -95,8 +95,12 @@ does not exist.
   in `src/CLAUDE.md` and `tests/CLAUDE.md` with the named directory.
 - [x] ✅ **Task 4.3**: Sweep remaining `/tmp` recommendations in agent-facing docs
   (7 snippets across the debugging, QA, install and update guides).
-- [ ] 🔄 **Task 4.4**: Migrate the acceptance-test corpus off `/tmp` — ~21 handler
-  modules whose `AcceptanceTest` commands the guard would now intercept.
+- [ ] 🔄 **Task 4.4**: Migrate the acceptance-test corpus off `/tmp`. Larger
+  than first scoped: 15 handler modules AND 49 strategy modules. Not cosmetic —
+  containment is terminal at priority 14, so a `mkdir -p /tmp/fixture` setup
+  command is denied outright and a Write to `/tmp` is denied by containment
+  rather than by the handler under test, making the expected patterns
+  unmatchable. Paths must land absolute (Decision 10).
 - [x] ✅ **Task 4.5**: Catch destination-naming bashisms — `curl -o|--output`,
   `wget -O`, `tar` creating an archive, `mkdir`, `rsync`/`scp`, and any of them
   nested inside `sh -c`/`bash -c`. Handler-local rather than a widened shared
@@ -189,6 +193,40 @@ counterpart to `blockReadsOutsideWorkingDirectories`. Enumeration is the only
 available shape there, which is exactly why the daemon handler — deny-by-default
 and whitelist-shaped — remains the control. The enumeration is pinned to
 `ProjectPath.EPHEMERAL_ROOTS` by test so the two layers cannot drift.
+
+### Decision 10: a migrated fixture path must stay ABSOLUTE
+
+The first cut of Task 4.4 moved `/tmp/fixture` to `untracked/scratch/fixture`
+and kept it relative. That preserved the location and lost the property that
+made the original work. The playbook renders each `AcceptanceTest.command`
+verbatim for an agent to follow, so a relative `file_path` in a Write
+instruction is denied by `AbsolutePathHandler` (terminal, priority 12) before
+the handler under test is ever reached — the test then observes
+R-ABSOLUTE-PATH-REQUIRED and can never pass. `/tmp` worked *because* it was
+absolute, not merely because it existed.
+
+`scratch_path()` resolves the live project root, landing on the same side of
+the split `utils/cli_command` documents as `daemon_cli_command`: the playbook
+is generated on demand for the machine it runs on and is not a tracked
+artefact, so resolving is correct rather than a leak.
+
+The inverse holds for `get_claude_md()`, and it is the half a bulk migration
+gets backwards: that text IS committed, so it keeps the relative
+`ProjectPath.SCRATCH_DIR`. `tests/integration/test_generated_docs_are_path_agnostic.py`
+is the guard. A `setup_commands` entry is Bash run from the project root, so
+relative is correct there too.
+
+### Decision 11: the guard's own false positive was fixed, not exempted
+
+Committing Task 4.4 was denied by `curl_pipe_shell`, because the commit
+message described the anti-pattern it was fixing. The body sat in a
+quoted-delimiter heredoc, which bash never parses — it was data.
+
+Fixed in `shell_segmentation` (`quoted_heredoc_receivers`) rather than in the
+handler, because that module exists precisely to stop two handlers deriving
+opposite halves of a shell rule (Plan 00200 Task 3.7). The exemption stops at
+the receiver: `bash <<'EOF'` executes the body, so blanking it would have
+turned a documentation fix into a bypass of a safety-critical handler.
 
 ## Success Criteria
 

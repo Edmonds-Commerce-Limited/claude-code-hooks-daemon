@@ -28,8 +28,11 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME: Final = "Ansible"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR: Final = "acceptance-test-lint-ansible"
 _EXTENSIONS: Final[tuple[str, ...]] = (".yml", ".yaml")
 
 # Cheap tier: catches the load-time failure this strategy exists for. The full
@@ -144,21 +147,26 @@ class AnsibleLintStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Ansible lint - valid playbook passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-ansible/playbooks/valid.yml "
+                    f"{scratch_path(_FIXTURE_DIR, 'playbooks', 'valid.yml')} "
                     'with content "---\\n- hosts: all\\n  tasks: []\\n"'
                 ),
                 description="A well-formed playbook should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses /tmp path - safe. Creates a temporary playbook.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. "
+                    "Creates a temporary playbook."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-ansible/playbooks"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-ansible"],
+                setup_commands=[f"mkdir -p {fixture_root}/playbooks"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
@@ -166,7 +174,7 @@ class AnsibleLintStrategy:
                 title="Ansible lint - unloadable playbook blocked",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-ansible/playbooks/broken.yml "
+                    f"{scratch_path(_FIXTURE_DIR, 'playbooks', 'broken.yml')} "
                     'with content "---\\n- hosts: all\\n  tasks:\\n'
                     "    - name: report\\n"
                     '      ansible.builtin.shell: echo \\"it is broken\\n"'
@@ -178,10 +186,13 @@ class AnsibleLintStrategy:
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Ansible lint FAILED", r"broken\.yml"],
-                safety_notes="Uses /tmp path - safe. Creates a temporary broken playbook.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. "
+                    "Creates a temporary broken playbook."
+                ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-ansible/playbooks"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-ansible"],
+                setup_commands=[f"mkdir -p {fixture_root}/playbooks"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
@@ -189,7 +200,7 @@ class AnsibleLintStrategy:
                 title="Ansible lint - a GitHub workflow is not claimed",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-ansible/.github/workflows/ci.yml "
+                    f"{scratch_path(_FIXTURE_DIR, '.github', 'workflows', 'ci.yml')} "
                     'with content "---\\non:\\n  push:\\njobs: {}\\n"'
                 ),
                 description=(
@@ -198,10 +209,13 @@ class AnsibleLintStrategy:
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses /tmp path - safe. Creates a temporary workflow file.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. "
+                    "Creates a temporary workflow file."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-ansible/.github/workflows"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-ansible"],
+                setup_commands=[f"mkdir -p {fixture_root}/.github/workflows"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

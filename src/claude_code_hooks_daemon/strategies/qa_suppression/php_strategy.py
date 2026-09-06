@@ -2,8 +2,12 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
 # ── Language-specific constants ──────────────────────────────────
 _LANGUAGE_NAME = "PHP"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-qa-php"
 _EXTENSIONS: tuple[str, ...] = (".php",)
 _FORBIDDEN_PATTERNS: tuple[str, ...] = (
     # PHPStan patterns (all variants)
@@ -71,52 +75,54 @@ class PhpQaSuppressionStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="PHP @phpstan-ignore-next-line blocked",
                 command=(
-                    'Write file_path="/tmp/acceptance-test-qa-php/phpstan-next-line.php"'
+                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "phpstan-next-line.php")}"'
                     ' content="<?php /** @phpstan-' + "ignore-next-line" + ' */ $x = 1;"'
                 ),
                 description="Should block @phpstan-ignore-next-line suppression",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "PHP"],
                 test_type=TestType.BLOCKING,
-                safety_notes="Uses /tmp path - safe",
-                setup_commands=["mkdir -p /tmp/acceptance-test-qa-php"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-qa-php"],
+                safety_notes="Inside the gitignored scratch directory - safe",
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="PHP @phpstan-ignore (with identifier) blocked",
                 command=(
-                    'Write file_path="/tmp/acceptance-test-qa-php/phpstan-ignore.php"'
+                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "phpstan-ignore.php")}"'
                     ' content="<?php /** @phpstan-' + "ignore" + ' argument.type */ $x = 1;"'
                 ),
                 description="Should block @phpstan-ignore with error identifier (modern pattern)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "PHP"],
                 test_type=TestType.BLOCKING,
-                safety_notes="Uses /tmp path - safe",
-                setup_commands=["mkdir -p /tmp/acceptance-test-qa-php"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-qa-php"],
+                safety_notes="Inside the gitignored scratch directory - safe",
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="PHP phpcs:disable blocked",
                 command=(
-                    'Write file_path="/tmp/acceptance-test-qa-php/phpcs-disable.php"'
+                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "phpcs-disable.php")}"'
                     ' content="<?php // phpcs:' + "disable" + '\\n$x = 1;"'
                 ),
                 description="Should block phpcs:disable block-level suppression",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "PHP"],
                 test_type=TestType.BLOCKING,
-                safety_notes="Uses /tmp path - safe",
-                setup_commands=["mkdir -p /tmp/acceptance-test-qa-php"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-qa-php"],
+                safety_notes="Inside the gitignored scratch directory - safe",
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

@@ -88,6 +88,65 @@ class TestItNeverDestroys:
 
         assert kept.read_text(encoding="utf-8") == "# in progress"
 
+
+class TestScratchPathResolvesAbsolutelyOnAnyMachine:
+    """Two constraints pull opposite ways, and each was violated in turn.
+
+    ABSOLUTE when executed: the playbook renders each ``AcceptanceTest.command``
+    verbatim for a tester to follow, and a Write instruction spelled
+    ``untracked/scratch/x.py`` is denied by ``AbsolutePathHandler`` (priority
+    12, terminal) before the handler under test is consulted -- so the test
+    reports the wrong rule and can never pass. ``/tmp`` worked precisely
+    BECAUSE it was absolute; migrating in-repo has to keep that property, not
+    just change the location.
+
+    But NOT the rendering machine's root: the playbook is followed in client
+    installs too, so a baked-in ``/workspace/...`` instructs a tester to write
+    outside their own project. That is pinned by
+    ``tests/integration/test_generated_docs_are_path_agnostic.py``, whose
+    docstring names this exact failure.
+
+    ``$CLAUDE_PROJECT_DIR`` is the only spelling satisfying both, and is
+    already the convention in the surrounding acceptance tests.
+    """
+
+    def test_it_is_rooted_at_the_project_dir_variable(self) -> None:
+        from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
+        assert scratch_path("fixture", "x.py") == (
+            "$CLAUDE_PROJECT_DIR/untracked/scratch/fixture/x.py"
+        )
+
+    def test_the_bare_directory_is_available(self) -> None:
+        from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
+        assert scratch_path() == "$CLAUDE_PROJECT_DIR/untracked/scratch"
+
+    def test_it_never_names_a_concrete_machine_root(self) -> None:
+        """The regression guard for the second constraint: no matter what the
+        live ProjectContext says, the rendered text must not carry it."""
+        from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
+        rendered = scratch_path("fixture")
+
+        assert "/workspace" not in rendered
+        assert rendered.startswith("$")
+
+    def test_it_does_not_depend_on_project_context(self, monkeypatch) -> None:
+        """Rendering guidance must work outside a running daemon -- unit
+        tests and tooling both do it. Reading ProjectContext here would make
+        a path builder raise, taking its caller down over cosmetics."""
+
+        def _raise() -> Path:
+            raise RuntimeError("ProjectContext not initialised")
+
+        from claude_code_hooks_daemon.core.project_context import ProjectContext
+        from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
+        monkeypatch.setattr(ProjectContext, "project_root", staticmethod(_raise))
+
+        assert scratch_path("fixture") == "$CLAUDE_PROJECT_DIR/untracked/scratch/fixture"
+
     def test_it_creates_the_ignore_file_when_only_the_directory_exists(
         self, tmp_path: Path
     ) -> None:

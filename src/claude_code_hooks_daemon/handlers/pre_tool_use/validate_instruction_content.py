@@ -17,6 +17,10 @@ from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest, Recomm
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR: Final[str] = "acceptance-test-validate"
 
 # SINGLE SOURCE OF TRUTH: (category name -- matches the keys _find_blocked_pattern
 # returns, rule_id, blocked, why, fix, verbose). One Rule per content category
@@ -316,7 +320,7 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
                 title="Block implementation log in CLAUDE.md",
                 command=(
                     "Use the Write tool to write to "
-                    "untracked/scratch/acceptance-test-validate/CLAUDE.md"
+                    f"{scratch_path(_FIXTURE_DIR, 'CLAUDE.md')}"
                     " with content 'Created the file ProductService.php and added the class'"
                 ),
                 description="Prevents implementation logs from being written to instruction files",
@@ -327,8 +331,8 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
                     "Write before file is created."
                 ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p untracked/scratch/acceptance-test-validate"],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-validate"],
+                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
@@ -336,7 +340,7 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
                 title="Allow clean instructions in CLAUDE.md",
                 command=(
                     "Use the Write tool to write to "
-                    "untracked/scratch/acceptance-test-validate/CLAUDE.md"
+                    f"{scratch_path(_FIXTURE_DIR, 'CLAUDE.md')}"
                     " with content '# Project Instructions\\n\\nUse strict typing for all modules.'"
                 ),
                 description="Allows clean instructional content without ephemeral patterns",
@@ -347,8 +351,8 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
                     "should be allowed."
                 ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p untracked/scratch/acceptance-test-validate"],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-validate"],
+                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

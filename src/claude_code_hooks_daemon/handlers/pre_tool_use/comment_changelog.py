@@ -47,6 +47,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     vendored_exclude_globs,
 )
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
@@ -54,6 +55,9 @@ if TYPE_CHECKING:
 _MODE_BLOCK: Final[str] = "block"
 _MODE_WARN: Final[str] = "warn"
 _DEFAULT_MAX_HISTORY_ENTRIES: Final[int] = 1
+
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR: Final[str] = "acceptance-test-comment-changelog-rationale"
 
 # Built-in default excludes so the "vendor/build/fixture dirs are skipped by
 # default" guidance in get_claude_md() below is actually true (Plan 00288
@@ -461,8 +465,8 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
                 title="comment_changelog: plan-number-keyed rationale is allowed",
                 command=(
                     "Use the Write tool to create "
-                    "untracked/scratch/acceptance-test-comment-changelog-rationale/"
-                    "example.py whose content has a '#' comment reading "
+                    f"{scratch_path(_FIXTURE_DIR, 'example.py')} whose content has a "
+                    "'#' comment reading "
                     "'History (Plan 00047 -- do NOT re-add DISABLE_MOUSE without "
                     "reading this): fullscreen draws on the terminal alt-screen...'"
                 ),
@@ -478,12 +482,8 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
                     "is created, not blocked."
                 ),
                 test_type=TestType.ADVISORY,
-                setup_commands=[
-                    "mkdir -p untracked/scratch/acceptance-test-comment-changelog-rationale"
-                ],
-                cleanup_commands=[
-                    "rm -rf untracked/scratch/acceptance-test-comment-changelog-rationale"
-                ],
+                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             )

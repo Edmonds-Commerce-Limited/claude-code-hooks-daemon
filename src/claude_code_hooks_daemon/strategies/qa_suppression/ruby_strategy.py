@@ -2,8 +2,12 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
 # ── Language-specific constants ──────────────────────────────────
 _LANGUAGE_NAME = "Ruby"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-qa-ruby"
 _EXTENSIONS: tuple[str, ...] = (".rb",)
 _FORBIDDEN_PATTERNS: tuple[str, ...] = (
     r"#\s*rubocop:" + "disable",
@@ -53,20 +57,22 @@ class RubyQaSuppressionStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Ruby QA suppression blocked",
                 command=(
-                    'Write file_path="/tmp/acceptance-test-qa-ruby/example.rb"'
+                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "example.rb")}"'
                     ' content="# rubocop:' + "disable" + ' Style/FrozenStringLiteral\\nx = 1"'
                 ),
                 description="Should block Ruby QA suppression comment",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "Ruby"],
                 test_type=TestType.BLOCKING,
-                safety_notes="Uses /tmp path - safe",
-                setup_commands=["mkdir -p /tmp/acceptance-test-qa-ruby"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-qa-ruby"],
+                safety_notes="Inside the gitignored scratch directory - safe",
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

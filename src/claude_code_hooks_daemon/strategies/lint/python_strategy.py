@@ -4,6 +4,7 @@ import sys
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Python"
@@ -11,6 +12,8 @@ _EXTENSIONS: tuple[str, ...] = (".py",)
 # Use the same Python interpreter running the daemon (works in any environment)
 _DEFAULT_LINT_COMMAND = f"{sys.executable} -m py_compile {{file}}"
 _EXTENDED_LINT_COMMAND = "ruff check {file}"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-lint-python"
 
 
 class PythonLintStrategy:
@@ -49,21 +52,26 @@ class PythonLintStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Python lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-python/valid.py "
+                    f"{scratch_path(_FIXTURE_DIR, 'valid.py')} "
                     "with content \"def hello():\\n    print('hello')\\n\""
                 ),
                 description="Valid Python code should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses /tmp path - safe. Creates temporary Python file.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. "
+                    "Creates temporary Python file."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-python"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-python"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
@@ -71,16 +79,19 @@ class PythonLintStrategy:
                 title="Python lint - invalid code blocked",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-python/invalid.py "
+                    f"{scratch_path(_FIXTURE_DIR, 'invalid.py')} "
                     "with content \"def hello(\\n    print('hello')\""
                 ),
                 description="Invalid Python code (missing closing paren) should be blocked",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Python lint FAILED", r"invalid.py", r"SyntaxError"],
-                safety_notes="Uses /tmp path - safe. Creates temporary Python file with syntax error.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. "
+                    "Creates temporary Python file with syntax error."
+                ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-python"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-python"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

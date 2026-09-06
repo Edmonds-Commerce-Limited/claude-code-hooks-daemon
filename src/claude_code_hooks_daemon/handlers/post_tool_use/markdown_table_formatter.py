@@ -34,9 +34,13 @@ from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Extensions treated as markdown (lowercase match).
 _MARKDOWN_EXTENSIONS: tuple[str, ...] = (".md", ".markdown")
+
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR: Final[str] = "acceptance-test-mdformat"
 
 # --- Advisory-message classification --------------------------------------
 #
@@ -326,7 +330,7 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
                 title="Markdown table auto-alignment after Write",
                 command=(
                     "Use the Write tool to create "
-                    "untracked/scratch/acceptance-test-mdformat/doc.md "
+                    f"{scratch_path(_FIXTURE_DIR, 'doc.md')} "
                     "with content:\n"
                     "# Test\n\n"
                     "| Name | Value |\n"
@@ -346,8 +350,8 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
                     "directory for formatting test"
                 ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p untracked/scratch/acceptance-test-mdformat"],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-mdformat"],
+                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
             ),

@@ -2,8 +2,12 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
 # ── Language-specific constants ──────────────────────────────────
 _LANGUAGE_NAME = "Swift"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-qa-swift"
 _EXTENSIONS: tuple[str, ...] = (".swift",)
 _FORBIDDEN_PATTERNS: tuple[str, ...] = (
     r"//\s*swiftlint:" + "disable",
@@ -57,20 +61,22 @@ class SwiftQaSuppressionStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Swift QA suppression blocked",
                 command=(
-                    'Write file_path="/tmp/acceptance-test-qa-swift/Example.swift"'
+                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "Example.swift")}"'
                     ' content="// swiftlint:' + "disable" + ' force_cast\\nlet x = obj as! String"'
                 ),
                 description="Should block Swift QA suppression comment",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "Swift"],
                 test_type=TestType.BLOCKING,
-                safety_notes="Uses /tmp path - safe",
-                setup_commands=["mkdir -p /tmp/acceptance-test-qa-swift"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-qa-swift"],
+                safety_notes="Inside the gitignored scratch directory - safe",
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

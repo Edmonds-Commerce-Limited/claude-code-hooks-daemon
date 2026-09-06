@@ -3,8 +3,11 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.error_hiding.protocol import ErrorHidingPattern
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "Go"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-error-hiding-go"
 _EXTENSIONS: tuple[str, ...] = (".go",)
 
 _PATTERNS: tuple[ErrorHidingPattern, ...] = (
@@ -50,12 +53,14 @@ class GoErrorHidingStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Go: empty error check ignores error value",
                 command=(
                     "Write(\n"
-                    "  file_path='/tmp/acceptance-test-error-hiding/go/bad.go',\n"
+                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'bad.go')}',\n"
                     "  content='package main\\nfunc main() { if err != nil {} }'\n"
                     ")"
                 ),
@@ -65,8 +70,10 @@ class GoErrorHidingStrategy:
                     r"BLOCKED \[R-ERROR-HIDING\]",
                     r"empty error check",
                 ],
-                safety_notes="Uses Write tool to a /tmp path",
+                safety_notes="Inside the gitignored scratch directory - safe",
                 test_type=TestType.BLOCKING,
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
@@ -74,7 +81,7 @@ class GoErrorHidingStrategy:
                 title="Go: proper error handling is allowed",
                 command=(
                     "Write(\n"
-                    "  file_path='/tmp/acceptance-test-error-hiding/go/good.go',\n"
+                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'good.go')}',\n"
                     '  content=\'package main\\nimport ("fmt"; "os")\\n'
                     'func main() {\\n  if _, err := os.Open(\\"f\\"); err != nil '
                     "{ fmt.Println(err) }\\n}'\n"
@@ -83,8 +90,10 @@ class GoErrorHidingStrategy:
                 description=("Allows Go file with proper error handling via Write tool"),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses Write tool to a /tmp path",
+                safety_notes="Inside the gitignored scratch directory - safe",
                 test_type=TestType.ADVISORY,
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

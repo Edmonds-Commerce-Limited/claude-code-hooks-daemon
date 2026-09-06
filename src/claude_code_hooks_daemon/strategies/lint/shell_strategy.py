@@ -3,12 +3,15 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Shell"
 _EXTENSIONS: tuple[str, ...] = (".sh", ".bash")
 _DEFAULT_LINT_COMMAND = "bash -n {file}"
 _EXTENDED_LINT_COMMAND = "shellcheck -x {file}"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-lint-shell"
 
 
 class ShellLintStrategy:
@@ -47,21 +50,26 @@ class ShellLintStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Shell lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-shell/valid.sh "
+                    f"{scratch_path(_FIXTURE_DIR, 'valid.sh')} "
                     'with content "#!/bin/bash\\necho hello"'
                 ),
                 description="Valid Shell script should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses /tmp path - safe. Creates temporary shell script.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. "
+                    "Creates temporary shell script."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-shell"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-shell"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
@@ -69,16 +77,19 @@ class ShellLintStrategy:
                 title="Shell lint - invalid code blocked",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-shell/invalid.sh "
+                    f"{scratch_path(_FIXTURE_DIR, 'invalid.sh')} "
                     'with content "#!/bin/bash\\nif [ -f file ]; then\\necho missing fi"'
                 ),
                 description="Invalid Shell script (missing fi) should be blocked",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Shell lint FAILED", r"invalid.sh", r"syntax error"],
-                safety_notes="Uses /tmp path - safe. Creates temporary shell script with syntax error.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. "
+                    "Creates temporary shell script with syntax error."
+                ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p /tmp/acceptance-test-lint-shell"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-shell"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

@@ -6,6 +6,7 @@ the TddEnforcementHandler aggregates them correctly.
 
 import pytest
 
+from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.core import AcceptanceTest, Decision, TestType
 from claude_code_hooks_daemon.handlers.pre_tool_use.tdd_enforcement import (
     TddEnforcementHandler,
@@ -132,14 +133,14 @@ class TestStrategyAcceptanceTests:
             assert isinstance(test.cleanup_commands, list)
             assert len(test.cleanup_commands) > 0
 
-    def test_uses_tmp_path(self, strategy_class: type) -> None:
-        """All tests use /tmp path for safety."""
+    def test_uses_scratch_path(self, strategy_class: type) -> None:
+        """All tests use the sanctioned scratch directory for safety."""
         strategy = strategy_class()
         tests = strategy.get_acceptance_tests()
         for test in tests:
-            assert (
-                "/tmp/" in test.command
-            ), f"{strategy_class.__name__} test doesn't use /tmp path: {test.command}"
+            assert f"{ProjectPath.SCRATCH_DIR}/" in test.command, (
+                f"{strategy_class.__name__} test doesn't use the scratch path: {test.command}"
+            )
 
     def test_has_safety_notes(self, strategy_class: type) -> None:
         """All tests have safety_notes explaining why they're safe."""

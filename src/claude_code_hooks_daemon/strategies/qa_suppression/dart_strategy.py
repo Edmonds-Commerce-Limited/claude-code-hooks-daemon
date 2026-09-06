@@ -2,8 +2,12 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
 # ── Language-specific constants ──────────────────────────────────
 _LANGUAGE_NAME = "Dart"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-qa-dart"
 _EXTENSIONS: tuple[str, ...] = (".dart",)
 _FORBIDDEN_PATTERNS: tuple[str, ...] = (
     r"//\s*" + r"ignore:",
@@ -57,20 +61,22 @@ class DartQaSuppressionStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Dart QA suppression blocked",
                 command=(
-                    'Write file_path="/tmp/acceptance-test-qa-dart/example.dart"'
+                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "example.dart")}"'
                     ' content="// ' + "ignore:" + ' unused_local_variable\\nvar x = 1;"'
                 ),
                 description="Should block Dart QA suppression comment",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "Dart"],
                 test_type=TestType.BLOCKING,
-                safety_notes="Uses /tmp path - safe",
-                setup_commands=["mkdir -p /tmp/acceptance-test-qa-dart"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-qa-dart"],
+                safety_notes="Inside the gitignored scratch directory - safe",
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

@@ -13,8 +13,11 @@ from claude_code_hooks_daemon.strategies.comments.syntax import (
     HASH_SYNTAX,
     CommentSyntax,
 )
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "Shell"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-comment-changelog-shell"
 _EXTENSIONS: tuple[str, ...] = (".sh", ".bash")
 
 
@@ -46,12 +49,14 @@ class ShellCommentStrategy:
             TestType,
         )
 
+        fixture_root = scratch_path(_FIXTURE_DIR)
+
         return [
             AcceptanceTest(
                 title="Shell: version-marker trailing comment changelog is blocked",
                 command=(
                     "Use the Write tool to create "
-                    "/tmp/acceptance-test-comment-changelog-shell/example.sh whose "
+                    f"{scratch_path(_FIXTURE_DIR, 'example.sh')} whose "
                     "content has a version variable line with a trailing '#' comment "
                     "reading changelog-style history: 'Patch: 3.27.0 was assigned. "
                     "Prior 3.26.2: whitelisted the supervisor. Prior 3.26.1: fixed "
@@ -63,10 +68,13 @@ class ShellCommentStrategy:
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["changelog", "comment", "BLOCKED"],
-                safety_notes="Uses /tmp path - safe. Handler blocks Write before file is created.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Handler "
+                    "blocks Write before file is created."
+                ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p /tmp/acceptance-test-comment-changelog-shell"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-comment-changelog-shell"],
+                setup_commands=[f"mkdir -p {fixture_root}"],
+                cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
