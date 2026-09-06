@@ -213,6 +213,35 @@ class TestEchdCaptureResolution:
         assert "TEMP_FILE" in reason
         assert "RECOMMENDED ALTERNATIVE" in reason
 
+    def test_the_fallback_never_recommends_a_path_outside_the_repo(
+        self, handler: PipeBlockerHandler, blacklisted_input: dict
+    ) -> None:
+        """The daemon must not advise what another handler then denies.
+
+        Plan 00333 added `project_containment`, which denies a write to a path
+        named outside the repository root. This fallback used to emit
+        `TEMP_FILE="/tmp/output_$$.txt"`, so an agent following the block
+        message verbatim would have been blocked by the next handler — the
+        daemon contradicting itself, in the one message an agent reads while
+        already blocked and looking for a way forward.
+
+        Measured incidentally while diagnosing that plan: this snippet was
+        never actually being pasted (no `/tmp/output_<pid>.txt` file existed),
+        so its real influence is as a statement about where scratch BELONGS.
+        That makes it worth getting right rather than worth deleting.
+        """
+        with patch(
+            f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir",
+            side_effect=RuntimeError("not initialised"),
+        ):
+            reason = handler.handle(
+                _with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl")
+            ).reason
+
+        assert reason is not None
+        assert "/tmp/" not in reason
+        assert "untracked/scratch" in reason
+
 
 # ── Blacklisted path: verbose (first fire) ────────────────────────────────────
 

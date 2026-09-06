@@ -227,8 +227,8 @@ If any of these fail, see Troubleshooting section below.
 **Step 6.1: Generate the full default config with ALL handlers visible:**
 
 ```bash
-.claude/hooks-daemon/bin/hooks-daemon init-config --stdout > /tmp/full-config.yaml
-cat /tmp/full-config.yaml
+.claude/hooks-daemon/bin/hooks-daemon init-config --stdout > untracked/scratch/full-config.yaml
+cat untracked/scratch/full-config.yaml
 ```
 
 `--stdout` prints the template for review and writes nothing, so it is safe to
@@ -334,8 +334,8 @@ This displays:
 **Save for reference:**
 
 ```bash
-.claude/hooks-daemon/bin/hooks-daemon handlers > /tmp/handler-status.txt
-cat /tmp/handler-status.txt
+.claude/hooks-daemon/bin/hooks-daemon handlers > untracked/scratch/handler-status.txt
+cat untracked/scratch/handler-status.txt
 ```
 
 ---

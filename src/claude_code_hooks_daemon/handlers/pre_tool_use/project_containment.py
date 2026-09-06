@@ -44,6 +44,7 @@ from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
+from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tags import HandlerTag
@@ -54,10 +55,10 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_write_targets
 
-#: Repo-relative home for scratch. Inside the working tree (so it survives a
-#: container restart and is visible to the tools that matter) and gitignored
-#: (so it never reaches review).
-SCRATCH_DIR = "untracked/scratch"
+#: Repo-relative home for scratch, shared with `pipe_blocker` so the handler
+#: that DENIES an out-of-repo write and the handler that RECOMMENDS a capture
+#: target cannot drift into advising what the other blocks.
+SCRATCH_DIR = ProjectPath.SCRATCH_DIR
 
 #: Where Claude Code keeps its own state. Allowed by default: it is not scratch,
 #: and it is not ephemeral in the setup this rule was written for -- under ccy

@@ -57,6 +57,15 @@ class ProjectPath:
     per-project client layout, so they stay here.
     """
 
+    # The sanctioned home for scratch: commit-message files, command captures,
+    # probes, prototypes (Plan 00333). Inside the working tree so it survives a
+    # container restart, and gitignored so it never reaches review. Named here
+    # rather than in the handler because two surfaces must agree on it --
+    # `project_containment` DENIES writes outside the repo and points here, and
+    # `pipe_blocker` RECOMMENDS a capture target. If those two drifted, the
+    # daemon would advise what it then blocks.
+    SCRATCH_DIR = f"{DaemonPath.UNTRACKED_DIR}/scratch"
+
     # Worktree directories
     WORKTREES_DIR = "untracked/worktrees"  # manually managed worktrees
     CLAUDE_WORKTREES_DIR = ".claude/worktrees"  # Claude Code managed worktrees (not configurable)

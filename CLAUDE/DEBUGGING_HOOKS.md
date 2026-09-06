@@ -395,15 +395,15 @@ Build a library of event flow logs for common scenarios.
 # Scenario A: Normal git commit
 ./scripts/debug_hooks.sh start "Normal git commit"
 # git commit -m "message"
-./scripts/debug_hooks.sh stop > /tmp/normal_commit.log
+./scripts/debug_hooks.sh stop > untracked/scratch/normal_commit.log
 
 # Scenario B: Git commit with pre-commit hook failure
 ./scripts/debug_hooks.sh start "Git commit with hook failure"
 # git commit (fails pre-commit hook)
-./scripts/debug_hooks.sh stop > /tmp/failed_commit.log
+./scripts/debug_hooks.sh stop > untracked/scratch/failed_commit.log
 
 # Compare
-diff /tmp/normal_commit.log /tmp/failed_commit.log
+diff untracked/scratch/normal_commit.log untracked/scratch/failed_commit.log
 ```
 
 Differences reveal when/how to detect failures and respond.

@@ -277,8 +277,8 @@ To find handlers you're missing:
 ```bash
 # Compare YOUR config against the shipped defaults. Anything under
 # "added_handlers" exists upstream but is absent from your config.
-.claude/hooks-daemon/bin/hooks-daemon init-config --stdout > /tmp/default-config.yaml
-.claude/hooks-daemon/bin/hooks-daemon config-diff .claude/hooks-daemon.yaml /tmp/default-config.yaml
+.claude/hooks-daemon/bin/hooks-daemon init-config --stdout > untracked/scratch/default-config.yaml
+.claude/hooks-daemon/bin/hooks-daemon config-diff .claude/hooks-daemon.yaml untracked/scratch/default-config.yaml
 ```
 
 ### Method 4: Version-Specific Config Migration Advisory (Recommended)
@@ -745,10 +745,10 @@ After updating code, compare your config with the new template:
 cd .claude/hooks-daemon
 
 # Generate new default config
-.claude/hooks-daemon/bin/hooks-daemon init-config --stdout > /tmp/new_default_config.yaml
+.claude/hooks-daemon/bin/hooks-daemon init-config --stdout > untracked/scratch/new_default_config.yaml
 
 # Diff against your config
-diff ../hooks-daemon.yaml /tmp/new_default_config.yaml
+diff ../hooks-daemon.yaml untracked/scratch/new_default_config.yaml
 ```
 
 ### Config Preservation CLI

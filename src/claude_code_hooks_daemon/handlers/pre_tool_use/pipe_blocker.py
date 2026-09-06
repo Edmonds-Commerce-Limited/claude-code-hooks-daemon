@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import (
     Decision,
@@ -760,10 +761,17 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         return str(helper) if helper is not None else None
 
     def _temp_file_block(self, source_segment: str) -> str:
-        """Shell snippet: redirect to a temp file and report the exit code."""
+        """Shell snippet: redirect to a capture file and report the exit code.
+
+        The target is IN-REPO. It used to be ``/tmp/output_$$.txt``, which
+        ``project_containment`` (Plan 00333) now denies — so the daemon would
+        have been advising, in the one message an agent reads while already
+        blocked, exactly what the next handler blocks.
+        """
         source = source_segment or "command"
         return (
-            f'  TEMP_FILE="/tmp/output_$$.txt"\n'
+            f'  mkdir -p {ProjectPath.SCRATCH_DIR}\n'
+            f'  TEMP_FILE="{ProjectPath.SCRATCH_DIR}/output_$$.txt"\n'
             f'  {source} > "$TEMP_FILE" 2>&1\n'
             f"  EXIT_CODE=$?\n"
             f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '

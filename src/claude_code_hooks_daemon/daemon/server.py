@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.scratch_dir import ensure_scratch_dir
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms, redact_text
 from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
 
@@ -649,6 +650,8 @@ class HooksDaemon:
         socket_path = self.config.socket_path_obj
         logger.info("Starting hooks daemon on %s", socket_path)
 
+        self._ensure_scratch_dir_best_effort()
+
         # Acquire the socket atomically across the probe->unlink->bind critical
         # section (Plan 00127, Finding 3). Without serialisation two fresh
         # same-root starts can both observe the socket as not-live and race to
@@ -693,6 +696,27 @@ class HooksDaemon:
             await touch_task
 
         logger.info("Daemon shutdown complete")
+
+    @staticmethod
+    def _ensure_scratch_dir_best_effort() -> None:
+        """Make the sanctioned scratch directory exist before anything needs it.
+
+        Plan 00333. ``project_containment`` denies a write outside the
+        repository root and points the agent at ``untracked/scratch/``; if that
+        directory does not exist, the guard blocks a real need and names a path
+        that is not there.
+
+        Fail-open, on the same sanctioned contract as
+        ``_capture_payload_best_effort``: an unwritable project root (OSError)
+        or an uninitialised ProjectContext (RuntimeError) is logged at warning
+        level — never silently swallowed — and startup continues. Refusing to
+        start the daemon over a missing scratch directory would trade a small
+        inconvenience for the loss of every safety-critical handler.
+        """
+        try:
+            ensure_scratch_dir(ProjectContext.project_root())
+        except (OSError, RuntimeError) as exc:
+            logger.warning("Could not ensure the scratch directory: %s", exc)
 
     @staticmethod
     def _start_lock_path(socket_path: Path) -> Path:

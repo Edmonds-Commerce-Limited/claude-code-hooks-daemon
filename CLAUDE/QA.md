@@ -360,13 +360,13 @@ Acceptance testing is **agentic** - AI agents execute real-world test scenarios:
 
 ```bash
 # 1. Generate fresh playbook (ephemeral)
-./bin/hooks-daemon generate-playbook > /tmp/playbook.md
+./bin/hooks-daemon generate-playbook > untracked/scratch/playbook.md
 
 # 2. Execute tests manually following playbook
 # ... test each scenario ...
 
 # 3. Delete ephemeral playbook when done
-rm /tmp/playbook.md
+rm untracked/scratch/playbook.md
 ```
 
 ### FAIL-FAST Cycle (CRITICAL)
