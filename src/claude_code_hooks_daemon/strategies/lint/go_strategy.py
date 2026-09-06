@@ -12,6 +12,16 @@ _DEFAULT_LINT_COMMAND = "go vet {file}"
 _EXTENDED_LINT_COMMAND = "golangci-lint run {file}"
 #: Acceptance-test fixture directory, below the sanctioned scratch root.
 _FIXTURE_DIR = "acceptance-test-lint-go"
+# `go vet` resolves PACKAGES, so it needs a module. In a repository with no
+# `go.mod` -- any polyglot repo that merely contains a `.go` file -- it exits
+# non-zero with one of these before reading the file at all. That is the
+# launcher reporting it cannot analyse here, not a finding about the file's
+# content: `go vet <file>` on the same file exits 0. Treating it as a lint
+# failure DENIES valid Go, which is the false positive this recognises.
+_MODULE_CONTEXT_MARKERS: tuple[str, ...] = (
+    "cannot find main module",
+    "go.mod file not found",
+)
 
 
 class GoLintStrategy:
@@ -40,6 +50,18 @@ class GoLintStrategy:
     @property
     def skip_paths(self) -> tuple[str, ...]:
         return COMMON_SKIP_PATHS
+
+    def is_tool_unavailable_output(self, output: str) -> bool:
+        """Recognise `go vet` failing for want of a module rather than for code.
+
+        See ``_MODULE_CONTEXT_MARKERS``. `go` is on PATH and runs, so the
+        handler's usual "tool absent" signal (FileNotFoundError) never fires,
+        yet the non-zero exit says nothing about the file -- it never got that
+        far. Degrading to an advisory ALLOW keeps a valid `.go` file writable
+        in a repository that is not a Go module, while a real vet finding or a
+        syntax error still denies.
+        """
+        return any(marker in output for marker in _MODULE_CONTEXT_MARKERS)
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Go lint strategy."""

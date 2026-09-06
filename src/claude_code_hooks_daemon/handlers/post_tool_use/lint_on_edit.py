@@ -437,15 +437,25 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         workspace = self._workspace_for(file_path)
         working_dir: str | None = None
         marker = self._MODULE_ROOT_MARKERS.get(language_name)
+        module_root_found = False
         if marker:
             working_dir = self._find_module_root(file_path, marker)
+            module_root_found = working_dir is not None
         if working_dir is None:
             working_dir = str(workspace.root)
 
         # For Go, vet the package directory (not single file) since Go packages span
-        # multiple files and single-file vetting can't resolve cross-file references
+        # multiple files and single-file vetting can't resolve cross-file references.
+        #
+        # ONLY when a `go.mod` was actually found, though. `go vet` resolves
+        # packages, so the directory form REQUIRES a module: pointed at a
+        # directory in a repo that merely CONTAINS Go, it exits non-zero with
+        # "cannot find main module" without ever reading the file, and a valid
+        # file was denied for it. The single-file form needs no module and
+        # still reports real findings, so it is the right fallback -- narrower
+        # (no cross-file resolution) but correct, which beats broad and wrong.
         effective_path = file_path
-        if language_name == "Go" and working_dir:
+        if language_name == "Go" and module_root_found:
             pkg_dir = str(Path(file_path).parent)
             # Convert absolute path to module-relative package path for go vet
             if pkg_dir.startswith(working_dir):
@@ -496,15 +506,23 @@ class LintOnEditHandler(PostToolUseHandlerBase):
                     strategy.is_tool_unavailable_output(error_output)
                 ):
                     # The resolved executable ran (no FileNotFoundError) but its
-                    # own output says the real tool behind it is missing -- a
-                    # launcher/shim reporting absence, not a genuine lint
-                    # failure against the file's content.
+                    # own output says it could not analyse the file -- a missing
+                    # component behind a shim (rustup's clippy-driver), or a
+                    # missing module context (`go vet` outside a go.mod). Either
+                    # way it is not a finding about the file's content, so the
+                    # write is ALLOWED unlinted.
+                    #
+                    # The reason is quoted rather than named: this branch serves
+                    # more than one cause, and telling a Go user to "install go"
+                    # when go is installed sends them somewhere there is nothing
+                    # to find.
+                    reason = error_output.strip().splitlines()[0] if error_output.strip() else ""
                     return BlockingResult(
                         decision=Decision.ALLOW,
                         context=[
-                            f"⚠️ {language_name} lint tool ({command_parts[0]}) reports "
-                            f"the underlying tool is not installed - install it to "
-                            f"enable lint checking"
+                            f"⚠️ {language_name} lint did not run ({command_parts[0]} could "
+                            f"not analyse this file), so it was NOT checked"
+                            + (f" - {reason}" if reason else "")
                         ],
                     )
 
