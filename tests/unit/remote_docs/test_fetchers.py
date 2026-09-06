@@ -348,6 +348,31 @@ class TestAgentBrowserFetch:
         with pytest.raises(CaptureError, match="agent-browser"):
             agent_browser_fetch("https://example.com", binary="agent-browser", runner=runner)
 
+    def test_a_close_failure_does_not_mask_the_original_fetch_error(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """`_close_session` must not raise from the `finally` and replace a real error.
+
+        A missing/misbehaving binary is exactly the shape that makes both the
+        read AND the close fail. If closing raised, the caller would see the
+        reap failure instead of the actual capture failure -- the diagnostic
+        that matters would be destroyed. The close failure must still be
+        visible somewhere (a warning log), just not as the raised exception.
+        """
+        import logging
+
+        def runner(cmd: list[str], **_kwargs: Any) -> Any:
+            if "close" in cmd:
+                raise OSError("could not reap browser session")
+            return _Completed(stdout=_payload(success=False))
+
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(CaptureError, match="failed for") as exc_info:
+                agent_browser_fetch("https://example.com", binary="agent-browser", runner=runner)
+
+        assert "close" not in str(exc_info.value)
+        assert any("could not reap browser session" in record.message for record in caplog.records)
+
     def test_no_shell_is_used(self) -> None:
         """A shell would make the URL an injection vector."""
         seen: dict[str, Any] = {}

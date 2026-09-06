@@ -194,6 +194,38 @@ class TestTheDeployFollowsTheConfiguredPath:
         assert not (tmp_path / "CLAUDE" / "PlanWorkflow.md").exists()
         assert not (tmp_path / "CLAUDE" / "core").exists()
 
+    def test_worktree_and_documentation_strategy_travel_with_it(self, tmp_path: Path) -> None:
+        """The two documents with no config key of their own follow
+        ``workflow_docs``'s directory too -- Decision 7 in Plan 00334's
+        DECISIONS.md chose this deliberately, precisely so a project that
+        moved its docs tree does not also acquire a stray ``CLAUDE/`` it never
+        asked for (the same guard as the test above, for the other two names).
+
+        ``worktree_file_copy.py`` and ``rules_file_shape.py`` still hardcode
+        ``CLAUDE/Worktree.md`` / ``CLAUDE/DocumentationStrategy.md`` in their
+        guidance TEXT -- a separate, already-documented residual ("Known
+        residuals" in that same DECISIONS.md) deferred to a future change that
+        makes rule text configuration-aware. Pinning the deploy TARGET back to
+        a hardcoded ``CLAUDE/`` to match that stale text would be the wrong
+        fix: it would recreate exactly the scattering
+        ``test_nothing_is_written_to_the_default_tree`` guards against.
+        """
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text(
+            "plan_workflow:\n"
+            "  enabled: true\n"
+            "  workflow_docs: docs/agent/PlanWorkflow.md\n"
+            "documentation:\n"
+            "  enabled: true\n",
+            encoding="utf-8",
+        )
+
+        deploy_core_docs_if_enabled(tmp_path, config_path)
+
+        assert (tmp_path / "docs/agent/Worktree.md").is_file()
+        assert (tmp_path / "docs/agent/DocumentationStrategy.md").is_file()
+        assert not (tmp_path / "CLAUDE").exists()
+
     def test_a_renamed_document_is_still_deployed(self, tmp_path: Path) -> None:
         """``workflow_docs`` configures a FILE, not just a directory.
 

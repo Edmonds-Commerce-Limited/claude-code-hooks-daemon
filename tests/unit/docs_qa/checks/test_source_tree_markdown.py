@@ -3,7 +3,11 @@
 from pathlib import Path
 
 from claude_code_hooks_daemon.core.project_layout import ProjectLayout
-from claude_code_hooks_daemon.docs_qa.checks.source_tree_markdown import CHECK_ID, CHECKS
+from claude_code_hooks_daemon.docs_qa.checks.source_tree_markdown import (
+    CHECK_ID,
+    CHECKS,
+    _walk_into,
+)
 from claude_code_hooks_daemon.docs_qa.context import sweep_context
 from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus
 from claude_code_hooks_daemon.docs_qa.policy import (
@@ -251,6 +255,37 @@ class TestVendorExceptionsSurviveThePrune:
         layout = self._layout_with_exception()
         policy = DocumentationPolicy(vendor_scopes=(VendorScope(vendor_dirs=layout.vendor_dirs),))
         assert _run_sweep(_context(tmp_path, layout=layout, policy=policy)) == []
+
+
+class TestVendorExceptionWildcardNeverUnprunesOwnExcludedDirs:
+    """Finding I3 (Plan 00335): a leading-wildcard ``vendor_exceptions`` entry
+    has no literal prefix, so ``may_contain_vendor_exception`` answers True
+    for every directory -- including ``_OWN_EXCLUDED_DIR_NAMES`` (``.git``,
+    ``untracked``, ``worktrees``), where a vendor exception can never live.
+    The conservative "might contain an exception, so descend" fallback exists
+    for genuinely vendored trees only; it must not override the daemon's own
+    always-prune set.
+    """
+
+    _WILDCARD_EXCEPTION = ("**/ours/**",)
+
+    def _scopes(self) -> tuple[VendorScope, ...]:
+        return (
+            VendorScope(
+                vendor_dirs=frozenset({"node_modules"}),
+                vendor_exceptions=self._WILDCARD_EXCEPTION,
+            ),
+        )
+
+    def test_own_excluded_dirs_stay_pruned_despite_the_wildcard(self) -> None:
+        scopes = self._scopes()
+        for name in (".git", "untracked", "worktrees"):
+            assert _walk_into((name,), vendor_scopes=scopes) is False
+
+    def test_a_genuinely_vendored_dir_is_still_descended_for_the_wildcard(self) -> None:
+        """The conservative fallback this fix must NOT remove: a vendored
+        directory that could contain the exception is still walked."""
+        assert _walk_into(("node_modules",), vendor_scopes=self._scopes()) is True
 
 
 class TestGrandfatherAllowlist:

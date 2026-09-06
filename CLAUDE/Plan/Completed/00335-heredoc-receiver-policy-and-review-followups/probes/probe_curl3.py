@@ -62,8 +62,10 @@ for label, cmd in EXECUTES.items():
     if not d:
         flag = " <-- REGRESSION vs v3.61.0" if b else " <-- allowed (baseline allowed too)"
         regressions.append(label)
-    print(f"  {'DENY ' if d else 'ALLOW'} (v3.61.0: {'DENY ' if b else 'ALLOW'}) | "
-          f"{label:26} receivers={quoted_heredoc_receivers(cmd)}{flag}")
+    print(
+        f"  {'DENY ' if d else 'ALLOW'} (v3.61.0: {'DENY ' if b else 'ALLOW'}) | "
+        f"{label:26} receivers={quoted_heredoc_receivers(cmd)}{flag}"
+    )
 
 print("== bodies that are DATA: must ALLOW ==")
 for label, cmd in IS_DATA.items():

@@ -238,11 +238,45 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         # just as thoroughly whether the command authored it or fetched it --
         # so the extra destinations are resolved HERE rather than by widening
         # shared infrastructure that 22 other handlers depend on.
+        #
+        # "Resolved" includes joining against the event's cwd. `_destination_
+        # targets` yields RAW tokens, unlike `get_bash_write_targets` above --
+        # which already joins ITS targets against `HookInputField.CWD` (see
+        # `core/utils.py`) before they ever reach `_is_outside`. Skipping that
+        # join here made two commands with identical effect disagree purely by
+        # extraction route: `echo hi > ../../tmp/out.txt` was resolved and
+        # denied, while `curl ... -o ../../../tmp/x.sh` stayed relative and
+        # `_is_outside` treats every relative path as never-outside -- an ALLOW
+        # for a write that lands in exactly the same place.
         command = get_bash_command(hook_input)
         if command:
-            targets.extend(self._destination_targets(command))
+            cwd = hook_input.get(HookInputField.CWD)
+            targets.extend(
+                self._resolve_against_cwd(target, cwd)
+                for target in self._destination_targets(command)
+            )
 
         return targets
+
+    @staticmethod
+    def _resolve_against_cwd(target: str, cwd: Any) -> str:
+        """Join a RELATIVE destination against the event's cwd.
+
+        An absolute target, or one with no cwd to join against, is returned
+        unchanged -- `_is_outside` already treats an unresolved relative path
+        as never-outside, the same "a wrong path is worse than no path"
+        contract `get_bash_write_targets` uses for the routes it resolves
+        itself. This mirrors that join rather than reusing it directly: the
+        shared accessor's resolver also declines targets needing shell
+        expansion and strips a directory-marking trailing slash, neither of
+        which the containment test needs -- it only asks where a path RESOLVES
+        TO, not whether it names an existing file.
+        """
+        if Path(target).is_absolute():
+            return target
+        if not isinstance(cwd, str) or not cwd:
+            return target
+        return str(Path(cwd) / target)
 
     def _destination_targets(self, command: str, depth: int = 0) -> list[str]:
         """Paths named as a destination by a flag or a positional argument.

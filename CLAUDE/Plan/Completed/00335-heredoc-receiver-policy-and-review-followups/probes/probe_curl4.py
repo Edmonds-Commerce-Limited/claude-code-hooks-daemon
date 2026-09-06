@@ -35,12 +35,12 @@ def parses(cmd):
 
 CANDIDATES = {
     "subshell, closed": f"(bash <<'EOF'\n{PIPED}\nEOF\n)",
-    "double-quoted name": f'"bash" <<\'EOF\'\n{PIPED}\nEOF',
+    "double-quoted name": f"\"bash\" <<'EOF'\n{PIPED}\nEOF",
     "single-quoted name": f"'bash' <<'EOF'\n{PIPED}\nEOF",
     "backslash-escaped name": f"\\bash <<'EOF'\n{PIPED}\nEOF",
-    "partially quoted name": f'ba"sh" <<\'EOF\'\n{PIPED}\nEOF',
+    "partially quoted name": f"ba\"sh\" <<'EOF'\n{PIPED}\nEOF",
     "subshell + eval": f"(eval \"$(cat <<'EOF'\n{PIPED}\nEOF\n)\")",
-    "quoted eval": f"\"eval\" \"$(cat <<'EOF'\n{PIPED}\nEOF\n)\"",
+    "quoted eval": f'"eval" "$(cat <<\'EOF\'\n{PIPED}\nEOF\n)"',
     "quoted source /dev/stdin": f"\"source\" /dev/stdin <<'EOF'\n{PIPED}\nEOF",
     "control: plain bash": f"bash <<'EOF'\n{PIPED}\nEOF",
     "control: brace group": f"{{ bash <<'EOF'\n{PIPED}\nEOF\n}}",

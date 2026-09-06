@@ -54,8 +54,11 @@ def _write(file_path: str) -> dict[str, Any]:
     return {"tool_name": "Write", "tool_input": {"file_path": file_path, "content": "x"}}
 
 
-def _bash(command: str) -> dict[str, Any]:
-    return {"tool_name": "Bash", "tool_input": {"command": command}}
+def _bash(command: str, cwd: str | None = None) -> dict[str, Any]:
+    hook_input: dict[str, Any] = {"tool_name": "Bash", "tool_input": {"command": command}}
+    if cwd is not None:
+        hook_input["cwd"] = cwd
+    return hook_input
 
 
 class TestHandlerIdentity:
@@ -206,6 +209,72 @@ class TestDestinationFlagsAndPositionalTargets:
         self, handler: ProjectContainmentHandler, label: str, command: str
     ) -> None:
         assert handler.matches(_bash(command)) is False
+
+
+class TestRelativeDestinationsResolveAgainstCwd:
+    """`_destination_targets` extraction used to skip the cwd join
+    `get_bash_write_targets` already performs on its own targets, so two
+    commands with identical effect disagreed purely by extraction route: a
+    redirect was resolved and denied while an equivalent `curl -o`/`mkdir`/
+    `tar -cf`/`rsync` destination stayed relative and walked straight past
+    `_is_outside`, which treats every unresolved relative path as
+    never-outside.
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "command"),
+        [
+            ("curl -o", "curl https://example.com/x -o ../../../tmp/x.sh"),
+            ("wget -O", "wget https://example.com/x -O ../../../tmp/x.sh"),
+            ("mkdir", "mkdir -p ../../../tmp/newdir"),
+            ("tar -cf", "tar -cf ../../../tmp/a.tar src"),
+            ("rsync", "rsync -a src/ ../../../tmp/dest/"),
+        ],
+    )
+    def test_a_relative_destination_escaping_the_root_matches(
+        self, handler: ProjectContainmentHandler, label: str, command: str
+    ) -> None:
+        assert (
+            handler.matches(_bash(command, cwd="/repo/sub")) is True
+        ), f"{label} reached out-of-root unjudged"
+
+    @pytest.mark.parametrize(
+        ("label", "command"),
+        [
+            ("curl -o", "curl https://example.com/x -o ../scratch/x.sh"),
+            ("mkdir", "mkdir -p ../scratch/sub"),
+        ],
+    )
+    def test_a_relative_destination_staying_in_the_root_does_not_match(
+        self, handler: ProjectContainmentHandler, label: str, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd="/repo/sub")) is False, label
+
+    def test_with_no_cwd_a_relative_destination_still_never_matches(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """No cwd to resolve against -- guessing would attribute the write to
+        the wrong file, so this stays the conservative `allow`, unchanged from
+        before the fix."""
+        assert handler.matches(_bash("mkdir -p ../../../tmp/newdir")) is False
+
+
+class TestATrailingSlashCopyDestination:
+    """Finding I2: `cp report.md /tmp/` is the most natural spelling of the
+    thing this handler exists to stop, and it used to vanish entirely."""
+
+    def test_a_trailing_slash_destination_matches(self, handler: ProjectContainmentHandler) -> None:
+        assert handler.matches(_bash("cp /repo/README.md /tmp/")) is True
+
+    def test_it_names_the_expanded_file_not_the_bare_directory(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """The reported path is `dest/<basename>` -- the file that is actually
+        written -- not `/tmp` itself, which nothing writes to directly."""
+        result = handler.handle(_bash("cp /repo/README.md /tmp/"))
+
+        assert result.reason is not None
+        assert "/tmp/README.md" in result.reason
 
 
 class TestOutputFlagsAreCommandKeyed:

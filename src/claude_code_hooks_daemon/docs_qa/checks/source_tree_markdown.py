@@ -189,17 +189,23 @@ def _walk_into(rel_parts: tuple[str, ...], *, vendor_scopes: tuple[VendorScope, 
     A vendored directory that could CONTAIN a first-party exception must
     still be descended (Plan 00331 Phase 3): pruning it makes the exception
     unreachable, the same way git cannot re-include a file whose parent
-    directory is excluded.
+    directory is excluded. That conservative fallback is scoped to
+    VENDORED directories only -- a ``vendor_exceptions`` entry names a
+    repo-relative path, which can never resolve inside ``.git``,
+    ``untracked`` or a worktree root, so a leading-wildcard exception (no
+    literal prefix, "could match anywhere") must not un-prune the daemon's
+    own always-excluded set (Plan 00335 finding I3).
 
     Takes the directory's PATH rather than its name (Plan 00332): with
     per-project vendor truth the same basename can be vendored in one
     project and ordinary in another, so the test is no longer set membership.
     """
+    if rel_parts[-1] in _OWN_EXCLUDED_DIR_NAMES:
+        return False
     rel_dir = "/".join(rel_parts)
-    excluded = rel_parts[-1] in _OWN_EXCLUDED_DIR_NAMES or is_vendored_path_in_scopes(
+    if is_vendored_path_in_scopes(
         rel_dir, vendor_scopes
-    )
-    if excluded and not may_contain_vendor_exception_in_scopes(rel_dir, vendor_scopes):
+    ) and not may_contain_vendor_exception_in_scopes(rel_dir, vendor_scopes):
         return False
     return not is_vendored_daemon_install_path(rel_parts)
 

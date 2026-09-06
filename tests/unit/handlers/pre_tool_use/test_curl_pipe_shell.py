@@ -776,9 +776,7 @@ class TestSinkAllowlistFailsClosed:
             ("braced variable", "${SHELL}"),
         ],
     )
-    def test_an_expansion_built_receiver_no_longer_needs_resolving(
-        self, handler, label, receiver
-    ):
+    def test_an_expansion_built_receiver_no_longer_needs_resolving(self, handler, label, receiver):
         """These six were recorded as an UNCLOSABLE limit while the guard
         enumerated bad receivers: the family is unbounded, so no finite
         normalisation could close it. Under an allowlist the unboundedness

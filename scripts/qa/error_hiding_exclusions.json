@@ -1001,6 +1001,12 @@
       "function": "render_index",
       "rule": "silent-fallback",
       "reason": "Plan 00326 Task 5.2: identical cosmetic fallback to remote_docs_staleness._describe. relative_to raises ValueError for a document not under the tree root, and the index then lists its absolute path -- more information, never less, and the document is still listed. Omitting it would be the real defect, because an index that quietly disagrees with the tree it describes becomes a second source of truth."
+    },
+    {
+      "file": "remote_docs/fetchers.py",
+      "function": "_close_session",
+      "rule": "log-and-continue",
+      "reason": "Plan 00335 I4: this is cleanup running in a `finally`, so the ONLY alternative to logging is masking. Raising here replaces whatever the fetch raised, and the triggering shape makes both fail together -- a missing or renamed agent-browser binary fails the read AND the close, so the operator would be shown the reap failure instead of the cause. Suppressing the primary error to report a cleanup error is strictly worse than the pattern this rule exists to catch, and it is why the same principle is built into contextlib's own cleanup contract. Nothing is concealed: the binary name and the underlying exception are both logged at WARNING, and the exception is caught by type (TimeoutExpired, FileNotFoundError, OSError) rather than bare. The leaked session self-reaps on the browser's idle timeout, so continuing is safe. Reversal: if a close failure ever needs to be fatal, it must be raised OUTSIDE the finally, after the primary error has been allowed to propagate -- not by deleting this entry."
     }
   ]
 }

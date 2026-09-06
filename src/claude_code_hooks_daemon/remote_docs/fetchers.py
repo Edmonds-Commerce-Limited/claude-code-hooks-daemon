@@ -28,6 +28,7 @@ handlers stay offline and testable.
 
 import functools
 import json
+import logging
 import shutil
 import subprocess  # nosec B404 - no shell is used; see _invoke
 from collections.abc import Callable, Sequence
@@ -36,6 +37,8 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.remote_docs.capture import CaptureError, FetchFn, FetchResult
 from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
+
+logger = logging.getLogger(__name__)
 
 # Preference order. The mode-suffixed wrappers come first because where they
 # exist the bare name is the one that may be deliberately disabled; where they
@@ -132,11 +135,12 @@ def _close_session(binary: str, runner: Runner) -> None:
     """Reap the browser session the read started.
 
     A read launches a real browser process. Without this every capture leaks
-    one until an idle timeout fires. A failure to close is logged by the
-    caller's exception path rather than masking the original error, so the
-    close result is deliberately not inspected -- there is nothing useful to
-    do about a failed reap, and raising here would replace a real fetch error
-    with a cleanup one.
+    one until an idle timeout fires. This runs in a ``finally``, so raising
+    here would replace whatever the fetch itself raised: a missing/misbehaving
+    binary is exactly the shape that makes both the read and the close fail,
+    and the fetch failure is the diagnostic that matters. A close failure is
+    therefore logged at warning level -- handled, not silenced -- rather than
+    raised, so the original error (if any) is always what the caller sees.
     """
     try:
         runner(
@@ -146,7 +150,7 @@ def _close_session(binary: str, runner: Runner) -> None:
             check=False,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-        raise CaptureError(f"{binary}: could not close the browser session: {exc}") from exc
+        logger.warning("%s: could not close the browser session: %s", binary, exc)
 
 
 def _extract(binary: str, url: str, completed: Any) -> tuple[bytes, str]:

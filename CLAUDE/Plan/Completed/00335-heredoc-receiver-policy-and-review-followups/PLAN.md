@@ -1,6 +1,6 @@
 # Plan 00335: heredoc receiver policy and review followups
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-06
 **Owner**: joseph
 **Priority**: Medium
@@ -97,69 +97,82 @@ writing down is the ALLOWLIST and its failure direction instead.
 
 ### Phase 3: `project_containment` path resolution
 
-Both re-confirmed reproducing on shipped code (`probes/probe_containment.py`).
+Both were re-confirmed reproducing on shipped code before being fixed
+(`probes/probe_containment.py`), which mattered: the dedupe scout had
+reported Plan 00333 already resolved these.
 
-- [ ] ⬜ **Task 3.1** (I1): Resolve relative destinations for
-  flag/positional commands. `_destination_targets()` returns RAW TOKENS
-  and `_is_outside()` declares any non-absolute path "never outside", so
-  `echo hi > ../../tmp/out.txt` DENIES while
-  `curl … -o ../../../tmp/x.sh`, `wget -O`, `mkdir -p`, `tar -cf` and
-  `rsync` with the same traversal all ALLOW. Two commands with identical
-  effect get opposite verdicts purely by extraction route. The stated
-  rationale ("resolves against a working directory the daemon does not
-  know") is contradicted by the sibling accessor one layer down, which
-  does know it (`HookInputField.CWD`). Fix: run `_destination_targets`
-  output through the same cwd-join before the containment test.
-  Location: `handlers/pre_tool_use/project_containment.py:247-282,     383-389`.
-- [ ] ⬜ **Task 3.2** (I2): A trailing slash makes a copy destination vanish —
-  `cp README.md /tmp/` yields no target at all, while
-  `cp /repo/README.md /tmp/copy.md` denies. This is arguably the most
-  natural spelling of the thing the handler exists to stop, and the
-  handler's own resident guidance calls its covered-shape list
-  "exhaustive, not illustrative". Declining is correct for a CONTENT
-  guard (nothing is authored at `/tmp/`), but a containment guard wants
-  `dest/<basename>`. Location: `core/utils.py:557-558`
-  (`_resolve_write_target`).
-- [ ] ⬜ **Task 3.3**: Record, in guidance rather than code, two limits the
-  probe re-confirmed: `cd /tmp && echo hi > out.txt` resolves against the
-  SESSION cwd (the shared accessor's documented limit), and a
-  triple-nested `sh -c` yields no target. Decide whether the nesting depth
-  is worth raising or is correctly a documented bound.
+- [x] ✅ **Task 3.1** (I1): Relative destinations now resolve. A new
+  `_resolve_against_cwd` joins every `_destination_targets` result against
+  `HookInputField.CWD` before the containment test, so the flag/positional
+  route and the redirect route finally agree. `curl -o`, `wget -O`,
+  `mkdir -p`, `tar -cf` and `rsync` with a `../../../tmp/` traversal all DENY
+  where all five previously ALLOWed.
+- [x] ✅ **Task 3.2** (I2): `cp README.md /tmp/` now DENIES.
+  `_resolve_write_target` strips a trailing slash instead of declining the
+  token outright, and the "declared to be a directory" test moved into
+  `_written_paths` keyed on the RAW destination — so it still declines rather
+  than guesses when a trailing-slash target is not actually a directory.
+  Content guards are provably unaffected: only `authored=True` candidates
+  reach them via `get_written_file_paths(authored_only=True)`, and those never
+  carry `sources`.
+- [x] ✅ **Task 3.3**: Both limits recorded and deliberately left as bounds.
+  `cd /tmp && echo hi > out.txt` still resolves against the SESSION cwd — the
+  shared accessor's documented limit, not this handler's — and a
+  triple-nested `sh -c` still yields no target while the doubled form is
+  caught. Neither is worth chasing here: the first needs session cwd
+  tracking, the second is a depth bound that trades off against scanning cost.
 
 ### Phase 4: Independent defects
 
-- [ ] ⬜ **Task 4.1** (I4): `remote_docs/fetchers.py:131-149, 204-210` —
-  `_close_session` raises `CaptureError` from inside a `finally`, so a
-  cleanup failure supersedes the real fetch error. Its own docstring says
-  it must not do this ("raising here would replace a real fetch error with
-  a cleanup one"). The likeliest trigger — a missing or renamed binary —
-  makes BOTH raise, so the operator sees the reap failure and not the
-  cause. Either restore the documented behaviour (log at warning, do not
-  raise) or correct the docstring; as it stands the rationale on the page
-  is false. Appears to be collateral from `a734b19d`.
-- [ ] ⬜ **Task 4.2** (I3): `docs_qa/checks/source_tree_markdown.py` and
-  `docs_qa/checks/module_doc_budget.py` (`_walk_into`) —
-  `may_contain_vendor_exception` returns True unconditionally for any
-  pattern with no literal prefix, so a single `**/ours/**`
-  `vendor_exceptions` entry un-prunes EVERYTHING, including `.git` and
-  `untracked/`. A vendor exception can never live in either, so the
-  conservative fallback should not apply to `_OWN_EXCLUDED_DIR_NAMES`. In
-  this repository `untracked/` holds virtualenvs and worktrees, so this is
-  a large silent slowdown on every sweep for any project that sets the
-  key.
-- [ ] ⬜ **Task 4.3** (I5): `install/core_docs.py:368-381` — core-doc
-  deployment derives its target directory from
-  `plan_workflow.workflow_docs`' parent, so all three documents follow
-  `PlanWorkflow`'s configured location. Only `PlanWorkflow` has a config
-  key of its own; `Worktree` and `DocumentationStrategy` are named by
-  handler and check text as `CLAUDE/Worktree.md` and
-  `CLAUDE/DocumentationStrategy.md`. With
-  `workflow_docs: docs/agent/PlanWorkflow.md` the latter two deploy to
-  `docs/agent/`, recreating the precise defect Plan 00334 exists to fix —
-  guidance naming a file that does not exist — for the two documents that
-  cannot be renamed. Also: `workflow_docs: "PlanWorkflow.md"` yields
-  `parent == "."` and scatters `core/` into the project root. Correct in
-  the default configuration, which is why it did not block.
+- [x] ✅ **Task 4.1** (I4): `_close_session` no longer raises from inside a
+  `finally`, so a fetch error survives a concurrent close failure. It logs the
+  close failure at WARNING with the binary name and the underlying exception,
+  caught by type rather than bare — handled, not silenced. The docstring was
+  aspirational rather than descriptive and now matches the code.
+
+  This tripped the project's own error-hiding audit (`log-and-continue`),
+  which is the correct thing for that audit to notice. Resolved through the
+  audited exclusions registry — NOT an inline suppression — with the reasoning
+  recorded: in a `finally`, the only alternative to logging IS masking, and
+  suppressing the primary error to report a cleanup error is strictly worse
+  than the pattern the rule exists to catch. The entry names its own reversal
+  path.
+
+- [x] ✅ **Task 4.2** (I3): `_walk_into` in both `source_tree_markdown.py` and
+  `module_doc_budget.py` now checks `_OWN_EXCLUDED_DIR_NAMES` first and returns
+  immediately, before the conservative vendor-exception fallback can run. A
+  leading-wildcard `vendor_exceptions` entry no longer un-prunes `.git`,
+  `untracked/` or `worktrees`, while a genuinely vendored directory is still
+  descended — the conservative behaviour exists for a reason and is preserved,
+  pinned by its own test.
+
+  Noted but NOT actioned: the two `_walk_into` implementations are
+  near-identical (one carries an extra `scope_exclude_globs` parameter). A
+  shared helper is plausible, but a refactor was out of proportion to the fix.
+
+- [x] ✅ **Task 4.3** (I5): Investigated and found NOT to be a defect. See
+  "Outcome note on I5" below. One characterization test was added to stop a
+  future pass "fixing" it; no source change.
+
+## Outcome note on I5
+
+**I5 was not a defect.** Verified before fixing: the coupling is Plan 00334
+Decision 7's deliberate design — the other core documents have no config key
+of their own and keep canonical names in `workflow_docs`' directory precisely
+so a project that moved its docs tree does not also acquire a stray `CLAUDE/`
+it never asked for. It is already pinned by a passing test
+(`test_nothing_is_written_to_the_default_tree`), which the proposed fix would
+have regressed. The `parent == "."` concern is also a non-issue: pathlib
+collapses `root / "."`, and an existing test pins it.
+
+The genuine residual sits elsewhere and Plan 00334 already scoped it out:
+`worktree_file_copy.py` and `docs_qa/checks/rules_file_shape.py` hardcode the
+literal strings `CLAUDE/Worktree.md` / `CLAUDE/DocumentationStrategy.md` in
+guidance TEXT, independent of any config. Making rule text
+configuration-aware is its own change and is NOT taken on here.
+
+This is the reviewer's lowest-confidence finding (75%), and it was wrong —
+worth recording, because the four confident ones all held.
 
 ## Success Criteria
 
@@ -189,3 +202,11 @@ Both re-confirmed reproducing on shipped code (`probes/probe_containment.py`).
 
 - Filed from the v3.62.0 release gate; source review at `review-report.md`,
   probe harness at `probes/`.
+- **Phase 1-2** (receiver policy inversion): `745ff9c5`. Closed three findings
+  with one change, including a fourth executor bypass (`ssh`) found by probing
+  rather than review, and the word-expansion family the plan had recorded as
+  unclosable.
+- **Phase 3-4** (containment paths, fetchers, docs-QA pruning): see the
+  archiving commit. I5 investigated and found not to be a defect.
+- Four of the reviewer's five non-blocking findings held; the fifth (I5, and
+  its lowest-confidence at 75%) did not survive verification.

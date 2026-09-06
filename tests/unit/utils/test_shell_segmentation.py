@@ -314,7 +314,7 @@ class TestQuotedHeredocCommandWords:
 
     def test_punctuation_is_normalised_off_the_command_word(self) -> None:
         assert quoted_heredoc_command_words("(bash <<'EOF'\nb\nEOF\n)") == ["bash"]
-        assert quoted_heredoc_command_words('"bash" <<\'EOF\'\nb\nEOF') == ["bash"]
+        assert quoted_heredoc_command_words("\"bash\" <<'EOF'\nb\nEOF") == ["bash"]
 
     def test_receiver_after_a_pipe_is_the_last_stage_only(self) -> None:
         assert quoted_heredoc_command_words("echo x | bash <<'EOF'\nb\nEOF") == ["bash"]

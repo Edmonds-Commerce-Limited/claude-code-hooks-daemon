@@ -23,9 +23,7 @@ def receivers(command: str) -> list[str]:
         preceding = command[: match.start("opener")]
         last_line = preceding.rsplit("\n", 1)[-1]
         segment = ss.split_unquoted(last_line, ss._RECEIVER_SEPARATORS)[-1]
-        out.extend(
-            normalise(w) for w in segment.split() if w and not w.startswith("-")
-        )
+        out.extend(normalise(w) for w in segment.split() if w and not w.startswith("-"))
     return out
 
 
@@ -39,12 +37,12 @@ def withheld(command: str) -> bool:
 
 EXECUTES = {
     "subshell, closed": f"(bash <<'EOF'\n{PIPED}\nEOF\n)",
-    "double-quoted name": f'"bash" <<\'EOF\'\n{PIPED}\nEOF',
+    "double-quoted name": f"\"bash\" <<'EOF'\n{PIPED}\nEOF",
     "single-quoted name": f"'bash' <<'EOF'\n{PIPED}\nEOF",
     "backslash-escaped": f"\\bash <<'EOF'\n{PIPED}\nEOF",
-    "partially quoted": f'ba"sh" <<\'EOF\'\n{PIPED}\nEOF',
+    "partially quoted": f"ba\"sh\" <<'EOF'\n{PIPED}\nEOF",
     "subshell + eval": f"(eval \"$(cat <<'EOF'\n{PIPED}\nEOF\n)\")",
-    "quoted eval": f"\"eval\" \"$(cat <<'EOF'\n{PIPED}\nEOF\n)\"",
+    "quoted eval": f'"eval" "$(cat <<\'EOF\'\n{PIPED}\nEOF\n)"',
     "plain bash": f"bash <<'EOF'\n{PIPED}\nEOF",
     "dot /dev/stdin": f". /dev/stdin <<'EOF'\n{PIPED}\nEOF",
 }

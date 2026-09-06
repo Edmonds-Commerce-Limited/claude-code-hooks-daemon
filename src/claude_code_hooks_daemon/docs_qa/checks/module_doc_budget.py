@@ -335,18 +335,24 @@ def _walk_into(
     still be descended (Plan 00331 Phase 3) -- pruning it makes the exception
     unreachable, which is exactly why git cannot re-include a file whose
     parent directory is excluded. The exception itself is then applied
-    per-file by the caller.
+    per-file by the caller. That conservative fallback is scoped to
+    VENDORED directories only -- a ``vendor_exceptions`` entry names a
+    repo-relative path, which can never resolve inside ``.git``,
+    ``untracked`` or a worktree root, so a leading-wildcard exception (no
+    literal prefix, "could match anywhere") must not un-prune the daemon's
+    own always-excluded set (Plan 00335 finding I3).
 
     Extracted from the comprehension it used to inline (Plan 00332) because
     per-scope resolution needs the directory's own PATH, not just its name:
     the same basename can be vendored in one project and ordinary in
     another, so the test can no longer be a set membership.
     """
+    if rel_parts[-1] in _OWN_EXCLUDED_DIR_NAMES:
+        return False
     rel_dir = "/".join(rel_parts)
-    excluded = rel_parts[-1] in _OWN_EXCLUDED_DIR_NAMES or is_vendored_path_in_scopes(
+    if is_vendored_path_in_scopes(
         rel_dir, vendor_scopes
-    )
-    if excluded and not may_contain_vendor_exception_in_scopes(rel_dir, vendor_scopes):
+    ) and not may_contain_vendor_exception_in_scopes(rel_dir, vendor_scopes):
         return False
     return not is_vendored_daemon_install_path(rel_parts) and not _dir_is_scope_excluded(
         rel_parts, scope_exclude_globs

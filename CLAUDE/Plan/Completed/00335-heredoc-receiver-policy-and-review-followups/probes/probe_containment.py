@@ -1,13 +1,16 @@
 from pathlib import Path
 from unittest.mock import patch
+
 from claude_code_hooks_daemon.handlers.pre_tool_use.project_containment import (
     ProjectContainmentHandler,
 )
 
 ROOT = Path("/repo")
 
+
 def bash(cmd, cwd="/repo/sub"):
     return {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": cwd}
+
 
 cases = [
     "echo hi > ../../tmp/out.txt",
@@ -20,7 +23,7 @@ cases = [
     "echo hi > /tmp/../tmp/out.txt",
     "sh -c 'echo hi > /tmp/x'",
     "sh -c 'sh -c \"echo hi > /tmp/x\"'",
-    "sh -c 'sh -c \"sh -c \\\"echo hi > /tmp/x\\\"\"'",
+    'sh -c \'sh -c "sh -c \\"echo hi > /tmp/x\\""\'',
     "install -m 644 a.txt /tmp/b.txt",
     "dd if=/dev/zero of=/tmp/z.bin",
     "cp README.md /tmp/",

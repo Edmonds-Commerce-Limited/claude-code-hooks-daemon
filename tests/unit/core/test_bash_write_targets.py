@@ -191,6 +191,49 @@ class TestTeeAndCopyVerbs:
         """
         assert get_bash_write_targets(_bash("cp /tmp/a.py /tmp/nosuchdir-eb9f1/")) == []
 
+    def test_a_trailing_slash_destination_that_exists_expands_to_the_file(
+        self, tmp_path: Path
+    ) -> None:
+        """The real-directory sibling of the decline above.
+
+        Before the fix, `_resolve_write_target` declined ANY trailing slash
+        outright, before `is_dir()` ever ran -- so `cp a.py dest/` and
+        `cp a.py dest` (this test vs.
+        `test_a_directory_destination_expands_to_the_file_actually_written`)
+        disagreed purely on a spelling difference a real shell treats
+        identically once `dest` exists.
+        """
+        destination = tmp_path / "dest"
+        destination.mkdir()
+
+        found = get_bash_write_targets(_bash(f"cp /tmp/a.py {destination}/"))
+
+        assert found == [str(destination / "a.py")]
+
+    def test_a_redirect_with_trailing_slash_into_a_real_directory_still_yields_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        """A redirect has no source operand, so even a REAL directory expands
+        to nothing -- the trailing slash does not change that, only `is_dir()`
+        plus a source list does."""
+        destination = tmp_path / "dest"
+        destination.mkdir()
+
+        assert get_bash_write_targets(_bash(f"echo x > {destination}/")) == []
+
+    def test_a_target_directory_flag_value_with_trailing_slash_expands(
+        self, tmp_path: Path
+    ) -> None:
+        """`-t dest/` is the same bug from the other spelling that sets
+        `directory_only`: the flag's value carried a trailing slash too, and
+        was declined outright before it ever reached the `is_dir()` check."""
+        destination = tmp_path / "dest"
+        destination.mkdir()
+
+        found = get_bash_write_targets(_bash(f"cp -t {destination}/ /tmp/a.py"))
+
+        assert found == [str(destination / "a.py")]
+
 
 class TestProseIsNeverAWriteTarget:
     """The failure that makes a generalised regex unusable."""

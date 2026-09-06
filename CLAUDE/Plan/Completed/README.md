@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00294: relay transport safe toggle and reenable](00294-relay-transport-safe-toggle-and-reenable/PLAN.md) - Complete at `17f9446e` + the archiving commit (one-command verified auto-reverting `transport on|off|status`; relay dogfood re-enabled here via the toggle; canary run 5 proved client parity incl. client-side relay build)
+
 - [00292: codex cli dual host research](00292-codex-cli-dual-host-research/PLAN.md) - Complete (research-only, 9-agent Sonnet workflow: Codex CLI hooks are verdict-based but cover only shell/apply_patch/MCP calls today; 6 of our 31 wired events have any counterpart; recommendation in FINDINGS.md — host-adapter + verdict degradation, deferred until Codex Edit/Write hook coverage lands)
 
 - [00290: rust socket relay forwarder](00290-rust-socket-relay-forwarder/PLAN.md) - Complete at `54422e79` + the archiving commit (opt-in `daemon.transport` relay: per-event Unix sockets + std-only static Rust relay, measured 4.344 ms p50 vs 34.1 ms baseline; stop/subagent-stop excluded to keep the exit-2 contract; dogfooded live in this repo)

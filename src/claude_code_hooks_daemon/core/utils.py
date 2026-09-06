@@ -345,15 +345,21 @@ def _written_paths(candidate: _TargetCandidate, cwd: Any) -> list[str]:
 
     With no sources there is nothing to expand and the directory is dropped:
     ``echo x > somedir`` is a shell error that writes nothing, so inventing a
-    path would be fabrication. A ``directory_only`` destination that is not a
-    real directory is dropped for the same reason -- the shell refuses it.
+    path would be fabrication. A destination declared to be a directory that
+    turns out not to be a real one is dropped for the same reason -- the shell
+    refuses it. Two spellings make that declaration: the ``-t``/
+    ``--target-directory`` flag (``candidate.directory_only``), and a trailing
+    slash on the RAW destination token (``cp a.py dest/``) -- checked here,
+    against ``candidate.destination`` rather than the resolved path, because
+    ``_resolve_write_target`` strips the slash to produce the path to test.
     """
     destination = _resolve_write_target(candidate.destination, cwd)
     if destination is None:
         return []
+    directory_only = candidate.directory_only or candidate.destination.endswith("/")
     if Path(destination).is_dir():
         return [str(Path(destination) / Path(source).name) for source in candidate.sources]
-    return [] if candidate.directory_only else [destination]
+    return [] if directory_only else [destination]
 
 
 def _tokenise(text: str) -> list[str]:
@@ -546,7 +552,18 @@ def _resolve_write_target(target: str, cwd: Any) -> str | None:
     Declines rather than guesses. A directory destination is declined too: the
     written file is ``dest/<basename>``, so reporting ``dest`` would name a
     path no path-keyed guard matches -- failing safe (a missed write) instead
-    of dangerously (the wrong file judged).
+    of dangerously (the wrong file judged). ``_written_paths`` is where that
+    decline actually happens (via ``is_dir()`` and ``candidate.directory_only``)
+    -- this function's job is only to produce the path to test, which is why a
+    trailing slash is stripped here rather than declined outright.
+
+    **A trailing slash is shell's own directory marker** (``cp a.py dest/``,
+    ``-t dest/``), not part of the path. Declining every trailing-slash token
+    used to make ``cp a.py somedir/`` and ``cp a.py somedir`` disagree for no
+    reason a real shell would recognise -- the first was always dropped before
+    ``is_dir()`` ever ran, even when ``somedir`` genuinely existed. Stripping
+    it here lets the same real-directory test that already handles the
+    slash-less spelling, and ``-t``'s value, decide both consistently.
 
     **No quote-stripping happens here.** :func:`_tokenise` runs in POSIX mode,
     so quotes are already removed by the lexer, which knows which ones were
@@ -554,12 +571,16 @@ def _resolve_write_target(target: str, cwd: Any) -> str | None:
     begins or ends with a quote character -- turning a correct target into a
     wrong one, the exact failure this function exists to avoid.
     """
-    if not target or target.endswith("/"):
+    if not target:
         return None
     if any(character in target for character in _UNEXPANDABLE_CHARACTERS):
         return None
     if target.startswith(_DEV_PREFIX):
         return None
+
+    # Must run AFTER the checks above: they key on the token as written (a
+    # bare "/dev/" only starts with `_DEV_PREFIX` while its slash is intact).
+    target = target.rstrip("/") or "/"
 
     if target.startswith(_HOME_PREFIX):
         return _expand_home(target)

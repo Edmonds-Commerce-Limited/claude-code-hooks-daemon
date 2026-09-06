@@ -28,7 +28,9 @@ def baseline(cmd):
 def parses(cmd):
     done = subprocess.run(  # nosec B603 - fixed argv, no shell
         ["bash", "-n", "-c", cmd.replace(PIPED, BENIGN)],
-        capture_output=True, timeout=10, check=False,
+        capture_output=True,
+        timeout=10,
+        check=False,
     )
     return done.returncode == 0
 
@@ -70,7 +72,7 @@ ORDINARY = {
     "subshell + source": hd("(source /dev/stdin", "\n)"),
     "eval $(cat)": f"eval \"$(cat <<'EOF'\n{PIPED}\nEOF\n)\"",
     "subshell + eval": f"(eval \"$(cat <<'EOF'\n{PIPED}\nEOF\n)\")",
-    "quoted eval": f"\"eval\" \"$(cat <<'EOF'\n{PIPED}\nEOF\n)\"",
+    "quoted eval": f'"eval" "$(cat <<\'EOF\'\n{PIPED}\nEOF\n)"',
     "backtick + eval": f"eval \"`cat <<'EOF'\n{PIPED}\nEOF\n`\"",
 }
 
@@ -97,7 +99,7 @@ DATA = {
     "psql": f"psql -d db <<'EOF'\n-- {PIPED}\nEOF",
     "mysql": f"mysql db <<'EOF'\n-- {PIPED}\nEOF",
     "ftp": f"ftp -n host <<'EOF'\n{PIPED}\nEOF",
-    "jq -r .": f"jq -r . <<'EOF'\n{{\"doc\": \"{PIPED}\"}}\nEOF",
+    "jq -r .": f'jq -r . <<\'EOF\'\n{{"doc": "{PIPED}"}}\nEOF',
     "sort > out": f"sort > untracked/scratch/o.txt <<'EOF'\navoid {PIPED}\nEOF",
 }
 
@@ -111,8 +113,10 @@ def report(title, cases, want_deny):
         if wrong and p:
             misses.append(label)
         mark = "  <-- WRONG" if wrong and p else ("  (unparseable)" if not p else "")
-        print(f"  parses={'Y' if p else 'N'} now={'DENY ' if d else 'ALLOW'} "
-              f"v3.61.0={'DENY ' if b else 'ALLOW'} | {label:24} {quoted_heredoc_receivers(cmd)}{mark}")
+        print(
+            f"  parses={'Y' if p else 'N'} now={'DENY ' if d else 'ALLOW'} "
+            f"v3.61.0={'DENY ' if b else 'ALLOW'} | {label:24} {quoted_heredoc_receivers(cmd)}{mark}"
+        )
     return misses
 
 
