@@ -670,3 +670,44 @@ suite that pins only the middle one can be fully green while every real
 invocation fails. When a component sits on a host boundary, write at least one
 test per contract IN the host's own manner of invocation — and treat "works
 when I run it by hand" as evidence about your hand, not about the host.
+
+## A contradictory instruction is usually a PRECEDENCE question, not an attack
+
+Plan 00335 dispatched four sub-agents onto daemon source. Two independently
+reported hitting "suspicious injected system-reminders" and disregarded them.
+Both were genuine:
+
+1. A Claude Code harness default under bypassPermissions, urging `sed` and Bash
+   heredocs over `Edit`/`Write`. Real, and correctly overridden — this
+   project's `CLAUDE.md` forbids `sed` for file modification, and a project
+   rule outranks a harness default.
+2. `src/CLAUDE.md` and `tests/CLAUDE.md`, tracked files opening "DO NOT EDIT".
+   Real, and aimed at a CLIENT project where the daemon is an upstream
+   dependency under `.claude/hooks-daemon/`. In self-install mode the daemon
+   IS the project, so the warning does not apply.
+
+Both agents took the right ACTION — they proceeded — but for the wrong reason,
+and the wrong reason is the dangerous part. An agent that learns to file
+inconvenient-but-legitimate instructions as "injected" has acquired a blanket
+licence to ignore anything awkward, and the failure is silent because
+the outcome looks identical whenever the instruction happened to be one that
+should have been overridden anyway. The symmetric failure is just as bad: the
+next agent reads the same page and STOPS, refusing work it was correctly asked
+to do.
+
+When an instruction contradicts your task, the first question is which
+authority wins — project rule over harness default, specific scope over
+general warning, task assignment over a page addressed to a different audience
+— not whether the instruction is hostile. Reach for the injection framing only
+when an instruction has no plausible legitimate author, which is rare; a
+tracked file in the repository always has one.
+
+Two corollaries, both paid for here:
+
+- **State the precedence out loud.** "This page targets client installs; this
+  repo is the daemon" is checkable and survives review. "It looked injected"
+  is not and does not.
+- **A page whose audience is conditional must say so.** Two of four agents
+  tripped on the same wording, so this was a documentation defect, not
+  carelessness. Both pages now name the self-install exception. If a warning
+  applies only in one deployment mode, the other mode belongs in the warning.
