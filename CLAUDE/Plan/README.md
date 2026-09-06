@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00335: heredoc receiver policy and review followups](00335-heredoc-receiver-policy-and-review-followups/PLAN.md) - Not Started (the non-blocking residue of the v3.62.0 code-review gate, whose centre is a design decision rather than a bug fix: the `jq` identity-filter over-block and the sink-inversion proposal pull opposite ways on the same receiver question, so fixing either alone partly undoes the other)
+
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
 
 - [00329: post upgrade truth changes report bloat](00329-post-upgrade-truth-changes-report-bloat/PLAN.md) - Not Started (the upgrade flow's truth-changes reconciliation hands the agent up to 89KB / 74 entries with no bound and no supersession collapsing, so superseded truths are replayed and the step is skimmed rather than performed)
@@ -277,40 +279,37 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 334 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 335 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 273 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 44 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 45 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 44 + 273 + 7 = **324 folders**, spanning
-  **321 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 45 + 273 + 7 = **325 folders**, spanning
+  **322 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  334 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  335 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  321 + 13 = 334. ✅
+  322 + 13 = 335. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00334 archival (44 root, 273 `Completed/`,
-  7 `Cancelled/`, 321 distinct numbers against a counter of 334). The **Active**
-  count had drifted by two and the arithmetic no longer closed (it asserted 319
-  distinct numbers, then added 318 to reach 331 against a counter of 332), so
-  every figure above was recounted from disk rather than incremented. The index
-  carries NO reconciliation history — it states current truth only; every
-  earlier recount is in git, and per-plan narrative belongs in that plan's
-  `JOURNAL/`.
+- **Last reconciled at**: the Plan 00335 filing (45 root, 273 `Completed/`,
+  7 `Cancelled/`, 322 distinct numbers against a counter of 335). Every figure
+  above was recounted from disk rather than incremented. The index carries NO
+  reconciliation history — it states current truth only; every earlier recount
+  is in git, and per-plan narrative belongs in that plan's `JOURNAL/`.
 
   One recount hazard worth keeping, because it recurs: an untracked stray
   directory (e.g. an accidental `CLAUDE/Plan/CLAUDE/Plan/` from a
