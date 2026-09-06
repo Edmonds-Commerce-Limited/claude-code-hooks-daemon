@@ -86,6 +86,11 @@ _QUOTED_HEREDOC_BODY_PATTERN = re.compile(
 # newlines still sees a well-formed command.
 _INERT_BODY_PLACEHOLDER = "HEREDOC_BODY"
 
+# Separators that end one command and start the next, used to find which
+# command a heredoc opener actually belongs to. Longest-first: `||` must be
+# matched whole before the single `|` can claim its first character.
+_RECEIVER_SEPARATORS: tuple[str, ...] = ("&&", "||", ";", "|", "&")
+
 
 def value_can_substitute(value: str) -> bool:
     """Whether bash will EXECUTE something inside this quoted argument value.
@@ -157,6 +162,60 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
         ),
         command,
     )
+
+
+def quoted_heredoc_receivers(command: str) -> list[str]:
+    """Return the command words each quoted-delimiter heredoc is fed to.
+
+    ``strip_quoted_heredoc_bodies`` blanks a body because bash never PARSES
+    it. That is the whole truth when the receiver treats the bytes as data —
+    ``git commit -F -``, ``cat > file`` — but NOT when the receiver is an
+    interpreter: ``bash <<'EOF'`` executes the body regardless of the quoting,
+    which only governs what the OUTER shell expands on the way in. A caller
+    blanking bodies for a safety decision would otherwise hand out a clean
+    bypass, so it needs to know who is on the receiving end.
+
+    The interpreter policy deliberately stays with the caller; different
+    handlers guard different interpreter sets, and this module judges nothing.
+
+    Every word of the receiving command is returned, not just the first,
+    because ``sudo -E bash <<'EOF'`` genuinely feeds bash and reporting only
+    ``sudo`` would hide it. Words are reduced to their basename so ``/bin/sh``
+    and ``sh`` compare equal. The consequence is intentional over-reporting: a
+    redirect target that happens to be named like an interpreter is reported
+    too. For a caller deciding whether to WITHHOLD an exemption that is the
+    safe direction — it withholds one, it never grants one.
+
+    An UNQUOTED ``<<EOF`` is not reported: it is not blanked either, so there
+    is no exemption to guard.
+
+    Args:
+        command: The raw Bash command string.
+
+    Returns:
+        Basenames of the words making up each quoted heredoc's receiving
+        command, in the order the heredocs appear. Empty if there are none.
+
+    Examples:
+        >>> quoted_heredoc_receivers("git commit -F - <<'MSG'\\nbody\\nMSG")
+        ['git']
+        >>> quoted_heredoc_receivers("/bin/sh <<'EOF'\\nbody\\nEOF")
+        ['sh']
+    """
+    receivers: list[str] = []
+    for match in _QUOTED_HEREDOC_BODY_PATTERN.finditer(command):
+        # The receiving command is what sits between the previous separator
+        # and the `<<` opener -- a pipe stage or a `&&` branch, not the whole
+        # line, so `echo x | bash <<'EOF'` resolves to bash rather than echo.
+        preceding = command[: match.start("opener")]
+        last_line = preceding.rsplit("\n", 1)[-1]
+        segment = split_unquoted(last_line, _RECEIVER_SEPARATORS)[-1]
+        receivers.extend(
+            word.rsplit("/", 1)[-1]
+            for word in segment.split()
+            if word and not word.startswith("-")
+        )
+    return receivers
 
 
 def split_unquoted(text: str, separators: Sequence[str]) -> list[str]:

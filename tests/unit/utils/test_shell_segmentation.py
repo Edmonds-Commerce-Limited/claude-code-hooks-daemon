@@ -29,6 +29,7 @@ from __future__ import annotations
 import pytest
 
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    quoted_heredoc_receivers,
     split_unquoted,
     strip_quoted_heredoc_bodies,
     value_can_substitute,
@@ -214,3 +215,68 @@ class TestStripQuotedHeredocBodies:
     def test_command_without_a_heredoc_is_returned_unchanged(self) -> None:
         command = "git commit -m 'ordinary message'"
         assert strip_quoted_heredoc_bodies(command) == command
+
+
+class TestQuotedHeredocReceivers:
+    """WHO receives a quoted heredoc decides whether its body can run.
+
+    ``strip_quoted_heredoc_bodies`` states the rule that makes a body inert:
+    bash never PARSES it. That is the whole truth for ``git commit -F -`` or
+    ``cat > file``, which treat the bytes as data — but not for ``bash <<'EOF'``,
+    where bash hands the body to an INTERPRETER that executes it. Quoting the
+    delimiter changes nothing there; it only stops the outer shell expanding
+    the text on the way in.
+
+    A caller blanking bodies for a safety decision must be able to tell those
+    apart, and the shell knowledge for it belongs here rather than re-derived
+    per handler — which is the mistake this module's own docstring records
+    (Plan 00200 Task 3.7). The interpreter POLICY stays with the caller: this
+    reports the receiving command word and judges nothing.
+    """
+
+    def test_git_commit_is_reported_as_the_receiver(self) -> None:
+        command = "git commit -F - <<'MSG'\nbody\nMSG"
+        assert quoted_heredoc_receivers(command)[0] == "git"
+
+    def test_bash_is_reported_as_the_receiver(self) -> None:
+        command = "bash <<'EOF'\nbody\nEOF"
+        assert quoted_heredoc_receivers(command) == ["bash"]
+
+    def test_a_receiver_named_by_path_is_reported_by_basename(self) -> None:
+        """`/bin/sh` and `sh` are the same interpreter; a caller matching
+        against a name must not have to strip the path itself."""
+        command = "/bin/sh <<'EOF'\nbody\nEOF"
+        assert quoted_heredoc_receivers(command) == ["sh"]
+
+    def test_redirect_receiver_leads_with_the_command_not_the_target(self) -> None:
+        command = "cat > notes.md <<'EOF'\nbody\nEOF"
+        assert quoted_heredoc_receivers(command)[0] == "cat"
+
+    def test_receiver_after_a_pipe_is_the_last_stage_only(self) -> None:
+        """`echo` is upstream of the pipe, so it is not the receiver."""
+        assert quoted_heredoc_receivers("echo x | bash <<'EOF'\nbody\nEOF") == ["bash"]
+
+    def test_receiver_after_a_separator_excludes_the_earlier_command(self) -> None:
+        command = "cd /x && git commit -F - <<'MSG'\nbody\nMSG"
+        receivers = quoted_heredoc_receivers(command)
+        assert receivers[0] == "git"
+        assert "cd" not in receivers
+
+    def test_sudo_reports_every_word_so_the_interpreter_is_not_hidden(self) -> None:
+        """`sudo -E bash <<'EOF'` still feeds bash. Reporting only the first
+        word would report `sudo` and hide the interpreter behind it."""
+        assert "bash" in quoted_heredoc_receivers("sudo -E bash <<'EOF'\nbody\nEOF")
+
+    def test_multiple_heredocs_report_each_receiver(self) -> None:
+        command = "cat > a <<'A'\nx\nA\nbash <<'B'\ny\nB"
+        receivers = quoted_heredoc_receivers(command)
+        assert "cat" in receivers
+        assert "bash" in receivers
+
+    def test_unquoted_heredoc_is_not_reported(self) -> None:
+        """It is not blanked by strip_quoted_heredoc_bodies either, so there
+        is no exemption for a caller to guard."""
+        assert quoted_heredoc_receivers("bash <<EOF\nbody\nEOF") == []
+
+    def test_command_without_a_heredoc_reports_nothing(self) -> None:
+        assert quoted_heredoc_receivers("git commit -m 'msg'") == []

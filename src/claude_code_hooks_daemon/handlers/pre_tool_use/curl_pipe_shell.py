@@ -17,6 +17,10 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, OPTIONAL_SUDO
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    quoted_heredoc_receivers,
+    strip_quoted_heredoc_bodies,
+)
 
 # Full first-fire teaching content (Plan 00116): reuses the pre-migration
 # handler's rich prose verbatim, minus the invocation-specific `COMMAND:`
@@ -124,7 +128,40 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
         if not command:
             return False
 
-        return bool(re.search(_CURL_PIPE_SHELL_PATTERN, command, re.IGNORECASE))
+        return bool(re.search(_CURL_PIPE_SHELL_PATTERN, self._scannable(command), re.IGNORECASE))
+
+    @staticmethod
+    def _scannable(command: str) -> str:
+        """Drop heredoc bodies that are DATA, keep the ones that are CODE.
+
+        ``<<'EOF'`` disables every expansion, so bash hands the body to the
+        receiving command verbatim and never parses it as shell syntax. A
+        commit message or a documentation file that MENTIONS the anti-pattern
+        therefore is not an invocation of it — and denying it is a false
+        positive this codebase has already met once
+        (``strip_quoted_heredoc_bodies``, Plan 00234 finding H-3). It recurred
+        here: the commit fixing this handler's own out-of-date guidance was
+        blocked by the handler, because the message described what it fixed.
+
+        The exemption stops at the receiver. ``bash <<'EOF'`` EXECUTES the
+        body — quoting the delimiter governs only what the outer shell expands
+        on the way in, not what the interpreter does with the bytes. Blanking
+        those bodies would turn a documentation fix into a clean bypass of a
+        safety-critical handler, so when any quoted heredoc feeds an
+        interpreter the raw command is scanned unchanged.
+
+        Withholding the exemption is deliberately the cheap error: the cost is
+        a mention being denied, and the alternative cost is remote code
+        execution.
+        """
+        receivers = quoted_heredoc_receivers(command)
+        if any(
+            receiver.startswith(interpreter)
+            for receiver in receivers
+            for interpreter in _PIPED_INTERPRETERS
+        ):
+            return command
+        return strip_quoted_heredoc_bodies(command)
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""
