@@ -128,9 +128,14 @@ case "${1:-}" in
         send_log_marker "END BOUNDARY"
         sleep 0.2  # Give daemon time to log the marker
 
-        # Capture logs and extract between boundaries
-        OUTPUT_FILE="/tmp/hook_debug_$(date +%Y%m%d_%H%M%S).log"
-        TEMP_LOGS="/tmp/hook_debug_all_$$.log"
+        # Capture logs and extract between boundaries. In-repo (Plan 00333):
+        # a hook-flow capture is diagnostic evidence, and the container's temp
+        # directory is wiped on restart -- losing exactly the artefact the run
+        # existed to produce.
+        SCRATCH_DIR="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/untracked/scratch"
+        mkdir -p "$SCRATCH_DIR"
+        OUTPUT_FILE="$SCRATCH_DIR/hook_debug_$(date +%Y%m%d_%H%M%S).log"
+        TEMP_LOGS="$SCRATCH_DIR/hook_debug_all_$$.log"
 
         "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli logs --level DEBUG --count 1000 > "$TEMP_LOGS" 2>&1
 

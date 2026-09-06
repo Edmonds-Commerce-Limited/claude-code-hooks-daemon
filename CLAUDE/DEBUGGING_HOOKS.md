@@ -34,7 +34,8 @@ Without introspection, you're guessing. With it, you're surgically precise.
 
 ### Output
 
-Logs are saved to `/tmp/hook_debug_TIMESTAMP.log` and displayed in terminal.
+Logs are saved to `untracked/scratch/hook_debug_TIMESTAMP.log` and displayed in
+terminal — in-repo, so a capture survives a container restart.
 
 Example output:
 

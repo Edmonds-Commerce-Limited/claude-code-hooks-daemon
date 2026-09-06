@@ -199,7 +199,7 @@ the daemon's `constants/priority.py`, the source of truth):
 .claude/hooks-daemon/bin/hooks-daemon validate-project-handlers
 
 # Generate acceptance test playbook (includes project handlers)
-.claude/hooks-daemon/bin/hooks-daemon generate-playbook > /tmp/playbook.md
+.claude/hooks-daemon/bin/hooks-daemon generate-playbook > untracked/scratch/playbook.md
 ```
 
 ## Examples
