@@ -57,7 +57,7 @@ A `Write`/`Edit` of code that silently swallows errors is blocked. All errors mu
 - Python: bare `except` clauses with an empty body, catching and discarding all exceptions
 - Shell: redirecting stderr to `/dev/null` to silence failures, `|| true` to suppress non-zero exit codes
 - JavaScript/TypeScript: empty `catch` blocks that swallow exceptions
-- Go: `_ = err` (discarding error return values without handling)
+- Go: `if err != nil {}` (empty error check), and a blank in the LAST tuple position — `result, _ := riskyCall()` — which is where Go returns the error. The idiomatic `_, err :=` CAPTURES it and is not blocked; a bare `_ = err` is not matched either.
 
 **Required action**: Handle errors explicitly — log them, return them to the caller, or propagate them. Silent error suppression masks bugs and makes debugging impossible.
 
