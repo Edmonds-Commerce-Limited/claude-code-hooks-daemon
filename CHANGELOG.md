@@ -7,6 +7,259 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.62.0] - 2026-09-06
+
+### Added
+
+- **Remote docs vendoring and staleness (Plan 00326).** Upstream
+  documentation can now be captured as a vendored, tracked,
+  provenance-bearing part of the repository via `hooks-daemon remote-docs add <url>`: fetched once, stored as markdown under `remote-docs/` (config:
+  `documentation.trees.remote`), carrying frontmatter that records
+  `source_url`, `fetched_at`, `source_sha256`, `licence`, `stale_after`, and
+  `fidelity` — the field that separates a citable corpus from a cache.
+  Capture prefers `agent-browser read <url>` for its documentation-aware
+  markdown negotiation (retry with `.md`, `llms.txt` lookup), recording
+  `fidelity: converted`; `--verbatim` forces a raw GET with an honest
+  identifying User-Agent for work that must quote upstream exactly
+  (`fidelity: verbatim`). Losing the browser degrades to the raw GET with a
+  named warning rather than failing outright. Captured content is scanned
+  against the sensitive-content handler's rules before it reaches disk,
+  since a CLI-authored write never passes through the Write-tool hook that
+  normally does this. New config block `documentation.remote`
+  (`default_staleness_days`, `known_sources` mapping a domain to its SPDX
+  licence) scopes both the pre-filled licence review and the WebFetch
+  capture nudge to declared documentation domains. A generated corpus index
+  lands at `.claude/REMOTE-DOCS.md` (outside the tree, regenerated on every
+  `add`/`refresh`) so "do we already have docs for X" costs one grep. Four
+  new handlers enforce the contract:
+  - `remote_docs_provenance` (PreToolUse, priority 36) — denies a
+    Write/Edit of markdown inside the remote-docs tree lacking valid
+    provenance frontmatter. Only added text is judged on an `Edit`.
+  - `remote_docs_commit_gate` (PreToolUse, priority 38) — denies a `git commit` staging a remote-docs file without valid provenance, the
+    backstop for the Bash-authored route the write-time gate cannot see.
+  - `remote_docs_routing` (PreToolUse, priority 37) — denies a `WebFetch`
+    of a URL already vendored and still fresh, naming the local path
+    instead; warns at `Read` time when a vendored document is stale or
+    carries an `unreviewed` licence.
+  - `remote_docs_staleness` (SessionStart, priority 68, advisory) —
+    reports vendored documents past their staleness window or whose
+    provenance no longer parses, capped at ten entries with a total.
+    All four are silent when the remote-docs tree is absent, so a project
+    vendoring nothing never sees any of this.
+- **`project_containment` — a deny-by-default guard against writes outside
+  the project root (Plan 00333).** Every path guard in this daemon is
+  expressed in repo-relative coordinates; a target that fails the
+  absolute-to-relative conversion was previously judged by nothing at all
+  (`handlers_matched=[]`). The new terminal PreToolUse handler (priority 14)
+  now owns that premise on every surface: the named target of
+  `Write`/`Edit`/`NotebookEdit`, every path a Bash command plainly writes,
+  and destination-bearing Bash constructs that name a path without directly
+  invoking a content-authoring tool — `curl -o`/`--output`, `wget -O`/`--output-document`, an archive-creating `tar`, `mkdir`,
+  `rsync`/`scp` destinations, including nested inside `sh -c`/`bash -c`.
+  Reads are never blocked. The exemption list (`allowed_external_paths`) is
+  empty by default; Claude Code's own state directory is allowed by owner
+  ruling. A belt-and-braces Claude Code settings rule is pinned by test to
+  the same `ProjectPath.EPHEMERAL_ROOTS` the handler denies, so the two
+  layers cannot drift apart.
+- **`untracked/scratch/` — the canonical scratch-file convention (Plan
+  00333 Phases 3-4).** `project_containment` denies writes to `/tmp`, so
+  the daemon now creates `untracked/scratch/` at startup (gitignored,
+  fail-open if the root is unwritable) and every handler that previously
+  recommended `/tmp` — `pipe_blocker`'s capture fallback,
+  `curl_pipe_shell`, `daemon_location_guard`, `sudo_pip`,
+  `pip_break_system` — now recommends this directory instead, via a single
+  shared `ProjectPath` constant.
+- **`layout.vendor_dirs` gained real production consumers (Plan 00331,
+  Plan 00332).** The config field parsed and merged correctly since it was
+  introduced, but every consumer read the raw builtin vendored-directory
+  constant instead, so a project's declaration was silently inert. Docs QA,
+  plan QA, and the content-blocker handlers now resolve the vendored set
+  through `Handler.layout_for()`, resolved from each file's *owning*
+  project — including inside a monorepo sub-project, which previously fell
+  back to the root project's declaration only. `layout.vendor_exceptions`
+  re-includes a first-party library maintained inside an otherwise
+  third-party vendored tree, with the directory-pruning walkers made
+  negation-aware so an exception is not pruned away before it can match.
+  `{vendor-dirs}` is now usable as a predicate reference inside any
+  exclusion list, so a project cites the vendor truth instead of restating
+  directory names.
+- **Core doc templates for client projects (Plan 00334).** `PlanWorkflow.md`
+  and `Worktree.md` are split into a canonical, deployable "core" template
+  (`PlanWorkflow.core.md`, `Worktree.core.md`, shipped from
+  `install/templates/core/` via the new `install/core_docs.py`) plus a
+  thinner project-specific overlay. The installer deploys the core template
+  into client projects, so resident guidance stops naming files that do not
+  exist client-side.
+- **`remote-docs add --verbatim`** forces the raw-GET capture path,
+  recording `fidelity: verbatim`, for callers that need genuinely unchanged
+  upstream bytes rather than the default agent-browser-converted markdown.
+
+### Changed
+
+- **Hook and statusLine commands now always execute through `bash <path>`,
+  making the executable bit and the working directory irrelevant (Plan
+  00102 Phase 6).** The status line was previously exempted from Tier 1's
+  `bash <path>` invocation on the mistaken assumption that Claude Code
+  executes it directly; it does not — the exempted command names no file on
+  disk and only renders because a shell expands it. `install_version.sh`'s
+  fallback also emitted relative bare paths for all sixteen commands, and
+  nothing could repair them once installed: the settings migrator now
+  recognises the relative/bare form and rebuilds each command from the
+  shared `HOOK_COMMAND_TEMPLATE` (now public) rather than only prefixing it,
+  and migration now also covers the top-level `statusLine` key, which sits
+  outside `settings["hooks"]` and previously had no repair path at all.
+  `validate_hook_commands` now reports any command not invoked through
+  `bash`, rather than only checking that it ends with the wrapper path.
+  Documentation that recommended the bare/executable form (README.md,
+  `Architecture/StatusLine.md`, `LLM-INSTALL.md`, and seven troubleshooting
+  snippets that piped straight into a hook) is corrected.
+- **The `/model` picker and the ccy supervisor's model auto-restore are
+  narrowed (Plan 00328 Phase 1).** The picker's fuzzy stem matcher is cut
+  down to a `startswith` match — a partial prefix was ambiguous and a
+  review found the wildcard match stealable and broader than intended.
+  Automatic model restoration is now scoped to only the fable
+  security-downgrade case it exists to reverse, rather than firing on any
+  model change. Typed-command recognition for `/compact`, `/model <x>` and
+  `/effort <x>` moved from the never-reloading host process into the
+  hot-reloading `--worker` subprocess (fed by a bounded raw-input tap the
+  host forwards each tick), so a future fix to that parsing ships live on
+  worker reload instead of requiring a full session restart.
+- **`curl_pipe_shell` treats a quoted heredoc body as inert data.** A
+  heredoc whose delimiter is quoted (`<<'EOF'`) is never shell-expanded, so
+  a `curl | sh` pattern sitting inside such a body was never actually going
+  to run; it is no longer flagged.
+- **The whole acceptance-test corpus, and every handler that referenced
+  `/tmp`, migrated to `untracked/scratch/`** — a consequence of
+  `project_containment` now denying writes to `/tmp` outright (see Added).
+- **QA test-report generation now reflects the true venv, not an assumed
+  one.** The Step 8 release gate previously found the QA venv had drifted
+  from `uv.lock` (44 packages at wrong versions, 19 locked packages absent,
+  the daemon itself two versions stale) — the venv is now synced with `uv sync --frozen --extra dev` as part of diagnosing a red gate, since a QA
+  verdict from a drifted venv is not trustworthy.
+
+### Fixed
+
+- **`lint_on_edit` denied every valid `.go` file in a repository with no
+  `go.mod`.** `go vet` resolves packages, so the handler passed it the
+  package DIRECTORY — correct in a Go module, but the module-root lookup
+  fell back to the workspace root when it found no `go.mod`, and `go vet`
+  then exited non-zero with "cannot find main module" WITHOUT READING THE
+  FILE. Any polyglot repository that merely contained Go had every `.go`
+  write blocked, with an error about modules rather than about the code.
+  The package form is now used only when a `go.mod` was actually found;
+  without one it falls back to the single-file form, which needs no module
+  and still reports real findings. Not a regression — this shipped broken
+  before, and surfaced only because the fixture moved into the repository
+  where the acceptance gate exercises it.
+- **The "lint tool unavailable" advisory claimed the tool was not
+  installed.** True of the rustup `clippy-driver` shim, the only cause when
+  it was written; false for Go, where `go` IS installed and would have sent
+  a user to install something already present. It now says the lint did not
+  run, that the file was NOT checked, and quotes the tool's own first line.
+- **The error-hiding guidance advertised a Go check that does not exist.**
+  Both the resident CLAUDE.md guidance and the rule's one-line summary
+  listed `_ = err`; the Go strategy matches `if err != nil {}` and a blank
+  in the LAST tuple position (`result, _ := riskyCall()`), never a bare
+  `_ = err`. An agent reading it would have believed a safety handler
+  covered a pattern it silently allows.
+- **The acceptance-test harness still wrote its playbook to `/tmp`,** which
+  `project_containment` denies as of this release — so the mandatory release
+  gate's own runner was blocked by the release's own new handler. The corpus
+  migration missed the harness because no test covers the skill scripts.
+- **A pytest run ending in an ERROR (fixture/setup/teardown blow-up) was
+  not counted as a failure in `tests.json`,** producing a self-contradicting
+  report that named a broken test while declaring `passed_all: true`. The
+  release gate itself was never fooled (it also requires a zero exit code),
+  but `tests.json` is read independently by other consumers. Errors are now
+  counted, included in the total, and folded into `passed_all`.
+- **The pytest output scraper could misread an unrelated subprocess log
+  line as a failing test name.** The `^(?:FAILED|ERROR)\s+(\S+)` pattern
+  was applied to the whole captured stream, which includes anything a
+  spawned daemon process wrote to inherited file descriptors — an ordinary
+  `ERROR ...` log line naming a real test's node id (via
+  `PYTEST_CURRENT_TEST`) could be read as a verdict in a run that passed
+  cleanly. Scraping is now scoped to pytest's own "short test summary info"
+  section.
+- **`module_doc_budget` and `rules_file_shape` both ignored the configured
+  `documentation.qa.scope_exclude_globs`.** Both checks enumerate with
+  their own directory walk instead of reading `docs_qa.corpus`, so neither
+  ever consulted this key — a declared exclusion (e.g. for a vendored
+  dependency carrying its own `CLAUDE.md`) could not silence either
+  check's advisory. Fixed in both the SWEEP and EDIT arms of each.
+- **The secret-file guard's trusted-consumer exemption failed behind a
+  leading `cd <dir> &&`.** `cd /infra/ansible && ansible-playbook --vault-password-file <path>` was denied even though `ansible-playbook`
+  is a recognised, shipped consumer, because the compound-command rule
+  fired before the consumer/flag check ran. One leading `cd <dir> &&` is
+  now stripped (once, only when the target is not itself protected and no
+  substitution is involved) and the remainder re-judged normally.
+- **`/hooks-daemon optimise` was documented but not dispatchable** as a
+  skill subcommand.
+- **The secret-file guard denied importing its own module.** The default
+  protected-path glob matched by substring, and the guard's own dotted
+  module path accidentally contained that substring, so any file importing
+  the handler directly was denied as if it referenced a protected file. An
+  `import x` / `from x import` statement — which cannot read a file's
+  contents — is now exempted from the substring match.
+- **`docs-qa --check-staged --help` claimed the flag was unimplemented**
+  after it had shipped fully.
+- **A `normalize_path` substring-matching bug** that could misclassify
+  paths when registering the remote-docs tree (Plan 00326).
+- **The sensitive-content guard could silently skip scanning a remote-docs
+  capture** when the scanner failed to build, without the CLI saying so as
+  its docstring claimed; it now logs at WARNING and prints an explicit
+  stderr notice.
+
+### Security
+
+All three closed by the release's own code-review gate — caught before
+shipping, confirmed by executing the code rather than by reading it, and all
+three regressions this release itself would have introduced (every shape was
+denied at v3.61.0). The gate ran three times: the third pass attacked the
+fixes from the first two and found the third defect.
+
+- **The secret-file guard's new import exemption was a general laundering
+  primitive.** The fix for "the guard denied importing its own module" (see
+  Fixed, above) exempted an `import`/`from` module path by STRING IDENTITY
+  rather than by position, so `find_protected_mention` skipped that token
+  wherever else it appeared in the command — prefixing any command with a
+  fake `import <protected-name>` line made every real mention of that name
+  invisible: `cat mykeys.privkey` was caught, `import mykeys.privkey\ncat mykeys.privkey` was missed. This gated four DENY/
+  suppress surfaces, including whether `payload_capture` writes a command's
+  payload to disk. Now positional: only the span each import statement's
+  own module path occupies is blanked, so the token is still matched
+  everywhere else in the command.
+- **`curl_pipe_shell`'s quoted-heredoc exemption did not cover every
+  receiver that executes its body.** The exemption (added for the
+  legitimate case of a heredoc fed to `cat`/`git commit -F -`, which is
+  data, not execution) keyed on membership in a fixed interpreter list, but
+  `eval "$(cat <<'EOF' ... EOF)"`, `. /dev/stdin <<'EOF' ... EOF`, and
+  `source /dev/stdin <<'EOF' ... EOF` all execute the body while matching
+  none of those names, letting a `curl ... | bash` payload through this
+  priority-10 terminal RCE guard. All three receivers now count as
+  executors. `-` is deliberately NOT one — though listing it would have been
+  inert rather than harmful, since `quoted_heredoc_receivers` already drops
+  every word beginning with `-`, so `git commit -F -`'s own argument never
+  reaches the comparison.
+- **The same exemption was defeated by ordinary shell punctuation.** Found
+  on the gate's SECOND pass, and it is the other half of the finding above:
+  widening the receiver vocabulary did nothing about the receiver WORD.
+  `quoted_heredoc_receivers` reduced each word to its basename and nothing
+  else, so a receiver bash resolves to `bash` was reported as `(bash`,
+  `"bash"`, `'bash'`, `\bash` or `ba"sh"` — matching neither list, blanking
+  the body, and passing a `curl ... | bash` payload. Seven shapes in all,
+  five of them reachable through the interpreter list that predates this
+  release. `_command_word` now strips quoting and leading grouping/escape
+  characters before the basename reduction, closing the family rather than
+  the spellings anyone happened to enumerate. A residue remains and is
+  documented rather than claimed closed: a receiver built by EXPANSION
+  (`b$'ash'`, `$SHELL`, `$(printf bash)`) is not resolved, because doing so
+  would mean executing the command a PreToolUse hook exists to judge.
+
+### Removed
+
+Nothing removed in this release — no handlers, config keys, or CLI
+subcommands were deleted or renamed.
+
 ## [3.61.0] - 2026-09-02
 
 ### Added

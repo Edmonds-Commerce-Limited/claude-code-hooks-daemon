@@ -716,16 +716,16 @@ class TestQuotedHeredocBodyIsData:
     )
     def test_punctuated_interpreter_receivers_are_still_blocked(self, handler, label, receiver):
         command = f"{receiver} <<'EOF'\n{self._PIPED}\nEOF"
-        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True, (
-            f"{label} receiver {receiver!r} executes the body and must not be exempted"
-        )
+        assert (
+            handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
+        ), f"{label} receiver {receiver!r} executes the body and must not be exempted"
 
     def test_a_subshell_eval_of_a_quoted_heredoc_is_blocked(self, handler):
         command = f"(eval \"$(cat <<'EOF'\n{self._PIPED}\nEOF\n)\")"
         assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
 
     def test_a_quoted_eval_of_a_quoted_heredoc_is_blocked(self, handler):
-        command = f"\"eval\" \"$(cat <<'EOF'\n{self._PIPED}\nEOF\n)\""
+        command = f'"eval" "$(cat <<\'EOF\'\n{self._PIPED}\nEOF\n)"'
         assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
 
     def test_normalisation_does_not_swallow_the_data_bodies(self, handler):

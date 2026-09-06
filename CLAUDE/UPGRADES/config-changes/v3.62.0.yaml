@@ -1,0 +1,210 @@
+version: "3.62.0"
+date: "2026-09-06"
+# breaking: false -- reconsidered explicitly for project_containment (Plan
+# 00333), which denies writes outside the repo root, including /tmp, and is
+# enabled by default. NOT marked breaking: no config key was removed or
+# renamed, and no previously-valid config value now fails validation --
+# this project's own precedent (46 of 47 released manifests are breaking:
+# false; the 4 that are breaking:true each removed/renamed a key or added a
+# hard validation error on a previously-valid value, e.g. v3.58.0's removal
+# of monorepo_subproject_patterns) and its stated semver table
+# (CLAUDE/development/RELEASING.md: "MINOR: New handlers/features ...
+# backwards-compatible") both treat a new enabled-by-default deny handler as
+# a normal MINOR addition -- this daemon ships ~150 such handlers,
+# incrementally, across many MINOR/PATCH releases, none of them breaking by
+# that measure. It IS a genuine behaviour change for any workflow that wrote
+# to /tmp (or elsewhere outside the repo), which is why it is dormant: false
+# and recommended: true below with a migration_note, rather than silent --
+# the advisory mechanism, not the breaking flag, is this project's
+# established way to surface "your existing config now does something" (see
+# v3.59.0's dispatch_declaration / subagent_report_size_blocker: both new,
+# enabled-by-default, denying/advisory handlers, both breaking: false).
+breaking: false
+upgrade_guide: null
+config_changes:
+  added:
+    - key: documentation.trees.remote
+      recommended: false
+      dormant: true
+      description: >-
+        Root directory of the vendored remote-docs tree (Plan 00326),
+        defaulting to `remote-docs/`. Deliberately TOP-LEVEL rather than a
+        `docs/` subdirectory: the deployed human-docs role rule
+        (`docs/**/*.md`) instructs "keep it terse, summarise", which is the
+        opposite of verbatim capture, and rule globs cannot be negated.
+        Registering it here also gives every project the markdown-location
+        allowance automatically, with no `extra_allowed_markdown_paths`
+        entry to keep in sync.
+      migration_note: >-
+        No action needed. Nothing is created until you capture something
+        with `hooks-daemon remote-docs add <url>`, and every remote-docs
+        handler stays silent while the tree is absent.
+    - key: documentation.remote
+      recommended: false
+      dormant: true
+      description: >-
+        NEW policy block for the vendored tree.
+        `default_staleness_days` (default 90, must be > 0) is the freshness
+        window applied at capture. `known_sources` maps a domain to its
+        SPDX licence, which serves two purposes: it pre-fills the `licence`
+        frontmatter field so the review is recorded once per SOURCE rather
+        than once per file, and it declares which domains are documentation
+        sources, which is what scopes the WebFetch capture nudge.
+      migration_note: >-
+        No action needed. With no `known_sources`, captures record the
+        `unreviewed` licence sentinel and no capture nudges fire. To
+        declare a source before reviewing its licence, record `unreviewed`
+        as the value.
+    - key: handlers.pre_tool_use.remote_docs_provenance
+      recommended: true
+      dormant: true
+      description: >-
+        NEW blocking PreToolUse handler (priority 36): denies a markdown
+        `Write`/`Edit` inside the remote-docs tree whose content lacks valid
+        provenance frontmatter (`source_url`, `fetched_at`, `fidelity`,
+        `source_sha256`, `licence`, `stale_after`). The tree is CAPTURED,
+        not authored. Only the added text is judged on an `Edit`, so
+        removing content is never blocked.
+      migration_note: >-
+        No action needed. Enabled by default and completely inert until the
+        remote-docs tree exists.
+    - key: handlers.pre_tool_use.remote_docs_commit_gate
+      recommended: true
+      dormant: true
+      description: >-
+        NEW blocking PreToolUse handler (priority 38): denies a `git commit`
+        staging a remote-docs markdown file without valid provenance. This
+        is the backstop for `remote_docs_provenance`, which keys on
+        `Write`/`Edit` and so cannot see a file authored through a Bash
+        heredoc or redirect. Every offending file is named at once.
+        Deletions are never blocked, and a commit it cannot inspect is
+        allowed rather than blocked.
+      migration_note: >-
+        No action needed. Enabled by default and inert until the
+        remote-docs tree exists.
+    - key: handlers.pre_tool_use.remote_docs_routing
+      recommended: true
+      dormant: true
+      description: >-
+        NEW blocking PreToolUse handler (priority 37): denies a `WebFetch`
+        of a URL already vendored AND still fresh, naming the local path. A
+        STALE vendored copy is never blocked -- there the fetch is the
+        refresh. Also warns at `Read` time when a vendored document is past
+        its `stale_after` or carries an `unreviewed` licence. The
+        capture nudge for unvendored URLs fires only for domains declared in
+        `documentation.remote.known_sources`.
+      migration_note: >-
+        No action needed. Enabled by default and inert until the tree
+        exists. Declaring no `known_sources` turns capture nudges off
+        without disabling routing to copies you already hold.
+    - key: handlers.session_start.remote_docs_staleness
+      recommended: true
+      dormant: true
+      description: >-
+        NEW advisory SessionStart handler (priority 68): reports vendored
+        documents past their `stale_after`, or whose provenance no longer
+        parses -- an unreadable document is not fresh, it is unknown. The
+        listing is capped with a total so a large corpus cannot crowd out
+        other session-start advice. Advisory only; staleness is a judgement
+        a human may knowingly accept.
+      migration_note: >-
+        No action needed. Silent when the remote-docs tree is absent, so a
+        project that vendors nothing never sees it.
+    - key: handlers.pre_tool_use.project_containment
+      recommended: true
+      dormant: false
+      description: >-
+        NEW deny-by-default PreToolUse handler (Plan 00333, priority 14,
+        terminal), ENABLED BY DEFAULT and active immediately -- unlike every
+        other entry in this manifest, this is not dormant. Every other path
+        rule in the daemon is expressed in repo-relative coordinates; a
+        write target that fails the absolute-to-relative conversion was
+        previously judged by NOTHING at all (`handlers_matched=[]`). This
+        handler now denies the named target of `Write`/`Edit`/`NotebookEdit`,
+        every path a Bash command plainly writes, and destination-bearing
+        Bash constructs that name a path without invoking a content-authoring
+        tool directly (`curl -o`/`--output`, `wget -O`/`--output-document`,
+        an archive-creating `tar`, `mkdir`, `rsync`/`scp` destinations,
+        including nested inside `sh -c`/`bash -c`), whenever the resolved
+        path is outside the repository root. Reads are never blocked. Two
+        options: `allowed_external_paths` (list, default empty) declares
+        specific external targets to permit; `allow_claude_home` (bool,
+        default true) permits Claude Code's own state directory, which is
+        durable under this daemon's own ccy setup, and can be set to `false`
+        in an environment where it is not.
+      migration_note: >-
+        A command that wrote outside the repository root previously
+        succeeded silently and now DENIES -- most commonly a redirect,
+        `mkdir`, or download destined for `/tmp`. This project's own CI
+        needed exactly this migration (its whole acceptance-test corpus
+        moved off `/tmp`). Redirect scratch work to `untracked/scratch/`
+        (created automatically by the daemon) instead of `/tmp`. If a
+        workflow genuinely needs to write outside the repository, add the
+        path to `handlers.pre_tool_use.project_containment.options.allowed_external_paths`,
+        or set `handlers.pre_tool_use.project_containment.enabled: false` to
+        opt out entirely.
+    - key: install.core_docs
+      recommended: false
+      dormant: false
+      description: >-
+        NEW installer/upgrade behaviour (Plan 00334, `install/core_docs.py`),
+        not a config option in itself. Daemon guidance had long instructed
+        agents to read `CLAUDE/PlanWorkflow.md` and `CLAUDE/Worktree.md`
+        client-side, but no install path ever created either file in a fresh
+        client project -- a stock install enforced a workflow against
+        documentation that did not exist. Upgrading (or a fresh install) now
+        deploys three daemon-owned templates to `CLAUDE/core/<Name>.core.md`
+        (`PlanWorkflow`, gated on `plan_workflow.enabled`; `Worktree`,
+        unconditional; `DocumentationStrategy`, gated on
+        `documentation.enabled`) -- replaced wholesale on every deploy, so
+        upstream fixes reach every install, and MUST NOT be hand-edited. The
+        first deploy also seeds a client-owned `CLAUDE/<Name>.md` for each,
+        written ONCE (never overwritten again if it already exists) and
+        opening with a reference to its core document.
+      migration_note: >-
+        No action needed. New files will appear under `CLAUDE/core/` (and,
+        the first time only, `CLAUDE/PlanWorkflow.md` / `CLAUDE/Worktree.md`
+        / `CLAUDE/DocumentationStrategy.md` if not already present) on your
+        next upgrade. Treat anything under `CLAUDE/core/` as read-only --
+        edits there are discarded on the next deploy; put project-specific
+        content in the client-owned `CLAUDE/<Name>.md` instead.
+  renamed: []
+  removed: []
+  changed:
+    - key: layout.vendor_dirs
+      recommended: false
+      dormant: false
+      description: >-
+        Introduced dormant in v3.57.0 ("a growing set of consumers" that, in
+        practice, never included this field) and genuinely inert until this
+        release: every consumer read the raw builtin vendored-directory
+        constant instead of the declared value. Docs QA, plan QA, and the
+        vendored-path-aware content-blocker handlers (Plan 00331, Plan
+        00332) now resolve `vendor_dirs`/`vendor_exceptions` through
+        `Handler.layout_for()`, scoped to the file's OWNING project -- so a
+        monorepo sub-project's own declaration is honoured too, not just the
+        root project's. A `{vendor-dirs}` predicate token is also now usable
+        inside any exclusion-glob list, referencing the resolved vendor set
+        instead of restating directory names.
+      migration_note: >-
+        No action needed if you have never declared `layout.vendor_dirs` --
+        nothing changes for you. If you HAD already declared it (previously
+        a silent no-op), it now actually takes effect: review your docs QA
+        and plan QA output after upgrading, since a previously-inert
+        exclusion may now suppress findings it did not before.
+    - key: documentation.qa.scope_exclude_globs
+      recommended: false
+      dormant: false
+      description: >-
+        Two client-reported bugs fixed: `module_doc_budget` and
+        `rules_file_shape` each enumerate with their own directory walk
+        rather than reading `docs_qa.corpus`, so neither ever consulted this
+        existing key -- a declared exclusion could not silence either
+        check's advisory. Both are now fixed in both their SWEEP and EDIT
+        arms; every other `scope_exclude_globs`-aware check was already
+        correct and is unaffected.
+      migration_note: >-
+        No action needed. If you declared `scope_exclude_globs` to silence a
+        `module_doc_budget` or `rules_file_shape` advisory that never
+        actually stopped firing, it should now be honoured -- recheck your
+        docs QA output.

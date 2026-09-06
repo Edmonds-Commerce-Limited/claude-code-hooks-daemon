@@ -55,7 +55,10 @@ class TestToolUnavailableDetection:
         assert strategy.is_tool_unavailable_output(output) is True
 
     def test_recognises_go_mod_absence_phrasing(self, strategy: GoLintStrategy) -> None:
-        assert strategy.is_tool_unavailable_output("go.mod file not found in current directory") is True
+        assert (
+            strategy.is_tool_unavailable_output("go.mod file not found in current directory")
+            is True
+        )
 
     def test_a_genuine_vet_finding_is_not_classified_as_unavailable(
         self, strategy: GoLintStrategy
@@ -69,7 +72,9 @@ class TestToolUnavailableDetection:
     def test_a_syntax_error_is_not_classified_as_unavailable(
         self, strategy: GoLintStrategy
     ) -> None:
-        assert strategy.is_tool_unavailable_output("./x.go:3:1: syntax error: unexpected EOF") is False
+        assert (
+            strategy.is_tool_unavailable_output("./x.go:3:1: syntax error: unexpected EOF") is False
+        )
 
     def test_empty_output_is_not_classified_as_unavailable(self, strategy: GoLintStrategy) -> None:
         assert strategy.is_tool_unavailable_output("") is False
