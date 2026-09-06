@@ -145,17 +145,52 @@ Triaged: the only authored file in `/tmp` outside tool directories was
 `blacktest/provenance.py`, the pre-`black` copy of a tracked source file. There
 is nothing to preserve, and deletion is the owner's call, not this plan's.
 
+### Decision 6: Claude Code's own state directory is allowed
+
+Owner ruling. It is not scratch, and where it is mapped into the bind mount it
+has the durability this guard protects, so the reason the temp directory is
+refused does not apply. Independent of `markdown_organization`'s block on
+untracked auto-memory: containment asks whether a path is DURABLE, that rule
+asks whether it is REVIEWABLE, and memory fails the second while passing the
+first. Configurable off for an environment that does not map it durably.
+
+### Decision 7: the accessor is not widened as a side-effect
+
+`get_bash_write_targets` resolves `>`, `>>`, `tee`, heredocs and
+`cp`/`mv`/`install`/`dd`, but not `rsync`, `tar`, `curl -o` or `mkdir` (Task
+4.5). Closing those means editing shared infrastructure with a documented
+conservative contract and 22 dependent handlers — a change with its own blast
+radius, not a footnote to this one. The limit is DECLARED in the resident
+guidance instead, because the failure this repo has already paid for is the
+false claim of coverage, not the missing check.
+
 ## Success Criteria
 
-- [ ] A `Write` to `/tmp/anything` is denied, with a message naming the
-  sanctioned location.
-- [ ] `> /tmp/x`, `tee /tmp/x`, a heredoc to `/tmp/x` and `cp f /tmp/` are denied.
-- [ ] A write anywhere inside the repo root is unaffected.
-- [ ] Reading an out-of-root path is unaffected.
-- [ ] `untracked/scratch/` exists and `git check-ignore` confirms it is ignored.
-- [ ] No daemon-emitted guidance string recommends `/tmp` to an agent.
+- [x] A `Write` to `/tmp/anything` is denied, with a message naming the
+  sanctioned location. Verified live against the restarted daemon.
+- [x] `> /tmp/x`, `tee /tmp/x`, a heredoc to `/tmp/x` and `cp`/`mv` targets are
+  denied. `mv` verified live; the rest by test.
+- [x] A write anywhere inside the repo root is unaffected.
+- [x] Reading an out-of-root path is unaffected. Verified live.
+- [x] `untracked/scratch/` exists and `git check-ignore` confirms it is ignored.
+  Created by the daemon at start, verified live.
+- [x] Claude Code's own state directory is writable, and untracked auto-memory
+  is still blocked by its own rule. Verified live.
+- [x] The guard's Bash coverage is stated exhaustively, naming what it does not
+  resolve, so a clean command is not read as evidence of containment.
+- [ ] No daemon-emitted guidance string recommends `/tmp` to an agent
+  (pending Task 4.4 — the acceptance-test corpus).
 - [ ] The full QA gate is green and the daemon restarts cleanly.
 
 ## Delivery & Milestones
 
-- <!-- milestone or delivery commit hash -->
+- `040160e5` — plan filed, after triaging the existing residue rather than
+  assuming its contents.
+- `bfe6e61a` — the guard: both surfaces, 14 enumerated meta-tests, verified
+  live.
+- `71b0371e` — the affordance: scratch created at daemon start, and the daemon
+  stops recommending what it now blocks.
+- `1dccc0c4` — the convention gets a canonical home in `DirectoryRoles.md`.
+- `383ac603` — skill SOURCES (not the gitignored deployed copies) and the debug
+  capture follow the rule too.
+- `89ae6417` — the Bash limit declared rather than implied.
