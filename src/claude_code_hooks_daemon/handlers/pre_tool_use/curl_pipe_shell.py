@@ -176,9 +176,9 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
             "`curl URL | sudo bash`\n\n"
             "**Safe alternative**: download first, inspect, then execute:\n"
             "```\n"
-            "curl -o /tmp/script.sh URL\n"
-            "cat /tmp/script.sh          # inspect\n"
-            "bash /tmp/script.sh         # execute if safe\n"
+            "curl -o untracked/scratch/script.sh URL\n"
+            "cat untracked/scratch/script.sh    # inspect\n"
+            "bash untracked/scratch/script.sh   # execute if safe\n"
             "```"
         )
 

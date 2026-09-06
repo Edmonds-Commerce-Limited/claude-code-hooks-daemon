@@ -93,19 +93,25 @@ class DaemonDocsGuardHandler(PreToolUseHandlerBase):
                 title="Read from hooks-daemon CLAUDE dir warns about wrong path",
                 command=(
                     "Use the Read tool to read the file "
-                    "/tmp/acceptance-test-daemon-docs/.claude/hooks-daemon/CLAUDE/PlanWorkflow.md"
+                    "untracked/scratch/acceptance-test-daemon-docs/.claude/hooks-daemon/"
+                    "CLAUDE/PlanWorkflow.md"
                 ),
                 description="Warns about reading from daemon internal docs (advisory, allows read)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"WRONG CLAUDE", r"hooks-daemon"],
-                safety_notes="Uses /tmp path - safe. Advisory handler allows read but warns.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Advisory handler "
+                    "allows read but warns."
+                ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[
-                    "mkdir -p /tmp/acceptance-test-daemon-docs/.claude/hooks-daemon/CLAUDE",
+                    "mkdir -p untracked/scratch/acceptance-test-daemon-docs/"
+                    ".claude/hooks-daemon/CLAUDE",
                     "echo '# Test PlanWorkflow' > "
-                    "/tmp/acceptance-test-daemon-docs/.claude/hooks-daemon/CLAUDE/PlanWorkflow.md",
+                    "untracked/scratch/acceptance-test-daemon-docs/.claude/hooks-daemon/"
+                    "CLAUDE/PlanWorkflow.md",
                 ],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-daemon-docs"],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-daemon-docs"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

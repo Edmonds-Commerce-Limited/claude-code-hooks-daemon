@@ -134,16 +134,24 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Writing to PLAN.md file",
                 command=(
-                    "Use the Write tool to write to /tmp/acceptance-test-planwf/CLAUDE/Plan/099-test/PLAN.md"
+                    "Use the Write tool to write to "
+                    "untracked/scratch/acceptance-test-planwf/CLAUDE/Plan/099-test/PLAN.md"
                     " with content '# Plan 099: Test Plan\\n\\n**Status**: Not Started'"
                 ),
                 description="Provides plan workflow guidance when writing PLAN.md (advisory)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"[Pp]lan", r"[Ww]orkflow"],
-                safety_notes="Uses /tmp path - safe. Advisory handler allows write and adds guidance.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Advisory handler "
+                    "allows write and adds guidance. No setup mkdir: the Write tool "
+                    "creates the missing parent directories itself, which also avoids "
+                    "plan_number_helper reading a literal `mkdir .../CLAUDE/Plan/099-test` "
+                    "as a hand-rolled plan-folder creation now that the fixture resolves "
+                    "inside the repository."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-planwf/CLAUDE/Plan/099-test"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-planwf"],
+                setup_commands=[],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-planwf"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

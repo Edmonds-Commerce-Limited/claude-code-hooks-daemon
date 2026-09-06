@@ -608,7 +608,9 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         # goal-emission trigger; when it used 00099 the resulting goal named a
         # plan that genuinely exists (00099-python-fingerprint-venv-isolation),
         # so a stale goal read as plausible and cost a long investigation.
-        plan_dir = "/tmp/acceptance-test-recovcron/CLAUDE/Plan/99099-test"  # nosec B108 - acceptance test fixture path, not a runtime temp file
+        # Plan 00333: inside the gitignored scratch directory, not /tmp --
+        # project_containment denies a Bash write named outside the repo root.
+        plan_dir = "untracked/scratch/acceptance-test-recovcron/CLAUDE/Plan/99099-test"
         plan_path = f"{plan_dir}/PLAN.md"
 
         return [
@@ -631,10 +633,17 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                     r"FAILSAFE RECOVERY",
                     r"heartbeat",
                 ],
-                safety_notes="Uses /tmp path - safe.  Advisory handler allows write and adds guidance.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe.  Advisory handler "
+                    "allows write and adds guidance. No setup mkdir: the Write tool "
+                    "creates the missing parent directories itself, which also avoids "
+                    "plan_number_helper treating a literal `mkdir .../CLAUDE/Plan/99099-test` "
+                    "as a hand-rolled plan-folder creation now that the fixture resolves "
+                    "inside the repository."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=[f"mkdir -p {plan_dir}"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-recovcron"],
+                setup_commands=[],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-recovcron"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
@@ -650,16 +659,25 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"CronList", r"create one now"],
-                safety_notes="Uses /tmp path - safe.  Advisory handler allows edit and adds guidance.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe.  Advisory handler "
+                    "allows edit and adds guidance. Setup uses `install -d`, not `mkdir`, "
+                    "to create the fixture directory: the Edit tool requires the file to "
+                    "already exist, so the directory genuinely must be created here (unlike "
+                    "the sibling Write tests) -- and a literal `mkdir .../CLAUDE/Plan/"
+                    "99099-test` would now be caught by plan_number_helper as a hand-rolled "
+                    "plan-folder creation, since that guard's out-of-workspace exemption no "
+                    "longer applies once the fixture is inside the repository."
+                ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[
-                    f"mkdir -p {plan_dir}",
+                    f"install -d {plan_dir}",
                     (
                         f"echo '# Plan 99099\\n\\n**Status**: In Progress"
                         f"\\n\\n- [ ] ⬜ **Task 1.1**: Todo' > {plan_path}"
                     ),
                 ],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-recovcron"],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-recovcron"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
@@ -677,10 +695,17 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"CronDelete"],
-                safety_notes="Uses /tmp path - safe.  Advisory handler allows write and adds guidance.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe.  Advisory handler "
+                    "allows write and adds guidance. No setup mkdir: the Write tool "
+                    "creates the missing parent directories itself, which also avoids "
+                    "plan_number_helper treating a literal `mkdir .../CLAUDE/Plan/99099-test` "
+                    "as a hand-rolled plan-folder creation now that the fixture resolves "
+                    "inside the repository."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=[f"mkdir -p {plan_dir}"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-recovcron"],
+                setup_commands=[],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-recovcron"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

@@ -403,7 +403,8 @@ is not evidence that a `.ts` file is clean."""
             AcceptanceTest(
                 title="ESLint validation on TypeScript file write",
                 command=(
-                    "Use the Write tool to create file /tmp/acceptance-test-eslint/test.ts "
+                    "Use the Write tool to create file "
+                    "untracked/scratch/acceptance-test-eslint/test.ts "
                     'with content "const x = 1;"'
                 ),
                 description=(
@@ -413,10 +414,13 @@ is not evidence that a `.ts` file is clean."""
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"ESLint", r"test\.ts"],
-                safety_notes="Creates temporary TypeScript file in /tmp for validation testing",
+                safety_notes=(
+                    "Creates a temporary TypeScript file inside the gitignored "
+                    "scratch directory for validation testing"
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-eslint"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-eslint"],
+                setup_commands=["mkdir -p untracked/scratch/acceptance-test-eslint"],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-eslint"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
@@ -428,8 +432,8 @@ is not evidence that a `.ts` file is clean."""
                 # because it exercises the Write TOOL, which no shell command
                 # can express.
                 command=(
-                    "mkdir -p /tmp/acceptance-test-eslint-bash && "
-                    "cat > /tmp/acceptance-test-eslint-bash/broken.ts <<'EOF'\n"
+                    "mkdir -p untracked/scratch/acceptance-test-eslint-bash && "
+                    "cat > untracked/scratch/acceptance-test-eslint-bash/broken.ts <<'EOF'\n"
                     "const x: number = ;\n"
                     "EOF"
                 ),
@@ -445,10 +449,13 @@ is not evidence that a `.ts` file is clean."""
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"broken\.ts"],
-                safety_notes="Writes a temporary TypeScript file under /tmp; removed by cleanup",
+                safety_notes=(
+                    "Writes a temporary TypeScript file inside the gitignored scratch "
+                    "directory; removed by cleanup"
+                ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p /tmp/acceptance-test-eslint-bash"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-eslint-bash"],
+                setup_commands=["mkdir -p untracked/scratch/acceptance-test-eslint-bash"],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-eslint-bash"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

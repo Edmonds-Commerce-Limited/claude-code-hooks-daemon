@@ -230,7 +230,11 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="Write to package-lock.json",
-                command="Use the Write tool to write to /tmp/acceptance-test-locks/package-lock.json with content '{}'",
+                command=(
+                    "Use the Write tool to write to "
+                    "untracked/scratch/acceptance-test-locks/package-lock.json "
+                    "with content '{}'"
+                ),
                 description="Blocks direct editing of package-lock.json (corruption risk)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -238,16 +242,22 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
                     r"lock file",
                     r"npm install",
                 ],
-                safety_notes="Uses /tmp path - safe. Handler blocks Write before file is created.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Write before file is created."
+                ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p /tmp/acceptance-test-locks"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-locks"],
+                setup_commands=["mkdir -p untracked/scratch/acceptance-test-locks"],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-locks"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="Edit Cargo.lock",
-                command="Use the Edit tool on /tmp/acceptance-test-locks/Cargo.lock with old_string 'old' and new_string 'new'",
+                command=(
+                    "Use the Edit tool on untracked/scratch/acceptance-test-locks/Cargo.lock "
+                    "with old_string 'old' and new_string 'new'"
+                ),
                 description="Blocks direct editing of Cargo.lock",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -255,13 +265,16 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
                     r"lock file",
                     r"cargo update",
                 ],
-                safety_notes="Uses /tmp path - safe. Handler blocks Edit before file is modified.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Edit before file is modified."
+                ),
                 test_type=TestType.BLOCKING,
                 setup_commands=[
-                    "mkdir -p /tmp/acceptance-test-locks",
-                    "echo 'old content' > /tmp/acceptance-test-locks/Cargo.lock",
+                    "mkdir -p untracked/scratch/acceptance-test-locks",
+                    "echo 'old content' > untracked/scratch/acceptance-test-locks/Cargo.lock",
                 ],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-locks"],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-locks"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

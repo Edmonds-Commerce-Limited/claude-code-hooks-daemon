@@ -223,16 +223,20 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Block time estimates in plan",
                 command=(
-                    "Use the Write tool to write to /tmp/acceptance-test-plantime/Plan/001-test/PLAN.md"
+                    "Use the Write tool to write to "
+                    "untracked/scratch/acceptance-test-plantime/Plan/001-test/PLAN.md"
                     " with content '# Plan 001\\n\\n**Estimated Effort**: 4 hours\\n\\nTask list here.'"
                 ),
                 description="Blocks time estimates in plan documents (plans focus on WHAT not WHEN)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"time estimate", r"BLOCKED"],
-                safety_notes="Uses /tmp path - safe. Handler blocks Write before file is created.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Write before file is created."
+                ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p /tmp/acceptance-test-plantime/Plan/001-test"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-plantime"],
+                setup_commands=["mkdir -p untracked/scratch/acceptance-test-plantime/Plan/001-test"],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-plantime"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

@@ -763,10 +763,11 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
     def _temp_file_block(self, source_segment: str) -> str:
         """Shell snippet: redirect to a capture file and report the exit code.
 
-        The target is IN-REPO. It used to be ``/tmp/output_$$.txt``, which
-        ``project_containment`` (Plan 00333) now denies — so the daemon would
-        have been advising, in the one message an agent reads while already
-        blocked, exactly what the next handler blocks.
+        The target is IN-REPO because ``project_containment`` denies a redirect
+        to a path outside the repository. An out-of-repo suggestion here would
+        be the daemon advising, in the one message an agent reads while already
+        blocked and looking for a way forward, exactly what the next handler
+        blocks.
         """
         source = source_segment or "command"
         return (
@@ -820,7 +821,8 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         source = source_segment or "command"
         if helper is None:
             return (
-                f'Redirect to a temp file: TEMP_FILE="/tmp/output_$$.txt"; '
+                f"Redirect to a capture file: mkdir -p {ProjectPath.SCRATCH_DIR}; "
+                f'TEMP_FILE="{ProjectPath.SCRATCH_DIR}/output_$$.txt"; '
                 f'{source} > "$TEMP_FILE" 2>&1\n'
             )
         return (
@@ -1065,7 +1067,10 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             "# Use --head N for the first N lines. pipefail keeps pytest's exit code visible.\n"
             "```\n\n"
             "**Always-works alternative** (no helper, no pipe): "
-            "`pytest tests/ > /tmp/out.txt 2>&1` then read the file selectively.\n\n"
+            f"`pytest tests/ > {ProjectPath.SCRATCH_DIR}/out.txt 2>&1` then read the "
+            "file selectively. Keep the capture IN-REPO — `project_containment` "
+            "denies a redirect to a path outside the repository, and a capture "
+            "written outside it is gone on the next container restart.\n\n"
             "**Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, "
             "`git log`, `git tag`, `git branch`, and other cheap filtering commands.\n\n"
             "**EVERY pipe in the command is judged, on its own producer.** A cheap "
@@ -1328,7 +1333,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="unquoted heredoc prose gets a short reason, no fabricated remediation",
                 command=(
-                    "false && cat >> /tmp/never-created-$$.md <<EOF\n"
+                    "false && cat >> untracked/scratch/never-created-$$.md <<EOF\n"
                     "the guardrail described above blocks piping straight to a pager e.g. output | tail -20\n"
                     "EOF"
                 ),

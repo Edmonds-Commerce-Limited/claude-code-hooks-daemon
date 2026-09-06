@@ -426,8 +426,8 @@ class CommentSizeHandler(PreToolUseHandlerBase):
                 title="comment_size: over-long trailing comment on a new file is blocked",
                 command=(
                     "Use the Write tool to create "
-                    "/tmp/acceptance-test-comment-size/example.py whose content has "
-                    "a trailing '#' comment on one line longer than 400 characters"
+                    "untracked/scratch/acceptance-test-comment-size/example.py whose "
+                    "content has a trailing '#' comment on one line longer than 400 characters"
                 ),
                 description=(
                     "Blocks creation of a file whose comment already exceeds the "
@@ -440,10 +440,13 @@ class CommentSizeHandler(PreToolUseHandlerBase):
                     "BLOCKED",
                     "MUST_EXCEED_COMMENT_SIZE_BECAUSE",
                 ],
-                safety_notes="Uses /tmp path - safe. Handler blocks Write before file is created.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Write before file is created."
+                ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p /tmp/acceptance-test-comment-size"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-comment-size"],
+                setup_commands=["mkdir -p untracked/scratch/acceptance-test-comment-size"],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-comment-size"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
@@ -451,9 +454,9 @@ class CommentSizeHandler(PreToolUseHandlerBase):
                 title="comment_size: a normal, reasonably-sized comment is allowed",
                 command=(
                     "Use the Write tool to create "
-                    "/tmp/acceptance-test-comment-size-ok/example.py whose content has "
-                    "an ordinary short '#' comment (well under 400 chars, well under "
-                    "40 lines) explaining a single function"
+                    "untracked/scratch/acceptance-test-comment-size-ok/example.py whose "
+                    "content has an ordinary short '#' comment (well under 400 chars, "
+                    "well under 40 lines) explaining a single function"
                 ),
                 description=(
                     "Near-miss ALLOW case: an ordinary explanatory comment is never "
@@ -461,10 +464,13 @@ class CommentSizeHandler(PreToolUseHandlerBase):
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses /tmp path - safe. Verify the file is created, not blocked.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Verify the file "
+                    "is created, not blocked."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-comment-size-ok"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-comment-size-ok"],
+                setup_commands=["mkdir -p untracked/scratch/acceptance-test-comment-size-ok"],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-comment-size-ok"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

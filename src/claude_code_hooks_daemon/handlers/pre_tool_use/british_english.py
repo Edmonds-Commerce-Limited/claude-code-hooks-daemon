@@ -210,16 +210,20 @@ class BritishEnglishHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="American spellings in markdown",
                 command=(
-                    "Use the Write tool to write to /tmp/acceptance-test-british/docs/style-guide.md"
+                    "Use the Write tool to write to "
+                    "untracked/scratch/acceptance-test-british/docs/style-guide.md"
                     " with content 'The color of the organization logo should favor readability.'"
                 ),
                 description="Advises British spellings but allows operation (advisory)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"colour", r"British"],
-                safety_notes="Uses /tmp path - safe. Advisory handler allows write but warns.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Advisory handler "
+                    "allows write but warns."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-british/docs"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-british"],
+                setup_commands=["mkdir -p untracked/scratch/acceptance-test-british/docs"],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-british"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

@@ -461,8 +461,8 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
                 title="comment_changelog: plan-number-keyed rationale is allowed",
                 command=(
                     "Use the Write tool to create "
-                    "/tmp/acceptance-test-comment-changelog-rationale/example.py "
-                    "whose content has a '#' comment reading "
+                    "untracked/scratch/acceptance-test-comment-changelog-rationale/"
+                    "example.py whose content has a '#' comment reading "
                     "'History (Plan 00047 -- do NOT re-add DISABLE_MOUSE without "
                     "reading this): fullscreen draws on the terminal alt-screen...'"
                 ),
@@ -473,10 +473,17 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses /tmp path - safe. Verify the file is created, not blocked.",
+                safety_notes=(
+                    "Inside the gitignored scratch directory - safe. Verify the file "
+                    "is created, not blocked."
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-comment-changelog-rationale"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-comment-changelog-rationale"],
+                setup_commands=[
+                    "mkdir -p untracked/scratch/acceptance-test-comment-changelog-rationale"
+                ],
+                cleanup_commands=[
+                    "rm -rf untracked/scratch/acceptance-test-comment-changelog-rationale"
+                ],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             )

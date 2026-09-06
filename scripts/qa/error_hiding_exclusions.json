@@ -273,6 +273,12 @@
       "reason": "Plan 00158 dogfooding payload capture: log-and-continue on OSError (untracked dir unwritable) / RuntimeError (ProjectContext not initialised in non-daemon callers). Capture is an opt-in debug aid and must NEVER break hook dispatch, which carries safety-critical handlers. Logged at warning level, never silently swallowed. Same sanctioned fail-open contract as context_sidecar._write_sidecar and compaction_signal._write_signal."
     },
     {
+      "file": "daemon/server.py",
+      "function": "_ensure_scratch_dir_best_effort",
+      "rule": "log-and-continue",
+      "reason": "Plan 00333 scratch bootstrap: log-and-continue on OSError (project root unwritable) / RuntimeError (ProjectContext not initialised), the exact sibling contract to _capture_payload_best_effort three entries above. project_containment denies out-of-root writes and points at untracked/scratch/, so the daemon creates it at start; but refusing to START over a missing scratch directory would trade a small inconvenience for the loss of every safety-critical handler, which is strictly the worse failure. Logged at warning level, never silently swallowed, and re-attempted on every restart."
+    },
+    {
       "file": "daemon/validation.py",
       "function": "load_config_safe",
       "rule": "return-none-on-error",

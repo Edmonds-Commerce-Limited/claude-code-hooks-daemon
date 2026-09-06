@@ -697,11 +697,10 @@ warning, never crashes the handler."""
         """
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
-        # nosec B108 - acceptance test fixture path a human runs in a shell, not a
-        # runtime temp file. B108 guards sockets/PID files/logs, which CLAUDE.md
-        # routes to the daemon's untracked dir; the same convention is used at
-        # recovery_cron_advisor.py for an identical fixture path.
-        directory = "/tmp/acceptance-test-lint-bash"  # nosec B108
+        # Plan 00333: inside the gitignored scratch directory, not /tmp --
+        # project_containment denies a Bash write named outside the repo root,
+        # and this fixture is authored via a heredoc redirect.
+        directory = "untracked/scratch/acceptance-test-lint-bash"
         return [
             AcceptanceTest(
                 title="Bash heredoc authoring invalid Python is DENIED",
@@ -715,7 +714,10 @@ warning, never crashes the handler."""
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"authored\.py"],
-                safety_notes="Writes a temporary Python file under /tmp; removed by cleanup",
+                safety_notes=(
+                    "Writes a temporary Python file inside the gitignored scratch "
+                    "directory; removed by cleanup"
+                ),
                 test_type=TestType.BLOCKING,
                 setup_commands=[f"mkdir -p {directory}"],
                 cleanup_commands=[f"rm -rf {directory}"],
@@ -735,7 +737,10 @@ warning, never crashes the handler."""
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Copies a temporary file under /tmp; removed by cleanup",
+                safety_notes=(
+                    "Copies a temporary file inside the gitignored scratch directory; "
+                    "removed by cleanup"
+                ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[
                     f"mkdir -p {directory}",

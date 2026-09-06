@@ -10,6 +10,7 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
+from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
@@ -153,7 +154,8 @@ class PipBreakSystemHandler(PreToolUseHandlerBase):
             "modern Linux distros.\n\n"
             "**Use a virtualenv or `--user` install instead**:\n\n"
             "```\n"
-            "python3 -m venv /tmp/venv && /tmp/venv/bin/pip install <package>\n"
+            f"python3 -m venv {ProjectPath.SCRATCH_DIR}/venv && "
+            f"{ProjectPath.SCRATCH_DIR}/venv/bin/pip install <package>\n"
             "# or\n"
             "pip install --user <package>\n"
             "```\n\n"

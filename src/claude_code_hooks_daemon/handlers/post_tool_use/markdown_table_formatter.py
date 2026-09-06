@@ -325,7 +325,8 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
             AcceptanceTest(
                 title="Markdown table auto-alignment after Write",
                 command=(
-                    "Use the Write tool to create /tmp/acceptance-test-mdformat/doc.md "
+                    "Use the Write tool to create "
+                    "untracked/scratch/acceptance-test-mdformat/doc.md "
                     "with content:\n"
                     "# Test\n\n"
                     "| Name | Value |\n"
@@ -340,10 +341,13 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"Reformatted markdown in doc\.md.*table pipes"],
-                safety_notes="Creates temporary markdown file in /tmp for formatting test",
+                safety_notes=(
+                    "Creates a temporary markdown file inside the gitignored scratch "
+                    "directory for formatting test"
+                ),
                 test_type=TestType.ADVISORY,
-                setup_commands=["mkdir -p /tmp/acceptance-test-mdformat"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-mdformat"],
+                setup_commands=["mkdir -p untracked/scratch/acceptance-test-mdformat"],
+                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-mdformat"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
             ),

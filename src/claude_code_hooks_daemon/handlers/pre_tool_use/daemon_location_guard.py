@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
@@ -110,13 +111,14 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
             f"  {daemon_cli_command('logs')}\n\n"
             "📦 CORRECT UPGRADE PROCESS:\n\n"
             "  # Download latest upgrade script\n"
-            "  curl -fsSL https://raw.githubusercontent.com/anthropics/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh\n\n"
+            "  curl -fsSL https://raw.githubusercontent.com/anthropics/claude-code-hooks-daemon/main/scripts/upgrade.sh"
+            f" -o {ProjectPath.SCRATCH_DIR}/upgrade.sh\n\n"
             "  # Review it\n"
-            "  less /tmp/upgrade.sh\n\n"
+            f"  less {ProjectPath.SCRATCH_DIR}/upgrade.sh\n\n"
             "  # Run it (script handles all git operations)\n"
-            "  bash /tmp/upgrade.sh --project-root /workspace\n\n"
+            f"  bash {ProjectPath.SCRATCH_DIR}/upgrade.sh --project-root /workspace\n\n"
             "  # Clean up\n"
-            "  rm /tmp/upgrade.sh\n\n"
+            f"  rm {ProjectPath.SCRATCH_DIR}/upgrade.sh\n\n"
             "💡 The upgrade script handles all git operations internally.\n"
             "   You never need to cd into .claude/hooks-daemon for upgrades.\n\n"
             "⚠️  Manual upgrade (last resort only):\n"
