@@ -1,5 +1,12 @@
 {
   "plansDirectory": "./CLAUDE/Plan",
+  "permissions": {
+    "deny": [
+      "Edit(//tmp/**)",
+      "Edit(//var/tmp/**)",
+      "Edit(//dev/shm/**)"
+    ]
+  },
   "statusLine": {
     "type": "command",
     "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/status-line",
