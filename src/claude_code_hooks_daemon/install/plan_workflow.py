@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.install.agent_assets import (
     spec_by_name,
     spec_source_path,
 )
+from claude_code_hooks_daemon.install.core_docs import deploy_core_docs
 
 logger = logging.getLogger(__name__)
 
@@ -308,7 +309,27 @@ def bootstrap_plan_workflow(
     # ROOT, not the plan dir — Claude Code resolves agents at .claude/agents/.
     _deploy_dedupe_agent(project_root, result)
 
+    # Deploy the core documents the workflow's own guidance names (Plan 00334).
+    # Turning the plan workflow ON is what makes `workflow_docs` point at
+    # CLAUDE/PlanWorkflow.md and makes the handler tell the agent to read it, so
+    # this is the moment that document has to start existing: a client was
+    # found enforcing a workflow whose documentation was never created.
+    # Relative to the PROJECT ROOT, like the agent above — a core document is
+    # not a plan-directory asset.
+    _deploy_core_docs(project_root, result)
+
     return result
+
+
+def _deploy_core_docs(project_root: Path, result: BootstrapResult) -> None:
+    """Refresh daemon-owned core docs and seed the client-owned overrides.
+
+    Delegates to ``install/core_docs.py``, which owns the DAEMON-owned versus
+    CLIENT-owned split. Kept as a thin adapter so the messages join this
+    bootstrap's own reporting rather than being returned separately.
+    """
+    core_result = deploy_core_docs(project_root)
+    result.messages.extend(core_result.messages)
 
 
 def _deploy_dedupe_agent(project_root: Path, result: BootstrapResult) -> None:

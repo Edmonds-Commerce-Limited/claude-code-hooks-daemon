@@ -34,7 +34,20 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.plan_workflow import PlanWor
 from claude_code_hooks_daemon.install.plan_workflow import plan_journalling_doc_path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_INTERNAL_PLAN_WORKFLOW_DOC = _REPO_ROOT / "CLAUDE" / "PlanWorkflow.md"
+
+# The plan-workflow guidance this project runs on. Plan 00334 moved the
+# generic body out of ``CLAUDE/PlanWorkflow.md`` and into a DAEMON-owned core
+# document that is shipped to every client and deployed back into this repo,
+# leaving ``CLAUDE/PlanWorkflow.md`` holding only what is specific to us.
+#
+# So this constant points at the core, and the change is the point rather than
+# a repoint. This module's own docstring records that the concepts had lived
+# in our internal document and never reached the client-facing guidance; the
+# core document IS both now, so for anything living in it that drift is not
+# guarded against, it is impossible. The parity checks below still matter
+# because ``PlanJournalling.md`` and the injected CLAUDE.md section remain
+# SEPARATE surfaces that must keep up.
+_INTERNAL_PLAN_WORKFLOW_DOC = _REPO_ROOT / "CLAUDE" / "core" / "PlanWorkflow.core.md"
 
 # Structural concepts this project's OWN plan folders use (per
 # CLAUDE/PlanWorkflow.md's directory-layout example). ALL of them must

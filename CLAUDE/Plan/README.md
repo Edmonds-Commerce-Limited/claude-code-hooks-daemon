@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00334: core doc templates for client projects](00334-core-doc-templates-for-client-projects/PLAN.md) - In Progress (daemon guidance names client documents no install path creates, so a client enforces a workflow whose documentation does not exist)
+
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
 
 - [00329: post upgrade truth changes report bloat](00329-post-upgrade-truth-changes-report-bloat/PLAN.md) - Not Started (the upgrade flow's truth-changes reconciliation hands the agent up to 89KB / 74 entries with no bound and no supersession collapsing, so superseded truths are replayed and the step is skimmed rather than performed)
