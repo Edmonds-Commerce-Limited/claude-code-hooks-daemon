@@ -279,8 +279,8 @@ _IMPORT_MODULE_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
-def _import_module_tokens(command: str) -> set[str]:
-    """Dotted module paths named by Python ``import``/``from`` statements.
+def _without_import_module_paths(command: str) -> str:
+    """``command`` with the dotted module path of each import statement removed.
 
     A module path is not a filesystem path, and importing a module cannot
     read a file -- so a module whose dotted name happens to contain a
@@ -291,17 +291,30 @@ def _import_module_tokens(command: str) -> set[str]:
     with a ``.secret``-containing module path hits the same wall and cannot
     be expected to enumerate its files.
 
-    Scoped to import STATEMENTS rather than to dotted tokens generally,
-    because this module's stated trade-off is that over-blocking is cheap and
-    under-blocking is not. A path can never be spelled as a module: the
-    grammar has no ``/``, so this cannot turn into a false negative.
+    The exemption is POSITIONAL: it deletes the span the import statement
+    occupies, so the token vanishes only where it was imported. Keying it on
+    the token's STRING instead would exempt every later occurrence too, and
+    a line of ``import <name>`` prepended to any command would delete that
+    name from the matcher's view -- an escape hatch in a guard whose deny
+    text states it has none, gating four DENY/suppress surfaces including
+    payload capture. ``import`` is not a shell builtin, so such a line fails
+    harmlessly while the real command after it runs.
+
+    A slash path still cannot be spelled as a module (the grammar admits no
+    ``/``), so a genuine path is untouched by this either way.
 
     Applied only by :func:`find_protected_mention`, not the ``_strict``
     variant: strict serves the quarantine-artefact globs, whose hyphenated
     markers cannot collide with a Python module name in the first place, so
     changing it would be a fix for a problem it does not have.
     """
-    return set(_IMPORT_MODULE_RE.findall(command))
+
+    def _drop_module_path(match: re.Match[str]) -> str:
+        # Keep the `import `/`from ` lead-in, drop only the module path, so
+        # `from a.b import X` still contributes its `X` token.
+        return match.group(0)[: match.start(1) - match.start(0)]
+
+    return _IMPORT_MODULE_RE.sub(_drop_module_path, command)
 
 
 def _normalised_token_forms(token: str) -> list[str]:
@@ -567,10 +580,7 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
         return None
     project_root = resolve_project_root()
     stem_pairs = _pattern_literal_stems(patterns)
-    import_modules = _import_module_tokens(command)
-    for token in _tokenise(command):
-        if token in import_modules:
-            continue
+    for token in _tokenise(_without_import_module_paths(command)):
         for form in _normalised_token_forms(token):
             for pattern in patterns:
                 if path_matches_globs(form, (pattern,), project_root=project_root):

@@ -435,6 +435,53 @@ class TestPythonImportStatements:
         assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
 
 
+class TestTheImportExemptionCannotLaunderAMention:
+    """A fake import must not blind the matcher to the SAME token elsewhere.
+
+    The exemption has to be positional, not a string-identity amnesty. Keyed on
+    identity, prefixing any command with ``import <token>`` deletes that token
+    from consideration everywhere in the text — an escape hatch in a guard
+    whose own deny text states there is none, and one that gates four DENY /
+    suppress surfaces including payload capture.
+
+    The original tests missed this because they demonstrated the exemption with
+    a SLASH path, which the module grammar genuinely cannot spell. A protected
+    file named without a directory — which the shipped ``*.secret*`` default
+    matches — is spellable as a module, and that is the whole hole.
+    """
+
+    PROTECTED = ("*.secret*",)
+
+    def test_a_fake_import_line_does_not_hide_a_later_read(self) -> None:
+        command = "import mykeys.secret\ncat mykeys.secret"
+        assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
+
+    def test_a_fake_from_line_does_not_hide_a_later_read(self) -> None:
+        command = "from mykeys.secret import x\ncat mykeys.secret"
+        assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
+
+    def test_a_semicolon_import_on_one_line_does_not_hide_the_read(self) -> None:
+        """`import` is not a shell builtin, so the laundering statement fails
+        harmlessly and the real command after the `;` still runs."""
+        command = "import mykeys.secret; cat mykeys.secret"
+        assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
+
+    def test_leading_whitespace_does_not_enable_the_laundering(self) -> None:
+        command = "  import mykeys.secret\ncat mykeys.secret"
+        assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
+
+    def test_the_legitimate_import_only_case_is_still_exempt(self) -> None:
+        """The fix must not re-break what the exemption exists for: an import
+        of a module whose dotted name merely contains the stem, with no other
+        occurrence of that token, is still not a mention."""
+        command = "import claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard"
+        assert sfm.find_protected_mention(command, self.PROTECTED) is None
+
+    def test_a_multiline_module_with_a_separate_legitimate_body_is_exempt(self) -> None:
+        command = "from a.b.secret_file_guard import X\nresult = X().handle(event)\n"
+        assert sfm.find_protected_mention(command, self.PROTECTED) is None
+
+
 class TestExemptions:
     PATTERNS = sfm.DEFAULT_PROTECTED_PATTERNS
 

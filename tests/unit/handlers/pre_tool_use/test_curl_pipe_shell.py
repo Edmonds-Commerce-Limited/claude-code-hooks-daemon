@@ -663,3 +663,35 @@ class TestQuotedHeredocBodyIsData:
         assert (
             handler.matches({"tool_name": "Bash", "tool_input": {"command": self._PIPED}}) is True
         )
+
+    # The exemption's stated invariant is "when the body is EXECUTED, scan
+    # raw". Membership of _PIPED_INTERPRETERS is a proxy for that, and these
+    # three receivers execute the body without being in the list -- so the
+    # body was blanked and this priority-10 terminal RCE guard saw nothing.
+    # All three were denied at v3.61.0, so each is a REGRESSION rather than a
+    # pre-existing gap. Found by the release code-review gate.
+
+    def test_eval_of_a_command_substituted_quoted_heredoc_is_blocked(self, handler):
+        """`eval "$(cat <<'EOF' ... EOF)"` runs the body as shell source."""
+        command = f"eval \"$(cat <<'EOF'\n{self._PIPED}\nEOF\n)\""
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
+
+    def test_dot_sourcing_dev_stdin_is_blocked(self, handler):
+        """`. /dev/stdin <<'EOF'` sources the body into the CURRENT shell."""
+        command = f". /dev/stdin <<'EOF'\n{self._PIPED}\nEOF"
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
+
+    def test_source_builtin_on_dev_stdin_is_blocked(self, handler):
+        """`source` is `.` spelled long; same execution, same verdict."""
+        command = f"source /dev/stdin <<'EOF'\n{self._PIPED}\nEOF"
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
+
+    def test_a_documentation_heredoc_is_still_allowed_after_the_widening(self, handler):
+        """The widening must not swallow the false positive the exemption
+        exists to kill: an ordinary writer receiver is still data."""
+        command = f"cat > untracked/scratch/n.md <<'EOF'\nnever run {self._PIPED}\nEOF"
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is False
+
+    def test_a_git_commit_heredoc_is_still_allowed_after_the_widening(self, handler):
+        command = f"git commit -F - <<'MSG'\ndo not {self._PIPED}\nMSG"
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is False

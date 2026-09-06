@@ -6,7 +6,7 @@ a common vector for malware and system compromise.
 """
 
 import re
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
@@ -45,6 +45,20 @@ _CURL_PIPE_SHELL_VERBOSE_CONTENT = (
 # Interpreters that execute piped content as code. Piping network content to any of
 # these is a remote-code-execution risk and must be blocked.
 _PIPED_INTERPRETERS = ("bash", "sh", "zsh", "ksh", "dash", "python", "perl", "ruby")
+
+# Receivers that EXECUTE a quoted heredoc body without being named in
+# _PIPED_INTERPRETERS. Consulted ONLY when deciding whether to withhold the
+# heredoc exemption -- they must never join _PIPED_INTERPRETERS, which builds
+# the pipe pattern itself (`| eval` is not the shape being matched there).
+#
+# `-` is deliberately ABSENT. The exemption exists to stop `git commit -F -`
+# being denied for a message that merely DESCRIBES the anti-pattern, and `-`
+# is that command's own argument -- treating it as an executor would re-break
+# the exact false positive this machinery was built to kill.
+#
+# Matched by EQUALITY, not prefix: `.` as a prefix would swallow every
+# receiver beginning with a dot, such as an ordinary `.md` output path.
+_HEREDOC_EXECUTORS: Final[tuple[str, ...]] = ("eval", "source", ".", "stdin", "/dev/stdin")
 
 # Pattern: (curl|wget) ... | [sudo [flags]] [path/]<interpreter>
 # - OPTIONAL_SUDO allows arbitrary sudo flags before the interpreter
@@ -153,6 +167,14 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
         Withholding the exemption is deliberately the cheap error: the cost is
         a mention being denied, and the alternative cost is remote code
         execution.
+
+        "Receiver is an interpreter" is only a PROXY for "the body is
+        executed", and the two came apart: ``eval "$(cat <<'EOF')"``,
+        ``. /dev/stdin`` and ``source /dev/stdin`` all run the body while
+        naming no interpreter, so the body was blanked and this handler saw
+        nothing. Those receivers are checked separately via
+        ``_HEREDOC_EXECUTORS`` rather than being added to
+        ``_PIPED_INTERPRETERS``, which drives the pipe pattern itself.
         """
         receivers = quoted_heredoc_receivers(command)
         if any(
@@ -160,6 +182,8 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
             for receiver in receivers
             for interpreter in _PIPED_INTERPRETERS
         ):
+            return command
+        if any(receiver in _HEREDOC_EXECUTORS for receiver in receivers):
             return command
         return strip_quoted_heredoc_bodies(command)
 
