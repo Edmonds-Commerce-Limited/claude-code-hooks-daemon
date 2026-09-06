@@ -125,7 +125,7 @@ pytest tests/ 2>&1 | /…/scripts/echd-capture 20
 # Use --head N for the first N lines. pipefail keeps pytest's exit code visible.
 ```
 
-**Always-works alternative** (no helper, no pipe): `pytest tests/ > /tmp/out.txt 2>&1` then read the file selectively.
+**Always-works alternative** (no helper, no pipe): `pytest tests/ > untracked/scratch/out.txt 2>&1` then read the file selectively. Keep the capture IN-REPO — `project_containment` denies a redirect to a path outside the repository, and a capture written outside it is gone on the next container restart.
 
 **Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, `git log`, `git tag`, `git branch`, and other cheap filtering commands.
 
