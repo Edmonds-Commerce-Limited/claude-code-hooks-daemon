@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00290: rust socket relay forwarder](00290-rust-socket-relay-forwarder/PLAN.md) - Complete at `54422e79` + the archiving commit (opt-in `daemon.transport` relay: per-event Unix sockets + std-only static Rust relay, measured 4.344 ms p50 vs 34.1 ms baseline; stop/subagent-stop excluded to keep the exit-2 contract; dogfooded live in this repo)
+
 - [00289: docs gold standard zero findings](00289-docs-gold-standard-zero-findings/PLAN.md) - Complete at `671b6eb7` + `01312f29` + the archiving commit (whole-repo `docs-qa --sweep` driven from 34 advisories to zero: two checker bug fixes, a new `scope_exclude_globs` corpus exclusion, a live-template link fix, root `CLAUDE.md` `@`-import conversion, module-doc thinning/promotion, and the `release-agent.md` duplicate)
 
 - [00288: project-layout config SSoT](00288-project-layout-config-ssot/PLAN.md) - Complete at `3aa68a72`…`e8dea14b` + the archiving commit (top-level `layout:` block and `ProjectLayout` facade as the single access API for directory truths)

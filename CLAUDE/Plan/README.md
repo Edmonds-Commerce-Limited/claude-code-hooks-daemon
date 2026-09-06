@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00333: no writes outside project root](00333-no-writes-outside-project-root/PLAN.md) - In Progress (every path guard works in repo-relative coordinates and the conversion failure means "allow", so `/workspace/notes.md` is denied while `/tmp/notes.md` is silently permitted; adds a dedicated containment guard over both the Write/Edit and Bash surfaces, plus `untracked/scratch/` as the sanctioned location)
-
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
 
 - [00329: post upgrade truth changes report bloat](00329-post-upgrade-truth-changes-report-bloat/PLAN.md) - Not Started (the upgrade flow's truth-changes reconciliation hands the agent up to 89KB / 74 entries with no bound and no supersession collapsing, so superseded truths are replayed and the step is skimmed rather than performed)
@@ -182,6 +180,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00333: no writes outside project root](Completed/00333-no-writes-outside-project-root/PLAN.md) - Complete at `bfe6e61a`…`75572df4` + the archiving commit (every path guard treated a failed absolute-to-relative conversion as allow, so `/tmp/notes.md` was silently permitted while `/workspace/notes.md` was denied; adds a deny-by-default containment guard over the Write/Edit and Bash surfaces, `untracked/scratch/` as the sanctioned location, and migrates the acceptance-test corpus off `/tmp`)
+
 - [00332: docs qa vendor truth per project](Completed/00332-docs-qa-vendor-truth-per-project/PLAN.md) - Complete at `116207c7` + the archiving commit (a monorepo sub-project's `layout.vendor_dirs` never reached docs QA, which was handed one flat set from the ROOT block; the vendored-path predicate is now resolved per-path against the owning project, longest root winning)
 
 - [00331: vendor dirs config is inert](Completed/00331-vendor-dirs-config-is-inert/PLAN.md) - Complete at `6b4fa867`…`ba7269d5` + the archiving commit (`layout.vendor_dirs` was a facade with zero production consumers, so declaring one did nothing; every reader now routes through it, resolved from the file's owning project)
@@ -238,8 +238,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00294: relay transport safe toggle and reenable](Completed/00294-relay-transport-safe-toggle-and-reenable/PLAN.md) - Complete at `17f9446e` + the archiving commit (one-command verified auto-reverting `transport on|off|status`; relay dogfood re-enabled here via the toggle; canary run 5 proved client parity incl. client-side relay build)
 
-- [00290: rust socket relay forwarder](Completed/00290-rust-socket-relay-forwarder/PLAN.md) - Complete at `54422e79` + the archiving commit (opt-in `daemon.transport` relay: per-event Unix sockets + std-only static Rust relay, measured 4.344 ms p50 vs 34.1 ms baseline; stop/subagent-stop excluded to keep the exit-2 contract; dogfooded live in this repo)
-
 - [00292: codex cli dual host research](Completed/00292-codex-cli-dual-host-research/PLAN.md) - Complete (research-only, 9-agent Sonnet workflow: Codex CLI hooks are verdict-based but cover only shell/apply_patch/MCP calls today; 6 of our 31 wired events have any counterpart; recommendation in FINDINGS.md — host-adapter + verdict degradation, deferred until Codex Edit/Write hook coverage lands)
 
 ## Blocked / On Hold Plans
@@ -281,15 +279,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 332 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 271 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 272 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 44 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 43 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 44 + 271 + 7 = **322 folders**, spanning
+- **Folder-to-number reconciliation**: 43 + 272 + 7 = **322 folders**, spanning
   **319 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

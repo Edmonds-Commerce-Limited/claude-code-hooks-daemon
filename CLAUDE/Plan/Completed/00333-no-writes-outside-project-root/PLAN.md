@@ -1,6 +1,6 @@
 # Plan 00333: no writes outside project root
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-06
 **Owner**: joseph
 **Priority**: High
@@ -95,7 +95,7 @@ does not exist.
   in `src/CLAUDE.md` and `tests/CLAUDE.md` with the named directory.
 - [x] ✅ **Task 4.3**: Sweep remaining `/tmp` recommendations in agent-facing docs
   (7 snippets across the debugging, QA, install and update guides).
-- [ ] 🔄 **Task 4.4**: Migrate the acceptance-test corpus off `/tmp`. Larger
+- [x] ✅ **Task 4.4**: Migrate the acceptance-test corpus off `/tmp`. Larger
   than first scoped: 15 handler modules AND 49 strategy modules. Not cosmetic —
   containment is terminal at priority 14, so a `mkdir -p /tmp/fixture` setup
   command is denied outright and a Write to `/tmp` is denied by containment
@@ -113,9 +113,9 @@ does not exist.
 
 ### Phase 5: Verify
 
-- [ ] ⬜ **Task 5.1**: Full QA gate green.
-- [ ] ⬜ **Task 5.2**: Daemon restarted and the guard verified live.
-- [ ] ⬜ **Task 5.3**: Regenerate the generated docs surfaces.
+- [x] ✅ **Task 5.1**: Full QA gate green.
+- [x] ✅ **Task 5.2**: Daemon restarted and the guard verified live.
+- [x] ✅ **Task 5.3**: Regenerate the generated docs surfaces.
 
 ## Technical Decisions
 
@@ -242,9 +242,8 @@ turned a documentation fix into a bypass of a safety-critical handler.
   is still blocked by its own rule. Verified live.
 - [x] The guard's Bash coverage is stated exhaustively, naming what it does not
   resolve, so a clean command is not read as evidence of containment.
-- [ ] No daemon-emitted guidance string recommends `/tmp` to an agent
-  (pending Task 4.4 — the acceptance-test corpus).
-- [ ] The full QA gate is green and the daemon restarts cleanly.
+- [x] No daemon-emitted guidance string recommends `/tmp` to an agent.
+- [x] The full QA gate is green and the daemon restarts cleanly.
 
 ## Delivery & Milestones
 
@@ -258,3 +257,13 @@ turned a documentation fix into a bypass of a safety-critical handler.
 - `383ac603` — skill SOURCES (not the gitignored deployed copies) and the debug
   capture follow the rule too.
 - `89ae6417` — the Bash limit declared rather than implied.
+- `a4a498a0` — first migration pass: 14 handler modules off `/tmp`, plus four
+  handlers that actively recommended it now emit `ProjectPath.SCRATCH_DIR`.
+- `3b05019c` — `curl_pipe_shell` fix: a quoted-heredoc commit body is data, not
+  a command, so describing the anti-pattern in a commit message must not deny
+  the commit that fixes it.
+- `a8bc987c` — full corpus migration: 49 strategy modules + 15 handler modules,
+  landing on an absolute `scratch_path()` so the acceptance playbook stays
+  runnable after `AbsolutePathHandler`.
+- `75572df4` — Phase 5: 25/25 QA gate green, daemon restarts clean, generated
+  docs regenerated.
