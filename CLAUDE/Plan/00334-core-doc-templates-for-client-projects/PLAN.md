@@ -70,32 +70,35 @@ ruled out.
 
 ### Phase 1: Reproduction (RED)
 
-- [ ] ⬜ **Task 1.1**: Failing test proving a fresh client-mode deploy leaves
+- [x] ✅ **Task 1.1**: Failing test proving a fresh client-mode deploy leaves
   `CLAUDE/PlanWorkflow.md` absent while `workflow_docs` points at it.
-- [ ] ⬜ **Task 1.2**: Failing test for the general invariant — every client doc
+- [x] ✅ **Task 1.2**: Failing test for the general invariant — every client doc
   path named in handler guidance or a config default is either deployed or
-  guarded by an existence check. The durable fix for the whole class; it should
-  enumerate the four known offenders.
+  guarded by an existence check. Six tests, all RED, each naming a real defect.
 
 ### Phase 2: The core/override mechanism
 
-- [ ] ⬜ **Task 2.1**: `install/templates/core/` as the home for genericised
+- [x] ✅ **Task 2.1**: `install/templates/core/` as the home for genericised
   core documents, deployed DAEMON-owned and overwritten every run (mirroring
   `mkplan.bash`) into `<project>/CLAUDE/core/`.
-- [ ] ⬜ **Task 2.2**: Seed the CLIENT-owned override document once, never
-  clobbering it, carrying the `@`-reference to its core document plus an empty
-  overrides section (mirroring `_TEMPLATE_.md`).
-- [ ] ⬜ **Task 2.3**: Wire both into the existing deploy decision site so
-  `deploy-plan-workflow`, install and upgrade all pick them up.
+- [x] ✅ **Task 2.2**: Seed the CLIENT-owned override document once, never
+  clobbering it, carrying the reference to its core document plus an empty
+  overrides section (mirroring `_TEMPLATE_.md`). The reference is a markdown
+  link rather than an `@`-import (Decision 3).
+- [x] ✅ **Task 2.3**: Wire into `bootstrap_plan_workflow`, so every path that
+  turns the plan workflow on also produces the document it names.
 
 ### Phase 3: The first core document
 
-- [ ] ⬜ **Task 3.1**: Genericise `CLAUDE/PlanWorkflow.md` into
-  `PlanWorkflow.core.md` — strip this project's identity, keep the workflow.
-- [ ] ⬜ **Task 3.2**: Convert this repo's own `CLAUDE/PlanWorkflow.md` to the
-  forced-read + overrides form, so the dogfooding is live.
-- [ ] ⬜ **Task 3.3**: Fix `worktree_file_copy.py:57` and the shipped
-  `hooks-daemon-docs-qa.md` reference — the other two confirmed offenders.
+- [x] ✅ **Task 3.1**: Genericise `CLAUDE/PlanWorkflow.md` and `Worktree.md`
+  into core documents. Nothing was lost in the reduction — each core is LARGER
+  than the original it was extracted from.
+- [x] ✅ **Task 3.2**: Convert this repo's own documents to the reference +
+  overrides form (1053 → 90 lines and 104 lines), so the dogfooding is live.
+- [x] ✅ **Task 3.3**: The other two offenders needed no edit: deploying the
+  documents is what makes `worktree_file_copy.py:57` and the shipped
+  `hooks-daemon-docs-qa.md` reference resolve. A reference is only wrong while
+  its target is missing.
 
 ### Phase 4: The remaining core set
 
@@ -141,17 +144,35 @@ installed and tried to "repair" working installations.
 Deploying a copy makes one path correct in both modes. `directory_role_rules.py`
 chose the other option for `DirectoryRoles.md`; this plan does not follow it.
 
-### Decision 3: the forced read is VERIFIED, not assumed
+### Decision 3: a markdown link, not an `@`-import — and the read is VERIFIED
 
-`@path` auto-import is a CLAUDE.md feature. In a document an agent is merely
-told to read, `@` is a convention the agent follows — sufficient for the goal,
-but not a mechanism, and an unverified convention decays silently.
+The owner asked for `@`-style read forcing. Implemented as a plain markdown
+link instead, because this project already has a law against the alternative:
+R6 in `DocumentationStrategy.md` prohibits `@`-imports outside the resident set
+in root `CLAUDE.md`, since they re-inline eagerly and defeat progressive
+disclosure. The `at-import-census` check offers an allowlist escape hatch
+expressly limited to *"a deliberately always-loaded file"* — which a core
+document is not, being read on demand. Taking that hatch would have declared
+these files resident in order to silence a check that was right.
 
-So a check asserts the override document exists AND still carries its
-`@`-reference. That turns "this project dogfoods the template" from a claim in
-a plan into a fact the build enforces. Without it this repo's own override
-document could drift off its core with nothing noticing — the exact failure
+Nothing is lost by the link, because the `@` was never a mechanism here
+either: it auto-resolves only inside a CLAUDE.md chain, and these documents sit
+outside one. In both spellings the forced read is a convention an agent
+follows.
+
+What actually enforces it is a test asserting each override document exists AND
+still references its core. That turns "this project dogfoods the template" from
+a claim in a plan into a fact the build enforces. Without it this repo's own
+override could drift off its core with nothing noticing — the exact failure
 this plan exists to fix, reintroduced one level up.
+
+### Decision 5: a missing bundled template does not fail a client's install
+
+It fails the BUILD instead. A manifest entry with no shipped template is a
+packaging defect, and the completeness test in `test_core_docs.py` catches it
+before release, which is where such a defect belongs. Failing the deploy in a
+client would trade the plan tooling — `mkplan.bash`, the plan directory — for
+the documentation about it, which is the worse of the two losses.
 
 ### Decision 4: guidance must not name a document the daemon does not ensure
 
