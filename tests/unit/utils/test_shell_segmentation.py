@@ -29,6 +29,7 @@ from __future__ import annotations
 import pytest
 
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    quoted_heredoc_command_words,
     quoted_heredoc_receivers,
     split_unquoted,
     strip_quoted_heredoc_bodies,
@@ -280,3 +281,57 @@ class TestQuotedHeredocReceivers:
 
     def test_command_without_a_heredoc_reports_nothing(self) -> None:
         assert quoted_heredoc_receivers("git commit -m 'msg'") == []
+
+
+class TestQuotedHeredocCommandWords:
+    """One effective command word per heredoc, for an ALLOWLIST caller.
+
+    `quoted_heredoc_receivers` reports EVERY word so a caller matching against
+    a list of dangerous names cannot be fooled by `sudo -E bash`. An allowlist
+    caller needs the opposite shape: the single word naming the command, so it
+    can ask "is this a recognised data sink?". Reporting arguments too would
+    make `git commit -F -` fail the question on `commit`, and `jq -r .` fail
+    it on `.` — which is exactly the over-block Plan 00335 removes.
+    """
+
+    def test_the_command_word_is_reported_not_its_arguments(self) -> None:
+        command = "git commit -F - <<'MSG'\nbody\nMSG"
+        assert quoted_heredoc_command_words(command) == ["git"]
+
+    def test_jq_reports_jq_not_its_identity_filter(self) -> None:
+        """`.` is jq's identity filter here, not the sourcing builtin."""
+        command = "jq -r . <<'EOF'\nbody\nEOF"
+        assert quoted_heredoc_command_words(command) == ["jq"]
+
+    def test_sudo_is_skipped_so_the_real_command_is_reported(self) -> None:
+        """Skipping `sudo` cannot hide an interpreter from an allowlist
+        caller: `sudo -E bash` resolves to `bash`, which no sink list holds."""
+        assert quoted_heredoc_command_words("sudo -E bash <<'EOF'\nb\nEOF") == ["bash"]
+        assert quoted_heredoc_command_words("sudo -E tee /etc/x <<'EOF'\nb\nEOF") == ["tee"]
+
+    def test_a_path_named_command_is_reduced_to_its_basename(self) -> None:
+        assert quoted_heredoc_command_words("/bin/sh <<'EOF'\nb\nEOF") == ["sh"]
+
+    def test_punctuation_is_normalised_off_the_command_word(self) -> None:
+        assert quoted_heredoc_command_words("(bash <<'EOF'\nb\nEOF\n)") == ["bash"]
+        assert quoted_heredoc_command_words('"bash" <<\'EOF\'\nb\nEOF') == ["bash"]
+
+    def test_receiver_after_a_pipe_is_the_last_stage_only(self) -> None:
+        assert quoted_heredoc_command_words("echo x | bash <<'EOF'\nb\nEOF") == ["bash"]
+
+    def test_each_heredoc_contributes_one_word(self) -> None:
+        command = "cat > a <<'A'\nx\nA\nbash <<'B'\ny\nB"
+        assert quoted_heredoc_command_words(command) == ["cat", "bash"]
+
+    def test_an_expansion_built_command_word_is_reported_verbatim(self) -> None:
+        """Not resolved -- resolving it would mean running the command. It is
+        reported as-is so an allowlist caller simply fails to match it, which
+        is the safe direction and is why the expansion family needs no
+        normalisation."""
+        assert quoted_heredoc_command_words("$SHELL <<'EOF'\nb\nEOF") == ["SHELL"]
+
+    def test_unquoted_heredoc_is_not_reported(self) -> None:
+        assert quoted_heredoc_command_words("bash <<EOF\nbody\nEOF") == []
+
+    def test_command_without_a_heredoc_reports_nothing(self) -> None:
+        assert quoted_heredoc_command_words("git commit -m 'msg'") == []

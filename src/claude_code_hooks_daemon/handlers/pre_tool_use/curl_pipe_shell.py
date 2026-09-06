@@ -18,7 +18,7 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, OPTIONAL_SUDO
 from claude_code_hooks_daemon.utils.shell_segmentation import (
-    quoted_heredoc_receivers,
+    quoted_heredoc_command_words,
     strip_quoted_heredoc_bodies,
 )
 
@@ -46,23 +46,66 @@ _CURL_PIPE_SHELL_VERBOSE_CONTENT = (
 # these is a remote-code-execution risk and must be blocked.
 _PIPED_INTERPRETERS = ("bash", "sh", "zsh", "ksh", "dash", "python", "perl", "ruby")
 
-# Receivers that EXECUTE a quoted heredoc body without being named in
-# _PIPED_INTERPRETERS. Consulted ONLY when deciding whether to withhold the
-# heredoc exemption -- they must never join _PIPED_INTERPRETERS, which builds
-# the pipe pattern itself (`| eval` is not the shape being matched there).
+# Commands that consume a quoted heredoc body as DATA and never execute it.
+# This is an ALLOWLIST, and the direction is the whole point (Plan 00335
+# Decision 1): the exemption is granted only for a name ON this list, so an
+# unrecognised receiver withholds it rather than being waved through.
 #
-# `-` is deliberately ABSENT, though listing it would be INERT rather than
-# harmful: `quoted_heredoc_receivers` already drops every word beginning with
-# `-`, so `git commit -F -`'s own `-` never reaches this comparison. The
-# spellings that genuinely execute all name the interpreter as a separate
-# word (`sh - <<'EOF'`, `python3 - <<'EOF'`, `bash -s -- <<'EOF'`), and each
-# is caught on that word.
+# The list it replaced enumerated receivers that EXECUTE, and that enumeration
+# failed four times: `eval`/`. /dev/stdin`/`source /dev/stdin` (B2), seven
+# punctuation spellings (B3), six word-expansion spellings recorded as an
+# unclosable limit, and `ssh` -- which executes the body on the REMOTE host and
+# was found by probing rather than review. Enumerating executors means every
+# receiver nobody thought of defaults to "safe"; enumerating sinks means it
+# defaults to "scan it".
 #
-# Matched by EQUALITY, not prefix: `.` as a prefix would swallow every
-# receiver beginning with a dot, such as an ordinary `.md` output path.
-# Punctuation is not this list's problem -- `_command_word` normalises the
-# receiver before it gets here, which is what makes equality sufficient.
-_HEREDOC_EXECUTORS: Final[tuple[str, ...]] = ("eval", "source", ".", "stdin", "/dev/stdin")
+# An omission here costs a FALSE DENIAL, not a bypass -- and only for a heredoc
+# that both names an unlisted receiver AND carries the `curl … | bash` pattern
+# in its body, since withholding the exemption scans the body rather than
+# denying the command. Add names as they prove legitimate.
+#
+# Deliberately EXCLUDED despite looking like ordinary filters:
+#   sed  -- `sed -f -` runs the body as a script, and the `e` flag reaches a shell
+#   awk  -- `awk -f /dev/stdin` runs the body as a program
+#   ssh  -- executes the body on the remote host
+#   crontab -- `crontab -` installs commands that execute later
+_DATA_SINKS: Final[frozenset[str]] = frozenset(
+    {
+        # Version control and text output
+        "git",
+        "cat",
+        "tee",
+        "sort",
+        "uniq",
+        "tr",
+        "cut",
+        "column",
+        "head",
+        "tail",
+        "wc",
+        "grep",
+        "diff",
+        "patch",
+        "less",
+        "more",
+        "base64",
+        "md5sum",
+        "sha1sum",
+        "sha256sum",
+        # Structured data
+        "jq",
+        "yq",
+        # Databases
+        "psql",
+        "mysql",
+        "sqlite3",
+        # Network and mail sinks that transfer rather than execute
+        "mail",
+        "mailx",
+        "sendmail",
+        "ftp",
+    }
+)
 
 # Pattern: (curl|wget) ... | [sudo [flags]] [path/]<interpreter>
 # - OPTIONAL_SUDO allows arbitrary sudo flags before the interpreter
@@ -165,29 +208,32 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
         body — quoting the delimiter governs only what the outer shell expands
         on the way in, not what the interpreter does with the bytes. Blanking
         those bodies would turn a documentation fix into a clean bypass of a
-        safety-critical handler, so when any quoted heredoc feeds an
-        interpreter the raw command is scanned unchanged.
+        safety-critical handler.
 
-        Withholding the exemption is deliberately the cheap error: the cost is
-        a mention being denied, and the alternative cost is remote code
-        execution.
+        The exemption is therefore granted only when EVERY quoted heredoc in
+        the command feeds a recognised data sink (``_DATA_SINKS``). An
+        unrecognised receiver withholds it, so the body is scanned rather than
+        blanked (Plan 00335 Decision 1).
 
-        "Receiver is an interpreter" is only a PROXY for "the body is
-        executed", and the two came apart: ``eval "$(cat <<'EOF')"``,
-        ``. /dev/stdin`` and ``source /dev/stdin`` all run the body while
-        naming no interpreter, so the body was blanked and this handler saw
-        nothing. Those receivers are checked separately via
-        ``_HEREDOC_EXECUTORS`` rather than being added to
-        ``_PIPED_INTERPRETERS``, which drives the pipe pattern itself.
+        That direction is the point. "Receiver is an interpreter" was only a
+        PROXY for "the body is executed", and asking whether a receiver is
+        DANGEROUS means every name nobody thought of defaults to safe — which
+        it did, four separate times: ``eval "$(cat <<'EOF')"``,
+        ``. /dev/stdin`` and ``source /dev/stdin`` (B2); seven punctuation
+        spellings (B3); six word-expansion spellings; and ``ssh host <<'EOF'``,
+        which runs the body on the remote machine. Asking whether a receiver is
+        a recognised SINK makes the same unknown default to "scan it", and
+        needs no normalisation for the unbounded expansion family: ``$SHELL``
+        is not a sink name, so it withholds like any other unrecognised word.
+
+        Withholding is deliberately the cheap error, and cheaper than it looks:
+        it does not deny the command, it scans the body. A denial follows only
+        if that body ALSO carries the ``curl … | bash`` pattern, so an omission
+        from ``_DATA_SINKS`` costs a false denial in a narrow case, while an
+        omission from a list of executors cost remote code execution.
         """
-        receivers = quoted_heredoc_receivers(command)
-        if any(
-            receiver.startswith(interpreter)
-            for receiver in receivers
-            for interpreter in _PIPED_INTERPRETERS
-        ):
-            return command
-        if any(receiver in _HEREDOC_EXECUTORS for receiver in receivers):
+        command_words = quoted_heredoc_command_words(command)
+        if any(word not in _DATA_SINKS for word in command_words):
             return command
         return strip_quoted_heredoc_bodies(command)
 
@@ -244,7 +290,25 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
             "curl -o untracked/scratch/script.sh URL\n"
             "cat untracked/scratch/script.sh    # inspect\n"
             "bash untracked/scratch/script.sh   # execute if safe\n"
-            "```"
+            "```\n\n"
+            "**Writing ABOUT the pattern is allowed, but only into a "
+            "recognised data sink.** A quoted-delimiter heredoc "
+            "(`<<'EOF'`) is exempt when the command receiving it consumes "
+            "the body as DATA — `git commit -F -`, `cat > doc.md`, `tee`, "
+            "`jq`, `psql`. That covers documenting or committing a message "
+            "about `curl | bash`.\n\n"
+            "The exemption is an ALLOWLIST, so an unrecognised receiver "
+            "does NOT get it and the body is scanned. This is deliberate: a "
+            "receiver that executes the body is not always obviously an "
+            "interpreter — `ssh host <<'EOF'` runs it on the remote "
+            "machine, `eval \"$(cat <<'EOF')\"` and `. /dev/stdin` run it "
+            "locally — so anything unrecognised is read rather than "
+            "trusted. Note this scans the body; it only DENIES if the body "
+            "also carries the `curl … | bash` pattern.\n\n"
+            "So a clean command is not evidence the body is inert — only "
+            "that its receiver is a recognised sink. If a legitimate "
+            "data receiver is missing from the list, that is a bug worth "
+            "reporting rather than working around."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

@@ -42,12 +42,15 @@ container restart.
 
 ## Non-Goals
 
-- **Closing the word-expansion receiver family** (`b$'ash'`, `$SHELL`,
-  `${SHELL}`). The reviewer argued, and this plan accepts, that the family is
-  unbounded (`${x:0:0}bash`, `$(printf bash)`, …) so no finite normalisation
-  closes it, and `$SHELL` cannot be resolved without executing the command a
-  PreToolUse hook exists to judge. Phase 2 DOCUMENTS this limit; it does not
-  attempt to close it.
+- ~~**Closing the word-expansion receiver family**~~ — **superseded by
+  Decision 1, and now CLOSED.** This was excluded on the reviewer's reasoning
+  that the family is unbounded (`${x:0:0}bash`, `$(printf bash)`, …) so no
+  finite normalisation closes it. That reasoning holds only for an allowlist
+  of BAD receivers. Inverting to an allowlist of data sinks closes the family
+  without resolving anything: `b$ash` and `SHELL` are simply not sink names,
+  so they withhold the exemption like any other unrecognised word. All ten
+  obfuscated shapes in the reviewer's corpus now DENY. `$SHELL` still is not
+  *resolved* — it does not need to be.
 - Re-opening any of the three blocking findings already fixed in v3.62.0.
 
 ## Tasks
@@ -57,36 +60,40 @@ container restart.
 Decide first, then implement. Do not start with the narrow fix — Task 1.1's
 outcome determines whether Task 1.2 is still wanted.
 
-- [ ] ⬜ **Task 1.1**: Decide between the two competing directions and record
-  the decision in `DECISIONS.md`.
-  (a) **Narrow fix**: treat `.` as the sourcing builtin only in first-word
-  position, reducing false positives.
-  (b) **Inversion**: withhold the exemption unless the receiver is a
-  recognised NON-executing sink (`git`, `cat`, `tee`, `psql`, …), which
-  flips the failure direction on an unknown receiver from "grant" to
-  "withhold". Safer, but the allowlist must grow with every legitimate
-  data-heredoc receiver and each omission costs a false denial.
-  These interact: (b) changes what (a) is for, so choosing (a) first and
-  (b) later partly discards the first piece of work.
-- [ ] ⬜ **Task 1.2**: Implement the decision with TDD regression tests.
-  `jq -r . <<'EOF'` is the concrete reproducer for the over-block: `.` is
-  jq's identity filter as well as the sourcing builtin, and receivers
-  include every word of the segment, so an ordinary JSON-data heredoc has
-  its exemption withheld. Direction is safe (over-blocking), which is why
-  it did not block the release.
-- [ ] ⬜ **Task 1.3**: Re-run the reviewer's receiver corpus
-  (`probes/probe_curl6.py`, 34 shapes) and confirm no regression in either
-  direction — every executing body still denied, all 11 data-heredoc
-  controls still exempt.
+- [x] ✅ **Task 1.1**: Decided — **the inversion**, which subsumes the narrow
+  fix rather than competing with it. Recorded in `DECISIONS.md`. Probing the
+  shipped handler before deciding (`probes/probe_phase1.py`) settled it: it
+  found a FOURTH live bypass the review missed — `ssh host <<'EOF'` executes
+  the body on the remote host and was ALLOWED — which is decisive evidence
+  that the executor family cannot be enumerated.
+- [x] ✅ **Task 1.2**: Implemented. `_DATA_SINKS` replaces the interpreter and
+  executor receiver lists in `curl_pipe_shell`; a new
+  `quoted_heredoc_command_words` reports one command word per heredoc for an
+  allowlist caller, leaving `quoted_heredoc_receivers` (which must report
+  every word for its opposite question) untouched. The `jq -r .` over-block
+  disappears by construction: arguments are no longer consulted, so `.` has
+  no list to be on. 21 new tests.
+- [x] ✅ **Task 1.3**: Corpus re-run green — **0 ordinary misses, 0
+  obfuscated misses, 0 false positives**. All 11 data-heredoc controls keep
+  their exemption and `jq -r .` joins them. Full suite 18,103 passed.
 
-### Phase 2: Write down the expansion limit
+### Phase 2: Write down what the exemption now promises
 
-- [ ] ⬜ **Task 2.1**: State in `quoted_heredoc_receivers`' docstring and in
-  the handler's resident guidance that a receiver word built by EXPANSION
-  is not resolved, using the framing `project_containment` already uses
-  for its own gap: a clean command is not evidence the body is inert, only
-  that no RECOGNISED receiver named an interpreter. Six known spellings
-  are listed in `review-report.md` under "Residual".
+Re-aimed by Decision 1. The original task was to document the expansion
+family as an unclosed limit; the inversion closed it, so the thing that needs
+writing down is the ALLOWLIST and its failure direction instead.
+
+- [x] ✅ **Task 2.1**: Docstrings state it —
+  `quoted_heredoc_command_words` explains why an expansion-built word needs
+  no resolving under an allowlist, and `_scannable` records the four failed
+  enumerations that motivated the inversion.
+- [x] ✅ **Task 2.2**: Resident guidance (`get_claude_md`) now states the
+  exemption is an allowlist, names the common sinks, gives `ssh` /
+  `eval "$(cat …)"` / `. /dev/stdin` as why an unknown receiver is not
+  trusted, and keeps the `project_containment` framing: a clean command is
+  not evidence the body is inert, only that its receiver is recognised. It
+  also states that withholding SCANS rather than denies, so the guidance
+  does not overstate the cost.
 
 ### Phase 3: `project_containment` path resolution
 

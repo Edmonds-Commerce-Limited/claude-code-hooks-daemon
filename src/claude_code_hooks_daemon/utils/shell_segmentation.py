@@ -98,6 +98,15 @@ _RECEIVER_SEPARATORS: tuple[str, ...] = ("&&", "||", ";", "|", "&")
 #: name.
 _WORD_GROUPING_PREFIXES = "(){}`\\$"
 
+#: Words that PREFIX a command without being it, so the command word sits
+#: further along: `sudo -E tee f` names tee. Only consulted by
+#: `quoted_heredoc_command_words`, whose caller matches against an allowlist
+#: of SAFE names -- skipping sudo cannot hide anything there, because what it
+#: reveals (`sudo -E bash` -> `bash`) is not on such a list either.
+#: `quoted_heredoc_receivers` must NOT use this: its caller matches against
+#: DANGEROUS names, where reporting only `sudo` would hide the interpreter.
+_COMMAND_WORD_PREFIXES: frozenset[str] = frozenset({"sudo"})
+
 
 def _command_word(word: str) -> str:
     """The command name bash would resolve ``word`` to.
@@ -228,17 +237,74 @@ def quoted_heredoc_receivers(command: str) -> list[str]:
         ['sh']
     """
     receivers: list[str] = []
-    for match in _QUOTED_HEREDOC_BODY_PATTERN.finditer(command):
-        # The receiving command is what sits between the previous separator
-        # and the `<<` opener -- a pipe stage or a `&&` branch, not the whole
-        # line, so `echo x | bash <<'EOF'` resolves to bash rather than echo.
-        preceding = command[: match.start("opener")]
-        last_line = preceding.rsplit("\n", 1)[-1]
-        segment = split_unquoted(last_line, _RECEIVER_SEPARATORS)[-1]
+    for segment in _heredoc_receiving_segments(command):
         receivers.extend(
             _command_word(word) for word in segment.split() if word and not word.startswith("-")
         )
     return receivers
+
+
+def _heredoc_receiving_segments(command: str) -> list[str]:
+    """Return the command segment feeding each quoted heredoc, in order.
+
+    The receiving command is what sits between the previous separator and the
+    ``<<`` opener -- a pipe stage or an ``&&`` branch, not the whole line, so
+    ``echo x | bash <<'EOF'`` resolves to bash rather than echo.
+    """
+    segments: list[str] = []
+    for match in _QUOTED_HEREDOC_BODY_PATTERN.finditer(command):
+        preceding = command[: match.start("opener")]
+        last_line = preceding.rsplit("\n", 1)[-1]
+        segments.append(split_unquoted(last_line, _RECEIVER_SEPARATORS)[-1])
+    return segments
+
+
+def quoted_heredoc_command_words(command: str) -> list[str]:
+    """Return the single command word feeding each quoted heredoc.
+
+    The allowlist counterpart to ``quoted_heredoc_receivers``. That function
+    reports EVERY word so a caller matching against a list of DANGEROUS names
+    cannot be fooled by ``sudo -E bash`` hiding the interpreter behind sudo.
+    A caller matching against a list of SAFE names needs the opposite shape:
+    the one word that names the command, because an argument is not the
+    receiver and must not be asked to satisfy the allowlist. ``git commit -F -``
+    would otherwise fail on ``commit`` and ``jq -r .`` on ``.``.
+
+    ``sudo`` is skipped so ``sudo -E tee f`` resolves to ``tee``. That cannot
+    hide anything from an allowlist caller: ``sudo -E bash`` resolves to
+    ``bash``, which no list of data sinks contains, so the exemption is
+    withheld either way.
+
+    A word built by EXPANSION (``$SHELL``, ``b$'ash'``) is reported as-is --
+    resolving it would mean running the command the caller exists to judge.
+    For an allowlist caller that needs no special handling: an unresolvable
+    word simply fails to match, which is the safe direction. This is why the
+    unbounded expansion family needs no normalisation here.
+
+    Args:
+        command: The raw Bash command string.
+
+    Returns:
+        One command-word basename per quoted heredoc, in the order the
+        heredocs appear. Empty if there are none.
+
+    Examples:
+        >>> quoted_heredoc_command_words("git commit -F - <<'MSG'\\nbody\\nMSG")
+        ['git']
+        >>> quoted_heredoc_command_words("sudo -E bash <<'EOF'\\nbody\\nEOF")
+        ['bash']
+    """
+    command_words: list[str] = []
+    for segment in _heredoc_receiving_segments(command):
+        for word in segment.split():
+            if not word or word.startswith("-"):
+                continue
+            resolved = _command_word(word)
+            if resolved in _COMMAND_WORD_PREFIXES:
+                continue
+            command_words.append(resolved)
+            break
+    return command_words
 
 
 def split_unquoted(text: str, separators: Sequence[str]) -> list[str]:
