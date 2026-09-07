@@ -91,15 +91,26 @@ Scanned every transcript under `~/.claude/projects/-workspace/` (25 files).
 **25 genuine records**, across 3 sessions, spanning 2026-08-26 to 2026-09-02 —
 every one of them the fable security downgrade this plan exists for:
 
+Both shapes, as they appear on the wire — the assistant-message content block
+first, then the standalone record that follows it:
+
 ```json
-{"originalModel": "claude-fable-5", "fallbackModel": "claude-opus-4-8",
+{"type": "assistant", "timestamp": "2026-08-27T09:33:41.549Z",
+ "message": {"role": "assistant", "content": [
+   {"type": "fallback", "from": {"model": "claude-fable-5"},
+                        "to":   {"model": "claude-opus-4-8"}}]}}
+
+{"subtype": "model_refusal_fallback",
+ "originalModel": "claude-fable-5", "fallbackModel": "claude-opus-4-8",
  "apiRefusalCategory": "cyber", "scope": "session",
- "ts": "2026-08-27T09:34:10.341Z"}
+ "timestamp": "2026-08-27T09:34:10.341Z"}
 ```
 
+The block names only the two models; the refusal category and scope arrive with
+the second record, which is why a consumer must not invent them for the first.
+
 Uniform across all 25: `claude-fable-5` → `claude-opus-4-8`, category `cyber`,
-scope `session`. Two shapes are emitted per event — a `fallback` content block
-inside the assistant message, then a standalone `subtype` record 7–90s later
+scope `session`. The two shapes arrive 7–90s apart
 (13 blocks / 12 subtypes in the sample, so they pair but not exactly; a
 consumer should treat either as the trigger and dedupe).
 

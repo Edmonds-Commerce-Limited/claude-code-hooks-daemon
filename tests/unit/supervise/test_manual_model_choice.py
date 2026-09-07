@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests.unit.supervise._load import load_supervisor_module
+from tests.unit.supervise.conftest import write_attributed_downgrade
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -192,6 +193,7 @@ def test_silent_substitution_without_typed_command_still_restores(tmp_path: Path
     """Nothing typed in the window -> the classifier keeps working unchanged."""
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
+    write_attributed_downgrade(sidecar_dir, session_id=_SESSION)
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
     _decide(sidecar_dir, machine)
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 0.5)
@@ -210,6 +212,7 @@ def test_manual_model_window_expires(tmp_path: Path) -> None:
     """A typed command outside the backstop window no longer counts as manual."""
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
+    write_attributed_downgrade(sidecar_dir, session_id=_SESSION)
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
     _decide(sidecar_dir, machine)
     _decide(sidecar_dir, machine, facts=_facts(human_model_command="opus"))
@@ -244,6 +247,7 @@ def test_manual_match_is_consumed_by_first_matching_reading(tmp_path: Path) -> N
     silent drop to the same family is a substitution again and must restore."""
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
+    write_attributed_downgrade(sidecar_dir, session_id=_SESSION)
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
     _decide(sidecar_dir, machine)
     _decide(sidecar_dir, machine, facts=_facts(human_model_command="opus"))
@@ -595,6 +599,7 @@ def test_the_fable_security_downgrade_is_still_restored(tmp_path: Path) -> None:
     """The one case the family exists for must keep working exactly as before."""
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
+    write_attributed_downgrade(sidecar_dir, session_id=_SESSION)
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
     _decide(sidecar_dir, machine)
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 0.5)
@@ -614,6 +619,9 @@ def test_a_fable_drop_all_the_way_to_sonnet_still_counts(tmp_path: Path) -> None
     STARTED -- so a fallback to anything below fable is still covered."""
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
+    write_attributed_downgrade(
+        sidecar_dir, session_id=_SESSION, original_family="fable", fallback_family="sonnet"
+    )
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
     _decide(sidecar_dir, machine)
     _write_sidecar(sidecar_dir, model_id="claude-sonnet-5", effort="high", ts=_NOW - 0.5)
@@ -666,6 +674,7 @@ def test_model_selector_latch_expires(tmp_path: Path) -> None:
     assert _mod._MANUAL_MODEL_SELECTOR_WINDOW_SECONDS < _mod._MANUAL_MODEL_WINDOW_SECONDS
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
+    write_attributed_downgrade(sidecar_dir, session_id=_SESSION)
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
     _decide(sidecar_dir, machine)
     _decide(sidecar_dir, machine, facts=_facts(human_model_selector=True))
@@ -680,6 +689,9 @@ def test_model_selector_latch_is_consumed_by_the_family_that_lands(tmp_path: Pat
     nothing newly typed is a silent substitution the classifier must catch."""
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
+    write_attributed_downgrade(
+        sidecar_dir, session_id=_SESSION, original_family="fable", fallback_family="sonnet"
+    )
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
     _decide(sidecar_dir, machine)
     _decide(sidecar_dir, machine, facts=_facts(human_model_selector=True))
@@ -734,7 +746,14 @@ def test_picker_latch_does_not_cross_into_another_session(tmp_path: Path) -> Non
     _decide(sidecar_dir, machine)
     _decide(sidecar_dir, machine, facts=_facts(human_model_selector=True))
     # Foreground moves to a different session, which then suffers a REAL silent
-    # drop. The other session's picker must not vouch for it.
+    # drop -- recorded as such by the platform. The other session's picker must
+    # not vouch for it.
+    write_attributed_downgrade(
+        sidecar_dir,
+        session_id="other-sess",
+        original_family="fable",
+        fallback_family="sonnet",
+    )
     (sidecar_dir / f"{_SESSION}.json").unlink()
     _write_sidecar(sidecar_dir, session_id="other-sess", model_id="claude-fable-5", ts=_NOW)
     _decide(sidecar_dir, machine, facts=_facts(_NOW + 1.0))

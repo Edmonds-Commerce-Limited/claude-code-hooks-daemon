@@ -46,6 +46,14 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.utils import secret_redaction
+from claude_code_hooks_daemon.utils.model_fallback_records import (
+    KEY_FALLBACK_MODEL,
+    KEY_ORIGINAL_MODEL,
+    KEY_TIMESTAMP,
+    PREFILTER_TOKENS,
+    UNKNOWN_MODEL,
+    parse_fallback_payload,
+)
 from claude_code_hooks_daemon.utils.repo_relative_path import normalise_repo_relative_path
 
 # Module-level aliases so tests can monkeypatch this module's own names, and
@@ -57,34 +65,18 @@ logger = logging.getLogger(__name__)
 
 _SESSION_START_EVENT: Final[str] = "SessionStart"
 
-# ── Transcript record shapes (see the Plan 00278 field report) ──────────────
-_KEY_SUBTYPE: Final[str] = "subtype"
-_FALLBACK_SUBTYPE: Final[str] = "model_refusal_fallback"
-_KEY_MESSAGE: Final[str] = "message"
-_KEY_CONTENT: Final[str] = "content"
-_KEY_TYPE: Final[str] = "type"
-_FALLBACK_BLOCK_TYPE: Final[str] = "fallback"
-_KEY_ORIGINAL_MODEL: Final[str] = "originalModel"
-_KEY_FALLBACK_MODEL: Final[str] = "fallbackModel"
-_KEY_REFUSAL_CATEGORY: Final[str] = "apiRefusalCategory"
-_KEY_SCOPE: Final[str] = "scope"
-_KEY_TIMESTAMP: Final[str] = "timestamp"
-_KEY_FROM: Final[str] = "from"
-_KEY_TO: Final[str] = "to"
-_KEY_MODEL: Final[str] = "model"
-
-# Cheap substring pre-filter: only lines that can possibly hold a fallback
-# record are json-parsed, so a large transcript stays a linear string scan.
-_PREFILTER_TOKENS: Final[tuple[str, ...]] = (_FALLBACK_SUBTYPE, f'"{_FALLBACK_BLOCK_TYPE}"')
+# Record recognition lives in `utils/model_fallback_records.py` — this handler
+# and the per-session downgrade recorder both consume the same two shapes, so
+# there is one place that knows what they look like.
 
 # Cheap substring pre-filter for assistant-message model tracking, used to
 # decide whether a fallback has since RECOVERED (a later assistant message
 # is back on the original model).
 _ASSISTANT_TOKEN: Final[str] = '"assistant"'
+_KEY_MESSAGE: Final[str] = "message"
+_KEY_MODEL: Final[str] = "model"
 _KEY_ROLE: Final[str] = "role"
 _ROLE_ASSISTANT: Final[str] = "assistant"
-
-_UNKNOWN_VALUE: Final[str] = "unknown"
 
 # ── Snapshot defaults (options injected by the registry as _<option>) ───────
 _DEFAULT_SNAPSHOT_ENABLED: Final[bool] = True
@@ -127,39 +119,17 @@ def _record_identity(payload: dict[str, Any], raw_line: str) -> str:
     falls back to a digest of the raw line so two field-identical records on
     different lines still deduplicate deterministically.
     """
-    timestamp = str(payload.get(_KEY_TIMESTAMP, "") or "")
+    timestamp = str(payload.get(KEY_TIMESTAMP, "") or "")
     if timestamp:
         return "|".join(
             (
                 timestamp,
-                str(payload.get(_KEY_ORIGINAL_MODEL, "") or ""),
-                str(payload.get(_KEY_FALLBACK_MODEL, "") or ""),
+                str(payload.get(KEY_ORIGINAL_MODEL, "") or ""),
+                str(payload.get(KEY_FALLBACK_MODEL, "") or ""),
             )
         )
     # MD5 as a cheap content fingerprint, not a security control.
     return hashlib.md5(raw_line.encode("utf-8"), usedforsecurity=False).hexdigest()
-
-
-def _extract_fallback_block(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """The first assistant-message ``fallback`` content block, if any."""
-    message = payload.get(_KEY_MESSAGE)
-    if not isinstance(message, dict):
-        return None
-    content = message.get(_KEY_CONTENT)
-    if not isinstance(content, list):
-        return None
-    for block in content:
-        if isinstance(block, dict) and block.get(_KEY_TYPE) == _FALLBACK_BLOCK_TYPE:
-            return block
-    return None
-
-
-def _block_model(block: dict[str, Any], key: str) -> str:
-    """The model name inside a fallback block's ``from``/``to`` object."""
-    endpoint = block.get(key)
-    if isinstance(endpoint, dict):
-        return str(endpoint.get(_KEY_MODEL, _UNKNOWN_VALUE) or _UNKNOWN_VALUE)
-    return _UNKNOWN_VALUE
 
 
 class ModelFallbackDetectorHandler(SessionStartHandlerBase):
@@ -229,7 +199,7 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         """Scan the transcript; advise loudly on any unreported fallback record."""
         try:
             transcript_path = str(hook_input.get(HookInputField.TRANSCRIPT_PATH, "") or "")
-            session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or _UNKNOWN_VALUE)
+            session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or UNKNOWN_MODEL)
 
             self._load_state()
 
@@ -309,7 +279,7 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
                     line = raw_line.strip()
                     if not line:
                         continue
-                    if any(token in line for token in _PREFILTER_TOKENS):
+                    if any(token in line for token in PREFILTER_TOKENS):
                         record = self._parse_candidate(
                             line, line_index, tuple(window) if window_size else ()
                         )
@@ -342,7 +312,13 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
     def _parse_candidate(
         self, line: str, line_index: int, preceding: tuple[str, ...]
     ) -> _FallbackRecord | None:
-        """Parse one candidate line into a fallback record, or ``None``."""
+        """Parse one candidate line into a fallback record, or ``None``.
+
+        Record RECOGNITION is delegated to ``model_fallback_records`` — the
+        shared home for both transcript shapes. What is added here is what only
+        a snapshot needs: an identity for dedupe, the raw line, and the
+        preceding-record window.
+        """
         try:
             payload = json.loads(line)
         except json.JSONDecodeError:
@@ -350,33 +326,20 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         if not isinstance(payload, dict):
             return None
 
-        if payload.get(_KEY_SUBTYPE) == _FALLBACK_SUBTYPE:
-            return _FallbackRecord(
-                original_model=str(payload.get(_KEY_ORIGINAL_MODEL, _UNKNOWN_VALUE) or ""),
-                fallback_model=str(payload.get(_KEY_FALLBACK_MODEL, _UNKNOWN_VALUE) or ""),
-                category=str(payload.get(_KEY_REFUSAL_CATEGORY, _UNKNOWN_VALUE) or ""),
-                scope=str(payload.get(_KEY_SCOPE, _UNKNOWN_VALUE) or ""),
-                timestamp=str(payload.get(_KEY_TIMESTAMP, "") or ""),
-                identity=_record_identity(payload, line),
-                raw_line=line,
-                preceding_lines=preceding,
-                line_index=line_index,
-            )
-
-        block = _extract_fallback_block(payload)
-        if block is not None:
-            return _FallbackRecord(
-                original_model=_block_model(block, _KEY_FROM),
-                fallback_model=_block_model(block, _KEY_TO),
-                category=_UNKNOWN_VALUE,
-                scope=_UNKNOWN_VALUE,
-                timestamp=str(payload.get(_KEY_TIMESTAMP, "") or ""),
-                identity=_record_identity(payload, line),
-                raw_line=line,
-                preceding_lines=preceding,
-                line_index=line_index,
-            )
-        return None
+        facts = parse_fallback_payload(payload)
+        if facts is None:
+            return None
+        return _FallbackRecord(
+            original_model=facts.original_model,
+            fallback_model=facts.fallback_model,
+            category=facts.category,
+            scope=facts.scope,
+            timestamp=facts.timestamp,
+            identity=_record_identity(payload, line),
+            raw_line=line,
+            preceding_lines=preceding,
+            line_index=line_index,
+        )
 
     @staticmethod
     def _is_recovered(record: _FallbackRecord, assistant_models: list[tuple[int, str]]) -> bool:
@@ -385,7 +348,7 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         A record with an unknown/empty original model can never be proven
         recovered — it stays ACTIVE, the conservative (louder) default.
         """
-        if not record.original_model or record.original_model == _UNKNOWN_VALUE:
+        if not record.original_model or record.original_model == UNKNOWN_MODEL:
             return False
         return any(
             index > record.line_index and model == record.original_model
@@ -522,9 +485,9 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         ]
         for record in records:
             detail = (
-                f"  - {record.original_model or _UNKNOWN_VALUE} → "
-                f"{record.fallback_model or _UNKNOWN_VALUE}"
-                f" (category: {record.category or _UNKNOWN_VALUE}"
+                f"  - {record.original_model or UNKNOWN_MODEL} → "
+                f"{record.fallback_model or UNKNOWN_MODEL}"
+                f" (category: {record.category or UNKNOWN_MODEL}"
             )
             if record.timestamp:
                 detail += f", at {record.timestamp}"
@@ -554,15 +517,15 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         ]
         for record in records:
             detail = (
-                f"  - {record.original_model or _UNKNOWN_VALUE} → "
-                f"{record.fallback_model or _UNKNOWN_VALUE}"
-                f" (category: {record.category or _UNKNOWN_VALUE}"
+                f"  - {record.original_model or UNKNOWN_MODEL} → "
+                f"{record.fallback_model or UNKNOWN_MODEL}"
+                f" (category: {record.category or UNKNOWN_MODEL}"
             )
             if record.timestamp:
                 detail += f", at {record.timestamp}"
             detail += (
                 f"); a later assistant turn returned to "
-                f"{record.original_model or _UNKNOWN_VALUE}, so this session is "
+                f"{record.original_model or UNKNOWN_MODEL}, so this session is "
                 "no longer degraded"
             )
             lines.append(detail)

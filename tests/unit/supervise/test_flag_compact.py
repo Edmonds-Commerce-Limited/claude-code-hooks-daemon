@@ -16,6 +16,7 @@ import json
 from typing import TYPE_CHECKING
 
 from tests.unit.supervise._load import load_supervisor_module
+from tests.unit.supervise.conftest import write_attributed_downgrade
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -85,7 +86,13 @@ def _decide(sidecar_dir: Path, machine, *, dry_run: bool = False, facts: object 
 
 
 def _downgrade(sidecar_dir: Path, machine, *, effort: str | None = "low") -> None:
-    """Tick once on fable, then tick after a switch to opus (opens an episode)."""
+    """Tick once on fable, then tick after a switch to opus (opens an episode).
+
+    The MACHINE's downgrade, so the platform's own record of it is written too
+    (Plan 00328) — an unrecorded drop is a human model change and opens no
+    episode.
+    """
+    write_attributed_downgrade(sidecar_dir, session_id=_SESSION)
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW - 2.0)
     _decide(sidecar_dir, machine)
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort=effort, ts=_NOW - 0.5)

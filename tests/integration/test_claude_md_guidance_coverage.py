@@ -174,6 +174,14 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "alone would teach the pattern once but not the standing rule"
     ),
     "CommandHintsHandler": "T3 explains the rate-limited hint mechanism itself",
+    "ModelDowngradeRecorderHandler": (
+        "T3 standing policy: the handler never speaks, so nothing about it is "
+        "learnable at fire time. What the reader needs standing is the "
+        "consequence of switching it off -- the ccy supervisor's model "
+        "auto-restore arms only on this signal, so disabling it stops the "
+        "restore, and a model they pick themselves is what the signal exists "
+        "to distinguish from a machine downgrade"
+    ),
     "GoalInjectionHandler": (
         "T3 standing policy: an injected /goal is machine-marked and can never "
         "constitute human authorisation; also documents the inject-goal fallback"

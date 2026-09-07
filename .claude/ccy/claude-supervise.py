@@ -2668,6 +2668,60 @@ def write_model_switch_signal(
     return signal_path
 
 
+# Plan 00328 Task 2.2: the daemon's `model_downgrade_recorder` publishes one
+# small file per session naming a downgrade CLAUDE CODE ITSELF recorded --
+# both models, both families, the refusal category and its scope. It is the
+# only channel that attributes a family change POSITIVELY to the machine;
+# every other signal available here (a keystroke tap, a model high-water mark,
+# the user settings file) can only infer that a change was not the human's,
+# and a live dogfood showed the supervisor typing `/model` at a human because
+# of it. Same directory and same atomic-write contract as the goal signal.
+_MODEL_DOWNGRADE_SIGNAL_SUFFIX = ".model-downgrade"
+_MODEL_DOWNGRADE_SIGNAL_GLOB = f"*{_MODEL_DOWNGRADE_SIGNAL_SUFFIX}"
+_DOWNGRADE_FIELD_ORIGINAL_FAMILY = "original_family"
+_DOWNGRADE_FIELD_FALLBACK_FAMILY = "fallback_family"
+
+
+def load_model_downgrade_signal(
+    directory: Path,
+    *,
+    own_sessions: frozenset[str] | None = None,
+) -> tuple[str, str, str] | None:
+    """Return ``(session_id, original_family, fallback_family)``, or ``None``.
+
+    Deliberately NOT time-windowed, unlike the goal and model-switch signals.
+    The record's own ``scope`` is ``session``: the substitution lasts until the
+    session ends, so a signal written an hour ago is still true. Staleness is
+    handled where it belongs -- ``reap_stale_sidecars`` removes the file once
+    the session is long dead.
+
+    Fail-silent per file, mirroring ``load_model_switch_signal``: a malformed
+    or unreadable signal is simply no signal. A family the recorder could not
+    resolve comes back as ``None`` in the payload and is rejected here rather
+    than passed on -- acting on it would aim a restore at nothing.
+    """
+    if not directory.is_dir():
+        return None
+    for path in sorted(directory.glob(_MODEL_DOWNGRADE_SIGNAL_GLOB)):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        session_id = data.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            continue
+        if not _session_in_scope(session_id, own_sessions):
+            continue
+        original = _canonical_model_family(data.get(_DOWNGRADE_FIELD_ORIGINAL_FAMILY))
+        fallback = _canonical_model_family(data.get(_DOWNGRADE_FIELD_FALLBACK_FAMILY))
+        if original is None or fallback is None:
+            continue
+        return session_id, original, fallback
+    return None
+
+
 # Plan 00316 Task 1.3: subdirectory (under the daemon's untracked dir, the
 # same shared root ``sidecar_dir``'s parent resolves to) holding one small
 # marker file per session -- the last user-typed /model family + when. Read
@@ -2706,8 +2760,8 @@ def reap_stale_sidecars(
     """Delete dead context-sidecar / compaction-signal files older than the TTL.
 
     Reaps ``*.json`` sidecars, ``*.compacting`` signals, ``*.goal-intent``
-    signals, ``*.goal-clear`` triggers, ``*.standing-auth-intent`` signals and
-    ``*.model-switch-intent``
+    signals, ``*.goal-clear`` triggers, ``*.standing-auth-intent`` signals,
+    ``*.model-switch-intent`` signals and ``*.model-downgrade``
     signals whose FILE MTIME is older than ``ttl_seconds``. Mtime (not the JSON ``ts``) is used so a
     malformed, truncated, or foreign file is reaped uniformly without a parse --
     a dead file is a dead file. The single newest-mtime ``*.json`` is ALWAYS
@@ -2733,6 +2787,7 @@ def reap_stale_sidecars(
         + list(directory.glob(_GOAL_CLEAR_GLOB))
         + list(directory.glob(_STANDING_AUTH_SIGNAL_GLOB))
         + list(directory.glob(_MODEL_SWITCH_SIGNAL_GLOB))
+        + list(directory.glob(_MODEL_DOWNGRADE_SIGNAL_GLOB))
     ):
         try:
             mtime = path.stat().st_mtime
@@ -2928,6 +2983,14 @@ class CompactStateMachine:
         # suppressed what would otherwise have opened a downgrade episode --
         # surfaced to decision.log by decide_once via take_manual_model_note().
         self._manual_model_note: str | None = None
+        # Plan 00328 Task 2.2: `session:from:to` of a downgrade CLAUDE CODE
+        # RECORDED, read from the daemon's `.model-downgrade` signal. Nothing
+        # else opens a downgrade episode -- see `note_machine_downgrade`.
+        self._attributed_downgrade: str | None = None
+        # Consume-once note for a ranked drop that arrived with no such
+        # record, so a disabled/failing recorder is diagnosable from
+        # decision.log rather than looking like "no downgrade ever happened".
+        self._unattributed_downgrade_note: str | None = None
         # Plan 00316 Task 2.1: the last user-TYPED `/effort <level>` -- a
         # latch (not time-windowed): it wins over the per-model default/
         # coupled effort until the user manually changes model again or
@@ -3366,6 +3429,39 @@ class CompactStateMachine:
         self._manual_effort_active = level
         self._coupled_effort_pending = None
 
+    def note_machine_downgrade(self, *, session: str, from_family: str, to_family: str) -> None:
+        """Record a downgrade CLAUDE CODE attributed to itself (Plan 00328).
+
+        Fed from ``load_model_downgrade_signal``, which reads what the daemon's
+        ``model_downgrade_recorder`` copied out of the session transcript. This
+        is the ONLY thing that opens a downgrade episode: the auto-restore's
+        whole remit is the automated fable security downgrade, so requiring the
+        platform's own record of it means a human model change can never be
+        mistaken for one -- it emits no such record.
+
+        Idempotent. The recorder republishes the same fact for as long as the
+        session lives, and re-noting it must not disturb an episode already
+        open (or reopen one the human has since closed by switching models
+        themselves).
+        """
+        self._attributed_downgrade = f"{session}:{from_family}:{to_family}"
+
+    def _downgrade_is_attributed(self, session: str, from_family: str, to_family: str) -> bool:
+        """True when the platform recorded THIS session making THIS drop."""
+        return self._attributed_downgrade == f"{session}:{from_family}:{to_family}"
+
+    def take_unattributed_downgrade_note(self) -> str | None:
+        """Return, once, a note about a drop that arrived with no attribution.
+
+        Edge-triggered and consume-once, mirroring ``take_manual_model_note``.
+        Without it, a `model_downgrade_recorder` that is disabled or failing
+        looks exactly like a session that was never downgraded -- the restore
+        simply stops happening and nothing anywhere says why.
+        """
+        note = self._unattributed_downgrade_note
+        self._unattributed_downgrade_note = None
+        return note
+
     def _typed_model_matches(self, family: str, now_wall: float) -> bool:
         """True when ``family`` matches a recent user-typed ``/model <family>``."""
         return (
@@ -3542,13 +3638,29 @@ class CompactStateMachine:
             and _family_rank(prev_family) == _TOP_FAMILY_RANK
             and _family_rank(family) < _family_rank(prev_family)
         ):
-            if self._downgrade_episode is None:
-                # A fresh episode: remember where we fell FROM and when, for
-                # the delayed /model flip-back (Task 2b.3). A further drop
-                # inside an open episode keeps the original from/started.
-                self._downgrade_from_family = prev_family
-                self._downgrade_started_ts = now_wall
-            self._downgrade_episode = f"{session}:{family}"
+            # ATTRIBUTION (Plan 00328): the shape above is necessary but not
+            # sufficient. A human choosing opus from the picker produces it
+            # exactly, and acting on the shape alone is how the supervisor came
+            # to type `/model fable` at a human who had just chosen otherwise.
+            # Claude Code records its OWN downgrades; require that record.
+            #
+            # Only the EPISODE is withheld. The per-model effort floor below
+            # still applies -- the human picked this family, so its configured
+            # minimum is exactly what they should get.
+            if not self._downgrade_is_attributed(session, prev_family, family):
+                if self._unattributed_downgrade_note is None:
+                    self._unattributed_downgrade_note = (
+                        f"downgrade {prev_family} -> {family} is unattributed "
+                        "(no model_downgrade_recorder signal) — no restore"
+                    )
+            else:
+                if self._downgrade_episode is None:
+                    # A fresh episode: remember where we fell FROM and when, for
+                    # the delayed /model flip-back (Task 2b.3). A further drop
+                    # inside an open episode keeps the original from/started.
+                    self._downgrade_from_family = prev_family
+                    self._downgrade_started_ts = now_wall
+                self._downgrade_episode = f"{session}:{family}"
         if manual_match:
             # Latch consumed: the typed choice has been observed landing. A
             # LATER family change with nothing newly typed is a silent
@@ -3703,6 +3815,8 @@ class CompactStateMachine:
             "manual_model_note": self._manual_model_note,
             "manual_marker_pending": self._manual_marker_pending,
             "manual_effort_active": self._manual_effort_active,
+            "attributed_downgrade": self._attributed_downgrade,
+            "unattributed_downgrade_note": self._unattributed_downgrade_note,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -3819,6 +3933,12 @@ class CompactStateMachine:
         if "manual_effort_active" in state:
             raw = state["manual_effort_active"]
             self._manual_effort_active = None if raw is None else str(raw)
+        if "attributed_downgrade" in state:
+            raw = state["attributed_downgrade"]
+            self._attributed_downgrade = None if raw is None else str(raw)
+        if "unattributed_downgrade_note" in state:
+            raw = state["unattributed_downgrade_note"]
+            self._unattributed_downgrade_note = None if raw is None else str(raw)
 
     def evaluate(
         self,
@@ -4518,6 +4638,14 @@ def decide_once(
         machine.note_manual_model_selector(now_wall=facts.now_wall)
     if facts.human_effort_command:
         machine.note_manual_effort_command(facts.human_effort_command, now_wall=facts.now_wall)
+    # Plan 00328: adopt the platform's OWN record of a safety downgrade before
+    # the reading is tracked, because that is the tick on which the drop is
+    # first observed and the episode would open. Nothing else opens one.
+    attributed = load_model_downgrade_signal(sidecar_dir, own_sessions=own_sessions)
+    if attributed is not None:
+        machine.note_machine_downgrade(
+            session=attributed[0], from_family=attributed[1], to_family=attributed[2]
+        )
     # Plan 00278: track the foreground model family so a ranked downgrade
     # opens an effort-restore episode (fired further below, subordinate to
     # every other family). Synthetic/stale readings are ignored.
@@ -4624,6 +4752,14 @@ def decide_once(
     # overriding whatever generic NOOP reason was derived above.
     if manual_model_note is not None:
         noop_reason_log = f"{_NOOP_LOG_PREFIX}: {manual_model_note}"
+    # Plan 00328: a ranked drop arrived with no platform record attributing it
+    # to the safety classifier, so no episode opened. Said out loud because
+    # the alternative is indistinguishable from a session that was never
+    # downgraded -- which is exactly how a disabled or failing
+    # `model_downgrade_recorder` would hide.
+    unattributed_note = machine.take_unattributed_downgrade_note()
+    if unattributed_note is not None:
+        noop_reason_log = f"{_NOOP_LOG_PREFIX}: {unattributed_note}"
     # ── Goal injection (Plan 00269) ─────────────────────────────────────────
     # Strictly SUBORDINATE to compact/continue: the goal branch runs only when
     # this tick decided NOOP with no payload, no compaction signal is pending,

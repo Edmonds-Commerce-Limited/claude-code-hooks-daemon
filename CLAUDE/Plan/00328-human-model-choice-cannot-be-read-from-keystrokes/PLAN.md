@@ -85,26 +85,44 @@ currently flails.
   `model_refusal_fallback` record; 25 genuine records were found across three
   sessions here, all `claude-fable-5` → `claude-opus-4-8`, category `cyber`,
   scope `session`.
-- [ ] ⬜ **Task 2.2**: Arm the restore POSITIVELY off that record, in the
-  daemon. The status-line event does not receive `transcript_path`, so the
-  producer is a hook event that does (`PostToolUse`/`Stop`), scanning the
-  transcript tail from a recorded offset — not re-reading a file that reaches
-  ~100 MB. It publishes the fact on the file channel the supervisor already
-  reads. The supervisor must not read transcripts itself (Plan 00317's thin-host
-  audit).
+- [x] ✅ **Task 2.2**: The restore now arms POSITIVELY off that record.
+  Delivered as three pieces: `utils/model_fallback_records.py` (shared
+  recognition of both transcript shapes, bounded tail scan — the SessionStart
+  `model_fallback_detector` was refactored onto it so there is one parser);
+  the `model_downgrade_recorder` PostToolUse handler, silent and enabled by
+  default, publishing `<session>.model-downgrade` into the `context-sidecar`
+  directory both sides already share; and the supervisor's
+  `load_model_downgrade_signal` + `note_machine_downgrade`, which is now the
+  ONLY thing that opens a downgrade episode. A drop with no record is logged
+  as `unattributed` rather than acted on, so a disabled recorder is
+  diagnosable instead of silent. The supervisor reads no transcripts (Plan
+  00317's thin-host audit holds).
 - [ ] ⬜ **Task 2.3**: Retire the keystroke-derived model recognition — the
   typed-argument parser, the stem match, the picker wildcard and its session
   key and restore-steal guard. Positive arming makes them redundant rather
   than merely replaceable: they all answer "was that the human?", which stops
   being asked. Deleting them is the main prize; leaving both channels doubles
-  the surface.
+  the surface. **Two halves, in order**: the daemon's `downgrade_indicator`
+  status line READS `write_manual_model_marker` to suppress a false
+  "downgraded" badge, and runs the same high-water guess the supervisor has
+  just stopped running — migrate it onto the attributed signal FIRST, or
+  deleting the writer makes the status line lie in exactly this plan's case.
+  The `/effort` and `/compact` recognition in `HumanInputLine` stays; only the
+  model half goes.
 
 ## Success Criteria
 
-- [ ] The reproduction in REPRODUCTION.md, replayed, produces no `/model`
-  injection.
-- [ ] No `/compact` is ever injected as a consequence of a restore that failed.
-- [ ] Supervisor tests cover each of the four observed input shapes.
+- [x] The reproduction in REPRODUCTION.md, replayed, produces no `/model`
+  injection. Covered by
+  `test_attributed_downgrade.py::test_an_unattributed_drop_never_injects_a_model_restore`
+  — the same fable → opus observation the old rule armed on.
+- [x] No `/compact` is ever injected as a consequence of a restore that failed.
+  Delivered in Phase 1 (Task 1.3) and pinned by
+  `test_futile_model_restore.py::test_a_failed_restore_does_not_fire_the_flag_compact`.
+- [ ] Supervisor tests cover each of the four observed input shapes. Superseded
+  in substance by the attribution rule — none of the four shapes is read any
+  more — but left open until Task 2.3 deletes the parser, so the deletion is
+  what closes it rather than a claim made ahead of it.
 
 ## Delivery & Milestones
 
@@ -116,4 +134,5 @@ currently flails.
   no further. Delivered in `c4e22ac0`.
 - Milestone B — Phase 2: the restore arms on a positively-attributed automatic
   downgrade instead of on a guess about human intent, and the keystroke
-  machinery it replaces is deleted.
+  machinery it replaces is deleted. Attribution delivered (Task 2.2); the
+  deletion (Task 2.3) is what completes the milestone.

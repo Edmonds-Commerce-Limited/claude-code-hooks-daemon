@@ -530,6 +530,16 @@ class HandlerID:
         config_key="failsafe_cron_blockage_suppressor",
         display_name="failsafe-cron-blockage-suppressor",
     )
+    # Model-downgrade recorder (PostToolUse) -- Plan 00328 Task 2.2: publishes
+    # Claude Code's own automatic model-downgrade record as a per-session
+    # signal, so the ccy supervisor's auto-restore arms on a positively
+    # attributed machine action instead of guessing that a family change was
+    # not the human's.
+    MODEL_DOWNGRADE_RECORDER = HandlerIDMeta(
+        class_name="ModelDowngradeRecorderHandler",
+        config_key="model_downgrade_recorder",
+        display_name="model-downgrade-recorder",
+    )
 
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = HandlerIDMeta(

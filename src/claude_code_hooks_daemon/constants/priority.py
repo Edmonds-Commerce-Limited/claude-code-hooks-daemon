@@ -148,6 +148,11 @@ class Priority:
     # 00315, sits after goal_injection in the same PostToolUse advisory band)
     BUDGET_EXHAUSTION_DETECTOR = 32
 
+    # Model-downgrade recorder (Priority: 33 - PostToolUse sensor; Plan 00328,
+    # next to goal_injection because it is the same kind of thing: a silent
+    # writer of a per-session signal file the ccy supervisor consumes)
+    MODEL_DOWNGRADE_RECORDER = 33
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30

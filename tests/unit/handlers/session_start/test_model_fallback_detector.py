@@ -408,28 +408,9 @@ class TestGuidanceSurfaces:
             assert test.expected_decision == Decision.ALLOW
 
 
-class TestExtractFallbackBlock:
-    def test_non_dict_message_yields_none(self) -> None:
-        from claude_code_hooks_daemon.handlers.session_start.model_fallback_detector import (
-            _extract_fallback_block,
-        )
-
-        assert _extract_fallback_block({"message": "prose"}) is None
-
-    def test_non_list_content_yields_none(self) -> None:
-        from claude_code_hooks_daemon.handlers.session_start.model_fallback_detector import (
-            _extract_fallback_block,
-        )
-
-        assert _extract_fallback_block({"message": {"content": "text"}}) is None
-
-    def test_no_fallback_block_yields_none(self) -> None:
-        from claude_code_hooks_daemon.handlers.session_start.model_fallback_detector import (
-            _extract_fallback_block,
-        )
-
-        payload = {"message": {"content": [{"type": "text", "text": "hi"}]}}
-        assert _extract_fallback_block(payload) is None
+# The malformed-message branches these used to cover moved with the parser to
+# `utils/model_fallback_records.py`; see TestAMalformedMessageIsNotARecord in
+# tests/unit/utils/test_model_fallback_records.py.
 
 
 class TestEdgeBranches:

@@ -2869,6 +2869,40 @@ handlers:
 
 ---
 
+#### model_downgrade_recorder
+
+| Property       | Value                      |
+| -------------- | -------------------------- |
+| **Config key** | `model_downgrade_recorder` |
+| **Priority**   | 33                         |
+| **Type**       | Sensor (silent)            |
+| **Event**      | PostToolUse                |
+
+**Description:** When Anthropic's safety classifier substitutes your session's model (typically `fable` → `opus`), Claude Code records the substitution in the session transcript. This handler copies that record to `<daemon untracked dir>/context-sidecar/<session>.model-downgrade`, where the ccy supervisor reads it.
+
+**Why it exists:** the supervisor's model auto-restore has to tell a MACHINE downgrade from a model you chose yourself. Everything else it could look at — typed keystrokes, a model high-water mark, `~/.claude/settings.json` — can only infer that a change *was not* yours, and a live dogfood showed what that costs: the supervisor typed `/model fable` at a human who had just picked Opus, forced their effort to that model's floor, and queued a `/compact`. The transcript record attributes the downgrade to the platform POSITIVELY, so a model you pick yourself is never overridden — it produces no such record.
+
+**Turning it off disables the auto-restore.** Since the supervisor arms only on this signal, a session with no recorder never restores. That is the safe direction, and it is not silent: the supervisor writes `downgrade fable -> opus is unattributed (no model_downgrade_recorder signal) — no restore` to its decision log.
+
+It never blocks, never advises, and writes nothing at all for a session that was never downgraded. The signal names both models, both families, the refusal category and the scope — never any message content.
+
+| Option       | Values | Default   | Effect                                                                                              |
+| ------------ | ------ | --------- | --------------------------------------------------------------------------------------------------- |
+| `tail_bytes` | int    | `1048576` | Bounded transcript tail scanned per tool call (never the whole file, which reaches hundreds of MB). |
+
+**Config example:**
+
+```yaml
+handlers:
+  post_tool_use:
+    model_downgrade_recorder:
+      enabled: true
+      options:
+        tail_bytes: 1048576
+```
+
+---
+
 ## SessionStart Handlers
 
 These handlers run when a new Claude Code session begins. They provide environment information and configuration checks.

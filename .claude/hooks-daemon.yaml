@@ -661,6 +661,12 @@ handlers:
       enabled: true  # On by default (opt-out) everywhere; advisory-only, never blocks.
       priority: 32
 
+    model_downgrade_recorder:  # Dogfood: publish Claude Code's automatic model-downgrade record (Plan 00328)
+      enabled: true  # On by default (opt-out); silent, and writes nothing unless a downgrade happened.
+      priority: 33
+      # options:
+      #   tail_bytes: 1048576  # bounded transcript tail scanned per PostToolUse
+
   # SessionStart handlers (run when session starts)
   session_start:
     disclosure_reset_session_start:  # Reset per-agent rule-disclosure state on every SessionStart (Plan 00116 Phase 4)

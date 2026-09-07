@@ -443,6 +443,16 @@ handlers:
       #   excluded_tools: [Read, Grep, Glob, Edit, Write, NotebookEdit]  # tools whose response is never scanned (default shown)
       #   extra_patterns: []                   # additional regexes, additive to the built-in family
 
+    model_downgrade_recorder:  # Publish Claude Code's own automatic model-downgrade record (Plan 00328)
+      enabled: true   # On by default (opt-out); silent, and writes nothing unless a downgrade happened.
+      priority: 33
+      # Turning this OFF disables the ccy supervisor's model auto-restore: the
+      # restore arms only on this signal, so that a model YOU pick is never
+      # overridden. The supervisor says so in its decision log rather than
+      # going quiet.
+      # options:
+      #   tail_bytes: 1048576                  # bounded transcript tail scanned per tool call (default shown)
+
     validate_eslint_on_write:  # Runs ESLint after file writes
       enabled: false           # Enable for automatic ESLint validation
       priority: 20
