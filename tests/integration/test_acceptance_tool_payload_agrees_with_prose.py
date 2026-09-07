@@ -190,6 +190,36 @@ class TestDeclaredPayloadsAgreeWithTheirProse:
             "write into the working tree:\n" + "\n".join(stray)
         )
 
+    def test_every_declared_file_path_is_absolute_or_project_rooted(
+        self, playbook: list[dict]
+    ) -> None:
+        """A relative path never reaches the handler the test is about.
+
+        `absolute_path` denies a relative `file_path` ahead of almost every
+        other PreToolUse handler, so the probe reports on THAT guard instead:
+        a DENY test passes for the wrong reason and an ALLOW test fails
+        outright. Two `sensitive_content` payloads shipped this way and were
+        invisible to the scratch check above, because `untracked/scratch/...`
+        contains the marker whether or not it is rooted.
+        """
+        relative = []
+        for block in playbook:
+            payload = block.get("tool_payload")
+            if not payload:
+                continue
+            file_path = str((payload.get("tool_input") or {}).get(_FILE_PATH_KEY, ""))
+            if not file_path:
+                continue
+            if file_path.startswith("/") or file_path.startswith("$"):
+                continue
+            relative.append(f"#{block.get('test_number')} {block.get('handler_name')}: {file_path}")
+
+        assert not relative, (
+            "a declared payload names a relative file_path, which "
+            "`absolute_path` denies before the handler under test is "
+            "reached:\n" + "\n".join(relative)
+        )
+
     def test_no_declared_payload_hardcodes_an_absolute_repo_path(
         self, playbook: list[dict]
     ) -> None:

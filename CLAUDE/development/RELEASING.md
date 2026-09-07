@@ -538,14 +538,22 @@ end-to-end against a fresh fixture project. Together they catch:
 # banned pattern to warn against — no agent shell ever sets it; Plan 00192).
 source scripts/lib/resolve_venv.sh
 PY="$(resolve_venv_python /workspace)"
-"$PY" -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py tests/acceptance/test_skill_install_python_discovery.py -v
+"$PY" -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py tests/acceptance/test_skill_install_python_discovery.py tests/acceptance/test_playbook_harness.py -v
 # Expected: tests/acceptance/test_diagnostic_scripts.py — 12 passed
 #           tests/acceptance/test_install_sh_end_to_end.py — 2 passed
 #           tests/acceptance/test_tool_use_error_recovery.py — 1 passed, 1 skipped
 #           tests/acceptance/test_stop_hook_hard_block.py — 3 passed
 #           tests/acceptance/test_skill_install_python_discovery.py — 4 passed
-#           combined: 22 passed, 1 skipped, 0 failed
+#           tests/acceptance/test_playbook_harness.py — 5 passed
+#           combined: 27 passed, 1 skipped, 0 failed
 ```
+
+`test_playbook_harness.py` (Plan 00243) dispatches every playbook test that
+declares a `tool_payload`, through the production hook wrappers, and asserts
+both the decision AND the deny reason. It is what makes most of Step 12.4
+automatic — see there for the split between what it owns and what a human
+still runs. A skip here means no daemon was running, which under H-1 is itself
+an abort condition.
 
 **The one expected skip is `test_tool_use_error_recovery_branch_skipped_on_success`,
 and ONLY while a release is in flight.** This repository's own terminal
@@ -593,17 +601,57 @@ may not exist on the host.
 
 **Step 12.3**: Generate playbook: `./bin/hooks-daemon generate-playbook > /tmp/playbook.md`
 
-**Step 12.4**: Execute the playbook's tests, routing each by its
-`Requires Main Thread` field (see the Step 12 intro):
+**Step 12.4**: Execute what the harness does NOT own.
 
-- **BLOCKING tests**: Bash/Write/Edit with dangerous commands, verify hook denies
-- **ADVISORY tests**: Verify system-reminder shows context
-- **Skip**: Untriggerable lifecycle events (verified by daemon load + unit tests)
+Step 12.0 already ran `test_playbook_harness.py`, which dispatched every
+playbook block that declares a `tool_payload` on a dispatchable event
+(`PreToolUse`/`PostToolUse`) and asserted its decision and deny reason. **Do
+not re-run those by hand** — they passed deterministically or Step 12.0 aborted
+the release.
+
+What remains manual is exactly what the harness reports as SKIPPED, and it
+prints a reason for every one. Ask it rather than working from a list here:
+
+```bash
+"$PY" -c "
+import json, subprocess, sys
+from pathlib import Path
+from collections import Counter
+from claude_code_hooks_daemon.daemon.playbook_harness import split_playbook
+blocks = json.loads(subprocess.run(['./bin/hooks-daemon','generate-playbook','--format','json'],
+                                   capture_output=True, text=True).stdout)
+executable, skipped = split_playbook(blocks, Path.cwd())
+print(f'harness ran {len(executable)}; {len(skipped)} need a human:')
+for reason, n in Counter(s.reason for s in skipped).most_common():
+    print(f'  {n:4d}  {reason}')
+"
+```
+
+Route each remaining test by its `Requires Main Thread` field (see the Step 12
+intro). They fall into four kinds, and the difference matters because only the
+first is unfinished work rather than a permanent boundary:
+
+- **Prose with no payload** — a human performs the tool call the sentence
+  describes. Converting one to a payload moves it into the harness.
+- **Non-tool events** (`SessionStart`, `Status`, `UserPromptSubmit`, `Stop`,
+  …) — no tool call exists for a payload to carry, so these are OBSERVABLE in
+  session or VERIFIED_BY_LOAD. Permanent.
+- **Missing toolchain** — a language linter this machine does not have.
+  Installing it moves the test into the harness on the next run.
+- **`harness_cannot_produce`** — Claude Code rewrites the input before the
+  daemon sees it. Permanently unreachable by any harness; the behaviour stays
+  covered by unit and socket-level tests.
 
 The generated playbook is the single source of truth for which tests exist and
-how many — do not restate counts here. This section previously hardcoded
-"~65 blocking / ~24 advisory" while `generate-playbook` was emitting over 200
-tests.
+how many — do not restate counts here or above. This section previously
+hardcoded "~65 blocking / ~24 advisory" while `generate-playbook` was emitting
+over 200 tests.
+
+**Nothing is narrowed by this.** Every block is in exactly one of the two
+buckets — `split_playbook` is a total partition, asserted by
+`test_the_partition_loses_nothing` — so a test cannot fall between the
+automated route and the manual one. A test that stops being executable moves
+into the skip list with its reason attached; it never disappears.
 
 **Step 12.5**: All tests must pass. Failed = 0.
 

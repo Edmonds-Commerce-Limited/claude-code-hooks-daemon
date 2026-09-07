@@ -244,7 +244,13 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
                 tool_payload=probe,
                 description="Blocks time estimates in plan documents (plans focus on WHAT not WHEN)",
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"time estimate", r"BLOCKED"],
+                # Case class because the deny opens "Time estimates not
+                # allowed..." and these patterns are case-sensitive regexes,
+                # as `[Pp]lan` elsewhere already assumes. A human tester ticks
+                # the lowercase spelling off against the capitalised sentence
+                # without noticing; a harness cannot, and reports the handler
+                # as denying for the wrong reason.
+                expected_message_patterns=[r"[Tt]ime estimate", r"BLOCKED"],
                 safety_notes=(
                     "Inside the gitignored scratch directory - safe. Handler blocks "
                     "Write before file is created."

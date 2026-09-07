@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Two independent rules (Plan 00116, Decision B): the two sources have
 # genuinely different disclosure properties -- a public-pattern match is safe
@@ -580,17 +581,22 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         # pushed. Their `command` therefore stays an instruction telling a
         # human tester to supply the term at test time, where it reaches no
         # file. Do not "finish the job" by inventing a payload for them.
+        # `scratch_path` rather than a bare relative string: a relative
+        # `file_path` never reaches this handler at all, because
+        # `absolute_path` sits ahead of it and denies the write first. Both
+        # probes then report on a guard neither of them is about -- and the
+        # ALLOW one reports a DENY, which looks like a defect here.
         public_pattern_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": "untracked/scratch/sensitive-public-pattern-probe.txt",
+                "file_path": str(scratch_path("sensitive-public-pattern-probe.txt")),
                 "content": "deploy target: /var/www/vhosts/example",
             },
         )
         clean_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": "untracked/scratch/sensitive-clean-probe.txt",
+                "file_path": str(scratch_path("sensitive-clean-probe.txt")),
                 "content": "The quick brown fox jumps over the lazy dog.\n",
             },
         )

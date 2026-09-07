@@ -158,42 +158,45 @@ results, so they are prerequisites, not follow-ups.
 
 ### Phase 2: The harness
 
-- [ ] ⬜ **Task 2.1**: Promote the ad-hoc script to `tests/acceptance/`
-  - [ ] ⬜ **Two requirements measured under Task 1.2, not guessed.** A probe
-    dispatch that ignores either reports false failures on its FIRST run — the
-    exact outcome that gets a harness switched off:
-    1. **Expand `$CLAUDE_PROJECT_DIR`.** Payload paths are stored unexpanded so
-       the playbook stays portable (`scratch_path`, `project_dir_path`); a
-       harness that passes the literal string writes to a path that cannot exist
-    2. **PERFORM the write before dispatching a PostToolUse probe.**
-       `lint_on_edit._is_lintable` ends with `Path(file_path).exists()`, which is
-       load-bearing and documented as such. Skipping the write makes all 10
-       "lint - invalid code blocked" tests silently fail to match
-  - [ ] ⬜ `PROTOTYPE-playbook_exec.py` reads a playbook from
-    `untracked/playbook.md`, which is a generated artefact and is NOT kept in
-    the tree. Regenerate it first:
-    `./bin/hooks-daemon generate-playbook > untracked/playbook.md`. The real
-    harness should generate into a tmp path rather than depend on that file
-  - [ ] ⬜ Drive the PRODUCTION wrapper as a subprocess, as
-    `test_stop_hook_hard_block.py` does — never a direct socket call
-  - [ ] ⬜ Skip cleanly when no daemon is running, matching the sibling file
-- [ ] ⬜ **Task 2.2**: Report a non-executable test as SKIPPED with its reason
-  - [ ] ⬜ A false FAILED is worse than no coverage; this is the lesson from
-    Plan 00241 Phase 2's discarded 23-handler guard
-- [ ] ⬜ **Task 2.3**: Assert `expected_message_patterns` too, not only the
-  decision — a deny for the wrong reason is a passing test today
-- [ ] ⬜ **Task 2.4**: Isolate every probe's `cwd` from the repo root
-  - [ ] ⬜ Plan 00241 found two acceptance probes shadowed by `release_blocker`
-    (terminal, priority 8) whenever the tree is dirty — which is exactly the
-    state a release is in when Step 12 runs. Any new probe inherits that trap
+- [x] ✅ **Task 2.1**: `tests/acceptance/test_playbook_harness.py` dispatches 94
+  probes; the judgement calls live in `daemon/playbook_harness.py` (pure, 41
+  unit tests) so they are pinned without a daemon
+  - [x] ✅ Both measured requirements honoured: `$CLAUDE_PROJECT_DIR` expanded,
+    and the write PERFORMED before a PostToolUse dispatch
+  - [x] ✅ **Two more found by building it, both invisible until run.** A
+    PostToolUse event needs `tool_response` — without it the daemon rejects the
+    event before any handler runs, so every ALLOW probe passed on a validation
+    error. And a `session_id` fixed per test made `lsp_enforcement`
+    (`block_once`) pass on run one and fail on run two
+  - [x] ✅ Generates the playbook itself rather than reading
+    `untracked/playbook.md`, which nothing keeps current
+  - [x] ✅ Drives the production wrapper as a subprocess; skips when no daemon
+- [x] ✅ **Task 2.2**: 193 blocks skipped, each with a reason. Event type is
+  tested BEFORE payload presence, so a `SessionStart` block reads as "carries
+  no tool call" rather than as unfinished conversion work
+- [x] ✅ **Task 2.3**: Patterns asserted on a deny, which always carries its
+  reason. Deliberately NOT on an allow: advisory text varies by disclosure
+  ladder, and asserting it would invent failures
+- [x] ✅ **Task 2.4**: The event's `cwd` is an isolated `tmp_path` while the
+  subprocess runs at the repo root, as `test_stop_hook_hard_block.py` splits
+  them. Measured to change no verdict today — kept as defence against the
+  shadowing trap, which is silent because the shadowing handler can return the
+  same decision the probe expected
 
 ### Phase 3: Shrink the manual gate
 
-- [ ] ⬜ **Task 3.1**: Add the harness to RELEASING.md Step 12.0's pytest line
-- [ ] ⬜ **Task 3.2**: Rewrite Step 12.4 to cover only what remains manual,
-  and say plainly which tests the harness now owns
-- [ ] ⬜ **Task 3.3**: State the residual honestly — no silent narrowing. If a
-  test is neither automated nor manually executed, that must be visible
+- [x] ✅ **Task 3.1**: Added to Step 12.0's pytest line and expected counts
+- [x] ✅ **Task 3.2**: Step 12.4 is now "execute what the harness does NOT own",
+  and tells the reader to ASK the harness for that list rather than working
+  from a list in the doc — the same rule the section already carried after
+  hardcoding "~65 blocking / ~24 advisory" while the generator emitted 200+.
+  The snippet was run verbatim before shipping it
+- [x] ✅ **Task 3.3**: The residual is split into four kinds, distinguishing
+  the one that is unfinished work (prose with no payload) from the three that
+  are permanent boundaries. No narrowing is possible: `split_playbook` is a
+  total partition asserted by `test_the_partition_loses_nothing`, so a test
+  that stops being executable moves into the skip list with its reason rather
+  than disappearing
 
 ### Phase 4: The guard (DBF) — DELIVERED
 
@@ -261,11 +264,14 @@ point is an integration test wearing the wrong label.
 
 ## Success Criteria
 
-- [ ] Every playbook test is EITHER executed by the harness OR explicitly
+- [x] Every playbook test is EITHER executed by the harness OR explicitly
   marked as needing a human, with a reason
-- [ ] No test can silently fail to be covered by either route
-- [ ] The harness reports zero false failures on a clean tree
-- [ ] A wrong constructor keyword argument in a documented example fails QA
+- [x] No test can silently fail to be covered by either route
+- [x] The harness reports zero false failures on a clean tree — and on the
+  RE-runs, which is the harder half: the first version passed once, then
+  failed on `lsp_enforcement` because a `block_once` handler had already spent
+  that session's block
+- [x] A wrong constructor keyword argument in a documented example fails QA
 
 ## Risks & Mitigations
 

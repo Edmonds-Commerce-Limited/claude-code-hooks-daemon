@@ -204,6 +204,12 @@ class AnsibleLintStrategy:
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Ansible lint FAILED", r"broken\.yml"],
+                # The binary `_DEFAULT_LINT_COMMAND` actually invokes. Without
+                # this the strategy correctly declines to lint on a machine
+                # with no Ansible installed -- returning no decision at all --
+                # and the probe reports a handler failure that is really a
+                # missing toolchain. Every sibling lint strategy declares one.
+                required_tools=["ansible-playbook"],
                 safety_notes=(
                     "Inside the gitignored scratch directory - safe. "
                     "Creates a temporary broken playbook."
