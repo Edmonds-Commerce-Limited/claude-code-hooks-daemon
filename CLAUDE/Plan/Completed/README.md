@@ -8,6 +8,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 - [00301: monorepo single config hard cutover](00301-monorepo-single-config-hard-cutover/PLAN.md) - Complete at `aa914471`/`906eed45` + the archiving commit (owner-ruled hard cutover: alias hard-error, single test_dir anchoring, per-project `layout:` with DRY aggregation helpers, REPO/PROJECT `workspace_scope` taxonomy)
 
+- [00298: failsafe cron blockage cadence](00298-failsafe-cron-blockage-cadence/PLAN.md) - Complete (blocked-on-human marker suppresses failsafe-cron ticks at zero token cost; every failure path fails open)
+
 - [00297: supervisor drop anchor safety net](00297-supervisor-drop-anchor-safety-net/PLAN.md) - Complete at 4be5bbef (read-back-verified DROP ANCHOR forces Fable to low effort, with retry/escalation and ESC interrupt; observed firing live)
 
 - [00296: monorepo workspace resolver](00296-monorepo-workspace-resolver/PLAN.md) - Complete at 9 merge commits + the archiving commit (one shared `Workspace`/`ProjectRegistry` resolver, declared-or-root `projects:` config, five handlers routed through it, monorepo detector advisory, degradation surfaced in `check`)

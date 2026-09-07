@@ -1,6 +1,12 @@
 # Claude Code Hooks Daemon
-# Exclude the cloned daemon repository (users install it themselves)
-hooks-daemon/
+# Exclude the cloned daemon repository (users install it themselves).
+# ANCHORED. Without the leading slash git matches at every depth below
+# .claude/, so this also swallowed .claude/skills/hooks-daemon/ -- the
+# DEPLOYED skill tree, which is not the clone and is tracked like every other
+# deployed skill. A file git ignores cannot drift visibly: that is how a
+# deployed troubleshooting.md kept a path its source had already moved off
+# (Plan 00336 Task 4.3, diagnosed by Plan 00338).
+/hooks-daemon/
 
 # Backup directories created during installation
 hooks.bak/

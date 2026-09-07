@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00341: plan status header rots behind shipped work](00341-plan-status-header-rots-behind-shipped-work/PLAN.md) - Not Started (2 of 22 live "Not Started" plans have shipped work behind the header; `header-body-coherence` fires only when EVERY box is ticked, so a partially-delivered plan is invisible to it — 00110 has 8 ticked boxes and still reads Not Started)
 
-- [00338: deployed skill tree invisible to review](00338-deployed-skill-tree-invisible-to-review/PLAN.md) - Not Started (an unanchored `hooks-daemon/` in `.claude/.gitignore` also ignores the DEPLOYED `.claude/skills/hooks-daemon/` tree, so a skill drifting from its source is invisible to `git status` — which is exactly how Plan 00336 found one; the sibling `docs-qa` skill is tracked, so the treatment is inconsistent by accident)
-
 - [00337: stop hook, human-input marker and failsafe cron retune](00337-stop-hook-human-input-cron-retune/PLAN.md) - In Progress (Phase 1 done: 00314 verified against the code and archived, and the "shipped but reads Not Started" rot filed as Plan 00341. Task 2.3 found one arming phrase was already in the resident guidance and still went unused, so Phase 2 is re-scoped from "add the vocabulary" to "state the consequence")
 
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
@@ -184,6 +182,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00338: deployed skill tree invisible to review](Completed/00338-deployed-skill-tree-invisible-to-review/PLAN.md) - Complete at the archiving commit (the `.claude/.gitignore` pattern is anchored to `/hooks-daemon/`, so the 21-file deployed skill tree is tracked like its five siblings; both directions pinned by tests, and source-to-deployed drift is now a check rather than an accident)
+
 - [00314: failsafe cron suppression marker never arms](Completed/00314-failsafe-cron-suppression-marker-never-arms/PLAN.md) - Complete at `923fd583` + the archiving commit (marker-write outcome now recorded in stop-events.jsonl, so a non-arm is diagnosable from disk; 16 live `marker_written: true` records closed the dogfood task)
 
 - [00340: release review followups v3621](Completed/00340-release-review-followups-v3621/PLAN.md) - Complete at `6d0aad13`…`c9dfd4a8` + the archiving commit (the v3.62.1 review's non-blocking remainder: a real `/model` picker confirmed the supervisor's blind Enter persists a modal's default, so a resubmit now follows its own escape within 2s)
@@ -238,8 +238,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00299: multi plan goal support](Completed/00299-multi-plan-goal-support/PLAN.md) - Complete (goal ledger renders a combined goal line across every In-Progress plan; single-plan behaviour unchanged)
 
-- [00298: failsafe cron blockage cadence](Completed/00298-failsafe-cron-blockage-cadence/PLAN.md) - Complete (blocked-on-human marker suppresses failsafe-cron ticks at zero token cost; every failure path fails open)
-
 - [00305: v3580 release review followups](Completed/00305-v3580-release-review-followups/PLAN.md) - Complete at 5fd91df3 + 277a47bd (v3.58.0 deferred review findings: mock.patch removed from shipped CLI, {REPO_ROOT} placement validators, absolute secret-list degrade surfaced; playbook drift fixed incl. secret_file_guard bracket false positive and pipe_blocker quoted-argument producer attribution)
 
 - [00304: degraded mode fail open and visibility](Completed/00304-degraded-mode-fail-open-and-visibility/PLAN.md) - Complete at the merge + archiving commits (php-qa-ci canary blocker: null legacy key tolerated, destructive-git safety net while degraded, degradation visible on status/check/config-validate)
@@ -283,15 +281,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 341 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 278 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 279 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 46 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 45 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 46 + 278 + 7 = **331 folders**, spanning
+- **Folder-to-number reconciliation**: 45 + 279 + 7 = **331 folders**, spanning
   **328 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -307,7 +305,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00341 filing (46 root, 278 `Completed/`,
+- **Last reconciled at**: the Plan 00338 archival (45 root, 279 `Completed/`,
   7 `Cancelled/`, 328 distinct numbers against a counter of 341). Every figure
   above was recounted from disk rather than incremented. The index carries NO
   reconciliation history — it states current truth only; every earlier recount
