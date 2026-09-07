@@ -64,19 +64,32 @@ manual pass.
   - [ ] ⬜ Measured split of the 129: **79 shell command**, **18 shell-shaped
     but unusual** (`python3 -c "..."`, `[[ "..." == 0 ]]`), **10 `Write(...)`
     call syntax**, **22 English prose** (out of scope, see Non-Goals)
-  - [ ] ⬜ 14 of the shell blocks carry `setup_commands`/`cleanup_commands` and
-    16 are multi-line. Both need a decision in Task 1.2 before bulk conversion
+  - [ ] ⬜ 17 of the no-payload blocks carry
+    `setup_commands`/`cleanup_commands` (Task 1.2 settles those) and 16 are
+    multi-line, which needs confirming as harmless before bulk conversion
 
-- [ ] ⬜ **Task 1.2**: Decide how the harness treats `setup_commands` /
-  `cleanup_commands`, which no converted block has needed so far
+- [ ] ⬜ **Task 1.2**: RUN `setup_commands` / `cleanup_commands` in the harness
 
-  - [ ] ⬜ The harness currently makes the world match the event's claim for a
-    FILE (create for PostToolUse, remove for PreToolUse) and nothing else. A
-    block with setup commands is asserting a precondition the harness does not
-    establish, so it would probe a state that never existed
-  - [ ] ⬜ Options: run them, or SKIP those 14 with a reason naming the
-    unestablished precondition. Skipping is the safe default — Plan 00243's
-    rule is that a false FAILED is worse than no coverage
+  - [ ] ⬜ **Settled by reading all of them, not by judgement: RUN them**,
+    behind the containment guard the harness already has
+  - [ ] ⬜ **17, not the 14 first recorded** — that count was taken inside
+    Task 1.1's buggy shell-shaped filter, so it inherited the same mistake
+  - [ ] ⬜ Every one is scratch-scoped and trivial. **16 of 17 are
+    `mkdir -p <untracked/scratch/...>`** with an `rm -rf` cleanup; the other
+    two are `echo "test content" >` (#20 `sed_blocker`) and
+    `printf 'def broken(\n' >` (#149 `lint_on_edit`), also into scratch
+  - [ ] ⬜ The `mkdir` majority is nearly redundant already — `_run_probe`
+    calls `target.parent.mkdir(parents=True, exist_ok=True)` before a
+    PostToolUse write. That is the argument FOR running them: a small,
+    well-understood extension of what the harness already does to the tree,
+    not a new execution surface
+  - [ ] ⬜ Guard with `_is_removable_probe_target`'s rule (under
+    `untracked/scratch/` or the system temp dir) and SKIP with a reason if a
+    block ever carries setup reaching outside it, keeping the blast radius
+    identical to what the harness already permits itself
+  - [ ] ⬜ Skipping was the first instinct and was WRONG: it would have parked
+    17 convertible blocks over a precondition that turns out to be one `mkdir`
+    the harness performs anyway
 
 ### Phase 2: The 10 call-syntax blocks (the Task 1.2 miss)
 
