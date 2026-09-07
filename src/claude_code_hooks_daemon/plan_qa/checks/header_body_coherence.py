@@ -35,24 +35,57 @@ _REMEDIATION: Final[str] = (
     "claims that contradict the current header."
 )
 
+# Plan 00341: a SECOND remediation, not a reworded first one. Telling the
+# author of a half-delivered plan to mark it Complete would be actively wrong,
+# which is why "started" and "finished" cannot share one message.
+_STARTED_REMEDIATION: Final[str] = (
+    "Flip the status header to `**Status**: In Progress`, or untick the boxes "
+    "that contradict `Not Started`."
+)
+
 
 def _rule(context: CheckContext, target: DocumentTarget) -> list[Finding]:
     doc = target.doc
     if doc.status not in _NON_TERMINAL_STATUSES:
         return []
 
-    if doc.done_marker_count == 0 and not doc.tasks.all_checked:
-        return []
+    level = level_for_plan(context, target.plan_number)
 
-    return [
-        Finding(
-            check_id=CHECK_ID,
-            level=level_for_plan(context, target.plan_number),
-            message=(f"PLAN.md header claims `{doc.status.value}` but the body claims completion"),
-            remediation=_REMEDIATION,
-            path=target.rel_path,
-        )
-    ]
+    # Completion is checked FIRST because both branches match a `Not Started`
+    # plan with every box ticked, and "you finished this" is the more useful
+    # correction than "you started this".
+    if doc.done_marker_count > 0 or doc.tasks.all_checked:
+        return [
+            Finding(
+                check_id=CHECK_ID,
+                level=level,
+                message=(
+                    f"PLAN.md header claims `{doc.status.value}` but the body claims completion"
+                ),
+                remediation=_REMEDIATION,
+                path=target.rel_path,
+            )
+        ]
+
+    # Plan 00341: a single ticked box falsifies "not started" on its own, with
+    # no history needed to see it. The all-checked branch above cannot catch a
+    # partially-delivered plan, which is exactly how a status header rots
+    # behind shipped work.
+    if doc.status is PlanStatus.NOT_STARTED and doc.tasks.checked > 0:
+        return [
+            Finding(
+                check_id=CHECK_ID,
+                level=level,
+                message=(
+                    "PLAN.md header claims `Not Started` but the body shows work already "
+                    f"started ({doc.tasks.checked} of {doc.tasks.total_checkboxes} boxes ticked)"
+                ),
+                remediation=_STARTED_REMEDIATION,
+                path=target.rel_path,
+            )
+        ]
+
+    return []
 
 
 CHECKS: Final[DocumentRuleChecks] = document_rule_checks(

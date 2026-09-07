@@ -74,28 +74,36 @@ So: 2 confirmed in 22, and one near-miss that defines the false-positive shape.
 
 ### Phase 1: The cheap half — no git required
 
-- [ ] ⬜ **Task 1.1**: `Not Started` plus **any** ticked box is already
-  self-contradictory and needs no history to detect — a single tick falsifies
-  "not started". Extend `header_body_coherence.py` so `NOT_STARTED` also fires
-  on a non-zero checked count, keeping the existing all-checked branch for both
-  non-terminal statuses. Distinct message per branch: "started" and "finished"
-  are different corrections.
+- [x] ✅ **Task 1.1**: **Shipped.** `header_body_coherence.py` now has a second
+  branch: `NOT_STARTED` plus a non-zero checked count. Distinct message AND
+  distinct remediation per branch — telling the author of a half-delivered
+  plan to mark it `Complete` would be actively wrong, so the split is not
+  cosmetic.
 
-- [ ] ⬜ **Task 1.2**: TDD it. The regression that matters is the one this plan
-  was filed from — a plan with SOME boxes ticked and a `Not Started` header
-  must produce a finding, and the same document with `In Progress` must not.
+  Branch ORDER turned out to matter and is now pinned by a test: a
+  `Not Started` plan with EVERY box ticked satisfies both conditions, and "you
+  finished this" is the more useful correction than "you started this", so the
+  completion branch is evaluated first. One finding, never two.
 
-- [ ] ⬜ **Task 1.3**: Run the sweep and read the result before shipping. If
-  Task 1.1 lights up a large number of live plans at BLOCK level, the level for
-  the new branch is the decision to make — a check whose first run has to be
-  suppressed to get any work committed is worth nothing.
+- [x] ✅ **Task 1.2**: TDD'd, RED first. The matched pair the plan asked for —
+  `Not Started` + partially checked produces a finding, the same body with
+  `In Progress` does not. The second half is what stops the new branch firing
+  on every healthy in-flight plan, which is how this change would have gone
+  wrong.
 
-  Pre-measured against the live tree (45 plans): exactly **one** would be
-  flagged, 00110, the plan that motivated the check. So BLOCK is safe with no
-  staged rollout and no exemption list. This answers the level question in
-  advance but does not retire the task — the sweep still has to be run after
-  the change, because a rule reasoned about is not a rule observed. (Journal
-  17:40.)
+- [x] ✅ **Task 1.3**: **Observed, and it matched the pre-measurement.** The
+  sweep over the live tree produced exactly **one** BLOCK finding —
+  `00110-python-discovery-dry-consolidation`, "8 of 60 boxes ticked" — and no
+  other plan moved. BLOCK is therefore right with no staged rollout and no
+  exemption list.
+
+  Ran because a rule reasoned about is not a rule observed; the value here was
+  confirmation rather than surprise, which is a real result and not a wasted
+  step.
+
+  00110's header flipped to `In Progress` — the check's own remediation — and
+  its README index row updated to match. A second sweep is clean of BLOCK
+  findings. (Journal 21:30.)
 
 ### Phase 2: The delivery-time half — re-scoped, because it already half exists
 
