@@ -44,6 +44,21 @@ deferred: N1, N2, N5.
   build the pattern from it, or correct the comment if a fixed pattern is
   intentional.
 
+  **Prerequisite, verified 2026-09-07 and larger than "read the config".**
+  The registry injects `track_plans_in_project` only into planning-tagged
+  handlers — `if plan_workflow is not None and "planning" in instance.tags`
+  (`handlers/registry.py`) — and `DispatchDeclarationHandler` is tagged
+  WORKFLOW / ADVISORY / NON_TERMINAL / BLOCKING, with no PLANNING. So the
+  configured directory is not reachable from this handler as it stands:
+  either add the tag (and check what else keys on tags) or resolve the plan
+  directory another way.
+
+  Not unique to this task. Plan 00337 Task 4.5 hits the identical obstacle in
+  `failsafe_cron_blockage_suppressor`, which also needs the plan directory and
+  also lacks the tag. Two handlers wanting the same injected value suggests
+  the answer is one decision about how a non-planning handler reaches plan
+  config, not two local workarounds.
+
 - [ ] ⬜ **Task 1.2 (N2)**: the glob heuristics in
   `src/claude_code_hooks_daemon/utils/secret_file_matching.py::find_protected_mention`
   are now heavily special-cased (~40+ lines of comment across four gates —
