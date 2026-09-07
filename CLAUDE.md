@@ -309,6 +309,17 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 
 **On Stop hook re-entry (the hook fires again after a prior block)**: your next response is treated like any other — it must either prefix with `STOPPING BECAUSE:` or continue the work. Re-entry does not exempt you from the explanation rule.
 
+**If you are stopping because you are blocked ONLY on the human, say so in one of these exact shapes — it turns the failsafe cron off**:
+
+- `blocked only on human input`
+- `blocked only on the owner's input`
+- `need user input`
+- `waiting on the user's decision`
+
+Any of them in your `STOPPING BECAUSE:` line records a marker that makes the daemon drop the next hourly failsafe-cron tick before it reaches you, at zero token cost. Without one, every tick costs a full turn to read and answer with nothing. The next real user message clears the marker and hourly ticks resume; it also expires on its own, so a mistake here costs you at most a day of ticks.
+
+**Only when it is the ONLY thing blocking you.** A stop that merely mentions waiting on someone while other work remains must not use these shapes — that would silence a tick you could have used. If there is work you could still do, do it instead of stopping.
+
 ## All other enforced rules
 
 <!-- handler: prevent-destructive-git -->
