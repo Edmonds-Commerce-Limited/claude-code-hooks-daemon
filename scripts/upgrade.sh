@@ -306,6 +306,27 @@ if [ -f "$DAEMON_DIR/pyproject.toml" ]; then
     fi
 fi
 
+# Step 3c: Capture the OLD default config before the checkout overwrites it.
+#
+# Same reason as FROM_VERSION above, and the same deadline. Layer 2's config
+# preservation diffs the user's config against "the default the previous
+# version shipped" to decide which values are deliberate customisations and
+# which are just the old defaults. Because this script checks the target out
+# BEFORE invoking Layer 2, the example config Layer 2 finds on disk is the NEW
+# one -- so every default the user had merely accepted looks like a deliberate
+# choice, is preserved, and the new default never reaches them. Silent, and
+# indistinguishable from correctly honouring a customisation.
+#
+# Preserved outside DAEMON_DIR because the checkout below is a `reset --hard`
+# for a normal install, which would discard a copy kept inside the tree.
+OLD_DEFAULT_EXAMPLE="$DAEMON_DIR/.claude/hooks-daemon.yaml.example"
+if [ -f "$OLD_DEFAULT_EXAMPLE" ]; then
+    HOOKS_DAEMON_OLD_DEFAULT_CONFIG="$(mktemp "${TMPDIR:-/tmp}/hooks_daemon_from_default_XXXXXX.yaml")"
+    cp "$OLD_DEFAULT_EXAMPLE" "$HOOKS_DAEMON_OLD_DEFAULT_CONFIG"
+    export HOOKS_DAEMON_OLD_DEFAULT_CONFIG
+    _ok "Preserved pre-upgrade config baseline for diffing"
+fi
+
 # Step 4: Best-effort daemon stop (before checkout)
 # Plan 00100 Task 2.5: PID-kill only. The previous implementation resolved a
 # venv python just to invoke `daemon.cli stop`, reintroducing the very

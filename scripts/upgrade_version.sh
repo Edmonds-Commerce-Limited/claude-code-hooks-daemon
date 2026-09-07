@@ -545,13 +545,13 @@ sleep 1
 
 log_step "5" "Preserving config customizations"
 
-# Save the old example config before checkout (for diff baseline)
-OLD_DEFAULT_CONFIG=""
-if [ -f "$EXAMPLE_CONFIG" ]; then
-    OLD_DEFAULT_CONFIG=$(mktemp /tmp/hooks_daemon_old_default_XXXXXX.yaml)
-    cp "$EXAMPLE_CONFIG" "$OLD_DEFAULT_CONFIG"
-    print_verbose "Saved old default config for diff baseline"
-fi
+# Resolve the diff baseline: the default config shipped by the version being
+# upgraded FROM. Invoked via Layer 1 the checkout has already happened, so
+# $EXAMPLE_CONFIG here is the NEW default and the real baseline arrives in
+# HOOKS_DAEMON_OLD_DEFAULT_CONFIG; invoked directly, Step 5 still pre-dates
+# Step 6 and the on-disk example is correct. resolve_old_default_config picks
+# whichever applies -- see its contract in install/config_preserve.sh.
+OLD_DEFAULT_CONFIG=$(resolve_old_default_config "$EXAMPLE_CONFIG")
 
 # Backup current config
 CONFIG_BACKUP=""

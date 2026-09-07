@@ -69,6 +69,65 @@ backup_config() {
 }
 
 #
+# resolve_old_default_config() - Resolve the diff baseline: the default config
+# shipped by the version being upgraded FROM.
+#
+# The baseline decides whether a user's value is a CUSTOMISATION or merely the
+# previous default they never touched, and those two are identical at the data
+# level -- only the baseline separates them. Get it wrong in the "new default"
+# direction and every accepted default looks deliberate, so it is preserved and
+# the new default never reaches the user. That failure is silent and looks
+# exactly like honouring a customisation.
+#
+# Two callers, two situations:
+#
+#   - Via Layer 1 (upgrade.sh, the documented path): Layer 1 has ALREADY
+#     checked out the target before invoking Layer 2, so the example config on
+#     disk here is the NEW default. Layer 1 therefore preserves the old one
+#     before its checkout and hands the path over in
+#     HOOKS_DAEMON_OLD_DEFAULT_CONFIG.
+#   - Direct Layer 2 invocation: Step 5 genuinely does run before Step 6, so
+#     the on-disk example IS the old default and the fallback is correct.
+#
+# Fails open: a stale or unreadable handover falls back to the on-disk example
+# rather than losing the baseline entirely.
+#
+# Args:
+#   $1 - example_config: Path to the on-disk .claude/hooks-daemon.yaml.example
+#
+# Returns:
+#   Prints the baseline path to stdout (empty when no baseline exists at all --
+#   a fresh install has no previous example, which is not an error).
+#   Exit code 0.
+#
+resolve_old_default_config() {
+    local example_config="${1:-}"
+    local handover="${HOOKS_DAEMON_OLD_DEFAULT_CONFIG:-}"
+
+    if [ -n "$handover" ] && [ -f "$handover" ]; then
+        print_verbose "Using pre-checkout diff baseline: $handover" >&2
+        echo "$handover"
+        return 0
+    fi
+
+    if [ -n "$handover" ]; then
+        print_warning "Handed-over diff baseline is missing: $handover" >&2
+        print_info "Falling back to the on-disk example config." >&2
+    fi
+
+    if [ -n "$example_config" ] && [ -f "$example_config" ]; then
+        local baseline
+        baseline=$(mktemp "${TMPDIR:-/tmp}/hooks_daemon_old_default_XXXXXX.yaml")
+        cp "$example_config" "$baseline"
+        echo "$baseline"
+        return 0
+    fi
+
+    echo ""
+    return 0
+}
+
+#
 # extract_custom_config() - Extract user customizations from config
 #
 # Calls the Python config-diff CLI to compare user config against

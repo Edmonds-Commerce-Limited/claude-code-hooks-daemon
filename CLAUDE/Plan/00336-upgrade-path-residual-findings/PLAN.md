@@ -52,14 +52,12 @@ a documented bootstrap command that this project's own new handler denies.
 
 ### Phase 1: The config-preservation baseline (highest value)
 
-- [ ] ⬜ **Task 1.1**: Confirm the finding. `scripts/upgrade.sh` checks out the
-  target at its Step 7 and only then invokes Layer 2; it never copies
-  `.claude/hooks-daemon.yaml.example` beforehand. Layer 2's Step 5 then
-  copies `$EXAMPLE_CONFIG` into `$OLD_DEFAULT_CONFIG` under the comment
-  "Save the old example config before checkout (for diff baseline)" — but
-  on this path the checkout already happened, so it is copying the NEW
-  default. Write a failing test that pins the intended semantics before
-  changing anything.
+- [x] ✅ **Task 1.1**: Confirm the finding and pin it with a failing test.
+  **Done.** `scripts/upgrade.sh` checks the target out and only then invokes
+  Layer 2, never copying `.claude/hooks-daemon.yaml.example` beforehand, so
+  Layer 2's Step 5 copies the NEW default under a comment claiming it is the
+  old one. `tests/integration/test_upgrade_old_default_baseline.py` pins the
+  contract: 7 of its 9 tests were RED before the fix.
 - [x] ✅ **Task 1.2**: Establish the consequence empirically rather than by
   reasoning. **Done — measured, and it is real.** Driving `ConfigDiffer` and
   `ConfigMerger` directly with a default that changed between versions
@@ -69,10 +67,18 @@ a documented bootstrap command that this project's own new handler denies.
   `custom_daemon_settings = {'log_level': 'INFO'}` and the merge yields
   `INFO`. A changed default does not reach a user who had accepted the
   previous one. Evidence in the journal.
-- [ ] ⬜ **Task 1.3**: Fix by having Layer 1 preserve the pre-checkout example
-  config and pass its path to Layer 2, or by having Layer 2 read the old
-  default from git (`git show <previous-ref>:.claude/hooks-daemon.yaml.example`).
-  Prefer whichever keeps the two entry points agreeing.
+- [x] ✅ **Task 1.3**: Fix it. **Done.** Layer 1 preserves the example config at
+  a new Step 3c — alongside the existing `FROM_VERSION` capture, which already
+  exists for exactly this deadline — and exports
+  `HOOKS_DAEMON_OLD_DEFAULT_CONFIG`. Layer 2's Step 5 now calls a new
+  `resolve_old_default_config()` in `install/config_preserve.sh`, which prefers
+  the handover and otherwise falls back to the on-disk example, so BOTH entry
+  points end up with a true old-version baseline and the direct-invocation path
+  is unchanged. The copy is kept outside `DAEMON_DIR` because Layer 1's
+  checkout is a `reset --hard` for a normal install and would discard it.
+  Rejected the `git show <previous-ref>:...` alternative: on the Layer 1 path
+  Layer 2 no longer knows the previous ref, so it would need the same handover
+  anyway — one mechanism beats two.
 
 ### Phase 2: Layer 2 post-checkout recovery shape
 
