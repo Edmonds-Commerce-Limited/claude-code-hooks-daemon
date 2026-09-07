@@ -671,8 +671,7 @@ class AutoContinueStopHandler(StopHandlerBase):
                 text = self._message_text(current_msg)
                 if self._contains_confirmation_pattern(text) and "?" in text:
                     logger.info(
-                        "Rhetorical continue question inside STOPPING BECAUSE: stop"
-                        " - hard-blocking"
+                        "Rhetorical continue question inside STOPPING BECAUSE: stop - hard-blocking"
                     )
                     reason = self._render_branch_message(
                         RuleID.STOP_TAUTOLOGICAL_QUESTION, hook_input

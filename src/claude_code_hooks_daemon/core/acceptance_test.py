@@ -6,10 +6,11 @@ that handlers must implement.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core.hook_result import Decision
 
 
@@ -179,6 +180,28 @@ class AcceptanceTest:
             changes. The handler keeps its real test_type and expected_decision:
             the behaviour is real, only the route to triggering it is gone, so
             the deny path must stay covered by unit and/or socket-level tests.
+        dispatch_as_bash: Declares that ``command`` is a literal shell string
+            and that the Bash tool receives it verbatim, so the payload is
+            DERIVED from it rather than written out a second time.
+
+            The prose tests run this derivation the other way -- they state a
+            payload and render the sentence from it -- because five English
+            grammars had grown up around one Write payload. A shell test has
+            the opposite problem: the bare command is already the best thing a
+            human can be handed, and ``as_instruction()`` would render
+            ``Use the Bash tool with command='echo "git reset --hard ..."'``,
+            strictly harder to paste. Deriving the payload keeps ONE copy, so
+            the command a human runs and the command the harness dispatches
+            cannot drift apart.
+
+            This is a per-site DECLARATION, not a classifier. Nothing here
+            inspects the command's shape to decide whether it is shell -- that
+            inference is what Plan 00243 removed, and it has since been
+            measured wrong four times over on this playbook's own blocks
+            (``Write(`` call syntax, a setup-command count, and two English
+            sentences that begin ``WebFetch``/``With``). A block whose command
+            merely LOOKS like shell but drives another tool must say so with
+            an explicit ``tool_payload``, which is why declaring both raises.
     """
 
     title: str
@@ -196,8 +219,15 @@ class AcceptanceTest:
     requires_main_thread: bool = False
     harness_cannot_produce: str | None = None
     tool_payload: ToolPayload | None = None
+    #: An `InitVar`, not a field: it is consumed at construction to produce
+    #: `tool_payload` and nothing reads it afterwards. A stored field would
+    #: also have to be serialised -- `test_playbook_generator_json_field_
+    #: coverage` requires every field to reach the JSON -- and emitting it
+    #: would invite a harness to read the FLAG instead of the payload, which
+    #: is the derived-versus-declared split this collapses.
+    dispatch_as_bash: InitVar[bool] = False
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, dispatch_as_bash: bool) -> None:
         """Validate fields after initialization."""
         if not self.title or not self.title.strip():
             raise ValueError("title must be a non-empty string")
@@ -205,6 +235,8 @@ class AcceptanceTest:
             raise ValueError("command must be a non-empty string")
         if not self.description or not self.description.strip():
             raise ValueError("description must be a non-empty string")
+        if dispatch_as_bash:
+            self._derive_bash_payload()
         if self.harness_cannot_produce and self.tool_payload is not None:
             # The two say opposite things about the same test: one that the
             # input cannot be produced at all, the other exactly how to
@@ -214,3 +246,22 @@ class AcceptanceTest:
                 "harness_cannot_produce and tool_payload are mutually exclusive: "
                 "a test whose input cannot be produced has no payload to declare"
             )
+
+    def _derive_bash_payload(self) -> None:
+        """Build the Bash payload from `command`, refusing any rival claim."""
+        if self.tool_payload is not None:
+            # Two payloads, and nothing says which one the harness runs. The
+            # blocks that carry a shell-shaped command but match a DIFFERENT
+            # tool are exactly why this cannot silently pick a winner.
+            raise ValueError(
+                "dispatch_as_bash and tool_payload are mutually exclusive: "
+                "the command is either the Bash payload or another tool's, not both"
+            )
+        if self.harness_cannot_produce:
+            raise ValueError(
+                "dispatch_as_bash and harness_cannot_produce are mutually exclusive: "
+                "a test whose input cannot be produced has no payload to derive"
+            )
+        self.tool_payload = ToolPayload(
+            tool_name=ToolName.BASH, tool_input={"command": self.command}
+        )

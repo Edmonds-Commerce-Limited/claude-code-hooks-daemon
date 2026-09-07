@@ -158,8 +158,7 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
                 compiled.append(re.compile(entry))
             except re.error as exc:
                 raise ValueError(
-                    f"bash_safe_mode exempt_patterns entry {entry!r} is not a "
-                    f"valid regex: {exc}."
+                    f"bash_safe_mode exempt_patterns entry {entry!r} is not a valid regex: {exc}."
                 ) from exc
         self.__exempt_patterns = compiled
 
@@ -363,6 +362,7 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Bash safe mode - sequenced statements without a prelude",
                 command="git status --short\ngit log --oneline -n 1",
+                dispatch_as_bash=True,
                 description=(
                     "Two newline-sequenced read-only statements with no `set` "
                     "prelude. Advisory by default: the command runs and the "
@@ -378,6 +378,7 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Bash safe mode - a declared prelude is silent",
                 command="set -euo pipefail\ngit status --short\ngit log --oneline -n 1",
+                dispatch_as_bash=True,
                 description="The prelude satisfies the default require list.",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

@@ -85,8 +85,7 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
         self._rule = Rule(
             rule_id=RuleID.CHMOD_WORLD_WRITABLE,
             blocked="`chmod 777`/`chmod a+w`/`chmod o+w`",
-            why="Allows anyone to read, write, and execute, bypassing all file "
-            "permission security",
+            why="Allows anyone to read, write, and execute, bypassing all file permission security",
             fix="Use least-privilege permissions instead (755/644/600)",
             verbose=_DANGEROUS_PERMISSIONS_VERBOSE_CONTENT,
         )
@@ -182,6 +181,7 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="chmod 777",
                 command='echo "chmod 777 /tmp/test_file.txt"',
+                dispatch_as_bash=True,
                 description="Blocks chmod 777 (security vulnerability)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -197,6 +197,7 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="chmod a+rwx",
                 command='echo "chmod a+rwx /tmp/test_script.sh"',
+                dispatch_as_bash=True,
                 description="Blocks chmod a+rwx (equivalent to 777)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

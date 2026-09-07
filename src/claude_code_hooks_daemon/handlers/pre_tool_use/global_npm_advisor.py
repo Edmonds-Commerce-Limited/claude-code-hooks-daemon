@@ -132,6 +132,7 @@ Proceeding with global install..."""
             AcceptanceTest(
                 title="Global npm install warning",
                 command='echo "npm install -g package"',
+                dispatch_as_bash=True,
                 description="Warns about global npm installs (advisory)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"global.*npm", r"npx"],

@@ -158,6 +158,7 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="daemon location guard blocks cd into hooks-daemon",
                 command='echo "cd .claude/hooks-daemon"',
+                dispatch_as_bash=True,
                 description=(
                     "Verify handler blocks attempts to cd into .claude/hooks-daemon. "
                     "Should deny with guidance on running daemon commands from project root."

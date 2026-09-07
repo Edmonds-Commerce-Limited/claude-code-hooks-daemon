@@ -844,6 +844,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
                     "PLAN.md '**Status**:' line to 'In Progress', then verify a "
                     "system-reminder advisory names the first plan as displaced."
                 ),
+                dispatch_as_bash=True,
                 description=(
                     "Plan 00276: emitting a goal while another ledgered plan is "
                     "still In Progress marks the older ledger entry displaced and "
@@ -852,8 +853,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"GOAL DISPLACED", r"\d{5}"],
                 safety_notes=(
-                    "Observe-only: writes goal-ledger.json under untracked/; "
-                    "never blocks the edit."
+                    "Observe-only: writes goal-ledger.json under untracked/; never blocks the edit."
                 ),
                 test_type=TestType.CONTEXT,
                 recommended_model=RecommendedModel.SONNET,

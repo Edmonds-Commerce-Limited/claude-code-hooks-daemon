@@ -72,9 +72,9 @@ class DaemonStatsHandler(StatusLineHandlerBase):
             if uptime < 60:
                 uptime_str = f"{uptime:.1f}s"
             elif uptime < 3600:
-                uptime_str = f"{uptime/60:.1f}m"
+                uptime_str = f"{uptime / 60:.1f}m"
             else:
-                uptime_str = f"{uptime/3600:.1f}h"
+                uptime_str = f"{uptime / 3600:.1f}h"
 
             # Memory usage (if psutil is available)
             mem_str = ""

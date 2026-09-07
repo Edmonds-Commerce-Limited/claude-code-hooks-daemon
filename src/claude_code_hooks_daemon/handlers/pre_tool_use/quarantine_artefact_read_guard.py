@@ -345,6 +345,7 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="quarantine_artefact_read_guard - blocks Bash cat of a DETAIL artefact",
                 command="cat /tmp/topic-opus-security-DETAIL.md",
+                dispatch_as_bash=True,
                 description="A content-revealing Bash mention of a DETAIL path is denied.",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[rf"BLOCKED \[{RuleID.QUARANTINE_ARTEFACT_READ}\]"],

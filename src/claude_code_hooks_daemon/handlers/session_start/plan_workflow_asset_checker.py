@@ -105,7 +105,7 @@ class PlanWorkflowAssetCheckerHandler(SessionStartHandlerBase):
         journalling_doc = plan_dir.parent / PLAN_JOURNALLING_DOC_NAME
         if not journalling_doc.exists():
             missing.append(
-                f"{plan_dir.parent.name}/{PLAN_JOURNALLING_DOC_NAME} " "(journalling reference doc)"
+                f"{plan_dir.parent.name}/{PLAN_JOURNALLING_DOC_NAME} (journalling reference doc)"
             )
         # Plan 00216: both mkplan.bash and plan_number_helper guidance tell
         # agents to dispatch this scout before filing, so an absent definition

@@ -568,6 +568,7 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Block broken plan number discovery",
                 command="ls -d CLAUDE/Plan/0* 2>/dev/null | sort -V | tail -1",
+                dispatch_as_bash=True,
                 description="Blocks broken bash commands that try to discover plan numbers and provides correct next number",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"plan number"],
@@ -579,6 +580,7 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Block hand-creating a plan folder with mkdir",
                 command="mkdir -p CLAUDE/Plan/99999-acceptance-probe",
+                dispatch_as_bash=True,
                 description=(
                     "`mkdir` claims a plan number without recording it, so a "
                     "concurrent agent reading the git counter is handed the same "
@@ -598,6 +600,7 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Allow mkdir of a plan archive directory",
                 command="mkdir -p CLAUDE/Plan/Completed",
+                dispatch_as_bash=True,
                 description=(
                     "The creation block is narrow: an archive directory is not a "
                     "numbered plan folder and must not be denied."
@@ -612,6 +615,7 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Allow counting plans with wc (not number discovery)",
                 command="find CLAUDE/Plan -maxdepth 1 -type d -name '[0-9]*' | wc -l",
+                dispatch_as_bash=True,
                 description=(
                     "A count of how many plans exist (e.g. for a statistics "
                     "line) is not an attempt to discover the NEXT plan number "

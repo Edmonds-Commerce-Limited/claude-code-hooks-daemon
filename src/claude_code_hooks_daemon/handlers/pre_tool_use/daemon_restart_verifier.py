@@ -116,6 +116,7 @@ class DaemonRestartVerifierHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Daemon restart verification advisory",
                 command="echo \"git commit -m 'test WIP'\"",
+                dispatch_as_bash=True,
                 description="Suggests verifying daemon restart before git commits (advisory only)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"RECOMMENDED", r"restart"],

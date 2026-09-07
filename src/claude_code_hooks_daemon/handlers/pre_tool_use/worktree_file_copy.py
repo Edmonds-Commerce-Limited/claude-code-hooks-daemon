@@ -170,6 +170,7 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="cp from worktree to main repo",
                 command='echo "cp untracked/worktrees/feature-branch/src/file.py src/"',
+                dispatch_as_bash=True,
                 description="Blocks copying files from worktree to main repo (breaks isolation)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -185,10 +186,11 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="rsync from worktree to main repo",
                 command='echo "rsync -av untracked/worktrees/feature/src/ src/"',
+                dispatch_as_bash=True,
                 description="Blocks rsync from worktree to main repo",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"worktree to main repo",
+                    r"between a worktree and the main repo",
                     r"git history",
                 ],
                 safety_notes="Uses echo - safe to test",

@@ -165,6 +165,7 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="gh issue view without --comments is blocked",
                 command='echo "gh issue view 123"',
+                dispatch_as_bash=True,
                 description="Blocks gh issue view without --comments flag",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"--comments"],

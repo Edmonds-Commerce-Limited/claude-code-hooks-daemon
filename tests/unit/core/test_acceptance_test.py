@@ -366,6 +366,71 @@ class TestToolPayloadField:
                 tool_payload=ToolPayload(tool_name=ToolName.WRITE, tool_input={"file_path": "/a"}),
             )
 
+    def test_dispatch_as_bash_derives_the_payload_from_the_command(self):
+        """A shell test states its command ONCE (Plan 00345 Task 3.1).
+
+        For a prose test the sentence is derived from the payload. A shell
+        test needs the opposite direction: the bare command is already the
+        best thing a human can be handed, so `as_instruction()` would only
+        make it harder to paste. Deriving the payload FROM the command keeps
+        one copy, which is what stops the two disagreeing.
+        """
+        command = 'echo "git reset --hard SAFE_TEST"'
+        test = AcceptanceTest(
+            title="git reset --hard",
+            command=command,
+            description="Blocks it",
+            expected_decision=Decision.DENY,
+            expected_message_patterns=[r"destroys"],
+            dispatch_as_bash=True,
+        )
+        assert test.tool_payload is not None
+        assert test.tool_payload.tool_name == ToolName.BASH
+        assert test.tool_payload.tool_input == {"command": command}
+
+    def test_the_command_a_human_is_shown_is_left_byte_identical(self):
+        """The human route must not get worse in exchange for the machine one."""
+        command = "grep -r 'x' /"
+        test = AcceptanceTest(
+            title="probe",
+            command=command,
+            description="Blocks it",
+            expected_decision=Decision.DENY,
+            expected_message_patterns=[r"x"],
+            dispatch_as_bash=True,
+        )
+        assert test.command == command
+
+    def test_dispatch_as_bash_and_an_explicit_payload_are_mutually_exclusive(self):
+        """Two payloads for one probe, and nothing says which the harness runs.
+
+        The five blocks that carry a shell-shaped command but match a DIFFERENT
+        tool are exactly why this must raise rather than pick a winner.
+        """
+        with pytest.raises(ValueError):
+            AcceptanceTest(
+                title="Contradiction",
+                command="npx eslint .",
+                description="Cannot be both",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[],
+                dispatch_as_bash=True,
+                tool_payload=ToolPayload(tool_name=ToolName.WRITE, tool_input={"file_path": "/a"}),
+            )
+
+    def test_dispatch_as_bash_and_a_skip_reason_are_mutually_exclusive(self):
+        """Same contradiction as the explicit-payload case, one step removed."""
+        with pytest.raises(ValueError):
+            AcceptanceTest(
+                title="Contradiction",
+                command='echo "x"',
+                description="Cannot be both",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[],
+                dispatch_as_bash=True,
+                harness_cannot_produce="Claude Code rewrites the path",
+            )
+
     def test_prose_command_is_kept_alongside_the_payload(self):
         """The playbook is still read by a human (Task 1.4).
 

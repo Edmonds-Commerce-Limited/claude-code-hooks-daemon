@@ -230,6 +230,7 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="recursive grep rooted at / blocked",
                 command='false && grep -rl "class X" /',
+                dispatch_as_bash=True,
                 description="Blocks grep -rl rooted at / — steer to a scoped search",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -256,6 +257,7 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="find rooted at / blocked",
                 command="false && find / -type d -name phparkitect",
+                dispatch_as_bash=True,
                 description="Blocks find rooted at / (always recursive)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"head"],
@@ -270,6 +272,7 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="scoped recursive grep allowed",
                 command='false && grep -rl "needle" "$CLAUDE_PROJECT_DIR"',
+                dispatch_as_bash=True,
                 description="Allows a recursive scan scoped to the project root",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

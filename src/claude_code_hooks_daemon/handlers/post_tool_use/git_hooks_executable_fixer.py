@@ -225,6 +225,7 @@ class GitHooksExecutableFixerHandler(PostToolUseHandlerBase):
                     "echo \"hint: The '.git/hooks/pre-push' hook was ignored "
                     "because it's not set as executable.\""
                 ),
+                dispatch_as_bash=True,
                 description=(
                     "NEGATIVE CONTROL: the hint is recognised, the handler checks "
                     "the repo resolved from the EVENT's cwd, finds every hook "

@@ -172,6 +172,7 @@ class PipBreakSystemHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="pip install --break-system-packages",
                 command='echo "pip install --break-system-packages requests"',
+                dispatch_as_bash=True,
                 description="Blocks pip --break-system-packages flag (system corruption risk)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -187,6 +188,7 @@ class PipBreakSystemHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="python3 -m pip install --break-system-packages",
                 command='echo "python3 -m pip install --break-system-packages numpy"',
+                dispatch_as_bash=True,
                 description="Blocks python3 -m pip with --break-system-packages",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

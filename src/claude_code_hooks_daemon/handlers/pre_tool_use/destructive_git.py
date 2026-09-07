@@ -393,6 +393,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git reset --hard",
                 command='echo "git reset --hard NONEXISTENT_REF_SAFE_TEST"',
+                dispatch_as_bash=True,
                 description="Blocks git reset --hard (destroys uncommitted changes)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -406,10 +407,11 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git clean -f",
                 command='echo "git clean -fd /nonexistent/safe/test/path"',
+                dispatch_as_bash=True,
                 description="Blocks git clean -f (permanently deletes untracked files)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"permanently deletes untracked files",
+                    r"[Pp]ermanently deletes untracked files",
                 ],
                 safety_notes="Uses non-existent path - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
@@ -419,6 +421,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git push --force",
                 command='echo "git push --force NONEXISTENT_REMOTE NONEXISTENT_BRANCH"',
+                dispatch_as_bash=True,
                 description="Blocks git push --force (overwrites remote history)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -433,10 +436,11 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git stash drop",
                 command='echo "git stash drop stash@{999}"',
+                dispatch_as_bash=True,
                 description="Blocks git stash drop (permanent deletion)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"permanently destroys",
+                    r"[Pp]ermanently destroys",
                     r"stash",
                 ],
                 safety_notes="Uses non-existent stash index - would fail harmlessly if executed",
@@ -447,10 +451,11 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git checkout --",
                 command='echo "git checkout -- /nonexistent/safe/test/file.py"',
+                dispatch_as_bash=True,
                 description="Blocks git checkout -- (discards changes)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"discards.*local changes",
+                    r"[Dd]iscards.*local changes",
                     r"permanently",
                 ],
                 safety_notes="Uses non-existent file path - would fail harmlessly if executed",
@@ -461,10 +466,11 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git restore",
                 command='echo "git restore /nonexistent/safe/test/file.py"',
+                dispatch_as_bash=True,
                 description="Blocks git restore (discards working tree changes)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"discards.*local changes",
+                    r"[Dd]iscards.*local changes",
                     r"permanently",
                 ],
                 safety_notes="Uses non-existent file path - would fail harmlessly if executed",
@@ -475,10 +481,11 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git branch -D",
                 command='echo "git branch -D NONEXISTENT_SAFE_TEST_BRANCH"',
+                dispatch_as_bash=True,
                 description="Blocks git branch -D (force-deletes branch without merge check)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"force-deletes.*branch",
+                    r"[Ff]orce-deletes.*branch",
                     r"merged",
                 ],
                 safety_notes="Uses non-existent branch - would fail harmlessly if executed",
@@ -489,10 +496,11 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git stash clear",
                 command='echo "git stash clear"',
+                dispatch_as_bash=True,
                 description="Blocks git stash clear (destroys all stashes)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"permanently destroys all",
+                    r"[Pp]ermanently destroys all",
                     r"stash",
                 ],
                 safety_notes="Safe to test - only clears stash (recoverable via reflog)",
@@ -503,10 +511,11 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git commit --amend",
                 command='echo "git commit --amend"',
+                dispatch_as_bash=True,
                 description="Blocks git commit --amend (rewrites previous commit)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"rewrites the previous commit",
+                    r"[Rr]ewrites the previous commit",
                     r"messy history",
                 ],
                 safety_notes="Uses echo - command is not actually executed",
@@ -517,6 +526,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git tag -f is not a force push",
                 command='echo "git tag -f v1.0.0-test-safe NONEXISTENT_SAFE_TEST_SHA"',
+                dispatch_as_bash=True,
                 description=(
                     "git tag -f force-moves a tag; it has nothing to do with "
                     "git push --force and must NOT be blocked. Regression test "

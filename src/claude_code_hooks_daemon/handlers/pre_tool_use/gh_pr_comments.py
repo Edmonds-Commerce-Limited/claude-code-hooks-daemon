@@ -48,7 +48,7 @@ class GhPrCommentsHandler(PreToolUseHandlerBase):
         self._rule = Rule(
             rule_id=RuleID.GH_PR_VIEW_NO_COMMENTS,
             blocked="`gh pr view` without `--comments`",
-            why="PR comments contain review feedback and discussion context " "not in the PR body",
+            why="PR comments contain review feedback and discussion context not in the PR body",
             fix="Add --comments, or include comments in --json fields",
             verbose=(
                 "WHY REQUIRED:\n"
@@ -182,6 +182,7 @@ class GhPrCommentsHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="gh pr view without --comments is blocked",
                 command='echo "gh pr view 123"',
+                dispatch_as_bash=True,
                 description="Blocks gh pr view without --comments flag",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"--comments"],

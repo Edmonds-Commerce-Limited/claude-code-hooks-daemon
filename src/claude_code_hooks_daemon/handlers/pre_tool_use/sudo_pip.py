@@ -176,6 +176,7 @@ class SudoPipHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="sudo pip install",
                 command='echo "sudo pip install requests"',
+                dispatch_as_bash=True,
                 description="Blocks sudo pip install (system-wide corruption risk)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -191,6 +192,7 @@ class SudoPipHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="sudo python3 -m pip install",
                 command='echo "sudo python3 -m pip install numpy"',
+                dispatch_as_bash=True,
                 description="Blocks sudo python3 -m pip install",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

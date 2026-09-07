@@ -319,6 +319,7 @@ class BackgroundProcessTrackerHandler(PostToolUseHandlerBase):
             AcceptanceTest(
                 title="backgrounded command triggers harvester advisory",
                 command="sleep 600 &",
+                dispatch_as_bash=True,
                 description=(
                     "Backgrounding a process (trailing &) surfaces guidance to run "
                     "harvest-background and manage a watchdog cron; never kills."

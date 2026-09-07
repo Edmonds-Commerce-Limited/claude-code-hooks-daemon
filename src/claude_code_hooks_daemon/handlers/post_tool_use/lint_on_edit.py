@@ -745,6 +745,7 @@ warning, never crashes the handler."""
             AcceptanceTest(
                 title="Copying an already-broken file is NOT denied",
                 command=(f"cp {directory}/source.py {directory}/copied.py"),
+                dispatch_as_bash=True,
                 description=(
                     "The boundary that makes the Bash route safe to enable by default. "
                     "`cp` writes a file, and the memory-path guard must see it -- copying "

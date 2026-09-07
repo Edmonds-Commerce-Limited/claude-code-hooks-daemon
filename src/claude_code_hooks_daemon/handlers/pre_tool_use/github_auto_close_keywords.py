@@ -132,7 +132,7 @@ _MESSAGE_FILE_PATTERN: Final[re.Pattern[str]] = re.compile(
 _STDIN_MESSAGE_FILE: Final[str] = "-"
 
 _REWRITE_EXAMPLES: Final[str] = (
-    '"Addresses #123", "Refs #123" or "See #123" — GitHub links these but ' "does not close"
+    '"Addresses #123", "Refs #123" or "See #123" — GitHub links these but does not close'
 )
 
 _WARN_GUIDANCE_HEADER: Final[str] = (
@@ -393,6 +393,7 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="closing keyword with issue reference blocked",
                 command="git commit -m 'Fixes #123'",
+                dispatch_as_bash=True,
                 description="Keyword+reference auto-closes on the default branch",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"Fixes #123", r"Addresses"],
@@ -404,6 +405,7 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="gh pr body with closing reference blocked",
                 command="gh pr create --title 'x' --body 'Fixes #123'",
+                dispatch_as_bash=True,
                 description="A PR body is the primary auto-close vector",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"Fixes #123"],
@@ -415,6 +417,7 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="keyword without a reference allowed",
                 command="echo \"git commit -m 'fixes the race condition'\"",
+                dispatch_as_bash=True,
                 description="The keyword alone is prose and must not match",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
@@ -426,6 +429,7 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="non-closing reference allowed",
                 command="echo \"git commit -m 'Addresses #123'\"",
+                dispatch_as_bash=True,
                 description="GitHub links but does not close this phrasing",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

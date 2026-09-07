@@ -218,6 +218,7 @@ class DocsQaCommitGateHandler(PreToolUseHandlerBase):
                     "markdown link to a file that does not exist, then run "
                     "`git commit` on it"
                 ),
+                dispatch_as_bash=True,
                 description=(
                     "In warn mode the commit proceeds but the PostToolUse context "
                     "contains a pointer-resolves finding naming the dead link."

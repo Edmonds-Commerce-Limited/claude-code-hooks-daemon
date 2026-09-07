@@ -298,12 +298,13 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git diff over a flaggable path is denied",
                 command=f"git diff {fixture}",
+                dispatch_as_bash=True,
                 description=(
                     "`git diff` on a path matching a configured flaggable glob "
                     "is denied before the diff ever runs."
                 ),
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"FLAGGABLE CONTENT CHANNEL", r"git diff"],
+                expected_message_patterns=[r"R-FLAGGABLE-CONTENT-CHANNEL", r"git diff"],
                 safety_notes=(
                     "Denied before execution — the diff never runs; requires "
                     "the handler enabled with the fixture path configured "
@@ -316,11 +317,10 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="grep over a flaggable path is denied",
                 command=f"grep mechanics {fixture}",
-                description=(
-                    "grep content search on a flaggable path is denied before " "it runs."
-                ),
+                dispatch_as_bash=True,
+                description=("grep content search on a flaggable path is denied before it runs."),
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"FLAGGABLE CONTENT CHANNEL"],
+                expected_message_patterns=[r"R-FLAGGABLE-CONTENT-CHANNEL"],
                 safety_notes="Denied before execution — grep never runs.",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.SONNET,
@@ -329,6 +329,7 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git status on a flaggable path is NOT denied",
                 command=f"git status {fixture}",
+                dispatch_as_bash=True,
                 description=(
                     "A non-content-revealing shape stays allowed even when it "
                     "names a flaggable path."

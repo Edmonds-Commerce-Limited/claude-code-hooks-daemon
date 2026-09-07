@@ -426,6 +426,7 @@ class CommandHintsHandler(PostToolUseHandlerBase):
             AcceptanceTest(
                 title="agent-browser command triggers close-session hint",
                 command="agent-browser --version",
+                dispatch_as_bash=True,
                 description=(
                     "Running a command starting with `agent-browser` surfaces the "
                     "close-session reminder as advisory context. The binary need not "
@@ -444,6 +445,7 @@ class CommandHintsHandler(PostToolUseHandlerBase):
             AcceptanceTest(
                 title="unrelated command mentioning agent-browser does not trigger a hint",
                 command="grep agent-browser /dev/null",
+                dispatch_as_bash=True,
                 description=(
                     "The word `agent-browser` appearing as an ARGUMENT to an unrelated "
                     "command (not the command itself) must NOT surface the hint — "

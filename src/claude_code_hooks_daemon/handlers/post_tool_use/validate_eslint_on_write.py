@@ -303,15 +303,13 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
             if is_worktree:
                 logger.info("Detected worktree file - using ESLint wrapper for consistent config")
 
-            result = (
-                subprocess.run(  # nosec B603 - eslint/npx are trusted tools, file path validated
-                    command,
-                    cwd=cwd,
-                    capture_output=True,
-                    text=True,
-                    timeout=Timeout.ESLINT_CHECK,
-                    env=env,
-                )
+            result = subprocess.run(  # nosec B603 - eslint/npx are trusted tools, file path validated
+                command,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=Timeout.ESLINT_CHECK,
+                env=env,
             )
 
             if result.returncode != 0:

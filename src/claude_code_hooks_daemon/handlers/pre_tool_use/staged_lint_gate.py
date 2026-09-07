@@ -291,13 +291,11 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         parts[0] = resolved
 
         try:
-            result: subprocess.CompletedProcess[str] | None = (
-                subprocess.run(  # nosec B603 - lint tools are trusted, file path from git
-                    parts,
-                    capture_output=True,
-                    text=True,
-                    timeout=Timeout.LINT_CHECK,
-                )
+            result: subprocess.CompletedProcess[str] | None = subprocess.run(  # nosec B603 - lint tools are trusted, file path from git
+                parts,
+                capture_output=True,
+                text=True,
+                timeout=Timeout.LINT_CHECK,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             # A missing binary or a timed-out subprocess is feature detection,
@@ -349,8 +347,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
     @staticmethod
     def _message(failures: list[tuple[str, str]]) -> str:
         lines = [
-            "STAGED LINT GATE: a syntax check FAILED for a staged file this commit "
-            "would include.",
+            "STAGED LINT GATE: a syntax check FAILED for a staged file this commit would include.",
             "",
         ]
         for path, diagnosis in failures:
@@ -395,6 +392,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Staged lint gate - a dry-run commit is never blocked",
                 command="git commit --dry-run",
+                dispatch_as_bash=True,
                 description=(
                     "`--dry-run` reports what WOULD be committed without committing "
                     "anything, so this is safe to run against any repository state. "
@@ -411,6 +409,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Staged lint gate - git commit respellings are still recognised",
                 command="git -C . commit --dry-run",
+                dispatch_as_bash=True,
                 description=(
                     "A `-C` global option must not hide the `commit` subcommand from "
                     "the gate. Read-only via `--dry-run`; proves the evasion-resistant "

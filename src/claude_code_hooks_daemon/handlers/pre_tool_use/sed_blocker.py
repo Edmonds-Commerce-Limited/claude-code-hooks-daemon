@@ -429,6 +429,7 @@ class SedBlockerHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="sed -i with substitution",
                 command='sed -i "s/foo/bar/g" untracked/scratch/sed_test.txt',
+                dispatch_as_bash=True,
                 description="Blocks sed -i (in-place editing) to prevent file destruction",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -445,6 +446,7 @@ class SedBlockerHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="sed -e command",
                 command='sed -e "s/old/new/" untracked/scratch/sed_test.txt',
+                dispatch_as_bash=True,
                 description="Blocks sed -e commands",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

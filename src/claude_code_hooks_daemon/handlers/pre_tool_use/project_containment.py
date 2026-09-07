@@ -562,10 +562,6 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 "content": "# probe",
             },
         )
-        outside_bash_probe = ToolPayload(
-            tool_name=ToolName.BASH,
-            tool_input={"command": f"echo probe > {outside_dir}.txt"},
-        )
         inside_write_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
@@ -595,8 +591,8 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Bash redirect to a path outside the repository",
-                command=outside_bash_probe.as_instruction(),
-                tool_payload=outside_bash_probe,
+                command=f"echo probe > {outside_dir}.txt",
+                dispatch_as_bash=True,
                 description="Blocks the Bash side-door as well as the Write tool",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

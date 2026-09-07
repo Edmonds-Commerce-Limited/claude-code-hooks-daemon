@@ -372,6 +372,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="secret_file_guard - blocks Bash cat of a protected path",
                 command="cat /tmp/fixture.vault-password",
+                dispatch_as_bash=True,
                 description="Any Bash mention of a protected path is denied.",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -386,6 +387,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="secret_file_guard - blocks an interpreter one-liner",
                 command="python3 -c \"print(open('/tmp/fixture.vault-password').read())\"",
+                dispatch_as_bash=True,
                 description="Deny-by-default catches interpreter one-liners uniformly.",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED \[R-SECRET-BASH-MENTION\]"],
@@ -397,9 +399,9 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="secret_file_guard - allows the secret-meta helper",
                 command="bin/hooks-daemon secret-meta /tmp/fixture.vault-password",
+                dispatch_as_bash=True,
                 description=(
-                    "The metadata helper is the sanctioned presence/metadata route "
-                    "and must pass."
+                    "The metadata helper is the sanctioned presence/metadata route and must pass."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
@@ -414,6 +416,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                     "echo would-run: ansible-playbook --vault-password-file "
                     "/tmp/fixture.vault-password site.yml"
                 ),
+                dispatch_as_bash=True,
                 description=(
                     "Unlike sed_blocker, wrapping a protected-path mention in "
                     "`echo` is NOT exempt — this command is DENIED (the head is "

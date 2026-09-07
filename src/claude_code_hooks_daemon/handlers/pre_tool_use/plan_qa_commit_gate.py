@@ -240,6 +240,7 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
                     "Stage a PLAN.md change flipping a root plan's status to Complete "
                     "(without git mv or README changes), then run `git commit` on it"
                 ),
+                dispatch_as_bash=True,
                 description=(
                     "In warn mode the commit proceeds but the PostToolUse context "
                     "contains a terminal-state-atomic finding listing the missing "

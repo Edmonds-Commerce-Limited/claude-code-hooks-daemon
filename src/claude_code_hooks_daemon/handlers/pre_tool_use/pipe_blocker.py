@@ -1164,6 +1164,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="npm test piped to tail (blacklisted — expensive path)",
                 command="false && npm test | tail -5",
+                dispatch_as_bash=True,
                 description=(
                     "Blocks npm test | tail via blacklist path (expensive message). "
                     "'false &&' short-circuits so npm test never executes. "
@@ -1185,6 +1186,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="pytest piped to head (blacklisted — expensive path)",
                 command="false && pytest | head -20",
+                dispatch_as_bash=True,
                 description=(
                     "Blocks pytest | head via blacklist path (expensive message). "
                     "'false &&' short-circuits so pytest never executes."
@@ -1202,6 +1204,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="docker ps piped to tail (unknown command — extra_whitelist path)",
                 command='[[ "docker ps -a | tail -20" == 0 ]]',
+                dispatch_as_bash=True,
                 description=(
                     "Blocks docker ps | tail via unknown-command path (extra_whitelist hint). "
                     "docker ps is not in blacklist so handler suggests adding to extra_whitelist."
@@ -1222,6 +1225,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
                     'git commit -m "docs: pytest tests/ 2>&1 | tail -20 is now blocked" '
                     "--dry-run --allow-empty"
                 ),
+                dispatch_as_bash=True,
                 description=(
                     "A commit message that quotes a '| tail' example as prose (e.g. "
                     "documenting this very handler) must NOT be treated as a real "
@@ -1239,6 +1243,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="commit message running a substitution IS a real pipe",
                 command='[[ "git commit -m \\"$(pytest tests/ | tail -1)\\"" == 0 ]]',
+                dispatch_as_bash=True,
                 description=(
                     "Plan 00222: the -m exemption above ends at a command "
                     "substitution. Bash expands $( ) inside DOUBLE quotes, so this "
@@ -1259,6 +1264,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="python -m names the module as the producer, not a placeholder",
                 command='[[ "python -m pytest tests/ | tail -5" == 0 ]]',
+                dispatch_as_bash=True,
                 description=(
                     "Plan 00222: -m means MODULE to python, not message. The block "
                     "was always correct, but the value was blanked, so the reason "
@@ -1279,6 +1285,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="expensive producer laundered through a whitelisted outer command",
                 command='[[ "echo $(pytest tests/ | head -1)" == 0 ]]',
+                dispatch_as_bash=True,
                 description=(
                     "Plan 00221: a pipe inside $( ) truncates the output of the "
                     "command INSIDE the substitution, so that is the producer to "
@@ -1299,6 +1306,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="cheap first pipe does not shadow an expensive second pipe",
                 command="false && git log | head -2 && pytest tests/ | head -1",
+                dispatch_as_bash=True,
                 description=(
                     "Plan 00221: only the FIRST pipe used to be classified, so "
                     "prefixing any command with a whitelisted `git log | head -1 &&` "
@@ -1321,6 +1329,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="whitelisted producer inside a substitution stays allowed",
                 command="echo $(git log --format=%H -1 | head -1)",
+                dispatch_as_bash=True,
                 description=(
                     "Plan 00221 guard against over-correction: attributing the pipe "
                     "to the inner command must classify it by the SAME whitelist, "
@@ -1341,6 +1350,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
                     "the guardrail described above blocks piping straight to a pager e.g. output | tail -20\n"
                     "EOF"
                 ),
+                dispatch_as_bash=True,
                 description=(
                     "Plan 00209 §1: a heredoc body whose PROSE contains the literal "
                     "characters of a pipe-to-pager still gets blocked, but must NOT be "

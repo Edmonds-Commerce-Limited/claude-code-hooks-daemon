@@ -278,6 +278,7 @@ class FlaggableWorkAdvisorHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="flaggable topic terms trigger the delegate-first advisory",
                 command='echo "exploit rootkit mechanics discussion"',
+                dispatch_as_bash=True,
                 description=(
                     "A tool input carrying two or more configured topic terms "
                     "surfaces the delegate-to-quarantine-subagent advisory as "
@@ -296,6 +297,7 @@ class FlaggableWorkAdvisorHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="single topic term does not trigger the advisory",
                 command='echo "we patched the exploit yesterday"',
+                dispatch_as_bash=True,
                 description=(
                     "One term alone is routine prose — verify no "
                     "safeguard-flaggable advisory appears."

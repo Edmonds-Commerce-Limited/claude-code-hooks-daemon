@@ -339,8 +339,7 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
             tool_input={
                 "file_path": str(scratch_path(_FIXTURE_DIR, "doc.md")),
                 "content": (
-                    "# Test\n\n| Name | Value |\n|---|---|\n"
-                    "| Short | x |\n| Very Long Name | y |\n"
+                    "# Test\n\n| Name | Value |\n|---|---|\n| Short | x |\n| Very Long Name | y |\n"
                 ),
             },
         )

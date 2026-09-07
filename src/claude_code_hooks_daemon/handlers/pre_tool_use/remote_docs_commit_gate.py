@@ -191,6 +191,7 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="remote-docs staged gate near-miss",
                 command="git commit with a properly captured vendored document staged",
+                dispatch_as_bash=True,
                 description=(
                     "A document with valid provenance commits normally; the "
                     "gate only fires on a missing or invalid record"

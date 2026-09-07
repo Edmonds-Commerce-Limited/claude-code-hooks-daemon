@@ -137,6 +137,40 @@ class TestDeclaredPayloadsAgreeWithTheirProse:
             + "\n".join(mismatches)
         )
 
+    def test_every_bash_payload_dispatches_the_command_a_human_is_shown(
+        self, playbook: list[dict]
+    ) -> None:
+        """The other tool's half of the agreement check (Plan 00345 Task 3.2).
+
+        The `file_path` check above is the Write half; this is the same
+        guarantee for Bash, where the whole input is the command string. A
+        payload whose command differs from the one printed beside it means the
+        human and the harness are testing two different things, and the
+        playbook shows only one of them.
+
+        `dispatch_as_bash=True` makes this true by construction rather than by
+        review, so what this actually guards is a HAND-WRITTEN Bash payload --
+        the route that stays open for a block needing setup around the command.
+        """
+        disagreements = []
+        for block in playbook:
+            payload = block.get("tool_payload") or {}
+            if (payload.get("tool_name") or "") != "Bash":
+                continue
+            declared = (payload.get("tool_input") or {}).get("command")
+            shown = block.get("command") or ""
+            if declared != shown:
+                disagreements.append(
+                    f"#{block.get('test_number')} {block.get('handler_name')}: "
+                    f"payload runs {declared!r} but the playbook shows {shown!r}"
+                )
+
+        assert not disagreements, (
+            "a Bash payload dispatches a different command from the one the "
+            "playbook prints, so the human and the harness are not running the "
+            "same test:\n" + "\n".join(disagreements)
+        )
+
     def test_every_declared_payload_names_a_tool(self, playbook: list[dict]) -> None:
         """An unnamed tool cannot be dispatched.
 

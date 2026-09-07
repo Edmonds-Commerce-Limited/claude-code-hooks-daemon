@@ -395,6 +395,7 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
                     "'Web search was not performed: this session has used its web "
                     "search budget (200 of 200 WebSearch calls).'"
                 ),
+                dispatch_as_bash=True,
                 description=(
                     "The pinned field-confirmed web-search budget refusal shape "
                     "triggers an advisory instructing the agent to report the "
@@ -418,6 +419,7 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
                     "Simulate a Bash tool response containing the text 'Updated the "
                     "project budget planning spreadsheet.'"
                 ),
+                dispatch_as_bash=True,
                 description=(
                     "Near-miss: the word 'budget' appears with no exhaustion/quota "
                     "context, so no advisory fires and the response is unaffected."

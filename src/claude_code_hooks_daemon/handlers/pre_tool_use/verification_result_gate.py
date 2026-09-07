@@ -477,6 +477,7 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Verification result gate - newline-separated verifier then mutator",
                 command="yamllint --version\ngit tag --list",
+                dispatch_as_bash=True,
                 description=(
                     "The motivating shape, with a newline as the separator. Advisory "
                     "by default: the command runs and the context names the pair."
@@ -491,6 +492,7 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Verification result gate - a gated pair is silent",
                 command="yamllint --version && git tag --list",
+                dispatch_as_bash=True,
                 description="`&&` consumes the result, so nothing is reported.",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

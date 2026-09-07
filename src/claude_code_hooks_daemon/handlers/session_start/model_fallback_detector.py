@@ -512,7 +512,7 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
     ) -> list[str]:
         """A soft, non-alarming notice for a fallback that has since recovered."""
         lines: list[str] = [
-            "A past model fallback occurred and has since recovered — no " "action needed.",
+            "A past model fallback occurred and has since recovered — no action needed.",
             "",
         ]
         for record in records:

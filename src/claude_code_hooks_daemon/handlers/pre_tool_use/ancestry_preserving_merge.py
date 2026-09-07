@@ -258,7 +258,7 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
                 decision=Decision.ALLOW,
                 context=[
                     _WARN_GUIDANCE_HEADER,
-                    f"{label} severs ancestry -- git branch -d will refuse this " "branch forever",
+                    f"{label} severs ancestry -- git branch -d will refuse this branch forever",
                     "Consider git merge --no-ff / gh pr merge --merge instead",
                 ],
                 guidance=self._warn_guidance(label),
@@ -357,6 +357,7 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git merge --squash",
                 command='echo "git merge --squash feature-branch"',
+                dispatch_as_bash=True,
                 description="Blocks git merge --squash (severs ancestry)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"ancestor"],
@@ -368,6 +369,7 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="gh pr merge --squash",
                 command='echo "gh pr merge --squash 123"',
+                dispatch_as_bash=True,
                 description="Blocks gh pr merge --squash (severs ancestry)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"ancestor"],
@@ -379,6 +381,7 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="gh pr merge --rebase",
                 command='echo "gh pr merge --rebase 123"',
+                dispatch_as_bash=True,
                 description="Blocks gh pr merge --rebase (severs ancestry, widened this plan's scope)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"ancestor"],
@@ -390,6 +393,7 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="git merge --no-ff is not blocked",
                 command='echo "git merge --no-ff feature-branch"',
+                dispatch_as_bash=True,
                 description=(
                     "git merge --no-ff preserves ancestry and must NOT be "
                     "blocked -- it is the whole point of this handler"
@@ -404,6 +408,7 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="gh pr merge --merge is not blocked",
                 command='echo "gh pr merge --merge 123"',
+                dispatch_as_bash=True,
                 description="gh pr merge --merge preserves ancestry and must NOT be blocked",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

@@ -174,6 +174,7 @@ class GitStashHandler(PreToolUseHandlerBase):
                 AcceptanceTest(
                     title="git stash blocked",
                     command='echo "git stash"',
+                    dispatch_as_bash=True,
                     description="Blocks git stash — use git commit instead",
                     expected_decision=Decision.DENY,
                     expected_message_patterns=[
@@ -188,6 +189,7 @@ class GitStashHandler(PreToolUseHandlerBase):
                 AcceptanceTest(
                     title="git stash push blocked",
                     command="echo \"git stash push -m 'temp changes'\"",
+                    dispatch_as_bash=True,
                     description="Blocks git stash push — use git commit instead",
                     expected_decision=Decision.DENY,
                     expected_message_patterns=[

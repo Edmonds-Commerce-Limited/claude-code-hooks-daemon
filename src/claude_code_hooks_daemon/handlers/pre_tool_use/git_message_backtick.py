@@ -195,9 +195,10 @@ class GitMessageBacktickHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="double-quoted backtick message blocked",
                 command=f'git commit -m "now allows {backtick}git branch{backtick} so it holds"',
+                dispatch_as_bash=True,
                 description="Backticks in a double-quoted -m are executed by bash, not quoted",
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"BLOCKED", r"EXECUTED", r"-F"],
+                expected_message_patterns=[r"BLOCKED", r"command substitution", r"-F"],
                 safety_notes=(
                     "Denied before bash runs, so no substitution and no commit occurs. "
                     "Not echo-wrapped: echo would itself substitute the backticks."
@@ -209,6 +210,7 @@ class GitMessageBacktickHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="single-quoted backtick message allowed",
                 command=f"echo 'git commit -m {backtick}safe{backtick} single-quoted'",
+                dispatch_as_bash=True,
                 description="Single quotes suppress substitution, so backticks stay literal",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

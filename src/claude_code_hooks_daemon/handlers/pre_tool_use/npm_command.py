@@ -355,6 +355,7 @@ class NpmCommandHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="npm command enforcement (llm: commands exist)",
                 command='echo "npm run build"',
+                dispatch_as_bash=True,
                 description=(
                     "Blocks raw npm commands when llm: wrappers exist in package.json. "
                     "If this project has llm: scripts, expect DENY. "

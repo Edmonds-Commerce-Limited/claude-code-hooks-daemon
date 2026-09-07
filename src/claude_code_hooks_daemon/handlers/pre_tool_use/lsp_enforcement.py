@@ -523,6 +523,7 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Block Bash rg for function definition",
                 command='rg "def get_bash_command" src/',
+                dispatch_as_bash=True,
                 description=(
                     "When using Bash to run rg searching for a function definition, "
                     "the handler should block and suggest LSP tools instead."
@@ -540,6 +541,7 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Allow Bash grep scoped to one named file",
                 command='grep -n "hook_input" src/claude_code_hooks_daemon/core/hook_result.py',
+                dispatch_as_bash=True,
                 description=(
                     "A grep already scoped to a single named file is a literal-"
                     "string check on a file the caller already knows about, not "
