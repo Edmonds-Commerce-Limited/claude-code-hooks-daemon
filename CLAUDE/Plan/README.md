@@ -4,9 +4,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00341: plan status header rots behind shipped work](00341-plan-status-header-rots-behind-shipped-work/PLAN.md) - Not Started (2 of 22 live "Not Started" plans have shipped work behind the header; `header-body-coherence` fires only when EVERY box is ticked, so a partially-delivered plan is invisible to it — 00110 has 8 ticked boxes and still reads Not Started)
+
 - [00338: deployed skill tree invisible to review](00338-deployed-skill-tree-invisible-to-review/PLAN.md) - Not Started (an unanchored `hooks-daemon/` in `.claude/.gitignore` also ignores the DEPLOYED `.claude/skills/hooks-daemon/` tree, so a skill drifting from its source is invisible to `git status` — which is exactly how Plan 00336 found one; the sibling `docs-qa` skill is tracked, so the treatment is inconsistent by accident)
 
-- [00337: stop hook, human-input marker and failsafe cron retune](00337-stop-hook-human-input-cron-retune/PLAN.md) - Not Started (filed from a live reproduction: four hourly cron ticks burned a model turn each because arming the suppression needs one of four phrases no agent-facing doc names; stop widening regexes and switch to an explicit declaration, plus an agent-independent capped backoff — and close out 00314, whose work shipped in `923fd583` but still reads Not Started)
+- [00337: stop hook, human-input marker and failsafe cron retune](00337-stop-hook-human-input-cron-retune/PLAN.md) - In Progress (Phase 1 done: 00314 verified against the code and archived, and the "shipped but reads Not Started" rot filed as Plan 00341. Task 2.3 found one arming phrase was already in the resident guidance and still went unused, so Phase 2 is re-scoped from "add the vocabulary" to "state the consequence")
 
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
 
@@ -279,34 +281,34 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 340 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 341 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 278 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 45 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 46 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 45 + 278 + 7 = **330 folders**, spanning
-  **327 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 46 + 278 + 7 = **331 folders**, spanning
+  **328 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  340 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  341 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  327 + 13 = 340. ✅
+  328 + 13 = 341. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00314 archival (45 root, 278 `Completed/`,
-  7 `Cancelled/`, 327 distinct numbers against a counter of 340). Every figure
+- **Last reconciled at**: the Plan 00341 filing (46 root, 278 `Completed/`,
+  7 `Cancelled/`, 328 distinct numbers against a counter of 341). Every figure
   above was recounted from disk rather than incremented. The index carries NO
   reconciliation history — it states current truth only; every earlier recount
   is in git, and per-plan narrative belongs in that plan's `JOURNAL/`.

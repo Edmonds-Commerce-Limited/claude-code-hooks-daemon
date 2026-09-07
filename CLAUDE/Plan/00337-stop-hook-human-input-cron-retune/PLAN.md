@@ -1,6 +1,6 @@
 # Plan 00337: stop hook, human-input marker and failsafe cron — pragmatic retune
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-07
 **Owner**: joseph
 **Priority**: Medium
@@ -93,19 +93,22 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 
 ### Phase 1: Correct the record on Plan 00314
 
-- [ ] ⬜ **Task 1.1**: Plan 00314 reads `Status: Not Started` with all four
-  tasks `⬜`, but Tasks 1.1-1.3 shipped in `923fd583` (marker-write
-  observability, `human` pattern widening, 235 lines of tests). Its own JOURNAL
-  entry from that commit exists — the executor journalled but never flipped the
-  boxes. Verify against the code, then update.
-- [ ] ⬜ **Task 1.2**: Task 1.4 was "live dogfood — arm the marker with a
-  matching stop". Today's `marker_written: true` at `03:34:41` satisfies it.
-  Record that evidence in 00314's journal and close the plan out with the
-  atomic archival (git mv + README row + statistics in one commit).
-- [ ] ⬜ **Task 1.3**: A plan whose work has shipped but reads "Not Started"
-  invites a second agent to redo it. Check whether this is systemic —
-  cross-reference live plan task boxes against commits naming those plans — and
-  if it is, that is a finding for its own plan, not scope creep here.
+- [x] ✅ **Task 1.1**: **Verified against the code, then updated.** Pattern 4 of
+  `_HUMAN_BLOCKED_PATTERNS` carries `human` in its alternation, and
+  `_maybe_record_human_blocked_marker` returns the `write_marker` result that
+  the stop-event record surfaces as `marker_written` — both of 00314's shipped
+  tasks are present in the current source, not merely in a commit message.
+- [x] ✅ **Task 1.2**: **Closed and archived in `9def2583`.** The live dogfood is
+  satisfied by 16 `"marker_written": true` records in
+  `untracked/stop-events.jsonl`. Recorded with its limit rather than glossed:
+  only the ARMING half is live-observed — a delivered tick being dropped is
+  pinned by 22 unit tests but was not seen live, the log ring having rolled.
+- [x] ✅ **Task 1.3**: **Systemic, and filed as Plan 00341.** 2 of the 22 live
+  `Not Started` plans have shipped work behind the header (00110, 00314). The
+  sharper finding is that the header and the boxes rot INDEPENDENTLY — 00110
+  has 8 ticked boxes and 24 unticked, so its executor maintained the boxes
+  across five phases and never touched the header. `header-body-coherence`
+  cannot see either case: it fires only when EVERY box is ticked.
 
 ### Phase 2: Make the contract visible (cheapest fix, highest ratio)
 
@@ -113,15 +116,26 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
   `get_claude_md()` so it reaches the generated `CLAUDE.md` block, next to the
   existing "Stop Explanation Required" guidance the agent already follows.
   State both directions: how to arm, and that a real user message clears it.
+
 - [ ] ⬜ **Task 2.2**: Pin it with the existing `get_claude_md()` coverage gate
   (the integration test the release process already runs), so the guidance
   cannot silently drift from `_HUMAN_BLOCKED_PATTERNS`. Ideally derive the
   documented phrases FROM the pattern set rather than restating them, so they
   cannot disagree.
-- [ ] ⬜ **Task 2.3**: Confirm the claim this phase rests on: that today's
-  four-tick failure would not have occurred had the vocabulary been in the
-  resident guidance. If that cannot be argued cleanly, this phase is weaker
-  than it looks and should be re-scoped.
+
+- [x] ✅ **Task 2.3**: **The claim does not hold, so the phase is re-scoped.**
+  One arming phrase is ALREADY in the generated `CLAUDE.md` block —
+  `get_claude_md()` says "Use `STOPPING BECAUSE: need user input` and ask your
+  question", and `_HUMAN_BLOCKED_PATTERNS[2]` is `need(?:s|ed)? user input`. So
+  the vocabulary was in front of the agent all session and four stops did not
+  reach for it. The reason is visible once stated: it is presented as **how to
+  ask a question**, and the agent was not asking one, it was waiting. Nothing
+  told it the phrasing had a CONSEQUENCE.
+
+  Phase 2 therefore is not "add vocabulary" — it is **state the consequence**:
+  "phrase your stop this way and the failsafe cron stops ticking". Tasks 2.1
+  and 2.2 stand with that framing. This also strengthens Phase 3 rather than
+  substituting for it: a phrase whose effect is invisible gets used by luck.
 
 ### Phase 3: Replace inference with declaration
 
@@ -217,7 +231,7 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
   limit still recovers.
 - [ ] The stop-hook DENY rate is classified with evidence, and any tuning cites
   that classification.
-- [ ] Plan 00314 reflects what actually shipped and is archived.
+- [x] Plan 00314 reflects what actually shipped and is archived (`9def2583`).
 - [ ] Full QA green (25/25), daemon restarted and the behaviour verified live —
   this subsystem is only ever proven by dogfooding it.
 
