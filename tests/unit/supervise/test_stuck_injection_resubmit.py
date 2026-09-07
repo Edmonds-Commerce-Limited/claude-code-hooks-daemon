@@ -79,14 +79,29 @@ def _policy(**overrides: object) -> object:
     return CompactPolicy(**fields)
 
 
+def _flush_attempts(count: int, *, policy: object | None = None) -> list[tuple[object, float]]:
+    """Drive one AWAIT episode, returning each flush attempt and WHEN it fired.
+
+    Steps the clock in poll-sized ticks rather than jumping a fixed interval, so
+    the timing between attempts is observed rather than assumed -- which is the
+    whole point once the interval before a resubmit differs from the interval
+    before an escape.
+    """
+    machine = CompactStateMachine(policy or _policy())
+    now = 1000.0
+    machine.evaluate(_reading(), idle=True, now=now)
+    attempts: list[tuple[object, float]] = []
+    while len(attempts) < count and now < 1000.0 + 2000.0:
+        now += 1.0
+        decision = machine.evaluate(_reading(), idle=True, now=now).decision
+        if decision is not Decision.NOOP:
+            attempts.append((decision, now))
+    return attempts
+
+
 def _flush_sequence(count: int) -> list[object]:
-    """Drive one AWAIT episode and return the decision of each flush attempt."""
-    machine = CompactStateMachine(_policy())
-    machine.evaluate(_reading(), idle=True, now=1000.0)
-    return [
-        machine.evaluate(_reading(), idle=True, now=1000.0 + 65.0 * (attempt + 1)).decision
-        for attempt in range(count)
-    ]
+    """Just the decisions, for tests that do not care about timing."""
+    return [decision for decision, _ in _flush_attempts(count)]
 
 
 class TestTheStallRemedyCoversBothCauses:
@@ -148,6 +163,71 @@ class TestTheStallRemedyCoversBothCauses:
 
         assert "unsubmitted" in resubmit.reason.lower()
         assert "2/5" in resubmit.reason
+
+
+class TestTheEnterFollowsItsEscapeCloselyEnoughToBeSafe:
+    """A blind Enter CONFIRMS a modal dialog. Measured, not supposed.
+
+    Driving a real Claude Code v2.1.263 over a PTY with the `/model` picker
+    open — the picker states the bindings itself, "Enter to set as default ·
+    s to use this session only · Esc to cancel":
+
+    * **Enter** answered "Set model to Opus 5 and saved as your default for new
+      sessions" — a persisted change the human never asked for.
+    * **ESC** answered "Kept model as Opus 5" — dismissed, nothing changed.
+
+    So ESC-before-Enter is a real mitigation, and the ordering already had it:
+    ESC is always attempt 1. What it did NOT have was proximity. The remedies
+    alternated at `escape_after_seconds`, so a dialog opened AFTER the escape
+    was still on screen for the Enter a full interval later — a 60-second
+    window in which the supervisor confirms whatever is highlighted.
+
+    The fix is to keep the alternation and shorten only the wait BEFORE a
+    resubmit, so an Enter is always closely preceded by an ESC that would have
+    dismissed any dialog. Verified on the same rig: with a dialog open,
+    ESC-pause-Enter left the default unconfirmed; with text in the box, the
+    same pair still submitted it (one ESC does not clear the box); and Enter on
+    an empty box is a no-op.
+
+    Deliberately NOT done: emitting a single new "escape then enter" decision.
+    The payload and decision names are the worker→host protocol, and the host
+    NEVER hot-reloads — a new worker talks to the OLD host until the ccy
+    session restarts, and that host would either reject an unknown decision
+    value or paste a raw ESC as literal text. Shortening an interval changes
+    nothing either side has to understand.
+    """
+
+    def test_the_resubmit_follows_its_escape_within_the_short_interval(self) -> None:
+        attempts = _flush_attempts(2)
+        (first, first_at), (second, second_at) = attempts
+
+        assert first is Decision.WOULD_ESCAPE
+        assert second is Decision.WOULD_RESUBMIT
+        assert second_at - first_at <= _mod._RESUBMIT_FOLLOW_SECONDS
+
+    def test_the_escape_still_waits_the_full_configured_interval(self) -> None:
+        """Only the wait before an ENTER is shortened; escalation pacing holds."""
+        attempts = _flush_attempts(3)
+        _, first_at = attempts[0]
+        _, third_at = attempts[2]
+
+        assert first_at - 1000.0 >= 60.0
+        assert third_at - first_at >= 60.0
+
+    def test_no_enter_ever_fires_long_after_its_escape(self) -> None:
+        """The invariant that makes the blind Enter safe, across a whole episode."""
+        attempts = _flush_attempts(5)
+        last_escape_at: float | None = None
+        for decision, when in attempts:
+            if decision is Decision.WOULD_ESCAPE:
+                last_escape_at = when
+                continue
+            assert last_escape_at is not None, "an Enter fired with no preceding ESC"
+            assert when - last_escape_at <= _mod._RESUBMIT_FOLLOW_SECONDS
+
+    def test_the_follow_interval_still_lets_a_tick_land(self) -> None:
+        """Shorter than a poll interval would mean the resubmit never fires."""
+        assert _mod._RESUBMIT_FOLLOW_SECONDS >= _mod._DEFAULT_POLL_SECONDS
 
 
 class TestTheResubmitInheritsEveryExistingGuard:

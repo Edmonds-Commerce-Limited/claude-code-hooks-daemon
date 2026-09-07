@@ -1013,6 +1013,16 @@ _DEFAULT_MAX_INJECTIONS = 20
 # [esc] to flush the queued command — and RE-FIRES every window until the
 # compaction starts or `max_escapes` is reached (Plan 00164 dogfooding fix).
 _DEFAULT_ESCAPE_AFTER_SECONDS = 60.0
+# How long a RESUBMIT waits behind the escape it alternates with, instead of a
+# full `escape_after_seconds`. A blind Enter confirms a modal dialog's
+# highlighted default — measured against a real Claude Code, where Enter on the
+# `/model` picker answered "saved as your default for new sessions" while ESC
+# answered "Kept model as Opus 5". ESC being attempt 1 already clears any dialog
+# that was open when the episode began; this closes the remaining window, where
+# a dialog appears AFTER that escape and is still on screen a full interval
+# later. Must be >= the poll interval or the tick that would fire the resubmit
+# never lands.
+_RESUBMIT_FOLLOW_SECONDS = 2.0
 # Cap on the repeated [esc] flushes for one queued /compact. Plan 00164: the
 # supervisor keeps pressing [esc] ("until it does") but must eventually give up
 # so a genuinely-wedged session returns to MONITOR rather than escaping forever.
@@ -4017,7 +4027,29 @@ class CompactStateMachine:
     def _escape_due(self, now: float) -> bool:
         if self._last_action_ts is None:
             return False
-        return (now - self._last_action_ts) >= self._policy.escape_after_seconds
+        return (now - self._last_action_ts) >= self._flush_interval()
+
+    def _flush_interval(self) -> float:
+        """How long to wait before the NEXT flush attempt.
+
+        A resubmit follows its escape after ``_RESUBMIT_FOLLOW_SECONDS`` rather
+        than a full ``escape_after_seconds``, because a blind Enter CONFIRMS a
+        modal dialog's highlighted default -- measured against a real Claude
+        Code, where Enter on the `/model` picker answered "saved as your default
+        for new sessions" and ESC answered "Kept model as Opus 5".
+
+        ESC being attempt 1 already dismisses any dialog that was open when the
+        episode started. What the full interval left open was a dialog appearing
+        AFTER that escape: it would still be on screen a whole minute later when
+        the Enter fired. Pairing them in time closes that to one poll.
+
+        The escape keeps the full interval, so escalation is still paced by the
+        configured policy -- only the Enter is pulled in behind its own ESC.
+        """
+        next_attempt = self._escapes_sent + 1
+        if next_attempt % 2 == 0:
+            return _RESUBMIT_FOLLOW_SECONDS
+        return self._policy.escape_after_seconds
 
     def _await_timed_out(self, now: float) -> bool:
         if self._last_action_ts is None:

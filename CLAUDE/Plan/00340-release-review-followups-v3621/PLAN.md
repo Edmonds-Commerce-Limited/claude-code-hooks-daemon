@@ -1,6 +1,6 @@
 # Plan 00340: release review followups v3621
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-07
 **Owner**: joseph
 **Priority**: Medium
@@ -38,23 +38,37 @@ relying on the path surviving.
 
 ### Phase 1: The resubmit Enter versus a modal dialog
 
-- [ ] ⬜ **Task 1.1**: Reproduce, do not reason. `Decision.WOULD_RESUBMIT`
-  presses Enter when the machine is in `AWAIT_COMPACTING`, the session is
-  keystroke-idle and the input line is modelled empty. A Claude Code MODAL
-  dialog — a permission prompt, a plan-approval prompt, a trust-folder prompt —
-  satisfies all three, and Enter there CONFIRMS the highlighted default. The
-  codebase already knows Enter confirms dialogs: that is what `confirm_enters`
-  and `_MODEL_CONFIRM_DELAY_SECONDS` exist for. Drive a real Claude Code over a
-  PTY (the Plan 00339 probes under `untracked/scratch/tui_*.py` are the rig),
-  open a permission prompt, and observe what attempt 2 does.
-- [ ] ⬜ **Task 1.2**: If it confirms a dialog, find a signal the supervisor can
-  read that says one is on screen. Note what was already ruled out: the
-  human-input-blockage marker is written from a Stop event's `STOPPING BECAUSE:`
-  text, so it does not fire for a UI prompt.
-- [ ] ⬜ **Task 1.3**: Weigh against the existing mitigations before changing
-  anything — ESC is always attempt 1, so any dialog that dismisses on ESC is
-  gone before an Enter can fire; dry-run is the default; the decision is logged
-  with its own reason.
+- [x] ✅ **Task 1.1**: Reproduce, do not reason. **Done — the risk is
+  CONFIRMED.** Drove a real Claude Code v2.1.263 over a PTY with the `/model`
+  picker open, which states the bindings itself: "Enter to set as default · s
+  to use this session only · Esc to cancel". A bare Enter answered "Set model
+  to Opus 5 and saved as your default for new sessions" — a persisted change
+  the human never asked for. ESC answered "Kept model as Opus 5". So a blind
+  Enter does confirm a modal's highlighted default, and ESC does dismiss it.
+
+- [x] ✅ **Task 1.2**: Find a signal saying a dialog is on screen. **Not
+  needed — superseded by 1.3.** The ordering fix removes the hazard without
+  needing to detect the dialog at all, which is better than screen-scraping a
+  TUI whose rendering is not a contract.
+
+- [x] ✅ **Task 1.3**: Weigh against the existing mitigations. **Done, and the
+  gap was in PROXIMITY, not ordering.** ESC was already attempt 1, so any
+  dialog open when the episode began was dismissed before an Enter could fire.
+  What the full `escape_after_seconds` left open was a dialog appearing AFTER
+  that escape: it was still on screen a whole minute later when the Enter
+  fired. `_RESUBMIT_FOLLOW_SECONDS` (2.0s) now paces a resubmit behind its own
+  escape instead, so an Enter is always closely preceded by a dismissing ESC.
+  Verified on the same rig that the pairing stays correct for the other cases:
+  with text in the box, ESC-pause-Enter still SUBMITS it (one ESC does not
+  clear the box); Enter on an empty box is a no-op; with a dialog open,
+  ESC-pause-Enter leaves the default unconfirmed.
+
+  **Deliberately not done: a single new "escape then enter" decision.** The
+  decision names and payloads are the worker→host protocol, and the host NEVER
+  hot-reloads — a new worker talks to the OLD host until the ccy session
+  restarts. That host would reject an unknown decision value, or paste a raw
+  ESC as literal text. Shortening an interval needs no agreement from either
+  side, which is why it was chosen over the cleaner-looking refactor.
 
 ### Phase 2: Deduplicate `_walk_into`
 
