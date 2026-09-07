@@ -445,6 +445,45 @@ def test_repo_without_a_plan_directory_is_clean(tmp_path: Path) -> None:
     assert exit_code == 0, report
 
 
+def test_python_bytecode_beside_a_plan_probe_is_not_a_plan_document(tmp_path: Path) -> None:
+    """A `.pyc` is generated, and nothing can stop it being generated.
+
+    Plans keep probe scripts (`probes/probe_walk.py`), and importing one writes
+    `__pycache__/probe_walk.cpython-311.pyc` beside it. That file is gitignored
+    and untracked, so it lands squarely in this rule's set — but it is not a
+    plan document, it was never authored, and the remediation the rule offers
+    (anchor the pattern so the file gets tracked) would be actively wrong:
+    bytecode must NOT be committed. Left unfiltered the rule fires on any
+    checkout where someone ran a plan's own probe, which is what a probe is
+    for.
+    """
+    repo = _make_repo(tmp_path, {"README.md": "# fixture\n"})
+    _write_ignored(
+        repo,
+        "CLAUDE/Plan/Completed/00002-x/probes/__pycache__/probe.cpython-311.pyc",
+        "__pycache__/",
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, report
+
+
+def test_an_ignored_plan_python_probe_is_still_flagged(tmp_path: Path) -> None:
+    """The exclusion covers BYTECODE, not Python under a plan.
+
+    A probe script swallowed by a pattern is exactly the silent loss this rule
+    exists for — the narrow carve-out must not widen into "ignore Python".
+    """
+    repo = _make_repo(tmp_path, {"README.md": "# fixture\n"})
+    _write_ignored(repo, "CLAUDE/Plan/Completed/00002-x/probes/probe.py", "probe*.py")
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1
+    assert "CLAUDE/Plan/Completed/00002-x/probes/probe.py" in _paths(report)
+
+
 # ---------------------------------------------------------------------------
 # orphaned-handler-guidance
 #

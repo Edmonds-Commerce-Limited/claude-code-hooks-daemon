@@ -72,12 +72,24 @@ relying on the path surviving.
 
 ### Phase 2: Deduplicate `_walk_into`
 
-- [ ] ⬜ **Task 2.1**: `docs_qa/checks/module_doc_budget.py` and
-  `docs_qa/checks/source_tree_markdown.py` carry near-identical `_walk_into`
-  functions. The v3.62.1 bundle had to apply the same fix to both, which is the
-  standard warning that the next fix will miss one. They differ only in the
-  `scope_exclude_globs` tail, so a shared helper taking an optional predicate
-  covers both.
+- [x] ✅ **Task 2.1**: **Done.** `corpus.walk_into` is now the one copy, with
+  `corpus.OWN_EXCLUDED_DIR_NAMES` beside it — that constant was duplicated too.
+  `module_doc_budget` passes its `scope_exclude_globs` prune as the
+  `also_prune` predicate; `source_tree_markdown` passes nothing. The shared
+  semantics are unit-tested once in `test_corpus.py`; each check's own test
+  now asserts the WIRING through its real walk (`_iter_module_doc_paths` /
+  `_iter_markdown_paths`) rather than poking a private helper, so a check that
+  quietly stopped calling the shared function would fail.
+
+- [x] ✅ **Task 2.2**: **Found and fixed while doing 2.1** —
+  `repo_hygiene`'s `ignored-plan-document` rule flagged
+  `__pycache__/probe_walk.cpython-311.pyc` as a silently-ignored plan
+  document. Plans keep probe scripts, and importing one writes bytecode beside
+  it: gitignored, untracked, so inside the rule's set without being a document
+  at all, and the remediation it offers (anchor the pattern so the file gets
+  tracked) is actively wrong for bytecode. Excluded `__pycache__`/`.pyc`/`.pyo`
+  only — an ignored `.py` probe is still a real silent loss and is still
+  flagged, which is pinned by a test.
 
 ### Phase 3: `config_preserve.sh` robustness
 

@@ -24,6 +24,7 @@ corpus when no cache exists yet (Cold/stale-index rule, DESIGN §2.1).
 
 import json
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
@@ -38,7 +39,11 @@ from claude_code_hooks_daemon.docs_qa.structured_blocks import (
     extract_structured_block_locations,
 )
 from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
-from claude_code_hooks_daemon.utils.vendor_paths import is_vendored_path_in_scopes
+from claude_code_hooks_daemon.utils.vendor_paths import (
+    VendorScope,
+    is_vendored_path_in_scopes,
+    may_contain_vendor_exception_in_scopes,
+)
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _CHANGELOG_FILENAME: Final[str] = "CHANGELOG.md"
@@ -103,6 +108,25 @@ _CLAUDE_MD_FILENAME: Final[str] = "CLAUDE.md"
 # tests need no change.
 COMMON_VENDORED_BUILD_DIR_NAMES: Final[frozenset[str]] = CORE_VENDORED_BUILD_DIR_NAMES
 
+# Directories heavy enough (or otherwise out of scope) that a walk should
+# never descend into them. "untracked" already covers
+# ProjectPath.WORKTREES_DIR ("untracked/worktrees"); "worktrees" is the shared
+# basename of BOTH worktree roots -- ProjectPath.CLAUDE_WORKTREES_DIR is
+# ".claude/worktrees", whose ".claude" segment is not otherwise excluded
+# (Task 3.3 T2). A vendored daemon install is NOT here: its basename is not
+# distinctive enough for a basename set (it also names this daemon's OWN
+# tracked ``skills/hooks-daemon/`` source in self-install mode), so
+# :func:`walk_into` excludes it by full path prefix instead (Task 3.6).
+#
+# These are the daemon's OWN basenames only, WITHOUT the vendored/build set:
+# that half is configurable (``layout.vendor_dirs``), so unioning it in at
+# module scope would freeze the prune to the BUILT-IN names and make a
+# project's declaration inert (Plan 00331). It reaches :func:`walk_into` as a
+# parameter instead.
+OWN_EXCLUDED_DIR_NAMES: Final[frozenset[str]] = frozenset(
+    {"untracked", ".git", Path(ProjectPath.CLAUDE_WORKTREES_DIR).name}
+)
+
 
 def is_module_doc_path(rel_path: str, agent_tree: str) -> bool:
     """True for any ``CLAUDE.md`` that is NOT a canonical root (repo or
@@ -159,6 +183,51 @@ def is_vendored_daemon_install_path(rel_parts: tuple[str, ...]) -> bool:
     return rel_path == _HOOKS_DAEMON_INSTALL_PREFIX or rel_path.startswith(
         _HOOKS_DAEMON_INSTALL_PREFIX + "/"
     )
+
+
+def walk_into(
+    rel_parts: tuple[str, ...],
+    *,
+    vendor_scopes: Sequence[VendorScope],
+    also_prune: Callable[[tuple[str, ...]], bool] | None = None,
+) -> bool:
+    """Whether a tree walk must descend into this directory.
+
+    Shared by every check that walks from the project root ITSELF rather than
+    reading this corpus (``module-doc-budget``, ``source-tree-markdown``).
+    It lives here, not privately in each check, because a copy per caller
+    means every fix has to be written twice and the second one gets missed;
+    each caller supplies only what genuinely differs, via ``also_prune``.
+
+    A vendored directory that could CONTAIN a first-party exception must
+    still be descended (Plan 00331 Phase 3): pruning it makes the exception
+    unreachable, the same way git cannot re-include a file whose parent
+    directory is excluded. The exception itself is then applied per-file by
+    the caller -- descending is not including. That conservative fallback is
+    scoped to VENDORED directories only: a ``vendor_exceptions`` entry names a
+    repo-relative path, which can never resolve inside ``.git``, ``untracked``
+    or a worktree root, so a leading-wildcard exception (no literal prefix,
+    "could match anywhere") must not un-prune :data:`OWN_EXCLUDED_DIR_NAMES`
+    (Plan 00335 finding I3).
+
+    Takes the directory's PATH rather than its name (Plan 00332): with
+    per-project vendor truth the same basename can be vendored in one project
+    and ordinary in another, so the test is no longer set membership.
+
+    ``also_prune`` ADDS a caller-specific exclusion (``module-doc-budget``
+    passes its configured ``scope_exclude_globs``); it is consulted last and
+    is never asked to overrule an exclusion decided above it.
+    """
+    if rel_parts[-1] in OWN_EXCLUDED_DIR_NAMES:
+        return False
+    rel_dir = "/".join(rel_parts)
+    if is_vendored_path_in_scopes(
+        rel_dir, vendor_scopes
+    ) and not may_contain_vendor_exception_in_scopes(rel_dir, vendor_scopes):
+        return False
+    if is_vendored_daemon_install_path(rel_parts):
+        return False
+    return also_prune is None or not also_prune(rel_parts)
 
 
 def matches_scope_exclude(rel_path: str, patterns: tuple[str, ...]) -> bool:

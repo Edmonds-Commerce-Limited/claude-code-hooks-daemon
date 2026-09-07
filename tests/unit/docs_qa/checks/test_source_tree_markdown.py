@@ -6,7 +6,7 @@ from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 from claude_code_hooks_daemon.docs_qa.checks.source_tree_markdown import (
     CHECK_ID,
     CHECKS,
-    _walk_into,
+    _iter_markdown_paths,
 )
 from claude_code_hooks_daemon.docs_qa.context import sweep_context
 from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus
@@ -258,13 +258,16 @@ class TestVendorExceptionsSurviveThePrune:
 
 
 class TestVendorExceptionWildcardNeverUnprunesOwnExcludedDirs:
-    """Finding I3 (Plan 00335): a leading-wildcard ``vendor_exceptions`` entry
-    has no literal prefix, so ``may_contain_vendor_exception`` answers True
-    for every directory -- including ``_OWN_EXCLUDED_DIR_NAMES`` (``.git``,
-    ``untracked``, ``worktrees``), where a vendor exception can never live.
-    The conservative "might contain an exception, so descend" fallback exists
-    for genuinely vendored trees only; it must not override the daemon's own
-    always-prune set.
+    """Finding I3 (Plan 00335), asserted through THIS check's own walk.
+
+    The prune rule itself is ``corpus.walk_into`` and is unit-tested there.
+    What this check owes is the WIRING — that its walk asks that function
+    rather than a private variant of it. A leading-wildcard
+    ``vendor_exceptions`` entry has no literal prefix, so
+    ``may_contain_vendor_exception`` answers True for every directory; the
+    walk must still refuse ``.git``, ``untracked`` and a worktree root, where
+    a repo-relative exception can never resolve, while still descending a
+    genuinely vendored directory that could hold one.
     """
 
     _WILDCARD_EXCEPTION = ("**/ours/**",)
@@ -277,15 +280,24 @@ class TestVendorExceptionWildcardNeverUnprunesOwnExcludedDirs:
             ),
         )
 
-    def test_own_excluded_dirs_stay_pruned_despite_the_wildcard(self) -> None:
-        scopes = self._scopes()
+    def test_own_excluded_dirs_stay_pruned_despite_the_wildcard(self, tmp_path: Path) -> None:
         for name in (".git", "untracked", "worktrees"):
-            assert _walk_into((name,), vendor_scopes=scopes) is False
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "NOTES.md").write_text("notes")
 
-    def test_a_genuinely_vendored_dir_is_still_descended_for_the_wildcard(self) -> None:
+        assert _iter_markdown_paths(tmp_path, vendor_scopes=self._scopes()) == []
+
+    def test_a_genuinely_vendored_dir_is_still_descended_for_the_wildcard(
+        self, tmp_path: Path
+    ) -> None:
         """The conservative fallback this fix must NOT remove: a vendored
         directory that could contain the exception is still walked."""
-        assert _walk_into(("node_modules",), vendor_scopes=self._scopes()) is True
+        (tmp_path / "node_modules" / "ours").mkdir(parents=True)
+        (tmp_path / "node_modules" / "ours" / "NOTES.md").write_text("notes")
+
+        assert _iter_markdown_paths(tmp_path, vendor_scopes=self._scopes()) == [
+            "node_modules/ours/NOTES.md"
+        ]
 
 
 class TestGrandfatherAllowlist:

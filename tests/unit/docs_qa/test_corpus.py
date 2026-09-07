@@ -4,9 +4,11 @@ import json
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
+from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.docs_qa.corpus import (
     _CACHE_SCHEMA_VERSION,
     COMMON_VENDORED_BUILD_DIR_NAMES,
+    OWN_EXCLUDED_DIR_NAMES,
     DocCorpus,
     DocRecord,
     QuoteRef,
@@ -18,6 +20,7 @@ from claude_code_hooks_daemon.docs_qa.corpus import (
     load_cached_corpus,
     load_or_cold_corpus,
     refresh_own_record,
+    walk_into,
 )
 from claude_code_hooks_daemon.docs_qa.policy import (
     DocumentationPolicy,
@@ -885,3 +888,68 @@ class TestRefreshOwnRecord:
             corpus, tmp_path, tmp_path / "CLAUDE" / "X.md", f"# X\n\n{long_block}"
         )
         assert len(refreshed.documents["CLAUDE/X.md"].block_hashes) == 1
+
+
+class TestWalkInto:
+    """The prune decision every check that walks the tree ITSELF has to make.
+
+    ``module-doc-budget`` and ``source-tree-markdown`` both walk from the
+    project root rather than reading the corpus, so both need the same answer
+    to "descend into this directory?". They carried a near-identical private
+    copy each, and the v3.62.1 bundle had to apply finding I3's fix to both —
+    the standard warning that the next fix will land on one and miss the
+    other. The two differ only in an extra prune the caller supplies, which is
+    what ``also_prune`` is for.
+    """
+
+    _WILDCARD_EXCEPTION = ("**/ours/**",)
+
+    def _scopes(self) -> tuple[VendorScope, ...]:
+        return (
+            VendorScope(
+                vendor_dirs=frozenset({"node_modules"}),
+                vendor_exceptions=self._WILDCARD_EXCEPTION,
+            ),
+        )
+
+    def test_own_excluded_dirs_stay_pruned_despite_a_wildcard_exception(self) -> None:
+        """Finding I3 (Plan 00335): a leading-wildcard ``vendor_exceptions``
+        entry has no literal prefix, so ``may_contain_vendor_exception``
+        answers True for every directory. The conservative "might contain an
+        exception, so descend" fallback is for genuinely vendored trees only;
+        it must not un-prune ``.git``, ``untracked`` or a worktree root, where
+        a repo-relative vendor exception can never resolve."""
+        scopes = self._scopes()
+        for name in OWN_EXCLUDED_DIR_NAMES:
+            assert walk_into((name,), vendor_scopes=scopes) is False
+
+    def test_a_genuinely_vendored_dir_is_still_descended_for_the_wildcard(self) -> None:
+        """The conservative fallback finding I3's fix must NOT have removed."""
+        assert walk_into(("node_modules",), vendor_scopes=self._scopes()) is True
+
+    def test_a_vendored_dir_with_no_possible_exception_is_pruned(self) -> None:
+        scopes = (VendorScope(vendor_dirs=frozenset({"node_modules"})),)
+        assert walk_into(("node_modules",), vendor_scopes=scopes) is False
+
+    def test_an_ordinary_dir_is_descended(self) -> None:
+        assert walk_into(("src", "pkg"), vendor_scopes=self._scopes()) is True
+
+    def test_the_vendored_daemon_install_is_pruned(self) -> None:
+        install_parts = tuple(ProjectPath.HOOKS_DAEMON_INSTALL_DIR.split("/"))
+        assert walk_into(install_parts, vendor_scopes=()) is False
+
+    def test_also_prune_can_veto_an_otherwise_walkable_dir(self) -> None:
+        """``module-doc-budget``'s ``scope_exclude_globs`` reaches the walk
+        this way rather than as a second parameter only one caller passes."""
+        assert (
+            walk_into(
+                ("infra", "roles"),
+                vendor_scopes=(),
+                also_prune=lambda parts: parts == ("infra", "roles"),
+            )
+            is False
+        )
+
+    def test_also_prune_cannot_un_prune_what_the_shared_rules_reject(self) -> None:
+        """The predicate ADDS exclusions; it is never asked to overrule one."""
+        assert walk_into((".git",), vendor_scopes=(), also_prune=lambda _parts: False) is False

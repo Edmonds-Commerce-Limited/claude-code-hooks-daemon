@@ -38,12 +38,11 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Final
 
-from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.docs_qa.corpus import (
     COMMON_VENDORED_BUILD_DIR_NAMES,
     is_module_doc_path,
-    is_vendored_daemon_install_path,
     matches_scope_exclude,
+    walk_into,
 )
 from claude_code_hooks_daemon.docs_qa.types import (
     CheckContext,
@@ -59,7 +58,6 @@ from claude_code_hooks_daemon.plan_qa.types import (
 from claude_code_hooks_daemon.utils.vendor_paths import (
     VendorScope,
     is_vendored_path_in_scopes,
-    may_contain_vendor_exception_in_scopes,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,30 +90,6 @@ _REGISTERED_ADVISORY_LINES: Final[int] = DEFAULT_PLAN_DOC_ADVISORY_LINES
 _QUOTE_BLOCK_RE: Final[re.Pattern[str]] = re.compile(
     r"<!-- ssot-quote: [^\n]+ -->.+?<!-- /ssot-quote -->",
     re.DOTALL,
-)
-
-# Directories heavy enough that a SWEEP walk should never descend into them.
-# "untracked" already covers ProjectPath.WORKTREES_DIR
-# ("untracked/worktrees"); "worktrees" (the shared basename of BOTH worktree
-# roots -- ProjectPath.CLAUDE_WORKTREES_DIR is ".claude/worktrees", whose
-# ".claude" segment is not otherwise excluded) added for Task 3.3 T2 -- this
-# check does its OWN rglob walk rather than using docs_qa.corpus, so the
-# corpus's worktree exclusion (corpus._is_worktree_path) does not reach it.
-# The same is true of a vendored daemon install (Task 3.6): its own basename
-# is not distinctive enough for this set (it also names this daemon's OWN
-# tracked ``skills/hooks-daemon/`` source in self-install mode), so it is
-# excluded by full path prefix via corpus.is_vendored_daemon_install_path
-# instead, applied separately below.
-#: This check's OWN excluded basenames, WITHOUT the vendored/build set.
-#: Kept separate (Plan 00331) because the vendored half is configurable --
-#: unioning it in at module scope froze it to the BUILT-IN names, so a
-#: project's declared ``layout.vendor_dirs`` could never reach the prune.
-_OWN_EXCLUDED_DIR_NAMES: Final[frozenset[str]] = frozenset(
-    {
-        "untracked",
-        ".git",
-        Path(ProjectPath.CLAUDE_WORKTREES_DIR).name,
-    }
 )
 
 
@@ -277,9 +251,11 @@ def _iter_module_doc_paths(
     ``_is_excluded``. Omitting it was a defect: a project that vendored a
     dependency carrying its own CLAUDE.md (an ansible-galaxy role, in the
     report) got a permanent sweep advisory that the one documented
-    suppression could not silence. ``_OWN_EXCLUDED_DIR_NAMES`` could not
+    suppression could not silence. ``corpus.OWN_EXCLUDED_DIR_NAMES`` could not
     stand in for it either -- those are well-known BASENAMES, and a vendored
-    path the project chose is not guessable.
+    path the project chose is not guessable. It reaches the shared
+    ``corpus.walk_into`` as its ``also_prune`` predicate, which is the ONLY
+    thing this walk needs beyond the shared prune rules.
 
     ``vendor_dirs`` is the project's EFFECTIVE vendored-directory set
     (``ProjectLayout.vendor_dirs``, reaching here via
@@ -296,16 +272,20 @@ def _iter_module_doc_paths(
     filename-shape pattern like ``CLAUDE.md`` matches no directory) is
     caught by the post-filter below.
     """
+
+    def scope_exclusion(rel_parts: tuple[str, ...]) -> bool:
+        return _dir_is_scope_excluded(rel_parts, scope_exclude_globs)
+
     matches: list[str] = []
     for dirpath, dirnames, filenames in os.walk(project_root):
         rel_dir_parts = Path(dirpath).relative_to(project_root).parts
         dirnames[:] = [
             name
             for name in dirnames
-            if _walk_into(
+            if walk_into(
                 (*rel_dir_parts, name),
                 vendor_scopes=vendor_scopes,
-                scope_exclude_globs=scope_exclude_globs,
+                also_prune=scope_exclusion,
             )
         ]
         if _CLAUDE_MD_FILENAME not in filenames:
@@ -321,42 +301,6 @@ def _iter_module_doc_paths(
         if is_module_doc_path(rel_path, agent_tree):
             matches.append(rel_path)
     return sorted(matches)
-
-
-def _walk_into(
-    rel_parts: tuple[str, ...],
-    *,
-    vendor_scopes: tuple[VendorScope, ...],
-    scope_exclude_globs: tuple[str, ...],
-) -> bool:
-    """Whether the walker must descend into this directory.
-
-    A vendored directory that could CONTAIN a first-party exception must
-    still be descended (Plan 00331 Phase 3) -- pruning it makes the exception
-    unreachable, which is exactly why git cannot re-include a file whose
-    parent directory is excluded. The exception itself is then applied
-    per-file by the caller. That conservative fallback is scoped to
-    VENDORED directories only -- a ``vendor_exceptions`` entry names a
-    repo-relative path, which can never resolve inside ``.git``,
-    ``untracked`` or a worktree root, so a leading-wildcard exception (no
-    literal prefix, "could match anywhere") must not un-prune the daemon's
-    own always-excluded set (Plan 00335 finding I3).
-
-    Extracted from the comprehension it used to inline (Plan 00332) because
-    per-scope resolution needs the directory's own PATH, not just its name:
-    the same basename can be vendored in one project and ordinary in
-    another, so the test can no longer be a set membership.
-    """
-    if rel_parts[-1] in _OWN_EXCLUDED_DIR_NAMES:
-        return False
-    rel_dir = "/".join(rel_parts)
-    if is_vendored_path_in_scopes(
-        rel_dir, vendor_scopes
-    ) and not may_contain_vendor_exception_in_scopes(rel_dir, vendor_scopes):
-        return False
-    return not is_vendored_daemon_install_path(rel_parts) and not _dir_is_scope_excluded(
-        rel_parts, scope_exclude_globs
-    )
 
 
 def _dir_is_scope_excluded(rel_parts: tuple[str, ...], patterns: tuple[str, ...]) -> bool:

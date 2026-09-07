@@ -66,14 +66,13 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Final
 
-from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.docs_qa.checks.generated_doc_hand_edit import (
     matched_manifest_entry,
 )
 from claude_code_hooks_daemon.docs_qa.corpus import (
     COMMON_VENDORED_BUILD_DIR_NAMES,
-    is_vendored_daemon_install_path,
     matches_scope_exclude,
+    walk_into,
 )
 from claude_code_hooks_daemon.docs_qa.types import (
     CheckContext,
@@ -85,7 +84,6 @@ from claude_code_hooks_daemon.docs_qa.types import (
 from claude_code_hooks_daemon.utils.vendor_paths import (
     VendorScope,
     is_vendored_path_in_scopes,
-    may_contain_vendor_exception_in_scopes,
 )
 
 CHECK_ID: Final[str] = "source-tree-markdown"
@@ -93,21 +91,6 @@ CHECK_ID: Final[str] = "source-tree-markdown"
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _CLAUDE_MD_FILENAME: Final[str] = "CLAUDE.md"
 _README_FILENAME: Final[str] = "README.md"
-
-# Directories heavy enough (or otherwise out of scope) that a SWEEP walk
-# should never descend into them. Mirrors module_doc_budget's own walk
-# exclusion set exactly -- this check does its OWN rglob-equivalent walk
-# rather than the doc corpus (source/test-dir markdown is deliberately
-# OUTSIDE docs_qa.corpus's audience-tree scope), so the exclusion set has
-# to be re-applied here, not just its outcome.
-#
-# These are this check's OWN basenames only, WITHOUT the vendored/build
-# set: that half is configurable (``layout.vendor_dirs``), so unioning it
-# in here would freeze the prune to the BUILT-IN names and make a project's
-# declaration inert (Plan 00331). It is passed to the walk instead.
-_OWN_EXCLUDED_DIR_NAMES: Final[frozenset[str]] = frozenset(
-    {"untracked", ".git", Path(ProjectPath.CLAUDE_WORKTREES_DIR).name}
-)
 
 # Test-fixture directory conventions, mirrored from
 # handlers.pre_tool_use.error_hiding_blocker's ``_DEFAULT_EXCLUDE_GLOBS`` --
@@ -168,7 +151,7 @@ def _iter_markdown_paths(
         dirnames[:] = [
             name
             for name in dirnames
-            if _walk_into((*rel_dir_parts, name), vendor_scopes=vendor_scopes)
+            if walk_into((*rel_dir_parts, name), vendor_scopes=vendor_scopes)
         ]
         for filename in filenames:
             if not filename.endswith(_MARKDOWN_SUFFIX):
@@ -181,33 +164,6 @@ def _iter_markdown_paths(
                 continue
             matches.append(rel_path)
     return sorted(matches)
-
-
-def _walk_into(rel_parts: tuple[str, ...], *, vendor_scopes: tuple[VendorScope, ...]) -> bool:
-    """Whether the walker must descend into this directory.
-
-    A vendored directory that could CONTAIN a first-party exception must
-    still be descended (Plan 00331 Phase 3): pruning it makes the exception
-    unreachable, the same way git cannot re-include a file whose parent
-    directory is excluded. That conservative fallback is scoped to
-    VENDORED directories only -- a ``vendor_exceptions`` entry names a
-    repo-relative path, which can never resolve inside ``.git``,
-    ``untracked`` or a worktree root, so a leading-wildcard exception (no
-    literal prefix, "could match anywhere") must not un-prune the daemon's
-    own always-excluded set (Plan 00335 finding I3).
-
-    Takes the directory's PATH rather than its name (Plan 00332): with
-    per-project vendor truth the same basename can be vendored in one
-    project and ordinary in another, so the test is no longer set membership.
-    """
-    if rel_parts[-1] in _OWN_EXCLUDED_DIR_NAMES:
-        return False
-    rel_dir = "/".join(rel_parts)
-    if is_vendored_path_in_scopes(
-        rel_dir, vendor_scopes
-    ) and not may_contain_vendor_exception_in_scopes(rel_dir, vendor_scopes):
-        return False
-    return not is_vendored_daemon_install_path(rel_parts)
 
 
 def _finding(rel_path: str) -> Finding:
