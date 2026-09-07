@@ -1,6 +1,6 @@
 # Plan 00328: human model choice cannot be read from keystrokes
 
-**Status**: In Progress — Phase 1 delivered; Phase 2 (detection channel) open
+**Status**: In Progress — Phase 1 delivered; Phase 2 channel chosen, build open
 **Created**: 2026-09-04
 **Owner**: joseph
 **Priority**: High
@@ -75,18 +75,29 @@ currently flails.
 
 ### Phase 2: A detection channel that works
 
-- [ ] ⬜ **Task 2.1**: Evaluate the user settings file as the signal. Claude
-  Code writes the chosen family there on every `/model`. Verified in the
-  reproduction: it held `opus` after the failed fable attempt, so it tracks
-  what took effect, not what was attempted. Risks to settle: it is user-level
-  and shared by concurrent sessions, and the supervisor's own injections write
-  it too (it knows when it injects).
-- [ ] ⬜ **Task 2.2**: If 2.1 is sound, retire the keystroke-derived model
-  recognition it replaces — the typed-argument parser, the stem match, the
-  picker wildcard and its session key and restore-steal guard. Deleting them
-  is most of the value; leaving both channels doubles the surface.
-- [ ] ⬜ **Task 2.3**: If 2.1 is not sound, record why, and fall back to
-  Phase 1 only — one failed attempt is a tolerable floor.
+- [x] ✅ **Task 2.1**: Evaluated the user settings file as the signal —
+  **rejected**, and a better channel found. Full write-up in
+  [DETECTION-CHANNELS.md](DETECTION-CHANNELS.md). `~/.claude/settings.json`
+  carries no session id, its mtime moves for `/effort` too, and its decisive
+  premise (that an automatic downgrade does not write `model`) is unmeasured —
+  if false, the auto-restore silently becomes dead code. Claude Code instead
+  writes the automatic downgrade into the SESSION TRANSCRIPT as a
+  `model_refusal_fallback` record; 25 genuine records were found across three
+  sessions here, all `claude-fable-5` → `claude-opus-4-8`, category `cyber`,
+  scope `session`.
+- [ ] ⬜ **Task 2.2**: Arm the restore POSITIVELY off that record, in the
+  daemon. The status-line event does not receive `transcript_path`, so the
+  producer is a hook event that does (`PostToolUse`/`Stop`), scanning the
+  transcript tail from a recorded offset — not re-reading a file that reaches
+  ~100 MB. It publishes the fact on the file channel the supervisor already
+  reads. The supervisor must not read transcripts itself (Plan 00317's thin-host
+  audit).
+- [ ] ⬜ **Task 2.3**: Retire the keystroke-derived model recognition — the
+  typed-argument parser, the stem match, the picker wildcard and its session
+  key and restore-steal guard. Positive arming makes them redundant rather
+  than merely replaceable: they all answer "was that the human?", which stops
+  being asked. Deleting them is the main prize; leaving both channels doubles
+  the surface.
 
 ## Success Criteria
 
@@ -103,5 +114,6 @@ currently flails.
 
 - Milestone A — Phase 1: a futile restore stops at one attempt and escalates
   no further. Delivered in `c4e22ac0`.
-- Milestone B — Phase 2: human intent is read from a channel that carries it,
-  and the keystroke machinery it replaces is deleted.
+- Milestone B — Phase 2: the restore arms on a positively-attributed automatic
+  downgrade instead of on a guess about human intent, and the keystroke
+  machinery it replaces is deleted.
