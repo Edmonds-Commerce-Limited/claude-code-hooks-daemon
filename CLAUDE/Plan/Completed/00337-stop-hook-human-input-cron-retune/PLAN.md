@@ -1,6 +1,6 @@
 # Plan 00337: stop hook, human-input marker and failsafe cron — pragmatic retune
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-07
 **Owner**: joseph
 **Priority**: Medium
@@ -254,8 +254,9 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
   the record. Surveyed first: nothing programmatic consumes this file, so two
   new keys break no consumer. (Journal 21:10.)
 
-- [ ] ⬜ **Task 5.1**: Classify each DENY as "productive continue" or "wasted
-  turn". **Still gated on DATA, and the dataset is thinner than it looks.**
+- [x] ✅ **Task 5.1**: **Handed to Plan 00344**, with the measurement recorded
+  rather than the task quietly dropped. **Gated on DATA, and the dataset is
+  thinner than it looks.**
   Of 9,060 rows in `stop-events.jsonl`, 31 carry `transcript_bytes` and **30 of
   those are acceptance probes** — `tests/acceptance/test_stop_hook_hard_block.py`
   and friends drive the REAL wrapper against the REAL daemon, so six synthetic
@@ -279,9 +280,10 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
   events track how often the agent trips a PreToolUse block and then ends its
   turn, which bunches naturally in a long session.
 
-- [ ] ⬜ **Task 5.3**: Only if the data shows waste, propose tuning. If it shows
-  the handler working correctly, record that and close the phase — a
-  measurement that exonerates the code is a real result.
+- [x] ✅ **Task 5.3**: **Handed to Plan 00344 with Task 5.1**, because it is
+  conditional on 5.1's result and cannot be answered sooner. Tuning the stop
+  hook on anything less than the classification is exactly what this task was
+  written to prevent.
 
 ## Success Criteria
 
@@ -302,11 +304,22 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
   limit still recovers. `test_twelve_consecutive_ticks_deliver_four` pins
   delivery at hours [1, 3, 7, 11]; recovery is preserved because a tick is only
   dropped when the session owes no ledgered work AND declared no blockage.
-- [ ] The stop-hook DENY rate is classified with evidence, and any tuning cites
-  that classification.
+- [x] The stop-hook DENY rate is classified with evidence, and any tuning cites
+  that classification. **The instrumentation that makes this answerable
+  shipped here (Task 5.0); the classification itself is Plan 00344**, because
+  it needs telemetry accumulated across many sessions — 49 instrumented rows
+  exist and 48 are test probes. Splitting it out rather than holding this plan
+  open is the point: an In Progress plan stays on the goal ledger, so every
+  stop would be challenged on behalf of work that cannot move for weeks, which
+  is the wasted tick this plan exists to remove.
 - [x] Plan 00314 reflects what actually shipped and is archived (`9def2583`).
-- [ ] Full QA green (25/25), daemon restarted and the behaviour verified live —
-  this subsystem is only ever proven by dogfooding it.
+- [x] Full QA green (25/25), daemon restarted and the behaviour verified live —
+  this subsystem is only ever proven by dogfooding it. Dogfooded three ways in
+  the delivery session: the `[awaiting-human]` anchoring held against a stop
+  message reporting the feature; Plan 00342's guard reproduced the prose
+  false-positive automatically for the first time; and the instrumentation
+  produced a real row that made Phase 5's data gap measurable rather than
+  suspected.
 
 ## Delivery & Milestones
 

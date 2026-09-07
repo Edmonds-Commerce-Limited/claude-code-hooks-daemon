@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00306: secret bash mention overbroad matching](00306-secret-bash-mention-overbroad-matching/PLAN.md) - Complete at 49befa8b (secret_file_guard Bash-mention false positives fixed, `git rm --cached` exempted, plus four same-subsystem review findings)
+
 - [00305: v3580 release review followups](00305-v3580-release-review-followups/PLAN.md) - Complete at 5fd91df3 + 277a47bd (v3.58.0 deferred review findings: mock.patch removed from shipped CLI, {REPO_ROOT} placement validators, absolute secret-list degrade surfaced; playbook drift fixed incl. secret_file_guard bracket false positive and pipe_blocker quoted-argument producer attribution)
 
 - [00304: degraded mode fail open and visibility](00304-degraded-mode-fail-open-and-visibility/PLAN.md) - Complete at the merge + archiving commits (php-qa-ci canary blocker: null legacy key tolerated, destructive-git safety net while degraded, degradation visible on status/check/config-validate)

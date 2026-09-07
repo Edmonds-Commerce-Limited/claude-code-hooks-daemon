@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00337: stop hook, human-input marker and failsafe cron retune](00337-stop-hook-human-input-cron-retune/PLAN.md) - In Progress (Phase 1 done: 00314 verified against the code and archived, and the "shipped but reads Not Started" rot filed as Plan 00341. Task 2.3 found one arming phrase was already in the resident guidance and still went unused, so Phase 2 is re-scoped from "add the vocabulary" to "state the consequence")
+- [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
 
@@ -180,6 +180,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00337: stop hook, human-input marker and failsafe cron retune](Completed/00337-stop-hook-human-input-cron-retune/PLAN.md) - Complete at `ea03f597`…`51e3694a` + the archiving commit (guidance states the consequence, not just the mechanism; `[awaiting-human]` anchored to the declaration position; the failsafe cron backs off to a 4h cap only when nothing is owed. The DENY-rate classification is Plan 00344)
+
 - [00342: prose guard does not reach stop handlers](Completed/00342-prose-guard-does-not-reach-stop-handlers/PLAN.md) - Complete at the delivery + archiving commits (the prose guard now scopes by base class and carries a Stop axis whose predicate is the marker SIDE EFFECT — `_denies()` would have passed vacuously; quoting a frozen phrase no longer arms cron suppression, and the unquoted residue is asserted as a recorded limit rather than left implicit)
 
 - [00343: flip the plan QA commit gate from warn to block](Completed/00343-plan-qa-commit-gate-warn-to-block/PLAN.md) - Complete at the delivery + archiving commits (a 253-commit replay found 18 would-be denials of which 7 blamed a commit for plan-tree state it never touched; six checks narrowed to BLOCK only what a commit introduced, replay then 11 denials with zero false positives, and the gate flipped to `block`)
@@ -238,8 +240,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00310: plan readme completed row ageout](Completed/00310-plan-readme-completed-row-ageout/PLAN.md) - Complete (Completed rows now age out: main README retains the 30 highest-numbered; older rows archived verbatim in Completed/README.md, enforced by test_plan_index_navigability.py)
 
-- [00306: secret bash mention overbroad matching](Completed/00306-secret-bash-mention-overbroad-matching/PLAN.md) - Complete at 49befa8b (secret_file_guard Bash-mention false positives fixed, `git rm --cached` exempted, plus four same-subsystem review findings)
-
 ## Blocked / On Hold Plans
 
 - **00032, 00034, 00035** - On hold pending upstream Claude Code delegate mode fix (GitHub #23447, #25037)
@@ -277,9 +277,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 343 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 344 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 282 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 283 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
 - **Active**: 44 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
@@ -287,24 +287,24 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 44 + 282 + 7 = **333 folders**, spanning
-  **330 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 44 + 283 + 7 = **334 folders**, spanning
+  **331 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  342 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  344 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  330 + 13 = 343. ✅
+  331 + 13 = 344. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00342 archiving (44 root, 282 `Completed/`,
-  7 `Cancelled/`, 330 distinct numbers against a counter of 343). Every figure
+- **Last reconciled at**: the Plan 00337 archiving (44 root, 283 `Completed/`,
+  7 `Cancelled/`, 331 distinct numbers against a counter of 344). Every figure
   above was recounted from disk rather than incremented. The index carries NO
   reconciliation history — it states current truth only; every earlier recount
   is in git, and per-plan narrative belongs in that plan's `JOURNAL/`.
