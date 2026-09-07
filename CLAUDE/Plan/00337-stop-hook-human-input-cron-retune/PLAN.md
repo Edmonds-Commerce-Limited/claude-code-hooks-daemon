@@ -192,60 +192,42 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
   original framing, which keyed backoff on "consecutive unproductive ticks" —
   a heuristic, where the ledger is a state signal.
 
-  **One design refinement found while implementing.** DESIGN-cadence.md said
-  "could not determine" must always behave like row 1 (tick). That is right on
-  the UNDECLARED path and wrong on the declared one: applied there it would
-  have turned Plan 00298's DENY into an ALLOW whenever the ledger was
-  unreadable, regressing shipped behaviour this plan's Non-Goals protect. So
-  unknown reads as owed when nothing was declared, and as row 3 when something
-  was. The existing row-3 tests caught it. (Journal 20:50.)
+  **One design refinement found while implementing**, corrected in
+  DESIGN-cadence.md: "could not determine" must behave like row 1 on the
+  UNDECLARED path but like row 3 on the declared one, or Plan 00298's DENY
+  becomes an ALLOW whenever the ledger is unreadable. The existing row-3 tests
+  caught it. (Journal 20:50.)
 
-- [x] ✅ **Task 4.1b**: **Respected, with the residual dependency bounded.**
-  `live_plan_numbers` counts only plans already in the ledger that also
-  resolve to `_STATE_IN_PROGRESS`, and both biases point at "nothing owed" —
-  the direction that backs the cron off.
-
-  The half this plan can fix, it fixed: "could not determine" is now a third
-  value distinct from "nothing owed", and a plan directory that does not exist
-  on disk resolves to it rather than to an empty scan — so the likeliest
-  misconfiguration costs a wasted tick, not a withdrawn net.
+- [x] ✅ **Task 4.1b**: **Respected, residual dependency bounded.** The half
+  this plan can fix, it fixed: "could not determine" is a third value distinct
+  from "nothing owed", and a plan directory absent from disk resolves to it
+  rather than to an empty scan — so the likeliest misconfiguration costs a
+  wasted tick, not a withdrawn net.
 
   The half that remains is **Plan 00341**'s: a plan actively worked behind a
-  stale `Not Started` header still reads as not-owed. The consequence is now
-  bounded rather than open-ended — that session gets a tick every 4 hours
-  instead of hourly, never silence — so this is a real dependency but no
-  longer a blocking one.
+  stale `Not Started` header still reads as not-owed. Now bounded rather than
+  open-ended — that session gets a tick every 4 hours instead of hourly, never
+  silence — so this is a real dependency but no longer a blocking one.
 
 - [x] ✅ **Task 4.2**: **Shipped.** Doubling to a 4-hour ceiling, never to
-  silence — the cron exists to recover a session interrupted by a rate limit,
-  and a later tick genuinely helps once the limit lifts. Twelve consecutive
-  unproductive ticks now deliver at hours 1, 3, 7 and 11: four turns instead
-  of twelve, asserted as that observable pattern rather than as three separate
-  invariants. Algorithm in [DESIGN-cadence.md](DESIGN-cadence.md).
+  silence. Twelve consecutive unproductive ticks deliver at hours 1, 3, 7 and
+  11 — four turns instead of twelve, asserted as that observable pattern rather
+  than as three separate invariants. Algorithm in
+  [DESIGN-cadence.md](DESIGN-cadence.md).
 
-- [x] ✅ **Task 4.5**: **Decided — add `HandlerTag.PLANNING`.** The worry the
-  task recorded ("tags drive filtering and reporting elsewhere") was surveyed
-  rather than assumed, and is not supported: the tag has exactly ONE
-  behavioural read in `src/` (the registry injection gate). The docs
-  generator, the `handlers` CLI payload, the playbook generator and
-  `claude_md_injector` all classify by something else; no test enumerates or
-  counts planning-tagged handlers; no document lists the set. Measured blast
-  radius: one line in `src/` plus `__init__` defaults, zero test changes, zero
-  doc changes.
+- [x] ✅ **Task 4.5**: **Decided — add `HandlerTag.PLANNING`**, which also
+  settles **Plan 00311 Task 1.1**. The recorded worry ("tags drive filtering
+  and reporting elsewhere") was surveyed rather than assumed and did not hold:
+  one behavioural read in `src/`, no test enumerating the tagged set, no doc
+  listing it. The one real consequence — `disable_tags: [planning]` now also
+  disables this handler — is in its docstring. (Journal 20:50,
+  [DESIGN-cadence.md](DESIGN-cadence.md).)
 
-  One real risk recorded in the handler docstring rather than avoided: tags
-  also feed the generic `enable_tags`/`disable_tags` filters, so a project
-  disabling the `planning` tag now disables this handler too. **This settles
-  Plan 00311 Task 1.1 the same way.** (Journal 20:50.)
-
-- [x] ✅ **Task 4.3**: Any genuine user message resets the cadence to hourly,
-  alongside the marker clear that already happened there.
-
-  **`matches()` had to widen too, or this would have been dead code.** It
-  gated a real prompt on the MARKER existing — and row 4 is by definition the
-  case with no marker, so the owner's reply would never have reached
-  `handle()` and the cadence would never have reset. Caught while reading the
-  code, not by a test; now covered by one. (Journal 20:50.)
+- [x] ✅ **Task 4.3**: A genuine user message resets the cadence to hourly,
+  alongside the marker clear already there. `matches()` had to widen too, or
+  this would have shipped as dead code — it gated a real prompt on the MARKER
+  existing, and row 4 is by definition the case with no marker. (Journal
+  20:50.)
 
 - [x] ✅ **Task 4.4**: **Folds into `failsafe_cron_blockage_suppressor`**, on
   position rather than preference: a backoff must see every delivered tick,
@@ -261,18 +243,25 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 
 ### Phase 5: Measure the stop-hook DENY rate before tuning it
 
-- [ ] ⬜ **Task 5.0** (added after measuring): `stop-events.jsonl` records
-  nothing that joins a row to the turn it came from, so Task 5.1 is blocked on
-  instrumentation rather than effort.
+- [x] ✅ **Task 5.0**: **Shipped.** `session_id` and `transcript_bytes` are now
+  written to `stop-events.jsonl`. The transcript is append-only, so its size is
+  monotonic within a session and O(1) via `stat`: two consecutive records
+  sharing a size are one stop logged twice, a small growth is a text-only turn
+  that stopped again, a large one is real work.
 
-  Design settled: add `session_id` **and `transcript_bytes`** — the transcript
-  is append-only, so its size is monotonic and O(1) via `stat`, and two
-  records with the same size are one stop logged twice. That turns Task 5.1
-  into arithmetic over the ledger. Details in
-  [DESIGN-cadence.md](DESIGN-cadence.md).
+  Both are OMITTED rather than nulled when unavailable (the `marker_written`
+  idiom), and a transcript path that does not resolve costs the field, never
+  the record. Surveyed first: nothing programmatic consumes this file, so two
+  new keys break no consumer. (Journal 21:10.)
 
 - [ ] ⬜ **Task 5.1**: Classify each DENY as "productive continue" or "wasted
-  turn". **Gated on Task 5.0.** The ledger alone already shows 50 of today's
+  turn". **Task 5.0 has shipped, so this is no longer gated on
+  instrumentation — it is gated on DATA.** `transcript_bytes` is recorded
+  going forward only; every row written before that commit lacks it, so the
+  classification has to run over records accumulated afterwards rather than
+  over the existing backlog. Worth stating because the two look identical from
+  the plan and only one can be started today. The ledger alone already shows
+  50 of today's
   ~140 logical stops are followed by another within TEN SECONDS — too fast for
   work — but cannot say whether that is the hook re-firing (a defect) or a
   text-only turn stopping again (agent behaviour). `transcript_bytes` settles

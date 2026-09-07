@@ -29,10 +29,8 @@ import logging
 import re
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, ClassVar
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path
+from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -213,6 +211,31 @@ _AWAITING_HUMAN_DECLARATION = re.compile(
     rf"{re.escape(_STOP_EXPLANATION_PREFIX)}\s*{re.escape(_AWAITING_HUMAN_SENTINEL)}",
     re.IGNORECASE,
 )
+
+
+def _transcript_size(hook_input: dict[str, Any]) -> int | None:
+    """Size of this session's transcript in bytes, or None if unknowable.
+
+    Plan 00337 Task 5.0's turn discriminator. The transcript is append-only,
+    so its size is monotonic within a session and O(1) to read -- which makes
+    "did anything happen between these two stop records?" arithmetic rather
+    than parsing.
+
+    Args:
+        hook_input: The Stop event's hook input.
+
+    Returns:
+        The byte size, or None when the path is absent, not a string, or does
+        not resolve. None is the honest answer for "cannot tell", and the
+        caller omits the field rather than recording a misleading zero.
+    """
+    path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+    if not isinstance(path, str) or not path:
+        return None
+    try:
+        return Path(path).stat().st_size
+    except OSError:
+        return None
 
 
 def _declares_human_blocked(text: str) -> bool:
@@ -1005,6 +1028,23 @@ class AutoContinueStopHandler(StopHandlerBase):
                 ``marker_written`` only when not None, so "matched but not
                 armed" (False) is diagnosable in the field without the
                 volatile in-memory log ring.
+
+        Plan 00337 Task 5.0 adds two discriminators, because nothing here
+        joined a record to the turn it came from and that blocked measurement
+        rather than merely inconveniencing it:
+
+        - ``session_id`` separates sessions. Free -- already in the input.
+        - ``transcript_bytes`` separates turns WITHIN a session. The transcript
+          is append-only, so its size is monotonic and reachable in O(1) via
+          ``stat`` with no parsing. Two consecutive records sharing a size are
+          one stop logged twice (a hook re-fire); a small growth is a
+          text-only turn that stopped again; a large one is real work.
+
+        Both are OMITTED when unavailable rather than written as null, the
+        same idiom ``marker_written`` already uses -- an absent key is honestly
+        absent, where a null would have to be told apart from a real zero. And
+        both honour the existing contract that this logger never affects the
+        Stop decision: a missing transcript costs the field, not the record.
         """
         try:
             untracked_dir: Path = ProjectContext.daemon_untracked_dir()
@@ -1020,6 +1060,12 @@ class AutoContinueStopHandler(StopHandlerBase):
             }
             if marker_written is not None:
                 entry["marker_written"] = marker_written
+            session_id = hook_input.get(HookInputField.SESSION_ID)
+            if isinstance(session_id, str) and session_id:
+                entry["session_id"] = session_id
+            transcript_bytes = _transcript_size(hook_input)
+            if transcript_bytes is not None:
+                entry["transcript_bytes"] = transcript_bytes
             with open_private_append(log_path) as f:
                 f.write(json.dumps(entry) + "\n")
             # Plan 00181: bound the append-only log (keep newest half on breach).

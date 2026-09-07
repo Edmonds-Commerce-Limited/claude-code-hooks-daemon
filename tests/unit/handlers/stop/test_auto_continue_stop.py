@@ -53,6 +53,78 @@ class TestStopEventsLogRetention:
         assert log_path.stat().st_size <= 300
 
 
+class TestStopEventDiscriminators:
+    """Plan 00337 Task 5.0: join a logged stop to the turn it came from.
+
+    ``stop-events.jsonl`` recorded nothing that distinguished two stops, which
+    is why Task 5.1 was blocked on instrumentation rather than on effort. Two
+    fields settle it: ``session_id`` separates sessions, and
+    ``transcript_bytes`` separates turns WITHIN a session -- the transcript is
+    append-only, so its size is monotonic and two records sharing one size are
+    the same stop logged twice (a hook re-fire), not two stops.
+
+    Both are OMITTED rather than nulled when unavailable, matching the
+    ``marker_written`` idiom already in this record: a key that is absent is
+    honestly absent, where a null would have to be told apart from a real zero.
+    """
+
+    def _log(self, tmp_path: Path, hook_input: dict[str, Any]) -> list[dict[str, Any]]:
+        handler = AutoContinueStopHandler()
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=tmp_path,
+        ):
+            handler._log_stop_event(hook_input, Decision.DENY, "reason")
+        lines = (tmp_path / "stop-events.jsonl").read_text(encoding="utf-8").splitlines()
+        return [json.loads(line) for line in lines]
+
+    def test_session_id_is_recorded_when_present(self, tmp_path: Path) -> None:
+        records = self._log(tmp_path, {"session_id": "sess-1", "stop_hook_active": False})
+        assert records[0]["session_id"] == "sess-1"
+
+    def test_session_id_is_omitted_when_absent(self, tmp_path: Path) -> None:
+        records = self._log(tmp_path, {"stop_hook_active": False})
+        assert "session_id" not in records[0]
+
+    def test_transcript_bytes_records_the_transcript_size(self, tmp_path: Path) -> None:
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 42, encoding="utf-8")
+        records = self._log(tmp_path, {"transcript_path": str(transcript)})
+        assert records[0]["transcript_bytes"] == 42
+
+    def test_transcript_bytes_is_omitted_when_no_path_is_given(self, tmp_path: Path) -> None:
+        records = self._log(tmp_path, {"stop_hook_active": False})
+        assert "transcript_bytes" not in records[0]
+
+    def test_a_missing_transcript_omits_the_field_rather_than_breaking_the_line(
+        self, tmp_path: Path
+    ) -> None:
+        """The existing contract is that this logger never affects the Stop
+        decision. A transcript path that does not resolve must cost the field,
+        not the record."""
+        records = self._log(tmp_path, {"transcript_path": str(tmp_path / "gone.jsonl")})
+        assert "transcript_bytes" not in records[0]
+        assert records[0]["decision"] == Decision.DENY.value
+
+    def test_a_non_string_transcript_path_is_ignored(self, tmp_path: Path) -> None:
+        records = self._log(tmp_path, {"transcript_path": 123})
+        assert "transcript_bytes" not in records[0]
+
+    def test_a_growing_transcript_yields_a_growing_value(self, tmp_path: Path) -> None:
+        """The property Task 5.1's arithmetic rests on: same size means one
+        stop logged twice, a larger size means a turn really happened."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("a" * 10, encoding="utf-8")
+        self._log(tmp_path, {"transcript_path": str(transcript)})
+        self._log(tmp_path, {"transcript_path": str(transcript)})
+        transcript.write_text("a" * 100, encoding="utf-8")
+        records = self._log(tmp_path, {"transcript_path": str(transcript)})
+
+        sizes = [r["transcript_bytes"] for r in records]
+        assert sizes == [10, 10, 100]
+
+
 class TestAutoContinueStopHandlerInit:
     """Test AutoContinueStopHandler initialization."""
 
