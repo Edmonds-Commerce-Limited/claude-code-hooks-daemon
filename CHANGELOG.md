@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.62.1] - 2026-09-07
 
-<!-- Attribution note: the six field-reported v3.61.0 -> v3.62.0 upgrade
-     defects were fixed in commits b1217789 and a9866261, BEFORE Plan 00336
-     was filed — that plan carries the residue those fixes exposed, and says
-     so itself. Entries below cite 00336 as the tracking plan for the work
-     area, not as the origin of every fix in it. -->
+_Attribution: entries cite a plan as the TRACKING plan for a work area, not as
+the origin of every fix in it. The six field-reported v3.61.0 → v3.62.0 upgrade
+defects were fixed in commits `b1217789` and `a9866261` **before** Plan 00336
+was filed; that plan carries the residue those fixes exposed, and says so
+itself._
 
 ### Fixed
 
