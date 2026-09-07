@@ -18,7 +18,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 
-- [00293: tool inventory disable and token savings](00293-tool-inventory-disable-and-token-savings/PLAN.md) - Not Started (disable-at-source for never-wanted tools instead of fighting them with hooks, transcript-scanning analyser for never-used tools, tools-vs-tokens report with the decision left to projects; dogfood here)
+- [00293: tool inventory disable and token savings](00293-tool-inventory-disable-and-token-savings/PLAN.md) - In Progress, 13 of 14 tasks done and the remainder human-gated (`source_disable`, the transcript analyser, `tool-report` and the advisory all shipped and are dogfooded here; Task 4.1 needs a `/context` spot check in a fresh interactive session, which an agent cannot perform)
 
 - [00291: upgrade path hardening and guarded branch install](00291-upgrade-path-hardening-and-guarded-branch-install/PLAN.md) - Not Started (php-qa-ci canary findings: fresh-clone `upgrade_version.sh` hard-fail, UNRELEASED-manifest visibility, silent old-config retention, `v`-prefix handling — plus the owner-ruled guarded, non-obvious, loudly-warned first-party-only branch-install mechanism)
 
