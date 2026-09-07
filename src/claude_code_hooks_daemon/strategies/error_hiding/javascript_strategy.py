@@ -43,24 +43,42 @@ class JavaScriptErrorHidingStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for JavaScript/TypeScript error-hiding strategy."""
+        from claude_code_hooks_daemon.constants.tools import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
 
+        # Stated once; the prose is rendered from it (Plan 00345 Phase 2).
+        # A WRITE payload, not Bash: these read as `Write(...)` call syntax,
+        # and a Bash payload would probe a string no file-write handler
+        # matches -- the deny test would then see ALLOW-by-not-matching and
+        # pass while testing nothing.
+        bad_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "bad.js")),
+                "content": "try { doSomething(); } catch (e) {}",
+            },
+        )
+        good_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "good.js")),
+                "content": "try { doSomething(); } catch (e) { console.error(e); throw e; }",
+            },
+        )
+
         return [
             AcceptanceTest(
                 title="JavaScript: empty catch block swallows exceptions",
-                command=(
-                    "Write(\n"
-                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'bad.js')}',\n"
-                    "  content='try { doSomething(); } catch (e) {}'\n"
-                    ")"
-                ),
+                command=bad_probe.as_instruction(),
+                tool_payload=bad_probe,
                 description=("Blocks JS file with empty catch block written via Write tool"),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -76,13 +94,8 @@ class JavaScriptErrorHidingStrategy:
             ),
             AcceptanceTest(
                 title="JavaScript: catch block with error handling is allowed",
-                command=(
-                    "Write(\n"
-                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'good.js')}',\n"
-                    "  content='try { doSomething(); } "
-                    "catch (e) { console.error(e); throw e; }'\n"
-                    ")"
-                ),
+                command=good_probe.as_instruction(),
+                tool_payload=good_probe,
                 description=("Allows JS file with proper catch block handling via Write tool"),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

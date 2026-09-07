@@ -55,24 +55,47 @@ class PythonErrorHidingStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Python error-hiding strategy."""
+        from claude_code_hooks_daemon.constants.tools import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
 
+        # Stated once; the prose is rendered from it (Plan 00345 Phase 2).
+        # A WRITE payload, not Bash: these read as `Write(...)` call syntax,
+        # and a Bash payload would probe a string no file-write handler
+        # matches -- the deny test would then see ALLOW-by-not-matching and
+        # pass while testing nothing.
+        bad_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "bad.py")),
+                "content": "try:\n    do_something()\nexcept:\n    pass\n",
+            },
+        )
+        good_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "good.py")),
+                "content": (
+                    "import logging\n\n\n"
+                    "def run(task):\n    try:\n        task()\n"
+                    '    except ValueError:\n        logging.exception("task failed")\n'
+                    "        raise\n"
+                ),
+            },
+        )
+
         return [
             AcceptanceTest(
                 title="Python: bare except: pass hides all exceptions",
-                command=(
-                    "Write(\n"
-                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'bad.py')}',\n"
-                    "  content='try:\\n    do_something()\\nexcept:\\n    pass\\n'\n"
-                    ")"
-                ),
+                command=bad_probe.as_instruction(),
+                tool_payload=bad_probe,
                 description=(
                     "Blocks Python file with 'except: pass' error-hiding pattern "
                     "written via Write tool"
@@ -91,15 +114,8 @@ class PythonErrorHidingStrategy:
             ),
             AcceptanceTest(
                 title="Python: proper exception handling is allowed",
-                command=(
-                    "Write(\n"
-                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'good.py')}',\n"
-                    "  content='import logging\\n\\n\\n"
-                    "def run(task):\\n    try:\\n        task()\\n"
-                    '    except ValueError:\\n        logging.exception(\\"task failed\\")\\n'
-                    "        raise\\n'\n"
-                    ")"
-                ),
+                command=good_probe.as_instruction(),
+                tool_payload=good_probe,
                 description=("Allows Python file with proper exception handling via Write tool"),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

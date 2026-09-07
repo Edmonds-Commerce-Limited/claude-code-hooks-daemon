@@ -67,24 +67,45 @@ class ShellErrorHidingStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Shell error-hiding strategy."""
+        from claude_code_hooks_daemon.constants.tools import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
 
+        # Stated once; the prose is rendered from it (Plan 00345 Phase 2).
+        # These were `Write(...)` CALL SYNTAX, a sixth grammar the Plan 00243
+        # audit's five never named -- so the conversion pass, which keyed on
+        # English sentences, walked straight past them. They must carry a
+        # WRITE payload: a Bash payload here would probe a command string no
+        # file-write handler matches, and the deny test would then read as
+        # ALLOW-by-not-matching, which is a pass. It would go green testing
+        # nothing.
+        bad_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "bad.sh")),
+                "content": "#!/bin/bash\nsome_command || true\n",
+            },
+        )
+        good_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "good.sh")),
+                "content": "#!/bin/bash\nset -euo pipefail\ncmd || { echo failed >&2; exit 1; }\n",
+            },
+        )
+
         return [
             AcceptanceTest(
                 title="Shell: || true hides command failure",
-                command=(
-                    "Write(\n"
-                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'bad.sh')}',\n"
-                    "  content='#!/bin/bash\\nsome_command || true\\n'\n"
-                    ")"
-                ),
+                command=bad_probe.as_instruction(),
+                tool_payload=bad_probe,
                 description=(
                     "Blocks shell script with '|| true' error-hiding pattern "
                     "written via Write tool"
@@ -103,13 +124,8 @@ class ShellErrorHidingStrategy:
             ),
             AcceptanceTest(
                 title="Shell: clean script with explicit error handling is allowed",
-                command=(
-                    "Write(\n"
-                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'good.sh')}',\n"
-                    "  content='#!/bin/bash\\nset -euo pipefail\\n"
-                    "cmd || { echo failed >&2; exit 1; }\\n'\n"
-                    ")"
-                ),
+                command=good_probe.as_instruction(),
+                tool_payload=good_probe,
                 description=("Allows shell script with proper error handling via Write tool"),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

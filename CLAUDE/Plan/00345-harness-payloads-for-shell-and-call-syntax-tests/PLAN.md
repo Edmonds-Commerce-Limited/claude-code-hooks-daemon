@@ -1,6 +1,6 @@
 # Plan 00345: harness payloads for shell and call syntax tests
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-07
 **Owner**: joseph
 **Priority**: Medium
@@ -93,18 +93,25 @@ manual pass.
 
 ### Phase 2: The 10 call-syntax blocks (the Task 1.2 miss)
 
-- [ ] ⬜ **Task 2.1**: Convert the `Write(...)` blocks to Write payloads
-  - [ ] ⬜ These are the sixth grammar, and the audit named five. The
+- [x] ✅ **Task 2.1**: All 10 converted to Write payloads across the five
+  `strategies/error_hiding/` files. Executable blocks **94 → 104**, and all 10
+  dispatch against the live handler with the declared decision
+  - [x] ✅ These were the sixth grammar, and the audit named five. The
     conversion pass keyed on English sentences and never saw call syntax, so
     they sat in the residual looking like shell commands
-  - [ ] ⬜ **They must not receive a Bash payload.** Dispatching
-    `{"command": "Write(\n  file_path=..."}` probes a Bash handler with a
-    string no file-write handler matches: the probe goes green while testing
-    nothing. That is the precise failure the harness exists to prevent, and it
-    is silent
-  - [ ] ⬜ Render `command` from the payload here (`as_instruction()`), unlike
-    the shell blocks — call syntax is not pasteable into anything, so there is
-    no human route to preserve
+  - [x] ✅ Write payloads, not Bash — confirmed necessary rather than assumed:
+    the Phase 3 dry run found 5 OTHER blocks that really do have shell-shaped
+    commands but match a different tool, and every one returned no decision.
+    That is what these 10 would have done under a Bash payload, and the deny
+    half would have reported PASS via ALLOW-by-not-matching
+  - [x] ✅ `command` rendered from the payload here, unlike the shell blocks —
+    call syntax is not pasteable into anything, so there was no human route to
+    preserve
+  - [x] ✅ Escaping was the live risk and is checked: the old prose carried
+    `\\n` (a literal backslash-n for a human to read), while the payload needs
+    REAL newlines, since the content is what the handler pattern-matches. An
+    assertion that no `content` contains a literal `\n` two-character sequence
+    now guards it
 
 ### Phase 3: The shell blocks
 

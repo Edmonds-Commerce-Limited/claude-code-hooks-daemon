@@ -46,24 +46,47 @@ class GoErrorHidingStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Go error-hiding strategy."""
+        from claude_code_hooks_daemon.constants.tools import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
 
+        # Stated once; the prose is rendered from it (Plan 00345 Phase 2).
+        # A WRITE payload, not Bash: these read as `Write(...)` call syntax,
+        # and a Bash payload would probe a string no file-write handler
+        # matches -- the deny test would then see ALLOW-by-not-matching and
+        # pass while testing nothing.
+        bad_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "bad.go")),
+                "content": "package main\nfunc main() { if err != nil {} }",
+            },
+        )
+        good_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "good.go")),
+                "content": (
+                    'package main\nimport ("fmt"; "os")\n'
+                    "func main() {\n"
+                    '  if _, err := os.Open("f"); err != nil { fmt.Println(err) }\n'
+                    "}"
+                ),
+            },
+        )
+
         return [
             AcceptanceTest(
                 title="Go: empty error check ignores error value",
-                command=(
-                    "Write(\n"
-                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'bad.go')}',\n"
-                    "  content='package main\\nfunc main() { if err != nil {} }'\n"
-                    ")"
-                ),
+                command=bad_probe.as_instruction(),
+                tool_payload=bad_probe,
                 description=("Blocks Go file with empty error check written via Write tool"),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -79,14 +102,8 @@ class GoErrorHidingStrategy:
             ),
             AcceptanceTest(
                 title="Go: proper error handling is allowed",
-                command=(
-                    "Write(\n"
-                    f"  file_path='{scratch_path(_FIXTURE_DIR, 'good.go')}',\n"
-                    '  content=\'package main\\nimport ("fmt"; "os")\\n'
-                    'func main() {\\n  if _, err := os.Open(\\"f\\"); err != nil '
-                    "{ fmt.Println(err) }\\n}'\n"
-                    ")"
-                ),
+                command=good_probe.as_instruction(),
+                tool_payload=good_probe,
                 description=("Allows Go file with proper error handling via Write tool"),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
