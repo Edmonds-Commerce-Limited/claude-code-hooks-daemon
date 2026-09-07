@@ -1,6 +1,6 @@
 # Plan 00243: Make the Acceptance Playbook Deterministically Executable
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-14
 **Owner**: joseph
 **Priority**: Medium
@@ -218,22 +218,39 @@ results, so they are prerequisites, not follow-ups.
 
 ### Phase 5: Remaining doc-snippet gap (optional, lower value)
 
-- [ ] ⬜ **Task 5.1**: Decide whether a doc re-declaring a real class
-  (`class HookResult:` under a heading naming `core/hook_result.py`) can be
-  distinguished from an illustration without guessing. If it cannot, leave it
-  — that is the correct answer, not a failure
-- [ ] ⬜ **Task 5.2**: `Handler` has FOUR abstract methods. Measured across
-  every scanned doc: **40 of 40** documented `Handler` subclass examples
-  define only a subset, so NONE of them can be instantiated —
-  `TypeError: Can't instantiate abstract class ... with abstract methods get_acceptance_tests, get_claude_md`. The canonical skeleton in `CLAUDE.md`
-  is already fixed and verified by executing it verbatim; the remaining 39 are
-  concentrated in `HANDLER_DEVELOPMENT.md` (13), `PROJECT_HANDLERS.md` (4),
-  `ARCHITECTURE.md` (4) and `development/QA.md` (4)
-  - [ ] ⬜ Decide per site: show all four, or state plainly that the example
-    is partial. Blanket-editing 40 examples to add two stubs is mostly noise
-  - [ ] ⬜ This is NOT catchable by `check_doc_snippets` — a partial example
-    is legitimate documentation, so flagging it would be the "missing
-    required arguments" false-positive trap in the check's own docstring
+- [x] ✅ **Task 5.1**: **It cannot be distinguished. Left out of scope, which
+  the task names as the correct answer rather than a failure** — now with
+  measurement behind it instead of an assertion
+  - [x] ✅ Class-name importability does NOT separate the two: `ARCHITECTURE.md`
+    re-declares `Handler` and `HookResult` to describe their shape, and
+    abridges `DestructiveGitHandler` and `PlanWorkflowHandler` as
+    illustrations. All four names are importable
+  - [x] ✅ A rule sidestepping the classification — "a declared member must
+    exist on the real class", allowing omission and flagging only invention —
+    was measured over the live corpus. **6 findings, all 6 false positives**,
+    from three distinct causes, each fatal on its own:
+    1. **Name collision.** `development/QA.md` declares an illustrative
+       `class Config(TypedDict)` unrelated to the package's `Config`
+    2. **Forward-looking documents.** Plan 00035 declares `SessionState` under
+       a "**New file**" heading. A plan describes what SHOULD exist, so
+       flagging it means flagging every design plan in the tree
+    3. **Deliberately wrong examples.** That `QA.md` snippet is labelled
+       `❌ WRONG` and teaches by being wrong. A correctness checker cannot tell
+       "broken on purpose" from "broken"
+- [x] ✅ **Task 5.2**: Stated once rather than edited into 42 sites
+  - [x] ✅ Re-measured against the live corpus (frozen `Completed/` and
+    `Cancelled/` plans excluded): **42 of 43 examples are partial**. At that
+    ratio abridgement is the CONVENTION, not the defect — adding two stubs to
+    42 examples is ~84 lines that teach nothing and lengthen every example at
+    the moment a reader wants only the relevant part
+  - [x] ✅ So `HANDLER_DEVELOPMENT.md` (which carries 13 of them, and is what
+    someone writing a handler actually reads) now states the convention at the
+    head of "Handler Pattern": it names all four abstract methods, shows the
+    exact `TypeError`, and points at the one complete skeleton — which is in
+    `CONTRIBUTING.md`, not `CLAUDE.md` as this task previously recorded
+  - [x] ✅ Confirmed NOT catchable by `check_doc_snippets`: a partial example
+    is legitimate documentation, so flagging it is the "missing required
+    arguments" false-positive trap named in the check's own docstring
 
 ## Dependencies
 

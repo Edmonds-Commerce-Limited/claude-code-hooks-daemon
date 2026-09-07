@@ -186,6 +186,23 @@ at merge time instead.
 
 ## Handler Pattern
 
+> **The examples below are ABRIDGED, and every example in this tree is.**
+> `Handler` declares four abstract methods — `matches`, `handle`,
+> `get_claude_md` and `get_acceptance_tests` — and a subclass must define all
+> four or Python refuses to instantiate it:
+>
+> ```text
+> TypeError: Can't instantiate abstract class MyHandler with abstract
+> methods get_acceptance_tests, get_claude_md
+> ```
+>
+> Each section here shows only the method it is teaching, because showing four
+> methods to explain one buries the point. Measured across the live docs, 42 of
+> 43 `Handler` examples are partial in exactly this way, so treat abridgement
+> as the convention rather than reading any single example as a full class.
+> For a skeleton that really does run, copy the complete one in
+> [CONTRIBUTING.md](../CONTRIBUTING.md).
+
 ### 1. Class Definition
 
 Subclass the base named after your event — see
