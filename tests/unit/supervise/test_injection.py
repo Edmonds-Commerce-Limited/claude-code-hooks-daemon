@@ -166,16 +166,18 @@ class TestPerformInjection:
         # `text\r` as one burst leaves the trailing CR absorbed into the
         # multiline input box (text sits unsubmitted, observed live on a long
         # `/compact` line). A standalone, delayed `\r` reads as a real Enter.
+        # The payload is also paste-framed, which is what makes that boundary
+        # explicit rather than timed -- see test_paste_framed_injection.py.
         written: list[bytes] = []
         sleeps: list[float] = []
         _mod._perform_injection(written.append, "hello world", sleep=sleeps.append)
-        assert written == [b"hello world", b"\r"]
+        assert written == [b"\x1b[200~hello world\x1b[201~", b"\r"]
         assert sleeps == [_mod._SUBMIT_DELAY_SECONDS]
 
     def test_full_line_still_ends_in_carriage_return(self) -> None:
         written: list[bytes] = []
         _mod._perform_injection(written.append, "hello world", sleep=lambda _s: None)
-        assert b"".join(written) == b"hello world\r"
+        assert b"".join(written) == b"\x1b[200~hello world\x1b[201~\r"
 
     def test_confirm_enters_sends_additional_standalone_enters(self) -> None:
         # A /model switch needs a SECOND confirming Enter after the normal
@@ -185,20 +187,20 @@ class TestPerformInjection:
         _mod._perform_injection(
             written.append, "/model fable", confirm_enters=1, sleep=sleeps.append
         )
-        assert written == [b"/model fable", b"\r", b"\r"]
+        assert written == [b"\x1b[200~/model fable\x1b[201~", b"\r", b"\r"]
         assert sleeps == [_mod._SUBMIT_DELAY_SECONDS, _mod._MODEL_CONFIRM_DELAY_SECONDS]
 
     def test_confirm_enters_default_is_zero_and_unchanged(self) -> None:
         written: list[bytes] = []
         _mod._perform_injection(written.append, "hello", sleep=lambda _s: None)
-        assert written == [b"hello", b"\r"]
+        assert written == [b"\x1b[200~hello\x1b[201~", b"\r"]
 
     def test_confirm_enters_multiple(self) -> None:
         written: list[bytes] = []
         _mod._perform_injection(
             written.append, "/model fable", confirm_enters=2, sleep=lambda _s: None
         )
-        assert written == [b"/model fable", b"\r", b"\r", b"\r"]
+        assert written == [b"\x1b[200~/model fable\x1b[201~", b"\r", b"\r", b"\r"]
 
     def test_confirm_enters_ignored_when_submit_false(self) -> None:
         # ESC is an interrupt keypress, not a submitted line -- confirm_enters
@@ -270,7 +272,8 @@ class TestPollOnce:
         )
         assert ev.decision is Decision.WOULD_COMPACT
         expected = _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=True, now_wall=1000.0)
-        assert b"".join(written) == (expected + "\r").encode("utf-8")
+        framed = _mod._PASTE_START + expected + _mod._PASTE_END
+        assert b"".join(written) == (framed + "\r").encode("utf-8")
 
     def test_not_red_no_injection(self, tmp_path: Path) -> None:
         self._sidecar(tmp_path / "sc", red=False)
@@ -371,11 +374,12 @@ class TestPollOnce:
             freshness_seconds=30.0,
         )
         payload = b"".join(written).decode("utf-8")
-        # Slash command first (recognised), bot chrome in the instruction arg,
-        # submitted with a carriage return.
-        assert payload.startswith("/compact ")
+        # Slash command first INSIDE the paste frame (that is what makes it
+        # recognised as a command), bot chrome in the instruction arg, and the
+        # submitting carriage return outside the frame so it reads as an Enter.
+        assert payload.startswith(_mod._PASTE_START + "/compact ")
         assert "🤖" in payload
-        assert payload.endswith("\r")
+        assert payload.endswith(_mod._PASTE_END + "\r")
 
     def test_human_compact_suppresses_supervisor_compact(self, tmp_path: Path) -> None:
         # A detected human /compact must stop the supervisor injecting its own.
@@ -600,7 +604,8 @@ class TestPollOnceCompaction:
         )
         assert ev.decision is Decision.WOULD_CONTINUE
         expected = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True, now_wall=1000.0)
-        assert b"".join(written) == (expected + "\r").encode("utf-8")
+        framed = _mod._PASTE_START + expected + _mod._PASTE_END
+        assert b"".join(written) == (framed + "\r").encode("utf-8")
 
     def test_signal_overrides_green_sidecar(self, tmp_path: Path) -> None:
         sc = tmp_path / "sc"
@@ -626,7 +631,8 @@ class TestPollOnceCompaction:
         )
         assert ev.decision is Decision.WOULD_CONTINUE
         expected = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True, now_wall=1000.0)
-        assert b"".join(written) == (expected + "\r").encode("utf-8")
+        framed = _mod._PASTE_START + expected + _mod._PASTE_END
+        assert b"".join(written) == (framed + "\r").encode("utf-8")
 
     def test_resume_consumes_signal_file(self, tmp_path: Path) -> None:
         # After a resume fires, the signal file is deleted so it cannot re-fire

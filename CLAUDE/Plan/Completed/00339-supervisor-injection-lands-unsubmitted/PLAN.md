@@ -1,6 +1,6 @@
 # Plan 00339: supervisor injection lands unsubmitted
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-07
 **Owner**: joseph
 **Priority**: High
@@ -14,13 +14,21 @@ in Claude Code's input box, followed by a newline, never submitted.
 
 `_perform_injection` writes the payload, sleeps `_SUBMIT_DELAY_SECONDS` (0.2s),
 then writes a standalone `\r`. That separation is on the **write** side, but
-keystroke/paste coalescing is decided on the **read** side. If the TUI event
-loop is blocked for longer than the delay — rendering a long transcript, GC,
-heavy load — both writes drain in a single `read()` and the carriage return is
-absorbed into the multi-line input box as a literal newline. A sender-side
-sleep cannot guarantee separation at the receiver, which is why the failure is
-intermittent and load-dependent, and why the constant was already tuned once
-(the comment records a long `/compact` line failing where a short one worked).
+whether the two writes are read as one burst is decided at the **reader**. A
+sender-side sleep cannot guarantee separation at the receiver, which is why the
+failure is intermittent and load-dependent, and why the constant was already
+tuned once (the comment records a long `/compact` line failing where a short
+one worked).
+
+**Measured, not inferred** (Phase 3 probes, real Claude Code v2.1.263 driven
+over a PTY with the real 131-byte armed payload): a coalesced
+`payload + \r` leaves the line sitting unsubmitted in the box, while a
+coalesced `ESC[200~ payload ESC[201~ \r` submits. A short bare `/compact\r`
+submits either way. So the trigger is not "arrived in one `read()`" — it is
+Claude Code's **paste detection**: a burst that large is treated as pasted
+text, and a carriage return inside pasted text is a literal newline. Framing
+the payload states where the paste ends, making the following `\r` a keypress
+regardless of how the writes are batched.
 
 The supervisor cannot see this happen. Its own injections are deliberately kept
 out of the `HumanInputLine` box model so they can never mark the box non-empty
@@ -83,40 +91,63 @@ up holding a compaction message, a newline, and more text.
 
 ### Phase 2: Stop the second `/compact` stacking
 
-- [ ] ⬜ **Task 2.1**: Establish whether Phase 1 closes this by itself. If the
-  resubmit submits the stuck line, the episode ends and no second injection is
-  reached. The stacking is only observable when BOTH remedies fail, so measure
-  before adding a guard for it.
-- [ ] ⬜ **Task 2.2**: If it persists, decide what a second `/compact` should
-  do when the first may still be in the box. Note the constraint from
-  Non-Goals: the box model deliberately cannot see supervisor text, so this
-  cannot be solved by reading the box.
+- [x] ✅ **Task 2.1**: Establish whether Phase 1 closes this by itself.
+  **Done — measured.** Reaching a second injection needs the whole flush budget
+  to burn without a compaction starting: `_enter_monitor` leaves
+  `_last_action_ts` at the last attempt, so once the cooldown elapses MONITOR
+  injects again. Phase 1 puts an Enter at attempt 2 of 5, and Phase 3 stops the
+  line being stuck in the first place, so the stacking path now needs THREE
+  independent failures (framing, ESC, Enter). Confirmed with the probe that ESC
+  does NOT clear the box — the TUI answers a single ESC with "Esc again to
+  clear" — so the pre-Phase-1 machine could never have recovered on its own.
+
+- [x] ✅ **Task 2.2**: Decide what a second `/compact` should do when the first
+  may still be in the box. **Decided: ship no guard, and record why.** The
+  probe establishes Ctrl-U (`0x15`) as a working box-clear — the TUI empties the
+  box and offers "Ctrl+Y to paste deleted text" — so a clear-then-inject guard
+  is now buildable. It is deliberately NOT shipped: it would fire on a path that
+  needs three independent failures, and its cost is that `input_line_empty` is
+  the supervisor's MODEL of the human's box, so any case where that model is
+  wrong turns the guard into a keystroke that wipes human text. Guarding a
+  triple-failure path with a change that can destroy real input is the wrong
+  trade. The measurement is recorded here so the guard can be built without
+  re-deriving it, if the path is ever actually observed.
 
 ### Phase 3: Remove the timing dependence (needs a live experiment)
 
-- [ ] ⬜ **Task 3.1**: Evaluate explicit bracketed-paste framing. The
-  supervisor owns the PTY master, so it IS the terminal; Claude Code enables
-  bracketed paste (the evidence is that `HumanInputLine` already parses
-  `ESC[200~`/`ESC[201~` out of the forwarded human stream). Wrapping the
-  payload would make the paste boundary explicit and a following `\r`
-  unambiguously a keypress — no heuristic, no timing.
-- [ ] ⬜ **Task 3.2**: Do NOT ship it on reasoning alone. Claude Code may
-  render a bracketed paste as a `[Pasted text]` placeholder rather than inline
-  text, which would stop `/compact` being recognised as a slash command and
-  break compaction entirely. Test it in a scratch session first; the payload is
-  single-line, which is the case most likely to insert inline, but "likely" is
-  not a basis for changing the live compaction path.
+- [x] ✅ **Task 3.1**: Evaluate explicit bracketed-paste framing. **Done and
+  shipped.** `_perform_injection` now writes a submitted payload as ONE
+  `_PASTE_START + payload + _PASTE_END` burst; the `\r` stays a separate,
+  delayed write outside the frame. A raw keypress (`submit=False` — the ESC
+  interrupt and the Phase 1 bare-Enter resubmit) is written unframed: framing a
+  control character would paste it as literal text instead of pressing it.
+
+- [x] ✅ **Task 3.2**: Do NOT ship it on reasoning alone. **Tested first, and
+  the feared failure did not occur.** Three probes drove a real Claude Code
+  v2.1.263 over a PTY, typing into the input box and never submitting a turn, so
+  the experiment cost no model call:
+
+  - The paste rendered INLINE, not as a `[Pasted text]` placeholder, and still
+    opened the slash-command menu (`/compact`, `/autocompact`) exactly as
+    typing it did. A submitted paste ran as a command.
+  - The bug reproduced deterministically: the real payload + `\r` in ONE write
+    sat unsubmitted in the box. The same write with paste framing submitted.
+  - Also settled, as a by-product: a single ESC does not clear the box ("Esc
+    again to clear"), and Ctrl-U does (with a kill-ring hint). Both feed
+    Phase 2.
 
 ## Success Criteria
 
-- [ ] A `/compact` left unsubmitted in the input box is submitted by the
-  supervisor without human intervention.
-- [ ] The queued-command remedy still fires first and still works.
-- [ ] The give-up budget is unchanged in attempt count.
-- [ ] Neither remedy can fire while the human has text in the box, during a
+- [x] ✅ A `/compact` left unsubmitted in the input box is submitted by the
+  supervisor without human intervention (Phase 1's alternating Enter).
+- [x] ✅ The injection stops landing unsubmitted in the first place — verified
+  against a real TUI, not reasoned about (Phase 3's paste framing).
+- [x] ✅ The queued-command remedy still fires first and still works.
+- [x] ✅ The give-up budget is unchanged in attempt count.
+- [x] ✅ Neither remedy can fire while the human has text in the box, during a
   human-originated compaction, or once compaction is under way.
-- [ ] Full QA green (25/25) and the daemon restarted and verified before the
-  terminal status flip.
+- [x] ✅ Full QA green (25/25, 18,195 tests, 95.2% coverage) and the daemon
+  restarted and verified before the terminal status flip.
 
 ## Delivery & Milestones
 

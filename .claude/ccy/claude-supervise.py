@@ -4206,14 +4206,27 @@ def _format_audit_banner(items: tuple[str, ...]) -> str:
 
 
 _INJECT_SUBMIT = "\r"
-# The submit (Enter) is written SEPARATELY from the payload, after this pause.
-# Injecting `payload + \r` in a single burst leaves the trailing carriage
-# return absorbed into the (multi-line-capable) input box -- the text sits
-# unsubmitted -- which was observed live on a long `/compact <instructions>`
-# line (a short bare `/compact\r` had submitted fine, so length/burst is the
-# trigger). A brief pause then a standalone `\r` is registered by the TUI as a
-# real Enter and submits regardless of payload length. This mirrors how
-# tmux/expect/pexpect drive a TUI: send text, then send Enter as its own key.
+# Bracketed-paste markers. A submitted payload is written INSIDE them so the
+# TUI is TOLD where the pasted text ends, making the `\r` that follows
+# unambiguously a keypress. Measured against a real Claude Code (v2.1.263)
+# driven over a PTY with the real 131-byte armed compact payload: written as
+# one `payload + \r` burst the line sits UNSUBMITTED in the box, and written
+# with these markers the same single burst SUBMITS. A short bare `/compact\r`
+# submits either way -- Claude Code treats a burst that LARGE as pasted text,
+# and a carriage return inside pasted text is a literal newline. That is the
+# reported bug: a compaction message and a newline, never submitted.
+# The pasted line still behaves as typed input (the probe saw the slash-command
+# menu open and the submitted `/compact` run), so slash-command recognition --
+# the risk worth measuring before shipping this -- is intact.
+_PASTE_START = "\x1b[200~"
+_PASTE_END = "\x1b[201~"
+# The submit (Enter) is ALSO written separately from the payload, after this
+# pause. This was the original defence on its own, and it cannot be sufficient:
+# the pause is on the WRITE side while the paste heuristic is applied at the
+# READER, so an event loop blocked longer than the pause still sees one burst.
+# The framing above is what actually removes the timing dependence; the pause
+# is kept as a second line of defence and mirrors how tmux/expect/pexpect drive
+# a TUI -- send text, then send Enter as its own key.
 _SUBMIT_DELAY_SECONDS = 0.2
 # A `/model <family>` switch shows a CONFIRMATION dialog after the command
 # line is submitted; a second, standalone Enter is needed to complete it, and
@@ -4272,14 +4285,18 @@ def _perform_injection(
 ) -> None:
     """Type ``payload`` into the child PTY, optionally submitting it with Enter.
 
-    The submit (carriage return) is a distinct write, delayed by
-    ``_SUBMIT_DELAY_SECONDS`` from the payload, so the TUI registers a real Enter
-    instead of absorbing a trailing CR into its multi-line input box (which left
-    a long ``/compact`` line sitting unsubmitted). ``sleep`` is injectable so
-    tests do not actually pause.
+    A submitted payload is written as ONE bracketed-paste burst
+    (``_PASTE_START`` + text + ``_PASTE_END``), so the TUI knows exactly where
+    the paste ends and the carriage return that follows is read as a keypress
+    rather than absorbed into the multi-line input box as a literal newline
+    (which left a long ``/compact`` line sitting unsubmitted). The submit is
+    still a distinct write delayed by ``_SUBMIT_DELAY_SECONDS`` as a second line
+    of defence. ``sleep`` is injectable so tests do not actually pause.
 
-    ``submit=False`` writes the payload with NO trailing Enter -- used for the
-    raw ESC interrupt, which is a keypress, not a line to submit.
+    ``submit=False`` writes the payload RAW, with no framing and no trailing
+    Enter -- used for the ESC interrupt and the bare-Enter resubmit, which are
+    keypresses, not lines. Framing either one would paste the control character
+    as literal text instead of pressing it.
 
     ``confirm_enters`` sends that many ADDITIONAL standalone Enter keystrokes
     after the normal submit, each preceded by ``_MODEL_CONFIRM_DELAY_SECONDS``
@@ -4288,9 +4305,10 @@ def _perform_injection(
     a no-op for them; it is also skipped entirely when ``submit=False`` (an
     interrupt keypress is never followed by a confirmation dialog).
     """
-    master_writer(payload.encode("utf-8"))
     if not submit:
+        master_writer(payload.encode("utf-8"))
         return
+    master_writer(f"{_PASTE_START}{payload}{_PASTE_END}".encode())
     sleep(_SUBMIT_DELAY_SECONDS)
     master_writer(_INJECT_SUBMIT.encode("utf-8"))
     for _ in range(confirm_enters):

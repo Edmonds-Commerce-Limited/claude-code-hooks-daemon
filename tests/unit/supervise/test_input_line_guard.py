@@ -481,7 +481,8 @@ class TestPollOnceInputBoxGuard:
         )
         assert second.decision is Decision.WOULD_COMPACT
         expected = _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=True, now_wall=1002.0)
-        assert b"".join(written) == (expected + "\r").encode("utf-8")
+        framed = _mod._PASTE_START + expected + _mod._PASTE_END
+        assert b"".join(written) == (framed + "\r").encode("utf-8")
 
     def test_continue_fires_on_later_tick_after_box_cleared(self, tmp_path: Path) -> None:
         sc = tmp_path / "sc"
@@ -516,7 +517,8 @@ class TestPollOnceInputBoxGuard:
         )
         assert second.decision is Decision.WOULD_CONTINUE
         expected = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True, now_wall=1002.0)
-        assert b"".join(written) == (expected + "\r").encode("utf-8")
+        framed = _mod._PASTE_START + expected + _mod._PASTE_END
+        assert b"".join(written) == (framed + "\r").encode("utf-8")
         assert not (sc / "s.compacting").exists()
 
     def test_empty_box_default_still_injects(self, tmp_path: Path) -> None:
