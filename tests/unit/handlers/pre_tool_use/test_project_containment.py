@@ -259,6 +259,46 @@ class TestRelativeDestinationsResolveAgainstCwd:
         assert handler.matches(_bash("mkdir -p ../../../tmp/newdir")) is False
 
 
+class TestUnexpandableTokensAreDeclinedNotFabricated:
+    """Finding C6 (release review 260907): `_resolve_against_cwd` must decline
+    a token needing shell expansion, exactly as the shared accessor
+    (`core/utils.py:_resolve_write_target`) already declines it -- not join it
+    against cwd into an absolute path that does not exist. Reproduced with cwd
+    OUTSIDE the repo root: that is what turns the fabricated path into
+    something that reads as out-of-root and gets denied, naming a location the
+    shell will never actually write to. With cwd inside the root the same
+    fabrication would still be wrong, just invisible (the fabricated path
+    happens to land inside and gets allowed).
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "command"),
+        [
+            ("dollar-expansion", 'curl https://x -o "$HOME/evil.sh"'),
+            ("glob-star", "curl https://x -o out*/evil.sh"),
+            ("glob-question", "curl https://x -o out?/evil.sh"),
+            ("backtick", 'curl https://x -o "`whoami`/evil.sh"'),
+            ("leading-tilde", "curl https://x -o ~/evil.sh"),
+        ],
+    )
+    def test_an_unexpandable_token_is_declined_not_fabricated(
+        self, handler: ProjectContainmentHandler, label: str, command: str
+    ) -> None:
+        assert (
+            handler.matches(_bash(command, cwd="/tmp/work")) is False
+        ), f"{label} was fabricated into a path instead of declined"
+
+    def test_an_ordinary_relative_token_is_still_resolved_and_denied(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """The decline must not regress the cwd-join this release ships: a
+        plain relative token with nothing unexpandable in it is still joined
+        against cwd and still denied when that lands outside the root."""
+        assert (
+            handler.matches(_bash("curl https://x -o ../../tmp/evil.sh", cwd="/repo/sub")) is True
+        )
+
+
 class TestATrailingSlashCopyDestination:
     """Finding I2: `cp report.md /tmp/` is the most natural spelling of the
     thing this handler exists to stop, and it used to vanish entirely."""

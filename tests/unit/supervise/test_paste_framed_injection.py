@@ -89,6 +89,49 @@ class TestASubmittedPayloadIsPasteFramed:
         ]
 
 
+class TestEveryInjectedPayloadStaysUnderThePlaceholderThreshold:
+    """A paste too large stops being text and becomes a REFERENCE to text.
+
+    Measured on the same PTY rig, framed, single-line, control-byte free:
+
+    ========  ==========================
+    payload   input box shows
+    ========  ==========================
+    134 B     the text, inline
+    303 B     the text, inline
+    503 B     the text, inline
+    803 B     ``[Pasted text #1]``
+    1503 B    ``[Pasted text #2]``
+    ========  ==========================
+
+    Above the threshold Claude Code collapses the paste to a placeholder, so a
+    submitted `/compact` would carry a reference rather than the instruction --
+    the injection silently becomes meaningless. Every payload the supervisor
+    builds is capped well under it TODAY; this pins that, because the failure
+    mode is invisible (the line submits, it just says nothing) and the caps are
+    the only thing keeping us on the safe side.
+    """
+
+    #: Half-way between the largest size measured to insert inline (503) and
+    #: the smallest measured to collapse (803). Not a discovered constant --
+    #: the exact threshold was not bisected, so this is the conservative bound
+    #: the measurements support.
+    SAFE_PAYLOAD_CEILING = 600
+
+    def test_the_goal_payload_cap_is_under_the_threshold(self) -> None:
+        assert _mod._GOAL_MAX_JOINED_CHARS <= self.SAFE_PAYLOAD_CEILING
+
+    def test_the_standing_auth_payload_cap_is_under_the_threshold(self) -> None:
+        assert _mod._STANDING_AUTH_MAX_JOINED_CHARS <= self.SAFE_PAYLOAD_CEILING
+
+    def test_the_armed_compact_payload_is_under_the_threshold(self) -> None:
+        """The compact payload is built from constants, not capped at all."""
+        payload = _mod._resolve_payload(_mod.Decision.WOULD_COMPACT, dry_run=False)
+
+        assert payload is not None
+        assert len(payload.encode()) <= self.SAFE_PAYLOAD_CEILING
+
+
 class TestARawKeypressIsNeverFramed:
     """Framing a keypress would turn a control key into literal pasted text."""
 

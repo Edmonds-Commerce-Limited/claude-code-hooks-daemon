@@ -55,7 +55,16 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
-from claude_code_hooks_daemon.core.utils import get_bash_command, get_bash_write_targets
+
+# `_UNEXPANDABLE_CHARACTERS` is private, but imported deliberately rather than
+# redefined: it is the exact character set `_resolve_write_target` already
+# declines a target on, and `_resolve_against_cwd` below must decline on the
+# same set rather than risk drifting from it.
+from claude_code_hooks_daemon.core.utils import (
+    _UNEXPANDABLE_CHARACTERS,
+    get_bash_command,
+    get_bash_write_targets,
+)
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
@@ -262,16 +271,24 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
     def _resolve_against_cwd(target: str, cwd: Any) -> str:
         """Join a RELATIVE destination against the event's cwd.
 
-        An absolute target, or one with no cwd to join against, is returned
-        unchanged -- `_is_outside` already treats an unresolved relative path
-        as never-outside, the same "a wrong path is worse than no path"
-        contract `get_bash_write_targets` uses for the routes it resolves
-        itself. This mirrors that join rather than reusing it directly: the
-        shared accessor's resolver also declines targets needing shell
-        expansion and strips a directory-marking trailing slash, neither of
-        which the containment test needs -- it only asks where a path RESOLVES
-        TO, not whether it names an existing file.
+        An absolute target, one with no cwd to join against, or one needing
+        shell expansion, is returned unchanged -- `_is_outside` already treats
+        an unresolved relative path as never-outside, the same "a wrong path
+        is worse than no path" contract `get_bash_write_targets` uses for the
+        routes it resolves itself. This mirrors that join rather than reusing
+        it directly: the shared accessor's resolver also strips a directory-
+        marking trailing slash, which the containment test does not need -- it
+        only asks where a path RESOLVES TO, not whether it names an existing
+        file. The expansion decline it DOES need, and shares verbatim: a token
+        containing `_UNEXPANDABLE_CHARACTERS` (`$`, `*`, `?`, a backtick), or
+        starting with `~`, would otherwise be joined into an absolute path
+        that no shell will ever actually write to -- fabricating a location
+        rather than declining to name one (release review finding C6).
         """
+        if any(character in target for character in _UNEXPANDABLE_CHARACTERS):
+            return target
+        if target.startswith("~"):
+            return target
         if Path(target).is_absolute():
             return target
         if not isinstance(cwd, str) or not cwd:

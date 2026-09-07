@@ -216,6 +216,34 @@ class TestConfigMergerMerge:
         plugins = result.merged_config.get("plugins", {})
         assert len(plugins.get("plugins", [])) == 1
 
+    def test_applies_custom_plugin_settings(self) -> None:
+        """Applies `plugins.paths` (a sibling of the `plugins.plugins` list) from diff.
+
+        Regression (release review C4).
+        """
+        new_default = {
+            "version": "2.0",
+            "handlers": {},
+            "plugins": {"paths": []},
+        }
+        diff = ConfigDiff(custom_plugin_settings={"paths": [".claude/lib"]})
+        result = self.merger.merge(new_default_config=new_default, diff=diff)
+        assert result.merged_config["plugins"]["paths"] == [".claude/lib"]
+        assert result.is_clean is True
+
+    def test_custom_plugin_settings_applied_alongside_custom_plugins(self) -> None:
+        """`plugins.paths` and `plugins.plugins` are both preserved together."""
+        new_default = {"version": "2.0", "handlers": {}}
+        diff = ConfigDiff(
+            custom_plugin_settings={"paths": [".claude/lib"]},
+            custom_plugins=[
+                {"path": "my_plugin.py", "event_type": "pre_tool_use", "enabled": True}
+            ],
+        )
+        result = self.merger.merge(new_default_config=new_default, diff=diff)
+        assert result.merged_config["plugins"]["paths"] == [".claude/lib"]
+        assert len(result.merged_config["plugins"]["plugins"]) == 1
+
     def test_conflict_for_removed_handler_with_user_customization(self) -> None:
         """Reports conflict when handler was removed by user but exists in new default."""
         new_default = {
@@ -601,3 +629,133 @@ class TestTopLevelSectionsSurviveTheMerge:
         merged = self.merger.merge(new_default_config=new_default, diff=diff).merged_config
 
         assert merged["plan_workflow"]["enabled"] is True
+
+
+class TestPluginPathsSurviveTheMerge:
+    """`plugins.paths` must survive an upgrade merge alongside `plugins.plugins`.
+
+    Release review finding C4. `_diff_plugins` only ever captured entries of
+    the `plugins.plugins` LIST. `paths` is a documented sibling key
+    (`docs/guides/CONFIGURATION.md`), and because `plugins` sits on
+    `_SECTIONS_WITH_A_DEDICATED_PASS` the custom-sections pass skips it too —
+    so it was captured by nothing at all. A user config with `plugins: {paths:
+    [...], plugins: [...]}` merged to `plugins: {plugins: [...]}` while
+    reporting `conflicts: []` and `is_clean: True`.
+    """
+
+    def setup_method(self) -> None:
+        self.differ = ConfigDiffer()
+        self.merger = ConfigMerger()
+
+    def test_the_field_scenario_end_to_end_through_the_differ(self) -> None:
+        """The reported path, not just the merger half — the loss happened at
+        the DIFF stage, so a merger-only test could pass while the real
+        upgrade still dropped `paths`."""
+        shipped_example = {
+            "version": "2.0",
+            "handlers": {},
+            "plugins": {"paths": [], "plugins": []},
+        }
+        user_config = {
+            "version": "2.0",
+            "handlers": {},
+            "plugins": {
+                "paths": [".claude/lib", "vendor/handlers"],
+                "plugins": [
+                    {
+                        "path": ".claude/hooks/handlers/my_plugin.py",
+                        "event_type": "pre_tool_use",
+                        "enabled": True,
+                    }
+                ],
+            },
+        }
+
+        diff = self.differ.diff(user_config, shipped_example)
+        result = self.merger.merge(new_default_config=shipped_example, diff=diff)
+
+        assert result.merged_config["plugins"]["paths"] == [".claude/lib", "vendor/handlers"]
+        assert len(result.merged_config["plugins"]["plugins"]) == 1
+        assert result.is_clean is True
+
+
+class TestCustomisedSectionsReceiveNewDefaultSubkeys:
+    """A section the user customised must still receive a subkey a later
+    default introduces, instead of losing it to a wholesale replacement.
+
+    Release review finding C5. `_apply_custom_sections` did `merged[section] =
+    deepcopy(value)`, replacing the whole section, so any key the new version
+    ADDS inside a section the user has customised never reached them.
+    """
+
+    def setup_method(self) -> None:
+        self.differ = ConfigDiffer()
+        self.merger = ConfigMerger()
+
+    @staticmethod
+    def _new_default() -> dict[str, Any]:
+        return {
+            "version": "2.0",
+            "daemon": {"log_level": "INFO"},
+            "handlers": {"pre_tool_use": {"sed_blocker": {"enabled": True}}},
+        }
+
+    def test_a_new_default_subkey_survives_when_the_section_is_customised(self) -> None:
+        new_default = dict(
+            self._new_default(),
+            plan_workflow={"plans_directory": "CLAUDE/Plan", "auto_number": True},
+        )
+        diff = ConfigDiff(custom_sections={"plan_workflow": {"plans_directory": "docs/Plans"}})
+
+        merged = self.merger.merge(new_default_config=new_default, diff=diff).merged_config
+
+        assert merged["plan_workflow"] == {
+            "plans_directory": "docs/Plans",
+            "auto_number": True,
+        }
+
+    def test_deep_merge_recurses_into_nested_mappings(self) -> None:
+        new_default = dict(
+            self._new_default(),
+            documentation={"trees": {"agent": "CLAUDE", "human": "docs"}, "strict": False},
+        )
+        diff = ConfigDiff(custom_sections={"documentation": {"trees": {"agent": "AGENT_DOCS"}}})
+
+        merged = self.merger.merge(new_default_config=new_default, diff=diff).merged_config
+
+        assert merged["documentation"] == {
+            "trees": {"agent": "AGENT_DOCS", "human": "docs"},
+            "strict": False,
+        }
+
+    def test_a_list_value_is_replaced_not_merged(self) -> None:
+        new_default = dict(
+            self._new_default(),
+            agents={"docs_qa": {"enabled": True}, "reviewers": ["alice", "bob"]},
+        )
+        diff = ConfigDiff(custom_sections={"agents": {"reviewers": ["carol"]}})
+
+        merged = self.merger.merge(new_default_config=new_default, diff=diff).merged_config
+
+        assert merged["agents"]["reviewers"] == ["carol"]
+        assert merged["agents"]["docs_qa"] == {"enabled": True}
+
+    def test_the_field_scenario_end_to_end_through_the_differ(self) -> None:
+        """Drives the whole differ -> merger path, mirroring how the upgrade
+        actually detects and re-applies a customised section."""
+        shipped_example = dict(
+            self._new_default(),
+            plan_workflow={"plans_directory": "CLAUDE/Plan", "auto_number": True},
+        )
+        user_config = dict(
+            self._new_default(),
+            plan_workflow={"plans_directory": "docs/Plans", "auto_number": True},
+        )
+
+        diff = self.differ.diff(user_config, shipped_example)
+        merged = self.merger.merge(new_default_config=shipped_example, diff=diff).merged_config
+
+        assert merged["plan_workflow"] == {
+            "plans_directory": "docs/Plans",
+            "auto_number": True,
+        }

@@ -300,7 +300,14 @@ def quoted_heredoc_command_words(command: str) -> list[str]:
             if not word or word.startswith("-"):
                 continue
             resolved = _command_word(word)
-            if resolved in _COMMAND_WORD_PREFIXES:
+            # An EMPTY resolution means the word was pure grouping punctuation
+            # (`{`, `(`), which `_WORD_GROUPING_PREFIXES` strips entirely. It
+            # names no command, so accepting it as the command word matched ''
+            # against the caller's allowlist, failed, and denied an ordinary
+            # `{ cat <<'DOC' ... } > doc.md`. Skipping it looks at the next
+            # word instead, which is the actual receiver -- so `( bash <<'X'`
+            # still resolves to `bash` and still withholds the exemption.
+            if not resolved or resolved in _COMMAND_WORD_PREFIXES:
                 continue
             command_words.append(resolved)
             break

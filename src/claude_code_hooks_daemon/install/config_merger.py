@@ -168,12 +168,52 @@ class ConfigMerger:
         merge, so a section the user set is not silently reverted to a default
         they never chose.
 
+        A section already present in the new default (untouched by any
+        earlier pass, since none of them handles a non-dedicated section) is
+        deep-merged rather than replaced wholesale: the user's keys win, and a
+        key the new default ADDS but the user's customisation never mentioned
+        still reaches them. A section the default does not mention at all is
+        still a plain wholesale copy -- there is nothing to merge it with.
+
         Args:
             merged: The config being built (mutated in place)
             diff: The structured diff of user customizations
         """
         for section, value in diff.custom_sections.items():
-            merged[section] = copy.deepcopy(value)
+            default_value = merged.get(section)
+            if isinstance(value, dict) and isinstance(default_value, dict):
+                merged[section] = self._deep_merge_section(default_value, value)
+            else:
+                merged[section] = copy.deepcopy(value)
+
+    @staticmethod
+    def _deep_merge_section(
+        default_value: dict[str, Any],
+        user_value: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Deep-merge a user-customised section over the new default's version.
+
+        User keys win; a default key the user's section does not mention
+        fills the gap instead of being dropped. Recurses into a key present as
+        a mapping on both sides; any other value -- including a list -- is
+        replaced wholesale by the user's value rather than merged
+        element-by-element.
+
+        Args:
+            default_value: The new default config's version of this section.
+            user_value: The user's customised version of this section.
+
+        Returns:
+            A freshly built merged section; neither input is mutated.
+        """
+        merged_section: dict[str, Any] = copy.deepcopy(default_value)
+        for key, value in user_value.items():
+            existing = merged_section.get(key)
+            if isinstance(value, dict) and isinstance(existing, dict):
+                merged_section[key] = ConfigMerger._deep_merge_section(existing, value)
+            else:
+                merged_section[key] = copy.deepcopy(value)
+        return merged_section
 
     def _apply_daemon_settings(
         self,
@@ -346,24 +386,32 @@ class ConfigMerger:
     ) -> None:
         """Apply custom plugin configurations.
 
+        Restores `custom_plugin_settings` (siblings of the plugin list, e.g.
+        `paths`) before appending to the plugin list, so the sibling keys are
+        never lost even when the user added no custom plugins. `plugins` stays
+        on `_SECTIONS_WITH_A_DEDICATED_PASS` precisely so `_apply_custom_sections`
+        -- which runs after this pass -- never touches this key and cannot
+        overwrite what is applied here.
+
         Args:
             merged: Merged config to modify in-place
             diff: ConfigDiff with custom plugins
         """
-        if not diff.custom_plugins:
+        if not diff.custom_plugins and not diff.custom_plugin_settings:
             return
 
-        if "plugins" not in merged:
+        if "plugins" not in merged or not isinstance(merged["plugins"], dict):
             merged["plugins"] = {}
 
-        if not isinstance(merged["plugins"], dict):
-            merged["plugins"] = {}
+        for key, value in diff.custom_plugin_settings.items():
+            merged["plugins"][key] = copy.deepcopy(value)
 
-        if "plugins" not in merged["plugins"]:
-            merged["plugins"]["plugins"] = []
+        if diff.custom_plugins:
+            if "plugins" not in merged["plugins"]:
+                merged["plugins"]["plugins"] = []
 
-        for plugin in diff.custom_plugins:
-            merged["plugins"]["plugins"].append(copy.deepcopy(plugin))
+            for plugin in diff.custom_plugins:
+                merged["plugins"]["plugins"].append(copy.deepcopy(plugin))
 
     def _report_removed_handler_conflicts(
         self,

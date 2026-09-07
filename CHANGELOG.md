@@ -7,6 +7,188 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.62.1] - 2026-09-07
+
+<!-- Attribution note: the six field-reported v3.61.0 -> v3.62.0 upgrade
+     defects were fixed in commits b1217789 and a9866261, BEFORE Plan 00336
+     was filed — that plan carries the residue those fixes exposed, and says
+     so itself. Entries below cite 00336 as the tracking plan for the work
+     area, not as the origin of every fix in it. -->
+
+### Fixed
+
+- **The ccy PTY supervisor's `/compact` injection could land unsubmitted in
+  Claude Code's input box (Plan 00339).** Probing a real Claude Code v2.1.263
+  over a PTY established the mechanism: Claude Code applies paste detection
+  to a large input burst, and a carriage return inside pasted text reads as
+  a literal newline rather than a submit — a short bare `/compact\r` submits
+  fine, the real 131-byte armed payload did not. `_perform_injection` now
+  frames a submitted payload in explicit bracketed-paste markers
+  (`_PASTE_START`/`_PASTE_END`) so the trailing Enter is unambiguously a
+  keypress regardless of how the writes are batched; a `submit=False`
+  payload (the ESC interrupt, the resubmit below) stays unframed, since
+  framing a control character would paste it as literal text instead of
+  pressing it. A companion fix adds a second stall remedy: from the second
+  flush attempt, an alternating bare Enter (`WOULD_RESUBMIT`) submits a line
+  left sitting unsubmitted in the input box, while `[esc]` — proven in the
+  field for the other stall cause, a command queued behind an in-flight
+  turn — stays the first attempt; both draw on the same escape budget, so a
+  wedged session still gives up after the same number of attempts. Field-
+  urgent: reported live from a client project.
+- **Upgrade config merge silently discarded every top-level config section it
+  had no dedicated pass for** (`plan_workflow`, `documentation`, `agents`)
+  while still reporting `is_clean: true, conflicts: []` — 27 keys dropped
+  silently on a real client upgrade. `ConfigDiffer` now captures unknown
+  top-level sections off a deny-list of the four it already handles, so a
+  section added by a later version survives from the day it exists rather
+  than the day someone lists it (Plan 00336).
+- **The upgrade also dropped `plugins.paths`, a documented sibling of the
+  plugin list.** The custom-sections pass skips `plugins` because that key
+  has a dedicated pass — but that pass only captured entries of the
+  `plugins.plugins` LIST, so the search paths were captured by nothing and
+  vanished with `conflicts: []` and `is_clean: True`. The sibling keys are
+  now captured and restored alongside the list.
+- **A customised config section was replaced wholesale, so a subkey the new
+  version ADDED never reached a user who had customised that section.** A
+  user's `plan_workflow: {plans_directory: ...}` overwrote the whole default
+  section, silently discarding options added by the release they were
+  upgrading to. Custom sections are now deep-merged over the default (user
+  keys win, new default keys fill the gaps), matching how `daemon` settings
+  were already handled.
+- **`project_containment` fabricated a path for a token needing shell
+  expansion.** The new relative-destination join did not share the shared
+  accessor's decline on `$`, `*`, `?`, a backtick or a leading `~`, so
+  `curl … -o "$HOME/evil.sh"` was reported at a literal `<cwd>/$HOME/evil.sh`
+  — a path no shell will ever write — in a message whose entire purpose is
+  telling the user where their write went. It now declines to resolve such a
+  token, per the module's own "no path rather than a wrong path" contract.
+- **Config preservation crashed on any config value containing a backslash
+  during upgrade.** Several sites built Python source by interpolating shell
+  variables into string literals — `^pip\b` was halved to a real backspace,
+  and a regex value aborted the upgrade as an illegal JSON escape. Values
+  now travel on stdin/argv instead of being interpolated into source
+  (Plan 00336).
+- **`parse_version` rejected the v-prefixed tag form this project's own
+  documentation hands it**, silently skipping the compatibility verdict and
+  the upgrade-guide list — the two checks that warn about a breaking change
+  before it lands (Plan 00336).
+- **A step added in a new release could not run during the upgrade TO that
+  release.** Layer 2 checks out the target at its own Step 6, but bash has
+  already read the running script, so every later step executed from the
+  release being replaced — v3.62.0's core-docs deployment was silently
+  absent on a Layer-2-only upgrade. Every upgrade document now teaches the
+  Layer 1 command instead; Layer 2 additionally fingerprints its own source
+  and re-execs the target's script on detecting the swap (Plan 00336).
+- **Two shipped documents disagreed about where scratch files go, and the
+  winning one overstated `project_containment`'s reach** — the documented
+  `/tmp` command was never actually denied by it, since the handler judges
+  redirects and destination-bearing constructs, not a path passed as a plain
+  argument. Report destinations now point inside the repository, and the
+  claim is stated as the backstop it is (Plan 00336).
+- **The upgrade's closing message claimed handlers new in the release stay
+  inert until the config-optimisation review runs.** They are registered and
+  firing with their defaults immediately — one had already denied a write in
+  the field before `/optimise` ran. The message no longer overstates this
+  (Plan 00336).
+- **The upgrade second-pass re-exec re-sent already-consumed positional
+  arguments.** `PROJECT_ROOT`/`DAEMON_DIR`/`TARGET_VERSION` were forwarded
+  explicitly and then `"$@"` re-appended all three — harmless today, but a
+  latent trap for a script with no flag parser that detects its own options
+  by substring-matching `$*`. Now forwards only `"${@:4}"`.
+- **Config preservation's diff baseline compared a user's config against the
+  NEW default instead of the version being upgraded FROM**, on the path
+  where Layer 1 checks out the target before invoking Layer 2. A user who
+  had simply accepted an old default was misclassified as having customised
+  it, so a changed default could silently never reach them. Layer 1 now
+  preserves the pre-checkout example config at a new Step 3c and hands it to
+  Layer 2; direct Layer 2 invocation, already correct, is unchanged
+  (Plan 00336).
+- **`.claude/HOOKS-DAEMON.md` was never regenerated on upgrade, only on
+  fresh install** — so the document permanently described the version a
+  project was originally installed at, however many upgrades later it was
+  read. `generate-docs` now runs on both `upgrade_version.sh` paths, after
+  the daemon restart (Plan 00336).
+- **17 commands documented across 8 files were denied by this project's own
+  `project_containment` handler**, found by driving every fenced shell line
+  of the instruction corpus through the live handler rather than a pattern
+  match — including this project's own release-verification step, which
+  fails in this self-installed repository. Every fetch now lands in
+  `untracked/scratch/` (Plan 00336).
+- **`remote_docs`'s `_close_session` could mask a real fetch error by
+  raising from a `finally` block**, so the likeliest trigger (a missing
+  binary) showed only the reap failure, not the underlying fetch error
+  (Plan 00335).
+- **`docs_qa`'s `_walk_into` un-pruned `.git` and `untracked/`** when a
+  `vendor_exceptions` entry used a leading wildcard, because the
+  always-excluded set was checked after the vendor-exception fallback rather
+  than before (Plan 00335).
+
+### Security
+
+- **`curl_pipe_shell`'s quoted-heredoc exemption enumerated receivers that
+  EXECUTE, so any receiver nobody had thought to list defaulted to being
+  GRANTED the exemption** — a priority-10 terminal RCE guard. That
+  enumeration had already failed three times (`eval`/`. /dev/stdin`/
+  `source /dev/stdin`; seven punctuation spellings; six word-expansion
+  spellings recorded as an unclosable limit) before probing the shipped
+  handler found a fourth: `ssh host <<EOF` executes the body on the REMOTE
+  host and was allowed. Inverted to an allowlist of DATA-SINK receivers
+  instead: an unrecognised receiver now withholds the exemption. This closes
+  `ssh` (no list to add it to) and the entire word-expansion family
+  (`$SHELL`, `b$ash`, ...) in one change — previously documented as an
+  unclosable limit, now closed by construction, since none of those are
+  sink names to begin with (Plan 00335).
+- **`curl … | python3` was ALLOWED by that same priority-10 guard.**
+  `_PIPED_INTERPRETERS` lists bare names and the pattern ended in `\b`, which
+  cannot follow a name ending in a digit — so `python\b` never matched
+  `python3`,
+  the spelling real install instructions use and often the only one that
+  exists on a modern system. `/usr/bin/python3`, `python3.12`, `ruby3` and
+  `perl5` were allowed for the same reason. An optional numeric version
+  suffix is now part of the pattern, restricted to digits so `sha256sum`
+  (which starts with `sh`) is still not mistaken for an interpreter. Found
+  while fixing the finding below, not by the review that prompted it.
+- **Three database clients were on the "never executes" allowlist.**
+  `sqlite3` (`.shell`/`.system`), `psql` (`\!`) and `mysql` (`system`) each
+  run shell commands from stdin, so a heredoc body naming one was blanked
+  before the pattern scan and the guard saw nothing. Removed from
+  `_DATA_SINKS` and recorded beside `ssh`, `awk`, `sed` and `crontab` as
+  executors — the same failure shape as `ssh`, in the one list whose whole
+  point is that an unknown name fails closed.
+- **Being a data sink said nothing about what CONSUMED the sink's output.**
+  `(cat <<'X' … X) | bash` fed a recognised sink, so the body was blanked —
+  and then executed by the interpreter the group was piped into. The
+  receiving-segment scan only looks left of the `<<` opener, so it could not
+  see a pipe following the closer. The exemption is now withheld when the
+  command pipes into an interpreter, tested on the heredoc-blanked text so a
+  `| bash` written inside the documentation body cannot trigger it.
+- **`project_containment`'s relative-destination resolution disagreed with
+  its own redirect route on identical effect.** `curl -o`, `wget -O`,
+  `mkdir -p`, `tar -cf` and `rsync` resolved a relative destination
+  differently from an equivalent shell redirect, and a trailing-slash copy
+  destination (`cp README.md /tmp/`) was not recognised as a destination at
+  all and passed through undenied. Both now resolve against the same cwd
+  the sibling accessor already knew (Plan 00335).
+
+### Changed
+
+- **"No review finding is ever dropped" is now a general Definition-of-Done
+  requirement, not a release-only one.** Any review, any change type: fix
+  blocking findings before shipping, file non-blocking findings as a
+  tracked follow-up plan automatically — filing needs no human approval,
+  only scheduling does.
+- **The two DO-NOT-EDIT module docs (`src/CLAUDE.md`, `tests/CLAUDE.md`) now
+  state the self-install exception explicitly.** Both previously read as a
+  hard stop on editing daemon source; in this repository the daemon IS the
+  project, so editing `src/`/`tests/` is the normal way to work. Two of four
+  sub-agents dispatched onto daemon source had read the unstated case as
+  forbidding their assigned task.
+- **Recorded a lesson**: a contradictory-seeming instruction is a precedence
+  question to resolve, not evidence of a prompt injection — filing it as
+  "injected" and disregarding it fails silently in both directions, because
+  the outcome looks the same whether the instruction should have been
+  overridden or not.
+
 ## [3.62.0] - 2026-09-06
 
 ### Added

@@ -141,8 +141,6 @@ class TestTheStallRemedyCoversBothCauses:
 
     def test_the_reason_names_the_cause_it_is_addressing(self) -> None:
         """decision.log is the only record; an unexplained Enter is a mystery."""
-        reason = _flush_sequence(2)
-        assert reason  # sequence drove far enough to produce the resubmit
         machine = CompactStateMachine(_policy())
         machine.evaluate(_reading(), idle=True, now=1000.0)
         machine.evaluate(_reading(), idle=True, now=1065.0)

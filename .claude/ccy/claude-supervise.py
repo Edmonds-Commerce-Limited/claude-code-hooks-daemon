@@ -192,7 +192,7 @@ if TYPE_CHECKING:
 # (see CLAUDE/development/RELEASING.md). Display-only for the banner and the
 # runtime status file; staleness detection (Plan 00164 Phase 3) uses a content
 # hash of THIS file so it is correct even between version bumps.
-__version__ = "3.62.0"
+__version__ = "3.62.1"
 
 # Absolute path to THIS running script — hashed for staleness detection so the
 # daemon can tell when the on-disk supervisor differs from the running one.
@@ -4308,6 +4308,9 @@ def _perform_injection(
     if not submit:
         master_writer(payload.encode("utf-8"))
         return
+    # Bare `.encode()` (not `.encode("utf-8")` like its neighbours) because
+    # ruff's UP012 flags an explicit utf-8 argument on a string LITERAL, which
+    # this f-string is and they are not.
     master_writer(f"{_PASTE_START}{payload}{_PASTE_END}".encode())
     sleep(_SUBMIT_DELAY_SECONDS)
     master_writer(_INJECT_SUBMIT.encode("utf-8"))

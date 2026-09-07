@@ -64,11 +64,21 @@ _PIPED_INTERPRETERS = ("bash", "sh", "zsh", "ksh", "dash", "python", "perl", "ru
 # in its body, since withholding the exemption scans the body rather than
 # denying the command. Add names as they prove legitimate.
 #
-# Deliberately EXCLUDED despite looking like ordinary filters:
+# Deliberately EXCLUDED despite looking like ordinary filters or clients:
 #   sed  -- `sed -f -` runs the body as a script, and the `e` flag reaches a shell
 #   awk  -- `awk -f /dev/stdin` runs the body as a program
 #   ssh  -- executes the body on the remote host
 #   crontab -- `crontab -` installs commands that execute later
+#   sqlite3 -- the `.shell` / `.system` dot-commands run a shell command
+#   psql -- the `\!` meta-command runs a shell command
+#   mysql -- the `system` / `\!` client command runs a shell command
+#
+# The three database clients were on this list until a release review probed
+# them: each reads its body from stdin and each offers a shell escape, so a
+# body naming one was blanked before the pattern scan and this priority-10
+# guard saw nothing. They are the same shape as `ssh` -- a client that looks
+# like a data consumer and is also an executor -- which is why the test that
+# pins them names the escape rather than the command.
 _DATA_SINKS: Final[frozenset[str]] = frozenset(
     {
         # Version control and text output
@@ -95,10 +105,6 @@ _DATA_SINKS: Final[frozenset[str]] = frozenset(
         # Structured data
         "jq",
         "yq",
-        # Databases
-        "psql",
-        "mysql",
-        "sqlite3",
         # Network and mail sinks that transfer rather than execute
         "mail",
         "mailx",
@@ -107,7 +113,21 @@ _DATA_SINKS: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Pattern: (curl|wget) ... | [sudo [flags]] [path/]<interpreter>
+# An OPTIONAL version suffix on the interpreter name, e.g. `python3`,
+# `python3.12`, `ruby3`, `perl5`. `_PIPED_INTERPRETERS` lists BARE names and a
+# trailing `\b` cannot follow one with a digit -- a digit is a word character,
+# so `python\b` does not match `python3`. That let the single most common
+# spelling on a modern system past this priority-10 guard: on many machines
+# bare `python` does not exist, so `curl URL | python3` is the form a real
+# install instruction uses.
+#
+# Restricted to DIGITS (and dots between them) rather than a general `[\w.]*`,
+# because `sh` is an interpreter and `sha256sum` starts with it -- widening
+# this would deny piping a download to a checksum, which is precisely the
+# safe habit this handler's own guidance recommends.
+_INTERPRETER_VERSION_SUFFIX = r"(?:\d[\d.]*)?"
+
+# Pattern: (curl|wget) ... | [sudo [flags]] [path/]<interpreter>[version]
 # - OPTIONAL_SUDO allows arbitrary sudo flags before the interpreter
 #   (e.g. "sudo -E bash", "sudo -E -H sh"), not just bare "sudo".
 # - OPTIONAL_PATH allows the interpreter to be named by path. Without it,
@@ -122,7 +142,30 @@ _CURL_PIPE_SHELL_PATTERN = (
     + OPTIONAL_PATH
     + r"("
     + "|".join(_PIPED_INTERPRETERS)
-    + r")\b"
+    + r")"
+    + _INTERPRETER_VERSION_SUFFIX
+    + r"\b"
+)
+
+# The same tail, matched WITHOUT requiring a curl/wget in front: "this command
+# pipes into an interpreter somewhere". Being a data sink says nothing about
+# what CONSUMES the sink's output, and the receiving-segment scan only looks
+# LEFT of the `<<` opener, so it cannot see a pipe that follows the CLOSER --
+# `(cat <<'X' … X) | bash` fed a recognised sink and executed the body anyway.
+#
+# Only ever applied to a command whose quoted heredoc bodies are already
+# BLANKED. Applied to the raw text it would find the `| bash` written inside
+# the documentation body being exempted, and deny the very case the exemption
+# exists to serve.
+_PIPE_INTO_INTERPRETER_PATTERN = (
+    r"\|\s*"
+    + OPTIONAL_SUDO
+    + OPTIONAL_PATH
+    + r"("
+    + "|".join(_PIPED_INTERPRETERS)
+    + r")"
+    + _INTERPRETER_VERSION_SUFFIX
+    + r"\b"
 )
 
 
@@ -235,7 +278,14 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
         command_words = quoted_heredoc_command_words(command)
         if any(word not in _DATA_SINKS for word in command_words):
             return command
-        return strip_quoted_heredoc_bodies(command)
+        blanked = strip_quoted_heredoc_bodies(command)
+        # A sink's output can itself be piped into an interpreter, which
+        # executes the body the exemption was about to blank. Checked on the
+        # BLANKED text so a `| bash` inside the documentation body cannot
+        # trigger it -- only one outside the bodies can.
+        if re.search(_PIPE_INTO_INTERPRETER_PATTERN, blanked):
+            return command
+        return blanked
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""

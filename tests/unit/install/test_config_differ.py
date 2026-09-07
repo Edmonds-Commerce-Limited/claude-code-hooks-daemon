@@ -391,3 +391,30 @@ class TestConfigDifferDiff:
         user_config = {"version": "2.0", "plugins": {"plugins": "also_not_a_list"}}
         diff = self.differ.diff(user_config=user_config, default_config=default_config)
         assert diff.custom_plugins == []
+
+    def test_detects_custom_plugin_paths(self) -> None:
+        """Detects `plugins.paths` as a customization, not just the plugins list.
+
+        Regression (release review C4): `_diff_plugins` only ever captured
+        entries of the `plugins.plugins` LIST. `paths` is a documented sibling
+        key (`docs/guides/CONFIGURATION.md`) and was captured by nothing.
+        """
+        default_config = {"version": "2.0", "plugins": {"paths": []}}
+        user_config = {
+            "version": "2.0",
+            "plugins": {"paths": [".claude/lib", "vendor/handlers"], "plugins": []},
+        }
+        diff = self.differ.diff(user_config=user_config, default_config=default_config)
+        assert diff.custom_plugin_settings == {"paths": [".claude/lib", "vendor/handlers"]}
+
+    def test_ignores_plugin_paths_matching_default(self) -> None:
+        """`plugins.paths` identical to the default is not reported as custom."""
+        default_config = {"version": "2.0", "plugins": {"paths": [".claude/lib"]}}
+        user_config = {"version": "2.0", "plugins": {"paths": [".claude/lib"]}}
+        diff = self.differ.diff(user_config=user_config, default_config=default_config)
+        assert diff.custom_plugin_settings == {}
+
+    def test_custom_plugin_settings_contributes_to_has_changes(self) -> None:
+        """A customized `plugins.paths` alone is enough to report changes."""
+        diff = ConfigDiff(custom_plugin_settings={"paths": [".claude/lib"]})
+        assert diff.has_changes is True

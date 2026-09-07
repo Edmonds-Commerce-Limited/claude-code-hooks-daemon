@@ -38,6 +38,10 @@ class ConfigDiff:
         changed_options: Option changes (enabled, options dict), keyed by event_type -> handler_name -> field -> {old, new}
         custom_daemon_settings: Daemon settings that differ from defaults
         custom_plugins: Plugin configs added by user
+        custom_plugin_settings: `plugins` mapping keys other than `plugins`
+            (e.g. `paths`) that differ from the default -- siblings of the
+            plugin list that the dedicated plugins pass would otherwise never
+            capture
         custom_sections: Whole top-level sections the user configured that the
             default config does not mention at all
     """
@@ -48,6 +52,7 @@ class ConfigDiff:
     changed_options: dict[str, dict[str, Any]] = field(default_factory=dict)
     custom_daemon_settings: dict[str, Any] = field(default_factory=dict)
     custom_plugins: list[dict[str, Any]] = field(default_factory=list)
+    custom_plugin_settings: dict[str, Any] = field(default_factory=dict)
     custom_sections: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -60,6 +65,7 @@ class ConfigDiff:
             or self.changed_options
             or self.custom_daemon_settings
             or self.custom_plugins
+            or self.custom_plugin_settings
             or self.custom_sections
         )
 
@@ -76,6 +82,7 @@ class ConfigDiff:
             "changed_options": self.changed_options,
             "custom_daemon_settings": self.custom_daemon_settings,
             "custom_plugins": self.custom_plugins,
+            "custom_plugin_settings": self.custom_plugin_settings,
             "custom_sections": self.custom_sections,
             "has_changes": self.has_changes,
         }
@@ -316,6 +323,15 @@ class ConfigDiffer:
     ) -> None:
         """Extract custom plugin configurations.
 
+        Captures two independent things under the `plugins` key: entries of
+        the `plugins.plugins` LIST (into `custom_plugins`), and every OTHER
+        key of the `plugins` mapping that differs from the default (into
+        `custom_plugin_settings`) -- e.g. `paths`, a documented sibling of the
+        plugin list (`docs/guides/CONFIGURATION.md`). `plugins` sits on
+        `_SECTIONS_WITH_A_DEDICATED_PASS`, so nothing else in this differ ever
+        looks at a sibling key; leaving it uncaptured here silently dropped it
+        during a merge.
+
         Args:
             user_config: User's config dict
             default_config: Default config dict
@@ -328,6 +344,13 @@ class ConfigDiffer:
             user_plugins = {}
         if not isinstance(default_plugins, dict):
             default_plugins = {}
+
+        for key, user_value in user_plugins.items():
+            if key == "plugins":
+                continue
+            default_value = default_plugins.get(key)
+            if user_value != default_value:
+                result.custom_plugin_settings[key] = copy.deepcopy(user_value)
 
         user_plugin_list = user_plugins.get("plugins", [])
         default_plugin_list = default_plugins.get("plugins", [])
