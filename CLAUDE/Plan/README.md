@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00343: flip the plan QA commit gate from warn to block](00343-plan-qa-commit-gate-warn-to-block/PLAN.md) - Not Started (in `warn` mode the commit gate renders every finding as advisory regardless of level, so its whole BLOCK tier is decorative; Plan 00341 shipped a correct BLOCK finding and had to record that BLOCK-level is not the same as blocking)
+- [00343: flip the plan QA commit gate from warn to block](00343-plan-qa-commit-gate-warn-to-block/PLAN.md) - In Progress (Phase 1 measured it: a 250-commit replay would DENY 18, and 8 are whole-tree checks blaming a commit for tree state it never touched — and those are sticky, so one stale README row wedges every later commit. Narrowing them is now Phase 3, the flip Phase 4)
 
 - [00342: prose guard does not reach stop handlers](00342-prose-guard-does-not-reach-stop-handlers/PLAN.md) - Not Started (Plan 00228's prose guard covers PreToolUse only, by construction; `AutoContinueStopHandler` now matches text to arm cron suppression and produced the bug once already — and here it fails SILENTLY, ticks just stop arriving)
 

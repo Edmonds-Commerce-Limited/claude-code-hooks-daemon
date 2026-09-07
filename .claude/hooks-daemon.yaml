@@ -1003,7 +1003,14 @@ plan_workflow:
     completed_dir: Completed
     cancelled_dir: Cancelled
     edit_mode: block
-    commit_gate_mode: warn      # warn-first rollout; flip to block after clean dogfooding
+    # Plan 00343 measured the flip instead of deferring it again: replaying
+    # every commit-stage check over 250 commits would DENY 18, and 8 of those
+    # (44%) are whole-tree checks -- row-folder-bijection,
+    # location-status-coherence -- denying a commit over plan-tree state it
+    # never touched. Those are sticky: one stale README row blocks every later
+    # commit until someone repairs it. Stays `warn` until Plan 00343 Phase 3
+    # narrows them; Phase 4 then flips it.
+    commit_gate_mode: warn
     sweep_mode: advise
     require_terminal_date: false  # git history is the SSoT for "when" in this repo
     staleness_days: 30
