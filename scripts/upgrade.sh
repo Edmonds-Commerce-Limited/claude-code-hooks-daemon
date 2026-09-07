@@ -138,7 +138,14 @@ _fail() { _err "$1"; exit 1; }
 # only-invoked-via-trap helper as unreachable (SC2317). `rm -f ""` on an
 # unset path is a harmless no-op that returns 0.
 _PYTHON_DISCOVERY_FETCHED_TMP=""
-trap 'rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP"' EXIT
+# The pre-checkout config baseline preserved at Step 3c. It has to outlive
+# Layer 2 (a child process that diffs against it), so it cannot be cleaned up
+# at the point of use — and an upgrade that aborts anywhere after Step 3c used
+# to leave it in the temp dir forever. Tracked separately from
+# HOOKS_DAEMON_OLD_DEFAULT_CONFIG so an export the CALLER set is never deleted
+# by us: this variable only ever holds a file this script created.
+_PRESERVED_OLD_DEFAULT_TMP=""
+trap 'rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP" "$_PRESERVED_OLD_DEFAULT_TMP"' EXIT
 
 _fetch_python_discovery_lib() {
     local ref base_url url tmp curl_path
@@ -323,7 +330,14 @@ OLD_DEFAULT_EXAMPLE="$DAEMON_DIR/.claude/hooks-daemon.yaml.example"
 if [ -f "$OLD_DEFAULT_EXAMPLE" ]; then
     HOOKS_DAEMON_OLD_DEFAULT_CONFIG="$(mktemp "${TMPDIR:-/tmp}/hooks_daemon_from_default_XXXXXX.yaml")"
     cp "$OLD_DEFAULT_EXAMPLE" "$HOOKS_DAEMON_OLD_DEFAULT_CONFIG"
-    export HOOKS_DAEMON_OLD_DEFAULT_CONFIG
+    _PRESERVED_OLD_DEFAULT_TMP="$HOOKS_DAEMON_OLD_DEFAULT_CONFIG"
+    # An exported path outlives the run that set it, so Layer 2 cannot tell a
+    # baseline THIS run preserved from one left in the user's shell by an
+    # earlier upgrade. Naming the owning process lets it say so: this one is
+    # alive for as long as Layer 2 runs, a leftover names a process that has
+    # exited.
+    HOOKS_DAEMON_OLD_DEFAULT_PID=$$
+    export HOOKS_DAEMON_OLD_DEFAULT_CONFIG HOOKS_DAEMON_OLD_DEFAULT_PID
     _ok "Preserved pre-upgrade config baseline for diffing"
 fi
 

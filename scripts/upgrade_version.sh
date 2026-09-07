@@ -148,6 +148,14 @@ LAYER2_SOURCE_CHANGED=false
 # shellcheck disable=SC2317  # Invoked indirectly by EXIT trap
 cleanup_on_failure() {
     local exit_code=$?
+
+    # Unconditional, and from HERE rather than from Step 10: the baseline is a
+    # temp copy Step 5 made, and a positional `rm` after the merge only runs
+    # when the script gets that far. Every early exit in between leaked one.
+    # cleanup_old_default_config declines a path it did not create, so this is
+    # safe on the Layer 1 path where the baseline belongs to the caller.
+    cleanup_old_default_config "${OLD_DEFAULT_CONFIG:-}"
+
     if [ "$exit_code" -ne 0 ] && [ "$UPGRADE_STARTED" = true ]; then
         echo ""
         print_warning "Upgrade failed - attempting rollback..."
@@ -888,10 +896,9 @@ else
     fi
 fi
 
-# Clean up temp file
-if [ -n "$OLD_DEFAULT_CONFIG" ] && [ -f "$OLD_DEFAULT_CONFIG" ]; then
-    rm -f "$OLD_DEFAULT_CONFIG"
-fi
+# The baseline temp copy is cleaned up by the EXIT trap, not here — see
+# cleanup_on_failure. Deleting it at this point covered only the happy path,
+# and deleted Layer 1's handover along with it.
 
 # ============================================================
 # Step 11: Setup .gitignore

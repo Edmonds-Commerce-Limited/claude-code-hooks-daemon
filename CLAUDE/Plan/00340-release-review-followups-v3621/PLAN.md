@@ -93,17 +93,35 @@ relying on the path surviving.
 
 ### Phase 3: `config_preserve.sh` robustness
 
-- [ ] ⬜ **Task 3.1**: `resolve_old_default_config` leaks a temp file per run,
-  and uses a handed-over `HOOKS_DAEMON_OLD_DEFAULT_CONFIG` SILENTLY whenever the
-  file exists — it warns only when the path is missing. A stale export from an
-  earlier run in the same shell is therefore used as the upgrade baseline
-  without a word. Record a version or timestamp in the handover and warn on a
-  mismatch.
-- [ ] ⬜ **Task 3.2**: Three sites capture the CLI with `2>&1` into a command
-  substitution that is then parsed as JSON. The exit code is checked first, so
-  this only bites when the CLI SUCCEEDS and also writes to stderr — at which
-  point `json.loads` fails and the upgrade reports "Failed to write merged
-  config" for a run that actually worked. Capture the two streams separately.
+- [x] ✅ **Task 3.1**: **Done, and the leak was narrower than reported.**
+  Step 10 already had a positional `rm`, so the leak is every early exit
+  between Step 5 and Step 10 — and that `rm` also deleted Layer 1's handover,
+  a file Layer 2 does not own. Ownership is now explicit:
+  `cleanup_old_default_config` removes only a path carrying this module's own
+  mktemp prefix, called from Layer 2's EXIT trap; Layer 1 removes its own
+  preserved baseline in its EXIT trap.
+
+  For staleness, the stamp is the OWNING PROCESS (`HOOKS_DAEMON_OLD_DEFAULT_PID`),
+  not a version or timestamp. A version cannot be checked — post-checkout,
+  Layer 2 has no independent idea of which version it is upgrading from, so a
+  stale pair would be self-consistent. What a leftover export cannot fake is a
+  live owner: Layer 1 waits for Layer 2, so the documented path always has one.
+  The baseline is still USED (the resolver's contract is to fail open, and a
+  false negative — no `ps`, a recycled PID — must not break the documented
+  path); it just cannot be used silently.
+
+- [x] ✅ **Task 3.2**: **Done.** `run_with_split_streams` captures the two
+  streams apart and `relay_cli_diagnostics` passes stderr through to the user,
+  so the payload stays parseable without the warnings disappearing. Applied to
+  all five captures, not the three named: the two `python -c` blocks had the
+  same shape, and one of them compared its output to the literal `"OK"`, so any
+  stderr line would have reported a successful write as a failure. The JSON now
+  reaches those blocks on a herestring rather than a pipe — a pipe would run
+  the helper in a subshell, where its two variables are set and thrown away.
+
+  A static guard covers the file as a whole, because the rule is general and
+  the next `2>&1` added to a captured CLI call would be the same defect under
+  a different function name.
 
 ### Phase 4: A heredoc whose redirect follows the opener
 

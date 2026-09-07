@@ -20,6 +20,11 @@ if [ -z "${OUTPUT_SH_LOADED+x}" ]; then
     source "$INSTALL_LIB_DIR/output.sh"
 fi
 
+# Basename prefix of the temp baseline copy resolve_old_default_config makes.
+# It is the ONLY thing that distinguishes our own copy from the path Layer 1
+# handed over, which cleanup_old_default_config must never delete.
+OLD_DEFAULT_TMP_PREFIX="hooks_daemon_old_default_"
+
 #
 # backup_config() - Create timestamped backup of config file
 #
@@ -69,6 +74,64 @@ backup_config() {
 }
 
 #
+# run_with_split_streams() - Run a command with its two output streams APART.
+#
+# Every caller below parses the command's stdout as JSON, and `2>&1` folds
+# diagnostics into it. The exit code is checked first, so the folded capture
+# only ever bit when the command SUCCEEDED and also wrote to stderr: one
+# deprecation notice prefixes the payload, `json.loads` rejects it, and the
+# upgrade reports "Failed to write merged config" for a run that worked. The
+# user is told their customisations were lost when they were not.
+#
+# Diagnostics are kept, not dropped -- CLI_STDERR is the caller's to relay
+# (relay_cli_diagnostics) or to quote in a failure message.
+#
+# Args:
+#   $@ - the command and its arguments
+#
+# Sets:
+#   CLI_STDOUT - the command's stdout, with no diagnostics mixed in
+#   CLI_STDERR - the command's stderr
+#
+# Returns:
+#   The command's own exit code.
+#
+# MUST NOT be called inside a command substitution or on either side of a
+# pipeline: both run it in a SUBSHELL, where the two assignments are discarded
+# and the caller silently reads stale values. Feed stdin with a herestring
+# (`<<< "$payload"`) rather than a pipe.
+#
+run_with_split_streams() {
+    local stderr_file
+    stderr_file=$(mktemp "${TMPDIR:-/tmp}/hooks_daemon_cli_stderr_XXXXXX")
+
+    CLI_STDOUT=$("$@" 2>"$stderr_file")
+    local exit_code=$?
+
+    CLI_STDERR=$(cat "$stderr_file")
+    rm -f "$stderr_file"
+    return $exit_code
+}
+
+#
+# relay_cli_diagnostics() - Pass a command's stderr through to the user.
+#
+# Splitting the streams keeps the payload parseable; it must not also make the
+# command's own warnings disappear, which would trade a loud wrong answer for
+# a silent one.
+#
+# Args:
+#   $1 - diagnostics: the captured stderr (may be empty)
+#
+relay_cli_diagnostics() {
+    local diagnostics="${1:-}"
+
+    if [ -n "$diagnostics" ]; then
+        printf '%s\n' "$diagnostics" >&2
+    fi
+}
+
+#
 # resolve_old_default_config() - Resolve the diff baseline: the default config
 # shipped by the version being upgraded FROM.
 #
@@ -105,6 +168,7 @@ resolve_old_default_config() {
     local handover="${HOOKS_DAEMON_OLD_DEFAULT_CONFIG:-}"
 
     if [ -n "$handover" ] && [ -f "$handover" ]; then
+        warn_if_baseline_handover_looks_stale "$handover"
         print_verbose "Using pre-checkout diff baseline: $handover" >&2
         echo "$handover"
         return 0
@@ -117,13 +181,88 @@ resolve_old_default_config() {
 
     if [ -n "$example_config" ] && [ -f "$example_config" ]; then
         local baseline
-        baseline=$(mktemp "${TMPDIR:-/tmp}/hooks_daemon_old_default_XXXXXX.yaml")
+        baseline=$(mktemp "${TMPDIR:-/tmp}/${OLD_DEFAULT_TMP_PREFIX}XXXXXX.yaml")
         cp "$example_config" "$baseline"
         echo "$baseline"
         return 0
     fi
 
     echo ""
+    return 0
+}
+
+#
+# warn_if_baseline_handover_looks_stale() - Say so when the handover may be
+# left over from an earlier upgrade.
+#
+# The handover is an EXPORTED path, and an export outlives the run that set
+# it. Re-running the upgrade in the same shell, or invoking Layer 2 directly
+# after a Layer 1 run, therefore hands over the PREVIOUS upgrade's baseline —
+# a real config file that passes every check, so the wrong baseline is used
+# without a word. The misclassification it causes (an accepted old default
+# read as a deliberate customisation) is invisible by construction, so saying
+# something is the only available defence.
+#
+# The only signal that separates "my caller preserved this" from "this was
+# lying around in someone's shell" is whether the process that made it is
+# still running -- Layer 1 waits for Layer 2, so a live owner is the
+# documented path and a dead one is a leftover. PID reuse could mask a stale
+# handover; that costs a warning, never a wrong answer.
+#
+# Deliberately advisory: the baseline is still USED. Refusing it would break
+# the documented path on any false negative (no `ps`, a recycled PID), and
+# this resolver's contract is to fail open.
+#
+# Args:
+#   $1 - handover: the handed-over baseline path
+#
+warn_if_baseline_handover_looks_stale() {
+    local handover="$1"
+    local owner="${HOOKS_DAEMON_OLD_DEFAULT_PID:-}"
+
+    case "$owner" in
+        '' | *[!0-9]*)
+            print_warning "Diff baseline handed over with no owning upgrade process: $handover" >&2
+            print_info "If this is a leftover export, unset HOOKS_DAEMON_OLD_DEFAULT_CONFIG and re-run." >&2
+            return 0
+            ;;
+    esac
+
+    if ps -p "$owner" > /dev/null; then
+        return 0
+    fi
+
+    print_warning "Diff baseline was handed over by process $owner, which has exited: $handover" >&2
+    print_info "That looks like a stale export from an earlier upgrade, so this baseline may be the wrong version." >&2
+    print_info "Unset HOOKS_DAEMON_OLD_DEFAULT_CONFIG and re-run to use the on-disk example instead." >&2
+}
+
+#
+# cleanup_old_default_config() - Remove the baseline copy THIS module made.
+#
+# resolve_old_default_config returns one of two things and its caller cannot
+# tell them apart: a temp copy of the on-disk example (ours to delete) or the
+# path Layer 1 handed over (Layer 1's, cleaned up by its own EXIT trap). The
+# mktemp prefix is what separates them, so the ownership rule lives here
+# rather than in every caller.
+#
+# Args:
+#   $1 - baseline: the path resolve_old_default_config returned (may be empty)
+#
+# Returns:
+#   Exit code 0 always -- cleanup must never be the thing that fails an
+#   upgrade, and it runs from an EXIT trap where a non-zero return is noise.
+#
+cleanup_old_default_config() {
+    local baseline="${1:-}"
+
+    [ -n "$baseline" ] || return 0
+    [ "$baseline" != "${HOOKS_DAEMON_OLD_DEFAULT_CONFIG:-}" ] || return 0
+
+    case "$(basename "$baseline")" in
+        "$OLD_DEFAULT_TMP_PREFIX"*) rm -f "$baseline" ;;
+    esac
+
     return 0
 }
 
@@ -169,17 +308,16 @@ extract_custom_config() {
 
     print_verbose "Extracting customizations from config..."
 
-    local diff_output
-    diff_output=$("$venv_python" -m claude_code_hooks_daemon.daemon.cli config-diff "$user_config" "$default_config" 2>&1)
-    local exit_code=$?
-
-    if [ $exit_code -ne 0 ]; then
-        print_error "Config diff failed: $diff_output"
+    if ! run_with_split_streams \
+        "$venv_python" -m claude_code_hooks_daemon.daemon.cli config-diff \
+        "$user_config" "$default_config"; then
+        print_error "Config diff failed: ${CLI_STDERR:-$CLI_STDOUT}"
         return 1
     fi
 
+    relay_cli_diagnostics "$CLI_STDERR"
     print_verbose "Config customizations extracted"
-    echo "$diff_output"
+    echo "$CLI_STDOUT"
     return 0
 }
 
@@ -229,14 +367,15 @@ merge_custom_config() {
 
     print_info "Merging config customizations onto new default..."
 
-    local merge_output
-    merge_output=$("$venv_python" -m claude_code_hooks_daemon.daemon.cli config-merge "$user_config" "$old_default_config" "$new_default_config" 2>&1)
-    local exit_code=$?
-
-    if [ $exit_code -ne 0 ]; then
-        print_error "Config merge failed: $merge_output"
+    if ! run_with_split_streams \
+        "$venv_python" -m claude_code_hooks_daemon.daemon.cli config-merge \
+        "$user_config" "$old_default_config" "$new_default_config"; then
+        print_error "Config merge failed: ${CLI_STDERR:-$CLI_STDOUT}"
         return 1
     fi
+
+    relay_cli_diagnostics "$CLI_STDERR"
+    local merge_output="$CLI_STDOUT"
 
     # If output_file specified, extract merged_config and write as YAML.
     #
@@ -248,19 +387,27 @@ merge_custom_config() {
     # silently; `v\d+\.\d+` was not a legal JSON escape at all and aborted the
     # upgrade; a value containing `'''` closed the literal and reached the
     # interpreter as code.
+    #
+    # The JSON reaches the writer on a HERESTRING rather than a pipe: a pipe
+    # would run run_with_split_streams in a subshell, where CLI_STDOUT and
+    # CLI_STDERR are set and then thrown away.
     if [ -n "$output_file" ]; then
-        local write_result
-        write_result=$(printf '%s' "$merge_output" | "$venv_python" -c "
+        if ! run_with_split_streams "$venv_python" -c "
 import json, sys, yaml
 data = json.loads(sys.stdin.read())
 merged = data.get('merged_config', {})
 with open(sys.argv[1], 'w') as f:
     yaml.dump(merged, f, default_flow_style=False, sort_keys=False)
 print('OK')
-" "$output_file" 2>&1)
+" "$output_file" <<< "$merge_output"; then
+            print_error "Failed to write merged config: ${CLI_STDERR:-$CLI_STDOUT}"
+            return 1
+        fi
 
-        if [ "$write_result" != "OK" ]; then
-            print_error "Failed to write merged config: $write_result"
+        relay_cli_diagnostics "$CLI_STDERR"
+
+        if [ "$CLI_STDOUT" != "OK" ]; then
+            print_error "Failed to write merged config: $CLI_STDOUT"
             return 1
         fi
 
@@ -305,18 +452,18 @@ validate_merged_config() {
 
     print_verbose "Validating merged config..."
 
-    local validate_output
-    validate_output=$("$venv_python" -m claude_code_hooks_daemon.daemon.cli config-validate "$config_path" 2>&1)
-    local exit_code=$?
-
-    if [ $exit_code -ne 0 ]; then
+    if ! run_with_split_streams \
+        "$venv_python" -m claude_code_hooks_daemon.daemon.cli config-validate \
+        "$config_path"; then
         print_warning "Config validation found issues"
-        echo "$validate_output"
+        relay_cli_diagnostics "$CLI_STDERR"
+        echo "$CLI_STDOUT"
         return 1
     fi
 
+    relay_cli_diagnostics "$CLI_STDERR"
     print_success "Config validation passed"
-    echo "$validate_output"
+    echo "$CLI_STDOUT"
     return 0
 }
 
@@ -352,8 +499,11 @@ report_incompatibilities() {
     # Python literal. A conflict record carries the user's own config value,
     # so interpolating it here meant a regex option could abort the very
     # report that exists to tell the user their value was not applied.
-    local report_output
-    report_output=$(printf '%s' "$merge_json" | "$venv_python" -c "
+    # Herestring, not a pipe: see the note in merge_custom_config. The exit
+    # code IS the answer here (0 clean / 1 conflicts), so it is captured
+    # rather than tested -- `if !` would collapse it to a plain boolean.
+    local exit_code=0
+    run_with_split_streams "$venv_python" -c "
 import json, sys
 
 data = json.loads(sys.stdin.read())
@@ -384,10 +534,10 @@ for i, conflict in enumerate(conflicts, 1):
 
 print('Review merged config and adjust manually if needed.')
 sys.exit(1)
-" 2>&1)
-    local exit_code=$?
+" <<< "$merge_json" || exit_code=$?
 
-    echo "$report_output"
+    relay_cli_diagnostics "$CLI_STDERR"
+    echo "$CLI_STDOUT"
     return $exit_code
 }
 
