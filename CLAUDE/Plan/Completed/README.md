@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00307: subagent file based report handoff](00307-subagent-file-based-report-handoff/PLAN.md) - Complete (dispatch_declaration + subagent_report_size_blocker handlers, both enabled by default; three live probe runs proved RED truncation, GREEN blocked+re-routed, third-run full convention compliance; owner called time on passive multi-session soak)
+
 - [00306: secret bash mention overbroad matching](00306-secret-bash-mention-overbroad-matching/PLAN.md) - Complete at 49befa8b (secret_file_guard Bash-mention false positives fixed, `git rm --cached` exempted, plus four same-subsystem review findings)
 
 - [00305: v3580 release review followups](00305-v3580-release-review-followups/PLAN.md) - Complete at 5fd91df3 + 277a47bd (v3.58.0 deferred review findings: mock.patch removed from shipped CLI, {REPO_ROOT} placement validators, absolute secret-list degrade surfaced; playbook drift fixed incl. secret_file_guard bracket false positive and pipe_blocker quoted-argument producer attribution)

@@ -1,6 +1,6 @@
 # Plan 00328: human model choice cannot be read from keystrokes
 
-**Status**: In Progress — Phase 1 delivered; Phase 2 channel chosen, build open
+**Status**: Complete
 **Created**: 2026-09-04
 **Owner**: joseph
 **Priority**: High
@@ -97,18 +97,18 @@ currently flails.
   as `unattributed` rather than acted on, so a disabled recorder is
   diagnosable instead of silent. The supervisor reads no transcripts (Plan
   00317's thin-host audit holds).
-- [ ] ⬜ **Task 2.3**: Retire the keystroke-derived model recognition — the
-  typed-argument parser, the stem match, the picker wildcard and its session
-  key and restore-steal guard. Positive arming makes them redundant rather
-  than merely replaceable: they all answer "was that the human?", which stops
-  being asked. Deleting them is the main prize; leaving both channels doubles
-  the surface. **Two halves, in order**: the daemon's `downgrade_indicator`
-  status line READS `write_manual_model_marker` to suppress a false
-  "downgraded" badge, and runs the same high-water guess the supervisor has
-  just stopped running — migrate it onto the attributed signal FIRST, or
-  deleting the writer makes the status line lie in exactly this plan's case.
-  The `/effort` and `/compact` recognition in `HumanInputLine` stays; only the
-  model half goes.
+- [x] ✅ **Task 2.3**: The keystroke-derived model recognition is gone — the
+  typed-argument parser, the stem match, the picker wildcard with its session
+  key and restore-steal guard, both latches and their state round-trip, and
+  `write_manual_model_marker`. Positive arming made them redundant rather than
+  merely replaceable: they all answered "was that the human?", which is no
+  longer asked. Shipped in the two halves it needed. First the daemon's
+  `downgrade_indicator` status line moved onto the same attributed signal —
+  it read the marker to suppress a false "downgraded" badge, so deleting the
+  writer ahead of that would have made the status line lie in exactly this
+  plan's case. Then the supervisor deletion. The `/effort` and `/compact`
+  recognition in `HumanInputLine` stays; a model spell is now bounded by the
+  family OBSERVED on screen, which is what the picker case always needed.
 
 ## Success Criteria
 
@@ -119,10 +119,13 @@ currently flails.
 - [x] No `/compact` is ever injected as a consequence of a restore that failed.
   Delivered in Phase 1 (Task 1.3) and pinned by
   `test_futile_model_restore.py::test_a_failed_restore_does_not_fire_the_flag_compact`.
-- [ ] Supervisor tests cover each of the four observed input shapes. Superseded
-  in substance by the attribution rule — none of the four shapes is read any
-  more — but left open until Task 2.3 deletes the parser, so the deletion is
-  what closes it rather than a claim made ahead of it.
+- [x] Supervisor tests cover each of the four observed input shapes. Closed by
+  the deletion rather than by covering them: the parser is gone, so
+  `test_manual_model_choice.py` asserts the recognisers are ABSENT
+  (`test_the_line_parser_no_longer_recognises_a_model_command`,
+  `test_tick_facts_carries_no_model_command_field`) and that a picker change —
+  the shape that types nothing at all — is respected without any of them
+  (`test_a_picker_change_needs_no_keystrokes_to_be_respected`).
 
 ## Delivery & Milestones
 
@@ -134,5 +137,6 @@ currently flails.
   no further. Delivered in `c4e22ac0`.
 - Milestone B — Phase 2: the restore arms on a positively-attributed automatic
   downgrade instead of on a guess about human intent, and the keystroke
-  machinery it replaces is deleted. Attribution delivered (Task 2.2); the
-  deletion (Task 2.3) is what completes the milestone.
+  machinery it replaces is deleted. Attribution delivered in `2639db13`; the
+  status-line migration onto the same signal in `dd7f43f3`; the deletion
+  completes the milestone.

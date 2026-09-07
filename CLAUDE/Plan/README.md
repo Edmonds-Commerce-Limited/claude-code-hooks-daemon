@@ -10,8 +10,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00329: post upgrade truth changes report bloat](00329-post-upgrade-truth-changes-report-bloat/PLAN.md) - Not Started (the upgrade flow's truth-changes reconciliation hands the agent up to 89KB / 74 entries with no bound and no supersession collapsing, so superseded truths are replayed and the step is skimmed rather than performed)
 
-- [00328: human model choice cannot be read from keystrokes](00328-human-model-choice-cannot-be-read-from-keystrokes/PLAN.md) - In Progress (Plan 00316's keystroke recognition cannot see a model chosen through Claude Code's picker, so the supervisor overrode the human, hit a 429 and escalated to an unrequested `/compact`; Phase 1 shipped)
-
 - [00327: hooks contract refresh audit](00327-hooks-contract-refresh-audit/PLAN.md) - Not Started (upstream's hooks documentation has changed since the 2.1.252 audit — `e2462deb…` vs META's `d514bf57…` — so the vendored contract needs its verified section-by-section extraction audit, and the mechanisable half of the refresh procedure folded into a `contract-status` command)
 
 - [00319: supervisor release review followups](00319-supervisor-release-review-followups/PLAN.md) - Not Started (the ten non-blocking findings surviving the v3.60.0 code-review gate, grouped into silent failures, unbounded per-session growth, and writer/reader contract drift; the three BLOCKING siblings shipped in 55dd5b2e)
@@ -176,6 +174,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00328: human model choice cannot be read from keystrokes](Completed/00328-human-model-choice-cannot-be-read-from-keystrokes/PLAN.md) - Complete at `c4e22ac0`…`dd7f43f3` + the archiving commit (the picker types no text a parser can read, so the restore now arms only on Claude Code's OWN downgrade record and the keystroke-recognition channel is deleted)
+
 - [00337: stop hook, human-input marker and failsafe cron retune](Completed/00337-stop-hook-human-input-cron-retune/PLAN.md) - Complete at `ea03f597`…`51e3694a` + the archiving commit (guidance states the consequence, not just the mechanism; `[awaiting-human]` anchored to the declaration position; the failsafe cron backs off to a 4h cap only when nothing is owed. The DENY-rate classification is Plan 00344)
 
 - [00342: prose guard does not reach stop handlers](Completed/00342-prose-guard-does-not-reach-stop-handlers/PLAN.md) - Complete at the delivery + archiving commits (the prose guard now scopes by base class and carries a Stop axis whose predicate is the marker SIDE EFFECT — `_denies()` would have passed vacuously; quoting a frozen phrase no longer arms cron suppression, and the unquoted residue is asserted as a recorded limit rather than left implicit)
@@ -228,8 +228,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00313: venv resolver cross-view reuse](Completed/00313-venv-resolver-cross-view-reuse/PLAN.md) - Complete at 3d71ff84, shipped in v3.59.0 (slug-mismatched `venv-*` candidates are now ineligible in the metadata and scan fallback resolution steps, so host and container views of the same repo each build their own venv; bash resolvers inherit via the Python SSOT)
 
-- [00307: subagent file based report handoff](Completed/00307-subagent-file-based-report-handoff/PLAN.md) - Complete (dispatch_declaration + subagent_report_size_blocker handlers, both enabled by default; three live probe runs proved RED truncation, GREEN blocked+re-routed, third-run full convention compliance; owner called time on passive multi-session soak)
-
 - [00309: lint on edit per language timeout](Completed/00309-lint-on-edit-per-language-timeout/PLAN.md) - Complete at 373db1f9, merged at 6ca8bf79 (per-language `options.timeouts.<Language>` for lint_on_edit; fail-open kept, fired timeouts now name the language, budget and config key)
 
 - [00308: post upgrade config optimisation autorun](Completed/00308-post-upgrade-config-optimisation-autorun/PLAN.md) - Complete at 022dbcea (merged) (/optimise promoted as the canonical config-optimisation step with manifest-diff + run recording; upgrade/install flows invoke it with `--skip-config-optimisation` opt-out; `config_optimisation_reminder` SessionStart safety net)
@@ -275,15 +273,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 344 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 284 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 285 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 43 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 42 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 43 + 284 + 7 = **334 folders**, spanning
+- **Folder-to-number reconciliation**: 42 + 285 + 7 = **334 folders**, spanning
   **331 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

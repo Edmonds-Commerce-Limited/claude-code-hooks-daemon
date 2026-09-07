@@ -99,20 +99,25 @@ forwarding and child/worker lifecycle is intentionally minimal, audited in
     (`_apply_decision`), and adopting the worker's post-tick state.
 
 A model change the HUMAN makes is NEVER overridden, in any direction, by any
-mechanism here (owner ruling, 2026-09-04). Two shapes of it are recognised. A
-typed `/model <family>` latches that family; anything that OPENS Claude Code's
-model UI -- a bare `/model`, or the fuzzy stem an autocomplete completed, such
-as the real `/modl` a dogfood caught -- arms a short-lived WILDCARD that
-sanctions whichever family lands next, because the picker is navigated with
-arrow keys that carry no text. Recognising only the first shape missed the
-commonest way a human switches model, and the auto-restore then flipped their
-choice straight back.
+mechanism here (owner ruling, 2026-09-04). That guarantee does NOT come from
+recognising what they typed. It comes from the opposite direction: the
+auto-restore arms only on a downgrade CLAUDE CODE RECORDED as its own, read
+from the daemon's `.model-downgrade` signal (Plan 00328). A model a human
+picks emits no such record, so it needs no recognition at all -- there is
+nothing to recognise, and nothing to get wrong.
 
-Note the auto-restore itself is scoped to drops that START at fable (the
+Keystroke recognition WAS how this worked, and it could not be made to work.
+The picker is navigated with arrow keys that carry no text, autocomplete
+completes the command inside Claude Code's own UI so the completed bytes never
+cross the PTY, and every widening of the match (a fuzzy stem, a bare-`/model`
+wildcard) traded one miss for a broader window in which a genuine substitution
+went unrestored. The negative inference -- "nothing was typed, so the machine
+did it" -- has no safe setting.
+
+Note the auto-restore is also scoped to drops that START at fable (the
 security fallback); see the SCOPE note above `_MODEL_FAMILY_RANKS`.
 
-Typed-command recognition (`/compact`, `/model <x>`, the bare-`/model`
-picker, `/effort <x>`) runs
+Typed-command recognition (`/compact`, `/effort <x>`) runs
 WORKER-SIDE: the host only forwards raw stdin bytes into a bounded
 `RawInputTap`, drained each tick into `TickFacts.human_raw_input`; the
 `--worker` subprocess owns the `HumanInputLine` parser that recognises
@@ -541,10 +546,6 @@ _CSI_FINAL_MIN, _CSI_FINAL_MAX = 0x40, 0x7E
 _CSI_FINAL_TILDE = 0x7E  # '~' terminates edit/function keys and paste markers
 _CSI_ARROW_UP = 0x41  # 'A'
 _CSI_ARROW_DOWN = 0x42  # 'B'
-# How much of a slash command must be typed for `_buffer_opens_command_ui` to
-# count it. `/mod` is enough to mean `/model`; it also matches this repo's own
-# `/mode` skill, and that false positive is fine -- see the method.
-_COMMAND_STEM_CHARS = 4
 _PASTE_START_PARAMS = (0x32, 0x30, 0x30)  # "200"
 _PASTE_END_PARAMS = (0x32, 0x30, 0x31)  # "201"
 
@@ -575,18 +576,12 @@ class HumanInputLine:
         # Edge flag: set when a submitted line was a human `/compact`, cleared by
         # take_compact_submitted() so the supervisor acts on it exactly once.
         self._compact_submitted: bool = False
-        # Plan 00316: the raw argument text of a submitted human `/model <x>`
-        # or `/effort <x>` line -- cleared by take_model_submitted()/
-        # take_effort_submitted() so each typed command is consumed exactly
-        # once.
-        self._model_submitted: str | None = None
+        # Plan 00316: the raw argument text of a submitted human `/effort <x>`
+        # line -- cleared by take_effort_submitted() so each typed command is
+        # consumed exactly once. `/model` is deliberately NOT recognised here
+        # (Plan 00328): the auto-restore now arms on the platform's own record
+        # of a downgrade, so a human's model choice needs no recognition.
         self._effort_submitted: str | None = None
-        # A bare `/model` names no target -- it opens Claude Code's own picker,
-        # and the family is then chosen with arrow keys that carry no text. It
-        # is still an unmistakable "the human is changing model NOW" edge, so
-        # it gets its own flag rather than being discarded: treating it as
-        # unrecognisable is what let the auto-restore fight the picker.
-        self._model_selector_submitted: bool = False
         # Observability: every submitted line starting with '/' is recorded
         # verbatim (bounded), matched or not, so a recognition MISS (e.g.
         # autocomplete swallowing the argument bytes) is diagnosable from the
@@ -629,11 +624,6 @@ class HumanInputLine:
             if byte in _LINE_SUBMIT_BYTES:
                 if self._buffer_is_compact():
                     self._compact_submitted = True
-                model_arg = self._buffer_command_arg(_MODEL_COMMAND)
-                if model_arg:
-                    self._model_submitted = model_arg
-                elif self._buffer_opens_command_ui(_MODEL_COMMAND):
-                    self._model_selector_submitted = True
                 effort_arg = self._buffer_command_arg(_EFFORT_COMMAND)
                 if effort_arg:
                     self._effort_submitted = effort_arg
@@ -697,9 +687,9 @@ class HumanInputLine:
         """Return the trimmed argument of a submitted ``command <arg>`` line.
 
         ``None`` when the line does not start with ``command`` followed by
-        whitespace and a non-empty argument -- a bare ``/model`` with no
-        target opens Claude Code's own selector and is not a command this
-        class can classify.
+        whitespace and a non-empty argument -- a bare ``/effort`` with no
+        level opens Claude Code's own selector and names nothing this class
+        can read.
         """
         text = bytes(self._buffer).decode("utf-8", errors="ignore").strip()
         prefix = f"{command} "
@@ -707,21 +697,6 @@ class HumanInputLine:
             return None
         arg = text[len(prefix) :].strip()
         return arg or None
-
-    def _buffer_opens_command_ui(self, command: str) -> bool:
-        """True when the submitted line looks like the human opening ``command``.
-
-        A STEM counts, not just the exact word, because Claude Code's slash
-        autocomplete completes it in its own UI: the completed text never
-        crosses the PTY, so only what the human actually typed is observable,
-        misspellings included. A live dogfood logged ``'/modl'`` while the
-        session really did switch model.
-
-        Deliberately blunt. Over-matching costs a restore we were told not to
-        make anyway, so there is nothing here worth a cleverer rule.
-        """
-        text = bytes(self._buffer).decode("utf-8", errors="ignore").strip()
-        return text.startswith(command[:_COMMAND_STEM_CHARS])
 
     def take_compact_submitted(self) -> bool:
         """Return True once if a human `/compact` was submitted, then clear it.
@@ -731,29 +706,6 @@ class HumanInputLine:
         """
         if self._compact_submitted:
             self._compact_submitted = False
-            return True
-        return False
-
-    def take_model_submitted(self) -> str | None:
-        """Return the argument of a submitted human `/model <x>`, then clear it.
-
-        Edge-triggered and consume-once, mirroring ``take_compact_submitted``
-        (Plan 00316) -- so a manual model command is recorded exactly once
-        per submission, however many ticks pass before it is consumed.
-        """
-        arg = self._model_submitted
-        self._model_submitted = None
-        return arg
-
-    def take_model_selector_submitted(self) -> bool:
-        """Return True once if a bare human `/model` was submitted, then clear it.
-
-        The picker it opens is the most common way a human changes model, and
-        it names no family anywhere in the typed bytes -- so this is the only
-        signal that a deliberate switch is under way.
-        """
-        if self._model_selector_submitted:
-            self._model_selector_submitted = False
             return True
         return False
 
@@ -792,14 +744,6 @@ class InputActivity:
     def take_compact_submitted(self) -> bool:
         """Return True once if the human submitted a `/compact` since last checked."""
         return self.line.take_compact_submitted()
-
-    def take_model_submitted(self) -> str | None:
-        """Return the argument of a human `/model <x>` submitted since last checked."""
-        return self.line.take_model_submitted()
-
-    def take_model_selector_submitted(self) -> bool:
-        """Return True once if the human submitted a bare `/model` (the picker)."""
-        return self.line.take_model_selector_submitted()
 
     def take_effort_submitted(self) -> str | None:
         """Return the argument of a human `/effort <x>` submitted since last checked."""
@@ -1281,21 +1225,6 @@ _DRY_RUN_EFFORT_BODY_PREFIX = "would inject /effort (dry-run — no real /effort
 # flip-back then RESETS effort down to the restored family's floor (the one
 # sanctioned lowering: fable at xhigh eats account allowance).
 _MODEL_COMMAND = "/model"
-# Plan 00316: BACKSTOP expiry on a user-typed `/model <family>` command. The
-# manual note is a latch consumed by the first sidecar reading that shows the
-# family -- however late that reading arrives, because a BUSY session can defer
-# the first observation for many minutes (the sidecar only refreshes on status
-# renders). This window exists only so a typed command whose switch never
-# landed at all cannot re-classify a much-later unrelated silent drop to the
-# same family; it must dwarf any plausible busy spell.
-_MANUAL_MODEL_WINDOW_SECONDS = 3600.0
-# Expiry for the PICKER latch (a submitted bare `/model`). It cannot be
-# family-matched -- the picker's arrow keys carry no text, so whatever family
-# lands next is taken as the human's choice -- and a wildcard that broad must
-# not linger: an hour of it would swallow genuine silent substitutions. Sized
-# for one picker interaction (open, read the list, choose), not for a busy
-# spell, because the switch here lands as fast as the human presses Enter.
-_MANUAL_MODEL_SELECTOR_WINDOW_SECONDS = 300.0
 _DEFAULT_MODEL_RESTORE_DELAY_SECONDS = 0.0
 _MODEL_RESTORE_DISABLED_SENTINEL = -1.0
 _MODEL_RESTORE_ENV_VAR = "CCY_MODEL_RESTORE_SECONDS"
@@ -1610,22 +1539,18 @@ class TickFacts:
     input_line_empty: bool
     human_compact_submitted: bool
     work_idle: bool
-    # Plan 00316: the raw argument of a human-typed `/model <x>` / `/effort
-    # <x>` line submitted since the last tick, or None. Consumed by
-    # `CompactStateMachine.note_manual_model_command`/
-    # `note_manual_effort_command` so a manual choice is recognised and never
-    # fought by the auto-restore or the coupled-effort default.
-    human_model_command: str | None = None
+    # Plan 00316: the raw argument of a human-typed `/effort <x>` line
+    # submitted since the last tick, or None. Consumed by
+    # `CompactStateMachine.note_manual_effort_command` so a manual level is
+    # never fought by the coupled-effort default. There is deliberately no
+    # `/model` counterpart (Plan 00328): the auto-restore arms on the
+    # platform's own downgrade record, so a human's model choice needs no
+    # recognition to be respected.
     human_effort_command: str | None = None
-    # A submitted BARE `/model` -- Claude Code's picker, where the chosen
-    # family never appears in the typed bytes. Consumed by
-    # `note_manual_model_selector`, which sanctions whichever family lands
-    # next instead of matching one by name.
-    human_model_selector: bool = False
     # Plan 00317: raw stdin bytes forwarded since the last tick, base64-encoded
     # (JSON has no byte-string type). Drained from the host's ``RawInputTap``.
     # The worker feeds this into its OWN persistent ``HumanInputLine`` and
-    # RECOMPUTES ``human_compact_submitted``/``human_model_command``/
+    # RECOMPUTES ``human_compact_submitted``/
     # ``human_effort_command``/``input_line_empty`` from it, overriding
     # whatever the host sent above -- that override is what makes typed-
     # command recognition hot-reloadable (a worker restart alone picks up a
@@ -2722,34 +2647,6 @@ def load_model_downgrade_signal(
     return None
 
 
-# Plan 00316 Task 1.3: subdirectory (under the daemon's untracked dir, the
-# same shared root ``sidecar_dir``'s parent resolves to) holding one small
-# marker file per session -- the last user-typed /model family + when. Read
-# by the daemon's ``downgrade_indicator`` status-line handler so a manual
-# choice never shows as a silent downgrade there either.
-_MANUAL_MODEL_MARKER_SUBDIR = "manual-model-changes"
-
-
-def write_manual_model_marker(
-    daemon_untracked_dir: Path, *, session_id: str, family: str, now: float
-) -> Path:
-    """Atomically record this session's last user-typed ``/model <family>``.
-
-    Mirrors ``write_model_switch_signal``'s atomic-replace pattern. Written
-    unconditionally on every typed command (no family validation) -- an
-    unrecognised family simply never matches any later observed reading, so
-    there is nothing to fail closed on here.
-    """
-    directory = daemon_untracked_dir / _MANUAL_MODEL_MARKER_SUBDIR
-    directory.mkdir(parents=True, exist_ok=True)
-    marker_path = directory / f"{session_id}.json"
-    payload = {"session_id": session_id, "family": family, "ts": now}
-    tmp_path = directory / f".{marker_path.name}.{os.getpid()}.tmp"
-    tmp_path.write_text(json.dumps(payload), encoding="utf-8")
-    tmp_path.replace(marker_path)
-    return marker_path
-
-
 def reap_stale_sidecars(
     directory: Path,
     *,
@@ -2947,23 +2844,6 @@ class CompactStateMachine:
         # to None whenever the anchor clears, so a fresh violation episode is
         # never throttled by a previous episode's ESC cooldown.
         self._anchor_esc_last_sent_ts: float | None = None
-        # Plan 00316: the last user-TYPED `/model <family>` command (canonical
-        # family + when it was typed) -- an observed change matching this
-        # within `_MANUAL_MODEL_WINDOW_SECONDS` is classified MANUAL, not a
-        # silent downgrade, so it is never fought by the auto-restore. A
-        # fresh manual command always overwrites the previous one (rapid
-        # successive manual changes each count on their own).
-        self._manual_model_family: str | None = None
-        self._manual_model_ts: float | None = None
-        # When the human last opened Claude Code's model PICKER (a submitted
-        # bare `/model`), and which session was foreground when they did. No
-        # family: the picker's arrow keys carry no text, so the only honest
-        # reading is that whichever family lands next was chosen. Hence a much
-        # shorter window than the typed latch above -- and a session key, like
-        # `_downgrade_episode` has, so a wildcard armed in one session cannot
-        # vouch for a silent substitution in another.
-        self._manual_selector_ts: float | None = None
-        self._manual_selector_session: str | None = None
         # Plan 00328: an injected `/model <family>` whose landing has not been
         # observed yet (`session:family` + when), and the families a restore
         # has been PROVEN unable to reach. A PTY write succeeding is not the
@@ -2974,15 +2854,6 @@ class CompactStateMachine:
         self._restore_awaiting: str | None = None
         self._restore_awaiting_ts: float | None = None
         self._unavailable_families: list[str] = []
-        # Shared-marker debt: a typed /model whose daemon-facing marker file
-        # has not been written yet because no tick so far could name the
-        # session (no fresh reading, no tracked session). decide_once retries
-        # every tick until a session id exists, then clears it.
-        self._manual_marker_pending: str | None = None
-        # Consume-once note set by note_model_reading() when a manual match
-        # suppressed what would otherwise have opened a downgrade episode --
-        # surfaced to decision.log by decide_once via take_manual_model_note().
-        self._manual_model_note: str | None = None
         # Plan 00328 Task 2.2: `session:from:to` of a downgrade CLAUDE CODE
         # RECORDED, read from the daemon's `.model-downgrade` signal. Nothing
         # else opens a downgrade episode -- see `note_machine_downgrade`.
@@ -3353,77 +3224,17 @@ class CompactStateMachine:
         """The most recently observed foreground session id, or None (Plan 00278)."""
         return self._last_model_session
 
-    def note_manual_model_command(self, family: str, *, now_wall: float) -> None:
-        """Record a user-TYPED ``/model <family>`` command (Plan 00316).
-
-        Called by decide_once for every tick that observed one (via
-        ``TickFacts.human_model_command``, sourced from the PTY host's input
-        path). A fresh command always overwrites the previous one -- rapid
-        successive manual changes each count on their own, never merged.
-        Also clears any manual effort latch: a deliberate model change is a
-        fresh context the old manual effort no longer speaks to (Task 2.1).
-        """
-        # CANONICALISE on the way in. `family` here is the RAW argument the
-        # human typed -- "Opus", "opusplan", "claude-opus-4-8", "mythos" -- and
-        # every later comparison is against a canonical family. Storing it raw
-        # made `/model Opus` silently fail to latch, so the auto-restore
-        # overrode the human's own choice. Falls back to the lowered raw string
-        # for an unrecognised family: it simply never matches a reading, which
-        # is the same harmless outcome as before.
-        canonical = _model_family(family) or family.strip().lower()
-        self._manual_model_family = canonical
-        self._manual_model_ts = now_wall
-        self._manual_marker_pending = canonical
-        self._manual_effort_active = None
-        # Picker opened, escaped, then a family typed instead: one interaction,
-        # one latch. The typed match would win anyway, but leaving the wildcard
-        # live is one more way it outlives the moment it was armed for.
-        self._retire_selector_latch()
-
-    def note_manual_model_selector(self, *, now_wall: float) -> None:
-        """Record that the human opened the model PICKER (a bare ``/model``).
-
-        The family cannot be recorded because it is never typed -- the picker
-        is navigated with arrow keys. So this arms a WILDCARD: the next family
-        to land is the human's own choice. Missing this edge is what let the
-        auto-restore flip a deliberate switch straight back, which is the most
-        common way a human changes model.
-
-        Deliberately does NOT clear the manual-effort latch (unlike
-        ``note_manual_model_command``): opening the picker is not yet a model
-        change, and the human may simply escape out of it. That clearing
-        happens where the switch is OBSERVED instead, in ``note_model_reading``.
-
-        Scoped to the session that is foreground as the picker opens. ``None``
-        (no reading tracked yet) matches any session rather than none: failing
-        to latch would resurrect the very bug this exists to fix, and a session
-        the supervisor has never seen a reading for is one the human is
-        certainly the one sitting in.
-        """
-        self._manual_selector_ts = now_wall
-        self._manual_selector_session = self._last_model_session
-
-    @property
-    def manual_marker_pending(self) -> str | None:
-        """Family of a typed /model whose shared marker is not yet on disk."""
-        return self._manual_marker_pending
-
-    def clear_manual_marker_pending(self) -> None:
-        """The shared marker for the pending typed /model has been written."""
-        self._manual_marker_pending = None
-
     def note_manual_effort_command(self, level: str, *, now_wall: float) -> None:
         """Record a user-TYPED ``/effort <level>`` command (Plan 00316 Task 2.1).
 
         A latch, not time-windowed: it wins over the per-model default and
         the post-switch coupled effort for the REST OF THE CURRENT model
-        spell -- until the user manually changes model again
-        (``note_manual_model_command``, which starts a fresh spell and
-        re-applies its own default via ``arm_coupled_effort``) or manually
-        re-sets effort. Also cancels any coupled-effort correction already
-        armed for THIS spell (from an earlier ``arm_coupled_effort`` call)
-        that has not yet been injected -- the human's choice, typed after
-        that default was queued, overrides the queued default outright.
+        spell -- until the model family OBSERVABLY changes (``note_model_reading``
+        starts a fresh spell) or the user manually re-sets effort. Also cancels
+        any coupled-effort correction already armed for THIS spell (from an
+        earlier ``arm_coupled_effort`` call) that has not yet been injected --
+        the human's choice, typed after that default was queued, overrides the
+        queued default outright.
         """
         del now_wall  # kept for signature symmetry with the model counterpart
         self._manual_effort_active = level
@@ -3460,42 +3271,6 @@ class CompactStateMachine:
         """
         note = self._unattributed_downgrade_note
         self._unattributed_downgrade_note = None
-        return note
-
-    def _typed_model_matches(self, family: str, now_wall: float) -> bool:
-        """True when ``family`` matches a recent user-typed ``/model <family>``."""
-        return (
-            self._manual_model_family == family
-            and self._manual_model_ts is not None
-            and now_wall - self._manual_model_ts <= _MANUAL_MODEL_WINDOW_SECONDS
-        )
-
-    def _selector_model_matches(self, session: str, now_wall: float) -> bool:
-        """True when the human recently opened the picker IN ``session``.
-
-        Family-agnostic by necessity, session-scoped by choice: an unscoped
-        wildcard disarmed the auto-restore for a session the human never
-        touched.
-        """
-        return (
-            self._manual_selector_ts is not None
-            and now_wall - self._manual_selector_ts <= _MANUAL_MODEL_SELECTOR_WINDOW_SECONDS
-            and self._manual_selector_session in (None, session)
-        )
-
-    def _retire_selector_latch(self) -> None:
-        """Drop the picker wildcard -- its interaction is over, however it ended."""
-        self._manual_selector_ts = None
-        self._manual_selector_session = None
-
-    def take_manual_model_note(self) -> str | None:
-        """Return, once, the reason a manual match suppressed a downgrade episode.
-
-        Edge-triggered and consume-once, mirroring ``take_compact_submitted``,
-        so decide_once logs it exactly once per manual match.
-        """
-        note = self._manual_model_note
-        self._manual_model_note = None
         return note
 
     def _settle_awaited_restore(self, *, family: str, session: str, reading_ts: float) -> None:
@@ -3568,10 +3343,6 @@ class CompactStateMachine:
         prev_family = self._last_model_family
         self._last_model_session = session
         self._last_model_family = family
-        # Captured BEFORE the episode-clearing block below, which nulls it on
-        # exactly the tick this needs it: the family we fell FROM identifies a
-        # landing the supervisor itself caused. See `supervisor_restore` below.
-        restore_target = self._downgrade_from_family
         self._settle_awaited_restore(family=family, session=session, reading_ts=reading.ts)
         if self._downgrade_episode is not None:
             ep_session, _, ep_family = self._downgrade_episode.partition(":")
@@ -3579,52 +3350,19 @@ class CompactStateMachine:
                 self._downgrade_episode = None
                 self._downgrade_from_family = None
                 self._downgrade_started_ts = None
-        typed_match = self._typed_model_matches(family, now_wall)
-        # The picker latch is a wildcard, so it must only be spent on an actual
-        # family CHANGE: matching the unchanged family already on screen would
-        # consume it on the very tick it was armed, leaving nothing to sanction
-        # the switch that follows a second later.
-        # An UPGRADE back to exactly the family we fell from is the supervisor's
-        # own flip-back landing, not a human choice. It must not spend the
-        # wildcard: the human opens the picker BECAUSE they saw the bounce, so a
-        # pending restore landing mid-interaction is the likely ordering -- and
-        # spending it there would leave their actual pick unlatched and bounced
-        # again, which is the whole defect this latch exists to stop.
-        supervisor_restore = (
-            restore_target is not None
-            and family == restore_target
-            and prev_family is not None
-            and _family_rank(family) > _family_rank(prev_family)
-        )
-        selector_match = (
-            prev_family is not None
-            and prev_session == session
-            and family != prev_family
-            and not supervisor_restore
-            and self._selector_model_matches(session, now_wall)
-        )
-        manual_match = typed_match or selector_match
         family_changed = (
             prev_session == session and prev_family is not None and family != prev_family
         )
-        if manual_match and family_changed:
-            # A human-driven model change is never overridden, in ANY
-            # direction. Any episode still open on this session dies with it:
-            # left alive it would restore over the choice a moment later,
-            # which is exactly the override the ruling forbids.
-            if self._downgrade_episode is not None:
-                ep_session, _, _ = self._downgrade_episode.partition(":")
-                if ep_session == session:
-                    self._downgrade_episode = None
-                    self._downgrade_from_family = None
-                    self._downgrade_started_ts = None
-            if selector_match and not typed_match:
-                # The picker path only learns the family HERE, so this is the
-                # first tick that can name one for the daemon-facing marker
-                # the status line reads.
-                self._manual_marker_pending = family
-            self._manual_model_note = f"manual change ({family}) — no restore"
-        elif (
+        if family_changed:
+            # A model spell is defined by the family ON SCREEN, not by what was
+            # typed (Plan 00328) -- so every observed change starts a fresh one
+            # and drops the previous spell's manual `/effort` latch, exactly as
+            # `arm_coupled_effort` does for a switch the supervisor injected.
+            # Keying this on recognised keystrokes cannot work: a change made
+            # through the picker types no text at all, so the latch survives and
+            # pins effort to the choice made under the OLD family.
+            self._manual_effort_active = None
+        if (
             family_changed
             # SCOPE (owner ruling, 2026-09-04, after a live dogfood): this
             # family counteracts the automated fable SECURITY downgrade and
@@ -3661,20 +3399,6 @@ class CompactStateMachine:
                     self._downgrade_from_family = prev_family
                     self._downgrade_started_ts = now_wall
                 self._downgrade_episode = f"{session}:{family}"
-        if manual_match:
-            # Latch consumed: the typed choice has been observed landing. A
-            # LATER family change with nothing newly typed is a silent
-            # substitution again -- the spent latch must not re-classify it.
-            self._manual_model_family = None
-            self._manual_model_ts = None
-            if selector_match:
-                # Same rule `arm_coupled_effort` applies to every other model
-                # change: a new spell re-applies its own default effort over a
-                # manual /effort set under the PREVIOUS one. The typed path does
-                # this when the command is noted; the picker names no family
-                # then, so observing the switch is the only place it can.
-                self._manual_effort_active = None
-            self._retire_selector_latch()
         if self._manual_effort_active is not None:
             # Plan 00316 Task 2.1: a manual /effort always wins -- neither the
             # downgrade-episode xhigh floor nor the per-model default fires
@@ -3805,15 +3529,9 @@ class CompactStateMachine:
             "anchor_last_injected_ts": self._anchor_last_injected_ts,
             "anchor_attempts": self._anchor_attempts,
             "anchor_esc_last_sent_ts": self._anchor_esc_last_sent_ts,
-            "manual_model_family": self._manual_model_family,
-            "manual_model_ts": self._manual_model_ts,
-            "manual_selector_ts": self._manual_selector_ts,
-            "manual_selector_session": self._manual_selector_session,
             "restore_awaiting": self._restore_awaiting,
             "restore_awaiting_ts": self._restore_awaiting_ts,
             "unavailable_families": list(self._unavailable_families),
-            "manual_model_note": self._manual_model_note,
-            "manual_marker_pending": self._manual_marker_pending,
             "manual_effort_active": self._manual_effort_active,
             "attributed_downgrade": self._attributed_downgrade,
             "unattributed_downgrade_note": self._unattributed_downgrade_note,
@@ -3901,18 +3619,6 @@ class CompactStateMachine:
         if "anchor_esc_last_sent_ts" in state:
             raw = state["anchor_esc_last_sent_ts"]
             self._anchor_esc_last_sent_ts = None if raw is None else _coerce_float(raw)
-        if "manual_model_family" in state:
-            raw = state["manual_model_family"]
-            self._manual_model_family = None if raw is None else str(raw)
-        if "manual_model_ts" in state:
-            raw = state["manual_model_ts"]
-            self._manual_model_ts = None if raw is None else _coerce_float(raw)
-        if "manual_selector_ts" in state:
-            raw = state["manual_selector_ts"]
-            self._manual_selector_ts = None if raw is None else _coerce_float(raw)
-        if "manual_selector_session" in state:
-            raw = state["manual_selector_session"]
-            self._manual_selector_session = None if raw is None else str(raw)
         if "restore_awaiting" in state:
             raw = state["restore_awaiting"]
             self._restore_awaiting = None if raw is None else str(raw)
@@ -3924,12 +3630,6 @@ class CompactStateMachine:
             self._unavailable_families = (
                 [str(item) for item in raw] if isinstance(raw, list) else []
             )
-        if "manual_model_note" in state:
-            raw = state["manual_model_note"]
-            self._manual_model_note = None if raw is None else str(raw)
-        if "manual_marker_pending" in state:
-            raw = state["manual_marker_pending"]
-            self._manual_marker_pending = None if raw is None else str(raw)
         if "manual_effort_active" in state:
             raw = state["manual_effort_active"]
             self._manual_effort_active = None if raw is None else str(raw)
@@ -4627,15 +4327,9 @@ def decide_once(
     # path (the passed machine is already the live authoritative one).
     if facts.machine_state is not None:
         machine.import_state(facts.machine_state)
-    # Plan 00316: record a user-typed /model or /effort command BEFORE
-    # tracking this tick's reading, so a manual match can be recognised on
-    # the same tick the change is first observed. Also drop a shared marker
-    # (untracked, keyed by session) so the daemon's status-line downgrade
-    # indicator can suppress itself for the very same manual choice.
-    if facts.human_model_command:
-        machine.note_manual_model_command(facts.human_model_command, now_wall=facts.now_wall)
-    if facts.human_model_selector:
-        machine.note_manual_model_selector(now_wall=facts.now_wall)
+    # Plan 00316: record a user-typed /effort command BEFORE tracking this
+    # tick's reading, so the latch is in place on the same tick the change is
+    # first observed.
     if facts.human_effort_command:
         machine.note_manual_effort_command(facts.human_effort_command, now_wall=facts.now_wall)
     # Plan 00328: adopt the platform's OWN record of a safety downgrade before
@@ -4651,35 +4345,6 @@ def decide_once(
     # every other family). Synthetic/stale readings are ignored.
     if reading is not None and not reading.stale:
         machine.note_model_reading(reading, now_wall=facts.now_wall)
-    # AFTER the reading is tracked, because the PICKER path only learns its
-    # family there -- a bare `/model` never names one, so nothing could be
-    # written on the tick it was typed.
-    pending_marker_family = machine.manual_marker_pending
-    if pending_marker_family:
-        # Written on the FIRST tick that can name the session (not necessarily
-        # the typing tick: right after a worker restart or during a compaction
-        # the reading can be absent or synthetic with an empty session id).
-        # Retried every tick until then so the marker is never silently lost.
-        marker_session = (reading.session_id if reading is not None else None) or (
-            machine.last_model_session
-        )
-        if marker_session:
-            write_manual_model_marker(
-                sidecar_dir.parent,
-                session_id=marker_session,
-                family=pending_marker_family,
-                now=facts.now_wall,
-            )
-            machine.clear_manual_marker_pending()
-            if log is not None:
-                # Via the INJECTED log, never the global worker error log: this
-                # function runs under unit test too, and a global-path write
-                # would pollute the live session's log from a test run.
-                log.write(
-                    f"manual /model marker written: family={pending_marker_family!r} "
-                    f"session={marker_session!r}"
-                )
-    manual_model_note = machine.take_manual_model_note()
     evaluation = machine.evaluate(
         reading,
         idle=can_inject,
@@ -4747,11 +4412,6 @@ def decide_once(
     # so the block above skips it -- surface it explicitly for decision.log.
     if dry_run_latched_log is not None:
         noop_reason_log = dry_run_latched_log
-    # Plan 00316: a manual /model match suppressed what would otherwise have
-    # opened a downgrade episode this tick -- surface WHY nothing was done,
-    # overriding whatever generic NOOP reason was derived above.
-    if manual_model_note is not None:
-        noop_reason_log = f"{_NOOP_LOG_PREFIX}: {manual_model_note}"
     # Plan 00328: a ranked drop arrived with no platform record attributing it
     # to the safety classifier, so no episode opened. Said out loud because
     # the alternative is indistinguishable from a session that was never
@@ -5461,9 +5121,7 @@ def _poll_once(
     compaction_signal_ttl_seconds: float = _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS,
     input_line_empty: bool = True,
     human_compact_submitted: bool = False,
-    human_model_command: str | None = None,
     human_effort_command: str | None = None,
-    human_model_selector: bool = False,
     work_idle: bool = True,
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS,
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
@@ -5486,9 +5144,7 @@ def _poll_once(
         input_line_empty=input_line_empty,
         human_compact_submitted=human_compact_submitted,
         work_idle=work_idle,
-        human_model_command=human_model_command,
         human_effort_command=human_effort_command,
-        human_model_selector=human_model_selector,
     )
     outcome = decide_once(
         machine,
@@ -5530,9 +5186,7 @@ def _facts_to_json(facts: TickFacts) -> str:
             "input_line_empty": facts.input_line_empty,
             "human_compact_submitted": facts.human_compact_submitted,
             "work_idle": facts.work_idle,
-            "human_model_command": facts.human_model_command,
             "human_effort_command": facts.human_effort_command,
-            "human_model_selector": facts.human_model_selector,
             "human_raw_input": facts.human_raw_input,
             "machine_state": facts.machine_state,
             "tick_id": facts.tick_id,
@@ -5548,9 +5202,7 @@ def _facts_from_json(line: str) -> TickFacts:
         input_line_empty=bool(data["input_line_empty"]),
         human_compact_submitted=bool(data["human_compact_submitted"]),
         work_idle=bool(data["work_idle"]),
-        human_model_command=data.get("human_model_command"),
         human_effort_command=data.get("human_effort_command"),
-        human_model_selector=bool(data.get("human_model_selector", False)),
         human_raw_input=str(data.get("human_raw_input", "")),
         machine_state=data.get("machine_state"),
         tick_id=int(data.get("tick_id", 0)),
@@ -5649,9 +5301,7 @@ def run_worker(
         facts = replace(
             facts,
             human_compact_submitted=line_recognizer.take_compact_submitted(),
-            human_model_command=line_recognizer.take_model_submitted(),
             human_effort_command=line_recognizer.take_effort_submitted(),
-            human_model_selector=line_recognizer.take_model_selector_submitted(),
             # AND, never override: a worker restart resets this recognizer, so
             # its buffer reads EMPTY while the human still has unsubmitted text
             # in the box. Overriding the host's own observation there would let
@@ -5667,8 +5317,7 @@ def run_worker(
             # diagnosable from the field.
             append_worker_error(
                 f"diagnostic typed-slash observed: {typed_slash!r} "
-                f"(recognised model={facts.human_model_command!r} "
-                f"picker={facts.human_model_selector!r} "
+                f"(recognised compact={facts.human_compact_submitted!r} "
                 f"effort={facts.human_effort_command!r})"
             )
         try:
@@ -6155,14 +5804,10 @@ def supervise(
         # Consume the human-/compact edge exactly once per tick so a human
         # compaction defers the supervisor's own, never suppresses it forever.
         human_compact = activity.take_compact_submitted()
-        # Plan 00316: consume a human-typed /model or /effort command the same
-        # way -- edge-triggered, once per tick, so a manual choice is recorded
-        # exactly once however many ticks pass before the worker consumes it.
-        human_model_command = activity.take_model_submitted()
+        # Plan 00316: consume a human-typed /effort command the same way --
+        # edge-triggered, once per tick, so a manual level is recorded exactly
+        # once however many ticks pass before the worker consumes it.
         human_effort_command = activity.take_effort_submitted()
-        # A bare `/model` (the picker) carries no family, so it needs its own
-        # edge -- see `take_model_selector_submitted`.
-        human_model_selector = activity.take_model_selector_submitted()
         # Plan 00317: drain the raw tap for the worker's OWN recognizer. Sent
         # alongside the host-computed fields above (unchanged, still used by
         # the in-process fallback below) so a worker restart alone can change
@@ -6181,9 +5826,7 @@ def supervise(
                     input_line_empty=activity.line.is_empty,
                     human_compact_submitted=human_compact,
                     work_idle=work_idle,
-                    human_model_command=human_model_command,
                     human_effort_command=human_effort_command,
-                    human_model_selector=human_model_selector,
                     human_raw_input=human_raw_input,
                     # Ship the host's authoritative machine state so the worker
                     # decides on it -- never on divergent worker-local state.
@@ -6226,9 +5869,7 @@ def supervise(
                 compaction_signal_ttl_seconds=policy.compaction_signal_ttl_seconds,
                 input_line_empty=activity.line.is_empty,
                 human_compact_submitted=human_compact,
-                human_model_command=human_model_command,
                 human_effort_command=human_effort_command,
-                human_model_selector=human_model_selector,
                 work_idle=work_idle,
                 reap_ttl_seconds=policy.reap_ttl_seconds,
                 foreground_margin_seconds=policy.foreground_margin_seconds,

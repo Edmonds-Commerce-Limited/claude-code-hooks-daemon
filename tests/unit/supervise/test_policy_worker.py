@@ -195,10 +195,36 @@ def _facts_with_raw_input(raw: bytes, *, now: float = 1000.0) -> object:
     )
 
 
-def test_run_worker_recognizes_typed_model_command_from_raw_input(tmp_path: Path) -> None:
-    """Plan 00317 Task 2.1: the worker recognises a submitted `/model <x>` from
-    the raw-input tap, NOT from the host-precomputed (and here absent/False)
-    legacy fields -- proving recognition now runs worker-side."""
+def test_run_worker_recognizes_typed_effort_command_from_raw_input(tmp_path: Path) -> None:
+    """Plan 00317 Task 2.1: the worker recognises a submitted `/effort <x>` from
+    the raw-input tap, NOT from the host-precomputed (and here absent) legacy
+    field -- proving recognition runs worker-side."""
+    sidecar_dir = tmp_path / "context-sidecar"
+    in_stream = io.StringIO(_mod._facts_to_json(_facts_with_raw_input(b"/effort low\r")) + "\n")
+    out_stream = io.StringIO()
+
+    _mod.run_worker(
+        in_stream,
+        out_stream,
+        dry_run=True,
+        sidecar_dir=sidecar_dir,
+        policy=_mod.CompactPolicy(),
+    )
+
+    # decide_once acted on a recognised manual `/effort low` -- observable via
+    # the post-tick machine state carrying the latch.
+    outcome = _mod._outcome_from_json(out_stream.getvalue().strip())
+    assert outcome.machine_state is not None
+    assert outcome.machine_state["manual_effort_active"] == "low"
+
+
+def test_run_worker_does_not_recognise_a_model_command_at_all(tmp_path: Path) -> None:
+    """A typed `/model opus` must leave NO trace in the worker's state.
+
+    Plan 00328 removed model recognition rather than merely ignoring it, and
+    this asserts that end to end through the worker's own JSON path -- the hop
+    where a leftover field would survive every state-machine unit test.
+    """
     sidecar_dir = tmp_path / "context-sidecar"
     in_stream = io.StringIO(_mod._facts_to_json(_facts_with_raw_input(b"/model opus\r")) + "\n")
     out_stream = io.StringIO()
@@ -211,36 +237,10 @@ def test_run_worker_recognizes_typed_model_command_from_raw_input(tmp_path: Path
         policy=_mod.CompactPolicy(),
     )
 
-    # decide_once acted on a recognised manual `/model opus` -- observable via
-    # the post-tick machine state recording the manual model note.
     outcome = _mod._outcome_from_json(out_stream.getvalue().strip())
     assert outcome.machine_state is not None
-    assert outcome.machine_state["manual_model_family"] == "opus"
-
-
-def test_run_worker_recognizes_the_bare_model_picker_from_raw_input(tmp_path: Path) -> None:
-    """A bare `/model` opens Claude Code's picker and names no family, so the
-    worker must arm the wildcard latch instead. Recognition and plumbing are
-    asserted here END TO END through the worker's own JSON path: a gap in any
-    single hop would leave the fix inert in production while the state-machine
-    unit tests still passed."""
-    sidecar_dir = tmp_path / "context-sidecar"
-    in_stream = io.StringIO(_mod._facts_to_json(_facts_with_raw_input(b"/model\r")) + "\n")
-    out_stream = io.StringIO()
-
-    _mod.run_worker(
-        in_stream,
-        out_stream,
-        dry_run=True,
-        sidecar_dir=sidecar_dir,
-        policy=_mod.CompactPolicy(),
-    )
-
-    outcome = _mod._outcome_from_json(out_stream.getvalue().strip())
-    assert outcome.machine_state is not None
-    assert outcome.machine_state["manual_selector_ts"] == 1000.0
-    # No family was typed, so the family-specific latch must stay untouched.
-    assert outcome.machine_state["manual_model_family"] is None
+    assert "manual_model_family" not in outcome.machine_state
+    assert "manual_selector_ts" not in outcome.machine_state
 
 
 def test_run_worker_recognition_persists_across_ticks_until_submitted(tmp_path: Path) -> None:
@@ -250,8 +250,8 @@ def test_run_worker_recognition_persists_across_ticks_until_submitted(tmp_path: 
     sidecar_dir = tmp_path / "context-sidecar"
     lines = "\n".join(
         [
-            _mod._facts_to_json(_facts_with_raw_input(b"/mo", now=1000.0)),
-            _mod._facts_to_json(_facts_with_raw_input(b"del opus\r", now=1000.5)),
+            _mod._facts_to_json(_facts_with_raw_input(b"/eff", now=1000.0)),
+            _mod._facts_to_json(_facts_with_raw_input(b"ort low\r", now=1000.5)),
         ]
     )
     out_stream = io.StringIO()
@@ -269,8 +269,10 @@ def test_run_worker_recognition_persists_across_ticks_until_submitted(tmp_path: 
     ]
     assert len(outcomes) == 2
     # The full command only completes (and is recognised) on the second tick.
+    assert outcomes[0].machine_state is not None
+    assert outcomes[0].machine_state["manual_effort_active"] is None
     assert outcomes[1].machine_state is not None
-    assert outcomes[1].machine_state["manual_model_family"] == "opus"
+    assert outcomes[1].machine_state["manual_effort_active"] == "low"
 
 
 def test_run_worker_skips_blank_and_bad_lines(tmp_path: Path) -> None:
@@ -385,7 +387,7 @@ def test_worker_restart_alone_picks_up_changed_recognition_behaviour(
     at all -- proving recognition genuinely lives in the hot-reloadable tier.
 
     Simulates a deploy by writing an EDITED copy of the supervisor (a
-    different `/model`-recognising prefix) to `tmp_path`, then pointing a
+    different `/effort`-recognising prefix) to `tmp_path`, then pointing a
     fresh `PolicyWorker` at that copy -- mirroring what a genuine on-disk
     edit + `reload_if_stale()`/`restart()` does. The exact same raw bytes
     recognise differently before/after, with nothing but the worker's
@@ -393,22 +395,22 @@ def test_worker_restart_alone_picks_up_changed_recognition_behaviour(
     """
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     original_source = SCRIPT_PATH.read_text(encoding="utf-8")
-    assert '_MODEL_COMMAND = "/model"' in original_source
+    assert '_EFFORT_COMMAND = "/effort"' in original_source
 
     edited_copy = tmp_path / "claude-supervise-edited.py"
     edited_copy.write_text(
-        original_source.replace('_MODEL_COMMAND = "/model"', '_MODEL_COMMAND = "/switchmodel"'),
+        original_source.replace('_EFFORT_COMMAND = "/effort"', '_EFFORT_COMMAND = "/thinkharder"'),
         encoding="utf-8",
     )
 
     original_worker = _mod.PolicyWorker(SCRIPT_PATH, dry_run=True)
     assert original_worker.start() is True
     try:
-        # BEFORE: running the ORIGINAL code, "/model opus" is recognised.
-        before = original_worker.decide(_facts_with_raw_input(b"/model opus\r"))
+        # BEFORE: running the ORIGINAL code, "/effort low" is recognised.
+        before = original_worker.decide(_facts_with_raw_input(b"/effort low\r"))
         assert before is not None
         assert before.machine_state is not None
-        assert before.machine_state["manual_model_family"] == "opus"
+        assert before.machine_state["manual_effort_active"] == "low"
     finally:
         original_worker.close()
 
@@ -417,18 +419,18 @@ def test_worker_restart_alone_picks_up_changed_recognition_behaviour(
     edited_worker = _mod.PolicyWorker(edited_copy, dry_run=True)
     assert edited_worker.start() is True
     try:
-        after_old_prefix = edited_worker.decide(_facts_with_raw_input(b"/model sonnet\r"))
+        after_old_prefix = edited_worker.decide(_facts_with_raw_input(b"/effort high\r"))
         assert after_old_prefix is not None
         assert after_old_prefix.machine_state is not None
-        assert after_old_prefix.machine_state.get("manual_model_family") is None
+        assert after_old_prefix.machine_state.get("manual_effort_active") is None
 
         # The NEW prefix now recognises the same style of command.
         after_new_prefix = edited_worker.decide(
-            _facts_with_raw_input(b"/switchmodel sonnet\r", now=1002.0)
+            _facts_with_raw_input(b"/thinkharder high\r", now=1002.0)
         )
         assert after_new_prefix is not None
         assert after_new_prefix.machine_state is not None
-        assert after_new_prefix.machine_state["manual_model_family"] == "sonnet"
+        assert after_new_prefix.machine_state["manual_effort_active"] == "high"
     finally:
         edited_worker.close()
 
