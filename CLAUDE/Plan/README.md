@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00340: release review followups v3621](00340-release-review-followups-v3621/PLAN.md) - Not Started (the v3.62.1 review's non-blocking remainder: whether the supervisor's blind Enter can confirm a modal dialog, a `_walk_into` this release had to patch in two places, and two `config_preserve.sh` robustness gaps)
-
 - [00338: deployed skill tree invisible to review](00338-deployed-skill-tree-invisible-to-review/PLAN.md) - Not Started (an unanchored `hooks-daemon/` in `.claude/.gitignore` also ignores the DEPLOYED `.claude/skills/hooks-daemon/` tree, so a skill drifting from its source is invisible to `git status` — which is exactly how Plan 00336 found one; the sibling `docs-qa` skill is tracked, so the treatment is inconsistent by accident)
 
 - [00337: stop hook, human-input marker and failsafe cron retune](00337-stop-hook-human-input-cron-retune/PLAN.md) - Not Started (filed from a live reproduction: four hourly cron ticks burned a model turn each because arming the suppression needs one of four phrases no agent-facing doc names; stop widening regexes and switch to an explicit declaration, plus an agent-independent capped backoff — and close out 00314, whose work shipped in `923fd583` but still reads Not Started)
@@ -186,6 +184,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00340: release review followups v3621](Completed/00340-release-review-followups-v3621/PLAN.md) - Complete at `6d0aad13`…`c9dfd4a8` + the archiving commit (the v3.62.1 review's non-blocking remainder: a real `/model` picker confirmed the supervisor's blind Enter persists a modal's default, so a resubmit now follows its own escape within 2s)
+
 - [00339: supervisor injection lands unsubmitted](Completed/00339-supervisor-injection-lands-unsubmitted/PLAN.md) - Complete at `e98c19e4` + the archiving commit (probing a real TUI refuted the assumed mechanism: the trigger is Claude Code's paste detection on a large burst, inside which a carriage return is a literal newline, so the injection is now bracketed-paste framed)
 
 - [00336: upgrade path residual findings](Completed/00336-upgrade-path-residual-findings/PLAN.md) - Complete at `c85d5e90`…`788ce6c8` + the archiving commit (config preservation now diffs against a true old-version baseline; `HOOKS-DAEMON.md` regenerated on both upgrade paths instead of never; 17 shipped commands our own `project_containment` denied moved in-repo, found by driving the doc corpus through the live handler)
@@ -244,8 +244,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00304: degraded mode fail open and visibility](Completed/00304-degraded-mode-fail-open-and-visibility/PLAN.md) - Complete at the merge + archiving commits (php-qa-ci canary blocker: null legacy key tolerated, destructive-git safety net while degraded, degradation visible on status/check/config-validate)
 
-- [00302: zero absolute paths config audit](Completed/00302-zero-absolute-paths-config-audit/PLAN.md) - Complete at `5bf8b8a6`/`b8c280a6` + the archiving commit (shared repo-relative validator across all path-typed config, fail-open runtime resolvers, documented exemptions, `{REPO_ROOT}` canonical token)
-
 ## Blocked / On Hold Plans
 
 - **00032, 00034, 00035** - On hold pending upstream Claude Code delegate mode fix (GitHub #23447, #25037)
@@ -285,15 +283,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 340 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 276 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 277 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 47 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 46 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 47 + 276 + 7 = **330 folders**, spanning
+- **Folder-to-number reconciliation**: 46 + 277 + 7 = **330 folders**, spanning
   **327 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -309,7 +307,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00340 filing (47 root, 276 `Completed/`,
+- **Last reconciled at**: the Plan 00340 archival (46 root, 277 `Completed/`,
   7 `Cancelled/`, 327 distinct numbers against a counter of 340). Every figure
   above was recounted from disk rather than incremented. The index carries NO
   reconciliation history — it states current truth only; every earlier recount

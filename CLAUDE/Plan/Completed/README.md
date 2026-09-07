@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00302: zero absolute paths config audit](00302-zero-absolute-paths-config-audit/PLAN.md) - Complete at `5bf8b8a6`/`b8c280a6` + the archiving commit (shared repo-relative validator across all path-typed config, fail-open runtime resolvers, documented exemptions, `{REPO_ROOT}` canonical token)
+
 - [00301: monorepo single config hard cutover](00301-monorepo-single-config-hard-cutover/PLAN.md) - Complete at `aa914471`/`906eed45` + the archiving commit (owner-ruled hard cutover: alias hard-error, single test_dir anchoring, per-project `layout:` with DRY aggregation helpers, REPO/PROJECT `workspace_scope` taxonomy)
 
 - [00296: monorepo workspace resolver](00296-monorepo-workspace-resolver/PLAN.md) - Complete at 9 merge commits + the archiving commit (one shared `Workspace`/`ProjectRegistry` resolver, declared-or-root `projects:` config, five handlers routed through it, monorepo detector advisory, degradation surfaced in `check`)

@@ -1,6 +1,6 @@
 # Plan 00340: release review followups v3621
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-07
 **Owner**: joseph
 **Priority**: Medium
@@ -146,11 +146,11 @@ relying on the path surviving.
 
 ## Success Criteria
 
-- [ ] The modal-dialog question is answered by observation, and whatever it
+- [x] The modal-dialog question is answered by observation, and whatever it
   implies is either shipped or recorded as a deliberate accepted risk.
-- [ ] `_walk_into` exists once.
-- [ ] A stale config-preservation baseline cannot be used silently.
-- [ ] Both heredoc redirect spellings agree, or the difference is documented
+- [x] `_walk_into` exists once.
+- [x] A stale config-preservation baseline cannot be used silently.
+- [x] Both heredoc redirect spellings agree, or the difference is documented
   where an agent will actually read it.
 
 ## Delivery & Milestones
@@ -160,6 +160,17 @@ relying on the path surviving.
      JOURNAL/00340-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Source: the v3.62.1 release code-review gate.
+- **Phase 1** — `6d0aad13` pulls the supervisor's blind Enter in behind its own
+  escape (`_RESUBMIT_FOLLOW_SECONDS`), shrinking the modal-confirm window from
+  60s to one poll.
+- **Phase 2** — `346b8d84` gives both tree-walking docs-QA checks one shared
+  `corpus.walk_into`, and fixes the `repo_hygiene` false positive that surfaced
+  while doing it.
+- **Phase 3** — `3a9fab9f` splits the upgrade CLI's streams so a diagnostic
+  cannot corrupt the JSON payload, and gives the diff baseline an owner so it
+  is neither leaked nor silently stale.
+- **Phase 4** — `c9dfd4a8` recognises a heredoc whose redirect follows the
+  delimiter, and keeps that redirect visible to the handlers that judge it.
 - **Versioning dissent, recorded rather than resolved**: the reviewer argued the
   v3.62.1 bundle reads as MINOR under general semver — it adds a decision family
   to a deployed artefact, inverts an allowlist in a priority-10 handler (with a
