@@ -1,6 +1,6 @@
 # Plan 00336: upgrade path residual findings
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-07
 **Owner**: joseph
 **Priority**: Medium
@@ -264,8 +264,9 @@ a documented bootstrap command that this project's own new handler denies.
 - [x] No shipped document instructs a command that this project's own handlers
   deny — enforced by driving the corpus through the live handler, not by a
   pattern match that could drift from it.
-- [ ] Full QA green (25/25) and the daemon restarted and verified before the
-  terminal status flip.
+- [x] Full QA green (25/25) and the daemon restarted and verified before the
+  terminal status flip — 18,176 tests, coverage 95.2%, daemon restarted and
+  `health` reporting all hooks registered and all project handlers loaded.
 
 ## Delivery & Milestones
 
@@ -275,6 +276,10 @@ a documented bootstrap command that this project's own new handler denies.
 
 - Source: the six defects fixed in `b1217789`; re-exec argument fix in
   `a9866261`. This plan is the residue of that work.
+- Phase 1 delivered at `c85d5e90`, corrected at `8f85ad61`.
+- Phase 2 decided and recorded at `8f85ad61`; Task 2.5 owner ruling at
+  `0f778682`.
+- Phases 3 and 4 delivered at `788ce6c8`.
 - Dedupe scout checked 44 live plans and found none covering these four items.
   Plan 00291 is closest by source (also from a client upgrade failure) but its
   stated scope does not encompass them; Plan 00176 covers `settings.json`
