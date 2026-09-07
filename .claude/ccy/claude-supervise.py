@@ -4089,13 +4089,13 @@ _ESC_PAYLOAD = "\x1b"
 _DRY_RUN_ESCAPE_BODY = "would send [esc] to flush a queued /compact (dry-run — no real ESC sent)"
 # A stalled `/compact` has two possible causes and they need opposite remedies.
 # ESC (above) flushes a command Claude Code QUEUED behind an in-flight turn. But
-# the line may never have been submitted at all: `_perform_injection` separates
-# the payload from its Enter by a sender-side sleep, and coalescing is decided
-# at the READER, so a TUI event loop blocked longer than that sleep drains both
-# writes in one read and absorbs the carriage return into the input box as a
-# literal newline. ESC cannot submit a line that is sitting in the box; only
-# another Enter can. Like ESC this is a raw KEY, injected with no trailing
-# Enter of its own -- submitting the submit would send two.
+# the line may never have been submitted at all -- see `_PASTE_START` below for
+# the measured mechanism (a large burst is read as a PASTE, and a carriage
+# return inside pasted text is a literal newline). The paste framing is the fix
+# for that; this is the safety net for a line that reaches the box unsubmitted
+# anyway, because ESC cannot submit a line sitting in the box and only another
+# Enter can. Like ESC this is a raw KEY, injected with no trailing Enter of its
+# own -- submitting the submit would send two.
 _RESUBMIT_PAYLOAD = "\r"
 _DRY_RUN_RESUBMIT_BODY = (
     "would press [enter] to submit a /compact left unsubmitted in the input box "

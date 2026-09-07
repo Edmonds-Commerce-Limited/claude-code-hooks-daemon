@@ -4,13 +4,16 @@ Reported live: the supervisor's compaction message sat in Claude Code's input
 box with a newline after it, never submitted.
 
 `_perform_injection` writes the payload, sleeps `_SUBMIT_DELAY_SECONDS` (0.2s),
-then writes a standalone ``\\r``. That delay is on the WRITE side, but
-keystroke/paste coalescing is decided on the READ side: if the TUI event loop
-is blocked for longer than the delay — rendering a long transcript, GC, heavy
-load — both writes drain in one ``read()`` and the carriage return is absorbed
-into the multi-line input box as a literal newline. A sender-side sleep cannot
-guarantee separation at the receiver, which is why the failure is intermittent
-and load-dependent.
+then writes a standalone ``\\r``. That delay is on the WRITE side, but whether
+the two writes are seen as one burst is decided at the READER. Probing a real
+Claude Code established what the burst then does: a large one is treated as
+PASTED TEXT, and a carriage return inside pasted text is a literal newline
+rather than a submit — see `test_paste_framed_injection.py` for the
+measurements and the framing that fixes it.
+
+This module covers the SAFETY NET rather than that fix: whatever the reason, a
+line that reaches the box unsubmitted needs an Enter, because ESC cannot submit
+it.
 
 The supervisor cannot see this happen. Its own injections are deliberately kept
 out of the `HumanInputLine` box model (so they can never mark the box
