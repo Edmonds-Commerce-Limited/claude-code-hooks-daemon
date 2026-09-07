@@ -143,9 +143,37 @@ class ConfigMerger:
         self._apply_option_changes(merged, diff, conflicts)
         self._apply_added_handlers(merged, diff)
         self._apply_plugins(merged, diff)
+        self._apply_custom_sections(merged, diff)
         self._report_removed_handler_conflicts(merged, diff, conflicts)
 
         return MergeResult(merged_config=merged, conflicts=conflicts)
+
+    def _apply_custom_sections(
+        self,
+        merged: dict[str, Any],
+        diff: ConfigDiff,
+    ) -> None:
+        """Carry whole top-level sections the user configured onto the merge.
+
+        The merge starts from a copy of the new default, and the passes above
+        restore only daemon settings, handler priorities/options, added handlers
+        and plugins. Anything else the user configured — `plan_workflow`,
+        `documentation`, `agents` — was therefore dropped, and dropped SILENTLY:
+        conflicts and `is_clean` track handler-level drift only, so a project
+        with complete handler coverage saw `is_clean: True, conflicts: []` while
+        losing its configuration.
+
+        The user's value wins over a default the new version may ship for the
+        same section. Preserving customisations is the whole purpose of the
+        merge, so a section the user set is not silently reverted to a default
+        they never chose.
+
+        Args:
+            merged: The config being built (mutated in place)
+            diff: The structured diff of user customizations
+        """
+        for section, value in diff.custom_sections.items():
+            merged[section] = copy.deepcopy(value)
 
     def _apply_daemon_settings(
         self,

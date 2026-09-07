@@ -566,7 +566,7 @@ handlers:
 
 ```bash
 # Generate the full diagnostic report (attach it to any bug report)
-.claude/hooks-daemon/scripts/debug_info.py /tmp/debug_report.md
+.claude/hooks-daemon/scripts/debug_info.py untracked/scratch/debug_report.md
 ```
 
 ### Common Quick Fixes

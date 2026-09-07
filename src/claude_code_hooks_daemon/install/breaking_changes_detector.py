@@ -31,8 +31,19 @@ def parse_version(version: str) -> tuple[int, int, int]:
     both range comparison and migration-hint construction use it, so a major
     such as ``10`` is never confused with the first character ``'1'``.
 
+    A leading ``v``/``V`` is accepted and stripped, because the TAG form is the
+    only form this project's own documentation ever hands to the upgrade path:
+    `RELEASES/vX.Y.Z.md` prints the literal `v` argument, and README.md and
+    BUG_REPORTING.md both derive it from `git describe --tags`, which always
+    emits the prefix. Rejecting it did not fail loudly — it skipped the
+    compatibility verdict and the upgrade-guide list on every tagged upgrade,
+    which are the two checks that warn about a breaking change before it lands.
+
+    Only the prefix is forgiven. Everything after it must still be three
+    integer components, so this cannot widen into "accept anything".
+
     Args:
-        version: Version string like ``'2.13.0'`` or ``'10.4.0'``
+        version: Version string like ``'2.13.0'``, ``'10.4.0'`` or ``'v3.62.0'``
 
     Returns:
         ``(major, minor, patch)`` tuple of ints.
@@ -40,7 +51,8 @@ def parse_version(version: str) -> tuple[int, int, int]:
     Raises:
         ValueError: If the version string is not ``MAJOR.MINOR.PATCH``.
     """
-    parts = version.split(_VERSION_SEPARATOR)
+    normalised = version.removeprefix("v").removeprefix("V")
+    parts = normalised.split(_VERSION_SEPARATOR)
     if len(parts) != 3:
         raise ValueError(
             f"Invalid version string {version!r}: expected MAJOR.MINOR.PATCH (three components)"

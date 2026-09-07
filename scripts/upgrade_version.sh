@@ -120,6 +120,27 @@ SNAPSHOT_ID=""
 ROLLBACK_REF=""
 UPGRADE_STARTED=false
 
+# Self-replacement detection.
+#
+# Step 6 checks out the target version INTO THE DIRECTORY THIS SCRIPT LIVES IN.
+# Bash has already read the program it is running, so every step after that
+# checkout still comes from the version being REPLACED: a step the new release
+# adds is not skipped by a gate, it is absent from the running program, and the
+# operator sees a clean successful upgrade that quietly did less than the
+# release notes promised.
+#
+# Layer 1 (upgrade.sh) does not have this problem — it checks out first and
+# then invokes this script as a fresh process. But this script remains a
+# public entry point that older skill shims and existing runbooks still call
+# directly, so it has to detect the swap itself. `cksum` is used rather than a
+# sha tool because it is POSIX and present everywhere this script runs.
+LAYER2_TARGET_SCRIPT="$DAEMON_DIR/scripts/upgrade_version.sh"
+LAYER2_SOURCE_FINGERPRINT_BEFORE=""
+if [ -f "$LAYER2_TARGET_SCRIPT" ]; then
+    LAYER2_SOURCE_FINGERPRINT_BEFORE="$(cksum < "$LAYER2_TARGET_SCRIPT")"
+fi
+LAYER2_SOURCE_CHANGED=false
+
 # ============================================================
 # Rollback trap
 # ============================================================
@@ -211,10 +232,17 @@ fi
 
 log_step "2" "Pre-upgrade checks"
 
-# Get current version info
+# Get current version info.
+#
+# On a second pass (see the re-exec at the end of this script) the checkout has
+# already moved to the target, so reading version.py here would report the NEW
+# version as the one being upgraded FROM. The first pass hands the real
+# starting version over instead, keeping the summary honest.
 CURRENT_VERSION="unknown"
 VERSION_FILE="$DAEMON_DIR/src/claude_code_hooks_daemon/version.py"
-if [ -f "$VERSION_FILE" ] && [ -f "$VENV_PYTHON" ]; then
+if [ -n "${HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION:-}" ]; then
+    CURRENT_VERSION="$HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION"
+elif [ -f "$VERSION_FILE" ] && [ -f "$VENV_PYTHON" ]; then
     CURRENT_VERSION=$("$VENV_PYTHON" -c "
 from claude_code_hooks_daemon.version import __version__
 print(__version__)
@@ -755,6 +783,21 @@ print_info "Checking out $TARGET_VERSION..."
 git -C "$DAEMON_DIR" checkout "$TARGET_VERSION" --quiet
 print_success "Checked out $TARGET_VERSION"
 
+# Did that checkout replace THIS script? If so, the steps below are the ones
+# the PREVIOUS release shipped, and anything the target added is missing from
+# them. Recorded here and acted on at the very end of the run: re-exec'ing now
+# would abandon Steps 7-17 half-done and force the child to rebuild the
+# snapshot id, the config backup and the old-default baseline that Steps 3-5
+# already produced. Completing this pass and then repeating it idempotently
+# keeps the rollback contract intact and needs no state handover.
+if [ -n "$LAYER2_SOURCE_FINGERPRINT_BEFORE" ] && [ -f "$LAYER2_TARGET_SCRIPT" ]; then
+    if [ "$(cksum < "$LAYER2_TARGET_SCRIPT")" != "$LAYER2_SOURCE_FINGERPRINT_BEFORE" ]; then
+        LAYER2_SOURCE_CHANGED=true
+        print_warning "$TARGET_VERSION ships a different upgrade script than the one now running."
+        print_info "The remaining steps come from the pre-upgrade script; a second pass will run from $TARGET_VERSION's own script at the end."
+    fi
+fi
+
 # ============================================================
 # Step 7: Recreate virtual environment (clean reinstall)
 # ============================================================
@@ -1160,7 +1203,9 @@ else
     echo "config-optimisation review (Skill tool: skill=hooks-daemon,"
     echo "args=optimise)."
     echo "It is not an optional follow-up and does not belong in a hand-back"
-    echo "list: handlers new in $NEW_VERSION stay inert until it runs."
+    echo "list: handlers new in $NEW_VERSION are registered and firing with"
+    echo "their DEFAULT settings, and handlers this project has disabled or"
+    echo "never configured stay that way until the review surfaces them."
     echo "It inventories disabled-but-relevant handlers, surfaces what is new,"
     echo "and produces a per-handler enable/skip recommendation list -- it"
     echo "never applies changes without your explicit confirmation."
@@ -1172,5 +1217,25 @@ echo "IMPORTANT: after the review, restart Claude Code to activate upgraded hook
 echo "  1. Exit your current Claude Code session"
 echo "  2. Start a new Claude Code session"
 echo ""
+
+# Second pass: everything above ran from the pre-upgrade script, because Step 6
+# replaced this file after bash had already read it. Re-exec the target's OWN
+# script so any step the new release added actually runs. Step 2 there sees the
+# checkout already at the target and takes the idempotent deployment path,
+# which is exactly the manual "run it again" that recovers this situation
+# today -- performed automatically, so an install is never left short of what
+# the release notes promised because nobody read the scrollback.
+#
+# The sentinel is exported so the child cannot repeat this; without it a script
+# that legitimately differs on every run would re-exec forever. `exec` does not
+# fire the EXIT trap, so no spurious rollback is triggered, and UPGRADE_STARTED
+# is already false by this point.
+if [ "$LAYER2_SOURCE_CHANGED" = true ] && [ -z "${HOOKS_DAEMON_UPGRADE_SECOND_PASS:-}" ]; then
+    print_header "Second pass: running $TARGET_VERSION's own upgrade steps"
+    print_info "The steps above came from the pre-upgrade script. Re-running from $LAYER2_TARGET_SCRIPT."
+    export HOOKS_DAEMON_UPGRADE_SECOND_PASS=1
+    export HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION="$CURRENT_VERSION"
+    exec bash "$LAYER2_TARGET_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" "$@"
+fi
 
 exit 0

@@ -28,8 +28,11 @@ assigned task, and one classified it as injected content.
   the [Bug Reporting Guide](../BUG_REPORTING.md) (it covers the diagnostic
   script, report contents, and the upstream issue tracker). That directory is
   inside the working tree, so the report survives a container restart, and it
-  is gitignored, so it never reaches review. A path outside the repository is
-  refused by `project_containment`.
+  is gitignored, so it never reaches review. `project_containment` denies an
+  ordinary redirect outside the repository (`echo x > /tmp/f`), but it judges
+  redirects and destination-bearing constructs — not a path handed to a script
+  as a plain argument — so treat it as a backstop, not a guarantee that
+  nothing can be written outside the tree.
 - **Change handler configuration** — edit your project's
   `.claude/hooks-daemon.yaml` (that IS yours: enable/disable handlers, set
   priorities and options).

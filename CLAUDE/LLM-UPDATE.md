@@ -213,10 +213,15 @@ cd ../..
 ### 3. Update Dependencies and Restart Daemon
 
 ```bash
-# Rebuild the venv and reinstall the package for the checked-out version.
-# Args: PROJECT_ROOT, DAEMON_DIR, TARGET_VERSION (all absolute).
-bash .claude/hooks-daemon/scripts/upgrade_version.sh \
-  "$PWD" "$PWD/.claude/hooks-daemon" "$TARGET_VERSION"
+# Rebuild the venv and reinstall the package for the target version.
+#
+# Use Layer 1 (upgrade.sh), NOT Layer 2 (upgrade_version.sh). Layer 1 checks
+# out the target and then runs Layer 2 as a fresh process, so the upgrade
+# executes the TARGET release's step list. Invoking Layer 2 directly makes it
+# check itself out half way through its own run, and every step after that
+# still comes from the release being replaced — so a step the new version
+# added does not run at all.
+bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" "$TARGET_VERSION"
 
 # Restart daemon
 .claude/hooks-daemon/bin/hooks-daemon restart || \
@@ -616,8 +621,7 @@ Schema and full convention: `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/READM
 
 ```bash
 git -C .claude/hooks-daemon fetch --tags
-bash .claude/hooks-daemon/scripts/upgrade_version.sh \
-  "$PWD" "$PWD/.claude/hooks-daemon" v2.2.1
+bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" v2.2.1
 .claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
@@ -683,8 +687,7 @@ cp "$SNAPSHOT/files/hooks/"* .claude/hooks/ 2>/dev/null || true
 cat "$SNAPSHOT/manifest.json"
 
 # Reinstall the original version (from manifest) — rebuilds the venv too
-bash "$DAEMON_DIR/scripts/upgrade_version.sh" \
-  "$PWD" "$DAEMON_DIR" <version-from-manifest>
+bash "$DAEMON_DIR/scripts/upgrade.sh" --project-root "$PWD" <version-from-manifest>
 
 # Restart
 "$DAEMON_DIR/bin/hooks-daemon" restart
@@ -703,8 +706,7 @@ cp .claude/hooks-daemon.yaml.backup .claude/hooks-daemon.yaml
 git -C .claude/hooks-daemon tag -l | sort -V
 
 # Reinstall the previous version (rebuilds the venv too)
-bash .claude/hooks-daemon/scripts/upgrade_version.sh \
-  "$PWD" "$PWD/.claude/hooks-daemon" vX.Y.Z
+bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" vX.Y.Z
 
 # Verify rollback
 cat .claude/hooks-daemon/src/claude_code_hooks_daemon/version.py
@@ -982,8 +984,7 @@ plugins:
 # NEVER hand-build one — `python3 -m venv untracked/venv` creates the retired
 # pre-v3.7.0 layout, which resolve_venv.sh refuses (every wrapper call exits 5).
 CURRENT_TAG="$(git -C .claude/hooks-daemon describe --tags --abbrev=0)"
-bash .claude/hooks-daemon/scripts/upgrade_version.sh \
-  "$PWD" "$PWD/.claude/hooks-daemon" "$CURRENT_TAG"
+bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" "$CURRENT_TAG"
 
 # Inspect what venvs exist and which one is active
 .claude/hooks-daemon/bin/hooks-daemon list-venvs
@@ -1138,7 +1139,7 @@ If you encounter update issues:
 
 ```bash
 # Generate the full diagnostic report (attach it to any bug report)
-.claude/hooks-daemon/scripts/debug_info.py /tmp/debug_report.md
+.claude/hooks-daemon/scripts/debug_info.py untracked/scratch/debug_report.md
 ```
 
 <!-- /ssot-quote -->

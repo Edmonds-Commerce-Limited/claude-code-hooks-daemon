@@ -185,7 +185,7 @@ except ImportError:
     sys.exit(0)
 
 try:
-    with open('$config_file') as f:
+    with open(sys.argv[1]) as f:
         config = yaml.safe_load(f) or {}
     if config.get('daemon', {}).get('self_install_mode', False):
         print('self-install')
@@ -193,7 +193,7 @@ try:
         print('normal')
 except Exception:
     print('normal')
-" 2>/dev/null)
+" "$config_file" 2>/dev/null)
 
     if [ -z "$self_install" ]; then
         echo "normal"

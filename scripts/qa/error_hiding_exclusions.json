@@ -716,12 +716,6 @@
       "reason": "Plan 00200 Task 5.4: `if command -v python3 &>/dev/null; then` -- exit code explicitly checked. Module-level (no enclosing function at this call site), hence line-based match."
     },
     {
-      "file": "scripts/install/config_preserve.sh",
-      "function": "preserve_config_for_upgrade",
-      "rule": "shell-|| true",
-      "reason": "Plan 00200 Task 5.4: wraps an embedded Python breaking-changes-documentation step. The Python code has its OWN top-level `except Exception as e: print(f'WARNING: ... failed: {e}', file=sys.stderr)`, so a failure is already visible; the outer `|| true` only stops a truly catastrophic failure (e.g. a syntax error before the try) from aborting the whole upgrade over a best-effort, purely informational step."
-    },
-    {
       "file": "scripts/install/hooks_deploy.sh",
       "function": "git_force_executable",
       "rule": "shell->/dev/null 2>&1",
@@ -794,7 +788,7 @@
     {
       "file": "scripts/upgrade_version.sh",
       "lines": [
-        395
+        423
       ],
       "rule": "shell-|| true",
       "reason": "Plan 00200 Task 5.4: `run_pre_install_checks ... \"false\" || true`. The function's own documented contract (fail_on_error=false): 'returns non-zero but doesn't exit', and it already prints any warnings found. The trailing `|| true` exists only to stop `set -e` treating that documented non-fatal return as script-terminating -- the function's own visible warnings are the diagnostic, not this line."
@@ -802,7 +796,7 @@
     {
       "file": "scripts/upgrade_version.sh",
       "lines": [
-        749
+        777
       ],
       "rule": "shell-&>/dev/null",
       "reason": "Plan 00200 Task 5.4: `if ! git ... rev-parse \"$TARGET_VERSION\" &>/dev/null; then fail_fast \"Version $TARGET_VERSION not found...\"` -- exit code explicitly checked, specific error printed on failure."

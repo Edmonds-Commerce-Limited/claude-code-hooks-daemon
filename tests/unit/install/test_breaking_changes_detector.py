@@ -8,7 +8,52 @@ from claude_code_hooks_daemon.install.breaking_changes_detector import (
     BreakingChange,
     BreakingChangesDetector,
     ChangeType,
+    parse_version,
 )
+
+
+class TestParseVersionAcceptsTheTagForm:
+    """A `v`-prefixed tag is the ONLY form this project's docs tell you to pass.
+
+    Field report, v3.61.0 -> v3.62.0 client upgrade: two pre-upgrade safety
+    checks crashed with `Invalid version string 'v3.62.0'` and were skipped —
+    the breaking-change compatibility verdict (`check_compatibility`) and the
+    upgrade-guide list (`suggest_upgrade_guides`). Those are precisely the two
+    checks that would have warned about the new deny-by-default handler before
+    it went live.
+
+    It is not user error. `RELEASES/vX.Y.Z.md` documents
+    `upgrade_version.sh ... "v3.62.0"` literally, and README.md/BUG_REPORTING.md
+    derive the argument from `git describe --tags`, which ALWAYS emits the
+    prefix. No documented invocation passes a bare `3.62.0`.
+    """
+
+    def test_a_bare_version_still_parses(self) -> None:
+        assert parse_version("3.62.0") == (3, 62, 0)
+
+    def test_a_v_prefixed_tag_parses(self) -> None:
+        assert parse_version("v3.62.0") == (3, 62, 0)
+
+    def test_an_uppercase_v_prefix_parses(self) -> None:
+        assert parse_version("V3.62.0") == (3, 62, 0)
+
+    def test_a_double_digit_component_survives_the_strip(self) -> None:
+        """The prefix strip must not disturb the real-major parsing this
+        function exists to get right (10 is not the character '1')."""
+        assert parse_version("v10.4.0") == (10, 4, 0)
+
+    def test_a_genuinely_malformed_version_is_still_rejected(self) -> None:
+        """Stripping `v` must not become "accept anything"."""
+        with pytest.raises(ValueError, match="components must be integers"):
+            parse_version("vX.Y.Z")
+
+    def test_a_version_with_too_few_components_is_still_rejected(self) -> None:
+        with pytest.raises(ValueError, match="three components"):
+            parse_version("v3.62")
+
+    def test_a_bare_v_is_rejected_rather_than_stripped_to_nothing(self) -> None:
+        with pytest.raises(ValueError):
+            parse_version("v")
 
 
 @pytest.fixture

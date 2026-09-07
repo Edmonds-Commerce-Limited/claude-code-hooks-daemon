@@ -124,8 +124,7 @@ cd hooks-daemon
 ### 2. Update Dependencies
 
 ```bash
-bash .claude/hooks-daemon/scripts/upgrade_version.sh \
-  "$PWD" "$PWD/.claude/hooks-daemon" v{NEW_VERSION}
+bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" v{NEW_VERSION}
 ```
 
 **Expected output**:
@@ -410,8 +409,7 @@ mv hooks-daemon.backup hooks-daemon
 ### 4. Reinstall Previous Dependencies
 
 ```bash
-bash .claude/hooks-daemon/scripts/upgrade_version.sh \
-  "$PWD" "$PWD/.claude/hooks-daemon" v{PREV_VERSION}
+bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" v{PREV_VERSION}
 ```
 
 ### 5. Restart Daemon

@@ -13,7 +13,7 @@ The daemon includes a debug info generator that automatically collects all diagn
 ./scripts/debug_info.py
 
 # Or save to file for GitHub
-./scripts/debug_info.py /tmp/bug_report.md
+./scripts/debug_info.py untracked/scratch/bug_report.md
 ```
 
 ### In a Client Project (Where Daemon is Installed)
@@ -23,8 +23,13 @@ The daemon includes a debug info generator that automatically collects all diagn
 .claude/hooks-daemon/scripts/debug_info.py
 
 # Or save to file
-.claude/hooks-daemon/scripts/debug_info.py /tmp/bug_report.md
+.claude/hooks-daemon/scripts/debug_info.py untracked/scratch/bug_report.md
 ```
+
+Write the report inside the repository, not `/tmp`. `untracked/scratch/` is
+gitignored, so it never reaches review, and it survives a container restart —
+a path under `/tmp` does not, and agents working in the project are denied
+ordinary redirects outside the repository root by `project_containment`.
 
 The script auto-detects:
 
@@ -174,13 +179,12 @@ This was a bug in v2.0.0 that's fixed in v2.1.0. Update your daemon:
 ```bash
 git -C .claude/hooks-daemon pull origin main
 TARGET="$(git -C .claude/hooks-daemon describe --tags --abbrev=0)"
-bash .claude/hooks-daemon/scripts/upgrade_version.sh \
-  "$PWD" "$PWD/.claude/hooks-daemon" "$TARGET"
+bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" "$TARGET"
 ```
 
 ## Getting Help
 
-1. **Run debug script first**: `./scripts/debug_info.py /tmp/report.md`
+1. **Run debug script first**: `./scripts/debug_info.py untracked/scratch/report.md`
 2. **Create GitHub issue**: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
 3. **Paste debug report** into issue description
 4. **Add context**: What you were doing when the issue occurred

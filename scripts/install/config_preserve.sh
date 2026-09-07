@@ -179,17 +179,26 @@ merge_custom_config() {
         return 1
     fi
 
-    # If output_file specified, extract merged_config and write as YAML
+    # If output_file specified, extract merged_config and write as YAML.
+    #
+    # The JSON arrives on STDIN and the destination on ARGV. Neither may be
+    # interpolated into the Python source: a config value is arbitrary user
+    # text, and pasting it into a `'''...'''` literal means Python's tokenizer
+    # decodes it BEFORE json.loads ever sees it. A regex option such as
+    # `^pip\b` was halved to a real backspace and written to the config
+    # silently; `v\d+\.\d+` was not a legal JSON escape at all and aborted the
+    # upgrade; a value containing `'''` closed the literal and reached the
+    # interpreter as code.
     if [ -n "$output_file" ]; then
         local write_result
-        write_result=$("$venv_python" -c "
+        write_result=$(printf '%s' "$merge_output" | "$venv_python" -c "
 import json, sys, yaml
-data = json.loads('''$merge_output''')
+data = json.loads(sys.stdin.read())
 merged = data.get('merged_config', {})
-with open('$output_file', 'w') as f:
+with open(sys.argv[1], 'w') as f:
     yaml.dump(merged, f, default_flow_style=False, sort_keys=False)
 print('OK')
-" 2>&1)
+" "$output_file" 2>&1)
 
         if [ "$write_result" != "OK" ]; then
             print_error "Failed to write merged config: $write_result"
@@ -280,11 +289,15 @@ report_incompatibilities() {
         return 1
     fi
 
+    # As in merge_custom_config: the JSON arrives on stdin, never inside a
+    # Python literal. A conflict record carries the user's own config value,
+    # so interpolating it here meant a regex option could abort the very
+    # report that exists to tell the user their value was not applied.
     local report_output
-    report_output=$("$venv_python" -c "
+    report_output=$(printf '%s' "$merge_json" | "$venv_python" -c "
 import json, sys
 
-data = json.loads('''$merge_json''')
+data = json.loads(sys.stdin.read())
 is_clean = data.get('is_clean', True)
 conflicts = data.get('conflicts', [])
 
@@ -409,7 +422,12 @@ preserve_config_for_upgrade() {
     print_info "Step 4a/5: Detecting breaking changes..."
     local migration_notes="$project_root/.claude/config-migration-notes.txt"
 
-    "$venv_python" -c "
+    # Same contract as the two blocks above: JSON on stdin, paths on argv.
+    # This site is the one a behavioural test is least likely to catch: the
+    # `try` below and the sanctioned exit-code suppression on the closing line
+    # turn a failure into a SKIPPED breaking-changes report rather than a
+    # visible error — and that report is what warns before a change lands.
+    if ! printf '%s' "$merge_output" | "$venv_python" -c "
 import json
 import sys
 from pathlib import Path
@@ -418,15 +436,17 @@ from datetime import datetime
 try:
     from claude_code_hooks_daemon.install.breaking_changes_detector import BreakingChangesDetector
 
+    old_default_config, migration_notes = sys.argv[1], sys.argv[2]
+
     # Determine current and target versions
-    daemon_dir = Path('$old_default_config').parent.parent.parent
+    daemon_dir = Path(old_default_config).parent.parent.parent
     changelog_path = daemon_dir / 'CHANGELOG.md'
 
     if not changelog_path.exists():
         sys.exit(0)
 
     # Parse merge output to get config diff
-    merge_data = json.loads('''$merge_output''')
+    merge_data = json.loads(sys.stdin.read())
     conflicts = merge_data.get('conflicts', [])
 
     # Look for handler removal/rename conflicts
@@ -456,7 +476,7 @@ try:
 
     if warnings:
         # Write migration notes to file
-        with open('$migration_notes', 'w') as f:
+        with open(migration_notes, 'w') as f:
             f.write('=' * 70 + '\n')
             f.write('Config Migration Notes\n')
             f.write('Generated: ' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + '\n')
@@ -477,11 +497,18 @@ try:
             f.write('- Verify daemon starts successfully\n')
             f.write('- See upgrade guides in CLAUDE/UPGRADES/ for details\n')
 
-        print(f'✓ Migration notes written to {Path(\"$migration_notes\").name}', file=sys.stderr)
+        print(f'✓ Migration notes written to {Path(migration_notes).name}', file=sys.stderr)
 
 except Exception as e:
     print(f'WARNING: Breaking changes documentation failed: {e}', file=sys.stderr)
-" || true
+" "$old_default_config" "$migration_notes"; then
+        # Documenting breaking changes is a best-effort, purely informational
+        # step, so it must not abort an otherwise-successful upgrade. It is
+        # still SAID OUT LOUD: the previous blanket suppression here hid the
+        # interpreter error raised by this block's own interpolated source,
+        # which is why the field report saw no migration notes and no reason.
+        print_warning "Breaking-changes documentation step failed; continuing upgrade"
+    fi
 
     # Step 5: Summary
     print_info "Step 5/5: Config preservation summary"

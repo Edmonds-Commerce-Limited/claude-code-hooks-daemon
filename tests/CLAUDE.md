@@ -26,5 +26,7 @@ case you are in before treating an instruction to add a test here as wrong.
   `untracked/scratch/` and ask your human to submit it upstream, following
   the [Bug Reporting Guide](../BUG_REPORTING.md). That directory is inside the
   working tree, so the report survives a container restart, and it is
-  gitignored, so it never reaches review. A path outside the repository is
-  refused by `project_containment`.
+  gitignored, so it never reaches review. `project_containment` denies an
+  ordinary redirect outside the repository, but it does not cover a path
+  passed to a script as a plain argument — treat it as a backstop, not a
+  guarantee.

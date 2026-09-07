@@ -76,7 +76,7 @@ import sys
 from pathlib import Path
 
 # Add src to path
-daemon_dir = Path('$daemon_dir')
+daemon_dir = Path(sys.argv[1])
 sys.path.insert(0, str(daemon_dir / 'src'))
 
 try:
@@ -84,7 +84,7 @@ try:
     print('OK')
 except ImportError as e:
     print(f'IMPORT_ERROR: {e}')
-" 2>&1)
+" "$daemon_dir" 2>&1)
 
         if [[ "$import_test" == "OK" ]]; then
             print_verbose "Daemon package imports successfully"

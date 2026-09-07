@@ -3,7 +3,9 @@
 TDD: These tests are written FIRST, before the implementation.
 """
 
-from claude_code_hooks_daemon.install.config_differ import ConfigDiff
+from typing import Any
+
+from claude_code_hooks_daemon.install.config_differ import ConfigDiff, ConfigDiffer
 from claude_code_hooks_daemon.install.config_merger import ConfigMerger, MergeConflict, MergeResult
 
 
@@ -485,3 +487,117 @@ class TestConfigMergerMerge:
         result = self.merger.merge(new_default_config=new_default, diff=diff)
         handler = result.merged_config["handlers"]["pre_tool_use"]["branch_policy"]
         assert handler["options"] == new_value
+
+
+class TestTopLevelSectionsSurviveTheMerge:
+    """A configured section absent from the shipped example must not be dropped.
+
+    Field report, v3.61.0 -> v3.62.0 client upgrade. The shipped
+    `.claude/hooks-daemon.yaml.example` contains only `daemon`, `handlers` and
+    `version`. The merge starts from a copy of the new default and applies back
+    only daemon settings, handler priorities/options, added handlers and
+    plugins — so every OTHER top-level section the user configured is silently
+    discarded. `plan_workflow`, `documentation` and `agents` are all documented,
+    all schema-valid, and all accepted by `config-validate`.
+
+    What makes it dangerous rather than merely wrong is the reporting.
+    `is_clean` and `conflicts` track handler-level drift only, so against a
+    config with complete handler coverage the merge reports `is_clean: True,
+    conflicts: []` while dropping 27 keys. The more thoroughly a project has
+    configured its handlers, the less warning it gets.
+    """
+
+    def setup_method(self) -> None:
+        self.merger = ConfigMerger()
+
+    @staticmethod
+    def _new_default() -> dict[str, Any]:
+        """A fresh copy per test: the merge deep-copies, but a shared mutable
+        default would still let one test's assertion depend on another's."""
+        return {
+            "version": "2.0",
+            "daemon": {"log_level": "INFO"},
+            "handlers": {"pre_tool_use": {"sed_blocker": {"enabled": True}}},
+        }
+
+    def test_a_configured_section_absent_from_the_example_is_carried_through(self) -> None:
+        diff = ConfigDiff(
+            custom_sections={
+                "plan_workflow": {"enabled": True, "directory": "CLAUDE/Plan"},
+                "documentation": {"trees": {"agent": "CLAUDE", "human": "docs"}},
+            }
+        )
+        merged = self.merger.merge(new_default_config=self._new_default(), diff=diff).merged_config
+
+        assert merged["plan_workflow"] == {"enabled": True, "directory": "CLAUDE/Plan"}
+        assert merged["documentation"] == {"trees": {"agent": "CLAUDE", "human": "docs"}}
+
+    def test_the_known_sections_are_untouched_by_the_carry_through(self) -> None:
+        diff = ConfigDiff(custom_sections={"plan_workflow": {"enabled": True}})
+        merged = self.merger.merge(new_default_config=self._new_default(), diff=diff).merged_config
+
+        assert merged["version"] == "2.0"
+        assert merged["daemon"] == {"log_level": "INFO"}
+        assert merged["handlers"]["pre_tool_use"]["sed_blocker"]["enabled"] is True
+
+    def test_no_custom_sections_leaves_the_default_shape_alone(self) -> None:
+        merged = self.merger.merge(
+            new_default_config=self._new_default(), diff=ConfigDiff()
+        ).merged_config
+
+        assert sorted(merged.keys()) == ["daemon", "handlers", "version"]
+
+    def test_the_field_scenario_end_to_end_through_the_differ(self) -> None:
+        """The reported path, not just the merger half.
+
+        The section was lost at the DIFF stage — `ConfigDiff` had no field for
+        it — so a merger-only test could pass while the real upgrade still
+        dropped configuration. This drives the whole differ -> merger path the
+        upgrade actually uses, against an example containing only the three
+        sections the shipped one has.
+        """
+        shipped_example = {
+            "version": "2.0",
+            "daemon": {"log_level": "INFO"},
+            "handlers": {"pre_tool_use": {"sed_blocker": {"enabled": True}}},
+        }
+        user_config = {
+            "version": "2.0",
+            "daemon": {"log_level": "DEBUG"},
+            "handlers": {"pre_tool_use": {"sed_blocker": {"enabled": True}}},
+            "plan_workflow": {"enabled": True, "directory": "CLAUDE/Plan"},
+            "documentation": {"trees": {"agent": "CLAUDE", "human": "docs"}},
+            "agents": {"docs_qa": {"enabled": True}},
+        }
+
+        diff = ConfigDiffer().diff(user_config, shipped_example)
+        merged = ConfigMerger().merge(new_default_config=shipped_example, diff=diff).merged_config
+
+        assert merged["plan_workflow"] == {"enabled": True, "directory": "CLAUDE/Plan"}
+        assert merged["documentation"] == {"trees": {"agent": "CLAUDE", "human": "docs"}}
+        assert merged["agents"] == {"docs_qa": {"enabled": True}}
+        assert merged["daemon"]["log_level"] == "DEBUG", "the daemon pass must still work"
+
+    def test_the_schema_version_comes_from_the_new_default_not_the_user(self) -> None:
+        """`version` is a shipped schema marker, not a user setting. Carrying
+        the user's value would restore the version they were upgrading FROM and
+        make the upgrade undo itself."""
+        shipped_example = {"version": "3.0", "daemon": {}, "handlers": {}}
+        user_config = {"version": "2.0", "daemon": {}, "handlers": {}}
+
+        diff = ConfigDiffer().diff(user_config, shipped_example)
+        merged = ConfigMerger().merge(new_default_config=shipped_example, diff=diff).merged_config
+
+        assert merged["version"] == "3.0"
+
+    def test_a_carried_section_does_not_overwrite_one_the_new_default_introduced(self) -> None:
+        """If a later version ships its own default for a section the user had
+        configured, the USER's value still wins — that is the whole point of
+        preserving customisations. Pinned so a future "defaults win" change is
+        a deliberate decision rather than a silent one."""
+        new_default = dict(self._new_default(), plan_workflow={"enabled": False})
+        diff = ConfigDiff(custom_sections={"plan_workflow": {"enabled": True}})
+
+        merged = self.merger.merge(new_default_config=new_default, diff=diff).merged_config
+
+        assert merged["plan_workflow"]["enabled"] is True

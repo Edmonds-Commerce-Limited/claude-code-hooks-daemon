@@ -349,8 +349,7 @@ cp "$SNAPSHOT/files/settings.json" .claude/settings.json 2>/dev/null || true
 cp "$SNAPSHOT/files/hooks/"* .claude/hooks/ 2>/dev/null || true
 
 # Reinstall the original version (read from manifest.json) — rebuilds the venv
-bash "$DAEMON_DIR/scripts/upgrade_version.sh" \
-  "$PWD" "$DAEMON_DIR" <version-from-manifest>
+bash "$DAEMON_DIR/scripts/upgrade.sh" --project-root "$PWD" <version-from-manifest>
 
 # Restart
 "$DAEMON_DIR/bin/hooks-daemon" restart
@@ -369,8 +368,9 @@ If upgrade fails and no snapshots are available (e.g., upgrading from a version 
 2. **Revert daemon code and rebuild its venv** (one step):
 
    ```bash
-   bash .claude/hooks-daemon/scripts/upgrade_version.sh \
-     "$PWD" "$PWD/.claude/hooks-daemon" vX.Y  # Previous working version
+   # Previous working version. Layer 1 (upgrade.sh) checks out the target
+   # first, so the run executes that version's own step list.
+   bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" vX.Y
    ```
 
 3. **Restart daemon**:

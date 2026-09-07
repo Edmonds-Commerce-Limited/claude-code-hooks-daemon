@@ -320,8 +320,7 @@ git -C .claude/hooks-daemon fetch --tags
 TARGET="$(git -C .claude/hooks-daemon describe --tags --abbrev=0)"
 
 # Rebuilds the venv and reinstalls the package for the target version.
-bash .claude/hooks-daemon/scripts/upgrade_version.sh \
-  "$PWD" "$PWD/.claude/hooks-daemon" "$TARGET"
+bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" "$TARGET"
 
 .claude/hooks-daemon/bin/hooks-daemon restart
 ```
@@ -480,10 +479,10 @@ For comprehensive troubleshooting and bug reporting, see [BUG_REPORTING.md](BUG_
 
 ```bash
 # From the daemon project
-./scripts/debug_info.py /tmp/debug_report.md
+./scripts/debug_info.py untracked/scratch/debug_report.md
 
 # From a client project
-.claude/hooks-daemon/scripts/debug_info.py /tmp/debug_report.md
+.claude/hooks-daemon/scripts/debug_info.py untracked/scratch/debug_report.md
 ```
 
 **Common fixes:**

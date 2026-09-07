@@ -89,3 +89,30 @@ class TestOptOutSurvives:
         body = _UPGRADE_SCRIPT.read_text(encoding="utf-8")
         assert '"--skip-config-optimisation"' in body
         assert "Config-optimisation review skipped" in body
+
+
+class TestTheMandateIsArguedHonestly:
+    """The reason given for the mandate must be true.
+
+    A field report checked the claim and found the opposite: every handler new
+    in the release was already registered and firing before the review ran,
+    and one of them had already denied a write. ``check-config-migrations``
+    describes the same handlers as "enabled by default", so the banner
+    contradicted the tool's own output.
+
+    The mandate is still mandatory — the review surfaces disabled-but-relevant
+    handlers and produces a per-handler recommendation, which is worth doing.
+    Overstating it is what costs: an agent that catches one warning
+    exaggerating discounts the next one, and every warning this tool prints
+    depends on being believed.
+    """
+
+    def test_the_banner_does_not_claim_new_handlers_are_inert(self) -> None:
+        start = _first_match(_MANDATE)
+        banner = "\n".join(_lines()[start : start + _BANNER_LINES])
+
+        assert not re.search(r"stay inert until it runs", banner), (
+            "New handlers are registered and firing with their defaults before "
+            "the review runs, so this claim is false. State what the review "
+            f"actually changes instead; got:\n{banner}"
+        )

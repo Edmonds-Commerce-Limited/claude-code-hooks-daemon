@@ -7,8 +7,24 @@ to preserve user settings when merging with new default configs.
 Decision: Key-based diff against example config (Plan 00041 Decision 2).
 """
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any
+
+#: Top-level keys this differ already accounts for, and which must therefore
+#: NOT be captured wholesale. Every OTHER top-level key is preserved as a custom
+#: section, so a config block introduced by a later version survives an upgrade
+#: without anyone having to remember to register it here. A key listed here MUST
+#: either have a pass of its own or be owned by the default -- otherwise its
+#: contents are dropped, which is exactly the defect that made the deny-list the
+#: right shape rather than an allow-list of known extras.
+#:
+#: `version` is here because it is the SHIPPED SCHEMA MARKER, not a user
+#: setting: the new default's value must win, or an upgrade would restore the
+#: version number the user was on and undo itself.
+_SECTIONS_WITH_A_DEDICATED_PASS: frozenset[str] = frozenset(
+    {"daemon", "handlers", "plugins", "version"}
+)
 
 
 @dataclass
@@ -22,6 +38,8 @@ class ConfigDiff:
         changed_options: Option changes (enabled, options dict), keyed by event_type -> handler_name -> field -> {old, new}
         custom_daemon_settings: Daemon settings that differ from defaults
         custom_plugins: Plugin configs added by user
+        custom_sections: Whole top-level sections the user configured that the
+            default config does not mention at all
     """
 
     added_handlers: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -30,6 +48,7 @@ class ConfigDiff:
     changed_options: dict[str, dict[str, Any]] = field(default_factory=dict)
     custom_daemon_settings: dict[str, Any] = field(default_factory=dict)
     custom_plugins: list[dict[str, Any]] = field(default_factory=list)
+    custom_sections: dict[str, Any] = field(default_factory=dict)
 
     @property
     def has_changes(self) -> bool:
@@ -41,6 +60,7 @@ class ConfigDiff:
             or self.changed_options
             or self.custom_daemon_settings
             or self.custom_plugins
+            or self.custom_sections
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -56,6 +76,7 @@ class ConfigDiff:
             "changed_options": self.changed_options,
             "custom_daemon_settings": self.custom_daemon_settings,
             "custom_plugins": self.custom_plugins,
+            "custom_sections": self.custom_sections,
             "has_changes": self.has_changes,
         }
 
@@ -86,8 +107,35 @@ class ConfigDiffer:
         self._diff_daemon_settings(user_config, default_config, result)
         self._diff_handlers(user_config, default_config, result)
         self._diff_plugins(user_config, default_config, result)
+        self._diff_custom_sections(user_config, result)
 
         return result
+
+    def _diff_custom_sections(
+        self,
+        user_config: dict[str, Any],
+        result: ConfigDiff,
+    ) -> None:
+        """Capture whole top-level sections this differ has no dedicated pass for.
+
+        The passes above each know one section by name. Anything else the user
+        configured was previously not captured AT ALL, so the merge — which
+        starts from a copy of the new default — silently dropped it. The shipped
+        example only contains `daemon`, `handlers` and `version`, so this covers
+        every documented block that lives outside them: `plan_workflow`,
+        `documentation`, `agents`, and any block a later version adds.
+
+        Keyed off a deny-list of the sections already handled rather than an
+        allow-list of known extras, so a new config block is preserved the day
+        it is introduced instead of the day someone remembers to list it here.
+
+        Args:
+            user_config: User's config dict
+            result: ConfigDiff to populate
+        """
+        for key, value in user_config.items():
+            if key not in _SECTIONS_WITH_A_DEDICATED_PASS:
+                result.custom_sections[key] = copy.deepcopy(value)
 
     def _diff_daemon_settings(
         self,
