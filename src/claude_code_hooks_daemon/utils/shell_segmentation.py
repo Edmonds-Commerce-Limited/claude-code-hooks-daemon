@@ -74,10 +74,23 @@ _QUOTED_HEREDOC_PATTERN = re.compile(
 #
 # DOTALL so the body may span newlines; non-greedy so the FIRST matching closing
 # delimiter ends the body rather than the last one in the command.
+#
+# The opener line may carry MORE than the delimiter. A heredoc opener and an
+# output redirect are independent redirections, so `cat > doc.md <<'EOF'` and
+# `cat <<'EOF' > doc.md` are the same command and bash cares about neither
+# order. Demanding a newline straight after the delimiter recognised only the
+# first, and an unrecognised heredoc is not a near miss: the body is scanned as
+# shell, so a paragraph of prose gets split on newlines and judged command by
+# command. Which of two identical commands got denied depended on word order.
+#
+# The delimiter charset is wider than `\w+` for the same reason -- `'EOF-1'`
+# and `'END.MD'` are ordinary and legal, and an unmatched delimiter exposes the
+# whole body. The closer then needs the lookahead: without it `EOF` is closed
+# by a body line reading `EOFDATA`, ending the body early and scanning the rest.
 _QUOTED_HEREDOC_BODY_PATTERN = re.compile(
-    r"(?P<opener><<-?\s*(?P<quote>['\"])(?P<delim>\w+)(?P=quote))"
-    r"\n.*?\n"
-    r"(?P<closer>[ \t]*(?P=delim))",
+    r"(?P<opener><<-?\s*(?P<quote>['\"])(?P<delim>[\w.\-]+)(?P=quote))"
+    r"(?P<opener_tail>[^\n]*)\n.*?\n"
+    r"(?P<closer>[ \t]*(?P=delim)(?![\w.\-]))",
     re.DOTALL,
 )
 
@@ -190,9 +203,14 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
         >>> strip_quoted_heredoc_bodies("echo hi")
         'echo hi'
     """
+    # ``opener_tail`` is kept, not dropped: it holds whatever else the opener
+    # line carried, and that is usually a REDIRECT (`cat <<'EOF' > doc.md`).
+    # Erasing it would hide the destination from every caller that judges the
+    # blanked command -- blanking a body must remove no evidence but the body.
     return _QUOTED_HEREDOC_BODY_PATTERN.sub(
         lambda match: (
-            f"{match.group('opener')}\n{_INERT_BODY_PLACEHOLDER}\n{match.group('closer')}"
+            f"{match.group('opener')}{match.group('opener_tail')}"
+            f"\n{_INERT_BODY_PLACEHOLDER}\n{match.group('closer')}"
         ),
         command,
     )

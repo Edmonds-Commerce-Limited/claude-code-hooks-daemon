@@ -218,6 +218,94 @@ class TestStripQuotedHeredocBodies:
         assert strip_quoted_heredoc_bodies(command) == command
 
 
+class TestTheOpenerLineMayCarryMoreThanTheDelimiter:
+    """Bash puts the redirect wherever it likes on the opener line.
+
+    ``cat > doc.md <<'EOF'`` and ``cat <<'EOF' > doc.md`` are the SAME
+    command — the heredoc opener and the output redirect are independent
+    redirections, and their order carries no meaning. Only the first spelling
+    was recognised: the pattern demanded a newline immediately after the
+    closing quote, so anything trailing on that line (a redirect, another
+    argument) meant the heredoc was not seen at all and its body was scanned
+    as shell.
+
+    That is the failure this module exists to prevent, reappearing on a
+    spelling nobody thought to try: a body of English prose gets split on
+    newlines and its words are judged as commands. Which of two identical
+    commands is denied then depends on word order.
+    """
+
+    def test_a_redirect_after_the_delimiter_still_marks_a_heredoc(self) -> None:
+        command = "cat <<'EOF' > doc.md\nprose mentioning run_all.sh\nEOF"
+        assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
+
+    def test_both_redirect_orders_agree(self) -> None:
+        """The point of the fix, stated as the equivalence it restores."""
+        before = strip_quoted_heredoc_bodies("cat > doc.md <<'EOF'\nprose\nEOF")
+        after = strip_quoted_heredoc_bodies("cat <<'EOF' > doc.md\nprose\nEOF")
+
+        assert "prose" not in before
+        assert "prose" not in after
+
+    def test_trailing_arguments_after_the_delimiter_are_tolerated(self) -> None:
+        command = "tee -a doc.md <<'EOF' 2> errors.log\nprose mentioning run_all.sh\nEOF"
+        assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
+
+    def test_a_redirect_on_the_opener_line_survives_the_blanking(self) -> None:
+        """Blanking a body must remove no evidence except the body.
+
+        The redirect destination is exactly what handlers like
+        ``project_containment`` judge, so dropping it while tidying the body
+        would hide ``cat <<'EOF' > /etc/hosts`` from the check that exists to
+        catch it.
+        """
+        stripped = strip_quoted_heredoc_bodies("cat <<'EOF' > /etc/hosts\nprose\nEOF")
+
+        assert "> /etc/hosts" in stripped
+        assert "prose" not in stripped
+
+    def test_an_unquoted_delimiter_with_a_trailing_redirect_is_still_left_alone(
+        self,
+    ) -> None:
+        """Widening the opener line must not widen WHICH heredocs count.
+
+        A bare ``<<EOF`` expands, so its body can genuinely run something —
+        that is why it is deliberately unmatched, and the redirect's position
+        has no bearing on it.
+        """
+        command = "cat <<EOF > doc.md\nvalue is $(./scripts/qa/run_all.sh)\nEOF"
+        assert "run_all.sh" in strip_quoted_heredoc_bodies(command)
+
+
+class TestDelimitersThatAreNotPlainWords:
+    """``\\w+`` is narrower than bash's rule for a delimiter.
+
+    A quoted delimiter can hold punctuation — ``'EOF-1'``, ``'END.MD'`` are
+    ordinary and legal. An unmatched delimiter is not a near miss: the heredoc
+    is not recognised at all, so the whole body is scanned as shell.
+    """
+
+    def test_a_hyphenated_delimiter_is_recognised(self) -> None:
+        command = "cat > doc.md <<'EOF-1'\nprose mentioning run_all.sh\nEOF-1"
+        assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
+
+    def test_a_dotted_delimiter_is_recognised(self) -> None:
+        command = "cat > doc.md <<'END.MD'\nprose mentioning run_all.sh\nEND.MD"
+        assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
+
+    def test_a_body_line_that_merely_starts_with_the_delimiter_does_not_close_it(
+        self,
+    ) -> None:
+        """``EOF`` must not be closed by a line reading ``EOFDATA``.
+
+        Sharper than it looks once punctuation is allowed in a delimiter: a
+        prefix match ends the body early, and everything after it is scanned
+        as shell — the exact exposure this helper removes.
+        """
+        command = "cat > doc.md <<'EOF'\nfirst line\nEOFDATA mentioning run_all.sh\nEOF"
+        assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
+
+
 class TestQuotedHeredocReceivers:
     """WHO receives a quoted heredoc decides whether its body can run.
 

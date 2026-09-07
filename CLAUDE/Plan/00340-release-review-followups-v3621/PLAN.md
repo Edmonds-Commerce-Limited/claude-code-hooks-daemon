@@ -125,14 +125,24 @@ relying on the path surviving.
 
 ### Phase 4: A heredoc whose redirect follows the opener
 
-- [ ] ⬜ **Task 4.1**: `cat <<'X' > doc.md` is denied while `cat > doc.md <<'X'`
-  is allowed. `_QUOTED_HEREDOC_BODY_PATTERN` requires a newline immediately
-  after the delimiter, so the first spelling is not recognised as a heredoc at
-  all and its raw body is scanned. Same for a delimiter containing a non-word
-  character. Pre-existing, and the same family as the brace-group regression
-  fixed in v3.62.1.
-- [ ] ⬜ **Task 4.2**: If not fixing, say so in the handler's `get_claude_md`
-  guidance — an agent that hits this needs to know which spelling works.
+- [x] ✅ **Task 4.1**: **Fixed.** The opener line may now carry anything after
+  the delimiter (`[^\n]*`), and the delimiter charset is `[\w.\-]+` so
+  `<<'EOF-1'` and `<<'END.MD'` are recognised. Widening the delimiter made the
+  closer's missing anchor matter, so it gained a `(?![\w.\-])` lookahead — a
+  body line reading `EOFDATA` was closing an `EOF` heredoc early and exposing
+  everything after it.
+
+  **Caught while fixing**: the blanking rewrite drops whatever it does not
+  capture, and the opener line's trailing text is usually a REDIRECT. Erasing
+  it would have hidden `cat <<'EOF' > /etc/hosts` from `project_containment` —
+  a hole opened by the fix itself. The tail is captured and re-emitted, with a
+  test: blanking a body must remove no evidence except the body.
+
+- [x] ✅ **Task 4.2**: **Done anyway, as reassurance rather than a warning.**
+  `pipe_blocker`'s guidance already used one spelling; it now says explicitly
+  that the redirect's position makes no difference and that a punctuated
+  delimiter counts, so an agent who met the old behaviour does not carry the
+  wrong lesson forward.
 
 ## Success Criteria
 
