@@ -1,10 +1,13 @@
 """Tests for the location-status-coherence tree check (Plan 00144; sins A1, A5, C1, C2, E8)."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.plan_qa.checks.location_status_coherence import CHECKS
+from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.plan_qa.model import PlanTree
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level, Stage
 
@@ -167,3 +170,86 @@ class TestStaleArchivedHeader:
         findings = commit_spec.run(context)
         assert len(findings) == 1
         assert findings[0].level == Level.ADVISE
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+
+
+# Distinct names, NOT a second _IN_PROGRESS/_COMPLETE: a redefinition lower in
+# the module silently rebinds the constants every test above also reads.
+_REPO_IN_PROGRESS = "# Plan 00304: Widget\n\n**Status**: In Progress\n"
+_REPO_COMPLETE = "# Plan 00304: Widget\n\n**Status**: Complete\n"
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """A repository whose HEAD holds one active, non-terminal plan."""
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True)
+    plan_root = root / _PLAN_DIR_REL
+    plan_root.mkdir(parents=True)
+    (plan_root / "Completed").mkdir()
+    (plan_root / "Cancelled").mkdir()
+    _make_folder(plan_root, "00304-widget", _REPO_IN_PROGRESS)
+    _git(root, "init")
+    _git(root, "config", "user.email", "test@example.com")
+    _git(root, "config", "user.name", "Test User")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "initial")
+    return root
+
+
+def _terminal_levels(root: Path) -> list[Level]:
+    context = CheckContext(
+        project_root=root,
+        plan_dir_rel=_PLAN_DIR_REL,
+        tree=PlanTree.scan(root / _PLAN_DIR_REL, cancelled_dir="Cancelled"),
+        gitfacts=GitFacts(root),
+    )
+    commit_spec, _sweep_spec = CHECKS
+    return [f.level for f in commit_spec.run(context) if "still in the active root" in f.message]
+
+
+class TestACommitIsAnswerableOnlyForThePlansItTouches:
+    """Plan 00343 Phase 3 — the same narrowing as row-folder-bijection.
+
+    Two of the eighteen would-be denials in the 250-commit replay were this
+    check firing on plans 00304 and 00302, which had been left in the active
+    root with a terminal header. The blamed commits were an error-hiding
+    exclusions change and a php-qa-ci documentation change; neither touches
+    either plan folder.
+    """
+
+    def test_a_plan_left_terminal_in_the_root_by_an_earlier_commit_only_advises(
+        self, repo: Path
+    ) -> None:
+        (repo / _PLAN_DIR_REL / "00304-widget" / "PLAN.md").write_text(_REPO_COMPLETE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "flip the status and forget the git mv")
+        (repo / "src" / "thing.py").write_text("x = 1\n")
+        _git(repo, "add", "-A")
+
+        assert _terminal_levels(repo) == [Level.ADVISE]
+
+    def test_the_commit_that_flips_the_status_without_moving_still_blocks(self, repo: Path) -> None:
+        (repo / _PLAN_DIR_REL / "00304-widget" / "PLAN.md").write_text(_REPO_COMPLETE)
+        _git(repo, "add", "-A")
+
+        assert _terminal_levels(repo) == [Level.BLOCK]
+
+    def test_the_sweep_is_unchanged_because_it_has_no_commit_to_blame(
+        self, plan_root: Path, tmp_path: Path
+    ) -> None:
+        _make_folder(plan_root, "00304-widget", _REPO_COMPLETE)
+        _commit_spec, sweep_spec = CHECKS
+        findings = [
+            f for f in sweep_spec.run(_context(tmp_path)) if "still in the active root" in f.message
+        ]
+
+        assert [f.level for f in findings] == [Level.BLOCK]

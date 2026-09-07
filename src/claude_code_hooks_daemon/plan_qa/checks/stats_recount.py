@@ -9,6 +9,10 @@ while the more volatile per-category figures are advisory only.
 
 from typing import Final
 
+from claude_code_hooks_daemon.plan_qa.checks.common import (
+    commit_changes_the_folder_set,
+    commit_scoped_level,
+)
 from claude_code_hooks_daemon.plan_qa.model import PlanLocation
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
@@ -48,7 +52,14 @@ def _run(context: CheckContext) -> list[Finding]:
                 findings.append(
                     Finding(
                         check_id=CHECK_ID,
-                        level=Level.BLOCK,
+                        # Plan 00343 Phase 3: only a commit that changes the
+                        # FOLDER SET can be why the recount disagrees. Drift it
+                        # merely inherited is still reported, as an advisory.
+                        level=commit_scoped_level(
+                            context,
+                            None,
+                            pre_existing=not commit_changes_the_folder_set(context),
+                        ),
                         message=(
                             f"Statistics label `{label}` states {value} but {counts['total']} "
                             "plan folders exist on disk"

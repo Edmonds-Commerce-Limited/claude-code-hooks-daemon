@@ -8,6 +8,11 @@ row's number has a folder somewhere on disk.
 
 from typing import Final
 
+from claude_code_hooks_daemon.plan_qa.checks.common import (
+    commit_scoped_level,
+    commit_touches_plan,
+    head_readme_index,
+)
 from claude_code_hooks_daemon.plan_qa.model import PlanFolder, PlanLocation, PlanTree
 from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex, ReadmeRow, ReadmeSection
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
@@ -34,15 +39,20 @@ _ORPHAN_ROW_REMEDIATION: Final[str] = (
 )
 
 
-def _level(context: CheckContext, number: int | None) -> Level:
-    if number is not None and number in context.legacy_plan_allowlist:
-        return Level.ADVISE
-    return Level.BLOCK
+def _level(context: CheckContext, number: int | None, *, pre_existing: bool) -> Level:
+    return commit_scoped_level(context, number, pre_existing=pre_existing)
 
 
 def _folder_findings(context: CheckContext, folder: PlanFolder) -> list[Finding]:
     rows = context.readme.rows_for(folder.number) if context.readme is not None else ()
-    level = _level(context, folder.number)
+    # A folder-level mismatch is this commit's only if the commit touched the
+    # folder. Nothing else it stages can have caused the folder to be
+    # unindexed or filed under the wrong section.
+    level = _level(
+        context,
+        folder.number,
+        pre_existing=not commit_touches_plan(context, folder.number),
+    )
 
     if not rows:
         return [
@@ -75,17 +85,26 @@ def _folder_findings(context: CheckContext, folder: PlanFolder) -> list[Finding]
     ]
 
 
-def _link_findings(context: CheckContext, row: ReadmeRow) -> list[Finding]:
+def _link_findings(
+    context: CheckContext, row: ReadmeRow, before: ReadmeIndex | None
+) -> list[Finding]:
     if row.link is None:
         return []
     target_parent = (context.plan_dir / row.link).parent
     if target_parent.is_dir():
         return []
     number = row.numbers[0] if row.numbers else None
+    # Two ways this is the commit's doing: it wrote the row, or it moved the
+    # folder out from under a row that was already there.
+    row_is_new = before is None or row.link not in {other.link for other in before.rows}
     return [
         Finding(
             check_id=CHECK_ID,
-            level=_level(context, number),
+            level=_level(
+                context,
+                number,
+                pre_existing=not row_is_new and not commit_touches_plan(context, number),
+            ),
             message=f"README row link `{row.link}` points at a folder that does not exist",
             remediation=_BROKEN_LINK_REMEDIATION,
             path=row.link,
@@ -94,17 +113,22 @@ def _link_findings(context: CheckContext, row: ReadmeRow) -> list[Finding]:
 
 
 def _orphan_row_findings(
-    context: CheckContext, tree: PlanTree, readme: ReadmeIndex
+    context: CheckContext, tree: PlanTree, readme: ReadmeIndex, before: ReadmeIndex | None
 ) -> list[Finding]:
     folder_numbers = {folder.number for folder in tree.folders}
     findings: list[Finding] = []
     for number in sorted(readme.numbers()):
         if number in folder_numbers:
             continue
+        row_is_new = before is None or number not in before.numbers()
         findings.append(
             Finding(
                 check_id=CHECK_ID,
-                level=_level(context, number),
+                level=_level(
+                    context,
+                    number,
+                    pre_existing=not row_is_new and not commit_touches_plan(context, number),
+                ),
                 message=f"README indexes plan {number:05d} but no folder exists for that plan",
                 remediation=_ORPHAN_ROW_REMEDIATION,
                 path=None,
@@ -117,6 +141,11 @@ def _run(context: CheckContext) -> list[Finding]:
     if context.tree is None or context.readme is None:
         return []
 
+    # The index as it stands at HEAD, read once: a row that was already there
+    # is not this commit's to answer for. None on a sweep, where there is no
+    # commit at all.
+    before = head_readme_index(context)
+
     findings: list[Finding] = []
     for folder in context.tree.folders:
         if folder.location == PlanLocation.OTHER:
@@ -124,9 +153,9 @@ def _run(context: CheckContext) -> list[Finding]:
         findings.extend(_folder_findings(context, folder))
 
     for row in context.readme.rows:
-        findings.extend(_link_findings(context, row))
+        findings.extend(_link_findings(context, row, before))
 
-    findings.extend(_orphan_row_findings(context, context.tree, context.readme))
+    findings.extend(_orphan_row_findings(context, context.tree, context.readme, before))
     return findings
 
 

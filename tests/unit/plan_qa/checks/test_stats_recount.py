@@ -1,10 +1,13 @@
 """Tests for the stats-recount tree check (Plan 00144; sin B5)."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.plan_qa.checks.stats_recount import CHECKS
+from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.plan_qa.model import PlanTree
 from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level, Stage
@@ -36,6 +39,73 @@ def plan_root(tmp_path: Path) -> Path:
     root.mkdir(parents=True)
     (root / "Completed").mkdir()
     return root
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+
+
+_UNDERCOUNTING_README = (
+    "# Plans\n\n## Plan Statistics\n\n- **Total Plans Created**: 1 (git counter)\n"
+)
+
+
+def _repo_with_drift(tmp_path: Path) -> Path:
+    """A repository whose HEAD already understates the plan count."""
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True)
+    plan_root = root / _PLAN_DIR_REL
+    plan_root.mkdir(parents=True)
+    _make_folder(plan_root, "00001-alpha")
+    _make_folder(plan_root, "00002-beta")
+    (plan_root / "README.md").write_text(_UNDERCOUNTING_README)
+    _git(root, "init")
+    _git(root, "config", "user.email", "test@example.com")
+    _git(root, "config", "user.name", "Test User")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "initial")
+    return root
+
+
+def _total_levels(root: Path) -> list[Level]:
+    plan_root = root / _PLAN_DIR_REL
+    context = CheckContext(
+        project_root=root,
+        plan_dir_rel=_PLAN_DIR_REL,
+        tree=PlanTree.scan(plan_root),
+        readme=ReadmeIndex.parse((plan_root / "README.md").read_text()),
+        gitfacts=GitFacts(root),
+    )
+    commit_spec, _sweep_spec = CHECKS
+    return [f.level for f in commit_spec.run(context) if "plan folders exist on disk" in f.message]
+
+
+class TestOnlyACommitThatChangesTheFolderSetIsBlamed:
+    """Plan 00343 Phase 3 — the count can only be wrong because of a folder.
+
+    Statistics drift is real whenever it exists, but an ordinary source commit
+    cannot have caused it and cannot be expected to fix it. Only a commit that
+    adds, removes or moves a plan folder changes what the recount produces.
+    """
+
+    def test_drift_this_commit_inherited_only_advises(self, tmp_path: Path) -> None:
+        root = _repo_with_drift(tmp_path)
+        (root / "src" / "thing.py").write_text("x = 1\n")
+        _git(root, "add", "-A")
+
+        assert _total_levels(root) == [Level.ADVISE]
+
+    def test_a_commit_that_adds_a_plan_folder_still_blocks(self, tmp_path: Path) -> None:
+        root = _repo_with_drift(tmp_path)
+        _make_folder(root / _PLAN_DIR_REL, "00003-gamma")
+        _git(root, "add", "-A")
+
+        assert _total_levels(root) == [Level.BLOCK]
 
 
 class TestSpec:

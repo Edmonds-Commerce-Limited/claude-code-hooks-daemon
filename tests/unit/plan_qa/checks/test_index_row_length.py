@@ -15,9 +15,12 @@ become wrong:
   the edit that fixes it.
 """
 
+import subprocess
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.plan_qa.checks.index_row_length import CHECK_ID, CHECKS
+from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
 from claude_code_hooks_daemon.plan_qa.types import (
     DEFAULT_INDEX_ROW_MAX_CHARS,
@@ -253,3 +256,71 @@ class TestDefinitionMatchesTheBatchGuard:
         text = f"# Plans Index\n\n## Plan Statistics\n\n{stats}\n"
         findings = _COMMIT_CHECK.run(_tree_context(text))
         assert [finding.check_id for finding in findings] == [CHECK_ID]
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+
+
+def _repo_with_index(tmp_path: Path, readme_text: str) -> Path:
+    root = tmp_path / "repo"
+    (root / _PLAN_DIR_REL).mkdir(parents=True)
+    (root / _INDEX_REL).write_text(readme_text)
+    _git(root, "init")
+    _git(root, "config", "user.email", "test@example.com")
+    _git(root, "config", "user.name", "Test User")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "initial")
+    return root
+
+
+def _commit_levels(root: Path) -> list[Level]:
+    context = CheckContext(
+        project_root=root,
+        plan_dir_rel=_PLAN_DIR_REL,
+        readme=ReadmeIndex.parse((root / _INDEX_REL).read_text()),
+        gitfacts=GitFacts(root),
+    )
+    return [finding.level for finding in _COMMIT_CHECK.run(context)]
+
+
+class TestOnlyAWorseningCommitBlocks:
+    """Plan 00343 Phase 3 — the COMMIT path adopts its own EDIT sibling's rule.
+
+    ``_worsens`` was written for the edit surface and its docstring states the
+    principle: "an already-degraded index is never trapped". ``_run_tree`` —
+    the path that runs at commit and sweep time — blocked on any over-limit
+    row, so an index that acquired one long row would have denied every
+    subsequent commit, including unrelated ones.
+    """
+
+    def test_an_inherited_long_row_only_advises(self, tmp_path: Path) -> None:
+        root = _repo_with_index(tmp_path, _index(_row(_LIMIT + 1)))
+        (root / _PLAN_DIR_REL / "note.md").write_text("unrelated\n")
+        _git(root, "add", "-A")
+
+        assert _commit_levels(root) == [Level.ADVISE]
+
+    def test_a_commit_that_adds_a_longer_row_blocks(self, tmp_path: Path) -> None:
+        root = _repo_with_index(tmp_path, _index(_row(_LIMIT + 1)))
+        (root / _INDEX_REL).write_text(_index(_row(_LIMIT + 200)))
+        _git(root, "add", "-A")
+
+        assert _commit_levels(root) == [Level.BLOCK]
+
+    def test_a_commit_that_shortens_the_worst_row_does_not_block(self, tmp_path: Path) -> None:
+        root = _repo_with_index(tmp_path, _index(_row(_LIMIT + 200)))
+        (root / _INDEX_REL).write_text(_index(_row(_LIMIT + 1)))
+        _git(root, "add", "-A")
+
+        assert _commit_levels(root) == [Level.ADVISE]
+
+    def test_the_sweep_is_unchanged_because_it_has_no_commit_to_blame(self) -> None:
+        findings = _SWEEP_CHECK.run(_tree_context(_index(_row(_LIMIT + 1))))
+
+        assert [finding.level for finding in findings] == [Level.BLOCK]

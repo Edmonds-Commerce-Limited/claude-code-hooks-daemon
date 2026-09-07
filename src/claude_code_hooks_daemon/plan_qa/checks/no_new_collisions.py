@@ -9,6 +9,10 @@ same rule runs at commit time (catch it before it lands) and at sweep time
 
 from typing import Final
 
+from claude_code_hooks_daemon.plan_qa.checks.common import (
+    commit_scoped_level,
+    commit_touches_plan,
+)
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "no-new-collisions"
@@ -26,7 +30,13 @@ def _run(context: CheckContext) -> list[Finding]:
     for number, claimants in sorted(context.tree.collisions().items()):
         if number in context.collision_allowlist:
             continue
-        level = Level.ADVISE if number in context.legacy_plan_allowlist else Level.BLOCK
+        # Plan 00343 Phase 3: honour this check's own name. A collision the
+        # commit did not create is inherited state, and denying every later
+        # commit over it blocks the work that would fix it just as hard as the
+        # work that would not.
+        level = commit_scoped_level(
+            context, number, pre_existing=not commit_touches_plan(context, number)
+        )
         names = ", ".join(sorted(folder.name for folder in claimants))
         findings.append(
             Finding(

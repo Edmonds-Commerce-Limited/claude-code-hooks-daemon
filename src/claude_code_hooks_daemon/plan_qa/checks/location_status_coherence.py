@@ -9,6 +9,10 @@ before (or after) the move.
 
 from typing import Final
 
+from claude_code_hooks_daemon.plan_qa.checks.common import (
+    commit_scoped_level,
+    commit_touches_plan,
+)
 from claude_code_hooks_daemon.plan_qa.model import (
     PlanDoc,
     PlanFolder,
@@ -37,7 +41,13 @@ _NON_TERMINAL_STATUSES: Final[frozenset[PlanStatus]] = frozenset(
 
 
 def _level(context: CheckContext, number: int) -> Level:
-    return Level.ADVISE if number in context.legacy_plan_allowlist else Level.BLOCK
+    # Plan 00343 Phase 3: every finding here is about ONE plan folder, so the
+    # commit is answerable for it only if it touched that folder. A plan left
+    # terminal-in-the-root by an earlier commit is real, and still reported —
+    # as an advisory, not as a denial of unrelated work.
+    return commit_scoped_level(
+        context, number, pre_existing=not commit_touches_plan(context, number)
+    )
 
 
 def _archive_dir_for(context: CheckContext, doc: PlanDoc) -> str:

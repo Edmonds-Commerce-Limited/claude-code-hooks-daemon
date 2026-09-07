@@ -1,10 +1,13 @@
 """Tests for the structure-archive-dirs tree check (Plan 00144; sin C3)."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.plan_qa.checks.structure_archive_dirs import CHECKS
+from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.plan_qa.model import PlanTree
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level, Stage
 
@@ -146,3 +149,81 @@ class TestStrayFiles:
         assert len(findings) == 1
         assert findings[0].level == Level.ADVISE
         assert "notes.txt" in (findings[0].path or "")
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+
+
+def _repo_with_misplaced_folder(tmp_path: Path) -> Path:
+    """A repository whose HEAD already holds a plan folder outside root/archives."""
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True)
+    plan_root = root / _PLAN_DIR_REL
+    plan_root.mkdir(parents=True)
+    (plan_root / "README.md").write_text("# Plans\n")
+    (plan_root / "Completed").mkdir()
+    (plan_root / "Cancelled").mkdir()
+    _make_folder(plan_root, "00005-stray", sub="Misc")
+    _git(root, "init")
+    _git(root, "config", "user.email", "test@example.com")
+    _git(root, "config", "user.name", "Test User")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "initial")
+    return root
+
+
+def _outside_levels(root: Path) -> list[Level]:
+    context = CheckContext(
+        project_root=root,
+        plan_dir_rel=_PLAN_DIR_REL,
+        cancelled_dir="Cancelled",
+        tree=PlanTree.scan(root / _PLAN_DIR_REL, cancelled_dir="Cancelled"),
+        gitfacts=GitFacts(root),
+    )
+    commit_spec, _sweep_spec = CHECKS
+    return [
+        f.level
+        for f in commit_spec.run(context)
+        if "outside the root and archive directories" in f.message
+    ]
+
+
+class TestAMisplacedFolderIsBlamedOnTheCommitThatMovedIt:
+    """Plan 00343 Phase 3, applied to the ONE folder-scoped finding here.
+
+    The two structural findings above it — no README index, no completed
+    archive — deliberately keep blocking unconditionally. They are not about a
+    plan, they are about the plan directory being usable at all; with no
+    README, `context.readme` is None and half the suite silently no-ops, so
+    "carry on and fix it later" is not a coherent state to allow.
+    """
+
+    def test_a_folder_an_earlier_commit_misplaced_only_advises(self, tmp_path: Path) -> None:
+        root = _repo_with_misplaced_folder(tmp_path)
+        (root / "src" / "thing.py").write_text("x = 1\n")
+        _git(root, "add", "-A")
+
+        assert _outside_levels(root) == [Level.ADVISE]
+
+    def test_the_commit_that_misplaces_it_still_blocks(self, tmp_path: Path) -> None:
+        root = tmp_path / "repo"
+        plan_root = root / _PLAN_DIR_REL
+        plan_root.mkdir(parents=True)
+        (plan_root / "README.md").write_text("# Plans\n")
+        (plan_root / "Completed").mkdir()
+        (plan_root / "Cancelled").mkdir()
+        _git(root, "init")
+        _git(root, "config", "user.email", "test@example.com")
+        _git(root, "config", "user.name", "Test User")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-m", "initial")
+        _make_folder(plan_root, "00005-stray", sub="Misc")
+        _git(root, "add", "-A")
+
+        assert _outside_levels(root) == [Level.BLOCK]

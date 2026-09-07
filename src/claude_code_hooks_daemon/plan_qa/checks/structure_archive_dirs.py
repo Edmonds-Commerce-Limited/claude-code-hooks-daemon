@@ -8,6 +8,10 @@ files at the plan root, are structural drift this check also surfaces.
 
 from typing import Final
 
+from claude_code_hooks_daemon.plan_qa.checks.common import (
+    commit_scoped_level,
+    commit_touches_plan,
+)
 from claude_code_hooks_daemon.plan_qa.model import PlanLocation
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
@@ -22,7 +26,15 @@ _STRAY_FILE_REMEDIATION: Final[str] = (
 
 
 def _level(context: CheckContext, number: int) -> Level:
-    return Level.ADVISE if number in context.legacy_plan_allowlist else Level.BLOCK
+    # Plan 00343 Phase 3. Used only by the misplaced-FOLDER finding, which is
+    # attributable to a commit. The two findings above it — no README index, no
+    # completed archive — are about the plan directory being usable at all
+    # rather than about any one plan, so they keep blocking unconditionally:
+    # with no README, `context.readme` is None and half the check suite
+    # silently no-ops, which is not a state to wave through.
+    return commit_scoped_level(
+        context, number, pre_existing=not commit_touches_plan(context, number)
+    )
 
 
 def _run(context: CheckContext) -> list[Finding]:

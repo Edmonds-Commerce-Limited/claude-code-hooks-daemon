@@ -20,7 +20,7 @@ The root problem is **WET, not buggy**. Every site reinvents discovery with slig
 
 ## Goals
 
-- One bash helper, one python helper. Every caller — `scripts/upgrade.sh`, `scripts/install/prerequisites.sh`, `scripts/install/parse_min_python.sh`, `src/.../skills/.../install.sh`, `scripts/lib/resolve_venv.sh`, `daemon/paths.py` — uses them. Zero duplicate `_is_python_at_least_311`, zero duplicate `requires-python` regex, zero duplicate candidate enumeration.
+- One bash helper, one python helper. Every caller — `scripts/upgrade.sh`, `scripts/install/prerequisites.sh`, `scripts/install/parse_min_python.sh`, `src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/install.sh`, `scripts/lib/resolve_venv.sh`, `daemon/paths.py` — uses them. Zero duplicate `_is_python_at_least_311`, zero duplicate `requires-python` regex, zero duplicate candidate enumeration.
 - Discovery is **version-agnostic**: glob `python3.[1-9][0-9]` on `$PATH`, sort numerically by minor, pick highest that satisfies `requires-python`. `python3.14` works the day it ships, no release required.
 - Error messages name an interpreter that **actually exists on the host**. If glob returns `python3.13` but it's below the floor, suggest installing a newer one — never suggest a version that isn't there.
 - Precedence ladder preserved: explicit `HOOKS_DAEMON_PYTHON` env > existing venv interpreter > glob-and-sort discovery > error with accurate remediation.
@@ -36,15 +36,15 @@ The root problem is **WET, not buggy**. Every site reinvents discovery with slig
 
 **Exploration report sites** (from session-of-record agent run on 2026-05-26):
 
-| Site                                             | Lines                     | Current logic                                                                                                                                                                              | Status                                   |
-| ------------------------------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------- |
-| `scripts/upgrade.sh`                             | 77-278                    | Hardcoded `(3.13, 3.12, 3.11)` + `compgen -c python3.` fallback + inline `requires-python` parse                                                                                           | **WET**                                  |
-| `scripts/install/prerequisites.sh`               | 40-164                    | Verbatim copy of `_is_python_at_least_311`, same candidate list, no `requires-python` cross-check                                                                                          | **WET — explicit duplicate**             |
-| `scripts/install/parse_min_python.sh`            | whole file                | `grep` `requires-python` from pyproject.toml, echo `X.Y`                                                                                                                                   | **OK — pure helper, reusable**           |
-| `src/.../skills/hooks-daemon/scripts/install.sh` | 47-72                     | Fetches remote pyproject.toml, parses `requires-python`, probes ONLY `$HOOKS_DAEMON_PYTHON` or default `python3` — **no glob, no candidate list**                                          | **The host-a failure path**              |
-| `src/.../daemon/paths.py`                        | 239-272, 350-361, 407-483 | `_find_compatible_python_on_path()` with `_COMPATIBLE_PYTHON_CANDIDATES = ("python3", "python3.13", "python3.12", "python3.11")`, `_parse_requires_python_min()`, `can_inline_bootstrap()` | **WET — same hardcoded list, in Python** |
-| `scripts/lib/resolve_venv.sh`                    | 85-131, 232-281           | `_rv_pick_python()` precedence ladder — delegates version checking to `paths.py`                                                                                                           | **OK — uses SSOT**                       |
-| `src/.../skills/.../_resolve-venv.sh`            | 1-42                      | Thin shim sourcing canonical `resolve_venv.sh`                                                                                                                                             | **OK — Plan 00104 thin shim**            |
+| Site                                                                        | Lines                     | Current logic                                                                                                                                                                              | Status                                   |
+| --------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------- |
+| `scripts/upgrade.sh`                                                        | 77-278                    | Hardcoded `(3.13, 3.12, 3.11)` + `compgen -c python3.` fallback + inline `requires-python` parse                                                                                           | **WET**                                  |
+| `scripts/install/prerequisites.sh`                                          | 40-164                    | Verbatim copy of `_is_python_at_least_311`, same candidate list, no `requires-python` cross-check                                                                                          | **WET — explicit duplicate**             |
+| `scripts/install/parse_min_python.sh`                                       | whole file                | `grep` `requires-python` from pyproject.toml, echo `X.Y`                                                                                                                                   | **OK — pure helper, reusable**           |
+| `src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/install.sh`       | 47-72                     | Fetches remote pyproject.toml, parses `requires-python`, probes ONLY `$HOOKS_DAEMON_PYTHON` or default `python3` — **no glob, no candidate list**                                          | **The host-a failure path**              |
+| `src/claude_code_hooks_daemon/daemon/paths.py`                              | 239-272, 350-361, 407-483 | `_find_compatible_python_on_path()` with `_COMPATIBLE_PYTHON_CANDIDATES = ("python3", "python3.13", "python3.12", "python3.11")`, `_parse_requires_python_min()`, `can_inline_bootstrap()` | **WET — same hardcoded list, in Python** |
+| `scripts/lib/resolve_venv.sh`                                               | 85-131, 232-281           | `_rv_pick_python()` precedence ladder — delegates version checking to `paths.py`                                                                                                           | **OK — uses SSOT**                       |
+| `src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/_resolve-venv.sh` | 1-42                      | Thin shim sourcing canonical `resolve_venv.sh`                                                                                                                                             | **OK — Plan 00104 thin shim**            |
 
 **The failure mode on host-a** was the *skill-level* `install.sh` (row 4), which has no glob discovery at all — it only checked `python3` (3.9.21) against `requires-python` (>=3.11) and aborted. Even fixing `scripts/upgrade.sh` and `paths.py` to use glob-and-sort would not have helped; the skill `install.sh` runs *before* the canonical scripts are even on disk.
 
@@ -54,49 +54,49 @@ The root problem is **WET, not buggy**. Every site reinvents discovery with slig
 
 ### Phase 1: Design
 
-- [ ] **Task 1.1**: Specify the canonical bash helper API in `scripts/lib/python_discovery.sh`
-  - [ ] Function signature: `find_latest_python <min_major.min_minor> [--require-pyproject <path>]` → stdout: absolute path to interpreter; exit 0 success, exit 1 not found
-  - [ ] Precedence: `$HOOKS_DAEMON_PYTHON` (validated against floor) → glob `$PATH` for `python3.[1-9][0-9]` → sort by minor desc → first that meets floor
-  - [ ] On failure: print to stderr a remediation hint naming an interpreter **observed during the glob** (not a hardcoded one); if no candidates at all, say so explicitly
-  - [ ] Reuses `parse_min_python.sh` for `--require-pyproject` parsing — no inline regex
-- [ ] **Task 1.2**: Specify the canonical python helper API in `daemon/paths.py`
-  - [ ] Function: `find_latest_python(min_version: tuple[int,int], *, require_pyproject: Path | None = None) -> Path | None`
-  - [ ] Same precedence, same glob, same sort
-  - [ ] Returns `None` on failure (caller decides error format); paired with `find_latest_python_or_explain()` that returns `(path | None, list[ProbeResult])` for diagnostics
-  - [ ] Delete `_COMPATIBLE_PYTHON_CANDIDATES` constant — gone forever
-- [ ] **Task 1.3**: Decide bash↔python parity strategy
-  - [ ] Option A: Bash helper invokes the python helper via existing `python3` (fragile when python3 is too old — the exact case we're fixing)
-  - [ ] Option B: Bash helper is self-contained POSIX shell; python helper is independent re-implementation; behavioural parity enforced by shared test fixtures
-  - [ ] **Decision**: Option B. The bash helper MUST work when no compatible python exists yet (skill bootstrap case). The two implementations are tested against the same fixture set in Phase 6.
+- [x] **Task 1.1**: Specify the canonical bash helper API in `scripts/lib/python_discovery.sh`
+  - [x] Function signature: `find_latest_python <min_major.min_minor> [--require-pyproject <path>]` → stdout: absolute path to interpreter; exit 0 success, exit 1 not found
+  - [x] Precedence: `$HOOKS_DAEMON_PYTHON` (validated against floor) → glob `$PATH` for `python3.[1-9][0-9]` → sort by minor desc → first that meets floor
+  - [x] On failure: print to stderr a remediation hint naming an interpreter **observed during the glob** (not a hardcoded one); if no candidates at all, say so explicitly
+  - [x] Reuses `parse_min_python.sh` for `--require-pyproject` parsing — no inline regex
+- [x] **Task 1.2**: Specify the canonical python helper API in `daemon/paths.py`
+  - [x] Function: `find_latest_python(min_version: tuple[int,int], *, require_pyproject: Path | None = None) -> Path | None`
+  - [x] Same precedence, same glob, same sort
+  - [x] Returns `None` on failure (caller decides error format); paired with `find_latest_python_or_explain()` that returns `(path | None, list[ProbeResult])` for diagnostics
+  - [x] Delete `_COMPATIBLE_PYTHON_CANDIDATES` constant — gone forever
+- [x] **Task 1.3**: Decide bash↔python parity strategy
+  - [x] Option A: Bash helper invokes the python helper via existing `python3` (fragile when python3 is too old — the exact case we're fixing)
+  - [x] Option B: Bash helper is self-contained POSIX shell; python helper is independent re-implementation; behavioural parity enforced by shared test fixtures
+  - [x] **Decision**: Option B. The bash helper MUST work when no compatible python exists yet (skill bootstrap case). The two implementations are tested against the same fixture set in Phase 6.
 
 ### Phase 2: TDD — Canonical Bash Helper
 
-- [ ] **Task 2.1**: Write failing tests in `tests/acceptance/test_python_discovery_bash.py`
-  - [ ] Fixture: synthesised `$PATH` with controlled set of fake `python3.N` symlinks (each prints its version)
-  - [ ] Test: empty PATH → fail with "no python3.N found"
-  - [ ] Test: only `python3.9` present, floor 3.11 → fail with "found python3.9 — below floor, install 3.11+"
-  - [ ] Test: `python3.9`, `python3.13`, `python3.14`, floor 3.11 → returns `python3.14`
-  - [ ] Test: `python3.9`, `python3.13`, `python3.14`, floor 3.11, `HOOKS_DAEMON_PYTHON=python3.13` → returns `python3.13` (env wins when satisfies floor)
-  - [ ] Test: `HOOKS_DAEMON_PYTHON=python3.9`, floor 3.11 → fail explicitly ("env override violates floor")
-  - [ ] Test: `--require-pyproject` with `requires-python = ">=3.12"` overrides any lower floor arg
-  - [ ] Test: `python3.13` exists but is not executable → skipped
-- [ ] **Task 2.2**: Implement `scripts/lib/python_discovery.sh` to make tests pass
-  - [ ] Self-contained POSIX shell, no python dependency
-  - [ ] Glob: `"$dir"/python3.[1-9][0-9]` per `$PATH` entry
-  - [ ] Sort: `sort -u -t. -k2,2n` then `tail -1` after filtering
-  - [ ] Version probe: `"$bin" --version 2>&1 | awk '{print $2}'` parsed against floor
-- [ ] **Task 2.3**: Run QA, verify all tests pass
+- [x] **Task 2.1**: Write failing tests in `tests/acceptance/test_python_discovery_bash.py`
+  - [x] Fixture: synthesised `$PATH` with controlled set of fake `python3.N` symlinks (each prints its version)
+  - [x] Test: empty PATH → fail with "no python3.N found"
+  - [x] Test: only `python3.9` present, floor 3.11 → fail with "found python3.9 — below floor, install 3.11+"
+  - [x] Test: `python3.9`, `python3.13`, `python3.14`, floor 3.11 → returns `python3.14`
+  - [x] Test: `python3.9`, `python3.13`, `python3.14`, floor 3.11, `HOOKS_DAEMON_PYTHON=python3.13` → returns `python3.13` (env wins when satisfies floor)
+  - [x] Test: `HOOKS_DAEMON_PYTHON=python3.9`, floor 3.11 → fail explicitly ("env override violates floor")
+  - [x] Test: `--require-pyproject` with `requires-python = ">=3.12"` overrides any lower floor arg
+  - [x] Test: `python3.13` exists but is not executable → skipped
+- [x] **Task 2.2**: Implement `scripts/lib/python_discovery.sh` to make tests pass
+  - [x] Self-contained POSIX shell, no python dependency
+  - [x] Glob: `"$dir"/python3.[1-9][0-9]` per `$PATH` entry
+  - [x] Sort: `sort -u -t. -k2,2n` then `tail -1` after filtering
+  - [x] Version probe: `"$bin" --version 2>&1 | awk '{print $2}'` parsed against floor
+- [x] **Task 2.3**: Run QA, verify all tests pass
 
 ### Phase 3: TDD — Canonical Python Helper
 
-- [ ] **Task 3.1**: Write failing tests in `tests/unit/daemon/test_paths_python_discovery.py`
-  - [ ] Same fixture matrix as Task 2.1, expressed via `monkeypatch` on `$PATH`
-  - [ ] Test parity assertion: for each fixture, bash helper and python helper return the same interpreter
-- [ ] **Task 3.2**: Implement `find_latest_python()` and `find_latest_python_or_explain()` in `daemon/paths.py`
-  - [ ] Use `os.environ["PATH"].split(os.pathsep)` + `pathlib.Path.glob("python3.[1-9][0-9]")`
-  - [ ] Probe via `subprocess.run([bin, "--version"], capture_output=True, timeout=3)`
-  - [ ] Delete `_COMPATIBLE_PYTHON_CANDIDATES`, `_find_compatible_python_on_path()`, fold the latter's callers into `find_latest_python()`
-- [ ] **Task 3.3**: Run QA, verify all tests pass and coverage ≥95% on the new functions
+- [x] **Task 3.1**: Write failing tests in `tests/unit/daemon/test_paths_python_discovery.py`
+  - [x] Same fixture matrix as Task 2.1, expressed via `monkeypatch` on `$PATH`
+  - [x] Test parity assertion: for each fixture, bash helper and python helper return the same interpreter
+- [x] **Task 3.2**: Implement `find_latest_python()` and `find_latest_python_or_explain()` in `daemon/paths.py`
+  - [x] Use `os.environ["PATH"].split(os.pathsep)` + `pathlib.Path.glob("python3.[1-9][0-9]")`
+  - [x] Probe via `subprocess.run([bin, "--version"], capture_output=True, timeout=3)`
+  - [x] Delete `_COMPATIBLE_PYTHON_CANDIDATES`, `_find_compatible_python_on_path()`, fold the latter's callers into `find_latest_python()`
+- [x] **Task 3.3**: Run QA, verify all tests pass and coverage ≥95% on the new functions
 
 ### Phase 4: Migrate WET Sites
 
@@ -104,11 +104,11 @@ Each migration is its own commit so we can bisect if any caller regresses.
 
 - [x] ✅ **Task 4.1**: `scripts/upgrade.sh` — replaced `find_compatible_python()` and `_is_python_at_least_311()` (200 lines) with a 25-line thin wrapper that sources `scripts/lib/python_discovery.sh` and calls `find_latest_python 3.11 "$pyproject"`. Two obsolete extraction-pattern integration tests (`test_bootstrap_explicit_probe.py`, `test_bootstrap_requires_python_cross_check.py`) deleted — sourced functions no longer exist; behaviours covered by 13 tests in `tests/acceptance/test_python_discovery_bash.py`. Sweep of 49 bootstrap/upgrade tests passes.
 - [x] ✅ **Task 4.2**: `scripts/install/prerequisites.sh` — `_is_python_at_least_311()` removed; `check_python3()` collapsed to a thin wrapper that sources `scripts/lib/python_discovery.sh` and delegates to `find_latest_python 3.11`. Manual smoke test `test_prerequisites_manual.sh` passes against migrated code (Python 3.11 found at `/usr/bin/python3.11`, all prerequisite checks green).
-- [x] ✅ **Task 4.3**: `src/.../skills/hooks-daemon/scripts/install.sh` — **the host-a fix**. Added `PYTHON_DISCOVERY_URL` constant; the pre-check block now fetches `scripts/lib/python_discovery.sh` from `main` alongside `pyproject.toml`, sources it, and delegates to `find_latest_python "$MIN_PY" "$PYPROJECT_TMP"`. On success the discovered absolute path is exported as `HOOKS_DAEMON_PYTHON` so the inner installer reuses it (no redundant probe). On failure the helper's own observed-interpreter diagnostic is shown — no hardcoded `python3.11` suggestion. The plan called for a `--require-pyproject` flag; the canonical helper signature is actually positional `find_latest_python <min> [pyproject_path]`, so the migration uses the real signature. Smoke-tested against synthesised PATH layouts: host-a scenario (python3=3.9 + python3.13/python3.14 present) selects `python3.14`; degraded scenario (only python3=3.9) aborts with "No python3.NN interpreter found on $PATH" — no hardcoded suggestion of a missing version.
-- [x] ✅ **Task 4.4**: `src/.../daemon/paths.py::can_inline_bootstrap()` — discovery call replaced with `find_latest_python((3, 11))`. `BootstrapDecision` missing-id `"compatible-python"` preserved. The post-check that enforces `requires-python` against the candidate is kept intact (passes the `pyproject_data`-derived requirement on top of the helper's (3, 11) floor) so the existing detailed diagnostic message ("does not satisfy requires-python=...") stays testable by string. The four monkeypatches in `tests/unit/daemon/test_bootstrap_decision.py` rewired from `_find_compatible_python_on_path` to `find_latest_python` (lambdas accept `*_args, **_kwargs` to match the helper's signature). All 68 tests across `test_bootstrap_decision.py + test_paths_resolve_venv_diagnostics.py + test_paths_python_discovery.py` pass; daemon restart verified RUNNING. The diagnostics caller in `resolve_existing_venv_python_with_diagnostics` and the WET helper `_find_compatible_python_on_path` are intentionally left for the Task 4.6 grep audit / follow-up commit (each migration is its own commit per Phase 4 preamble).
+- [x] ✅ **Task 4.3**: `src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/install.sh` — **the host-a fix**. Added `PYTHON_DISCOVERY_URL` constant; the pre-check block now fetches `scripts/lib/python_discovery.sh` from `main` alongside `pyproject.toml`, sources it, and delegates to `find_latest_python "$MIN_PY" "$PYPROJECT_TMP"`. On success the discovered absolute path is exported as `HOOKS_DAEMON_PYTHON` so the inner installer reuses it (no redundant probe). On failure the helper's own observed-interpreter diagnostic is shown — no hardcoded `python3.11` suggestion. The plan called for a `--require-pyproject` flag; the canonical helper signature is actually positional `find_latest_python <min> [pyproject_path]`, so the migration uses the real signature. Smoke-tested against synthesised PATH layouts: host-a scenario (python3=3.9 + python3.13/python3.14 present) selects `python3.14`; degraded scenario (only python3=3.9) aborts with "No python3.NN interpreter found on $PATH" — no hardcoded suggestion of a missing version.
+- [x] ✅ **Task 4.4**: `src/claude_code_hooks_daemon/daemon/paths.py::can_inline_bootstrap()` — discovery call replaced with `find_latest_python((3, 11))`. `BootstrapDecision` missing-id `"compatible-python"` preserved. The post-check that enforces `requires-python` against the candidate is kept intact (passes the `pyproject_data`-derived requirement on top of the helper's (3, 11) floor) so the existing detailed diagnostic message ("does not satisfy requires-python=...") stays testable by string. The four monkeypatches in `tests/unit/daemon/test_bootstrap_decision.py` rewired from `_find_compatible_python_on_path` to `find_latest_python` (lambdas accept `*_args, **_kwargs` to match the helper's signature). All 68 tests across `test_bootstrap_decision.py + test_paths_resolve_venv_diagnostics.py + test_paths_python_discovery.py` pass; daemon restart verified RUNNING. The diagnostics caller in `resolve_existing_venv_python_with_diagnostics` and the WET helper `_find_compatible_python_on_path` are intentionally left for the Task 4.6 grep audit / follow-up commit (each migration is its own commit per Phase 4 preamble).
 - [x] ✅ **Task 4.5**: `scripts/lib/resolve_venv.sh::_rv_pick_python()` — the `--fallback-target` branch (formerly `command -v python3 > /dev/null && echo "python3"`) now sources `${_RV_LIB_DIR}/python_discovery.sh` and delegates to `find_latest_python "3.11" "${_RV_PROJECT_ROOT}/pyproject.toml"`. The helper is sourced lazily inside the fallback branch so a missing `python_discovery.sh` only impacts fresh-clone bootstrap, not the steady-state cache-hit path. On success the discovered ABSOLUTE path is echoed (vs the previous bare `python3` — strictly more PATH-stable for the inner `paths.py` invocation). On miss, `find_latest_python` has already written its observed-interpreter diagnostic to stderr — no second-guessing. Three precedence rungs above (HOOKS_DAEMON_PYTHON, HOOKS_DAEMON_VENV_PATH, untracked/venv-\* glob) unchanged. shellcheck clean. 24/25 relevant resolver tests pass (`test_v391_field_regression.py + test_venv_resolver_pipefail_cascade.py + test_venv_resolver_parity_matrix.py + test_venv_resolver_multi_host_nfs_fail_fast.py + test_install_venv_resolver.py + test_paths_resolve_venv_cli.py`); the one failure (`test_resolver_median_latency_under_budget`) is a pre-existing container-environmental flake — fails identically on HEAD~ vs HEAD (9.65ms / 9.76ms) and exercises the cache-hit steady-state path, NOT the fallback branch this task touches. Host-a smoke test against synthesised PATH (default `python3`=3.9 + `python3.13` + `python3.14`) correctly selects `python3.14`. Daemon restart verified RUNNING.
-- [x] ✅ **Task 4.6**: Grep audit + deletion of the WET `_find_compatible_python_on_path` helper + migration of the second caller (the diagnostics path deferred by Task 4.4). **Code changes**: deleted `_COMPATIBLE_PYTHON_CANDIDATES`, `_PYTHON_VERSION_PROBE`, `_COMPATIBLE_PYTHON_PROBE_TIMEOUT_SECS`, and the `_find_compatible_python_on_path()` function from `src/.../daemon/paths.py`. Kept `_MIN_COMPATIBLE_PYTHON = (3, 11)` as the single shared floor constant; rewired Task 4.4's literal `(3, 11)` in `can_inline_bootstrap` to reference it (DRY). Rewired `_probe_python_major_minor`'s timeout to the surviving `_PYTHON_VERSION_PROBE_TIMEOUT_SECS` (same 3.0 value). Migrated `resolve_existing_venv_python_with_diagnostics` second caller to `find_latest_python_or_explain(_MIN_COMPATIBLE_PYTHON)` — the no-alternative branch now lists OBSERVED interpreters (`f"observed on PATH: {observed} — all below floor {floor_str}"`) instead of a hardcoded `python3.11`/`python3.12`/`python3.13` enumeration that may not exist (the host-a trap closer at the diagnostics layer). **Test changes**: three monkeypatches in `tests/unit/daemon/test_paths_resolve_venv_diagnostics.py` retargeted from `_find_compatible_python_on_path` to `find_latest_python_or_explain` (returning `(alternative, [])` tuples). Direct-helper test renamed to `test_find_latest_python_returns_none_when_empty_path`. **Exclusions cleanup**: removed `_find_compatible_python_on_path`'s `silent-continue` entry from `scripts/qa/error_hiding_exclusions.json` (function gone). **Grep survivors documented** — all are docstring/comment references explaining what the regex matches, or user-facing install hints:
-  - `src/.../daemon/paths.py:324-341,701` — docstrings/comments explaining the python3.NN regex coverage and venv-fingerprint scenarios
+- [x] ✅ **Task 4.6**: Grep audit + deletion of the WET `_find_compatible_python_on_path` helper + migration of the second caller (the diagnostics path deferred by Task 4.4). **Code changes**: deleted `_COMPATIBLE_PYTHON_CANDIDATES`, `_PYTHON_VERSION_PROBE`, `_COMPATIBLE_PYTHON_PROBE_TIMEOUT_SECS`, and the `_find_compatible_python_on_path()` function from `src/claude_code_hooks_daemon/daemon/paths.py`. Kept `_MIN_COMPATIBLE_PYTHON = (3, 11)` as the single shared floor constant; rewired Task 4.4's literal `(3, 11)` in `can_inline_bootstrap` to reference it (DRY). Rewired `_probe_python_major_minor`'s timeout to the surviving `_PYTHON_VERSION_PROBE_TIMEOUT_SECS` (same 3.0 value). Migrated `resolve_existing_venv_python_with_diagnostics` second caller to `find_latest_python_or_explain(_MIN_COMPATIBLE_PYTHON)` — the no-alternative branch now lists OBSERVED interpreters (`f"observed on PATH: {observed} — all below floor {floor_str}"`) instead of a hardcoded `python3.11`/`python3.12`/`python3.13` enumeration that may not exist (the host-a trap closer at the diagnostics layer). **Test changes**: three monkeypatches in `tests/unit/daemon/test_paths_resolve_venv_diagnostics.py` retargeted from `_find_compatible_python_on_path` to `find_latest_python_or_explain` (returning `(alternative, [])` tuples). Direct-helper test renamed to `test_find_latest_python_returns_none_when_empty_path`. **Exclusions cleanup**: removed `_find_compatible_python_on_path`'s `silent-continue` entry from `scripts/qa/error_hiding_exclusions.json` (function gone). **Grep survivors documented** — all are docstring/comment references explaining what the regex matches, or user-facing install hints:
+  - `src/claude_code_hooks_daemon/daemon/paths.py:324-341,701` — docstrings/comments explaining the python3.NN regex coverage and venv-fingerprint scenarios
   - `scripts/upgrade.sh:81-82`, `scripts/upgrade_version.sh:82`, `scripts/install/prerequisites.sh:69`, `scripts/install/python_fingerprint.sh:24`, `scripts/lib/resolve_venv.sh:125`, `scripts/lib/python_discovery.sh:164-165` — docstrings, error-message templates, or install instructions; not code paths
   - `tests/**` — fixtures and probes that synthesise pythonX.Y interpreters on PATH (expected)
   - **No code path remains that hardcodes a candidate enumeration.** All discovery flows now route through `find_latest_python` (bash) or `find_latest_python` / `find_latest_python_or_explain` (python).
@@ -126,12 +126,18 @@ Each migration is its own commit so we can bisect if any caller regresses.
 
 ### Phase 6: Parity & Regression
 
-- [ ] **Task 6.1**: Shared fixture set in `tests/fixtures/python_discovery/` — JSON describing PATH layouts and expected interpreter selection. Both Phase 2 and Phase 3 tests consume it.
-- [ ] **Task 6.2**: Property-style test: for 50 randomised fixture combinations, bash helper and python helper agree on selected interpreter (or both fail with structurally equivalent reasons).
-- [ ] **Task 6.3**: Full QA: `./scripts/qa/run_all.sh` — all 13 checks pass.
-- [ ] **Task 6.4**: Daemon restart verification.
+- [x] **Task 6.1**: Shared fixture set in `tests/fixtures/python_discovery/` — JSON describing PATH layouts and expected interpreter selection. Both Phase 2 and Phase 3 tests consume it. **Shipped**: 7 curated fixtures (`host_a_baseline`, `higher_minor_wins`, `double_digit_minor`, `floor_excludes_some`, `only_old_python`, `no_python_nn_at_all`, `single_match_at_floor`).
+- [x] **Task 6.2**: Property-style test: for 50 randomised fixture combinations, bash helper and python helper agree on selected interpreter (or both fail with structurally equivalent reasons). **Shipped** as `tests/integration/test_python_discovery_parity.py`, which also carries `test_property_run_count_meets_plan_quota` asserting this task's quota of 50 so the number cannot quietly decay.
+- [x] **Task 6.3**: Full QA — 25/25 (the check count has grown from the 13 this task was written against).
+- [x] **Task 6.4**: Daemon restart verification.
 
-### Phase 7: Release
+### Phase 7: Release — AWAITING A HUMAN
+
+**This phase cannot be executed by an agent.** A release is a decision about
+SCOPE, which is not visible from inside the repository, and `/release` is
+human-gated: only a human invoking it in the current session authorises one.
+No state file exists, so no release is in progress. Everything else in this
+plan is done — Phase 7 is the whole of what remains.
 
 - [ ] **Task 7.1**: Run `/release` skill. Bump is MINOR (new helper API, no breaking changes for callers — `HOOKS_DAEMON_PYTHON` still honoured, fingerprint paths unchanged).
 - [ ] **Task 7.2**: Release notes call out the host-a scenario explicitly so operators in the same position know the upgrade resolves it.

@@ -1,6 +1,6 @@
 # Plan 00343: flip the plan QA commit gate from warn to block
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-07
 **Owner**: joseph
 **Priority**: Medium
@@ -82,22 +82,33 @@ one check.
   `location-status-coherence` 3, `terminal-state-atomic` 1, `index-at-birth` 1
   (26 findings over 18 distinct commits).
 
-- [x] ✅ **Task 1.3**: **8 of the 18 are false positives — 44% — and all 8 are
+- [x] ✅ **Task 1.3**: **7 of the 18 are false positives — 39% — and all 7 are
   the same shape.** A whole-tree check denies a commit for state the commit did
   not create and cannot see.
 
-  Six commits (`3d71ff84`, `018b5238`, `b3063f4c`, `4dffe1c9`, `5242b58f`,
-  `42eb19da`) were denied by `row-folder-bijection` over a stale README row for
+  Five commits (`3d71ff84`, `018b5238`, `b3063f4c`, `4dffe1c9`, `5242b58f`)
+  were denied by `row-folder-bijection` over a stale README row for
   `00311-v3590-release-review-followups`. Not one of them touches a file
   mentioning 00311 — they are supervisor and venv-resolver work. Two more
   (`94459b2f`, `080da087`) were denied by `location-status-coherence` over
   plans 00304/00302 sitting in the active root with a terminal header; neither
   commit touches those folders either.
 
-  The ten true positives are all self-inflicted: 8 `same-commit-plan-doc`
+  **Corrected during Phase 3, and the correction is the interesting part.**
+  This task first counted `42eb19da` as a sixth `row-folder-bijection` false
+  positive, on the reasoning that it too was denied over the 00311 row. It is
+  not: `git show 42eb19da^:CLAUDE/Plan/README.md` has no 00311 row and
+  `git show 42eb19da:...` has one, so that commit CREATED the broken row and
+  is the one commit that should be denied over it. The mistake surfaced only
+  because Phase 3's narrowing kept blocking it — the fix disagreed with the
+  measurement, and the fix was right. Grouping by symptom rather than by cause
+  is what produced the wrong classification.
+
+  The eleven true positives are all self-inflicted: 8 `same-commit-plan-doc`
   fires where the commit's own subject claims a plan whose header still read
-  `Not Started`, plus `20714cd7` (scaffolded a plan folder with no README row)
-  and `a502f02e` (flipped a status to Complete without moving the folder).
+  `Not Started`, plus `42eb19da` (added a README row for a folder that does not
+  exist), `20714cd7` (scaffolded a plan folder with no README row) and
+  `a502f02e` (flipped a status to Complete without moving the folder).
 
   **The project already has the right answer written down.** `index-row-length`
   fixed this exact problem at EDIT stage with `_worsens(before, after)`, whose
@@ -127,36 +138,70 @@ one check.
 
 ### Phase 3: Narrow the whole-tree checks so a clean commit is never trapped
 
-- [ ] ⬜ **Task 3.1**: Establish the rule from the precedent rather than
-  inventing one. `index-row-length._worsens` already decides this exact
-  question at EDIT stage: block when the change makes things worse, advise
-  when it merely fails to fix what was already broken. The commit-stage
-  equivalent is a comparison against HEAD, which `GitFacts.head_file_text`
-  already supports.
+- [x] ✅ **Task 3.1**: **The rule is "BLOCK what this commit introduced,
+  ADVISE what it inherited"**, lifted from `index-row-length._worsens` rather
+  than invented. Three helpers in `checks/common.py` express it:
+  `commit_touches_plan` (does the commit stage anything inside this plan's
+  folder), `commit_changes_the_folder_set` (does it add/remove/move a plan
+  folder — the narrower question a COUNT needs), and `commit_scoped_level`,
+  which applies the downgrade and leaves the legacy allowlist and the
+  gitfacts-less surfaces alone.
 
-- [ ] ⬜ **Task 3.2**: Apply it to `row-folder-bijection` — a finding about a
-  folder or row the commit did not touch drops to ADVISE; one the commit
-  created or broke stays BLOCK. TDD, with the six replayed false positives as
-  the fixtures.
+  Without gitfacts the level is unchanged, deliberately. The sweep's job is to
+  report the tree as it stands; this narrowing is about who gets BLAMED, not
+  about what is true.
 
-- [ ] ⬜ **Task 3.3**: Apply it to `location-status-coherence`, same rule,
-  same fixture discipline. `94459b2f` and `080da087` are the cases to pin.
+- [x] ✅ **Task 3.2**: **`row-folder-bijection` narrowed.** A folder finding
+  is the commit's only if it staged something in that folder; a row finding is
+  the commit's if it wrote the row (compared against HEAD's parsed README) or
+  moved the folder out from under one that was already there. Five tests,
+  RED-first — the two false-positive shapes failed, the three true-positive
+  and sweep cases passed unchanged, which is what made the RED meaningful.
 
-- [ ] ⬜ **Task 3.4**: Decide whether `stats-recount`,
-  `structure-archive-dirs`, `no-new-collisions` and `index-row-length._run_tree`
-  need the same treatment. None fired in the replay, so this is a question
-  about SHAPE, not observed pain — and the answer may legitimately be "leave
-  them" if their findings cannot be pre-existing. Record which, and why.
+- [x] ✅ **Task 3.3**: **`location-status-coherence` narrowed.** Every finding
+  here is about one folder, so the predicate is `commit_touches_plan` alone.
+
+- [x] ✅ **Task 3.4**: **All four needed it, and all four got it** — the
+  survey found no check whose findings cannot be pre-existing, which is the
+  opposite of what this task allowed for.
+
+  - `no-new-collisions`: its NAME already promised this ("no NEW collisions",
+    "catch it before it lands") while `_run` reported every collision in the
+    tree. Narrowed by folder.
+  - `index-row-length._run_tree`: now uses its own module's `_worsens` against
+    HEAD's README, which is where the principle was written down in the first
+    place. A commit that SHORTENS the worst row no longer blocks.
+  - `stats-recount`: narrowed by `commit_changes_the_folder_set`, not by
+    folder — the finding is about a count, and editing a `PLAN.md` in place
+    cannot change what the recount produces.
+  - `structure-archive-dirs`: only its misplaced-FOLDER finding is narrowed.
+    **"No README index" and "no completed archive" keep blocking
+    unconditionally, on purpose**: they are not about a plan, they are about
+    the plan directory being usable at all. With no README, `context.readme`
+    is None and half the check suite silently no-ops — "carry on and fix it
+    later" is not a coherent state to allow.
 
 ### Phase 4: Re-measure, then flip
 
-- [ ] ⬜ **Task 4.1**: Re-run the 250-commit replay after Phase 3. The bar is
-  zero false positives, not a smaller number: a sticky false positive blocks
-  every commit after it, so a low rate is not a low cost.
+- [x] ✅ **Task 4.1**: **Bar met: 18 → 11 denials, ZERO false positives.**
+  Re-run over the IDENTICAL corpus, which took a second attempt to get right —
+  the first re-run used "last 250 commits" and this session's own three commits
+  had slid the window, silently dropping `20714cd7` (a true positive) from the
+  comparison. Re-run at 253 to restore the original set.
 
-- [ ] ⬜ **Task 4.2**: If the bar is met, flip `commit_gate_mode` to `block`
-  and restart the daemon. Name the escape hatch in the commit message — the
-  mode is one config key, so reverting is one edit.
+  The seven commits that stopped being denied are exactly the seven
+  false positives, by hash: `3d71ff84`, `018b5238`, `b3063f4c`, `4dffe1c9`,
+  `5242b58f`, `94459b2f`, `080da087`. The eleven that remain are the eleven
+  true positives. Nothing was traded away.
+
+- [x] ✅ **Task 4.2**: **Flipped.** `commit_gate_mode: block`, daemon restarted
+  (1220370 → 1461157) and `plan-qa --check-staged` clean afterwards.
+
+  Pre-check first: `plan-qa --sweep` reported 0 block / 3 advise on the current
+  tree, so the flip could not wedge this repository on day one. The escape
+  hatch is one key — set it back to `warn` and restart — and it is named in
+  the config comment rather than only in the commit message, because that is
+  where somebody hitting an unexpected denial will look.
 
 ## Success Criteria
 
@@ -165,12 +210,16 @@ one check.
 - [x] The flip decision cites a replay count and a false-positive
   classification, not a judgement call — 250 commits, 18 denials, 8 false
   positives, one shared shape.
-- [ ] No commit-stage check can BLOCK a commit over plan-tree state that
-  commit did not touch.
-- [ ] `commit_gate_mode` and its config comment agree with each other and with
-  reality.
-- [ ] Full QA green (25/25) and the daemon restarted and verified before the
-  terminal status flip.
+- [x] No commit-stage check can BLOCK a commit over plan-tree state that
+  commit did not touch. Six checks narrowed; the 253-commit replay confirms it
+  end to end — seven inherited-state denials gone, eleven caused-here denials
+  kept.
+- [x] `commit_gate_mode` and its config comment agree with each other and with
+  reality. The comment now records the measurement and the escape hatch
+  instead of an open-ended promise.
+- [x] Full QA green (25/25) and the daemon restarted and verified before the
+  terminal status flip. 18,349 tests, 95.2% coverage; daemon 1220370 →
+  1461157 with `block` mode live and `plan-qa --check-staged` clean after.
 
 ## Delivery & Milestones
 

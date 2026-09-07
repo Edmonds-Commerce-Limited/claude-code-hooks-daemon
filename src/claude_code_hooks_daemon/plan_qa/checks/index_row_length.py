@@ -33,6 +33,7 @@ plan), and that rule stays crisp.
 
 from typing import Final
 
+from claude_code_hooks_daemon.plan_qa.checks.common import head_readme_index
 from claude_code_hooks_daemon.plan_qa.model import README_FILENAME
 from claude_code_hooks_daemon.plan_qa.paths import PlanFileKind, classify
 from claude_code_hooks_daemon.plan_qa.types import (
@@ -133,15 +134,31 @@ def _run_edit(context: CheckContext) -> list[Finding]:
 
 
 def _run_tree(context: CheckContext) -> list[Finding]:
-    """Stages 2 and 3: the index as it stands, from the parsed tree view."""
+    """Stages 2 and 3: the index as it stands, from the parsed tree view.
+
+    Plan 00343 Phase 3 gave this path the same grow/shrink tiering
+    :func:`_run_edit` has had since Plan 00218. It blocked on ANY over-limit
+    row, so one long row would have denied every later commit — including the
+    commit shortening it. The docstring on :func:`_worsens` already said an
+    already-degraded index is never trapped; only the edit surface honoured it.
+
+    A sweep has no HEAD to compare against and no commit to blame, so it keeps
+    reporting the index as it stands.
+    """
     readme = context.readme
     if readme is None:
         return []
     offenders = _over_limit(readme.lines)
     if not offenders:
         return []
+    before_index = head_readme_index(context)
+    if context.gitfacts is None:
+        level = Level.BLOCK
+    else:
+        before = _over_limit(before_index.lines) if before_index is not None else ()
+        level = Level.BLOCK if _worsens(before, offenders) else Level.ADVISE
     rel_path = f"{context.plan_dir_rel.rstrip('/')}/{README_FILENAME}"
-    return [_finding(offenders, Level.BLOCK, rel_path)]
+    return [_finding(offenders, level, rel_path)]
 
 
 CHECKS: Final[tuple[CheckSpec, CheckSpec, CheckSpec]] = (

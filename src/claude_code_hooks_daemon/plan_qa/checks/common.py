@@ -11,8 +11,14 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Final, NamedTuple
 
-from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME, PlanDoc, PlanLocation
+from claude_code_hooks_daemon.plan_qa.model import (
+    PLAN_DOC_FILENAME,
+    README_FILENAME,
+    PlanDoc,
+    PlanLocation,
+)
 from claude_code_hooks_daemon.plan_qa.paths import classify
+from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
     CheckSpec,
@@ -405,6 +411,89 @@ def has_staged_journal_entry(context: CheckContext, folder: str) -> bool:
             if staged_text is not None and staged_text != head_text:
                 return True
     return False
+
+
+def commit_touches_plan(context: CheckContext, plan_number: int | None) -> bool:
+    """Whether this commit stages any file inside plan ``plan_number``'s folder.
+
+    Matches the folder wherever it lives — active root or an archive
+    subdirectory — and counts the OLD side of a rename too, so a ``git mv``
+    into ``Completed/`` reads as touching the plan it moved.
+    """
+    gitfacts = context.gitfacts
+    if gitfacts is None or plan_number is None:
+        return False
+    prefix = re.escape(context.plan_dir_rel.rstrip("/") + "/")
+    pattern = re.compile(rf"^{prefix}(?:[^/]+/)?0*{plan_number}-[^/]+/")
+    for change in gitfacts.staged_changes():
+        if pattern.match(change.path) or pattern.match(change.old_path or ""):
+            return True
+    return False
+
+
+def commit_changes_the_folder_set(context: CheckContext) -> bool:
+    """Whether this commit adds, removes or moves a plan folder.
+
+    The narrower twin of :func:`commit_touches_plan`, for findings about a
+    COUNT rather than about one plan. Editing a ``PLAN.md`` in place leaves the
+    folder set alone, so it cannot be why a recount disagrees; only an add, a
+    delete or a rename can.
+    """
+    gitfacts = context.gitfacts
+    if gitfacts is None:
+        return False
+    prefix = context.plan_dir_rel.rstrip("/") + "/"
+    for change in gitfacts.staged_changes():
+        if change.status == _COMMIT_MODIFY_STATUS:
+            continue
+        if change.path.startswith(prefix) and change.path.endswith(_PLAN_MD_SUFFIX):
+            return True
+        old_path = change.old_path or ""
+        if old_path.startswith(prefix) and old_path.endswith(_PLAN_MD_SUFFIX):
+            return True
+    return False
+
+
+def head_readme_index(context: CheckContext) -> ReadmeIndex | None:
+    """The plan index as it stands at HEAD, or ``None`` when unavailable.
+
+    ``None`` means "no before-state to compare against" — no gitfacts (a sweep
+    or an edit), or no README at HEAD (the index is being created by this very
+    commit). Callers treat that as "nothing was pre-existing", which is the
+    conservative reading: a finding with no prior state is this commit's.
+    """
+    gitfacts = context.gitfacts
+    if gitfacts is None:
+        return None
+    text = gitfacts.head_file_text(f"{context.plan_dir_rel.rstrip('/')}/{README_FILENAME}")
+    return ReadmeIndex.parse(text) if text is not None else None
+
+
+def commit_scoped_level(
+    context: CheckContext, plan_number: int | None, *, pre_existing: bool
+) -> Level:
+    """BLOCK for state THIS commit introduced; ADVISE for state it inherited.
+
+    Plan 00343 Phase 3. The whole-tree commit-stage checks scored the tree
+    rather than the commit, so an unrepaired inconsistency denied every later
+    commit regardless of what it changed — measured at 8 of 18 would-be denials
+    over 250 commits, six of them over a single stale README row that none of
+    the blamed commits went anywhere near. That failure is sticky: it does not
+    cost one retry, it blocks everything until somebody else's mess is cleaned
+    up.
+
+    The rule is not new here. ``index-row-length._worsens`` already decides the
+    same question at edit time, and states the principle in its own docstring:
+    an already-degraded index is never trapped.
+
+    Without gitfacts there is no commit to attribute anything to, so the level
+    is unchanged — the sweep's job is to report the tree as it stands, and this
+    narrowing is about who gets BLAMED, not about what is true.
+    """
+    level = level_for_plan(context, plan_number)
+    if level is Level.ADVISE or context.gitfacts is None:
+        return level
+    return Level.ADVISE if pre_existing else Level.BLOCK
 
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"

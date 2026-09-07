@@ -255,18 +255,22 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
   new keys break no consumer. (Journal 21:10.)
 
 - [ ] ⬜ **Task 5.1**: Classify each DENY as "productive continue" or "wasted
-  turn". **Task 5.0 has shipped, so this is no longer gated on
-  instrumentation — it is gated on DATA.** `transcript_bytes` is recorded
-  going forward only; every row written before that commit lacks it, so the
-  classification has to run over records accumulated afterwards rather than
-  over the existing backlog. Worth stating because the two look identical from
-  the plan and only one can be started today. The ledger alone already shows
-  50 of today's
-  ~140 logical stops are followed by another within TEN SECONDS — too fast for
-  work — but cannot say whether that is the hook re-firing (a defect) or a
-  text-only turn stopping again (agent behaviour). `transcript_bytes` settles
-  it. Also corrects this plan's Evidence: the "28 DENY" figure was inflated by
-  1291 double-logged pairs. (Journal 15:30.)
+  turn". **Still gated on DATA, and the dataset is thinner than it looks.**
+  Of 9,060 rows in `stop-events.jsonl`, 31 carry `transcript_bytes` and **30 of
+  those are acceptance probes** — `tests/acceptance/test_stop_hook_hard_block.py`
+  and friends drive the REAL wrapper against the REAL daemon, so six synthetic
+  rows land per full QA run. Exactly one real instrumented row exists so far.
+  Not a defect (an acceptance test of the live daemon should produce live
+  telemetry) but a filter the analysis must apply, and Task 5.0's `session_id`
+  is what makes the filter possible.
+
+  **The backlog is unusable for a sharper reason than this task recorded.** It
+  lacks `session_id` as well as `transcript_bytes` — a pre-5.0 row carries only
+  `timestamp`, `decision`, `reason_prefix`, `stop_hook_active` — so it cannot
+  be attributed to a session at all. That means the "50 of today's ~140 stops
+  within TEN SECONDS" figure cannot distinguish one session re-firing from two
+  concurrent sessions, and should be treated as unproven rather than as
+  evidence of double-logging. (Journal 15:30 and today's Task 5.1 entry.)
 
 - [x] ✅ **Task 5.2**: **Not a cadence — the code is exonerated.** Measured over
   all 27 of today's `R-STOP-AFTER-TOOL-ERROR` events, the gaps run 482-3557 s
@@ -281,13 +285,23 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 
 ## Success Criteria
 
-- [ ] An agent reading only its resident `CLAUDE.md` can arm cron suppression
-  correctly on the first attempt.
-- [ ] An explicit declaration arms the marker; the prose patterns still work but
-  are documented as frozen.
-- [ ] A session producing nothing across consecutive ticks costs asymptotically
+- [x] An agent reading only its resident `CLAUDE.md` can arm cron suppression
+  correctly on the first attempt. Verified against the GENERATED block, which
+  is what an agent actually receives: it carries the sentinel in a copyable
+  one-liner, states that the match is exact so any wording after it works, and
+  — the part Phase 2 added — states the CONSEQUENCE rather than only the
+  mechanism. It also carries the constraint that stops it being misused:
+  "Only when it is the ONLY thing blocking you."
+- [x] An explicit declaration arms the marker; the prose patterns still work but
+  are documented as frozen. Both halves are in the resident text: the four
+  older phrasings are listed under "kept working rather than extended — a new
+  wording is handled by the token, not by adding another phrase here", so the
+  freeze is stated where an agent will read it, not only in the source.
+- [x] A session producing nothing across consecutive ticks costs asymptotically
   less than one model turn per hour, while a session interrupted by a rate
-  limit still recovers.
+  limit still recovers. `test_twelve_consecutive_ticks_deliver_four` pins
+  delivery at hours [1, 3, 7, 11]; recovery is preserved because a tick is only
+  dropped when the session owes no ledgered work AND declared no blockage.
 - [ ] The stop-hook DENY rate is classified with evidence, and any tuning cites
   that classification.
 - [x] Plan 00314 reflects what actually shipped and is archived (`9def2583`).
