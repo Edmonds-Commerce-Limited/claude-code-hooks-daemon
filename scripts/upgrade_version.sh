@@ -414,6 +414,19 @@ FASTPATH_RELAY_PY
         fail_fast "Post-install verification failed after idempotent upgrade"
     fi
 
+    # Plan 00336 Phase 3: regenerate .claude/HOOKS-DAEMON.md. The restart above
+    # already refreshed the CLAUDE.md <hooksdaemon> block (DaemonController
+    # .initialise runs the ClaudeMdInjector), but nothing regenerated this
+    # document, so it kept describing the version the project was INSTALLED at.
+    # Runs AFTER the restart so it reflects the handler set that actually
+    # loaded, and only warns on failure — guidance is not worth aborting a
+    # completed upgrade for.
+    if "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli generate-docs --project-root "$PROJECT_ROOT"; then
+        print_success "Regenerated .claude/HOOKS-DAEMON.md"
+    else
+        print_warning "Failed to regenerate handler docs (non-fatal; run 'hooks-daemon regenerate-docs')"
+    fi
+
     print_success "$(upgrade_transition_summary "$INSTALLED_VERSION" "$TARGET_VERSION")"
     exit 0
 fi
@@ -1140,6 +1153,28 @@ else
     print_info "Fix the handler(s) above, then restart the daemon:"
     echo "  $DAEMON_DIR/bin/hooks-daemon restart"
     print_info "Until then, every new session will show a degraded-protection alert."
+fi
+
+# ============================================================
+# Step 16.6: Regenerate handler documentation (Plan 00336 Phase 3)
+# ============================================================
+#
+# A project carries two generated guidance artifacts, and only one of them was
+# being refreshed here. The CLAUDE.md <hooksdaemon> block is rewritten by the
+# Step 15 restart (DaemonController.initialise runs the ClaudeMdInjector);
+# .claude/HOOKS-DAEMON.md was written by install_version.sh and then never
+# again, so it described the INSTALLED version no matter how many upgrades
+# later it was read. An upgrade that enables a new deny handler by default then
+# denies an agent by a rule its own guidance does not document.
+#
+# Ordering: after the restart, so the document reflects the handler set that
+# actually loaded rather than one the daemon might have failed to load.
+
+log_step "16.6" "Regenerating handler documentation"
+if "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli generate-docs --project-root "$PROJECT_ROOT"; then
+    print_success "Regenerated .claude/HOOKS-DAEMON.md"
+else
+    print_warning "Failed to regenerate handler docs (non-fatal; run 'hooks-daemon regenerate-docs')"
 fi
 
 # ============================================================

@@ -34,14 +34,18 @@ fi
 ```bash
 # From your project root (must have .git/)
 
-# Download the installer script
-curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o /tmp/hooks-daemon-install.sh
+# Download the installer script INSIDE the repository. `project_containment`
+# denies a `curl -o` naming a path outside the repo, so a /tmp destination is
+# blocked in any project that already has the daemon — a repair or reinstall.
+# untracked/ is gitignored and survives a container restart; /tmp does not.
+mkdir -p untracked/scratch
+curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o untracked/scratch/hooks-daemon-install.sh
 
 # Inspect it (good security practice)
-cat /tmp/hooks-daemon-install.sh
+cat untracked/scratch/hooks-daemon-install.sh
 
 # Run it
-bash /tmp/hooks-daemon-install.sh
+bash untracked/scratch/hooks-daemon-install.sh
 ```
 
 > **Note**: We intentionally avoid `curl | bash` because the daemon itself blocks that
@@ -72,11 +76,12 @@ This will:
 
 ```bash
 # Install specific version
-curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o /tmp/hooks-daemon-install.sh
-DAEMON_BRANCH=v2.5.0 bash /tmp/hooks-daemon-install.sh
+mkdir -p untracked/scratch
+curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o untracked/scratch/hooks-daemon-install.sh
+DAEMON_BRANCH=v2.5.0 bash untracked/scratch/hooks-daemon-install.sh
 
 # Force reinstall
-FORCE=true bash /tmp/hooks-daemon-install.sh
+FORCE=true bash untracked/scratch/hooks-daemon-install.sh
 ```
 
 ---

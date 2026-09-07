@@ -48,14 +48,16 @@ Before installing, make sure you have:
 From your **project root** (the directory containing `.claude/` and `.git/`):
 
 ```bash
-# Download the installer
-curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o /tmp/hooks-daemon-install.sh
+# Download the installer inside the repo — the daemon blocks writes outside it,
+# and untracked/ is gitignored and survives a container restart
+mkdir -p untracked/scratch
+curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o untracked/scratch/hooks-daemon-install.sh
 
 # Inspect it (good security practice)
-cat /tmp/hooks-daemon-install.sh
+cat untracked/scratch/hooks-daemon-install.sh
 
 # Run it
-bash /tmp/hooks-daemon-install.sh
+bash untracked/scratch/hooks-daemon-install.sh
 ```
 
 This installer will:
@@ -71,8 +73,9 @@ This installer will:
 ### Install a Specific Version
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o /tmp/hooks-daemon-install.sh
-DAEMON_BRANCH=v2.7.0 bash /tmp/hooks-daemon-install.sh
+mkdir -p untracked/scratch
+curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o untracked/scratch/hooks-daemon-install.sh
+DAEMON_BRANCH=v2.7.0 bash untracked/scratch/hooks-daemon-install.sh
 ```
 
 ### Create .gitignore (Required After Install)

@@ -266,7 +266,8 @@ def get_acceptance_tests(self) -> list[Any]:
 
 ```bash
 # Generate fresh playbook from code
-./bin/hooks-daemon generate-playbook > /tmp/playbook.md
+mkdir -p untracked/scratch
+./bin/hooks-daemon generate-playbook > untracked/scratch/playbook.md
 ```
 
 Execute tests in a real Claude Code session. See `CLAUDE/AcceptanceTests/GENERATING.md` for details.

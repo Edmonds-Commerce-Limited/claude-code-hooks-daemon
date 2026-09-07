@@ -757,11 +757,12 @@ gh release upload vX.Y.Z \
 # self-bootstrap stanza uses, and every script's published sha must match
 # its manifest entry. ABORT release if any curl fails or any sha mismatches.
 BASE="https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/releases/latest/download"
-curl -fsSL -o /tmp/_check.txt "$BASE/bootstrap-checksums.txt"
+mkdir -p untracked/scratch
+curl -fsSL -o untracked/scratch/_check.txt "$BASE/bootstrap-checksums.txt"
 for script in upgrade.sh daemon-cli.sh health-check.sh init-handlers.sh; do
-    curl -fsSL -o "/tmp/_check_$script" "$BASE/$script"
-    PUBLISHED_SHA="$(sha256sum "/tmp/_check_$script" | awk '{print $1}')"
-    MANIFEST_SHA="$(awk -v name="$script" '$2 == name {print $1; exit}' /tmp/_check.txt)"
+    curl -fsSL -o "untracked/scratch/_check_$script" "$BASE/$script"
+    PUBLISHED_SHA="$(sha256sum "untracked/scratch/_check_$script" | awk '{print $1}')"
+    MANIFEST_SHA="$(awk -v name="$script" '$2 == name {print $1; exit}' untracked/scratch/_check.txt)"
     if [ -z "$MANIFEST_SHA" ]; then
         echo "ABORT: manifest has no entry for $script"; exit 1
     fi

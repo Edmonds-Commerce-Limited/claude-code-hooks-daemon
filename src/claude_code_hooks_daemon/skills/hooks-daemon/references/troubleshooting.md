@@ -152,6 +152,7 @@ Preferred — in the Claude Code chat:
 Manual — from a terminal:
 
 ```bash
+mkdir -p untracked/scratch
 curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o untracked/scratch/hooks-daemon-upgrade.sh
 bash untracked/scratch/hooks-daemon-upgrade.sh
 ```

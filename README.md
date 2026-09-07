@@ -188,8 +188,9 @@ The daemon is designed for **fast, deterministic validation**. For reasoning-hea
 
 ```
 Use curl to fetch and save this file:
-curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md -o /tmp/LLM-INSTALL.md
-Then read /tmp/LLM-INSTALL.md and follow the instructions exactly.
+mkdir -p untracked/scratch
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md -o untracked/scratch/LLM-INSTALL.md
+Then read untracked/scratch/LLM-INSTALL.md and follow the instructions exactly.
 ```
 
 </details>
@@ -199,8 +200,9 @@ Then read /tmp/LLM-INSTALL.md and follow the instructions exactly.
 
 ```
 Use curl to fetch and save this file:
-curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md -o /tmp/LLM-UPDATE.md
-Then read /tmp/LLM-UPDATE.md and follow the instructions exactly.
+mkdir -p untracked/scratch
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md -o untracked/scratch/LLM-UPDATE.md
+Then read untracked/scratch/LLM-UPDATE.md and follow the instructions exactly.
 ```
 
 </details>
@@ -265,8 +267,9 @@ See [CLAUDE/PROJECT_HANDLERS.md](CLAUDE/PROJECT_HANDLERS.md) for the complete gu
 
 ```
 Use curl to fetch and save this file:
-curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md -o /tmp/LLM-INSTALL.md
-Then read /tmp/LLM-INSTALL.md and follow the instructions exactly.
+mkdir -p untracked/scratch
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md -o untracked/scratch/LLM-INSTALL.md
+Then read untracked/scratch/LLM-INSTALL.md and follow the instructions exactly.
 ```
 
 Installation takes around 30 seconds. Claude will clone the daemon, create a virtual environment, run the installer, and verify everything works.
@@ -308,8 +311,9 @@ The installer creates:
 
 ```
 Use curl to fetch and save this file:
-curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md -o /tmp/LLM-UPDATE.md
-Then read /tmp/LLM-UPDATE.md and follow the instructions exactly.
+mkdir -p untracked/scratch
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md -o untracked/scratch/LLM-UPDATE.md
+Then read untracked/scratch/LLM-UPDATE.md and follow the instructions exactly.
 ```
 
 ### Manual

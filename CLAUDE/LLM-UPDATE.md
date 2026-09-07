@@ -104,17 +104,23 @@ The upgrade script itself handles all git operations (fetch, checkout, pull, etc
 ### Standard Upgrade Process
 
 ```bash
+# Run these FROM YOUR PROJECT ROOT. The download must land inside the
+# repository: `project_containment` denies a `curl -o` naming a path outside
+# it, and on an update the daemon is by definition installed and enforcing.
+# untracked/ is gitignored and survives a container restart; /tmp does not.
+mkdir -p untracked/scratch
+
 # Download the latest upgrade script
-curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o untracked/scratch/upgrade.sh
 
 # Review the script to ensure you're comfortable with it
-less /tmp/upgrade.sh
+less untracked/scratch/upgrade.sh
 
 # Run it with --project-root pointing to your project directory (REQUIRED)
-bash /tmp/upgrade.sh --project-root /path/to/your/project
+bash untracked/scratch/upgrade.sh --project-root /path/to/your/project
 
 # Clean up
-rm /tmp/upgrade.sh
+rm untracked/scratch/upgrade.sh
 ```
 
 This works for **any version** (including pre-v2.5.0 installations) and is the safest method since you can inspect what the script will do before running it. The `--project-root` argument is required and must point to the directory containing your `.claude/` folder. The script handles all the git fetch/checkout/pull operations.
@@ -122,10 +128,11 @@ This works for **any version** (including pre-v2.5.0 installations) and is the s
 ### Upgrade to Specific Version
 
 ```bash
-# Fetch and run with version argument
-curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh
-bash /tmp/upgrade.sh --project-root /path/to/your/project v2.9.0
-rm /tmp/upgrade.sh
+# Fetch and run with version argument (from your project root)
+mkdir -p untracked/scratch
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o untracked/scratch/upgrade.sh
+bash untracked/scratch/upgrade.sh --project-root /path/to/your/project v2.9.0
+rm untracked/scratch/upgrade.sh
 ```
 
 ### What the Script Does (Two-Layer Flow)
@@ -897,12 +904,13 @@ export CLAUDE_HOOKS_SOCKET_PATH=/tmp/my-project-daemon.sock
 If your installation is in a broken state (missing venv, corrupt config, nested install artifacts):
 
 ```bash
-# Download latest upgrade script
-curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh
+# Download latest upgrade script (from your project root)
+mkdir -p untracked/scratch
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o untracked/scratch/upgrade.sh
 
 # Run with explicit project root - it will clean up and rebuild
-bash /tmp/upgrade.sh --project-root /path/to/your/project
-rm /tmp/upgrade.sh
+bash untracked/scratch/upgrade.sh --project-root /path/to/your/project
+rm untracked/scratch/upgrade.sh
 ```
 
 The upgrade script actively cleans up nested install artifacts and rebuilds the venv from scratch.
@@ -918,7 +926,7 @@ break the deadlock. Try them in order.
 
 - `Unknown option: --already-bootstrapped` — a pre-v3.15 skill shim passes a flag an older
   fetched script rejected. (The canonical script now accepts-and-ignores it.)
-- `Canonical python discovery helper missing` — the curl-to-`/tmp` flow ran a script whose
+- `Canonical python discovery helper missing` — the curl-fetched-script flow ran a script whose
   installed daemon predates `python_discovery.sh`. (The canonical script now fetches its
   own helper.)
 
@@ -926,21 +934,22 @@ break the deadlock. Try them in order.
 
 ```bash
 # 1. Run the canonical Layer-1 script straight from main — it bypasses the old skill shim
-#    entirely, tolerates legacy flags, and fetches its own helpers:
-curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh
-bash /tmp/upgrade.sh --project-root /path/to/your/project
+#    entirely, tolerates legacy flags, and fetches its own helpers (from your project root):
+mkdir -p untracked/scratch
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o untracked/scratch/upgrade.sh
+bash untracked/scratch/upgrade.sh --project-root /path/to/your/project
 
 # 2. If Python discovery still fails, point it at a known-good interpreter (3.11+):
-HOOKS_DAEMON_PYTHON=/usr/bin/python3 bash /tmp/upgrade.sh --project-root /path/to/your/project
+HOOKS_DAEMON_PYTHON=/usr/bin/python3 bash untracked/scratch/upgrade.sh --project-root /path/to/your/project
 
 # 3. To pull the canonical script from a specific ref instead of main:
-HOOKS_DAEMON_UPGRADE_REF=v3.16.0 bash /tmp/upgrade.sh --project-root /path/to/your/project
+HOOKS_DAEMON_UPGRADE_REF=v3.16.0 bash untracked/scratch/upgrade.sh --project-root /path/to/your/project
 
 # 4. Last resort — skip the self-bootstrap verification of the local skill shim (only if
 #    1-3 are unavailable and you trust the on-disk script):
 HOOKS_DAEMON_SKIP_BOOTSTRAP=1 bash "$PROJECT_ROOT/.claude/skills/hooks-daemon/scripts/upgrade.sh" --project-root "$PROJECT_ROOT"
 
-rm -f /tmp/upgrade.sh
+rm -f untracked/scratch/upgrade.sh
 ```
 
 Once any path succeeds it installs the current backward-tolerant shim, so the next upgrade
