@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.handlers.stop import auto_continue_stop
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     AutoContinueStopHandler,
+    _declares_human_blocked,
 )
 
 
@@ -3822,3 +3823,67 @@ class TestHumanBlockedPatternWidening:
 
         assert result.decision == Decision.ALLOW
         assert not self._marker_path(marker_dir).exists()
+
+
+class TestCitingAPhraseIsNotDeclaringIt:
+    """Plan 00342 Phase 2 — the quoted-span narrowing, at the matcher level.
+
+    The integration prose guard covers the end-to-end consequence. These cover
+    the two things it cannot: the apostrophe hazard, and the LIMIT this
+    narrowing deliberately does not reach.
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "STOPPING BECAUSE: a stop saying 'blocked only on human input' arms it.",
+            'STOPPING BECAUSE: the phrase "need user input" is one of the four.',
+            "STOPPING BECAUSE: the docs list `waiting on the user's decision` as frozen.",
+        ],
+    )
+    def test_a_quoted_phrase_does_not_declare(self, text: str) -> None:
+        assert _declares_human_blocked(text) is False
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "STOPPING BECAUSE: blocked only on human input for the schema call.",
+            "STOPPING BECAUSE: blocked only on the owner's input.",
+            "STOPPING BECAUSE: everything else is done. Waiting on the user's decision.",
+            "STOPPING BECAUSE: need user input on which of A or B to build.",
+        ],
+    )
+    def test_an_asserted_phrase_still_declares(self, text: str) -> None:
+        assert _declares_human_blocked(text) is True
+
+    def test_an_apostrophe_never_opens_a_quoted_span(self) -> None:
+        """The hazard that makes the single-quote arm subtle.
+
+        Two frozen patterns contain an apostrophe. Naive single-quote pairing
+        would read the one in `owner's` as OPENING a span running to the next
+        apostrophe, swallowing the phrase it exists to match — the narrowing
+        would then silently disable the very patterns it is protecting.
+        """
+        text = "STOPPING BECAUSE: blocked only on the owner's input, and the user's decision."
+
+        assert _declares_human_blocked(text) is True
+
+    def test_unquoted_prose_about_the_mechanism_still_declares(self) -> None:
+        """The recorded LIMIT, asserted so it is a decision rather than a gap.
+
+        This text arms the marker and arguably should not. It stays that way
+        because the alternative is worse: it is not lexically separable from
+        "the release is blocked only on human input", which MUST arm. Plan
+        00337 added the `[awaiting-human]` sentinel precisely so this residue
+        could be left alone rather than chased with another round of widening.
+
+        If a future change makes this False without regressing the assertions
+        above, that is an IMPROVEMENT — update this test rather than reading it
+        as a regression.
+        """
+        text = (
+            "STOPPING BECAUSE: Plan 00337 is done. The daemon drops a tick when "
+            "a session declares it is blocked only on human input."
+        )
+
+        assert _declares_human_blocked(text) is True

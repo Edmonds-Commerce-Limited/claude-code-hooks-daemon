@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00342: prose guard does not reach stop handlers](00342-prose-guard-does-not-reach-stop-handlers/PLAN.md) - Not Started (Plan 00228's prose guard covers PreToolUse only, by construction; `AutoContinueStopHandler` now matches text to arm cron suppression and produced the bug once already — and here it fails SILENTLY, ticks just stop arriving)
-
 - [00337: stop hook, human-input marker and failsafe cron retune](00337-stop-hook-human-input-cron-retune/PLAN.md) - In Progress (Phase 1 done: 00314 verified against the code and archived, and the "shipped but reads Not Started" rot filed as Plan 00341. Task 2.3 found one arming phrase was already in the resident guidance and still went unused, so Phase 2 is re-scoped from "add the vocabulary" to "state the consequence")
 
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
@@ -182,6 +180,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00342: prose guard does not reach stop handlers](Completed/00342-prose-guard-does-not-reach-stop-handlers/PLAN.md) - Complete at the delivery + archiving commits (the prose guard now scopes by base class and carries a Stop axis whose predicate is the marker SIDE EFFECT — `_denies()` would have passed vacuously; quoting a frozen phrase no longer arms cron suppression, and the unquoted residue is asserted as a recorded limit rather than left implicit)
+
 - [00343: flip the plan QA commit gate from warn to block](Completed/00343-plan-qa-commit-gate-warn-to-block/PLAN.md) - Complete at the delivery + archiving commits (a 253-commit replay found 18 would-be denials of which 7 blamed a commit for plan-tree state it never touched; six checks narrowed to BLOCK only what a commit introduced, replay then 11 denials with zero false positives, and the gate flipped to `block`)
 
 - [00341: plan status header rots behind shipped work](Completed/00341-plan-status-header-rots-behind-shipped-work/PLAN.md) - Complete at `9a0bf7a8` + the archiving commit (a single ticked box now falsifies a `Not Started` header, and shipping `src/` code for a plan named in the commit SUBJECT does too; the subject scoping came from a 250-commit replay that exposed a 25% false-positive shape argument had missed)
@@ -240,8 +240,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00306: secret bash mention overbroad matching](Completed/00306-secret-bash-mention-overbroad-matching/PLAN.md) - Complete at 49befa8b (secret_file_guard Bash-mention false positives fixed, `git rm --cached` exempted, plus four same-subsystem review findings)
 
-- [00305: v3580 release review followups](Completed/00305-v3580-release-review-followups/PLAN.md) - Complete at 5fd91df3 + 277a47bd (v3.58.0 deferred review findings: mock.patch removed from shipped CLI, {REPO_ROOT} placement validators, absolute secret-list degrade surfaced; playbook drift fixed incl. secret_file_guard bracket false positive and pipe_blocker quoted-argument producer attribution)
-
 ## Blocked / On Hold Plans
 
 - **00032, 00034, 00035** - On hold pending upstream Claude Code delegate mode fix (GitHub #23447, #25037)
@@ -281,15 +279,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 343 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 281 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 282 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 45 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 44 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 45 + 281 + 7 = **333 folders**, spanning
+- **Folder-to-number reconciliation**: 44 + 282 + 7 = **333 folders**, spanning
   **330 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -305,7 +303,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00343 archiving (45 root, 281 `Completed/`,
+- **Last reconciled at**: the Plan 00342 archiving (44 root, 282 `Completed/`,
   7 `Cancelled/`, 330 distinct numbers against a counter of 343). Every figure
   above was recounted from disk rather than incremented. The index carries NO
   reconciliation history — it states current truth only; every earlier recount

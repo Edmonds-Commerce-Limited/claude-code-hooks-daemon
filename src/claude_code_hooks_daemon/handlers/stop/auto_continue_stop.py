@@ -212,6 +212,14 @@ _AWAITING_HUMAN_DECLARATION = re.compile(
     re.IGNORECASE,
 )
 
+# Plan 00342 Phase 2: spans in which the frozen prose patterns are being CITED
+# rather than asserted. The single-quote arm requires a non-word character on
+# both sides so an apostrophe never opens a span -- two of the frozen patterns
+# contain one (`the owner's input`, `the user's decision`).
+_QUOTED_SPAN_RE = re.compile(
+    r"`[^`]*`" r'|"[^"]*"' r"|(?<![\w])'[^']*'(?![\w])",
+)
+
 
 def _transcript_size(hook_input: dict[str, Any]) -> int | None:
     """Size of this session's transcript in bytes, or None if unknowable.
@@ -238,16 +246,54 @@ def _transcript_size(hook_input: dict[str, Any]) -> int | None:
         return None
 
 
+def _quoted_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """Character ranges of quoted spans -- backtick, double, or single quoted.
+
+    The single-quote arm is bounded by non-word lookaround on BOTH sides, and
+    that is load-bearing rather than defensive: two of the frozen patterns
+    contain an apostrophe (``the owner's input``, ``the user's decision``).
+    Naive single-quote pairing would read that apostrophe as opening a span and
+    swallow the very phrase the pattern exists to match.
+    """
+    return tuple(match.span() for match in _QUOTED_SPAN_RE.finditer(text))
+
+
 def _declares_human_blocked(text: str) -> bool:
     """Whether a stop declares it is blocked ONLY on the human.
 
     The token is checked first because it is the supported route. The prose
     patterns remain as a compatibility fallback so no wording that works
     today regresses -- Plan 00337's Non-Goals require that explicitly.
+
+    Plan 00342 Phase 2: a prose pattern matching inside a QUOTED span does not
+    count. An agent writing about this subsystem cites the vocabulary, and
+    citing it armed cron suppression on a session that was not blocked -- which
+    fails SILENTLY, since the symptom is recovery ticks that never arrive.
+    Asserting a phrase and quoting one are different acts, and quoting is the
+    shape that actually occurred.
+
+    Note this is the OPPOSITE call to `security_antipattern` /
+    `sensitive_content`, which deliberately refuse a quoted-span exemption. The
+    difference is real: there, quoted text can still EXECUTE, so the exemption
+    would be a one-character bypass. Here the text is a message, never a
+    program -- nothing it quotes can run.
+
+    The limit is narrower than "prose about the mechanism", deliberately. An
+    UNQUOTED description ("the daemon drops a tick when a session is blocked
+    only on human input") still arms, because it cannot be told apart lexically
+    from "the release is blocked only on human input", which must. That
+    difference is semantic, and it is precisely why Plan 00337 added the
+    explicit sentinel and closed these patterns to extension.
     """
     if _AWAITING_HUMAN_DECLARATION.search(text):
         return True
-    return any(pattern.search(text) for pattern in _HUMAN_BLOCKED_PATTERNS)
+    quoted = _quoted_spans(text)
+    for pattern in _HUMAN_BLOCKED_PATTERNS:
+        for match in pattern.finditer(text):
+            start, end = match.span()
+            if not any(qs <= start and end <= qe for qs, qe in quoted):
+                return True
+    return False
 
 
 # SINGLE SOURCE OF TRUTH for get_rules() / the disclosure ladder (Plan 00116,
