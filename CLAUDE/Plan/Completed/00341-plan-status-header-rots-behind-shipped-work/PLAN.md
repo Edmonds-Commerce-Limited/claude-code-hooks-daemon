@@ -1,6 +1,6 @@
 # Plan 00341: plan status header rots behind shipped work
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-07
 **Owner**: joseph
 **Priority**: Medium
@@ -122,40 +122,69 @@ disappears — the commit stage already holds the facts.
 - [x] ✅ **Task 2.3**: **An extension of `same-commit-plan-doc`, not a new
   check.** Same stage, same inputs, same plan-number extraction; only the
   assertion changes.
-- [ ] ⬜ **Task 2.1** (was "does this belong in plan QA"): **Level.** Decide
-  whether `same-commit-plan-doc` should BLOCK rather than ADVISE. Not an
-  obvious yes — a first commit that scaffolds a plan and starts work
-  legitimately may not touch `PLAN.md`, so the false-positive shape is real
-  and needs an answer before the level moves.
-- [ ] ⬜ **Task 2.2** (was "define delivery commit"): **Assert on content, not
-  on the file being touched.** The check passes for ANY edit to `PLAN.md`, so
-  a commit that adds a paragraph and leaves the header at `Not Started`
-  satisfies it today. The stronger property — status is not `Not Started` when
-  code ships for that plan — costs nothing extra, because the staged blob is
-  already in hand. Prove it against `923fd583` (must fire) and against a
-  plan-scaffolding first commit (must not).
+
+- [x] ✅ **Task 2.1**: **BLOCK for the content assertion, ADVISE unchanged for
+  "PLAN.md untouched"** — the two differ in kind, so one level for both was
+  the wrong question. A plan that is `Not Started` while its code ships is a
+  self-contradiction with a one-word fix; "you did not tick any tasks" is a
+  judgement.
+
+  **The false-positive shape was measured, not argued about**, and the
+  measurement changed the design. Over the last 250 commits an unscoped
+  content rule fired 4 times and ONE was a commit merely REFERENCING another
+  plan while delivering a different one — 25% false positives, fatal for a
+  BLOCK. Scoping the BLOCK to plan numbers in the SUBJECT line left 2 fires,
+  both genuine, none spurious. A plan named in the body is a reference; a plan
+  named in the subject is a claim of delivery. (Journal 21:50.)
+
+- [x] ✅ **Task 2.2**: **Shipped — asserts on content.** A plan cannot still
+  read `Not Started` once code ships for it. The status is read from the
+  STAGED blob where one exists, which is what makes the remediation
+  satisfiable: the fix is "flip it in this same commit", so reading HEAD would
+  reject the author for doing exactly as told. A plan number with no `PLAN.md`
+  yields no finding — inventing a status would turn a typo in a commit message
+  into a blocked commit.
 
 ### Phase 3: Reduce the chance of the rot in the first place
 
-- [ ] ⬜ **Task 3.1**: Phase 2's content assertion IS this intervention, moved
-  to where the facts already are. What remains here is the question Phase 2
-  cannot answer: whether an advisory is enough. The evidence says it was not —
-  the advisory fired on `923fd583` and changed nothing — which is the argument
-  for Task 2.1 choosing BLOCK.
-- [ ] ⬜ **Task 3.2**: Record the outcome even if it is "no". A block at
-  delivery time is the intervention most likely to work and also the most
-  likely to be noisy; a reasoned rejection is a real result.
+- [x] ✅ **Task 3.1**: Phase 2's content assertion IS this intervention, moved
+  to where the facts already are, and it is now BLOCK-level.
+
+  **But BLOCK-level is not the same as blocking, and saying otherwise would be
+  the same mistake this plan was filed about.** This project runs
+  `plan_workflow.qa.commit_gate_mode: warn`, and in warn mode the gate renders
+  EVERY finding as advisory regardless of level — so today the new finding
+  reaches the author as `[block] same-commit-plan-doc: …` in the advisory
+  block, more prominent than `[advise]` but still not a denial.
+
+- [x] ✅ **Task 3.2**: **Recorded, and the honest answer is "not yet, and not
+  by this plan".** Flipping `commit_gate_mode` to `block` is what converts the
+  finding into an actual gate, and that is a PROJECT-WIDE decision affecting
+  every plan QA commit check — the config already stages it deliberately
+  ("warn-first rollout; flip to block after clean dogfooding"). Making that
+  flip as a side effect of one check would be exactly the over-reach the
+  warn-first rollout exists to prevent.
+
+  So what this plan delivers is a correct, measured, BLOCK-level finding, and
+  what it leaves is a single named lever with the evidence attached. **File
+  the flip as its own follow-up** rather than smuggling it in here.
 
 ## Success Criteria
 
-- [ ] A plan with a `Not Started` header and at least one ticked box is
+- [x] A plan with a `Not Started` header and at least one ticked box is
   reported by plan QA, with a message that names which of the two fields is
-  likely wrong.
-- [ ] Plan 00110's current on-disk state produces a finding; the same document
-  with an `In Progress` header does not.
-- [ ] Plan 00311's shape produces no finding from any check this plan adds.
-- [ ] Full QA green (25/25) and the daemon restarted and verified before the
-  terminal status flip.
+  likely wrong — and a REMEDIATION that names it too, which mattered more than
+  the message.
+- [x] Plan 00110's current on-disk state produced a finding (8 of 60 ticked,
+  the only BLOCK in the whole sweep); with the header flipped to `In Progress`
+  it does not.
+- [x] Plan 00311's shape produces no finding from either check: `Not Started`
+  with 0 of 6 ticked is not self-contradictory, and no commit has shipped
+  `src/` code naming it in a subject line.
+- [x] Full QA green (25/25) and the daemon restarted and verified before the
+  terminal status flip. 18,332 tests, 95.2% coverage; no file in the tree was
+  touched after the run started, so the verdict scores the tree being shipped.
+  Daemon 1125377 → 1208130.
 
 ## Delivery & Milestones
 

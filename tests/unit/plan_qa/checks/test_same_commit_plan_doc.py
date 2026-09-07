@@ -153,3 +153,91 @@ class TestFindings:
         )
         findings = CHECK.run(context)
         assert len(findings) == 1
+
+
+def _set_status(repo: Path, status: str) -> None:
+    plan_md = repo / "CLAUDE" / "Plan" / "00042-widget" / "PLAN.md"
+    plan_md.write_text(f"# Plan 00042: Widget\n\n**Status**: {status}\n", encoding="utf-8")
+
+
+class TestStatusStillNotStarted:
+    """Plan 00341 Phase 2: assert on CONTENT, not on the file being touched.
+
+    Touching `PLAN.md` satisfies the original check, so a commit that adds a
+    paragraph and leaves the header at `Not Started` passed it. The stronger
+    property -- a plan cannot be `Not Started` once code ships for it -- costs
+    nothing extra, because the staged blob is already in hand.
+    """
+
+    def test_shipping_code_for_a_not_started_plan_blocks(self, repo: Path) -> None:
+        _set_status(repo, "Not Started")
+        (repo / "src" / "thing.py").write_text("x = 1\n")
+        _git(repo, "add", "-A")
+        findings = CHECK.run(_context(repo, "Plan 00042: implement thing"))
+
+        blocking = [f for f in findings if f.level == Level.BLOCK]
+        assert len(blocking) == 1
+        assert "Not Started" in blocking[0].message
+        assert "In Progress" in blocking[0].remediation
+
+    def test_touching_the_plan_doc_is_not_enough_to_satisfy_it(self, repo: Path) -> None:
+        """The exact hole this task exists to close: an edit that leaves the
+        header alone used to be indistinguishable from one that fixed it."""
+        plan_md = repo / "CLAUDE" / "Plan" / "00042-widget" / "PLAN.md"
+        plan_md.write_text(
+            "# Plan 00042: Widget\n\n**Status**: Not Started\n\nA new paragraph.\n",
+            encoding="utf-8",
+        )
+        (repo / "src" / "thing.py").write_text("x = 1\n")
+        _git(repo, "add", "-A")
+        findings = CHECK.run(_context(repo, "Plan 00042: implement thing"))
+
+        assert [f for f in findings if f.level == Level.BLOCK]
+
+    def test_an_in_progress_plan_does_not_block(self, repo: Path) -> None:
+        _set_status(repo, "In Progress")
+        (repo / "src" / "thing.py").write_text("x = 1\n")
+        _git(repo, "add", "-A")
+        findings = CHECK.run(_context(repo, "Plan 00042: implement thing"))
+
+        assert not [f for f in findings if f.level == Level.BLOCK]
+
+    def test_a_staged_status_flip_satisfies_it_in_the_same_commit(self, repo: Path) -> None:
+        """The staged blob is what counts, not what is on HEAD -- otherwise
+        the remediation ("flip the status in this same commit") could not be
+        satisfied by doing exactly that."""
+        _set_status(repo, "Not Started")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "park it")
+        _set_status(repo, "In Progress")
+        (repo / "src" / "thing.py").write_text("x = 1\n")
+        _git(repo, "add", "-A")
+        findings = CHECK.run(_context(repo, "Plan 00042: implement thing"))
+
+        assert not [f for f in findings if f.level == Level.BLOCK]
+
+    def test_a_plan_named_only_in_the_body_is_spared(self, repo: Path) -> None:
+        """Measured, not assumed. Over this repository's last 250 commits an
+        unscoped content rule fired 4 times and one was a commit that merely
+        REFERENCED another plan ("filed the gap as Plan 00342") while
+        delivering a different one -- a 25% false-positive rate, fatal for a
+        BLOCK. Scoping to the SUBJECT line removed it: 2 fires, both genuine,
+        none spurious. This test is that decision, pinned.
+        """
+        _set_status(repo, "Not Started")
+        (repo / "src" / "thing.py").write_text("x = 1\n")
+        _git(repo, "add", "-A")
+        message = "Some other work: fix a thing\n\nFiled the follow-up as Plan 00042.\n"
+        findings = CHECK.run(_context(repo, message))
+
+        assert not [f for f in findings if f.level == Level.BLOCK]
+
+    def test_a_missing_plan_doc_does_not_block(self, repo: Path) -> None:
+        """A plan number with no PLAN.md anywhere cannot have a status, and
+        inventing one would turn a typo in a commit message into a blocked
+        commit."""
+        (repo / "src" / "thing.py").write_text("x = 1\n")
+        _git(repo, "add", "-A")
+        findings = CHECK.run(_context(repo, "Plan 00099: implement thing"))
+
+        assert not [f for f in findings if f.level == Level.BLOCK]

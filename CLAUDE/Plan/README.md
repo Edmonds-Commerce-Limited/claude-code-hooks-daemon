@@ -8,8 +8,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00342: prose guard does not reach stop handlers](00342-prose-guard-does-not-reach-stop-handlers/PLAN.md) - Not Started (Plan 00228's prose guard covers PreToolUse only, by construction; `AutoContinueStopHandler` now matches text to arm cron suppression and produced the bug once already — and here it fails SILENTLY, ticks just stop arriving)
 
-- [00341: plan status header rots behind shipped work](00341-plan-status-header-rots-behind-shipped-work/PLAN.md) - In Progress (`header-body-coherence` fires only when EVERY box is ticked, so a partially-delivered plan is invisible; and the commit-stage detection already exists — it fired on `923fd583` at ADVISE and the plan stayed Not Started for five days, so the failure is the level, not the detection)
-
 - [00337: stop hook, human-input marker and failsafe cron retune](00337-stop-hook-human-input-cron-retune/PLAN.md) - In Progress (Phase 1 done: 00314 verified against the code and archived, and the "shipped but reads Not Started" rot filed as Plan 00341. Task 2.3 found one arming phrase was already in the resident guidance and still went unused, so Phase 2 is re-scoped from "add the vocabulary" to "state the consequence")
 
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
@@ -186,6 +184,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00341: plan status header rots behind shipped work](Completed/00341-plan-status-header-rots-behind-shipped-work/PLAN.md) - Complete at `9a0bf7a8` + the archiving commit (a single ticked box now falsifies a `Not Started` header, and shipping `src/` code for a plan named in the commit SUBJECT does too; the subject scoping came from a 250-commit replay that exposed a 25% false-positive shape argument had missed)
+
 - [00338: deployed skill tree invisible to review](Completed/00338-deployed-skill-tree-invisible-to-review/PLAN.md) - Complete at the archiving commit (the `.claude/.gitignore` pattern is anchored to `/hooks-daemon/`, so the 21-file deployed skill tree is tracked like its five siblings; both directions pinned by tests, and source-to-deployed drift is now a check rather than an accident)
 
 - [00314: failsafe cron suppression marker never arms](Completed/00314-failsafe-cron-suppression-marker-never-arms/PLAN.md) - Complete at `923fd583` + the archiving commit (marker-write outcome now recorded in stop-events.jsonl, so a non-arm is diagnosable from disk; 16 live `marker_written: true` records closed the dogfood task)
@@ -285,15 +285,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 343 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 279 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 280 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 47 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 46 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 47 + 279 + 7 = **333 folders**, spanning
+- **Folder-to-number reconciliation**: 46 + 280 + 7 = **333 folders**, spanning
   **330 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -309,7 +309,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00343 filing (47 root, 279 `Completed/`,
+- **Last reconciled at**: the Plan 00341 archiving (46 root, 280 `Completed/`,
   7 `Cancelled/`, 330 distinct numbers against a counter of 343). Every figure
   above was recounted from disk rather than incremented. The index carries NO
   reconciliation history — it states current truth only; every earlier recount

@@ -937,6 +937,12 @@
       "reason": "Plan 00298: same site as the return-none-on-error entry immediately above -- clear_marker's OSError branch is both 'returns without raising' and 'logs and continues' under this audit's classification. An unwritable marker file degrades to 'the marker stays present until its own expiry', which is the documented fail-open outcome, not a concealed failure."
     },
     {
+      "file": "plan_qa/checks/same_commit_plan_doc.py",
+      "function": "_plan_status",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00341 Phase 2: None means 'this plan has no readable status', which is a distinct answer from any PlanStatus value and is what the caller needs -- it emits no finding rather than guessing. An unreadable PLAN.md must not break the commit gate: this check runs inside a PreToolUse handler on every `git commit`, so raising would convert a permissions problem or a mid-commit race on one plan document into a blocked commit for work that has nothing to do with that plan."
+    },
+    {
       "file": "handlers/stop/auto_continue_stop.py",
       "function": "_transcript_size",
       "rule": "return-none-on-error",
