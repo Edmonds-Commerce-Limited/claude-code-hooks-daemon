@@ -143,16 +143,50 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 ### Phase 4: Backoff that needs no cooperation from the agent
 
 - [ ] ⬜ **Task 4.1**: The strongest fix is the one that does not depend on the
-  agent saying anything. Detect consecutive unproductive ticks — a tick whose
-  turn produced no tool call, no file change and no commit — and back the
-  cadence off.
+  agent saying anything. **Ask the goal ledger, not the agent.** Owner steer:
+  "wondering if we should keep the cron running once we hit a human blocker or
+  work is completely done — the completely done bit is tricky because agents
+  stop randomly all the time, which is why we have so many stop systems." That
+  splits the two cases, and they do NOT get the same answer:
+
+  - **Blocked on human** is a real terminal-until-input state, and a user
+    message already clears it. Suppressing is safe and is today's behaviour.
+  - **"Work complete" must never suppress on the agent's say-so.** A false
+    "done" is the single most common way an agent stops wrongly, and the cron
+    is the net that catches it. Trusting a self-reported "done" would disable
+    the safety net exactly when it is needed.
+
+  The ledger resolves this, because it already answers "is work owed?" from
+  daemon-side state rather than self-report: `_goal_ledger_challenge()` calls
+  `GoalLedger.live_plan_numbers(plan_dir)`, which reads plan **Status on
+  disk** — including goals the upstream single-slot `/goal` has forgotten. So
+  the cron should consult the ledger:
+
+  | Goals owed | Declared blocked-on-human | Cron                                                  |
+  | ---------- | ------------------------- | ----------------------------------------------------- |
+  | yes        | no                        | tick (the net working — agent likely stopped wrongly) |
+  | yes        | yes                       | tick, backed off                                      |
+  | no         | yes                       | suppress (today's behaviour)                          |
+  | no         | no                        | back off hard                                         |
+
+  This supersedes the original framing of this task, which keyed backoff purely
+  on "consecutive unproductive ticks". Unproductive-tick counting is a
+  heuristic; the ledger is a state signal, and state beats heuristic.
+
+- [ ] ⬜ **Task 4.1b**: Respect the ledger's limit. It tracks **plan** goals, so
+  work outside a plan is invisible to it and "no goals owed" is not proof of
+  idleness. That is why the bottom row backs off rather than silences, and why
+  the ledger must not become the sole authority.
+
 - [ ] ⬜ **Task 4.2**: Back off exponentially with a **cap** (e.g. doubling to
   a 4-hour ceiling), never to silence. The cron exists to recover a session
   interrupted by a rate limit or API error, and in that case a later tick
   genuinely does help once the limit lifts; unbounded backoff would destroy the
   feature's reason to exist.
+
 - [ ] ⬜ **Task 4.3**: Any genuine user message resets the cadence to hourly,
   matching how a user message already clears the marker.
+
 - [ ] ⬜ **Task 4.4**: Decide where this lives. `recovery_cron_advisor` owns the
   cron lifecycle and `failsafe_cron_blockage_suppressor` owns tick-dropping;
   adding a third state-holder needs justifying against folding it into the
