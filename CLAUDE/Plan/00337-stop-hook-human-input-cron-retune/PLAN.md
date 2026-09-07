@@ -93,22 +93,12 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 
 ### Phase 1: Correct the record on Plan 00314
 
-- [x] ✅ **Task 1.1**: **Verified against the code, then updated.** Pattern 4 of
-  `_HUMAN_BLOCKED_PATTERNS` carries `human` in its alternation, and
-  `_maybe_record_human_blocked_marker` returns the `write_marker` result that
-  the stop-event record surfaces as `marker_written` — both of 00314's shipped
-  tasks are present in the current source, not merely in a commit message.
-- [x] ✅ **Task 1.2**: **Closed and archived in `9def2583`.** The live dogfood is
-  satisfied by 16 `"marker_written": true` records in
-  `untracked/stop-events.jsonl`. Recorded with its limit rather than glossed:
-  only the ARMING half is live-observed — a delivered tick being dropped is
-  pinned by 22 unit tests but was not seen live, the log ring having rolled.
-- [x] ✅ **Task 1.3**: **Systemic, and filed as Plan 00341.** 2 of the 22 live
-  `Not Started` plans have shipped work behind the header (00110, 00314). The
-  sharper finding is that the header and the boxes rot INDEPENDENTLY — 00110
-  has 8 ticked boxes and 24 unticked, so its executor maintained the boxes
-  across five phases and never touched the header. `header-body-coherence`
-  cannot see either case: it fires only when EVERY box is ticked.
+- [x] ✅ **Task 1.1**: Verified against the current source, not the commit
+  message, then updated. (Journal 14:20.)
+- [x] ✅ **Task 1.2**: **Closed and archived in `9def2583`**, with its evidence
+  limit stated: only the ARMING half is live-observed. (Journal 14:20.)
+- [x] ✅ **Task 1.3**: **Systemic — filed as Plan 00341.** 2 of 22, and the
+  header and the boxes rot independently. (Journal 14:40.)
 
 ### Phase 2: Make the contract visible (cheapest fix, highest ratio)
 
@@ -117,13 +107,10 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
   agent already follows. Both directions: how to arm, and that a real user
   message clears it.
 
-  It has to be THAT section, not the suppressor's. Checked:
-  `failsafe_cron_blockage_suppressor.get_claude_md()` already names the shape
-  verbatim and its provenance marker IS in `CLAUDE.md` — but the only line
-  carrying the phrase is the `R-FAILSAFE-CRON-SUPPRESSED` rules-table row,
-  whose Fix column says how to CLEAR the marker. The prose was compressed to a
-  row on the way in, and the compression is what drops the arming half. The
-  stop handler's section is rendered in full.
+  It has to be THAT section, not the suppressor's — the suppressor's
+  `get_claude_md()` already names the shape and is compressed to a rules-table
+  row on the way into `CLAUDE.md`, which is what drops the arming half.
+  (Journal 15:45.)
 
 - [ ] ⬜ **Task 2.2**: Pin it with the existing `get_claude_md()` coverage gate
   (the integration test the release process already runs), so the guidance
@@ -132,18 +119,16 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
   cannot disagree.
 
 - [x] ✅ **Task 2.3**: **The claim does not hold, so the phase is re-scoped.**
-  One arming phrase is ALREADY in the generated `CLAUDE.md` block —
-  `get_claude_md()` says "Use `STOPPING BECAUSE: need user input` and ask your
-  question", and `_HUMAN_BLOCKED_PATTERNS[2]` is `need(?:s|ed)? user input`. So
-  the vocabulary was in front of the agent all session and four stops did not
-  reach for it. The reason is visible once stated: it is presented as **how to
-  ask a question**, and the agent was not asking one, it was waiting. Nothing
-  told it the phrasing had a CONSEQUENCE.
+  One arming phrase is ALREADY in the resident block — `get_claude_md()` says
+  "Use `STOPPING BECAUSE: need user input`", which `_HUMAN_BLOCKED_PATTERNS[2]`
+  matches — and four stops still did not reach for it, because it is presented
+  as how to ASK A QUESTION and the agent was waiting, not asking.
 
-  Phase 2 therefore is not "add vocabulary" — it is **state the consequence**:
-  "phrase your stop this way and the failsafe cron stops ticking". Tasks 2.1
-  and 2.2 stand with that framing. This also strengthens Phase 3 rather than
-  substituting for it: a phrase whose effect is invisible gets used by luck.
+  So Phase 2 is not "add vocabulary", it is **state the consequence**: phrase
+  your stop this way and the failsafe cron stops ticking. Tasks 2.1 and 2.2
+  stand with that framing, and it strengthens Phase 3 rather than substituting
+  for it — a phrase whose effect is invisible gets used by luck. (Journal
+  14:55.)
 
 ### Phase 3: Replace inference with declaration
 
@@ -157,21 +142,16 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
   fallback. Both paths arm the same marker; only the token is advertised.
 
 - [x] ✅ **Task 3.3**: **Cited, and it transfers only in part.**
-  `ask_user_question_blocker` (Plan 00108) requires `ASKING BECAUSE:` on every
-  question and denies without it, with a `strict`/`advisory` mode pair for
-  dogfooding; its docstring says it mirrors `STOPPING BECAUSE:`, so the family
-  exists. But that prefix is a **gate** — the agent wants to ask, and the
-  declaration is the price. Phase 3's token is a **state marker**: the agent
-  gains nothing by declaring, and a stop cannot be denied for failing to
-  declare a state the agent may not be in. So the token can never be mandatory
-  and will always be opt-in.
+  `ASKING BECAUSE:` (Plan 00108) is a **gate** — the agent wants to ask, and
+  the declaration is the price, so it can be enforced by denying the call.
+  Phase 3's token is a **state marker**: the agent gains nothing by declaring
+  and a stop cannot be denied for failing to declare a state it may not be in,
+  so the token is permanently opt-in.
 
-  Ordering consequence: Phase 3 makes arming reliable for an agent that
-  co-operates and does nothing for one that does not, which is why **Phase 4 is
-  the load-bearing fix and Phase 3 the optimisation on top**. The phase numbers
-  are not a priority order. The `strict`/`advisory` rollout does transfer and
-  should be reused — ship the token recognised-but-unadvertised, confirm it
-  arms, then document it.
+  Ordering consequence: **Phase 4 is the load-bearing fix and Phase 3 the
+  optimisation on top** — the phase numbers are not a priority order. The
+  `strict`/`advisory` rollout does transfer and should be reused. (Journal
+  16:00.)
 
 - [ ] ⬜ **Task 3.4**: Mark `_HUMAN_BLOCKED_PATTERNS` closed to extension in a
   comment — new phrasings are handled by the token, not by another round of
@@ -210,10 +190,17 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
   on "consecutive unproductive ticks". Unproductive-tick counting is a
   heuristic; the ledger is a state signal, and state beats heuristic.
 
-- [ ] ⬜ **Task 4.1b**: Respect the ledger's limit. It tracks **plan** goals, so
-  work outside a plan is invisible to it and "no goals owed" is not proof of
-  idleness. That is why the bottom row backs off rather than silences, and why
-  the ledger must not become the sole authority.
+- [ ] ⬜ **Task 4.1b**: Respect the ledger's limit — **wider than this task
+  originally said.** `live_plan_numbers` returns only plans already in the
+  ledger (so one that never got a `/goal` is invisible) that also resolve to
+  `_STATE_IN_PROGRESS` (so `Not Started` does not count). Both biases point at
+  "nothing owed", the direction that backs the cron off.
+
+  Concrete failure: a plan being ACTIVELY WORKED whose header still reads
+  `Not Started` is not owed, so the bottom row fires and the net is withdrawn
+  from a working session. That makes this a real dependency on **Plan 00341**,
+  and it is why the bottom row must back off rather than silence and the
+  ledger must not be the sole authority. (Journal 16:30.)
 
 - [ ] ⬜ **Task 4.2**: Back off exponentially with a **cap** (e.g. doubling to
   a 4-hour ceiling), never to silence. The cron exists to recover a session
@@ -224,10 +211,17 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 - [ ] ⬜ **Task 4.3**: Any genuine user message resets the cadence to hourly,
   matching how a user message already clears the marker.
 
-- [ ] ⬜ **Task 4.4**: Decide where this lives. `recovery_cron_advisor` owns the
-  cron lifecycle and `failsafe_cron_blockage_suppressor` owns tick-dropping;
-  adding a third state-holder needs justifying against folding it into the
-  latter.
+- [x] ✅ **Task 4.4**: **Folds into `failsafe_cron_blockage_suppressor`**, on
+  position rather than preference: a backoff must see every delivered tick,
+  see every real prompt (to reset), hold a counter and be able to drop a tick,
+  and that handler already does all four with an injectable clock and
+  fail-open behaviour throughout. `recovery_cron_advisor` owns the cron's
+  LIFECYCLE and never sees a delivered tick as a prompt, so it cannot count
+  them.
+
+  What does NOT fold: the counter cannot live in the existing marker, which is
+  cleared on any real prompt and is absent in exactly the truth table's bottom
+  row. It needs its own persistence and lifetime. (Journal 16:15.)
 
 ### Phase 5: Measure the stop-hook DENY rate before tuning it
 
