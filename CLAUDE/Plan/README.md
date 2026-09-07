@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00341: plan status header rots behind shipped work](00341-plan-status-header-rots-behind-shipped-work/PLAN.md) - Not Started (2 of 22 live "Not Started" plans have shipped work behind the header; `header-body-coherence` fires only when EVERY box is ticked, so a partially-delivered plan is invisible to it — 00110 has 8 ticked boxes and still reads Not Started)
+- [00341: plan status header rots behind shipped work](00341-plan-status-header-rots-behind-shipped-work/PLAN.md) - In Progress (`header-body-coherence` fires only when EVERY box is ticked, so a partially-delivered plan is invisible; and the commit-stage detection already exists — it fired on `923fd583` at ADVISE and the plan stayed Not Started for five days, so the failure is the level, not the detection)
 
 - [00337: stop hook, human-input marker and failsafe cron retune](00337-stop-hook-human-input-cron-retune/PLAN.md) - In Progress (Phase 1 done: 00314 verified against the code and archived, and the "shipped but reads Not Started" rot filed as Plan 00341. Task 2.3 found one arming phrase was already in the resident guidance and still went unused, so Phase 2 is re-scoped from "add the vocabulary" to "state the consequence")
 

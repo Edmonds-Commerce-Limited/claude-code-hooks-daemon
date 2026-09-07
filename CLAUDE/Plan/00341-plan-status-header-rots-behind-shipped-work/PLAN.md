@@ -1,6 +1,6 @@
 # Plan 00341: plan status header rots behind shipped work
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-07
 **Owner**: joseph
 **Priority**: Medium
@@ -80,38 +80,61 @@ So: 2 confirmed in 22, and one near-miss that defines the false-positive shape.
   on a non-zero checked count, keeping the existing all-checked branch for both
   non-terminal statuses. Distinct message per branch: "started" and "finished"
   are different corrections.
+
 - [ ] ⬜ **Task 1.2**: TDD it. The regression that matters is the one this plan
   was filed from — a plan with SOME boxes ticked and a `Not Started` header
   must produce a finding, and the same document with `In Progress` must not.
+
 - [ ] ⬜ **Task 1.3**: Run the sweep and read the result before shipping. If
   Task 1.1 lights up a large number of live plans at BLOCK level, the level for
   the new branch is the decision to make — a check whose first run has to be
   suppressed to get any work committed is worth nothing.
 
-### Phase 2: The git-informed half
+  Pre-measured against the live tree (45 plans): exactly **one** would be
+  flagged, 00110, the plan that motivated the check. So BLOCK is safe with no
+  staged rollout and no exemption list. This answers the level question in
+  advance but does not retire the task — the sweep still has to be run after
+  the change, because a rule reasoned about is not a rule observed. (Journal
+  17:40.)
 
-- [ ] ⬜ **Task 2.1**: Decide whether this belongs in plan QA at all. Every
-  existing check reads the plan tree; this one needs `git log`, which is a new
-  dependency and a per-run cost on a sweep over 45 plans. The session sweep
-  (`plan_qa_sweep`) is the plausible home; the edit-time lint is not.
-- [ ] ⬜ **Task 2.2**: Define "delivery commit" precisely enough to exclude
-  Plan 00311's shape. Working definition from the evidence: a commit whose
-  subject LEADS with `Plan NNNNN` **and** which touches a file outside the plan
-  tree. Test it against all three evidence cases before relying on it.
-- [ ] ⬜ **Task 2.3**: Check the adjacent existing rule first.
-  `same-commit-plan-doc` already relates commits to plan documents, in the
-  opposite direction (a commit naming a plan should also touch its PLAN.md).
-  Establish whether this is an extension of that check or a new one, and record
-  why.
+### Phase 2: The delivery-time half — re-scoped, because it already half exists
+
+Task 2.3 was done first and collapsed this phase. `same-commit-plan-doc`
+already detects the exact situation: it reads plan numbers out of the commit
+message, sees whether `src/`/`tests/`/`config/` are staged, and reports when
+that plan's `PLAN.md` is untouched. Applied to `923fd583` — the commit this
+plan was filed from — it fires: the message names Plan 00314, `src/` and
+`tests/` are staged, and only the JOURNAL is touched. **The detection was never
+missing; the finding was `Level.ADVISE` and the plan stayed `Not Started` for
+five days anyway.** (Journal 17:55.)
+
+The `git log` dependency the original Phase 2 worried about therefore
+disappears — the commit stage already holds the facts.
+
+- [x] ✅ **Task 2.3**: **An extension of `same-commit-plan-doc`, not a new
+  check.** Same stage, same inputs, same plan-number extraction; only the
+  assertion changes.
+- [ ] ⬜ **Task 2.1** (was "does this belong in plan QA"): **Level.** Decide
+  whether `same-commit-plan-doc` should BLOCK rather than ADVISE. Not an
+  obvious yes — a first commit that scaffolds a plan and starts work
+  legitimately may not touch `PLAN.md`, so the false-positive shape is real
+  and needs an answer before the level moves.
+- [ ] ⬜ **Task 2.2** (was "define delivery commit"): **Assert on content, not
+  on the file being touched.** The check passes for ANY edit to `PLAN.md`, so
+  a commit that adds a paragraph and leaves the header at `Not Started`
+  satisfies it today. The stronger property — status is not `Not Started` when
+  code ships for that plan — costs nothing extra, because the staged blob is
+  already in hand. Prove it against `923fd583` (must fire) and against a
+  plan-scaffolding first commit (must not).
 
 ### Phase 3: Reduce the chance of the rot in the first place
 
-- [ ] ⬜ **Task 3.1**: The header is not flipped because nothing prompts it at
-  the moment of delivery. Consider whether the commit gate — which already
-  reads staged plan documents — can advise when a commit stages source changes
-  alongside a `Not Started` PLAN.md from the same plan folder. Advisory, not
-  block: a first commit that scaffolds a plan and starts work is legitimate.
-- [ ] ⬜ **Task 3.2**: Record the outcome even if it is "no". A prompt at
+- [ ] ⬜ **Task 3.1**: Phase 2's content assertion IS this intervention, moved
+  to where the facts already are. What remains here is the question Phase 2
+  cannot answer: whether an advisory is enough. The evidence says it was not —
+  the advisory fired on `923fd583` and changed nothing — which is the argument
+  for Task 2.1 choosing BLOCK.
+- [ ] ⬜ **Task 3.2**: Record the outcome even if it is "no". A block at
   delivery time is the intervention most likely to work and also the most
   likely to be noisy; a reasoned rejection is a real result.
 
