@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00342: prose guard does not reach stop handlers](00342-prose-guard-does-not-reach-stop-handlers/PLAN.md) - Not Started (Plan 00228's prose guard covers PreToolUse only, by construction; `AutoContinueStopHandler` now matches text to arm cron suppression and produced the bug once already — and here it fails SILENTLY, ticks just stop arriving)
+
 - [00341: plan status header rots behind shipped work](00341-plan-status-header-rots-behind-shipped-work/PLAN.md) - In Progress (`header-body-coherence` fires only when EVERY box is ticked, so a partially-delivered plan is invisible; and the commit-stage detection already exists — it fired on `923fd583` at ADVISE and the plan stayed Not Started for five days, so the failure is the level, not the detection)
 
 - [00337: stop hook, human-input marker and failsafe cron retune](00337-stop-hook-human-input-cron-retune/PLAN.md) - In Progress (Phase 1 done: 00314 verified against the code and archived, and the "shipped but reads Not Started" rot filed as Plan 00341. Task 2.3 found one arming phrase was already in the resident guidance and still went unused, so Phase 2 is re-scoped from "add the vocabulary" to "state the consequence")
@@ -279,34 +281,34 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 341 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 342 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 279 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 45 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 46 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 45 + 279 + 7 = **331 folders**, spanning
-  **328 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 46 + 279 + 7 = **332 folders**, spanning
+  **329 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  341 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  342 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  328 + 13 = 341. ✅
+  329 + 13 = 342. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00338 archival (45 root, 279 `Completed/`,
-  7 `Cancelled/`, 328 distinct numbers against a counter of 341). Every figure
+- **Last reconciled at**: the Plan 00342 filing (46 root, 279 `Completed/`,
+  7 `Cancelled/`, 329 distinct numbers against a counter of 342). Every figure
   above was recounted from disk rather than incremented. The index carries NO
   reconciliation history — it states current truth only; every earlier recount
   is in git, and per-plan narrative belongs in that plan's `JOURNAL/`.
