@@ -586,3 +586,36 @@ class TestGuidanceActuallyReachesClaudeMd:
             "worth fixing too: this repo dogfoods its own handlers, so an earning "
             "handler that is off here is untested guidance."
         )
+
+    def test_the_cron_arming_vocabulary_reached_claude_md(self) -> None:
+        """Plan 00337 Phase 2, Task 2.2: the phrasings arrive, not just exist.
+
+        This is the same "returning is not arriving" property the class was
+        built for, applied to the one section whose absence has a measured
+        cost. Four consecutive hourly failsafe-cron ticks each burned a model
+        turn because the agent did not know a phrasing existed that would stop
+        them — while a matching phrase was, unlabelled, already resident.
+
+        Asserted against the RENDERED CLAUDE.md rather than
+        ``get_claude_md()``, because the suppressor handler is the cautionary
+        case: its own guidance names the arming shape verbatim and the only
+        line that survived into CLAUDE.md is a rules-table row explaining how
+        to CLEAR the marker. Prose can be compressed away on the journey in.
+        """
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _HUMAN_BLOCKED_EXAMPLES,
+        )
+
+        claude_md = (_project_root() / "CLAUDE.md").read_text(encoding="utf-8")
+        missing = [example for example in _HUMAN_BLOCKED_EXAMPLES if example not in claude_md]
+
+        assert not missing, (
+            "These cron-suppression arming phrasings never reached CLAUDE.md: "
+            f"{missing}\n\n"
+            "auto_continue_stop.get_claude_md() renders them from "
+            "_HUMAN_BLOCKED_EXAMPLES, so the likeliest cause is simply that "
+            "the daemon has not been restarted since the guidance changed — "
+            "the block is only regenerated on startup. Restart and re-run. If "
+            "they are still missing after a restart, the guidance is being "
+            "produced and dropped on the way in."
+        )

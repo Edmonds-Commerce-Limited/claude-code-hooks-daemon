@@ -160,6 +160,19 @@ _HUMAN_BLOCKED_PATTERNS: tuple[re.Pattern[str], ...] = (
     ),
 )
 
+# Plan 00337 Phase 2: the phrasings get_claude_md() ADVERTISES, and the only
+# place it takes them from -- rendering derives from this tuple rather than
+# restating the regexes, so the two cannot drift apart the way they did
+# between Plan 00298 and Plan 00314. Each entry is verified against
+# _HUMAN_BLOCKED_PATTERNS by a unit test, so an example that stops arming the
+# marker fails the suite instead of misleading an agent.
+_HUMAN_BLOCKED_EXAMPLES: tuple[str, ...] = (
+    "blocked only on human input",
+    "blocked only on the owner's input",
+    "need user input",
+    "waiting on the user's decision",
+)
+
 # SINGLE SOURCE OF TRUTH for get_rules() / the disclosure ladder (Plan 00116,
 # Phase 3): one Rule per DENY-branch CONCEPT, not per historical reason
 # constant naming quirk. Each rule's ``verbose`` is the corresponding
@@ -1063,7 +1076,21 @@ class AutoContinueStopHandler(StopHandlerBase):
             "**On Stop hook re-entry (the hook fires again after a prior block)**: "
             "your next response is treated like any other — it must either prefix "
             "with `STOPPING BECAUSE:` or continue the work. Re-entry does not "
-            "exempt you from the explanation rule."
+            "exempt you from the explanation rule.\n\n"
+            "**If you are stopping because you are blocked ONLY on the human, "
+            "say so in one of these exact shapes — it turns the failsafe cron "
+            "off**:\n\n" + "".join(f"- `{example}`\n" for example in _HUMAN_BLOCKED_EXAMPLES) + "\n"
+            "Any of them in your `STOPPING BECAUSE:` line records a marker that "
+            "makes the daemon drop the next hourly failsafe-cron tick before it "
+            "reaches you, at zero token cost. Without one, every tick costs a "
+            "full turn to read and answer with nothing. The next real user "
+            "message clears the marker and hourly ticks resume; it also expires "
+            "on its own, so a mistake here costs you at most a day of ticks.\n\n"
+            "**Only when it is the ONLY thing blocking you.** A stop that "
+            "merely mentions waiting on someone while other work remains "
+            "must not use these shapes — that would silence a tick you could "
+            "have used. If there is work you could still do, do it instead of "
+            "stopping."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

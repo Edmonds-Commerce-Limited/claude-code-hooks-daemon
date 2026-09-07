@@ -2583,6 +2583,92 @@ class TestAutoContinueStopGetClaudeMdGuidance:
         )
 
 
+class TestArmingVocabularyIsDocumentedWithItsConsequence:
+    """Plan 00337 Phase 2: the guidance must say what the phrasing DOES.
+
+    Measured failure, not a supposition. Four consecutive hourly failsafe-cron
+    ticks each burned a model turn because the human-input marker never armed —
+    and one arming phrase was already in the resident guidance the whole time.
+    ``get_claude_md()`` said "Use ``STOPPING BECAUSE: need user input`` and ask
+    your question", which ``_HUMAN_BLOCKED_PATTERNS[2]`` matches exactly. The
+    agent did not reach for it because it was presented as how to ASK A
+    QUESTION, and the agent was not asking one — it was waiting. Nothing told
+    it the phrasing had a consequence.
+
+    So the property under test is not "the vocabulary is present" (it was);
+    it is that the CONSEQUENCE is stated, and that every phrasing the guidance
+    advertises genuinely arms the marker. The second half is what stops the
+    documentation drifting away from ``_HUMAN_BLOCKED_PATTERNS`` silently, the
+    way it did between Plan 00298 and Plan 00314.
+    """
+
+    def test_every_advertised_phrasing_actually_arms_the_marker(self) -> None:
+        """The documented examples are checked AGAINST the pattern set.
+
+        A restated phrase can drift from the regex it is supposed to describe;
+        one that is verified against it cannot.
+        """
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _HUMAN_BLOCKED_EXAMPLES,
+            _HUMAN_BLOCKED_PATTERNS,
+        )
+
+        unmatched = [
+            example
+            for example in _HUMAN_BLOCKED_EXAMPLES
+            if not any(pattern.search(example) for pattern in _HUMAN_BLOCKED_PATTERNS)
+        ]
+
+        assert not unmatched, (
+            "These phrasings are advertised to the agent as arming the "
+            f"human-input marker, but no pattern matches them: {unmatched}. "
+            "The guidance and _HUMAN_BLOCKED_PATTERNS have drifted apart — an "
+            "agent following the documentation would stop, believe it had "
+            "armed suppression, and go on burning a turn per cron tick."
+        )
+
+    def test_the_guidance_shows_every_advertised_phrasing(self) -> None:
+        """Rendering derives from the examples, so it cannot silently omit one."""
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _HUMAN_BLOCKED_EXAMPLES,
+        )
+
+        guidance = AutoContinueStopHandler().get_claude_md() or ""
+        missing = [example for example in _HUMAN_BLOCKED_EXAMPLES if example not in guidance]
+
+        assert not missing, (
+            f"get_claude_md() does not show these arming phrasings: {missing}. "
+            "Render them FROM _HUMAN_BLOCKED_EXAMPLES rather than restating "
+            "them, so the two cannot disagree."
+        )
+
+    def test_the_guidance_states_the_consequence_not_just_the_words(self) -> None:
+        """The phrase alone was already present and was still not used."""
+        guidance = (AutoContinueStopHandler().get_claude_md() or "").lower()
+
+        assert "failsafe" in guidance and "cron" in guidance, (
+            "get_claude_md() names the arming phrasings but never says what "
+            "they DO. That is the exact state that produced four no-op cron "
+            "ticks: the vocabulary was resident and unused because its effect "
+            "was invisible. Say that the failsafe cron stops ticking."
+        )
+
+    def test_the_guidance_says_a_real_message_clears_it(self) -> None:
+        """Both directions, or the agent cannot reason about the state at all.
+
+        Asserted on the specific phrase rather than the bare word "clear",
+        which the existing text already contains in "a clear reason" — a
+        substring check there would pass without the sentence being present.
+        """
+        guidance = (AutoContinueStopHandler().get_claude_md() or "").lower()
+
+        assert "user message clears" in guidance, (
+            "get_claude_md() must state that a real user message clears the "
+            "suppression, not only how to arm it. An agent told how to enter a "
+            "state and not how it ends cannot tell whether it is still in it."
+        )
+
+
 class TestAutoContinueStopAfterToolUseError:
     """Plan 00101 Phase 6: handle() must emit a specific recovery reason after
     a tool_use_error, not the generic explain-or-continue text.

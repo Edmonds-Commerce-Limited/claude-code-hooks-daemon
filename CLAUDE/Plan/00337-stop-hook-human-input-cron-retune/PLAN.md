@@ -102,21 +102,24 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 
 ### Phase 2: Make the contract visible (cheapest fix, highest ratio)
 
-- [ ] ⬜ **Task 2.1**: State the CONSEQUENCE in the stop handler's
-  `get_claude_md()`, in the existing "Stop Explanation Required" section the
-  agent already follows. Both directions: how to arm, and that a real user
-  message clears it.
+- [x] ✅ **Task 2.1**: **Shipped.** `auto_continue_stop.get_claude_md()` now
+  states the consequence — the shapes that arm the marker, that the daemon
+  drops the next hourly tick at zero token cost, that the next real user
+  message clears it and that it expires anyway, and the ONLY-blocking
+  restriction so a transient mention does not silence a usable tick. It had to
+  be that section, not the suppressor's: the suppressor's own guidance already
+  names the shape and is compressed to a rules-table row on the way into
+  `CLAUDE.md`, which is what drops the arming half. (Journal 15:45.)
 
-  It has to be THAT section, not the suppressor's — the suppressor's
-  `get_claude_md()` already names the shape and is compressed to a rules-table
-  row on the way into `CLAUDE.md`, which is what drops the arming half.
-  (Journal 15:45.)
-
-- [ ] ⬜ **Task 2.2**: Pin it with the existing `get_claude_md()` coverage gate
-  (the integration test the release process already runs), so the guidance
-  cannot silently drift from `_HUMAN_BLOCKED_PATTERNS`. Ideally derive the
-  documented phrases FROM the pattern set rather than restating them, so they
-  cannot disagree.
+- [x] ✅ **Task 2.2**: **Pinned in both directions, derived not restated.** The
+  advertised phrasings live in `_HUMAN_BLOCKED_EXAMPLES` and the guidance is
+  rendered FROM that tuple, so a phrase cannot be documented without being
+  shown. Three unit tests plus one integration test hold it: every example
+  must match `_HUMAN_BLOCKED_PATTERNS` (so documentation cannot drift from the
+  regexes), the guidance must show every example, it must state the
+  consequence and the clearing rule, and — the Plan 00237 lesson — the
+  phrasings must be present in the RENDERED `CLAUDE.md`, since returning a
+  section is not the same as one arriving.
 
 - [x] ✅ **Task 2.3**: **The claim does not hold, so the phase is re-scoped.**
   One arming phrase is ALREADY in the resident block — `get_claude_md()` says
@@ -132,11 +135,19 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 
 ### Phase 3: Replace inference with declaration
 
-- [ ] ⬜ **Task 3.1**: Design the explicit token. A bracketed marker composing
-  with the prefix the agent already emits — e.g.
-  `STOPPING BECAUSE: [awaiting-human] ...` — is matched exactly, needs no NLP,
-  and reads acceptably to a human. Compare against alternatives (a dedicated
-  tool, a structured hook field) and record why the chosen one wins.
+- [x] ✅ **Task 3.1**: **`STOPPING BECAUSE: [awaiting-human] …`**, anchored
+  directly after the prefix so the position is unambiguous to match and is not
+  something prose produces by accident.
+
+  A structured hook field turned out not to be a choice: the Stop hook's input
+  schema is Claude Code's, and the daemon reads the fields the host sends — an
+  agent-populated field would be an upstream change. A dedicated tool is real
+  and more precise, but adds permanent tool-inventory surface this project is
+  trying to SHRINK (Plan 00293), and a tool call is not a stop, so the
+  declaration would split across two acts that can happen apart. The token
+  composes with a line the agent already emits and costs nothing to add —
+  which is the dominant criterion for a declaration that Task 3.3 established
+  is permanently OPTIONAL. (Journal 17:25.)
 
 - [ ] ⬜ **Task 3.2**: Implement with the existing regexes retained as a
   fallback. Both paths arm the same marker; only the token is advertised.
