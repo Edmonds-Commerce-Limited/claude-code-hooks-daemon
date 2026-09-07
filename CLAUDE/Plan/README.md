@@ -30,6 +30,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Not Started (Plan 00245's `-rs` flag named 11 acceptance tests that have skipped on every CI run for want of a daemon socket, three of the files being ones `RELEASING.md` Step 12.0 declares BLOCKING)
 
+- [00345: harness payloads for shell and call syntax tests](00345-harness-payloads-for-shell-and-call-syntax-tests/PLAN.md) - Not Started (Plan 00243's harness runs 94 of 228 dispatchable blocks; 107 more are convertible and were left behind by a scoping number computed for PROSE tests and carried unexamined into a phase that changed the constraints — 10 of them are a `Write(...)` grammar the audit's five never named)
+
 ### Security / Presentation Audit
 
 ### Core / Hook Coverage
@@ -269,18 +271,18 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 344 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 345 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 286 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 42 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 41 + 286 + 7 = **334 folders**, spanning
-  **331 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 42 + 286 + 7 = **335 folders**, spanning
+  **332 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
