@@ -326,24 +326,45 @@ class TestBuildEvent:
 
     def test_a_post_tool_use_event_carries_the_required_tool_response(self) -> None:
         """`POST_TOOL_USE_INPUT_SCHEMA` requires it; without it nothing runs."""
-        event = build_event(self._probe(event_type="PostToolUse"), _ROOT, run_id="r1")
+        event = build_event(self._probe(event_type="PostToolUse"), run_id="r1")
         assert isinstance(event.get("tool_response"), dict)
 
     def test_a_pre_tool_use_event_does_not_invent_a_response(self) -> None:
         """The tool has not run yet, so there is nothing to report."""
-        event = build_event(self._probe(event_type="PreToolUse"), _ROOT, run_id="r1")
+        event = build_event(self._probe(event_type="PreToolUse"), run_id="r1")
         assert "tool_response" not in event
 
     def test_the_event_names_its_tool_and_input(self) -> None:
-        event = build_event(self._probe(), _ROOT, run_id="r1")
+        event = build_event(self._probe(), run_id="r1")
         assert event["tool_name"] == "Write"
         assert event["hook_event_name"] == "PreToolUse"
         assert event["tool_input"]["file_path"] == "/repo/untracked/scratch/probe.sh"
 
+    def test_the_event_is_rooted_at_the_project(self) -> None:
+        """`cwd` is part of a Bash probe's INPUT, not incidental framing.
+
+        A command carrying a relative path means nothing without the directory
+        it resolves against, and the playbook's commands are written as a human
+        runs them: from the repository root. Pointing `cwd` anywhere else
+        silently rewrites what every such probe asks, and 14 dispatchable
+        handlers read this field.
+
+        Measured, not reasoned: dispatching the 94 shell blocks under an
+        isolated temp dir instead put `mkdir -p CLAUDE/Plan/99999-probe`
+        outside the repository, so `project_containment` answered before
+        `plan_number_helper` ever saw it. The probe still denied — with the
+        WRONG handler's reason — and its sibling allow-probe denied outright.
+
+        The root travels ON the probe rather than as a parameter so a caller
+        has no cwd knob to get wrong; that is what the temp-dir caller was.
+        """
+        event = build_event(self._probe(), run_id="r1")
+        assert event["cwd"] == str(_ROOT)
+
     def test_each_probe_gets_its_own_session(self) -> None:
         """A shared session would let one probe's disclosure ladder mute another."""
-        first = build_event(self._probe(test_number=1), _ROOT, run_id="r1")
-        second = build_event(self._probe(test_number=2), _ROOT, run_id="r1")
+        first = build_event(self._probe(test_number=1), run_id="r1")
+        second = build_event(self._probe(test_number=2), run_id="r1")
         assert first["session_id"] != second["session_id"]
 
     def test_the_same_probe_gets_a_new_session_on_a_later_run(self) -> None:
@@ -356,8 +377,8 @@ class TestBuildEvent:
         that is working perfectly as broken. Measured — this harness passed
         clean, then failed on exactly that probe when re-run.
         """
-        first = build_event(self._probe(test_number=1), _ROOT, run_id="r1")
-        second = build_event(self._probe(test_number=1), _ROOT, run_id="r2")
+        first = build_event(self._probe(test_number=1), run_id="r1")
+        second = build_event(self._probe(test_number=1), run_id="r2")
         assert first["session_id"] != second["session_id"]
 
 

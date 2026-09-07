@@ -59,6 +59,11 @@ class ExecutableProbe:
     tool_name: str
     tool_input: dict[str, Any]
     expected_decision: str
+    #: The checkout this probe was planned against, and the directory its
+    #: event reports as the session's. Carried here rather than passed to
+    #: `build_event` so no caller can point a probe at a directory that is not
+    #: the project -- see that function for what the temp-dir caller broke.
+    project_root: Path = Path()
     expected_message_patterns: list[str] = field(default_factory=list)
     requires_existing_file: bool = False
     requires_absent_file: bool = False
@@ -183,6 +188,7 @@ def plan_probe(block: PlaybookBlock, project_root: Path) -> ExecutableProbe | Sk
         tool_name=str(payload.get("tool_name") or ""),
         tool_input=tool_input,
         expected_decision=str(block.get("expected_decision") or "").lower(),
+        project_root=project_root,
         expected_message_patterns=list(block.get("expected_message_patterns") or []),
         requires_existing_file=requires_existing_file,
         requires_absent_file=requires_absent_file,
@@ -232,7 +238,7 @@ def daemon_error(payload: PlaybookBlock) -> str | None:
     return f"{error}: {rendered}" if rendered else str(error)
 
 
-def build_event(probe: ExecutableProbe, session_cwd: Path, run_id: str) -> dict[str, Any]:
+def build_event(probe: ExecutableProbe, run_id: str) -> dict[str, Any]:
     """Assemble the hook event that carries this probe to the daemon.
 
     The `session_id` is unique in BOTH directions, and each half was measured.
@@ -248,13 +254,25 @@ def build_event(probe: ExecutableProbe, session_cwd: Path, run_id: str) -> dict[
     second run sees an allow and reports a perfectly working handler as
     broken. A harness that is only truthful on its first run is worse than no
     harness, because nobody re-reads a green one.
+
+    **`cwd` is the probe's own project root, and deliberately not an
+    argument.** An isolated temp directory here is safe for a WRITE payload,
+    whose `file_path` is absolute -- which is why measuring isolation over
+    those probes shows no difference and makes it look free. It is unsafe for
+    a BASH payload, where a relative path resolves against `cwd` and the
+    isolation silently relocates the command: `mkdir -p
+    CLAUDE/Plan/99999-probe` then lands outside the repository, and
+    `project_containment` answers in `plan_number_helper`'s place -- a deny
+    that still reads as a pass, plus a sibling allow-probe that denies. 14
+    dispatchable handlers read this field, and none wants a directory that is
+    not the project, so there is no caller-supplied cwd to get wrong.
     """
     event: dict[str, Any] = {
         "hook_event_name": probe.event_type,
         "tool_name": probe.tool_name,
         "tool_input": probe.tool_input,
         "session_id": f"playbook-probe-{run_id}-{probe.test_number}",
-        "cwd": str(session_cwd),
+        "cwd": str(probe.project_root),
     }
     if probe.event_type == "PostToolUse":
         # Required by the schema, and its absence is rejected before any

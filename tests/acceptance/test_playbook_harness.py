@@ -143,25 +143,23 @@ def _response_decision(payload: dict) -> str:
     return str(hook_specific.get("permissionDecision") or payload.get("decision") or "")
 
 
-def _dispatch(probe: ExecutableProbe, session_cwd: Path) -> tuple[str, str, str | None]:
+def _dispatch(probe: ExecutableProbe) -> tuple[str, str, str | None]:
     """Send one probe to the production wrapper; return (decision, text, error).
 
-    The SUBPROCESS runs at the repo root so the wrapper can find the daemon
-    socket; the EVENT's `cwd` is an isolated directory, exactly as
-    `test_stop_hook_hard_block.py` separates the two.
+    Both the SUBPROCESS and the EVENT are rooted at the repository: the wrapper
+    needs it to find the daemon socket, and the event needs it because `cwd` is
+    part of a Bash probe's input rather than framing around it.
 
-    Isolating the event `cwd` was measured to change nothing today — all 94
-    probes give identical verdicts either way. It is here for the trap Plan
-    00241 hit: two acceptance probes were silently shadowed by
-    `release_blocker`, a terminal handler that matches on a modified release
-    file whenever the tree is dirty, which during a release it is by
-    definition. That substitution is invisible, because the shadowing handler
-    can return the same decision the probe expected.
+    An isolated temp directory for the event `cwd` measured as changing
+    nothing, but that measurement only ever covered WRITE payloads, whose
+    `file_path` is absolute and so cannot notice. Extending payloads to the
+    shell blocks is what exposed the cost — see `build_event`, which now owns
+    the choice so this caller cannot make it wrongly.
     """
     wrapper = _WRAPPERS[probe.event_type]
     result = subprocess.run(
         ["bash", str(wrapper)],
-        input=json.dumps(build_event(probe, session_cwd, _RUN_ID)),
+        input=json.dumps(build_event(probe, _RUN_ID)),
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
@@ -194,7 +192,7 @@ def _is_removable_probe_target(target: Path) -> bool:
     return target.is_relative_to(scratch) or target.is_relative_to(temp_root)
 
 
-def _run_probe(probe: ExecutableProbe, session_cwd: Path) -> str | None:
+def _run_probe(probe: ExecutableProbe) -> str | None:
     """Dispatch one probe, making the world match what its event claims."""
     created: Path | None = None
     target = Path(probe.file_path) if probe.file_path else None
@@ -210,7 +208,7 @@ def _run_probe(probe: ExecutableProbe, session_cwd: Path) -> str | None:
             # clobber rather than the new write the event claims.
             target.unlink()
     try:
-        decision, text, error = _dispatch(probe, session_cwd)
+        decision, text, error = _dispatch(probe)
         if error is not None:
             return f"the daemon rejected the event, so no handler ran: {error}"
         return verdict(probe, decision, text)
@@ -263,7 +261,6 @@ class TestTheDeclaredProbesBehaveAsDeclared:
     def test_every_executable_probe_matches_its_expected_decision_and_reason(
         self,
         partitioned: tuple[list[ExecutableProbe], list[SkippedProbe]],
-        tmp_path: Path,
     ) -> None:
         """The gate: dispatch all of them, report every mismatch at once.
 
@@ -276,7 +273,7 @@ class TestTheDeclaredProbesBehaveAsDeclared:
         executable, _ = partitioned
         failures = []
         for probe in executable:
-            failure = _run_probe(probe, tmp_path)
+            failure = _run_probe(probe)
             if failure is not None:
                 failures.append(f"#{probe.test_number} {probe.handler_name}: {failure}")
 
