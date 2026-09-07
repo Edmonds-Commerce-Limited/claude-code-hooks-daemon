@@ -603,11 +603,13 @@ class TestGuidanceActuallyReachesClaudeMd:
         to CLEAR the marker. Prose can be compressed away on the journey in.
         """
         from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _AWAITING_HUMAN_SENTINEL,
             _HUMAN_BLOCKED_EXAMPLES,
         )
 
         claude_md = (_project_root() / "CLAUDE.md").read_text(encoding="utf-8")
-        missing = [example for example in _HUMAN_BLOCKED_EXAMPLES if example not in claude_md]
+        advertised = (_AWAITING_HUMAN_SENTINEL, *_HUMAN_BLOCKED_EXAMPLES)
+        missing = [example for example in advertised if example not in claude_md]
 
         assert not missing, (
             "These cron-suppression arming phrasings never reached CLAUDE.md: "
@@ -619,3 +621,62 @@ class TestGuidanceActuallyReachesClaudeMd:
             "they are still missing after a restart, the guidance is being "
             "produced and dropped on the way in."
         )
+
+    def test_the_handler_reference_quotes_real_arming_phrases(self) -> None:
+        """The tuple's OTHER consumer, which nothing was checking.
+
+        ``_HUMAN_BLOCKED_EXAMPLES`` feeds two documents. ``CLAUDE.md`` is
+        GENERATED from it, so it cannot drift and the test above is really
+        checking delivery. ``HANDLER_REFERENCE.md`` is hand-written, and it
+        had drifted: it quoted "waiting on the owner's decision", which is
+        neither entry — it conflates "blocked only on the owner's input" with
+        "waiting on the user's decision". An agent copying that phrase gets
+        one that does not arm the marker, which is the exact failure this plan
+        exists to remove.
+
+        Scoped to quoted phrases that LOOK like arming phrases, so the
+        reference stays free to paraphrase: only a string that starts like one
+        of the real shapes has to actually be one.
+        """
+        import re as _re
+
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _HUMAN_BLOCKED_EXAMPLES,
+        )
+
+        reference = (_project_root() / "docs" / "guides" / "HANDLER_REFERENCE.md").read_text(
+            encoding="utf-8"
+        )
+        # The vocabulary an arming phrase opens with, per _HUMAN_BLOCKED_EXAMPLES.
+        openers = ("blocked only on", "need user", "waiting on the")
+        quoted = _re.findall(r'"([^"\n]{10,60})"', reference)
+        arming_like = [q for q in quoted if q.lower().startswith(openers)]
+        impostors = [q for q in arming_like if q not in _HUMAN_BLOCKED_EXAMPLES]
+
+        assert not impostors, (
+            "HANDLER_REFERENCE.md quotes phrases that read as cron-suppression "
+            f"arming shapes but are not in _HUMAN_BLOCKED_EXAMPLES: {impostors}\n\n"
+            "An agent copying one of these gets a phrase that does not arm the "
+            "marker. Quote a real entry, or reword so it does not read as a "
+            f"literal arming phrase. The real set is: {list(_HUMAN_BLOCKED_EXAMPLES)}"
+        )
+
+    def test_the_handler_reference_drift_guard_has_teeth(self) -> None:
+        """A guard that cannot fail proves nothing.
+
+        Pins that the guard really would have caught the drift it was written
+        for, rather than passing because its regex matches nothing.
+        """
+        import re as _re
+
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _HUMAN_BLOCKED_EXAMPLES,
+        )
+
+        openers = ("blocked only on", "need user", "waiting on the")
+        drifted = 'the set ("waiting on the owner\'s decision" and others)'
+        quoted = _re.findall(r'"([^"\n]{10,60})"', drifted)
+        arming_like = [q for q in quoted if q.lower().startswith(openers)]
+
+        assert arming_like, "the guard's regex no longer recognises an arming-like phrase"
+        assert [q for q in arming_like if q not in _HUMAN_BLOCKED_EXAMPLES]

@@ -46,25 +46,18 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 - **It armed the instant the wording matched.** The `03:34:41` record carries
   `"marker_written": true`, after a stop reading "STOPPING BECAUSE: blocked
   only on human input." The mechanism works; only arming is fragile.
-- **The agent could only comply by reading daemon source.** The four phrases
-  live in `_HUMAN_BLOCKED_PATTERNS` (`handlers/stop/auto_continue_stop.py`).
-- **The contract is documented in the wrong direction.** The generated
-  `CLAUDE.md` block documents `R-FAILSAFE-CRON-SUPPRESSED` — that the marker
-  exists and how to CLEAR it ("Send a real message") — but never how to ARM it.
-  `docs/guides/HANDLER_REFERENCE.md` (3283, 3402) does name the phrases, but
-  that is the human reference tree, not the agent's resident guidance. The
-  handler's own `get_claude_md()` mentions human input, cron and suppression
-  **zero** times.
+- **The contract was documented in the wrong direction.** The `CLAUDE.md`
+  rules-table row for `R-FAILSAFE-CRON-SUPPRESSED` said how to CLEAR the
+  marker, never how to ARM it; the phrases themselves lived in
+  `_HUMAN_BLOCKED_PATTERNS` and in the human reference tree. Task 2.3 later
+  sharpened this — one phrase WAS resident, just unlabelled. Fixed in Phase 2.
 - **Widening does not converge.** `cd02e32d` (00298) introduced the patterns;
-  `923fd583` (00314) widened pattern 4 to add `human` after a 2026-09-01/02
-  dogfood miss; today's miss used wording none of the four cover. Two misses,
-  one widening, a third round still planned.
-- **Stop-hook volume is worth measuring.** 34 stop events on 2026-09-07, of
-  which 28 were `deny` inside a ~34-minute window, dominated by
-  `R-STOP-NO-REASON` with `R-STOP-AFTER-TOOL-ERROR` recurring at roughly
-  ten-minute intervals. Each DENY forces an extra model turn. Whether that is
-  the auto-continue feature working as designed or over-firing is currently
-  unknown, and worth a measurement before anyone tunes it.
+  `923fd583` (00314) widened pattern 4 after a 2026-09-01/02 dogfood miss;
+  today's miss used wording none of the four cover. Two misses, one widening.
+- **Stop-hook volume.** ~140 logical stops on 2026-09-07, mostly DENY.
+  Superseded in detail by Phase 5, which found the raw row count over-reports
+  (one stop is logged twice, ~79 ms apart) and that the
+  `R-STOP-AFTER-TOOL-ERROR` "cadence" is not one.
 
 ## Goals
 
@@ -102,24 +95,18 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 
 ### Phase 2: Make the contract visible (cheapest fix, highest ratio)
 
-- [x] ✅ **Task 2.1**: **Shipped.** `auto_continue_stop.get_claude_md()` now
-  states the consequence — the shapes that arm the marker, that the daemon
-  drops the next hourly tick at zero token cost, that the next real user
-  message clears it and that it expires anyway, and the ONLY-blocking
-  restriction so a transient mention does not silence a usable tick. It had to
-  be that section, not the suppressor's: the suppressor's own guidance already
-  names the shape and is compressed to a rules-table row on the way into
-  `CLAUDE.md`, which is what drops the arming half. (Journal 15:45.)
+- [x] ✅ **Task 2.1**: **Shipped** in `auto_continue_stop.get_claude_md()`: the
+  shapes, the zero-token saving, the clearing rule, the expiry, and the
+  ONLY-blocking restriction. It had to be that section — the suppressor's own
+  guidance already names the shape and is compressed to a rules-table row on
+  the way into `CLAUDE.md`, which is what drops the arming half. (Journal
+  15:45.)
 
-- [x] ✅ **Task 2.2**: **Pinned in both directions, derived not restated.** The
-  advertised phrasings live in `_HUMAN_BLOCKED_EXAMPLES` and the guidance is
-  rendered FROM that tuple, so a phrase cannot be documented without being
-  shown. Three unit tests plus one integration test hold it: every example
-  must match `_HUMAN_BLOCKED_PATTERNS` (so documentation cannot drift from the
-  regexes), the guidance must show every example, it must state the
-  consequence and the clearing rule, and — the Plan 00237 lesson — the
-  phrasings must be present in the RENDERED `CLAUDE.md`, since returning a
-  section is not the same as one arriving.
+- [x] ✅ **Task 2.2**: **Pinned, derived not restated.** The phrasings live in
+  `_HUMAN_BLOCKED_EXAMPLES` and the guidance renders FROM that tuple; tests
+  assert every example matches `_HUMAN_BLOCKED_PATTERNS`, that the guidance
+  shows each one with its consequence and clearing rule, and — the Plan 00237
+  lesson — that they reach the RENDERED `CLAUDE.md`.
 
 - [x] ✅ **Task 2.3**: **The claim does not hold, so the phase is re-scoped.**
   One arming phrase is ALREADY in the resident block — `get_claude_md()` says
@@ -136,37 +123,51 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 ### Phase 3: Replace inference with declaration
 
 - [x] ✅ **Task 3.1**: **`STOPPING BECAUSE: [awaiting-human] …`**, anchored
-  directly after the prefix so the position is unambiguous to match and is not
-  something prose produces by accident.
+  after the prefix where prose does not produce it by accident. A structured
+  hook field is not ours to choose (the Stop input schema is Claude Code's); a
+  dedicated tool is more precise but adds permanent tool-inventory surface
+  this project is shrinking, and a tool call is not a stop, so the declaration
+  would split across two acts. (Journal 17:25.)
 
-  A structured hook field turned out not to be a choice: the Stop hook's input
-  schema is Claude Code's, and the daemon reads the fields the host sends — an
-  agent-populated field would be an upstream change. A dedicated tool is real
-  and more precise, but adds permanent tool-inventory surface this project is
-  trying to SHRINK (Plan 00293), and a tool call is not a stop, so the
-  declaration would split across two acts that can happen apart. The token
-  composes with a line the agent already emits and costs nothing to add —
-  which is the dominant criterion for a declaration that Task 3.3 established
-  is permanently OPTIONAL. (Journal 17:25.)
+- [x] ✅ **Task 3.2**: **Shipped.** `_declares_human_blocked()` checks the token
+  first and falls back to the prose patterns, so both paths arm the same
+  marker. Case-insensitive, matching the patterns' own handling. Six unit
+  tests, including the one that carries the plan's whole point: wording no
+  prose pattern reaches ("nothing further I can do until a person weighs in")
+  arms nothing on its own and arms with the token — with a guard asserting the
+  fixture stays unmatched, so the test cannot quietly stop proving anything.
 
-- [ ] ⬜ **Task 3.2**: Implement with the existing regexes retained as a
-  fallback. Both paths arm the same marker; only the token is advertised.
+  Deviated from "only the token is advertised": the guidance advertises BOTH,
+  with the older phrasings labelled recognised-but-frozen. Dropping them from
+  the docs while the fallback still accepts them would create the very
+  code/docs disagreement this plan exists because of. **Live dogfood is still
+  outstanding** — unit tests prove the token arms; no real stop has used it.
 
-- [x] ✅ **Task 3.3**: **Cited, and it transfers only in part.**
-  `ASKING BECAUSE:` (Plan 00108) is a **gate** — the agent wants to ask, and
-  the declaration is the price, so it can be enforced by denying the call.
-  Phase 3's token is a **state marker**: the agent gains nothing by declaring
-  and a stop cannot be denied for failing to declare a state it may not be in,
-  so the token is permanently opt-in.
+  **Dogfood bug found and fixed inside this phase.** The first draft matched
+  the token anywhere in the stop text, so a stop message REPORTING the feature
+  armed cron suppression on a session that was not blocked — the Plan 00228
+  class, failing silently (ticks just stop arriving). `AutoContinueStopHandler`
+  is outside `test_handlers_do_not_match_prose.py` by construction, its fixture
+  being a Bash tool call. Reproduced RED, then anchored to the declaration
+  position, which is where the guidance already says to put it. (Journal
+  19:10.)
 
-  Ordering consequence: **Phase 4 is the load-bearing fix and Phase 3 the
-  optimisation on top** — the phase numbers are not a priority order. The
-  `strict`/`advisory` rollout does transfer and should be reused. (Journal
-  16:00.)
+- [x] ✅ **Task 3.3**: **Cited, transfers only in part.** `ASKING BECAUSE:` is a
+  **gate** (the agent wants to ask, so the declaration can be priced by
+  denying the call); this token is a **state marker**, and a stop cannot be
+  denied for failing to declare a state it may not be in — so it is
+  permanently opt-in. Consequence: **Phase 4 is the load-bearing fix and Phase
+  3 the optimisation on top**; the phase numbers are not a priority order.
+  (Journal 16:00.)
 
-- [ ] ⬜ **Task 3.4**: Mark `_HUMAN_BLOCKED_PATTERNS` closed to extension in a
-  comment — new phrasings are handled by the token, not by another round of
-  widening — and reconcile with Plan 00314's remaining widening task.
+- [x] ✅ **Task 3.4**: **Marked CLOSED TO EXTENSION** at the definition itself,
+  where the next author will be standing when tempted — the comment says add
+  nothing, and states why widening does not converge (00298 introduced it,
+  00314 widened it after a miss, a third phrasing missed anyway).
+
+  Reconciled with Plan 00314: there is no remaining widening task. Its archived
+  PLAN.md already records that nothing further is queued and that this task
+  supersedes the idea.
 
 ### Phase 4: Backoff that needs no cooperation from the agent
 
@@ -185,39 +186,30 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
     the safety net exactly when it is needed.
 
   The ledger resolves this, because it already answers "is work owed?" from
-  daemon-side state rather than self-report: `_goal_ledger_challenge()` calls
-  `GoalLedger.live_plan_numbers(plan_dir)`, which reads plan **Status on
-  disk** — including goals the upstream single-slot `/goal` has forgotten. So
-  the cron should consult the ledger:
-
-  | Goals owed | Declared blocked-on-human | Cron                                                  |
-  | ---------- | ------------------------- | ----------------------------------------------------- |
-  | yes        | no                        | tick (the net working — agent likely stopped wrongly) |
-  | yes        | yes                       | tick, backed off                                      |
-  | no         | yes                       | suppress (today's behaviour)                          |
-  | no         | no                        | back off hard                                         |
-
-  This supersedes the original framing of this task, which keyed backoff purely
-  on "consecutive unproductive ticks". Unproductive-tick counting is a
-  heuristic; the ledger is a state signal, and state beats heuristic.
+  daemon-side state rather than self-report. **Full truth table, algorithm and
+  prerequisites: [DESIGN-cadence.md](DESIGN-cadence.md).** This supersedes the
+  original framing, which keyed backoff on "consecutive unproductive ticks" —
+  a heuristic, where the ledger is a state signal.
 
 - [ ] ⬜ **Task 4.1b**: Respect the ledger's limit — **wider than this task
-  originally said.** `live_plan_numbers` returns only plans already in the
-  ledger (so one that never got a `/goal` is invisible) that also resolve to
-  `_STATE_IN_PROGRESS` (so `Not Started` does not count). Both biases point at
-  "nothing owed", the direction that backs the cron off.
+  originally said.** `live_plan_numbers` counts only plans already in the
+  ledger that also resolve to `_STATE_IN_PROGRESS`, so a plan that never got a
+  `/goal`, or one whose header still reads `Not Started`, is not "owed". Both
+  biases point at "nothing owed", the direction that backs the cron off — so
+  a plan being actively worked behind a stale header would lose its safety
+  net. A real dependency on **Plan 00341**. (Journal 16:30, DESIGN-cadence.md.)
 
-  Concrete failure: a plan being ACTIVELY WORKED whose header still reads
-  `Not Started` is not owed, so the bottom row fires and the net is withdrawn
-  from a working session. That makes this a real dependency on **Plan 00341**,
-  and it is why the bottom row must back off rather than silence and the
-  ledger must not be the sole authority. (Journal 16:30.)
+- [ ] ⬜ **Task 4.2**: Back off exponentially with a **cap** (doubling to a
+  4-hour ceiling), never to silence — the cron exists to recover a session
+  interrupted by a rate limit, and a later tick genuinely helps once the limit
+  lifts. Algorithm settled in [DESIGN-cadence.md](DESIGN-cadence.md).
 
-- [ ] ⬜ **Task 4.2**: Back off exponentially with a **cap** (e.g. doubling to
-  a 4-hour ceiling), never to silence. The cron exists to recover a session
-  interrupted by a rate limit or API error, and in that case a later tick
-  genuinely does help once the limit lifts; unbounded backoff would destroy the
-  feature's reason to exist.
+- [ ] ⬜ **Task 4.5** (found while designing): the suppressor **cannot reach
+  the ledger yet** — `track_plans_in_project` is injected only into
+  planning-tagged handlers and this one is not tagged PLANNING. Decide before
+  Task 4.1; **Plan 00311 Task 1.1** hits the identical obstacle in
+  `dispatch_declaration`, which argues for one shared decision rather than two
+  local workarounds. (DESIGN-cadence.md.)
 
 - [ ] ⬜ **Task 4.3**: Any genuine user message resets the cadence to hourly,
   matching how a user message already clears the marker.
@@ -236,25 +228,23 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 
 ### Phase 5: Measure the stop-hook DENY rate before tuning it
 
-- [ ] ⬜ **Task 5.0** (added after measuring): `stop-events.jsonl` records only
-  `decision`, `reason_prefix`, `stop_hook_active` and `timestamp` — nothing
-  that joins a row to the turn it came from. Task 5.1's correlation is
-  therefore blocked on instrumentation, not effort. Add a session/turn
-  discriminator first. Doing 5.1 without it produces a guess wearing a
-  percentage sign.
+- [ ] ⬜ **Task 5.0** (added after measuring): `stop-events.jsonl` records
+  nothing that joins a row to the turn it came from, so Task 5.1 is blocked on
+  instrumentation rather than effort.
 
-- [ ] ⬜ **Task 5.1**: Classify each DENY as "productive continue" (work
-  followed) or "wasted turn". **Gated on Task 5.0.** What the ledger alone
-  already shows: after de-duplicating re-fires, 50 of today's ~140 logical
-  stops are followed by another stop within TEN SECONDS — too fast for work.
-  Whether that is the hook firing repeatedly for one stop (a defect) or the
-  model emitting a text-only turn and stopping again (agent behaviour) is
-  exactly what the missing turn id would settle.
+  Design settled: add `session_id` **and `transcript_bytes`** — the transcript
+  is append-only, so its size is monotonic and O(1) via `stat`, and two
+  records with the same size are one stop logged twice. That turns Task 5.1
+  into arithmetic over the ledger. Details in
+  [DESIGN-cadence.md](DESIGN-cadence.md).
 
-  Correction to this plan's own Evidence: the "28 DENY in ~34 minutes" figure
-  is inflated. 1291 pairs across the ledger (43 of today's 183 rows) are the
-  same stop logged twice, 51-162 ms apart, differing only in
-  `stop_hook_active` flipping False to True.
+- [ ] ⬜ **Task 5.1**: Classify each DENY as "productive continue" or "wasted
+  turn". **Gated on Task 5.0.** The ledger alone already shows 50 of today's
+  ~140 logical stops are followed by another within TEN SECONDS — too fast for
+  work — but cannot say whether that is the hook re-firing (a defect) or a
+  text-only turn stopping again (agent behaviour). `transcript_bytes` settles
+  it. Also corrects this plan's Evidence: the "28 DENY" figure was inflated by
+  1291 double-logged pairs. (Journal 15:30.)
 
 - [x] ✅ **Task 5.2**: **Not a cadence — the code is exonerated.** Measured over
   all 27 of today's `R-STOP-AFTER-TOOL-ERROR` events, the gaps run 482-3557 s

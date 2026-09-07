@@ -2669,6 +2669,197 @@ class TestArmingVocabularyIsDocumentedWithItsConsequence:
         )
 
 
+class TestExplicitAwaitingHumanToken:
+    """Plan 00337 Phase 3: an exact token, so a rephrasing cannot miss.
+
+    The history is two widenings and two misses. Plan 00298 introduced
+    ``_HUMAN_BLOCKED_PATTERNS``; a dogfood miss led Plan 00314 to widen
+    pattern 4 (``923fd583``); a different phrasing missed again on 2026-09-07
+    and cost four no-op cron ticks. Prose is expected to vary and control
+    signals must be exact, so reconciling the two by regex does not converge.
+
+    The token composes with the prefix the agent already emits, is matched as
+    a literal, and is anchored after ``STOPPING BECAUSE:`` where prose does
+    not produce it by accident. The prose patterns stay as a compatibility
+    fallback — the Non-Goals are explicit that no currently-working phrasing
+    may regress — but they are closed to extension.
+    """
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        return AutoContinueStopHandler()
+
+    def _write_assistant_text(self, path: Path, text: str) -> None:
+        msg = {
+            "type": "message",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
+        }
+        with path.open("w") as f:
+            f.write(json.dumps(msg) + "\n")
+
+    def _arms_marker(self, handler: AutoContinueStopHandler, tmp_path: Path, text: str) -> bool:
+        from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME
+
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(transcript, text)
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-token",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        return (marker_dir / MARKER_FILENAME).exists()
+
+    def test_the_token_arms_the_marker(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        armed = self._arms_marker(
+            handler,
+            tmp_path,
+            "STOPPING BECAUSE: [awaiting-human] the owner has to pick between "
+            "the two migration strategies before anything else can move.",
+        )
+
+        assert armed, (
+            "The explicit token did not arm the human-input marker. That is "
+            "the whole point of Phase 3 — an exact declaration must not "
+            "depend on the surrounding prose matching a regex."
+        )
+
+    def test_the_token_arms_on_wording_no_prose_pattern_matches(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """The regression that motivated the plan, in one test.
+
+        This wording is deliberately outside every existing pattern — the
+        same way 2026-09-07's four stops were. Without the token it arms
+        nothing; with it, it arms.
+        """
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _HUMAN_BLOCKED_PATTERNS,
+        )
+
+        prose = "there is nothing further I can do until a person weighs in"
+        assert not any(pattern.search(prose) for pattern in _HUMAN_BLOCKED_PATTERNS), (
+            "This fixture is meant to be unmatched by the prose patterns. A "
+            "pattern now covers it, so the test no longer proves the token "
+            "adds anything — pick fresh wording rather than deleting the test."
+        )
+
+        assert not self._arms_marker(handler, tmp_path, f"STOPPING BECAUSE: {prose}.")
+        assert self._arms_marker(
+            handler, tmp_path, f"STOPPING BECAUSE: [awaiting-human] {prose}."
+        ), "The token must arm wording that no prose pattern reaches."
+
+    def test_the_token_is_case_insensitive(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Matching the prose patterns' own case handling, so casing is never a trap."""
+        assert self._arms_marker(
+            handler, tmp_path, "STOPPING BECAUSE: [Awaiting-Human] waiting on the owner."
+        )
+
+    def test_the_prose_patterns_still_arm(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """The Non-Goal made executable: no working phrasing may regress."""
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _HUMAN_BLOCKED_EXAMPLES,
+        )
+
+        unarmed = [
+            example
+            for example in _HUMAN_BLOCKED_EXAMPLES
+            if not self._arms_marker(handler, tmp_path, f"STOPPING BECAUSE: {example}.")
+        ]
+
+        assert not unarmed, (
+            f"Adding the token regressed these existing phrasings: {unarmed}. "
+            "The prose patterns are a compatibility fallback and must keep "
+            "working — Plan 00337's Non-Goals say so explicitly."
+        )
+
+    def test_an_undeclared_stop_still_arms_nothing(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """The token must not widen what counts as blocked-on-human."""
+        assert not self._arms_marker(
+            handler,
+            tmp_path,
+            "STOPPING BECAUSE: all tasks complete, QA passes, daemon restart verified.",
+        )
+
+    def test_merely_discussing_the_token_does_not_arm_it(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00228's failure class, found by dogfooding this very change.
+
+        A handler that matches its own trigger vocabulary anywhere in a text
+        fires on prose ABOUT the trigger. ``pipe_blocker`` and ``git_stash``
+        both shipped that bug, and
+        ``tests/integration/test_handlers_do_not_match_prose.py`` guards
+        against it — but only for PreToolUse handlers, by construction (its
+        fixture is a Bash tool call), so a Stop handler gets no cover.
+
+        The consequence here is worse than a false DENY: an agent reporting
+        that it implemented the token would silently arm cron suppression on a
+        session that is not blocked at all, and the symptom is ticks quietly
+        not arriving.
+        """
+        armed = self._arms_marker(
+            handler,
+            tmp_path,
+            "STOPPING BECAUSE: Phase 3 is shipped — the `[awaiting-human]` "
+            "token now arms the marker, and QA is green.",
+        )
+
+        assert not armed, (
+            "A stop message that merely MENTIONS the token armed cron "
+            "suppression. The token must be recognised as a declaration — "
+            "immediately after the STOPPING BECAUSE: prefix, where the "
+            "guidance says to put it — not as a substring anywhere in the "
+            "message."
+        )
+
+    def test_the_token_is_recognised_at_the_declaration_position(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Anchoring must not break the documented usage it exists to protect."""
+        assert self._arms_marker(
+            handler,
+            tmp_path,
+            "STOPPING BECAUSE:   [awaiting-human] the owner has to choose.",
+        ), "Whitespace between the prefix and the token must still be accepted."
+
+    def test_the_guidance_advertises_the_token(self, handler: AutoContinueStopHandler) -> None:
+        """A token nobody is told about is a token nobody uses.
+
+        Phase 2's finding applies to Phase 3 as well: the failure was never
+        that arming was impossible, it was that its existence and its effect
+        were invisible. Shipping recognition without advertising it would
+        repeat that exactly.
+        """
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _AWAITING_HUMAN_SENTINEL,
+        )
+
+        guidance = handler.get_claude_md() or ""
+
+        assert _AWAITING_HUMAN_SENTINEL in guidance, (
+            f"get_claude_md() never shows {_AWAITING_HUMAN_SENTINEL}. The token "
+            "is the supported way to arm cron suppression; an agent that "
+            "cannot see it will keep guessing at prose."
+        )
+
+
 class TestAutoContinueStopAfterToolUseError:
     """Plan 00101 Phase 6: handle() must emit a specific recovery reason after
     a tool_use_error, not the generic explain-or-continue text.

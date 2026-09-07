@@ -130,6 +130,16 @@ _TOOL_ERROR_RECOVERY_REASON = (
 # Prefix an assistant message uses to signal an intentional, explained stop.
 _STOP_EXPLANATION_PREFIX = "STOPPING BECAUSE:"
 
+# CLOSED TO EXTENSION (Plan 00337 Task 3.4). Do NOT add a pattern here when a
+# phrasing is missed -- add nothing, and let the agent use
+# _AWAITING_HUMAN_SENTINEL below. Widening does not converge: Plan 00298
+# introduced this set, a dogfood miss led Plan 00314 to widen pattern 4, and a
+# third phrasing missed anyway and cost four no-op cron ticks. Prose is
+# expected to vary while a control signal must be exact, so every natural
+# rephrasing is a silent miss and the next one is always one rephrasing away.
+# These patterns remain ONLY as a compatibility fallback so no wording that
+# works today regresses.
+#
 # Plan 00298 (widened Plan 00314): narrow "blocked only on human input"
 # shapes. Deliberately a short, enumerated set -- NOT a broad "input"
 # substring match -- because a stop reason that merely MENTIONS human input
@@ -172,6 +182,50 @@ _HUMAN_BLOCKED_EXAMPLES: tuple[str, ...] = (
     "need user input",
     "waiting on the user's decision",
 )
+
+# Plan 00337 Phase 3: the EXPLICIT declaration, and the reason the patterns
+# above are now closed to extension. Prose is expected to vary and a control
+# signal has to be exact, so matching one with the other does not converge --
+# 00298 introduced the patterns, a miss led 00314 to widen pattern 4, and a
+# third phrasing missed anyway. A new wording is handled by this sentinel, NOT
+# by another round of widening. Spelled lower-case because it is what
+# get_claude_md() advertises verbatim; matching is case-insensitive via the
+# anchored pattern below, so casing is never a trap for the agent.
+#
+# NAMED "sentinel" rather than "token", which is what the guidance calls it:
+# bandit's B105 reads any `_TOKEN` identifier holding a literal as a hardcoded
+# credential, and this is not one. The guidance wording is unaffected.
+_AWAITING_HUMAN_SENTINEL = "[awaiting-human]"
+
+# ANCHORED to the declaration position, and that is load-bearing rather than
+# tidiness. A first draft matched the token anywhere in the stop text, and a
+# stop message REPORTING the feature ("Phase 3 is shipped -- the
+# [awaiting-human] token now arms the marker") armed cron suppression on a
+# session that was not blocked at all. That is the Plan 00228 failure class --
+# a handler matching its own trigger vocabulary in prose ABOUT the trigger --
+# and here it fails silently, because the symptom is ticks not arriving.
+# `test_handlers_do_not_match_prose.py` cannot cover this: its fixture is a
+# Bash tool call, so it is scoped to PreToolUse handlers by construction.
+#
+# Anchoring after the prefix costs nothing, because that is exactly where
+# get_claude_md() tells the agent to put it.
+_AWAITING_HUMAN_DECLARATION = re.compile(
+    rf"{re.escape(_STOP_EXPLANATION_PREFIX)}\s*{re.escape(_AWAITING_HUMAN_SENTINEL)}",
+    re.IGNORECASE,
+)
+
+
+def _declares_human_blocked(text: str) -> bool:
+    """Whether a stop declares it is blocked ONLY on the human.
+
+    The token is checked first because it is the supported route. The prose
+    patterns remain as a compatibility fallback so no wording that works
+    today regresses -- Plan 00337's Non-Goals require that explicitly.
+    """
+    if _AWAITING_HUMAN_DECLARATION.search(text):
+        return True
+    return any(pattern.search(text) for pattern in _HUMAN_BLOCKED_PATTERNS)
+
 
 # SINGLE SOURCE OF TRUTH for get_rules() / the disclosure ladder (Plan 00116,
 # Phase 3): one Rule per DENY-branch CONCEPT, not per historical reason
@@ -684,7 +738,7 @@ class AutoContinueStopHandler(StopHandlerBase):
             inside ``write_marker``) is exactly the "matched but not armed"
             case that was previously invisible outside the volatile log ring.
         """
-        if not any(pattern.search(text) for pattern in _HUMAN_BLOCKED_PATTERNS):
+        if not _declares_human_blocked(text):
             return None
         session_id = hook_input.get(HookInputField.SESSION_ID)
         if not isinstance(session_id, str) or not session_id:
@@ -1078,9 +1132,17 @@ class AutoContinueStopHandler(StopHandlerBase):
             "with `STOPPING BECAUSE:` or continue the work. Re-entry does not "
             "exempt you from the explanation rule.\n\n"
             "**If you are stopping because you are blocked ONLY on the human, "
-            "say so in one of these exact shapes — it turns the failsafe cron "
-            "off**:\n\n" + "".join(f"- `{example}`\n" for example in _HUMAN_BLOCKED_EXAMPLES) + "\n"
-            "Any of them in your `STOPPING BECAUSE:` line records a marker that "
+            "declare it — it turns the failsafe cron off**. Put the token "
+            f"immediately after the prefix:\n\n```\nSTOPPING BECAUSE: "
+            f"{_AWAITING_HUMAN_SENTINEL} the owner has to choose between A and B "
+            "before anything else can move.\n```\n\n"
+            "The token is matched exactly, so any wording after it works. These "
+            "older phrasings are also still recognised, and are kept working "
+            "rather than extended — a new wording is handled by the token, not "
+            "by adding another phrase here:\n\n"
+            + "".join(f"- `{example}`\n" for example in _HUMAN_BLOCKED_EXAMPLES)
+            + "\n"
+            "Either form in your `STOPPING BECAUSE:` line records a marker that "
             "makes the daemon drop the next hourly failsafe-cron tick before it "
             "reaches you, at zero token cost. Without one, every tick costs a "
             "full turn to read and answer with nothing. The next real user "
