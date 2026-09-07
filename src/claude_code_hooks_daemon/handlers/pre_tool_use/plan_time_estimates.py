@@ -221,16 +221,27 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Plan Time Estimates."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        # Stated once; the prose is rendered from it (Plan 00243).
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "Plan", "001-test", "PLAN.md")),
+                "content": "# Plan 001\n\n**Estimated Effort**: 4 hours\n\nTask list here.",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Block time estimates in plan",
-                command=(
-                    "Use the Write tool to write to "
-                    f"{scratch_path(_FIXTURE_DIR, 'Plan', '001-test', 'PLAN.md')}"
-                    " with content '# Plan 001\\n\\n**Estimated Effort**: 4 hours\\n\\nTask list here.'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Blocks time estimates in plan documents (plans focus on WHAT not WHEN)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"time estimate", r"BLOCKED"],

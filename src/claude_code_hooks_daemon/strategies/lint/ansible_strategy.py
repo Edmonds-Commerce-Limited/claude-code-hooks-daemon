@@ -140,23 +140,46 @@ class AnsibleLintStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for the Ansible lint strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe_valid = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "playbooks", "valid.yml")),
+                "content": "---\n- hosts: all\n  tasks: []\n",
+            },
+        )
+        probe_broken = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "playbooks", "broken.yml")),
+                "content": (
+                    "---\n- hosts: all\n  tasks:\n    - name: report\n"
+                    '      ansible.builtin.shell: echo "it is broken\n'
+                ),
+            },
+        )
+        probe_workflow = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, ".github", "workflows", "ci.yml")),
+                "content": "---\non:\n  push:\njobs: {}\n",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Ansible lint - valid playbook passes",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'playbooks', 'valid.yml')} "
-                    'with content "---\\n- hosts: all\\n  tasks: []\\n"'
-                ),
+                command=probe_valid.as_instruction(),
+                tool_payload=probe_valid,
                 description="A well-formed playbook should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
@@ -172,13 +195,8 @@ class AnsibleLintStrategy:
             ),
             AcceptanceTest(
                 title="Ansible lint - unloadable playbook blocked",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'playbooks', 'broken.yml')} "
-                    'with content "---\\n- hosts: all\\n  tasks:\\n'
-                    "    - name: report\\n"
-                    '      ansible.builtin.shell: echo \\"it is broken\\n"'
-                ),
+                command=probe_broken.as_instruction(),
+                tool_payload=probe_broken,
                 description=(
                     "An unbalanced quote inside a shell block aborts the play load; "
                     "the write has already landed, so the denial is a failure report "
@@ -198,11 +216,8 @@ class AnsibleLintStrategy:
             ),
             AcceptanceTest(
                 title="Ansible lint - a GitHub workflow is not claimed",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, '.github', 'workflows', 'ci.yml')} "
-                    'with content "---\\non:\\n  push:\\njobs: {}\\n"'
-                ),
+                command=probe_workflow.as_instruction(),
+                tool_payload=probe_workflow,
                 description=(
                     "Sharing the .yml extension is not sharing a language; a workflow "
                     "must never be handed to ansible-playbook."

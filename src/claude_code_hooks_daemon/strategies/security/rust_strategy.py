@@ -3,8 +3,11 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "Rust"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-security-rust"
 _EXTENSIONS: tuple[str, ...] = (".rs",)
 
 _OWASP_CATEGORY = "A03"
@@ -47,20 +50,28 @@ class RustSecurityStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Rust security strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        transmute_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.rs")),
+                "content": "let x: u32 = std::mem::transmute(y);",
+            },
         )
 
         return [
             AcceptanceTest(
                 title="Block Rust transmute in source file",
-                command=(
-                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.rs' "
-                    "with content 'let x: u32 = std::mem::transmute(y);'"
-                ),
+                command=transmute_probe.as_instruction(),
+                tool_payload=transmute_probe,
                 description="Blocks writing Rust file with transmute call",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

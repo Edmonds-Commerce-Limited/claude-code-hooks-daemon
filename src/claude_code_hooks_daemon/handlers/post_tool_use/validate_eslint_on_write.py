@@ -404,16 +404,27 @@ is not evidence that a `.ts` file is clean."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        # Stated once; the prose is rendered from it (Plan 00243).
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "test.ts")),
+                "content": "const x = 1;",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="ESLint validation on TypeScript file write",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'test.ts')} "
-                    'with content "const x = 1;"'
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description=(
                     "Triggers ESLint validation after writing TypeScript file. "
                     "If llm: commands exist in package.json, runs ESLint. "

@@ -88,23 +88,29 @@ class PhpTddStrategy:
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for PHP TDD strategy."""
 
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "src", "Services", "UserService.php")),
+                "content": "<?php\n\nclass UserService {}",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="TDD enforcement for PHP source file",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'src', 'Services', 'UserService.php')} "
-                    "with content '<?php\\n\\nclass UserService {}'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Blocks PHP source file creation without corresponding test file",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED \[R-TDD-TEST-FIRST\]", r"PHP", r"test file"],

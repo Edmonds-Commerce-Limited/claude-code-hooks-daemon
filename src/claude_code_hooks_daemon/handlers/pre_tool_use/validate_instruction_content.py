@@ -13,7 +13,12 @@ from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import GatingResult, get_data_layer
-from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest, RecommendedModel, TestType
+from claude_code_hooks_daemon.core.acceptance_test import (
+    AcceptanceTest,
+    RecommendedModel,
+    TestType,
+    ToolPayload,
+)
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -315,14 +320,27 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Return acceptance tests for this handler."""
+        # Stated once; the prose is rendered from it (Plan 00243).
+        implementation_log_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "CLAUDE.md")),
+                "content": "Created the file ProductService.php and added the class",
+            },
+        )
+        clean_content_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "CLAUDE.md")),
+                "content": "# Project Instructions\n\nUse strict typing for all modules.",
+            },
+        )
+
         return [
             AcceptanceTest(
                 title="Block implementation log in CLAUDE.md",
-                command=(
-                    "Use the Write tool to write to "
-                    f"{scratch_path(_FIXTURE_DIR, 'CLAUDE.md')}"
-                    " with content 'Created the file ProductService.php and added the class'"
-                ),
+                command=implementation_log_probe.as_instruction(),
+                tool_payload=implementation_log_probe,
                 description="Prevents implementation logs from being written to instruction files",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"implementation logs", r"BLOCKED"],
@@ -338,11 +356,8 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Allow clean instructions in CLAUDE.md",
-                command=(
-                    "Use the Write tool to write to "
-                    f"{scratch_path(_FIXTURE_DIR, 'CLAUDE.md')}"
-                    " with content '# Project Instructions\\n\\nUse strict typing for all modules.'"
-                ),
+                command=clean_content_probe.as_instruction(),
+                tool_payload=clean_content_probe,
                 description="Allows clean instructional content without ephemeral patterns",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"validated"],

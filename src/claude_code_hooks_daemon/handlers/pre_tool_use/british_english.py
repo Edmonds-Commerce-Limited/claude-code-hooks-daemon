@@ -208,16 +208,27 @@ class BritishEnglishHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for British English."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        # Stated once; the prose is rendered from it (Plan 00243).
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "docs", "style-guide.md")),
+                "content": "The color of the organization logo should favor readability.",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="American spellings in markdown",
-                command=(
-                    "Use the Write tool to write to "
-                    f"{scratch_path(_FIXTURE_DIR, 'docs', 'style-guide.md')}"
-                    " with content 'The color of the organization logo should favor readability.'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Advises British spellings but allows operation (advisory)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"colour", r"British"],

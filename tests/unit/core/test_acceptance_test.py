@@ -386,6 +386,76 @@ class TestToolPayloadField:
         assert test.command == prose
 
 
+class TestPayloadRendersItsOwnInstruction:
+    """`as_instruction()` renders the human sentence FROM the payload.
+
+    The audit counted FIVE grammars expressing one Write payload —
+    "create file X with content Y", "write file_path='X' with content 'Y'",
+    "Write file_path=\"X\" content=\"Y\"", and two more. They exist because
+    each site hand-wrote its own sentence next to its own values, so the two
+    could disagree and nothing would notice.
+
+    Rendering the sentence from the payload removes the second copy. A site
+    states the payload once; the prose is derived, so a harness and a human
+    tester are reading the same fact by construction rather than by review.
+    """
+
+    def test_write_payload_names_the_tool_and_both_arguments(self):
+        payload = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={"file_path": "/repo/x.py", "content": "x = 1"},
+        )
+        instruction = payload.as_instruction()
+
+        assert "Write" in instruction
+        assert "/repo/x.py" in instruction
+        assert "x = 1" in instruction
+
+    def test_instruction_is_stable_regardless_of_key_order(self):
+        """Two sites stating the same payload must read identically.
+
+        Dict order follows insertion, so without this the same probe written
+        by two authors renders as two grammars again — the exact defect.
+        """
+        a = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={"file_path": "/repo/x.py", "content": "x = 1"},
+        )
+        b = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={"content": "x = 1", "file_path": "/repo/x.py"},
+        )
+        assert a.as_instruction() == b.as_instruction()
+
+    def test_works_for_a_tool_that_is_not_write(self):
+        """The grammar is generic — nothing about it is Write-specific."""
+        payload = ToolPayload(
+            tool_name=ToolName.EDIT,
+            tool_input={"file_path": "/repo/x.py", "old_string": "a", "new_string": "b"},
+        )
+        instruction = payload.as_instruction()
+
+        assert "Edit" in instruction
+        assert "old_string" in instruction
+        assert "new_string" in instruction
+
+    def test_a_tool_with_no_arguments_still_reads_as_a_sentence(self):
+        payload = ToolPayload(tool_name="AskUserQuestion")
+        assert "AskUserQuestion" in payload.as_instruction()
+
+    def test_multiline_content_is_rendered_readably(self):
+        """A newline inside a sentence would break the playbook's layout.
+
+        The playbook renders this inline in a `**Command**` block, so a raw
+        newline would split one instruction across two lines and read as two.
+        """
+        payload = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={"file_path": "/a.py", "content": "line one\nline two"},
+        )
+        assert "\n" not in payload.as_instruction()
+
+
 class TestAcceptanceTestValidation:
     """Test validation of AcceptanceTest fields."""
 

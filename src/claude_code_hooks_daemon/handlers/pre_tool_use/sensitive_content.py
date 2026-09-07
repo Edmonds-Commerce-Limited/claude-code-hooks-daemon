@@ -567,16 +567,42 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             AcceptanceTest,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        # Plan 00243: only the PUBLIC-pattern probes can declare a payload.
+        #
+        # The secret-word-list probes below deliberately do NOT get one, and
+        # that is a ruling rather than an omission. A declared payload has to
+        # CONTAIN the content it sends, so giving one to a secret-list probe
+        # would mean committing a live blocked term into tracked source -- the
+        # one outcome the word list exists to prevent, and irreversible once
+        # pushed. Their `command` therefore stays an instruction telling a
+        # human tester to supply the term at test time, where it reaches no
+        # file. Do not "finish the job" by inventing a payload for them.
+        public_pattern_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": "untracked/scratch/sensitive-public-pattern-probe.txt",
+                "content": "deploy target: /var/www/vhosts/example",
+            },
+        )
+        clean_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": "untracked/scratch/sensitive-clean-probe.txt",
+                "content": "The quick brown fox jumps over the lazy dog.\n",
+            },
         )
 
         return [
             AcceptanceTest(
                 title="sensitive_content - blocks a configured public pattern",
                 command=(
-                    "Use the Write tool to write content containing "
-                    "`/var/www/vhosts/example` to a scratch file, with "
-                    "public_patterns configured to match `/var/www/vhosts`"
+                    f"{public_pattern_probe.as_instruction()} "
+                    "-- with public_patterns configured to match `/var/www/vhosts`"
                 ),
+                tool_payload=public_pattern_probe,
                 description=(
                     "Content matching a configured public pattern is denied with a "
                     "reason naming the pattern and the matched text."
@@ -657,7 +683,8 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="sensitive_content - allows clean content",
-                command="Use the Write tool to write plain, unremarkable content to a scratch file",
+                command=clean_probe.as_instruction(),
+                tool_payload=clean_probe,
                 description="Content matching neither source passes silently.",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

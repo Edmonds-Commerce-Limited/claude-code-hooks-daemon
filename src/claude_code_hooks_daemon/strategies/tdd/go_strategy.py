@@ -54,23 +54,33 @@ class GoTddStrategy:
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Go TDD strategy."""
 
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        # Stated ONCE, and the prose is rendered from it (Plan 00243). The
+        # payload is what a harness dispatches; `as_instruction()` is what a
+        # human tester reads. Hand-writing both is what let five grammars and
+        # a drifting path into the same field.
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "src", "myapp", "server.go")),
+                "content": "package main\n\nfunc main() {}",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="TDD enforcement for Go source file",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'src', 'myapp', 'server.go')} "
-                    "with content 'package main\\n\\nfunc main() {}'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Blocks Go source file creation without corresponding test file",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED \[R-TDD-TEST-FIRST\]", r"Go", r"test file"],

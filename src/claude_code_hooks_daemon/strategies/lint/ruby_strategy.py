@@ -43,23 +43,36 @@ class RubyLintStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Ruby lint strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe_valid = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.rb")),
+                "content": "puts 'hello'",
+            },
+        )
+        probe_invalid = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.rb")),
+                "content": "def hello\n  puts 'missing end'",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Ruby lint - valid code passes",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'valid.rb')} "
-                    "with content \"puts 'hello'\""
-                ),
+                command=probe_valid.as_instruction(),
+                tool_payload=probe_valid,
                 description="Valid Ruby code should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
@@ -74,11 +87,8 @@ class RubyLintStrategy:
             ),
             AcceptanceTest(
                 title="Ruby lint - invalid code blocked",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'invalid.rb')} "
-                    "with content \"def hello\\n  puts 'missing end'\""
-                ),
+                command=probe_invalid.as_instruction(),
+                tool_payload=probe_invalid,
                 description="Invalid Ruby code (missing end) should be blocked",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Ruby lint FAILED", r"invalid.rb"],

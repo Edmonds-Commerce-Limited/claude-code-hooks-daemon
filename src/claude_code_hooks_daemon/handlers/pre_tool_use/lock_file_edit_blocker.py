@@ -229,16 +229,37 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for lock file edit blocker handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        # Stated once; the prose is rendered from it (Plan 00243). A harness
+        # dispatches the payload, a human tester reads `as_instruction()` --
+        # hand-writing both is what let the two drift apart.
+        write_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "package-lock.json")),
+                "content": "{}",
+            },
+        )
+        edit_probe = ToolPayload(
+            tool_name=ToolName.EDIT,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "Cargo.lock")),
+                "old_string": "old",
+                "new_string": "new",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Write to package-lock.json",
-                command=(
-                    "Use the Write tool to write to "
-                    f"{scratch_path(_FIXTURE_DIR, 'package-lock.json')} "
-                    "with content '{}'"
-                ),
+                command=write_probe.as_instruction(),
+                tool_payload=write_probe,
                 description="Blocks direct editing of package-lock.json (corruption risk)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -258,10 +279,8 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Edit Cargo.lock",
-                command=(
-                    f"Use the Edit tool on {scratch_path(_FIXTURE_DIR, 'Cargo.lock')} "
-                    "with old_string 'old' and new_string 'new'"
-                ),
+                command=edit_probe.as_instruction(),
+                tool_payload=edit_probe,
                 description="Blocks direct editing of Cargo.lock",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

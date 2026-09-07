@@ -41,6 +41,7 @@ separate handler rather than weakening an existing one to make room.
 import logging
 import os
 import shlex
+import tempfile
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -535,15 +536,49 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         created, and a `mkdir` outside the repo would be this handler's own
         business anyway.
         """
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        # Stated once; the prose is rendered from it (Plan 00243). These are
+        # the only declared payloads that deliberately point OUTSIDE the
+        # repository, and they have to: a handler whose entire contract is
+        # "deny an out-of-repo write" cannot be exercised by a path inside one.
+        #
+        # Asked for rather than written literally, because a declared payload
+        # is DISPATCHED. The system temp directory is the one place that is
+        # outside the working tree on every platform and ephemeral by
+        # definition, so the write a REGRESSED handler would let through lands
+        # somewhere carrying no code, no credential and nothing tracked -- and
+        # it stays correct on a machine where `/tmp` is not the temp directory.
+        outside_dir = Path(tempfile.gettempdir()) / "acceptance-test-containment"
+        outside_write_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(outside_dir / "probe.md"),
+                "content": "# probe",
+            },
+        )
+        outside_bash_probe = ToolPayload(
+            tool_name=ToolName.BASH,
+            tool_input={"command": f"echo probe > {outside_dir}.txt"},
+        )
+        inside_write_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path("acceptance-probe.md")),
+                "content": "# probe",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Write to a path outside the repository",
-                command=(
-                    "Use the Write tool to write to "
-                    "/tmp/acceptance-test-containment/probe.md with content '# probe'"
-                ),
+                command=outside_write_probe.as_instruction(),
+                tool_payload=outside_write_probe,
                 description="Blocks a write to an ephemeral location outside the repo",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -560,7 +595,8 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Bash redirect to a path outside the repository",
-                command=("Run the bash command: echo probe > /tmp/acceptance-test-containment.txt"),
+                command=outside_bash_probe.as_instruction(),
+                tool_payload=outside_bash_probe,
                 description="Blocks the Bash side-door as well as the Write tool",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -576,15 +612,13 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="The same scratch write, inside the repository",
-                command=(
-                    # Absolute, unlike the tracked guidance that names the same
-                    # directory relatively (Decision 10): the playbook renders
-                    # this verbatim for an agent, and a relative file_path is
-                    # denied by AbsolutePathHandler first -- which would turn
-                    # this ALLOW case into a pass for entirely the wrong reason.
-                    f"Use the Write tool to write to {scratch_path('acceptance-probe.md')} "
-                    "with content '# probe'"
-                ),
+                # Absolute, unlike the tracked guidance that names the same
+                # directory relatively (Decision 10): the playbook renders
+                # this verbatim for an agent, and a relative file_path is
+                # denied by AbsolutePathHandler first -- which would turn
+                # this ALLOW case into a pass for entirely the wrong reason.
+                command=inside_write_probe.as_instruction(),
+                tool_payload=inside_write_probe,
                 description=(
                     "The near miss: identical intent and identical content, differing "
                     "only in whether the destination is inside the repo. A guard that "

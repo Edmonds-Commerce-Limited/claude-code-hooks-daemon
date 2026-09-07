@@ -42,26 +42,39 @@ class ShellCommentStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Shell comment-changelog detection."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        # The hash marker and the dated/versioned history phrase below are
+        # split across separate string-literal lines (same runtime value once
+        # concatenated) so this SOURCE line does not itself read as a
+        # changelog comment to comment_changelog's own line-based scan of
+        # this file. Version variable name/shape mirrors the field report
+        # itself, see PROPOSAL.md.
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "example.sh")),
+                "content": (
+                    'CCY_VERSION="3.27.1"  #'
+                    " Patch: 3.27.0 was assigned. Prior 3.26.2: whitelisted the "
+                    "supervisor. Prior 3.26.1: fixed a different bug.\n"
+                ),
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Shell: version-marker trailing comment changelog is blocked",
-                command=(
-                    "Use the Write tool to create "
-                    f"{scratch_path(_FIXTURE_DIR, 'example.sh')} whose "
-                    "content has a version variable line with a trailing '#' comment "
-                    "reading changelog-style history: 'Patch: 3.27.0 was assigned. "
-                    "Prior 3.26.2: whitelisted the supervisor. Prior 3.26.1: fixed "
-                    "a different bug.' (the exact real-world shape reported)"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description=(
                     "Blocks the field-report shape: a bash version-marker trailing "
                     "comment carrying release-numbered history"

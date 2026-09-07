@@ -43,23 +43,36 @@ class DartLintStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Dart lint strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe_valid = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.dart")),
+                "content": "void main() { print('hello'); }",
+            },
+        )
+        probe_invalid = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.dart")),
+                "content": "void main( { print('hello'); }",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Dart lint - valid code passes",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'valid.dart')} "
-                    "with content \"void main() { print('hello'); }\""
-                ),
+                command=probe_valid.as_instruction(),
+                tool_payload=probe_valid,
                 description="Valid Dart code should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
@@ -74,11 +87,8 @@ class DartLintStrategy:
             ),
             AcceptanceTest(
                 title="Dart lint - invalid code blocked",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'invalid.dart')} "
-                    "with content \"void main( { print('hello'); }\""
-                ),
+                command=probe_invalid.as_instruction(),
+                tool_payload=probe_invalid,
                 description="Invalid Dart code (missing closing paren) should be blocked",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Dart lint FAILED", r"invalid.dart"],

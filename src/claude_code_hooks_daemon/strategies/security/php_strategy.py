@@ -3,8 +3,11 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "PHP"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-security-php"
 _EXTENSIONS: tuple[str, ...] = (".php",)
 
 _OWASP_CATEGORY = "A03"
@@ -76,20 +79,28 @@ class PhpSecurityStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for PHP security strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        eval_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.php")),
+                "content": "<?php eval($userInput);",
+            },
         )
 
         return [
             AcceptanceTest(
                 title="Block PHP eval in source file",
-                command=(
-                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.php' "
-                    "with content '<?php eval($userInput);'"
-                ),
+                command=eval_probe.as_instruction(),
+                tool_payload=eval_probe,
                 description="Blocks writing PHP file with eval() call",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

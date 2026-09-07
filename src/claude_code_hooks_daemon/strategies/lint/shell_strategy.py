@@ -43,23 +43,36 @@ class ShellLintStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Shell lint strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe_valid = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.sh")),
+                "content": "#!/bin/bash\necho hello",
+            },
+        )
+        probe_invalid = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.sh")),
+                "content": "#!/bin/bash\nif [ -f file ]; then\necho missing fi",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Shell lint - valid code passes",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'valid.sh')} "
-                    'with content "#!/bin/bash\\necho hello"'
-                ),
+                command=probe_valid.as_instruction(),
+                tool_payload=probe_valid,
                 description="Valid Shell script should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
@@ -75,11 +88,8 @@ class ShellLintStrategy:
             ),
             AcceptanceTest(
                 title="Shell lint - invalid code blocked",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'invalid.sh')} "
-                    'with content "#!/bin/bash\\nif [ -f file ]; then\\necho missing fi"'
-                ),
+                command=probe_invalid.as_instruction(),
+                tool_payload=probe_invalid,
                 description="Invalid Shell script (missing fi) should be blocked",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Shell lint FAILED", r"invalid.sh", r"syntax error"],

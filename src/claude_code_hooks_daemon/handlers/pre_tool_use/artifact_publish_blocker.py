@@ -287,7 +287,18 @@ is the backstop until the current session ends."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests: one DENY case and one ALLOW case."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        # Stated once; the prose is rendered from it (Plan 00243).
+        list_probe = ToolPayload(
+            tool_name=ToolName.ARTIFACT,
+            tool_input={"action": "list", "limit": 1},
+        )
 
         return [
             AcceptanceTest(
@@ -315,7 +326,8 @@ is the backstop until the current session ends."""
             ),
             AcceptanceTest(
                 title="Artifact list is allowed",
-                command='Use the Artifact tool with action: "list" and limit: 1.',
+                command=list_probe.as_instruction(),
+                tool_payload=list_probe,
                 description=(
                     "Read-only enumeration is NOT blocked - proves the matcher is "
                     "not over-broad, which a deny-only suite cannot show"

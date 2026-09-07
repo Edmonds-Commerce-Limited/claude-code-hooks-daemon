@@ -43,25 +43,32 @@ class DartCommentStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Dart comment-changelog detection."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "example.dart")),
+                "content": (
+                    'const String version = "3.2.3"; // Prior 3.2.2: fixed a race. '
+                    "Prior 3.2.1: original broken behaviour.\n"
+                ),
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Dart: changelog narrative in a comment is blocked",
-                command=(
-                    "Use the Write tool to create "
-                    f"{scratch_path(_FIXTURE_DIR, 'example.dart')} whose "
-                    "content has a trailing '//' comment reading changelog-style "
-                    "history: 'Prior 3.2.2: fixed a race. Prior 3.2.1: original "
-                    "broken behaviour.'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description=(
                     "Blocks a Dart trailing comment carrying multiple "
                     "'Prior <version>:' dated/versioned entries"

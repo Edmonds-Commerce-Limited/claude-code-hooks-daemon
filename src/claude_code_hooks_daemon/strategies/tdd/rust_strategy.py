@@ -55,23 +55,29 @@ class RustTddStrategy:
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Rust TDD strategy."""
 
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "src", "parser.rs")),
+                "content": "pub fn parse() {}",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="TDD enforcement for Rust source file",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'src', 'parser.rs')} "
-                    "with content 'pub fn parse() {}'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Blocks Rust source file creation without corresponding test file",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED \[R-TDD-TEST-FIRST\]", r"Rust", r"test file"],

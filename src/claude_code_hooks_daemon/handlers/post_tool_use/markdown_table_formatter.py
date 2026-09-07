@@ -323,21 +323,33 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Acceptance tests for the handler — Write/Edit of .md files."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        # Stated once; the prose is rendered from it (Plan 00243). This one
+        # shows why: the misaligned pipes ARE the fixture, so a tester
+        # retyping them from a sentence could accidentally align them and
+        # the handler would then correctly do nothing.
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "doc.md")),
+                "content": (
+                    "# Test\n\n| Name | Value |\n|---|---|\n"
+                    "| Short | x |\n| Very Long Name | y |\n"
+                ),
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Markdown table auto-alignment after Write",
-                command=(
-                    "Use the Write tool to create "
-                    f"{scratch_path(_FIXTURE_DIR, 'doc.md')} "
-                    "with content:\n"
-                    "# Test\n\n"
-                    "| Name | Value |\n"
-                    "|---|---|\n"
-                    "| Short | x |\n"
-                    "| Very Long Name | y |\n"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description=(
                     "Writes a markdown file with unaligned table pipes. "
                     "PostToolUse handler reformats the file so pipes are "

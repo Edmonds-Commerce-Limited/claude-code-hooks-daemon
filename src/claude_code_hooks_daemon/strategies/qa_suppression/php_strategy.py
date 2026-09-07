@@ -68,22 +68,43 @@ class PhpQaSuppressionStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for PHP QA suppression strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe_ignore_next_line = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "phpstan-next-line.php")),
+                "content": "<?php /** @phpstan-" + "ignore-next-line" + " */ $x = 1;",
+            },
+        )
+        probe_ignore = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "phpstan-ignore.php")),
+                "content": "<?php /** @phpstan-" + "ignore" + " argument.type */ $x = 1;",
+            },
+        )
+        probe_phpcs_disable = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "phpcs-disable.php")),
+                "content": "<?php // phpcs:" + "disable" + "\n$x = 1;",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="PHP @phpstan-ignore-next-line blocked",
-                command=(
-                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "phpstan-next-line.php")}"'
-                    ' content="<?php /** @phpstan-' + "ignore-next-line" + ' */ $x = 1;"'
-                ),
+                command=probe_ignore_next_line.as_instruction(),
+                tool_payload=probe_ignore_next_line,
                 description="Should block @phpstan-ignore-next-line suppression",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "PHP"],
@@ -96,10 +117,8 @@ class PhpQaSuppressionStrategy:
             ),
             AcceptanceTest(
                 title="PHP @phpstan-ignore (with identifier) blocked",
-                command=(
-                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "phpstan-ignore.php")}"'
-                    ' content="<?php /** @phpstan-' + "ignore" + ' argument.type */ $x = 1;"'
-                ),
+                command=probe_ignore.as_instruction(),
+                tool_payload=probe_ignore,
                 description="Should block @phpstan-ignore with error identifier (modern pattern)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "PHP"],
@@ -112,10 +131,8 @@ class PhpQaSuppressionStrategy:
             ),
             AcceptanceTest(
                 title="PHP phpcs:disable blocked",
-                command=(
-                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "phpcs-disable.php")}"'
-                    ' content="<?php // phpcs:' + "disable" + '\\n$x = 1;"'
-                ),
+                command=probe_phpcs_disable.as_instruction(),
+                tool_payload=probe_phpcs_disable,
                 description="Should block phpcs:disable block-level suppression",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "PHP"],

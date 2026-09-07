@@ -61,22 +61,29 @@ class JavaScriptQaSuppressionStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for JavaScript/TypeScript QA suppression strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "example.ts")),
+                "content": "// eslint-" + "disable" + " no-console\nconst x = 1;",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="JavaScript/TypeScript QA suppression blocked",
-                command=(
-                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "example.ts")}"'
-                    ' content="// eslint-' + "disable" + ' no-console\\nconst x = 1;"'
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Should block JavaScript/TypeScript QA suppression comment",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

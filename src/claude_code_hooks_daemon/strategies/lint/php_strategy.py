@@ -43,23 +43,36 @@ class PhpLintStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for PHP lint strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe_valid = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.php")),
+                "content": "<?php echo 'hello'; ?>",
+            },
+        )
+        probe_invalid = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.php")),
+                "content": "<?php\necho 'hello'\necho 'world';",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="PHP lint - valid code passes",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'valid.php')} "
-                    "with content \"<?php echo 'hello'; ?>\""
-                ),
+                command=probe_valid.as_instruction(),
+                tool_payload=probe_valid,
                 description="Valid PHP code should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
@@ -74,11 +87,8 @@ class PhpLintStrategy:
             ),
             AcceptanceTest(
                 title="PHP lint - invalid code blocked",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'invalid.php')} "
-                    "with content \"<?php\\necho 'hello'\\necho 'world';\""
-                ),
+                command=probe_invalid.as_instruction(),
+                tool_payload=probe_invalid,
                 description=(
                     "Invalid PHP code (missing semicolon between echo statements) "
                     "should be blocked. Note: '<?php echo x ?>' is VALID PHP — "

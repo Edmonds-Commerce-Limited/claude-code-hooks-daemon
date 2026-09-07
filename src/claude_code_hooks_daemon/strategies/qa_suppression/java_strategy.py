@@ -58,24 +58,29 @@ class JavaQaSuppressionStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Java QA suppression strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "Example.java")),
+                "content": "@Suppress" + "Warnings" + '("unchecked")\npublic class Example {}',
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Java QA suppression blocked",
-                command=(
-                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "Example.java")}"'
-                    ' content="@Suppress'
-                    + "Warnings"
-                    + '(\\"unchecked\\")\\npublic class Example {}"'
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Should block Java QA suppression annotation",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "Java"],

@@ -68,23 +68,29 @@ class JavaScriptTddStrategy:
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for JavaScript/TypeScript TDD strategy."""
 
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "src", "utils", "helper.ts")),
+                "content": "export function helper() {}",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="TDD enforcement for JavaScript/TypeScript source file",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'src', 'utils', 'helper.ts')} "
-                    "with content 'export function helper() {}'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Blocks JavaScript/TypeScript source file creation without corresponding test file",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

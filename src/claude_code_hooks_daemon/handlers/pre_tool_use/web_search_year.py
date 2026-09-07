@@ -79,12 +79,24 @@ class WebSearchYearHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Web Search Year."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        # Stated once; the prose is rendered from it (Plan 00243).
+        outdated_query_probe = ToolPayload(
+            tool_name=ToolName.WEB_SEARCH,
+            tool_input={"query": "Python best practices 2024"},
+        )
 
         return [
             AcceptanceTest(
                 title="Outdated year in search query",
-                command="Use the WebSearch tool with query 'Python best practices 2024'",
+                command=outdated_query_probe.as_instruction(),
+                tool_payload=outdated_query_probe,
                 description="Advises current year for web searches (advisory)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"current year", r"2026"],

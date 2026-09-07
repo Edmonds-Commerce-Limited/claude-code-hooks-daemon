@@ -15,6 +15,10 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_content, get_file_path
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
+#: Scratch subdirectory for this handler's acceptance-test fixtures.
+_FIXTURE_DIR = "acceptance-test-sed"
 
 # Shared teaching content for the SINGLE deny concept this handler enforces
 # (Plan 00116: sed_blocker collapses to one Rule -- every matched shape is the
@@ -397,7 +401,29 @@ class SedBlockerHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for sed blocker handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        # Stated once; the prose is rendered from it (Plan 00243). Built with
+        # `scratch_path` rather than an open-coded string: `untracked/` alone
+        # is not the sanctioned probe location, and this payload is now
+        # DISPATCHED rather than read, so a regressed handler would leave the
+        # file behind outside the scratch directory.
+        #
+        # The `.sh` extension is load-bearing -- this handler only inspects
+        # content for `.sh`/`.bash` writes -- so it must survive any later
+        # move of this fixture.
+        strict_mode_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": scratch_path(_FIXTURE_DIR, "test_sed_acceptance.sh"),
+                "content": '#!/bin/bash\nsed -i "s/foo/bar/g" file.txt',
+            },
+        )
 
         return [
             AcceptanceTest(
@@ -432,11 +458,8 @@ class SedBlockerHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Write tool: shell script with sed (strict mode)",
-                command=(
-                    "Use the Write tool to write "
-                    "file_path='$CLAUDE_PROJECT_DIR/untracked/test_sed_acceptance.sh' "
-                    "with content '#!/bin/bash\\nsed -i \"s/foo/bar/g\" file.txt'"
-                ),
+                command=strict_mode_probe.as_instruction(),
+                tool_payload=strict_mode_probe,
                 description=(
                     "In strict mode (default), blocks the Write tool from creating shell "
                     "scripts containing sed. The hook should block the Write call before "

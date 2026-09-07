@@ -139,8 +139,17 @@ results, so they are prerequisites, not follow-ups.
     `Write`. Rewriting such a test as `echo … > f` would assert the opposite
     of what it means to assert. The audit's own bottom line already pointed
     here — the structured field is the fix, not string normalisation
-- [ ] ⬜ **Task 1.2**: Populate `tool_payload` on the 76 convertible prose
-  tests (five grammars, one Write payload). Now a declaration, not a regex
+- [x] ✅ **Task 1.2**: 97 of 119 prose tests now declare `tool_payload`. Not
+  done by normalising five grammars into a sixth: `as_instruction()` renders
+  the sentence FROM the payload, so a site states it once and the two cannot
+  drift. The 22 remaining are deliberate, in three kinds — `harness_cannot_produce`
+  (2), content a payload must never CARRY (3 `sensitive_content`, which would
+  mean committing a live blocked term into tracked source), and stateful
+  SEQUENCES whose assertion is an observation a one-call payload cannot express
+  (17). Each is recorded where a reader will meet it
+  - [x] ✅ All 97 dispatched in-process against their own handlers: 59 DENY
+    confirmed, 27 ALLOW correct, 11 explained by two harness requirements
+    (see Task 2.1), zero payload defects
 - [x] ✅ **Task 1.4**: Rendered in both directions — `generate_json` emits
   `tool_payload` (caught on its own commit by Task 0.2's dataclass-derived
   coverage guard), and `_tool_payload_block` renders it in the markdown beside
@@ -150,6 +159,16 @@ results, so they are prerequisites, not follow-ups.
 ### Phase 2: The harness
 
 - [ ] ⬜ **Task 2.1**: Promote the ad-hoc script to `tests/acceptance/`
+  - [ ] ⬜ **Two requirements measured under Task 1.2, not guessed.** A probe
+    dispatch that ignores either reports false failures on its FIRST run — the
+    exact outcome that gets a harness switched off:
+    1. **Expand `$CLAUDE_PROJECT_DIR`.** Payload paths are stored unexpanded so
+       the playbook stays portable (`scratch_path`, `project_dir_path`); a
+       harness that passes the literal string writes to a path that cannot exist
+    2. **PERFORM the write before dispatching a PostToolUse probe.**
+       `lint_on_edit._is_lintable` ends with `Path(file_path).exists()`, which is
+       load-bearing and documented as such. Skipping the write makes all 10
+       "lint - invalid code blocked" tests silently fail to match
   - [ ] ⬜ `PROTOTYPE-playbook_exec.py` reads a playbook from
     `untracked/playbook.md`, which is a generated artefact and is NOT kept in
     the tree. Regenerate it first:

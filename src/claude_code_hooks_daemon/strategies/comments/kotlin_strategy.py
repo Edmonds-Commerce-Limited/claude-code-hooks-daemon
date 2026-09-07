@@ -38,25 +38,32 @@ class KotlinCommentStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Kotlin comment-changelog detection."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "Example.kt")),
+                "content": (
+                    'const val VERSION = "1.9.3" // Prior 1.9.2: fixed a race. '
+                    "Prior 1.9.1: original broken behaviour.\n"
+                ),
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Kotlin: changelog narrative in a comment is blocked",
-                command=(
-                    "Use the Write tool to create "
-                    f"{scratch_path(_FIXTURE_DIR, 'Example.kt')} whose "
-                    "content has a trailing '//' comment reading changelog-style "
-                    "history: 'Prior 1.9.2: fixed a race. Prior 1.9.1: original "
-                    "broken behaviour.'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description=(
                     "Blocks a Kotlin trailing comment carrying multiple "
                     "'Prior <version>:' dated/versioned entries"

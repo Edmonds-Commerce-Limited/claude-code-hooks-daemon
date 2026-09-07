@@ -4,8 +4,11 @@ from typing import Any
 
 from claude_code_hooks_daemon.strategies.security.common import UNIVERSAL_EXTENSION
 from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "Secrets"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-security-secrets"
 _EXTENSIONS: tuple[str, ...] = (UNIVERSAL_EXTENSION,)
 
 _OWASP_CATEGORY = "A02"
@@ -73,20 +76,37 @@ class SecretDetectionStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for secret detection strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        aws_key_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "config.ts")),
+                "content": 'const key = "AKIAIOSFODNN7EXAMPLE1";',
+            },
+        )
+        fixture_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(
+                    scratch_path(_FIXTURE_DIR, "tests", "fixtures", "security_test.py")
+                ),
+                "content": 'AWS_KEY = "AKIAIOSFODNN7EXAMPLE1"',
+            },
         )
 
         return [
             AcceptanceTest(
                 title="Block hardcoded AWS key",
-                command=(
-                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/config.ts' "
-                    "with content 'const key = \"AKIAIOSFODNN7EXAMPLE1\";'"
-                ),
+                command=aws_key_probe.as_instruction(),
+                tool_payload=aws_key_probe,
                 description="Blocks writing file with hardcoded AWS access key",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -100,11 +120,8 @@ class SecretDetectionStrategy:
             ),
             AcceptanceTest(
                 title="Allow test fixture files",
-                command=(
-                    "Use the Write tool to write "
-                    "file_path='$CLAUDE_PROJECT_DIR/tests/fixtures/security_test.py' "
-                    "with content 'AWS_KEY = \"AKIAIOSFODNN7EXAMPLE1\"'"
-                ),
+                command=fixture_probe.as_instruction(),
+                tool_payload=fixture_probe,
                 description="Allows writing secrets in test fixture files (excluded path)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

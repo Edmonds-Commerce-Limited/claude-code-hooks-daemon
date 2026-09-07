@@ -3,8 +3,11 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "Kotlin"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-security-kotlin"
 _EXTENSIONS: tuple[str, ...] = (".kt", ".kts")
 
 _OWASP_CATEGORY = "A03"
@@ -58,20 +61,28 @@ class KotlinSecurityStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Kotlin security strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        object_input_stream_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.kt")),
+                "content": "val ois = ObjectInputStream(socket.getInputStream())",
+            },
         )
 
         return [
             AcceptanceTest(
                 title="Block Kotlin ObjectInputStream in source file",
-                command=(
-                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.kt' "
-                    "with content 'val ois = ObjectInputStream(socket.getInputStream())'"
-                ),
+                command=object_input_stream_probe.as_instruction(),
+                tool_payload=object_input_stream_probe,
                 description="Blocks writing Kotlin file with ObjectInputStream() call",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

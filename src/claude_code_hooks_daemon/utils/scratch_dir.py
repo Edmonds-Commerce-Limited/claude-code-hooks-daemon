@@ -83,6 +83,33 @@ def scratch_path(*segments: str) -> str:
     return _PATH_SEPARATOR.join((base, *segments))
 
 
+def project_dir_path(*segments: str) -> str:
+    """Return a project-rooted path that resolves ABSOLUTELY on any machine.
+
+    The non-scratch sibling of :func:`scratch_path`, for the handful of
+    acceptance probes whose target must NOT be the scratch directory --
+    ``markdown_organization``'s wrong-location test being the case in point,
+    since ``untracked/`` is itself an ALLOWED markdown location and a scratch
+    path would quietly stop the test exercising anything.
+
+    Both constraints from :func:`scratch_path` still apply and pull the same
+    two ways: absolute when executed, and never naming the RENDERING machine's
+    root. Resolving ``ProjectContext.project_root()`` here would satisfy only
+    the first -- it bakes this checkout's ``/workspace`` into a playbook a
+    client install has to follow, the defect
+    ``tests/integration/test_generated_docs_are_path_agnostic.py`` exists to
+    catch.
+
+    Args:
+        *segments: Path segments below the project root, e.g. ``("notes.md",)``.
+
+    Returns:
+        A path rooted at ``$CLAUDE_PROJECT_DIR``, e.g.
+        ``$CLAUDE_PROJECT_DIR/notes.md``.
+    """
+    return _PATH_SEPARATOR.join((_PROJECT_DIR_VAR, *segments))
+
+
 def ensure_scratch_dir(project_root: Path) -> bool:
     """Ensure ``untracked/scratch/`` exists and is ignored.
 

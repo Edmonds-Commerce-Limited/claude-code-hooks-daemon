@@ -3,8 +3,11 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "JavaScript"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-security-javascript"
 _EXTENSIONS: tuple[str, ...] = (".ts", ".tsx", ".js", ".jsx")
 
 _OWASP_CATEGORY = "A03"
@@ -64,20 +67,28 @@ class JavaScriptSecurityStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for JavaScript security strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        eval_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "utils.ts")),
+                "content": "const result = eval(userCode);",
+            },
         )
 
         return [
             AcceptanceTest(
                 title="Block JS eval in source file",
-                command=(
-                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/utils.ts' "
-                    "with content 'const result = eval(userCode);'"
-                ),
+                command=eval_probe.as_instruction(),
+                tool_payload=eval_probe,
                 description="Blocks writing TS file with eval() call",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

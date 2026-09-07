@@ -65,23 +65,36 @@ class GoLintStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Go lint strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe_valid = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.go")),
+                "content": "package main\nfunc main() {}",
+            },
+        )
+        probe_invalid = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.go")),
+                "content": 'package main\nfunc main() {\n    x := "unclosed',
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Go lint - valid code passes",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'valid.go')} "
-                    'with content "package main\\nfunc main() {}"'
-                ),
+                command=probe_valid.as_instruction(),
+                tool_payload=probe_valid,
                 description="Valid Go code should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
@@ -96,11 +109,8 @@ class GoLintStrategy:
             ),
             AcceptanceTest(
                 title="Go lint - invalid code blocked",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'invalid.go')} "
-                    'with content "package main\\nfunc main() {\\n    x := \\"unclosed"'
-                ),
+                command=probe_invalid.as_instruction(),
+                tool_payload=probe_invalid,
                 description="Invalid Go code (unclosed string) should be blocked",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Go lint FAILED", r"invalid.go"],

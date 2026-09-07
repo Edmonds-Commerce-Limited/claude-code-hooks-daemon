@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     next_plan_number_for_target,
     record_plan_allocation,
 )
+from claude_code_hooks_daemon.utils.scratch_dir import project_dir_path
 
 logger = logging.getLogger(__name__)
 
@@ -1334,15 +1335,35 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Markdown Organization."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        # Stated once; the prose is rendered from it (Plan 00243). Not
+        # scratch_path(): untracked/ is itself an ALLOWED location, so this
+        # test's file_path must stay at the project root to exercise the
+        # wrong-location deny path at all.
+        #
+        # `project_dir_path` rather than a resolved `ProjectContext
+        # .project_root()`: the payload is rendered INTO the playbook, which
+        # client installs follow too, so a resolved root would bake this
+        # checkout's `/workspace` into their instructions.
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": project_dir_path("random-notes.md"),
+                "content": "# Some Notes\n\nRandom markdown file.",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Block markdown in wrong location",
-                command=(
-                    "Use the Write tool to write to $CLAUDE_PROJECT_DIR/random-notes.md"
-                    " with content '# Some Notes\\n\\nRandom markdown file.'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Blocks markdown files written to non-standard locations within the project",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"WRONG LOCATION", r"allowed"],

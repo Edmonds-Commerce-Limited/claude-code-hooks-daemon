@@ -3,8 +3,11 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "Swift"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-security-swift"
 _EXTENSIONS: tuple[str, ...] = (".swift",)
 
 _OWASP_CATEGORY = "A03"
@@ -52,20 +55,28 @@ class SwiftSecurityStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Swift security strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        process_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.swift")),
+                "content": "let task = Process()",
+            },
         )
 
         return [
             AcceptanceTest(
                 title="Block Swift Process() in source file",
-                command=(
-                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.swift' "
-                    "with content 'let task = Process()'"
-                ),
+                command=process_probe.as_instruction(),
+                tool_payload=process_probe,
                 description="Blocks writing Swift file with Process() call",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

@@ -241,13 +241,45 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
             AcceptanceTest,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         prefix = DEFAULT_REQUIRED_PREFIX
+
+        # Stated once; the prose is rendered from it (Plan 00243). This
+        # handler shows that the payload is not a Write-only idea: what it
+        # reads is `tool_input.questions`, so the probe IS that list, and a
+        # sentence describing it could never be dispatched.
+        def _ask(*questions: str) -> ToolPayload:
+            return ToolPayload(
+                tool_name=ToolName.ASK_USER_QUESTION,
+                tool_input={
+                    "questions": [
+                        {
+                            "question": question,
+                            "header": "Probe",
+                            "multiSelect": False,
+                            "options": [
+                                {"label": "Yes", "description": "proceed"},
+                                {"label": "No", "description": "stop"},
+                            ],
+                        }
+                        for question in questions
+                    ]
+                },
+            )
+
+        unjustified = _ask("Should I continue?")
+        justified = _ask(f"{prefix} both options are valid. Which of A or B?")
+        # The prefix-laundering shape: one justified question carrying an
+        # unjustified one into the user's lap.
+        mixed = _ask(f"{prefix} A or B?", "Should I continue?")
+
         return [
             AcceptanceTest(
                 title="Deny AskUserQuestion without prefix",
-                command="AskUserQuestion tool call without `ASKING BECAUSE:` prefix",
+                command=unjustified.as_instruction(),
+                tool_payload=unjustified,
                 description=(
                     "Tautological / unjustified questions are denied; agent "
                     "is instructed to state the assumed answer and proceed."
@@ -262,10 +294,8 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Allow AskUserQuestion when every question is prefix-justified",
-                command=(
-                    "AskUserQuestion call where every `question` begins with "
-                    "`ASKING BECAUSE: <reason>`"
-                ),
+                command=justified.as_instruction(),
+                tool_payload=justified,
                 description=(
                     "Genuinely-justified questions reach the user. The "
                     "prefix declares why the agent could not decide "
@@ -281,9 +311,8 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Deny mixed AskUserQuestion (some prefixed, some not)",
-                command=(
-                    "AskUserQuestion call where one question has the prefix " "and another lacks it"
-                ),
+                command=mixed.as_instruction(),
+                tool_payload=mixed,
                 description=(
                     "Mixed calls are denied to close the prefix-laundering "
                     "loophole (one justified question carrying N "

@@ -38,25 +38,37 @@ class PythonCommentStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Python comment-changelog detection."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        # The '#' and the 'Prior <version>:' text are split across separate
+        # string-literal lines below (same runtime value once concatenated)
+        # so this SOURCE line does not itself read as a changelog comment to
+        # comment_changelog's own line-based scan of this file.
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "example.py")),
+                "content": (
+                    'VERSION = "3.27.0"  #'
+                    " Prior 3.26.2: fixed timing bug. Prior 3.26.1: attempted a "
+                    "different fix.\n"
+                ),
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Python: changelog narrative in a comment is blocked",
-                command=(
-                    "Use the Write tool to create "
-                    f"{scratch_path(_FIXTURE_DIR, 'example.py')} whose "
-                    "content has a trailing '#' comment on a version-constant line "
-                    "reading changelog-style history: 'Prior 3.26.2: fixed timing "
-                    "bug. Prior 3.26.1: attempted a different fix.'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description=(
                     "Blocks a Python trailing comment carrying multiple "
                     "'Prior <version>:' dated/versioned entries"

@@ -611,25 +611,52 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for the three lifecycle phases."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
 
         # Plan 00333: two spellings of the same fixture path. `plan_dir`/
         # `plan_path` are relative -- correct for the Bash setup/cleanup
         # commands below, which run from the repo root. `plan_path_abs` is
-        # absolute -- required for the Write/Edit tool prose in `command`:
+        # absolute -- required for the Write/Edit tool payloads below:
         # AbsolutePathHandler denies a relative file_path before this
         # handler is ever reached.
         plan_dir = f"untracked/scratch/{_FIXTURE_DIR}/{_FIXTURE_PLAN_SUBPATH}"
         plan_path = f"{plan_dir}/PLAN.md"
         plan_path_abs = scratch_path(_FIXTURE_DIR, _FIXTURE_PLAN_SUBPATH, "PLAN.md")
 
+        # Stated once; the prose is rendered from it (Plan 00243).
+        creation_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(plan_path_abs),
+                "content": "# Plan 99099: Test\n\n**Status**: Not Started",
+            },
+        )
+        progress_probe = ToolPayload(
+            tool_name=ToolName.EDIT,
+            tool_input={
+                "file_path": str(plan_path_abs),
+                "old_string": "⬜ **Task 1.1**",
+                "new_string": "✅ **Task 1.1**",
+            },
+        )
+        completion_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(plan_path_abs),
+                "content": "# Plan 99099\n\n**Status**: Complete",
+            },
+        )
+
         return [
             AcceptanceTest(
                 title="Plan creation: writing new PLAN.md triggers recovery cron setup",
-                command=(
-                    f"Use the Write tool to write to {plan_path_abs}"
-                    " with content '# Plan 99099: Test\\n\\n**Status**: Not Started'"
-                ),
+                command=creation_probe.as_instruction(),
+                tool_payload=creation_probe,
                 description=(
                     "On plan creation, advises agent to create a non-durable hourly"
                     " recovery cron (CronCreate, durable:false).  Must include the"
@@ -659,10 +686,8 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Plan progress-update: editing PLAN.md task status triggers cron check",
-                command=(
-                    f"Use the Edit tool on {plan_path_abs}"
-                    " to change '⬜ **Task 1.1**' to '✅ **Task 1.1**'"
-                ),
+                command=progress_probe.as_instruction(),
+                tool_payload=progress_probe,
                 description=(
                     "On progress-update, advises agent to verify the recovery cron is"
                     " still running (CronList) and recreate if missing."
@@ -693,10 +718,8 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Plan completion: writing Status Complete warns before cron teardown",
-                command=(
-                    f"Use the Write tool to write to {plan_path_abs}"
-                    " with content '# Plan 99099\\n\\n**Status**: Complete'"
-                ),
+                command=completion_probe.as_instruction(),
+                tool_payload=completion_probe,
                 description=(
                     "On plan completion, warns that deleting the recovery cron"
                     " while the session is still live strands it with no recovery"

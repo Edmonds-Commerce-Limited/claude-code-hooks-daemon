@@ -38,25 +38,33 @@ class JavaCommentStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Java comment-changelog detection."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "Example.java")),
+                "content": (
+                    'public static final String VERSION = "11.0.3"; // Prior '
+                    "11.0.2: fixed a race. Prior 11.0.1: original broken "
+                    "behaviour.\n"
+                ),
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Java: changelog narrative in a comment is blocked",
-                command=(
-                    "Use the Write tool to create "
-                    f"{scratch_path(_FIXTURE_DIR, 'Example.java')} whose "
-                    "content has a trailing '//' comment reading changelog-style "
-                    "history: 'Prior 11.0.2: fixed a race. Prior 11.0.1: original "
-                    "broken behaviour.'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description=(
                     "Blocks a Java trailing comment carrying multiple "
                     "'Prior <version>:' dated/versioned entries"

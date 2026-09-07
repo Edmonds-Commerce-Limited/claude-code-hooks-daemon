@@ -54,23 +54,33 @@ class KotlinTddStrategy:
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Kotlin TDD strategy."""
 
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(
+                    scratch_path(
+                        _FIXTURE_DIR, "src", "main", "kotlin", "com", "example", "UserService.kt"
+                    )
+                ),
+                "content": "package com.example\n\nclass UserService",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="TDD enforcement for Kotlin source file",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'src', 'main', 'kotlin', 'com', 'example', 'UserService.kt')} "
-                    "with content 'package com.example\\n\\nclass UserService'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Blocks Kotlin source file creation without corresponding test file",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

@@ -43,23 +43,36 @@ class SwiftLintStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Swift lint strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe_valid = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.swift")),
+                "content": 'print("hello")',
+            },
+        )
+        probe_invalid = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.swift")),
+                "content": 'print("hello',
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Swift lint - valid code passes",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'valid.swift')} "
-                    'with content "print(\\"hello\\")"'
-                ),
+                command=probe_valid.as_instruction(),
+                tool_payload=probe_valid,
                 description="Valid Swift code should pass lint validation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
@@ -75,11 +88,8 @@ class SwiftLintStrategy:
             ),
             AcceptanceTest(
                 title="Swift lint - invalid code blocked",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'invalid.swift')} "
-                    'with content "print(\\"hello"'
-                ),
+                command=probe_invalid.as_instruction(),
+                tool_payload=probe_invalid,
                 description="Invalid Swift code (unclosed string) should be blocked",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Swift lint FAILED", r"invalid.swift"],

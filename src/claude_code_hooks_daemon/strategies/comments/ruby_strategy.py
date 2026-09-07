@@ -38,25 +38,37 @@ class RubyCommentStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Ruby comment-changelog detection."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        # The '#' and the 'Prior <version>:' text are split across separate
+        # string-literal lines below (same runtime value once concatenated)
+        # so this SOURCE line does not itself read as a changelog comment to
+        # comment_changelog's own line-based scan of this file.
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "example.rb")),
+                "content": (
+                    'VERSION = "2.4.2"  #'
+                    " Prior 2.4.1: fixed a race. Prior 2.4.0: original broken "
+                    "behaviour.\n"
+                ),
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Ruby: changelog narrative in a comment is blocked",
-                command=(
-                    "Use the Write tool to create "
-                    f"{scratch_path(_FIXTURE_DIR, 'example.rb')} whose "
-                    "content has a trailing '#' comment reading changelog-style "
-                    "history: 'Prior 2.4.1: fixed a race. Prior 2.4.0: original "
-                    "broken behaviour.'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description=(
                     "Blocks a Ruby trailing comment carrying multiple "
                     "'Prior <version>:' dated/versioned entries"

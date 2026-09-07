@@ -3,8 +3,11 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "Dart"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-security-dart"
 _EXTENSIONS: tuple[str, ...] = (".dart",)
 
 _OWASP_CATEGORY = "A03"
@@ -52,20 +55,28 @@ class DartSecurityStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Dart security strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        process_run_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.dart")),
+                "content": "await Process.run('ls', ['-la']);",
+            },
         )
 
         return [
             AcceptanceTest(
                 title="Block Dart Process.run() in source file",
-                command=(
-                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.dart' "
-                    "with content \"await Process.run('ls', ['-la']);\""
-                ),
+                command=process_run_probe.as_instruction(),
+                tool_payload=process_run_probe,
                 description="Blocks writing Dart file with Process.run() call",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

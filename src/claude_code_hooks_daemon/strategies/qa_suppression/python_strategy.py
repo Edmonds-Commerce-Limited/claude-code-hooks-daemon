@@ -60,22 +60,29 @@ class PythonQaSuppressionStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Python QA suppression strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "example.py")),
+                "content": "x = 1  # type: " + "ignore",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Python QA suppression blocked",
-                command=(
-                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "example.py")}"'
-                    ' content="x = 1  # type: ' + "ignore" + '"'
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Should block Python QA suppression comment",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "Python"],

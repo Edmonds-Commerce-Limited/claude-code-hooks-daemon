@@ -1,0 +1,233 @@
+"""A declared `tool_payload` must agree with the prose beside it (Plan 00243).
+
+`AcceptanceTest.command` is overloaded: sometimes a literal shell command,
+sometimes an English sentence describing a tool call. Task 1.3 added
+`tool_payload` so a harness can DISPATCH the second kind instead of guessing at
+it with regexes -- the guessing that turned 49 declared tests into false
+failures.
+
+Adding the field creates a new way to be wrong, and it is worse than the
+problem it solves. A payload naming a different path from the sentence beside
+it does not fail loudly: the harness writes to the payload's path, the handler
+answers about THAT path, and the assertion is judged against a probe no human
+reviewing the playbook ever saw. A wrong payload is a test that passes for the
+wrong reason.
+
+So the two are checked against each other here, over the REAL generator rather
+than over a fixture. That matters: five handlers declare zero tests of their
+own and inherit every one from `strategies/`, so anything walking handler
+classes alone misses 75 files' worth of the exact strings this plan is about.
+
+The check is deliberately narrow -- `file_path` only. It is the field the
+harness actually writes to, it is always rendered verbatim, and it is the one
+whose mismatch silently retargets the probe. Content is not compared: a
+sentence legitimately abbreviates or describes it, and demanding a literal
+match would fail for correct declarations, which is how a guard gets switched
+off.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
+
+_FILE_PATH_KEY = "file_path"
+
+# Generous next to the 120s its neighbours here allow a QA checker: this
+# subprocess imports every handler module and walks all ~280 test blocks, so
+# its cost tracks handler COUNT rather than the size of any one input.
+_GENERATE_TIMEOUT_SECONDS = 180
+
+# The sanctioned probe location (Plan 00333): inside the repo so
+# `project_containment` permits it, gitignored so nothing reaches review.
+_SCRATCH_MARKER = "untracked/scratch"
+
+# Real in this self-install checkout, false in every client install — the
+# property `test_generated_docs_are_path_agnostic.py` enforces for the other
+# two artefacts rendered from handler code (Plan 00244).
+_SELF_INSTALL_ROOT = "/workspace"
+
+# Handlers whose CONTRACT is a path outside the repository, so a scratch path
+# would not exercise them at all. Named individually rather than pattern-
+# matched: an exemption that cannot be read off a list is one nobody audits.
+_OUTSIDE_SCRATCH_BY_CONTRACT = frozenset(
+    {
+        # Denies writes OUTSIDE the repository root, so its probe must target
+        # one. It asks for the system temp directory, which is the least
+        # harmful such path: outside the working tree, so a regressed handler
+        # cannot touch anything tracked or reviewed, and ephemeral by
+        # definition rather than by a `/tmp` that may not be the temp dir.
+        "ProjectContainmentHandler",
+        # Denies markdown written to an UNRECOGNISED location -- and
+        # `untracked/` is a recognised one. A scratch path would therefore
+        # stop this probe exercising anything, which is a worse failure than
+        # the one the scratch rule prevents: a test that silently proves
+        # nothing, versus a stray `random-notes.md` at the repo root that a
+        # regressed handler would leave in plain sight and `git status` names
+        # immediately. It carries no code and no credential.
+        "MarkdownOrganizationHandler",
+    }
+)
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(scope="module")
+def playbook() -> list[dict]:
+    """Every test block, collected through the production generator CLI.
+
+    Driven as a subprocess for the same reason the harness itself will be
+    (Plan 00243 Task 2.1): it exercises the real entry point rather than a
+    hand-assembled generator that can drift from what a release actually runs.
+    """
+    root = _project_root()
+    result = subprocess.run(
+        [str(root / "bin" / "hooks-daemon"), "generate-playbook", "--format", "json"],
+        capture_output=True,
+        text=True,
+        cwd=root,
+        timeout=_GENERATE_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"generate-playbook unavailable: {result.stderr[-400:]}")
+    return json.loads(result.stdout)
+
+
+class TestTheGeneratorIsReachable:
+    def test_the_playbook_is_not_empty(self, playbook: list[dict]) -> None:
+        """Guards every other test here from passing vacuously."""
+        assert len(playbook) > 100, (
+            "the generator returned almost nothing, so the agreement checks "
+            "below would pass without examining anything"
+        )
+
+    def test_the_payload_field_is_exposed_at_all(self, playbook: list[dict]) -> None:
+        """A missing key would make every check below silently vacuous."""
+        handler_blocks = [b for b in playbook if b.get("test_type") != "cli"]
+        assert handler_blocks
+        assert "tool_payload" in handler_blocks[0]
+
+
+class TestDeclaredPayloadsAgreeWithTheirProse:
+    def test_every_declared_file_path_appears_in_its_command(self, playbook: list[dict]) -> None:
+        """The path the harness writes to must be the path the sentence names."""
+        mismatches = []
+        for block in playbook:
+            payload = block.get("tool_payload")
+            if not payload:
+                continue
+            file_path = (payload.get("tool_input") or {}).get(_FILE_PATH_KEY)
+            if not file_path:
+                continue
+            command = block.get("command") or ""
+            if str(file_path) not in command:
+                mismatches.append(
+                    f"#{block.get('test_number')} {block.get('handler_name')}: "
+                    f"payload writes {file_path!r} but the command says {command!r}"
+                )
+
+        assert not mismatches, (
+            "a declared tool_payload names a different path from the prose "
+            "beside it, so the harness would probe something no reviewer saw:\n"
+            + "\n".join(mismatches)
+        )
+
+    def test_every_declared_payload_names_a_tool(self, playbook: list[dict]) -> None:
+        """An unnamed tool cannot be dispatched.
+
+        `ToolPayload.__post_init__` already rejects this at construction, so a
+        failure here means something built a payload dict by another route --
+        which is worth catching, because the generator's JSON is hand-built.
+        """
+        unnamed = [
+            f"#{b.get('test_number')} {b.get('handler_name')}"
+            for b in playbook
+            if b.get("tool_payload") and not (b["tool_payload"].get("tool_name") or "").strip()
+        ]
+        assert not unnamed, f"tool_payload with no tool_name: {unnamed}"
+
+    def test_every_declared_write_targets_the_scratch_directory(self, playbook: list[dict]) -> None:
+        """A dispatchable payload must not aim at the working tree.
+
+        This is the risk the payload field ADDS, and it is the reverse of the
+        one it removes. As prose, "write to $CLAUDE_PROJECT_DIR/src/config.ts"
+        is read by a human who would balk, or quietly substitute a scratch
+        path. As a declared payload it is dispatched verbatim.
+
+        These are DENY tests, so in the healthy case the handler blocks the
+        write and nothing lands. But the case a deny test exists for is the
+        one where the handler has REGRESSED -- and then the write succeeds.
+        The probe that catches a broken guard would be the probe that drops a
+        file carrying a dynamic-execution construct or a credential-shaped
+        string into `src/`, precisely when the guard is not there to stop it.
+
+        `untracked/scratch/` is the sanctioned location (Plan 00333): inside
+        the repo so `project_containment` permits it, gitignored so nothing
+        reaches review, and wiped without consequence.
+        """
+        stray = []
+        for block in playbook:
+            payload = block.get("tool_payload")
+            if not payload:
+                continue
+            file_path = str((payload.get("tool_input") or {}).get(_FILE_PATH_KEY, ""))
+            if not file_path:
+                continue
+            handler = block.get("handler_name", "")
+            if handler in _OUTSIDE_SCRATCH_BY_CONTRACT:
+                continue
+            if _SCRATCH_MARKER not in file_path:
+                stray.append(f"#{block.get('test_number')} {handler}: {file_path}")
+
+        assert not stray, (
+            "a dispatchable payload targets a path outside "
+            f"{_SCRATCH_MARKER!r}, so a regressed handler would let the probe "
+            "write into the working tree:\n" + "\n".join(stray)
+        )
+
+    def test_no_declared_payload_hardcodes_an_absolute_repo_path(
+        self, playbook: list[dict]
+    ) -> None:
+        """`/workspace` is real only here and false in every client install.
+
+        The same property `test_generated_docs_are_path_agnostic.py` enforces
+        for the other two artefacts rendered from handler code (Plan 00244).
+        The playbook is the third, and a payload is now a machine-followed
+        instruction rather than a sentence, so a wrong root is dispatched
+        rather than read.
+        """
+        hardcoded = []
+        for block in playbook:
+            payload = block.get("tool_payload")
+            if not payload:
+                continue
+            for key, value in (payload.get("tool_input") or {}).items():
+                if isinstance(value, str) and value.startswith(_SELF_INSTALL_ROOT):
+                    hardcoded.append(
+                        f"#{block.get('test_number')} {block.get('handler_name')} " f"{key}={value}"
+                    )
+
+        assert not hardcoded, (
+            f"a declared payload hardcodes {_SELF_INSTALL_ROOT!r}, which exists "
+            "only in this self-install checkout:\n" + "\n".join(hardcoded)
+        )
+
+    def test_no_block_declares_both_a_payload_and_a_skip_reason(self, playbook: list[dict]) -> None:
+        """One says the input cannot be produced, the other says how to.
+
+        Enforced at construction too; asserted here because the JSON dict is
+        assembled by hand and could carry both even when the dataclass cannot.
+        """
+        contradictory = [
+            f"#{b.get('test_number')} {b.get('handler_name')}"
+            for b in playbook
+            if b.get("tool_payload") and b.get("harness_cannot_produce")
+        ]
+        assert (
+            not contradictory
+        ), f"blocks declaring both tool_payload and harness_cannot_produce: {contradictory}"

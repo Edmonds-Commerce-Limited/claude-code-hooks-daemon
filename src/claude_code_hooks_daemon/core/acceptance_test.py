@@ -47,6 +47,28 @@ class ToolPayload:
         if not self.tool_name or not self.tool_name.strip():
             raise ValueError("tool_name must be a non-empty string")
 
+    def as_instruction(self) -> str:
+        """Render the sentence a human tester follows, FROM this payload.
+
+        The audit behind Plan 00243 counted FIVE grammars expressing one Write
+        payload. They existed because every site hand-wrote its own sentence
+        beside its own values, so the two could disagree with nothing to
+        notice. Deriving the sentence removes the second copy: a site states
+        the payload once and both readers -- the harness and the human -- get
+        the same fact by construction rather than by review.
+
+        Arguments are sorted, so the same payload written by two authors in
+        two key orders still renders identically; dict order would otherwise
+        reintroduce the very variation this collapses. Values are rendered
+        with ``repr`` so a newline inside file content stays inside the
+        sentence instead of splitting the playbook's ``**Command**`` block
+        across two lines and reading as two instructions.
+        """
+        if not self.tool_input:
+            return f"Use the {self.tool_name} tool"
+        rendered = ", ".join(f"{key}={value!r}" for key, value in sorted(self.tool_input.items()))
+        return f"Use the {self.tool_name} tool with {rendered}"
+
 
 class RecommendedModel(StrEnum):
     """Recommended model for running an acceptance test.

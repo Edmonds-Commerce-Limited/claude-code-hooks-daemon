@@ -144,16 +144,29 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Plan Workflow."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        # Stated once; the prose is rendered from it (Plan 00243).
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(
+                    scratch_path(_FIXTURE_DIR, "CLAUDE", "Plan", "099-test", "PLAN.md")
+                ),
+                "content": "# Plan 099: Test Plan\n\n**Status**: Not Started",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Writing to PLAN.md file",
-                command=(
-                    "Use the Write tool to write to "
-                    f"{scratch_path(_FIXTURE_DIR, 'CLAUDE', 'Plan', '099-test', 'PLAN.md')}"
-                    " with content '# Plan 099: Test Plan\\n\\n**Status**: Not Started'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Provides plan workflow guidance when writing PLAN.md (advisory)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"[Pp]lan", r"[Ww]orkflow"],

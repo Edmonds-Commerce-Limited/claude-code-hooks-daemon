@@ -55,22 +55,29 @@ class CSharpQaSuppressionStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for C# QA suppression strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "Example.cs")),
+                "content": "#pragma warning " + "disable" + " CS0168\npublic class Example {}",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="C# QA suppression blocked",
-                command=(
-                    f'Write file_path="{scratch_path(_FIXTURE_DIR, "Example.cs")}"'
-                    ' content="#pragma warning ' + "disable" + ' CS0168\\npublic class Example {}"'
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Should block C# QA suppression directive",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "C#"],

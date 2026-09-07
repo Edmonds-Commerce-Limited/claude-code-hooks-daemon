@@ -3,8 +3,11 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "Java"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-security-java"
 _EXTENSIONS: tuple[str, ...] = (".java",)
 
 _OWASP_CATEGORY = "A03"
@@ -58,20 +61,28 @@ class JavaSecurityStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Java security strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        runtime_exec_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.java")),
+                "content": "Runtime.getRuntime().exec(userInput);",
+            },
         )
 
         return [
             AcceptanceTest(
                 title="Block Java Runtime.exec() in source file",
-                command=(
-                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.java' "
-                    "with content 'Runtime.getRuntime().exec(userInput);'"
-                ),
+                command=runtime_exec_probe.as_instruction(),
+                tool_payload=runtime_exec_probe,
                 description="Blocks writing Java file with Runtime.getRuntime().exec() call",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

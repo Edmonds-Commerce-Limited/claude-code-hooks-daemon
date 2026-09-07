@@ -803,6 +803,15 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
     def get_acceptance_tests(self) -> list[Any]:
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
+        # Deliberately NO `tool_payload` (Plan 00243). Both tests below are
+        # stateful SEQUENCES -- set a status, then observe a file or an
+        # advisory that appears as a consequence -- and the second additionally
+        # depends on the first having already run this session.
+        #
+        # `ToolPayload` expresses exactly one tool call. Declaring one here
+        # would capture the middle step and silently drop the observation that
+        # IS the assertion, leaving a probe that dispatches cleanly and checks
+        # nothing. A harness must keep skipping these with their reason shown.
         return [
             AcceptanceTest(
                 title="plan flip to In Progress writes a goal-intent signal",

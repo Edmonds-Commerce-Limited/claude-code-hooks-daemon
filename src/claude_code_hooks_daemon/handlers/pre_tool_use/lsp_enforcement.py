@@ -467,12 +467,28 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for LSP enforcement handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        # Stated once; the prose is rendered from it (Plan 00243).
+        class_lookup_probe = ToolPayload(
+            tool_name=ToolName.GREP,
+            tool_input={"pattern": "class FrontController"},
+        )
+        regex_search_probe = ToolPayload(
+            tool_name=ToolName.GREP,
+            tool_input={"pattern": "log.*Error"},
+        )
 
         return [
             AcceptanceTest(
                 title="Block Grep for class definition",
-                command='Use Grep tool with pattern "class FrontController"',
+                command=class_lookup_probe.as_instruction(),
+                tool_payload=class_lookup_probe,
                 description=(
                     "When using Grep to search for a class definition like "
                     "'class FrontController', the handler should block and suggest "
@@ -490,7 +506,8 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Allow Grep for regex pattern",
-                command='Use Grep tool with pattern "log.*Error"',
+                command=regex_search_probe.as_instruction(),
+                tool_payload=regex_search_probe,
                 description=(
                     "When using Grep to search for a regex pattern like "
                     "'log.*Error', the handler should NOT trigger because "

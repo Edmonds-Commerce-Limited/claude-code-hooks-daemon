@@ -55,23 +55,33 @@ class JavaTddStrategy:
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Java TDD strategy."""
 
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
         )
 
         fixture_root = scratch_path(_FIXTURE_DIR)
+        probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(
+                    scratch_path(
+                        _FIXTURE_DIR, "src", "main", "java", "com", "example", "UserService.java"
+                    )
+                ),
+                "content": "package com.example;\n\npublic class UserService {}",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="TDD enforcement for Java source file",
-                command=(
-                    "Use the Write tool to create file "
-                    f"{scratch_path(_FIXTURE_DIR, 'src', 'main', 'java', 'com', 'example', 'UserService.java')} "
-                    "with content 'package com.example;\\n\\npublic class UserService {}'"
-                ),
+                command=probe.as_instruction(),
+                tool_payload=probe,
                 description="Blocks Java source file creation without corresponding test file",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED \[R-TDD-TEST-FIRST\]", r"Java", r"test file"],

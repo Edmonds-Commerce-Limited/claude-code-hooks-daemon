@@ -3,8 +3,11 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
+from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LANGUAGE_NAME = "Python"
+#: Acceptance-test fixture directory, below the sanctioned scratch root.
+_FIXTURE_DIR = "acceptance-test-security-python"
 _EXTENSIONS: tuple[str, ...] = (".py",)
 
 _OWASP_CATEGORY = "A03"
@@ -76,20 +79,28 @@ class PythonSecurityStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Python security strategy."""
+        from claude_code_hooks_daemon.constants import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        eval_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.py")),
+                "content": "result = eval(user_input)",
+            },
         )
 
         return [
             AcceptanceTest(
                 title="Block Python eval in source file",
-                command=(
-                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.py' "
-                    "with content 'result = eval(user_input)'"
-                ),
+                command=eval_probe.as_instruction(),
+                tool_payload=eval_probe,
                 description="Blocks writing Python file with eval() call",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
