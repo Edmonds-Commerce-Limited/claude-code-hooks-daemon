@@ -1,6 +1,6 @@
 # Plan 00336: upgrade path residual findings
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-07
 **Owner**: joseph
 **Priority**: Medium
@@ -60,12 +60,15 @@ a documented bootstrap command that this project's own new handler denies.
   on this path the checkout already happened, so it is copying the NEW
   default. Write a failing test that pins the intended semantics before
   changing anything.
-- [ ] ⬜ **Task 1.2**: Establish the consequence empirically rather than by
-  reasoning. Expected: with `OLD_DEFAULT == NEW_DEFAULT`, a user value
-  equal to the old default is classified as a customisation and preserved,
-  so a changed default never propagates. Confirm against `ConfigDiffer`
-  before designing the fix — the direction is "safe" (preserve rather than
-  silently change), which is why it has gone unnoticed.
+- [x] ✅ **Task 1.2**: Establish the consequence empirically rather than by
+  reasoning. **Done — measured, and it is real.** Driving `ConfigDiffer` and
+  `ConfigMerger` directly with a default that changed between versions
+  (`log_level` `INFO` → `WARNING`) and a user who simply accepted the old one:
+  against the true old default the value is not a customisation and the merge
+  yields `WARNING`; against the new default it is recorded as
+  `custom_daemon_settings = {'log_level': 'INFO'}` and the merge yields
+  `INFO`. A changed default does not reach a user who had accepted the
+  previous one. Evidence in the journal.
 - [ ] ⬜ **Task 1.3**: Fix by having Layer 1 preserve the pre-checkout example
   config and pass its path to Layer 2, or by having Layer 2 read the old
   default from git (`git show <previous-ref>:.claude/hooks-daemon.yaml.example`).
