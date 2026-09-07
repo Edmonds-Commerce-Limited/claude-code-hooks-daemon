@@ -8,6 +8,7 @@ or structured JSON for automated test execution.
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 from collections.abc import Sequence
@@ -41,6 +42,29 @@ CollectedTests = list[tuple[str, str, int, list[AcceptanceTest], str]]
 # the trigger is a ratio on real events, not a hook event of its own.
 PSEUDO_EVENT_LABEL_PREFIX = "pseudo:"
 PSEUDO_EVENT_SOURCE = "pseudo-event"
+
+
+def _tool_payload_block(test: AcceptanceTest) -> list[str]:
+    """Render the declared tool call for a test whose command is prose.
+
+    Returns an empty list for the ordinary case (a literal shell command, no
+    payload). Shared by the built-in and project-handler renderers so a
+    payload is never shown in one section and hidden in the other.
+
+    Rendered ALONGSIDE the prose ``command``, never instead of it: the payload
+    is what a harness dispatches, the sentence is what a human tester follows.
+    Showing only the payload would fix a machine and break a person; showing
+    only the prose is the state that produced the guessing this replaces.
+    """
+    if test.tool_payload is None:
+        return []
+    return [
+        f"**Tool call** (dispatch this, not the prose above): `{test.tool_payload.tool_name}`",
+        "```json",
+        json.dumps(test.tool_payload.tool_input, indent=2, sort_keys=True),
+        "```",
+        "",
+    ]
 
 
 def _skip_block(test: AcceptanceTest) -> list[str]:
@@ -424,6 +448,19 @@ class PlaybookGenerator:
                     # without it here a harness runs the test and reports a false
                     # failure, which is how a harness gets switched off.
                     "harness_cannot_produce": test.harness_cannot_produce,
+                    # The declared tool call, for a test whose `command` is an
+                    # English sentence rather than a shell command (Plan 00243).
+                    # Emitted as the hook event's own field names so a harness
+                    # copies them into its probe instead of regexing the prose --
+                    # which is where the prototype's 49 false failures came from.
+                    "tool_payload": (
+                        {
+                            "tool_name": test.tool_payload.tool_name,
+                            "tool_input": test.tool_payload.tool_input,
+                        }
+                        if test.tool_payload is not None
+                        else None
+                    ),
                 }
                 result.append(test_dict)
                 test_number += 1
@@ -695,6 +732,7 @@ class PlaybookGenerator:
                 lines.append(test.command)
                 lines.append("```")
                 lines.append("")
+                lines.extend(_tool_payload_block(test))
 
                 # Expected message patterns
                 if test.expected_message_patterns:
@@ -789,6 +827,7 @@ class PlaybookGenerator:
                     lines.append(test.command)
                     lines.append("```")
                     lines.append("")
+                    lines.extend(_tool_payload_block(test))
 
                     if test.expected_message_patterns:
                         lines.append("**Expected Message Patterns**:")

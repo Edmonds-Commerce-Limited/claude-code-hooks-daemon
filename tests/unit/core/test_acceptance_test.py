@@ -1,9 +1,17 @@
 """Tests for AcceptanceTest dataclass."""
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 
+from claude_code_hooks_daemon.constants import ToolName
 from claude_code_hooks_daemon.core import Decision
-from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest, RecommendedModel, TestType
+from claude_code_hooks_daemon.core.acceptance_test import (
+    AcceptanceTest,
+    RecommendedModel,
+    TestType,
+    ToolPayload,
+)
 
 
 class TestAcceptanceTestDataclass:
@@ -274,6 +282,108 @@ class TestHarnessCannotProduceField:
         )
         assert test.test_type == TestType.BLOCKING
         assert test.expected_decision == Decision.DENY
+
+
+class TestToolPayloadField:
+    """Test the structured `tool_payload` field (Plan 00243 Task 1.3).
+
+    `command` is overloaded: sometimes a literal shell command, sometimes an
+    English sentence describing a tool call ("Use the Write tool to create
+    file X with content Y"). Nothing marked which, so the prototype harness
+    guessed with regexes and produced 49 false failures — five grammars for
+    one payload.
+
+    A shell string is the WRONG target for those tests. A Write-tool guard is
+    not reachable from bash at all: this project's own rules record that a
+    file written through Bash bypasses the content guards that run before a
+    `Write`. Rewriting such a test as `echo … > f` would assert the opposite
+    of what it means to assert. So the payload is declared, not parsed.
+    """
+
+    def test_defaults_to_none(self):
+        """A test carries no payload unless it needs one."""
+        test = AcceptanceTest(
+            title="Test",
+            command='echo "test"',
+            description="Test description",
+            expected_decision=Decision.DENY,
+            expected_message_patterns=[],
+        )
+        assert test.tool_payload is None
+
+    def test_carries_the_tool_name_and_input(self):
+        payload = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={"file_path": "/repo/x.py", "content": "def f():\n    pass\n"},
+        )
+        test = AcceptanceTest(
+            title="A guarded write is blocked",
+            command="Use the Write tool to create /repo/x.py",
+            description="Blocks the guarded content",
+            expected_decision=Decision.DENY,
+            expected_message_patterns=[r"blocked"],
+            tool_payload=payload,
+        )
+        assert test.tool_payload is not None
+        assert test.tool_payload.tool_name == ToolName.WRITE
+        assert test.tool_payload.tool_input["file_path"] == "/repo/x.py"
+
+    def test_payload_is_frozen(self):
+        """A shared default must not be mutable by one consumer.
+
+        Handlers build these at import time and the generator hands the same
+        object to every renderer; a mutable payload would let one of them
+        edit what the next reads.
+        """
+        payload = ToolPayload(tool_name=ToolName.WRITE, tool_input={"file_path": "/a"})
+        with pytest.raises(FrozenInstanceError):
+            payload.tool_name = ToolName.EDIT
+
+    def test_empty_tool_name_rejected(self):
+        """An unnamed tool cannot be dispatched, so it must not construct."""
+        with pytest.raises(ValueError):
+            ToolPayload(tool_name="", tool_input={"file_path": "/a"})
+
+    def test_blank_tool_name_rejected(self):
+        with pytest.raises(ValueError):
+            ToolPayload(tool_name="   ", tool_input={"file_path": "/a"})
+
+    def test_a_payload_and_a_skip_reason_are_mutually_exclusive(self):
+        """A test the harness cannot produce has no payload to produce.
+
+        Declaring both says the test is simultaneously unreachable and
+        directly dispatchable. Whichever is true, the other is a lie the
+        harness would act on.
+        """
+        with pytest.raises(ValueError):
+            AcceptanceTest(
+                title="Contradiction",
+                command="Use the Write tool",
+                description="Cannot be both",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[],
+                harness_cannot_produce="Claude Code rewrites the path",
+                tool_payload=ToolPayload(tool_name=ToolName.WRITE, tool_input={"file_path": "/a"}),
+            )
+
+    def test_prose_command_is_kept_alongside_the_payload(self):
+        """The playbook is still read by a human (Task 1.4).
+
+        The payload is for the harness; the sentence is what a tester follows.
+        Replacing one with the other would fix a machine and break a person.
+        """
+        prose = "Use the Write tool to create /repo/x.py with content 'x = 1'"
+        test = AcceptanceTest(
+            title="Write probe",
+            command=prose,
+            description="Blocks something",
+            expected_decision=Decision.DENY,
+            expected_message_patterns=[r"x"],
+            tool_payload=ToolPayload(
+                tool_name=ToolName.WRITE, tool_input={"file_path": "/repo/x.py", "content": "x = 1"}
+            ),
+        )
+        assert test.command == prose
 
 
 class TestAcceptanceTestValidation:

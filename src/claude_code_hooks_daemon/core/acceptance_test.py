@@ -6,10 +6,46 @@ that handlers must implement.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 from claude_code_hooks_daemon.core.hook_result import Decision
+
+
+@dataclass(frozen=True)
+class ToolPayload:
+    """The exact tool call a harness must synthesise to trigger a test.
+
+    ``AcceptanceTest.command`` is overloaded: sometimes a literal shell
+    command, sometimes an English sentence describing a tool call ("Use the
+    Write tool to create file X with content Y"). Nothing marks which, so a
+    harness that wants to DRIVE the test has to guess -- and the Plan 00243
+    prototype's guessing produced 49 false failures from five different
+    grammars expressing one payload.
+
+    Declaring the payload removes the guess. ``tool_name``/``tool_input`` are
+    the hook event's own field names, so a harness builds its probe by copying
+    them rather than by reconstructing them.
+
+    A shell string is not an alternative for these tests. A ``Write``-tool
+    guard is not reachable from bash at all -- a file written through Bash
+    bypasses the content guards that run BEFORE a ``Write`` -- so rewriting
+    such a test as ``echo ... > f`` would assert the opposite of what it means
+    to assert.
+
+    Frozen because handlers build these at import time and the generator hands
+    the same object to every renderer; a mutable payload would let one of them
+    edit what the next reads.
+    """
+
+    tool_name: str
+    tool_input: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Reject a payload no harness could dispatch."""
+        if not self.tool_name or not self.tool_name.strip():
+            raise ValueError("tool_name must be a non-empty string")
 
 
 class RecommendedModel(StrEnum):
@@ -137,6 +173,7 @@ class AcceptanceTest:
     recommended_model: RecommendedModel | None = None
     requires_main_thread: bool = False
     harness_cannot_produce: str | None = None
+    tool_payload: ToolPayload | None = None
 
     def __post_init__(self) -> None:
         """Validate fields after initialization."""
@@ -146,3 +183,12 @@ class AcceptanceTest:
             raise ValueError("command must be a non-empty string")
         if not self.description or not self.description.strip():
             raise ValueError("description must be a non-empty string")
+        if self.harness_cannot_produce and self.tool_payload is not None:
+            # The two say opposite things about the same test: one that the
+            # input cannot be produced at all, the other exactly how to
+            # produce it. Whichever is true, the other is a claim the harness
+            # would act on.
+            raise ValueError(
+                "harness_cannot_produce and tool_payload are mutually exclusive: "
+                "a test whose input cannot be produced has no payload to declare"
+            )

@@ -125,15 +125,27 @@ results, so they are prerequisites, not follow-ups.
     identical Write payload — that concentration is what makes Task 1.2 cheap
   - [x] ✅ Five handlers declare zero tests and inherit all of theirs from
     strategies, so a per-handler converter would miss them
-- [ ] ⬜ **Task 1.2**: Convert to a literal command every prose test that can
-  be one — the Write/Edit tests are the bulk, and a payload is expressible
-- [ ] ⬜ **Task 1.3**: For the genuine remainder, add an explicit optional
-  field declaring the tool and payload the test needs, so a harness reads it
-  instead of regexing prose
-  - [ ] ⬜ Keep it distinct from `harness_cannot_produce`, whose docstring is
-    deliberately narrow
-- [ ] ⬜ **Task 1.4**: Render the machine-readable form into the playbook
-  alongside the prose, so `generate-playbook` stays readable for a human
+- [x] ✅ **Task 1.3**: `ToolPayload` (`tool_name` + `tool_input`, frozen,
+  rejecting a blank tool name) and `AcceptanceTest.tool_payload`. Field names
+  are the hook event's own, so a harness copies them rather than translating.
+  - [x] ✅ Kept distinct from `harness_cannot_produce` — and the two are now
+    mutually exclusive at construction: one says the input cannot be produced,
+    the other says exactly how to produce it, so declaring both is a claim the
+    harness would act on
+  - [x] ✅ **Done BEFORE Task 1.2, reversing the plan's order.** Task 1.2 as
+    written ("convert to a literal command") is the wrong target for the bulk
+    of these: a `Write`-tool guard is not reachable from bash at all, because
+    a file written through Bash bypasses the content guards that run before a
+    `Write`. Rewriting such a test as `echo … > f` would assert the opposite
+    of what it means to assert. The audit's own bottom line already pointed
+    here — the structured field is the fix, not string normalisation
+- [ ] ⬜ **Task 1.2**: Populate `tool_payload` on the 76 convertible prose
+  tests (five grammars, one Write payload). Now a declaration, not a regex
+- [x] ✅ **Task 1.4**: Rendered in both directions — `generate_json` emits
+  `tool_payload` (caught on its own commit by Task 0.2's dataclass-derived
+  coverage guard), and `_tool_payload_block` renders it in the markdown beside
+  the prose, shared by the built-in and project-handler renderers so it can
+  never show in one section and hide in the other
 
 ### Phase 2: The harness
 
