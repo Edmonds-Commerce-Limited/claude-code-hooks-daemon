@@ -16,9 +16,21 @@
     },
     {
       "file": "handlers/post_tool_use/model_downgrade_recorder.py",
+      "function": "publish",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00328: resolving the live project's untracked dir is the only thing this adds over write_downgrade_signal, and it is the one step that can fail before the write is even attempted. A daemon started outside a project (or a unit test) raises RuntimeError from ProjectContext; it is logged at warning and returns None, because there is simply nowhere to publish to. Nothing is concealed and nothing is lost: the downgrade record stays in the transcript, and the next PostToolUse scans again."
+    },
+    {
+      "file": "utils/model_downgrade_signal.py",
+      "function": "read_downgrade_signal",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00328: fail-silent read on two hot paths — a status-line render roughly once a second, and a ccy supervisor tick. A missing file (the overwhelmingly common case: the session was never downgraded), an unreadable one (OSError) and a corrupt one (ValueError, logged at debug) all mean the same thing to both callers: no attribution, so no badge and no restore. That is the SAFE direction — the alternative to returning None is raising on the render path, which this directory's CLAUDE.md rule #2 forbids outright."
+    },
+    {
+      "file": "utils/model_downgrade_signal.py",
       "function": "write_downgrade_signal",
       "rule": "return-none-on-error",
-      "reason": "Plan 00328: publishing the per-session downgrade signal is best-effort, the same contract goal_injection's signal write follows. Two failure paths both log before returning None — no ProjectContext (RuntimeError; a daemon started outside a project, or a unit test) and an unwritable untracked directory (OSError). Neither is a reason to fail a PostToolUse dispatch: the signal is advisory, the record it carries is session-scoped and still in the transcript, and the very next tool call retries. The write itself is atomic (tmp + Path.replace) so a failure can never leave a half-written signal for the supervisor to read."
+      "reason": "Plan 00328: publishing the per-session downgrade signal is best-effort, the same contract goal_injection's signal write follows. An unwritable untracked directory (OSError) is logged at warning and swallowed — it is not a reason to fail a PostToolUse dispatch, because the signal is advisory, the record it carries is session-scoped and still in the transcript, and the very next tool call retries. The write itself is atomic (tmp + Path.replace) so a failure can never leave a half-written signal for a consumer to read."
     },
     {
       "file": "utils/model_fallback_records.py",
@@ -615,12 +627,6 @@
       "function": "_parse_state",
       "rule": "return-none-on-error",
       "reason": "Plan 00278: fail-silent read of the per-session downgrade state file on the status-line render path (renamed from _parse_high_water when episode-count fields were added on top of the high-water fields). Malformed/foreign/partial JSON (a concurrent write by another session sharing the daemon, a truncated file, or a legacy file predating the count fields) yields None = 'no prior state', matching this directory's documented CLAUDE.md rule #2 ('reads are fail-silent and defensive... never raise'). Same contract as thread_registry.upsert_heartbeat and supervisor_indicator._read_status -- a broken status line is worse than a missing element."
-    },
-    {
-      "file": "handlers/status_line/downgrade_state.py",
-      "function": "_parse_manual_marker",
-      "rule": "return-none-on-error",
-      "reason": "Plan 00316: fail-silent read of the ccy supervisor's manual-model-change marker on the status-line render path. Missing (no manual command typed yet), malformed, or foreign JSON all yield None = 'not manual' -- the same contract as _parse_state immediately above: a broken status line is worse than a missing marker, and the caller (is_manual_model_change) treats None exactly like a genuine silent downgrade."
     },
     {
       "file": "handlers/user_prompt_submit/git_context_injector.py",

@@ -10,8 +10,6 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.handlers.status_line.downgrade_state import (
     evaluate_downgrade,
-    is_manual_model_change,
-    manual_model_change_dir,
     read_downgrade_counts,
     read_high_water,
     resolve_model_family,
@@ -98,7 +96,7 @@ class TestEvaluateDowngrade:
 
     def test_render_on_lower_rank_than_high_water_reports_downgrade(self, tmp_path: Path) -> None:
         write_high_water(tmp_path, "sess-a", "fable", 3)
-        result = evaluate_downgrade(tmp_path, "sess-a", "opus", 2)
+        result = evaluate_downgrade(tmp_path, "sess-a", "opus", 2, attributed=True)
         assert result == ("fable", "opus")
         # A downgrade render must NOT clobber the recorded high-water.
         assert read_high_water(tmp_path, "sess-a") == ("fable", 3)
@@ -133,77 +131,39 @@ class TestEvaluateDowngrade:
         assert result is None
         assert read_high_water(tmp_path, "sess-b") == ("opus", 2)
 
-    def test_manual_drop_reports_no_downgrade(self, tmp_path: Path) -> None:
+    def test_an_unattributed_drop_reports_no_downgrade(self, tmp_path: Path) -> None:
+        """Nothing recorded it, so it was the human's own model choice."""
         write_high_water(tmp_path, "sess-a", "fable", 3)
-        result = evaluate_downgrade(tmp_path, "sess-a", "opus", 2, manual=True)
+        result = evaluate_downgrade(tmp_path, "sess-a", "opus", 2)
         assert result is None
 
-    def test_manual_drop_resets_high_water_to_the_manual_choice(self, tmp_path: Path) -> None:
-        write_high_water(tmp_path, "sess-a", "fable", 3)
-        evaluate_downgrade(tmp_path, "sess-a", "opus", 2, manual=True)
-        assert read_high_water(tmp_path, "sess-a") == ("opus", 2)
-
-    def test_further_silent_drop_below_a_manual_choice_is_still_caught(
+    def test_an_unattributed_drop_resets_high_water_to_the_chosen_family(
         self, tmp_path: Path
     ) -> None:
         write_high_water(tmp_path, "sess-a", "fable", 3)
-        evaluate_downgrade(tmp_path, "sess-a", "opus", 2, manual=True)
-        result = evaluate_downgrade(tmp_path, "sess-a", "haiku", 0)
+        evaluate_downgrade(tmp_path, "sess-a", "opus", 2)
+        assert read_high_water(tmp_path, "sess-a") == ("opus", 2)
+
+    def test_a_later_attributed_drop_below_a_chosen_family_is_still_caught(
+        self, tmp_path: Path
+    ) -> None:
+        write_high_water(tmp_path, "sess-a", "fable", 3)
+        evaluate_downgrade(tmp_path, "sess-a", "opus", 2)
+        result = evaluate_downgrade(tmp_path, "sess-a", "haiku", 0, attributed=True)
         assert result == ("opus", "haiku")
 
+    def test_attribution_defaults_off_so_a_caller_must_be_explicit(self, tmp_path: Path) -> None:
+        """The safe direction: a caller that forgets shows no badge, rather
+        than telling someone they are degraded because they chose Opus."""
+        write_high_water(tmp_path, "sess-a", "fable", 3)
+        assert evaluate_downgrade(tmp_path, "sess-a", "opus", 2) is None
 
-class TestManualModelChange:
-    def test_missing_marker_is_not_manual(self, tmp_path: Path) -> None:
-        assert is_manual_model_change(tmp_path, "sess-a", "opus", now=1000.0) is False
 
-    def test_matching_recent_marker_is_manual(self, tmp_path: Path) -> None:
-        tmp_path.mkdir(parents=True, exist_ok=True)
-        (tmp_path / "sess-a.json").write_text(
-            json.dumps({"session_id": "sess-a", "family": "opus", "ts": 1000.0}),
-            encoding="utf-8",
-        )
-        assert is_manual_model_change(tmp_path, "sess-a", "opus", now=1005.0) is True
-
-    def test_marker_for_a_different_family_is_not_manual(self, tmp_path: Path) -> None:
-        tmp_path.mkdir(parents=True, exist_ok=True)
-        (tmp_path / "sess-a.json").write_text(
-            json.dumps({"session_id": "sess-a", "family": "opus", "ts": 1000.0}),
-            encoding="utf-8",
-        )
-        assert is_manual_model_change(tmp_path, "sess-a", "sonnet", now=1005.0) is False
-
-    def test_marker_survives_a_busy_gap_longer_than_two_minutes(self, tmp_path: Path) -> None:
-        """The supervisor's window is the backstop; this mirror must match it.
-
-        A busy session only re-renders the status line when it next renders, so
-        the first render after a manual `/model` can arrive many minutes later.
-        While this constant lagged the supervisor's at 120s, that render opened
-        a downgrade episode and the false "downgraded" indicator latched for the
-        rest of the session — the very defect the manual marker exists to stop.
-        """
-        tmp_path.mkdir(parents=True, exist_ok=True)
-        (tmp_path / "sess-a.json").write_text(
-            json.dumps({"session_id": "sess-a", "family": "opus", "ts": 1000.0}),
-            encoding="utf-8",
-        )
-        ten_minutes_later = 1000.0 + 600.0
-        assert is_manual_model_change(tmp_path, "sess-a", "opus", now=ten_minutes_later) is True
-
-    def test_stale_marker_outside_the_window_is_not_manual(self, tmp_path: Path) -> None:
-        tmp_path.mkdir(parents=True, exist_ok=True)
-        (tmp_path / "sess-a.json").write_text(
-            json.dumps({"session_id": "sess-a", "family": "opus", "ts": 1000.0}),
-            encoding="utf-8",
-        )
-        assert is_manual_model_change(tmp_path, "sess-a", "opus", now=100_000.0) is False
-
-    def test_corrupt_marker_is_not_manual(self, tmp_path: Path) -> None:
-        tmp_path.mkdir(parents=True, exist_ok=True)
-        (tmp_path / "sess-a.json").write_text("not json", encoding="utf-8")
-        assert is_manual_model_change(tmp_path, "sess-a", "opus", now=1000.0) is False
-
-    def test_manual_model_change_dir_is_a_subdirectory(self, tmp_path: Path) -> None:
-        assert manual_model_change_dir(tmp_path).parent == tmp_path
+# The manual-model-change marker this module used to read is gone (Plan 00328):
+# it was a mirror of the ccy supervisor's guess at what the human had typed, and
+# a time-windowed one, so it could only ever suppress a badge it had already
+# half-decided to show. Attribution comes from the platform's own record now —
+# see tests/unit/utils/test_model_downgrade_signal.py.
 
 
 class TestDowngradeCounts:
@@ -224,23 +184,23 @@ class TestDowngradeCounts:
 
     def test_downgrade_increments_once_per_episode(self, tmp_path: Path) -> None:
         write_high_water(tmp_path, "s", "fable", 3)
-        assert evaluate_downgrade(tmp_path, "s", "opus", 2) == ("fable", "opus")
+        assert evaluate_downgrade(tmp_path, "s", "opus", 2, attributed=True) == ("fable", "opus")
         # A SUSTAINED downgrade (another render on the same lower family) must
         # not double-count the same episode.
-        evaluate_downgrade(tmp_path, "s", "opus", 2)
+        evaluate_downgrade(tmp_path, "s", "opus", 2, attributed=True)
         assert read_downgrade_counts(tmp_path, "s") == (1, 0)
 
     def test_recovery_increments_recovery_count(self, tmp_path: Path) -> None:
         write_high_water(tmp_path, "s", "fable", 3)
-        evaluate_downgrade(tmp_path, "s", "opus", 2)
-        evaluate_downgrade(tmp_path, "s", "fable", 3)
+        evaluate_downgrade(tmp_path, "s", "opus", 2, attributed=True)
+        evaluate_downgrade(tmp_path, "s", "fable", 3, attributed=True)
         assert read_downgrade_counts(tmp_path, "s") == (1, 1)
 
     def test_flapping_counts_each_episode_and_shows_stuck(self, tmp_path: Path) -> None:
         write_high_water(tmp_path, "s", "fable", 3)
-        evaluate_downgrade(tmp_path, "s", "opus", 2)  # down 1
-        evaluate_downgrade(tmp_path, "s", "fable", 3)  # up 1
-        evaluate_downgrade(tmp_path, "s", "opus", 2)  # down 2 — and stays there
+        evaluate_downgrade(tmp_path, "s", "opus", 2, attributed=True)  # down 1
+        evaluate_downgrade(tmp_path, "s", "fable", 3, attributed=True)  # up 1
+        evaluate_downgrade(tmp_path, "s", "opus", 2, attributed=True)  # down 2 — and stays
         # down (2) > up (1): the session is currently stranded on the lower model.
         assert read_downgrade_counts(tmp_path, "s") == (2, 1)
 
@@ -248,10 +208,10 @@ class TestDowngradeCounts:
         self, tmp_path: Path
     ) -> None:
         write_high_water(tmp_path, "s", "opus", 2)
-        evaluate_downgrade(tmp_path, "s", "sonnet", 1)  # down 1
+        evaluate_downgrade(tmp_path, "s", "sonnet", 1, attributed=True)  # down 1
         # Jump straight to a NEW high (fable outranks the opus high-water):
         # still a recovery from the open episode.
-        evaluate_downgrade(tmp_path, "s", "fable", 3)
+        evaluate_downgrade(tmp_path, "s", "fable", 3, attributed=True)
         assert read_downgrade_counts(tmp_path, "s") == (1, 1)
         assert read_high_water(tmp_path, "s") == ("fable", 3)
 

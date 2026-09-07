@@ -7,7 +7,6 @@ session's high-water state, and renders a warning segment naming the drop
 """
 
 import json
-import time
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +20,10 @@ from claude_code_hooks_daemon.handlers.status_line.downgrade_indicator import (
 from claude_code_hooks_daemon.handlers.status_line.downgrade_state import (
     _STATE_SUBDIR,
     write_high_water,
+)
+from claude_code_hooks_daemon.utils.model_downgrade_signal import (
+    DowngradeSignal,
+    write_downgrade_signal,
 )
 
 _UNTRACKED_ATTR = (
@@ -96,6 +99,7 @@ class TestDowngradeIndicatorHandler:
     def test_opus_after_fable_high_water_emits_downgrade_segment(
         self, handler: DowngradeIndicatorHandler
     ) -> None:
+        self._publish_downgrade("sess-a")
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
         result = handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
         assert len(result.context) == 1
@@ -106,6 +110,7 @@ class TestDowngradeIndicatorHandler:
     def test_downgrade_segment_carries_episode_counts(
         self, handler: DowngradeIndicatorHandler
     ) -> None:
+        self._publish_downgrade("sess-a")
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
         result = handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
         segment = result.context[0]
@@ -114,6 +119,7 @@ class TestDowngradeIndicatorHandler:
         assert "↑0" in segment
 
     def test_counts_show_stuck_session_after_flap(self, handler: DowngradeIndicatorHandler) -> None:
+        self._publish_downgrade("sess-a")
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))  # HW fable
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))  # down 1
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))  # up 1
@@ -129,6 +135,7 @@ class TestDowngradeIndicatorHandler:
         self, handler: DowngradeIndicatorHandler
     ) -> None:
         handler._show_counts = False
+        self._publish_downgrade("sess-a")
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
         result = handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
         segment = result.context[0]
@@ -138,6 +145,7 @@ class TestDowngradeIndicatorHandler:
     def test_render_back_on_fable_after_downgrade_is_silent_recovery(
         self, handler: DowngradeIndicatorHandler
     ) -> None:
+        self._publish_downgrade("sess-a")
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
         result = handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
@@ -224,44 +232,60 @@ class TestDowngradeIndicatorHandler:
     def test_has_acceptance_tests(self, handler: DowngradeIndicatorHandler) -> None:
         assert len(handler.get_acceptance_tests()) >= 1
 
-    # ---- Plan 00316: manual model change suppression ----------------------
+    # ---- Plan 00328: the badge needs the platform's own record -------------
 
-    def _write_manual_marker(self, session_id: str, family: str, ts: float) -> None:
-        marker_dir = self._untracked / "manual-model-changes"
-        marker_dir.mkdir(parents=True, exist_ok=True)
-        (marker_dir / f"{session_id}.json").write_text(
-            json.dumps({"session_id": session_id, "family": family, "ts": ts}),
-            encoding="utf-8",
+    def _publish_downgrade(
+        self,
+        session_id: str,
+        *,
+        original_family: str = "fable",
+        fallback_family: str = "opus",
+    ) -> None:
+        """Write what the `model_downgrade_recorder` publishes for a real drop."""
+        write_downgrade_signal(
+            self._untracked,
+            DowngradeSignal(
+                session_id=session_id,
+                original_model=f"claude-{original_family}-5",
+                fallback_model=f"claude-{fallback_family}-5",
+                original_family=original_family,
+                fallback_family=fallback_family,
+                category="cyber",
+                scope="session",
+                record_ts="2026-08-27T09:34:10.341Z",
+            ),
+            now=1000.0,
         )
 
-    def test_manual_model_drop_emits_no_downgrade_segment(
+    def test_a_drop_the_human_chose_emits_no_downgrade_segment(
         self, handler: DowngradeIndicatorHandler
     ) -> None:
+        """Nothing recorded it, so telling them they are degraded would be a lie."""
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
-        self._write_manual_marker("sess-a", "opus", time.time())
         result = handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
         assert result.context == []
 
-    def test_manual_model_drop_resets_the_high_water(
+    def test_a_drop_the_human_chose_resets_the_high_water(
         self, handler: DowngradeIndicatorHandler
     ) -> None:
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
-        self._write_manual_marker("sess-a", "opus", time.time())
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
         entry = json.loads((self._state_dir() / "sess-a.json").read_text(encoding="utf-8"))
         assert entry["high_water_family"] == "opus"
 
-    def test_manual_marker_for_a_different_family_does_not_suppress(
+    def test_a_recorded_drop_to_a_different_family_does_not_attribute_this_one(
         self, handler: DowngradeIndicatorHandler
     ) -> None:
+        """A recorded fable → sonnet says nothing about the opus on screen."""
+        self._publish_downgrade("sess-a", fallback_family="sonnet")
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
-        self._write_manual_marker("sess-a", "sonnet", time.time())
         result = handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
-        assert len(result.context) == 1
+        assert result.context == []
 
-    def test_no_marker_still_reports_a_silent_downgrade(
+    def test_another_sessions_record_does_not_attribute_this_drop(
         self, handler: DowngradeIndicatorHandler
     ) -> None:
+        self._publish_downgrade("some-other-session")
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
         result = handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
-        assert len(result.context) == 1
+        assert result.context == []

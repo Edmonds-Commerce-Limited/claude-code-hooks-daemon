@@ -30,10 +30,7 @@ in the file.
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-import re
 import time
 from pathlib import Path
 from typing import Any, Final
@@ -43,6 +40,12 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.status_line.downgrade_state import resolve_model_family
+from claude_code_hooks_daemon.utils.model_downgrade_signal import (
+    SIGNAL_SUBDIR,
+    SIGNAL_SUFFIX,
+    DowngradeSignal,
+    write_downgrade_signal,
+)
 from claude_code_hooks_daemon.utils.model_fallback_records import (
     FallbackFacts,
     scan_transcript_tail,
@@ -50,37 +53,10 @@ from claude_code_hooks_daemon.utils.model_fallback_records import (
 
 logger = logging.getLogger(__name__)
 
-# Same directory the context sidecar and goal-intent signals use: the
-# supervisor already watches it, so no new transport is introduced.
-_SIGNAL_SUBDIR: Final[str] = "context-sidecar"
-# Deliberately NOT ``.json`` — the supervisor's sidecar reader globs for
-# context sidecars by that extension and must not pick this up as one.
-_SIGNAL_SUFFIX: Final[str] = ".model-downgrade"
-_SESSION_ID_FALLBACK: Final[str] = "unknown"
-_UNSAFE_SESSION_CHARS: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9_.-]")
-
-# ── Signal payload fields ──────────────────────────────────────────────────
-_FIELD_TS: Final[str] = "ts"
-_FIELD_SESSION_ID: Final[str] = "session_id"
-_FIELD_ORIGINAL_MODEL: Final[str] = "original_model"
-_FIELD_FALLBACK_MODEL: Final[str] = "fallback_model"
-_FIELD_ORIGINAL_FAMILY: Final[str] = "original_family"
-_FIELD_FALLBACK_FAMILY: Final[str] = "fallback_family"
-_FIELD_CATEGORY: Final[str] = "category"
-_FIELD_SCOPE: Final[str] = "scope"
-_FIELD_RECORD_TS: Final[str] = "record_ts"
-
-# Fields compared to decide whether an already-published signal still
-# describes the current record. ``ts`` is excluded on purpose: it is the
-# publish time, so including it would make every payload differ and defeat
-# the whole rewrite guard.
-_IDENTITY_FIELDS: Final[tuple[str, ...]] = (
-    _FIELD_ORIGINAL_MODEL,
-    _FIELD_FALLBACK_MODEL,
-    _FIELD_CATEGORY,
-    _FIELD_SCOPE,
-    _FIELD_RECORD_TS,
-)
+# Re-exported so tests and readers can locate the published file without
+# reaching past this handler into the shared signal module.
+_SIGNAL_SUBDIR: Final[str] = SIGNAL_SUBDIR
+_SIGNAL_SUFFIX: Final[str] = SIGNAL_SUFFIX
 
 # Bounded tail window, matching ``TranscriptReader.load_tail``'s 1 MiB so the
 # codebase has one answer to "how much tail is enough". A downgrade record
@@ -89,16 +65,6 @@ _IDENTITY_FIELDS: Final[tuple[str, ...]] = (
 # window unless a single result is enormous, and a miss is recoverable because
 # the next tool call scans again.
 _DEFAULT_TAIL_BYTES: Final[int] = 1_048_576
-
-
-def _session_stem(session_id: str) -> str:
-    """A filesystem-safe stem for ``session_id``.
-
-    A session id reaches this handler from the hook payload, so it is treated
-    as untrusted input: path separators and traversal dots are collapsed
-    rather than allowed to steer the write out of the signal directory.
-    """
-    return _UNSAFE_SESSION_CHARS.sub("_", session_id) if session_id else _SESSION_ID_FALLBACK
 
 
 def _family_or_none(model_id: str) -> str | None:
@@ -111,61 +77,40 @@ def _family_or_none(model_id: str) -> str | None:
     return resolved[0] if resolved is not None else None
 
 
-def build_signal_payload(facts: FallbackFacts, *, session_id: str, now: float) -> dict[str, Any]:
-    """Render the per-session downgrade signal from a parsed record."""
-    return {
-        _FIELD_TS: now,
-        _FIELD_SESSION_ID: session_id,
-        _FIELD_ORIGINAL_MODEL: facts.original_model,
-        _FIELD_FALLBACK_MODEL: facts.fallback_model,
-        _FIELD_ORIGINAL_FAMILY: _family_or_none(facts.original_model),
-        _FIELD_FALLBACK_FAMILY: _family_or_none(facts.fallback_model),
-        _FIELD_CATEGORY: facts.category,
-        _FIELD_SCOPE: facts.scope,
-        _FIELD_RECORD_TS: facts.timestamp,
-    }
+def build_signal(facts: FallbackFacts, *, session_id: str) -> DowngradeSignal:
+    """Render the per-session downgrade signal from a parsed transcript record.
+
+    Model ids are resolved to families HERE so the supervisor stays thin. An
+    unrecognised id becomes ``None`` rather than a guess: consumers gate a real
+    injection and a status-line badge on it, and a mis-resolved family would
+    aim both at the wrong model.
+    """
+    return DowngradeSignal(
+        session_id=session_id,
+        original_model=facts.original_model,
+        fallback_model=facts.fallback_model,
+        original_family=_family_or_none(facts.original_model),
+        fallback_family=_family_or_none(facts.fallback_model),
+        category=facts.category,
+        scope=facts.scope,
+        record_ts=facts.timestamp,
+    )
 
 
-def _describes_the_same_record(path: Path, payload: dict[str, Any]) -> bool:
-    """Whether the signal already on disk names the same downgrade record."""
-    try:
-        existing = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    if not isinstance(existing, dict):
-        return False
-    return all(existing.get(field) == payload.get(field) for field in _IDENTITY_FIELDS)
+def publish(signal: DowngradeSignal, *, now: float) -> Path | None:
+    """Publish ``signal`` under the live project's untracked dir.
 
-
-def write_downgrade_signal(payload: dict[str, Any], *, session_id: str) -> Path | None:
-    """Atomically publish ``payload``, unless the same record is already there.
-
-    Returns the signal path when written, ``None`` when the write was skipped
-    or impossible. Skipping an unchanged record is not an optimisation: this
-    handler runs on every PostToolUse, and rewriting would churn the file's
-    mtime so nothing downstream could use it to tell a fresh downgrade from a
-    long-standing one.
+    Resolving that directory is the only thing this adds over
+    ``write_downgrade_signal``; without a project context (a daemon started
+    outside a project, or a unit test) there is nowhere to write and the record
+    stays in the transcript for the next tool call to find.
     """
     try:
-        target_dir = ProjectContext.daemon_untracked_dir() / _SIGNAL_SUBDIR
+        daemon_untracked_dir = ProjectContext.daemon_untracked_dir()
     except RuntimeError as exc:
         logger.warning("model_downgrade_recorder: no project context: %s", exc)
         return None
-
-    stem = _session_stem(session_id)
-    final_path = target_dir / f"{stem}{_SIGNAL_SUFFIX}"
-    if final_path.exists() and _describes_the_same_record(final_path, payload):
-        return None
-
-    try:
-        target_dir.mkdir(parents=True, exist_ok=True)
-        tmp_path = target_dir / f".{stem}.{os.getpid()}.tmp"
-        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
-        tmp_path.replace(final_path)
-    except OSError as exc:
-        logger.warning("model_downgrade_recorder: could not write %s: %s", final_path, exc)
-        return None
-    return final_path
+    return write_downgrade_signal(daemon_untracked_dir, signal, now=now)
 
 
 class ModelDowngradeRecorderHandler(PostToolUseHandlerBase):
@@ -221,8 +166,7 @@ class ModelDowngradeRecorderHandler(PostToolUseHandlerBase):
         if facts is None:
             return BlockingResult(decision=Decision.ALLOW)
 
-        payload = build_signal_payload(facts, session_id=session_id, now=time.time())
-        write_downgrade_signal(payload, session_id=session_id)
+        publish(build_signal(facts, session_id=session_id), now=time.time())
         return BlockingResult(decision=Decision.ALLOW)
 
     def get_claude_md(self) -> str | None:

@@ -12,7 +12,6 @@ reports -- no dependency on the ccy supervisor or any external signal.
 """
 
 import logging
-import time
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
@@ -22,12 +21,11 @@ from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.handlers.status_line.downgrade_state import (
     evaluate_downgrade,
-    is_manual_model_change,
-    manual_model_change_dir,
     read_downgrade_counts,
     resolve_model_family,
     state_dir,
 )
+from claude_code_hooks_daemon.utils.model_downgrade_signal import read_downgrade_signal
 
 logger = logging.getLogger(__name__)
 
@@ -88,14 +86,14 @@ class DowngradeIndicatorHandler(StatusLineHandlerBase):
             current_family, current_rank = resolved
             daemon_untracked_dir = ProjectContext.daemon_untracked_dir()
             dir_path = state_dir(daemon_untracked_dir)
-            manual = is_manual_model_change(
-                manual_model_change_dir(daemon_untracked_dir),
-                session_id,
-                current_family,
-                now=time.time(),
-            )
+            # Plan 00328: the badge is shown only for a drop Claude Code
+            # RECORDED as its own. A high-water drop alone cannot tell a
+            # safety substitution from a model the human picked, and telling
+            # someone they are degraded because they chose Opus is a lie.
+            signal = read_downgrade_signal(daemon_untracked_dir, session_id)
+            attributed = signal is not None and signal.fallback_family == current_family
             downgrade = evaluate_downgrade(
-                dir_path, session_id, current_family, current_rank, manual=manual
+                dir_path, session_id, current_family, current_rank, attributed=attributed
             )
             if downgrade is None:
                 return ""

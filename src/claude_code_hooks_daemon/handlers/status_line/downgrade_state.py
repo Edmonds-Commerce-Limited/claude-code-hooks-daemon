@@ -89,78 +89,12 @@ def state_dir(daemon_untracked_dir: Path) -> Path:
     return daemon_untracked_dir / _STATE_SUBDIR
 
 
-# Plan 00316 Task 1.3: the ccy supervisor's manual-model-change marker
-# directory — written by `.claude/ccy/claude-supervise.py`'s
-# `write_manual_model_marker` (host tier, on every user-typed `/model
-# <family>`) under the SAME daemon untracked root this module's own state
-# lives under. Kept as a plain read here (not cached via `MtimeCachedFile`)
-# because a marker is consulted once per render and is deliberately
-# short-lived (see `_MANUAL_MARKER_WINDOW_SECONDS`).
-_MANUAL_MARKER_SUBDIR: Final[str] = "manual-model-changes"
-# Mirrors the supervisor's `_MANUAL_MODEL_WINDOW_SECONDS` — kept as an
-# independent constant (the two are separate deployables) rather than a
-# shared import. It is a BACKSTOP, not a race window: a busy session may not
-# re-render the status line for many minutes after the human's Enter, and a
-# marker that expires before that first render lets the indicator open a
-# downgrade episode against the human's own choice and latch for the rest of
-# the session. Raising the supervisor's constant WITHOUT raising this one
-# reintroduces exactly that defect, so the two must move together.
-_MANUAL_MARKER_WINDOW_SECONDS: Final[float] = 3600.0
-_MARKER_KEY_FAMILY: Final[str] = "family"
-_MARKER_KEY_TS: Final[str] = "ts"
-
-
-def manual_model_change_dir(daemon_untracked_dir: Path) -> Path:
-    """Return the directory holding per-session manual-model-change markers."""
-    return daemon_untracked_dir / _MANUAL_MARKER_SUBDIR
-
-
-def _parse_manual_marker(text: str) -> tuple[str, float] | None:
-    """Parse one marker file's text into ``(family, ts)``, or ``None``.
-
-    Never raises: matches this module's fail-silent render-path contract.
-    """
-    try:
-        data: Any = json.loads(text)
-    except ValueError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    family = data.get(_MARKER_KEY_FAMILY)
-    ts = data.get(_MARKER_KEY_TS)
-    if not isinstance(family, str):
-        return None
-    if isinstance(ts, bool) or not isinstance(ts, (int, float)):
-        return None
-    return family, float(ts)
-
-
-# Routed through the shared mtime gate (like `_STATE_CACHE` above) rather
-# than a direct read on every render — the supervisor rewrites a session's
-# marker at most once per typed `/model` command, far rarer than the render
-# rate.
-_MANUAL_MARKER_CACHE: MtimeCachedFile[tuple[str, float] | None] = MtimeCachedFile(
-    _parse_manual_marker, None
-)
-
-
-def is_manual_model_change(
-    dir_path: Path, session_id: str, current_family: str, *, now: float
-) -> bool:
-    """True when a recent human-typed `/model <current_family>` marker exists.
-
-    Fail-silent: a missing, unreadable, or malformed marker file, or one for
-    a DIFFERENT family, or one outside the validity window, all read as "not
-    manual" — this must never raise on the render path.
-    """
-    path = dir_path / f"{safe_session_stem(session_id)}.json"
-    parsed = _MANUAL_MARKER_CACHE.read(path)
-    if parsed is None:
-        return False
-    family, ts = parsed
-    if family != current_family:
-        return False
-    return (now - ts) <= _MANUAL_MARKER_WINDOW_SECONDS
+# Attribution used to be read from the ccy supervisor's manual-model-change
+# marker — a mirror of the supervisor's guess at what the human had typed,
+# time-windowed, with a constant the two deployables had to keep in step by
+# hand. Plan 00328 replaced it with Claude Code's OWN record of a downgrade
+# (`utils/model_downgrade_signal.py`), which needs no window and no guess: a
+# model the human picks emits no record at all.
 
 
 # JSON keys for the episode tallies added on top of the high-water fields
@@ -314,7 +248,7 @@ def evaluate_downgrade(
     current_family: str,
     current_rank: int,
     *,
-    manual: bool = False,
+    attributed: bool = False,
 ) -> tuple[str, str] | None:
     """Update this session's high-water state; report an active downgrade if any.
 
@@ -323,18 +257,22 @@ def evaluate_downgrade(
         session_id: Owning session id (also the state-file key).
         current_family: Canonical family name for the model THIS render saw.
         current_rank: Rank for ``current_family``.
-        manual: True when the ccy supervisor's manual-model-change marker
-            (Plan 00316) shows THIS drop matches a command the human just
-            typed. A manual drop is never reported as a downgrade — the
-            high-water resets to the chosen family/rank instead, exactly
-            like a fresh session starting there, so a further genuine SILENT
-            substitution below it is still caught.
+        attributed: True when Claude Code's OWN record of a safety downgrade
+            (the `model_downgrade_recorder` signal, Plan 00328) names THIS
+            drop. Defaults False, which is the safe direction and forces every
+            caller to be explicit: a drop nothing recorded is the human's own
+            model choice, is never reported as a downgrade, and resets the
+            high-water to the chosen family/rank — exactly like a fresh
+            session starting there, so a later genuine substitution below it
+            is still caught. The high-water mark alone cannot tell the two
+            apart, which is what this replaces.
 
     Returns:
         ``(high_water_family, current_family)`` when ``current_rank`` is
-        BELOW the stored high-water — an active downgrade. ``None`` on a
-        first render (nothing stored yet), a new high (the render that set
-        it), a manual drop, or an unchanged/equal rank — all of which report
+        BELOW the stored high-water AND the platform recorded the drop — an
+        active downgrade. ``None`` on a first render (nothing stored yet), a
+        new high (the render that set it), an unattributed drop, or an
+        unchanged/equal rank — all of which report
         no downgrade. A downgrade render never rewrites the stored
         high-water, so the session's true peak survives a sustained
         downgrade and a later recovery is judged against it, not against the
@@ -379,11 +317,12 @@ def evaluate_downgrade(
             )
         return None
 
-    # Plan 00316: a drop matching a recently-typed human `/model` command is
-    # never a downgrade — reset the high-water to the manual choice (closing
-    # any open episode as a recovery), exactly like a fresh session starting
-    # there, so a LATER genuine silent substitution below it is still caught.
-    if manual:
+    # Plan 00328: a drop the PLATFORM did not record is the human's own model
+    # choice, and is never a downgrade — reset the high-water to the chosen
+    # family (closing any open episode as a recovery), exactly like a fresh
+    # session starting there, so a LATER genuine substitution below it is still
+    # caught.
+    if not attributed:
         if active:
             recovery += 1
         write_state(
