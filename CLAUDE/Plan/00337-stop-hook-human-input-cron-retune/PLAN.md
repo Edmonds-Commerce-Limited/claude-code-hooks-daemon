@@ -171,8 +171,9 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 
 ### Phase 4: Backoff that needs no cooperation from the agent
 
-- [ ] ⬜ **Task 4.1**: The strongest fix is the one that does not depend on the
-  agent saying anything. **Ask the goal ledger, not the agent.** Owner steer:
+- [x] ✅ **Task 4.1**: **Shipped.** The strongest fix is the one that does not
+  depend on the agent saying anything. **Ask the goal ledger, not the agent.**
+  Owner steer:
   "wondering if we should keep the cron running once we hit a human blocker or
   work is completely done — the completely done bit is tricky because agents
   stop randomly all the time, which is why we have so many stop systems." That
@@ -191,28 +192,60 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
   original framing, which keyed backoff on "consecutive unproductive ticks" —
   a heuristic, where the ledger is a state signal.
 
-- [ ] ⬜ **Task 4.1b**: Respect the ledger's limit — **wider than this task
-  originally said.** `live_plan_numbers` counts only plans already in the
-  ledger that also resolve to `_STATE_IN_PROGRESS`, so a plan that never got a
-  `/goal`, or one whose header still reads `Not Started`, is not "owed". Both
-  biases point at "nothing owed", the direction that backs the cron off — so
-  a plan being actively worked behind a stale header would lose its safety
-  net. A real dependency on **Plan 00341**. (Journal 16:30, DESIGN-cadence.md.)
+  **One design refinement found while implementing.** DESIGN-cadence.md said
+  "could not determine" must always behave like row 1 (tick). That is right on
+  the UNDECLARED path and wrong on the declared one: applied there it would
+  have turned Plan 00298's DENY into an ALLOW whenever the ledger was
+  unreadable, regressing shipped behaviour this plan's Non-Goals protect. So
+  unknown reads as owed when nothing was declared, and as row 3 when something
+  was. The existing row-3 tests caught it. (Journal 20:50.)
 
-- [ ] ⬜ **Task 4.2**: Back off exponentially with a **cap** (doubling to a
-  4-hour ceiling), never to silence — the cron exists to recover a session
-  interrupted by a rate limit, and a later tick genuinely helps once the limit
-  lifts. Algorithm settled in [DESIGN-cadence.md](DESIGN-cadence.md).
+- [x] ✅ **Task 4.1b**: **Respected, with the residual dependency bounded.**
+  `live_plan_numbers` counts only plans already in the ledger that also
+  resolve to `_STATE_IN_PROGRESS`, and both biases point at "nothing owed" —
+  the direction that backs the cron off.
 
-- [ ] ⬜ **Task 4.5** (found while designing): the suppressor **cannot reach
-  the ledger yet** — `track_plans_in_project` is injected only into
-  planning-tagged handlers and this one is not tagged PLANNING. Decide before
-  Task 4.1; **Plan 00311 Task 1.1** hits the identical obstacle in
-  `dispatch_declaration`, which argues for one shared decision rather than two
-  local workarounds. (DESIGN-cadence.md.)
+  The half this plan can fix, it fixed: "could not determine" is now a third
+  value distinct from "nothing owed", and a plan directory that does not exist
+  on disk resolves to it rather than to an empty scan — so the likeliest
+  misconfiguration costs a wasted tick, not a withdrawn net.
 
-- [ ] ⬜ **Task 4.3**: Any genuine user message resets the cadence to hourly,
-  matching how a user message already clears the marker.
+  The half that remains is **Plan 00341**'s: a plan actively worked behind a
+  stale `Not Started` header still reads as not-owed. The consequence is now
+  bounded rather than open-ended — that session gets a tick every 4 hours
+  instead of hourly, never silence — so this is a real dependency but no
+  longer a blocking one.
+
+- [x] ✅ **Task 4.2**: **Shipped.** Doubling to a 4-hour ceiling, never to
+  silence — the cron exists to recover a session interrupted by a rate limit,
+  and a later tick genuinely helps once the limit lifts. Twelve consecutive
+  unproductive ticks now deliver at hours 1, 3, 7 and 11: four turns instead
+  of twelve, asserted as that observable pattern rather than as three separate
+  invariants. Algorithm in [DESIGN-cadence.md](DESIGN-cadence.md).
+
+- [x] ✅ **Task 4.5**: **Decided — add `HandlerTag.PLANNING`.** The worry the
+  task recorded ("tags drive filtering and reporting elsewhere") was surveyed
+  rather than assumed, and is not supported: the tag has exactly ONE
+  behavioural read in `src/` (the registry injection gate). The docs
+  generator, the `handlers` CLI payload, the playbook generator and
+  `claude_md_injector` all classify by something else; no test enumerates or
+  counts planning-tagged handlers; no document lists the set. Measured blast
+  radius: one line in `src/` plus `__init__` defaults, zero test changes, zero
+  doc changes.
+
+  One real risk recorded in the handler docstring rather than avoided: tags
+  also feed the generic `enable_tags`/`disable_tags` filters, so a project
+  disabling the `planning` tag now disables this handler too. **This settles
+  Plan 00311 Task 1.1 the same way.** (Journal 20:50.)
+
+- [x] ✅ **Task 4.3**: Any genuine user message resets the cadence to hourly,
+  alongside the marker clear that already happened there.
+
+  **`matches()` had to widen too, or this would have been dead code.** It
+  gated a real prompt on the MARKER existing — and row 4 is by definition the
+  case with no marker, so the owner's reply would never have reached
+  `handle()` and the cadence would never have reset. Caught while reading the
+  code, not by a test; now covered by one. (Journal 20:50.)
 
 - [x] ✅ **Task 4.4**: **Folds into `failsafe_cron_blockage_suppressor`**, on
   position rather than preference: a backoff must see every delivered tick,

@@ -73,9 +73,32 @@ unreadable or the ledger raises, ALLOW the tick. A cadence bug that denied
 everything would silently disable recovery, which is worse than a wasted turn
 and invisible, because the symptom is nothing happening.
 
+**CORRECTED WHILE IMPLEMENTING — "unknown" is not one rule, it is two.** This
+document said "could not determine" must always behave like row 1 and tick.
+That holds on the UNDECLARED path, and it is the whole defence against a
+mis-resolved plan directory reading as "nothing owed". It is wrong on the
+DECLARED path: applied there it turns Plan 00298's DENY into an ALLOW whenever
+the ledger is unreadable, regressing shipped behaviour this plan's Non-Goals
+protect. The existing row-3 tests caught it. So unknown reads as **owed** when
+nothing was declared, and as **row 3** when something was — the declaration
+alone justified suppression before Phase 4, and the ledger's blind spot must
+not make that path less safe than it already was.
+
 **Row 4 must never become row 3.** "No goals owed and nothing declared" is the
 case where the ledger's blind spot bites, so it backs off rather than
 suppressing. That is the whole reason the bottom row is not "silence".
+
+## The ledger consult is a WRITE, not a read (found while implementing)
+
+`live_plan_numbers()` takes the ledger lock, reconciles every entry against the
+plan directory and **persists any retirements it finds**. This document treated
+it as a pure input signal above; it is not. The suppressor is therefore a
+second writer of `goal-ledger.json`, on a `UserPromptSubmit` event.
+
+Idempotent reconciliation, and cheap at hourly cadence, so this is not a
+correctness problem — but the handler docstring says so plainly rather than
+letting the method name imply a read, and a future change that makes the
+consult more frequent should revisit it.
 
 ## The ledger is narrower than it looks (Task 4.1b)
 
@@ -118,6 +141,16 @@ Two ways out:
 which also needs the configured plan directory and also lacks the tag. Two
 handlers wanting the same injected value argues for one decision about how a
 non-planning handler reaches plan config, not two local workarounds.
+
+**RESOLVED: the tag was added.** The second option's worry did not survive
+measurement. Surveying every read of `HandlerTag.PLANNING` across `src/`,
+`tests/` and the doc tree found exactly one behavioural read — the injection
+gate itself. The docs generator classifies by blocking/advisory/context, the
+`handlers` CLI payload carries no tags, the playbook generator never mentions
+them, no test enumerates the planning set and no document lists it. So "tags
+drive filtering and reporting elsewhere" was true in principle and empty in
+fact. The one genuine consequence is that `enable_tags`/`disable_tags` now
+also reach this handler, which is recorded in its docstring.
 
 **Related trap.** `resolve_plan_dir` falls back to `PlanWorkflowConfig().directory`,
 so a missing attribute yields "wrong directory → no goals found → back off" —

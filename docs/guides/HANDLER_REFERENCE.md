@@ -3406,7 +3406,18 @@ handlers:
 
 **Description:** Zero-token cadence for a session that is stably blocked only on human input (Plan 00298). When `auto_continue_stop` allows a Stop that declares this — `STOPPING BECAUSE: [awaiting-human] …`, or one of the legacy prose shapes it keeps as a fallback — it records a session-scoped marker (`human-input-blockage-marker.json` under the daemon's untracked dir). This handler recognises a DELIVERED failsafe-cron tick — the canonical prompt from `recovery_cron_advisor` — and, while a still-valid marker exists for the session, blocks the prompt before it ever reaches the model (Claude Code's documented `UserPromptSubmit` block behaviour). This is genuinely zero-token, unlike a convention/prompt-text backoff that still costs a full turn to read and act on.
 
-**Fails open everywhere:** no marker, a marker for a different session, an expired marker, a corrupt/unreadable marker, or no resolvable project context all ALLOW the tick through unchanged — suppression is a positive assertion made only when every condition is individually verified, never the default. Any genuine (non-cron) user prompt clears the marker immediately (a different handler-independent behaviour of `auto_continue_stop`'s narrow write conditions never re-arming outside a new matching stop).
+**Backoff for a session that declares nothing (Plan 00337 Phase 4):** the marker only ever covered sessions that said something, leaving every other session at a full model turn per hour indefinitely. The handler now also asks the daemon-side goal ledger whether work is owed — a state signal, rather than the agent's self-report, because a false "done" is the commonest way an agent stops wrongly and the cron is the net that catches it. Four cases:
+
+| work owed | declared | outcome                                         |
+| --------- | -------- | ----------------------------------------------- |
+| yes       | no       | ALLOW every tick — the case the cron exists for |
+| yes       | yes      | back off, capped                                |
+| no        | yes      | DENY — Plan 00298's behaviour, unchanged        |
+| no        | no       | back off, capped                                |
+
+The backoff thins ticks to hourly, then every 2 hours, then every 4, and **never sparser** (`R-FAILSAFE-CRON-BACKED-OFF`), so a session interrupted by a rate limit still recovers once the limit lifts. Any genuine user prompt resets it to hourly. "Could not determine whether work is owed" is a third value, not a synonym for "no": on the undeclared path it counts as owed, so an unresolvable plan directory costs a wasted tick rather than a silently withdrawn safety net. Adding the ledger consult means this handler carries `HandlerTag.PLANNING` — a project that disables that tag now disables this handler too.
+
+**Fails open everywhere:** no marker, a marker for a different session, an expired marker, a corrupt/unreadable marker, an unreadable cadence file, or no resolvable project context all ALLOW the tick through unchanged — suppression is a positive assertion made only when every condition is individually verified, never the default. Any genuine (non-cron) user prompt clears the marker immediately (a different handler-independent behaviour of `auto_continue_stop`'s narrow write conditions never re-arming outside a new matching stop).
 
 **Never terminal:** `idle_housekeeping_advisory` and `standing_authorisations` also key off the same canonical cron prompt and must keep running on every non-suppressed tick. A non-terminal DENY still survives later handlers regardless of registration order.
 

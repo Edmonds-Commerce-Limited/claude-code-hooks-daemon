@@ -937,6 +937,30 @@
       "reason": "Plan 00298: same site as the return-none-on-error entry immediately above -- clear_marker's OSError branch is both 'returns without raising' and 'logs and continues' under this audit's classification. An unwritable marker file degrades to 'the marker stays present until its own expiry', which is the documented fail-open outcome, not a concealed failure."
     },
     {
+      "file": "utils/cron_cadence.py",
+      "function": "read_cadence",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00337 Phase 4: the sibling of blockage_marker.read_marker and the same tolerant-JSON-record pattern. A missing, unreadable or corrupt cadence file all map to None, which the suppressor consumes as 'no backoff accumulated yet' and therefore DELIVERS the tick. Raising out of a UserPromptSubmit handler over an unparseable state file would be strictly worse than the fail-open outcome, because the state file only ever makes the cron cheaper, never safer."
+    },
+    {
+      "file": "utils/cron_cadence.py",
+      "function": "reset_cadence",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00337 Phase 4: resetting a cadence that is already absent (FileNotFoundError) is not an error -- it is the exact state the caller wanted. An OSError removing an existing file is logged at debug and swallowed: a stale cadence file left behind only means ticks stay thinned until the next real prompt or the next reset, and they are capped at every 4 hours, never silence."
+    },
+    {
+      "file": "utils/cron_cadence.py",
+      "function": "reset_cadence",
+      "rule": "log-and-continue",
+      "reason": "Plan 00337 Phase 4: same site as the return-none-on-error entry immediately above -- reset_cadence's OSError branch is both 'returns without raising' and 'logs and continues' under this audit's classification. It rides along with a genuine user prompt, and failing that prompt because a cleanup unlink failed would turn a cosmetic problem into a blocked conversation."
+    },
+    {
+      "file": "handlers/user_prompt_submit/failsafe_cron_blockage_suppressor.py",
+      "function": "_work_is_owed",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00337 Phase 4: None is a DELIBERATE THIRD VALUE here, not a swallowed failure -- it means 'could not determine whether work is owed', and it is distinct from False ('nothing owed'). The caller treats it as owed on the undeclared path, so an unresolvable project context or an unreadable ledger produces a DELIVERED tick. Raising would abort a UserPromptSubmit handler; returning False would silently withdraw the session's recovery net, which is the failure this three-valued return exists to prevent."
+    },
+    {
       "file": "daemon/payload_capture.py",
       "function": "resolve_capture_dir",
       "rule": "log-and-continue",

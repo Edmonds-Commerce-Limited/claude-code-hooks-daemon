@@ -484,3 +484,9 @@ class RuleID:
     #: A delivered failsafe-cron tick suppressed by a still-valid
     #: blocked-only-on-human-input marker.
     FAILSAFE_CRON_SUPPRESSED: str = "R-FAILSAFE-CRON-SUPPRESSED"
+
+    #: A delivered failsafe-cron tick dropped by the Plan 00337 backoff, which
+    #: thins ticks out for a session producing nothing. Distinct from
+    #: SUPPRESSED: that one needs a declaration and stops ticks entirely until
+    #: a real prompt; this one needs no declaration and never stops them.
+    FAILSAFE_CRON_BACKED_OFF: str = "R-FAILSAFE-CRON-BACKED-OFF"

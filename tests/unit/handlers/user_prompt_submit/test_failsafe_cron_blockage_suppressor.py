@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
     _CANONICAL_CRON_PROMPT,
@@ -23,6 +23,17 @@ from claude_code_hooks_daemon.utils.blockage_marker import (
     MARKER_FILENAME,
     read_marker,
     write_marker,
+)
+from claude_code_hooks_daemon.utils.cron_cadence import (
+    CADENCE_FILENAME,
+    CadenceState,
+    read_cadence,
+    write_cadence,
+)
+
+_OWED_PATCH_TARGET = (
+    "claude_code_hooks_daemon.handlers.user_prompt_submit."
+    "failsafe_cron_blockage_suppressor.FailsafeCronBlockageSuppressorHandler._work_is_owed"
 )
 
 _DAEMON_UNTRACKED_DIR_PATCH_TARGET = (
@@ -221,3 +232,165 @@ class TestMatchesWithMarker:
             _DAEMON_UNTRACKED_DIR_PATCH_TARGET, side_effect=RuntimeError("no project context")
         ):
             assert handler.matches(_real_hook_input("sess-1")) is False
+
+
+def _backoff_handler() -> FailsafeCronBlockageSuppressorHandler:
+    """A handler with a fixed clock, for the Phase 4 cadence tests."""
+    handler = FailsafeCronBlockageSuppressorHandler()
+    handler._clock = lambda: 1000.0
+    return handler
+
+
+class TestPlanningTagIsPresent:
+    """Plan 00337 Task 4.5.
+
+    The tag is the ONLY route by which the registry injects
+    ``track_plans_in_project``. Without it the handler silently reads None and
+    resolves the DEFAULT plan directory, so a project that configured a
+    different one would find "nothing owed" -- the direction that withdraws the
+    safety net. Asserted here because that failure is invisible at runtime: the
+    attribute is self-defaulted, so the missing injection does not raise.
+    """
+
+    def test_handler_carries_the_planning_tag(self) -> None:
+        assert HandlerTag.PLANNING in FailsafeCronBlockageSuppressorHandler().tags
+
+    def test_track_plans_in_project_self_defaults(self) -> None:
+        """The injection block does not run when plan_workflow is None, so the
+        attribute must exist before the registry ever touches it."""
+        assert FailsafeCronBlockageSuppressorHandler()._track_plans_in_project is None
+
+
+class TestRowOneWorkOwedIsNeverBackedOff:
+    """Work owed, nothing declared: the case the cron exists for.
+
+    Every tick must be delivered, and any accumulated backoff discarded.
+    """
+
+    def test_owed_work_allows_the_tick(self, tmp_path: Path) -> None:
+        handler = _backoff_handler()
+        with (
+            patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
+            patch(_OWED_PATCH_TARGET, return_value=True),
+        ):
+            result = handler.handle(_cron_hook_input("sess-1"))
+        assert result.decision == Decision.ALLOW
+
+    def test_owed_work_resets_an_accumulated_backoff(self, tmp_path: Path) -> None:
+        handler = _backoff_handler()
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            with patch(_OWED_PATCH_TARGET, return_value=False):
+                for _ in range(4):
+                    handler.handle(_cron_hook_input("sess-1"))
+            assert read_cadence(tmp_path / CADENCE_FILENAME) is not None
+            with patch(_OWED_PATCH_TARGET, return_value=True):
+                result = handler.handle(_cron_hook_input("sess-1"))
+        assert result.decision == Decision.ALLOW
+        assert read_cadence(tmp_path / CADENCE_FILENAME) is None
+
+
+class TestUndeterminablePlanDirBehavesLikeRowOne:
+    """A plan directory that cannot be resolved must NOT read as "nothing
+    owed". It is a third value, and it ticks -- otherwise a mis-resolved
+    directory silently withdraws the safety net."""
+
+    def test_unknown_owed_state_allows_every_tick(self, tmp_path: Path) -> None:
+        handler = _backoff_handler()
+        with (
+            patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
+            patch(_OWED_PATCH_TARGET, return_value=None),
+        ):
+            decisions = [handler.handle(_cron_hook_input("sess-1")).decision for _ in range(6)]
+        assert decisions == [Decision.ALLOW] * 6
+
+
+class TestRowFourNothingOwedNothingDeclaredBacksOff:
+    """Backed off, never silent."""
+
+    def test_ticks_thin_out_but_never_stop(self, tmp_path: Path) -> None:
+        handler = _backoff_handler()
+        with (
+            patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
+            patch(_OWED_PATCH_TARGET, return_value=False),
+        ):
+            decisions = [handler.handle(_cron_hook_input("sess-1")).decision for _ in range(12)]
+        delivered = [i + 1 for i, d in enumerate(decisions) if d == Decision.ALLOW]
+        # hourly, then every 2h, then every 4h and no sparser (MAX_CADENCE_HOURS)
+        assert delivered == [1, 3, 7, 11]
+
+    def test_a_real_prompt_resets_the_cadence(self, tmp_path: Path) -> None:
+        handler = _backoff_handler()
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            with patch(_OWED_PATCH_TARGET, return_value=False):
+                for _ in range(6):
+                    handler.handle(_cron_hook_input("sess-1"))
+            handler.handle(_real_hook_input("sess-1"))
+            assert read_cadence(tmp_path / CADENCE_FILENAME) is None
+            with patch(_OWED_PATCH_TARGET, return_value=False):
+                first_after_reset = handler.handle(_cron_hook_input("sess-1"))
+        assert first_after_reset.decision == Decision.ALLOW
+
+
+class TestRowTwoDeclaredAndOwedBacksOffRatherThanSuppressing:
+    """Declared, but work IS owed. Full suppression would be unsafe (there is
+    real work), hourly would be wasteful (the agent says it is blocked), so
+    this row backs off rather than taking either extreme."""
+
+    def test_declared_with_owed_work_thins_out_instead_of_denying_every_tick(
+        self, tmp_path: Path
+    ) -> None:
+        write_marker(tmp_path / MARKER_FILENAME, "sess-1", now=1000.0)
+        handler = _backoff_handler()
+        with (
+            patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
+            patch(_OWED_PATCH_TARGET, return_value=True),
+        ):
+            decisions = [handler.handle(_cron_hook_input("sess-1")).decision for _ in range(12)]
+        delivered = [i + 1 for i, d in enumerate(decisions) if d == Decision.ALLOW]
+        assert delivered == [1, 3, 7, 11]
+
+
+class TestMatchesSeesTheResetOpportunity:
+    """Task 4.3 is dead code unless matches() widens.
+
+    In row 4 ("nothing owed, nothing declared") there is by definition no
+    MARKER, so the existing ``marker_path.exists()`` fallback returns False for
+    a real user prompt -- handle() never runs and the cadence is never reset.
+    The failure is invisible: ticks simply stay sparse after the owner returns.
+    """
+
+    def test_real_prompt_matches_when_only_a_cadence_file_exists(self, tmp_path: Path) -> None:
+        write_cadence(tmp_path / CADENCE_FILENAME, CadenceState("sess-1", 1, 2))
+        handler = FailsafeCronBlockageSuppressorHandler()
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            assert handler.matches(_real_hook_input("sess-1")) is True
+
+    def test_real_prompt_still_does_not_match_when_neither_file_exists(
+        self, tmp_path: Path
+    ) -> None:
+        handler = FailsafeCronBlockageSuppressorHandler()
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            assert handler.matches(_real_hook_input("sess-1")) is False
+
+
+class TestCadenceFailsOpen:
+    def test_an_unreadable_cadence_file_allows(self, tmp_path: Path) -> None:
+        (tmp_path / CADENCE_FILENAME).write_text("{not json", encoding="utf-8")
+        handler = _backoff_handler()
+        with (
+            patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
+            patch(_OWED_PATCH_TARGET, return_value=False),
+        ):
+            result = handler.handle(_cron_hook_input("sess-1"))
+        assert result.decision == Decision.ALLOW
+
+    def test_a_raising_ledger_consult_allows(self, tmp_path: Path) -> None:
+        """_work_is_owed swallows its own errors and returns None, but if a new
+        failure mode ever escaped it, the tick must still get through."""
+        handler = _backoff_handler()
+        with (
+            patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
+            patch(_OWED_PATCH_TARGET, side_effect=OSError("boom")),
+        ):
+            result = handler.handle(_cron_hook_input("sess-1"))
+        assert result.decision == Decision.ALLOW
