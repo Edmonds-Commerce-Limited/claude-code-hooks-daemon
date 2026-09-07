@@ -155,6 +155,28 @@ class TestLayerTwoDetectsThatItsOwnFileChanged:
             "detects its source changed underneath it."
         )
 
+    def test_the_second_pass_does_not_duplicate_the_positional_arguments(self) -> None:
+        """Forward the trailing FLAGS, not the whole original argument list.
+
+        The three positionals are already passed explicitly. A plain ``"$@"``
+        appends them a second time, so the child receives each one twice — it
+        still reads ``$1``-``$3`` correctly, but the flag detection in this
+        script matches against ``$*``, and feeding it duplicated paths is a
+        trap waiting for the first path that contains a flag-like substring.
+        """
+        content = LAYER2.read_text()
+
+        reexec_line = next(
+            line for line in content.splitlines() if 'exec bash "$LAYER2_TARGET_SCRIPT"' in line
+        )
+
+        assert '"${@:4}"' in reexec_line, (
+            'Forward only the trailing flags with "${@:4}"; got:\n' + reexec_line
+        )
+        assert not reexec_line.rstrip().endswith('"$@"'), (
+            'plain "$@" re-appends the three positionals that are already ' "passed explicitly"
+        )
+
     def test_the_second_pass_cannot_loop(self) -> None:
         """The re-exec must be guarded by a sentinel the child inherits."""
         content = LAYER2.read_text()

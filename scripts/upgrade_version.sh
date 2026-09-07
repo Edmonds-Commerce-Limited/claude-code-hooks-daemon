@@ -1235,7 +1235,10 @@ if [ "$LAYER2_SOURCE_CHANGED" = true ] && [ -z "${HOOKS_DAEMON_UPGRADE_SECOND_PA
     print_info "The steps above came from the pre-upgrade script. Re-running from $LAYER2_TARGET_SCRIPT."
     export HOOKS_DAEMON_UPGRADE_SECOND_PASS=1
     export HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION="$CURRENT_VERSION"
-    exec bash "$LAYER2_TARGET_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" "$@"
+    # "${@:4}" forwards only the trailing FLAGS. Plain "$@" would re-append the
+    # three positionals that are already being passed explicitly, handing the
+    # child each of them twice.
+    exec bash "$LAYER2_TARGET_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" "${@:4}"
 fi
 
 exit 0
