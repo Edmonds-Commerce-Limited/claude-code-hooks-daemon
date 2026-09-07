@@ -89,12 +89,50 @@ a documented bootstrap command that this project's own new handler denies.
   is restructuring Steps 1-6 into a skippable region in a 1200-line script
   that upgrades every client; the cost of not resuming is doing the work
   twice on a direct Layer 2 invocation.
-- [ ] ⬜ **Task 2.2**: If resuming, keep the rollback contract intact — the
-  child must inherit `SNAPSHOT_ID` so a post-re-exec failure still rolls
-  back to the pre-upgrade state.
-- [ ] ⬜ **Task 2.3**: Whatever the decision, record it. The current second
-  pass is a deliberate trade, not an oversight, and the next reader needs
-  to know that.
+
+- [x] ✅ **Task 2.2**: Rollback contract. **Resolved by not resuming** — the
+  second pass runs only after Step 17, with the upgrade already successful and
+  `UPGRADE_STARTED=false`, so no snapshot has to cross the boundary. Verified
+  separately that `exec` does not fire the EXIT trap, so the re-exec cannot
+  trigger a spurious rollback.
+
+- [x] ✅ **Task 2.3**: Record the decision. **Done — KEEP the second pass.**
+  The gap it leaves is narrower than it first appeared, because under Layer 1
+  (checkout at line 440, Layer 2 invoked at 478) Layer 2 starts as a fresh
+  process AFTER the checkout, so its script body AND its sourced
+  `install/*.sh` libraries are all the new release. The "steps run from old
+  code" problem is therefore confined to DIRECT Layer 2 invocation — the path
+  the Defect 4 documentation fix now steers people away from — and the second
+  pass already covers new steps there. A blanket re-source of the libraries
+  after checkout was considered as a cheaper alternative and REJECTED:
+  `gitignore.sh` and `rollback.sh` declare `readonly` variables, and
+  re-assigning a readonly under `set -e` aborts the script.
+
+- [x] ✅ **Task 2.4** (added): Boundary of what the first pass runs as old
+  code. Only the SHELL is stale. Step 7 rebuilds the venv from the new
+  checkout, so every `"$VENV_PYTHON" -m claude_code_hooks_daemon...` call from
+  Step 8 onward already executes the new release's Python. A fix in
+  `config_differ.py` reaches the upgrade that delivers it; a fix in
+  `config_preserve.sh` does not.
+
+- [ ] ⬜ **Task 2.5** (added, and the largest finding in this phase): **On a
+  standard Layer 1 tag upgrade, config preservation and merging never run at
+  all.** Layer 1 checks out first, so Layer 2's Step 2 finds
+  `ROLLBACK_REF == TARGET_VERSION`, takes the idempotent fast path, and
+  `exit 0`s at line 418. `preserve_config_for_upgrade` is called from exactly
+  one place — line 861, Step 10 — which the fast path never reaches. Confirmed
+  by grep: Layer 1 contains no config-merge call of its own, and the fast path
+  (269-418) contains none either, though it IS otherwise comprehensive (venv,
+  hooks, slash commands, skills, plan workflow, core docs, ccy, relay, restart,
+  post-install checks).
+
+  Judge the impact before acting: this is staleness, not data loss. The user's
+  config is left untouched, and the Pydantic schema supplies defaults for keys
+  that are absent, so behaviour still follows the new defaults at runtime — the
+  config FILE simply never gains the new entries. The config-optimisation
+  review may well be the intended mechanism for adopting new handlers. The
+  question for the owner is whether the fast path skipping Step 10 is deliberate
+  or an accident of where the early `exit 0` landed.
 
 ### Phase 3: Stale resident guidance after an upgrade
 
