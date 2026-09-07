@@ -242,6 +242,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 - [00164: Supervisor lifecycle and upgrade clarity](00164-supervisor-lifecycle-and-upgrade-clarity/PLAN.md) - Complete (shipped as **v3.41.0** (MINOR), all 7 phases in one release. (1) truthful upgrade transition messaging — client upgrades read the venv `.daemon-version` stamp so they report the real installed→target …)
 
+- [00161: Idle Housekeeping Mode](00161-idle-housekeeping-mode/PLAN.md) - Complete at `127c3a3c` + `4f99de53` + the archiving commit (the beta `idle_housekeeping_advisor` turns repeated no-op failsafe ticks into bounded, report-first housekeeping dispatched to sub-agents; ships OFF by default, dogfooded here, with a project-supplied guidance doc as an additive or replacing override. Found shipped-but-unticked 55 days later — the third such plan in one session)
+
 - [00157: Review Followups — Perf Wave](00157-review-followups-perf-wave/PLAN.md) - Complete (closes the loop on the v3.38.0 release-review findings so no review value is lost as tech debt.)
 
 - [00156: Performance Tuning Wave 2 — drop `jq`, slim `init.sh`](00156-performance-tuning-wave-2-drop-jq-slim-init/PLAN.md) - Complete (`Themes: performance`; Wave 2 off Plan 00154, the forwarder-side wins.)

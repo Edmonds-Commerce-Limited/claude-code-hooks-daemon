@@ -1,6 +1,6 @@
 # Plan 00161: idle housekeeping mode
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-14
 **Owner**: joseph
 **Priority**: Medium
@@ -73,24 +73,22 @@ genuinely idle-stop.
   UserPromptSubmit (observed directly this session: every failsafe-recovery tick
   arrives with a `UserPromptSubmit hook additional context` line). The
   UserPromptSubmit host (BRAINSTORM §A.2 Option B) is viable; no fallback needed.
-- [ ] ⬜ **Task 2.1**: TDD the `idle_housekeeping_advisor` detector — matches the
-  canonical `FAILSAFE RECOVERY CHECK` marker, transcript-tail no-op counter
-  (threshold 2), guards (pending AskUserQuestion / real-user-prompt /
-  interleaved tool_use), pass-cap sidecar (RED → GREEN → REFACTOR).
-- [ ] ⬜ **Task 2.2**: Guidance injects an instruction to **fire specialist
-  housekeeping sub-agent(s)** (protecting main-thread context) that run scoped,
-  report-first audits and each write a **shareable markdown report file**.
-- [ ] ⬜ **Task 2.3**: Reports mechanism — reports are markdown files written to
-  an untracked reports directory (`untracked/reports/` by convention, gitignored,
-  no size limit); add the dir to `extra_allowed_markdown_paths` so the
-  markdown_organization handler permits them; dogfood-enable in this repo.
-- [ ] ⬜ **Task 2.4**: Ship a how-to-create-reports guide (`docs/guides/…`)
-  covering the report structure and the three sharing channels (agent-to-agent,
-  Slack/colleague, GitHub issue for the public).
-- [ ] ⬜ **Task 2.5**: Config options (`get_default_enabled() → False` — opt-in
-  beta, OFF by default; `noop_threshold` default 2; `max_passes_per_session`;
-  `reports_dir`); `get_claude_md()`; acceptance tests; `config-changes` manifest
-  entry (recommended: leave OFF — beta); full QA; daemon restart RUNNING.
+- [x] ✅ **Task 2.1**: Shipped as
+  `handlers/user_prompt_submit/idle_housekeeping_advisor.py`, with 23 tests in
+  `tests/unit/handlers/user_prompt_submit/test_idle_housekeeping_advisor.py`.
+- [x] ✅ **Task 2.2**: Shipped — the guidance directs sub-agent dispatch and
+  names the report file, so main-thread context is protected.
+- [x] ✅ **Task 2.3**: Shipped. No `extra_allowed_markdown_paths` entry was
+  needed after all: `untracked/` is already covered by the handler's built-in
+  defaults, so declaring it would have been a redundant override. Dogfood-
+  enabled here (`enabled: true`, priority 56).
+- [x] ✅ **Task 2.4**: Shipped as `docs/guides/CREATING_REPORTS.md`.
+- [x] ✅ **Task 2.5**: Shipped — `get_default_enabled() → False` with the
+  reasoning in its docstring, all three options (`noop_threshold`,
+  `max_passes_per_session`, `reports_dir`), `get_claude_md()`,
+  `get_acceptance_tests()`, and the `config-changes` manifest entry in
+  `CLAUDE/UPGRADES/config-changes/v3.40.0.yaml` at `recommended: false` with a
+  migration note pointing at the reports guide.
 
 ## Technical Decisions
 
@@ -174,12 +172,17 @@ daemon code. Delivered on the beta handler.
 
 ## Success Criteria
 
-- [ ] A robust detection rule that never trips while the user is waiting, mid-plan,
-  or blocked only on human input.
-- [ ] A ranked, safety-scored housekeeping task catalogue the user has reviewed.
-- [ ] An MVP handler dogfooded in this repo that converts repeated no-op ticks
+- [x] A robust detection rule that never trips while the user is waiting, mid-plan,
+  or blocked only on human input. The guards (pending AskUserQuestion,
+  real-user-prompt, interleaved tool_use) plus the pass cap are covered by 23
+  tests.
+- [x] A ranked, safety-scored housekeeping task catalogue the user has reviewed
+  — `BRAINSTORM.md`, reviewed under Task 1.2, with the decisions it produced
+  recorded in Technical Decisions.
+- [x] An MVP handler dogfooded in this repo that converts repeated no-op ticks
   into useful, bounded, report-first housekeeping without fighting the Stop
-  handler or burning quota.
+  handler or burning quota. `enabled: true` here while shipping OFF upstream,
+  which is what "dogfooded" required.
 
 ## Notes & Updates
 
