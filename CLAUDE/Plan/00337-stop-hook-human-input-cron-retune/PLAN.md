@@ -112,10 +112,18 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 
 ### Phase 2: Make the contract visible (cheapest fix, highest ratio)
 
-- [ ] ⬜ **Task 2.1**: Add the arming vocabulary to the stop handler's
-  `get_claude_md()` so it reaches the generated `CLAUDE.md` block, next to the
-  existing "Stop Explanation Required" guidance the agent already follows.
-  State both directions: how to arm, and that a real user message clears it.
+- [ ] ⬜ **Task 2.1**: State the CONSEQUENCE in the stop handler's
+  `get_claude_md()`, in the existing "Stop Explanation Required" section the
+  agent already follows. Both directions: how to arm, and that a real user
+  message clears it.
+
+  It has to be THAT section, not the suppressor's. Checked:
+  `failsafe_cron_blockage_suppressor.get_claude_md()` already names the shape
+  verbatim and its provenance marker IS in `CLAUDE.md` — but the only line
+  carrying the phrase is the `R-FAILSAFE-CRON-SUPPRESSED` rules-table row,
+  whose Fix column says how to CLEAR the marker. The prose was compressed to a
+  row on the way in, and the compression is what drops the arming half. The
+  stop handler's section is rendered in full.
 
 - [ ] ⬜ **Task 2.2**: Pin it with the existing `get_claude_md()` coverage gate
   (the integration test the release process already runs), so the guidance
@@ -144,12 +152,27 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
   `STOPPING BECAUSE: [awaiting-human] ...` — is matched exactly, needs no NLP,
   and reads acceptably to a human. Compare against alternatives (a dedicated
   tool, a structured hook field) and record why the chosen one wins.
+
 - [ ] ⬜ **Task 3.2**: Implement with the existing regexes retained as a
   fallback. Both paths arm the same marker; only the token is advertised.
-- [ ] ⬜ **Task 3.3**: Follow the in-project precedent rather than inventing a
-  convention: `ASKING BECAUSE:` (`R-ASK-USER-QUESTION-UNJUSTIFIED`) is already
-  an explicit agent-facing declaration, and Plan 00228 already documented the
-  limits of inference-from-prose. Cite both.
+
+- [x] ✅ **Task 3.3**: **Cited, and it transfers only in part.**
+  `ask_user_question_blocker` (Plan 00108) requires `ASKING BECAUSE:` on every
+  question and denies without it, with a `strict`/`advisory` mode pair for
+  dogfooding; its docstring says it mirrors `STOPPING BECAUSE:`, so the family
+  exists. But that prefix is a **gate** — the agent wants to ask, and the
+  declaration is the price. Phase 3's token is a **state marker**: the agent
+  gains nothing by declaring, and a stop cannot be denied for failing to
+  declare a state the agent may not be in. So the token can never be mandatory
+  and will always be opt-in.
+
+  Ordering consequence: Phase 3 makes arming reliable for an agent that
+  co-operates and does nothing for one that does not, which is why **Phase 4 is
+  the load-bearing fix and Phase 3 the optimisation on top**. The phase numbers
+  are not a priority order. The `strict`/`advisory` rollout does transfer and
+  should be reused — ship the token recognised-but-unadvertised, confirm it
+  arms, then document it.
+
 - [ ] ⬜ **Task 3.4**: Mark `_HUMAN_BLOCKED_PATTERNS` closed to extension in a
   comment — new phrasings are handled by the token, not by another round of
   widening — and reconcile with Plan 00314's remaining widening task.
@@ -208,14 +231,33 @@ All from the 2026-09-07 session; `untracked/stop-events.jsonl` is the record.
 
 ### Phase 5: Measure the stop-hook DENY rate before tuning it
 
-- [ ] ⬜ **Task 5.1**: 28 DENY events in ~34 minutes is either the auto-continue
-  feature working exactly as intended or a handler over-firing. Do not guess —
-  correlate the DENY events in `stop-events.jsonl` against the transcript and
-  classify each as "productive continue" (work followed) or "wasted turn".
-- [ ] ⬜ **Task 5.2**: The `R-STOP-AFTER-TOOL-ERROR` events recurring at roughly
-  ten-minute intervals are the more suspicious signal — a regular cadence
-  suggests something systematic rather than organic. Identify what produced
-  them.
+- [ ] ⬜ **Task 5.0** (added after measuring): `stop-events.jsonl` records only
+  `decision`, `reason_prefix`, `stop_hook_active` and `timestamp` — nothing
+  that joins a row to the turn it came from. Task 5.1's correlation is
+  therefore blocked on instrumentation, not effort. Add a session/turn
+  discriminator first. Doing 5.1 without it produces a guess wearing a
+  percentage sign.
+
+- [ ] ⬜ **Task 5.1**: Classify each DENY as "productive continue" (work
+  followed) or "wasted turn". **Gated on Task 5.0.** What the ledger alone
+  already shows: after de-duplicating re-fires, 50 of today's ~140 logical
+  stops are followed by another stop within TEN SECONDS — too fast for work.
+  Whether that is the hook firing repeatedly for one stop (a defect) or the
+  model emitting a text-only turn and stopping again (agent behaviour) is
+  exactly what the missing turn id would settle.
+
+  Correction to this plan's own Evidence: the "28 DENY in ~34 minutes" figure
+  is inflated. 1291 pairs across the ledger (43 of today's 183 rows) are the
+  same stop logged twice, 51-162 ms apart, differing only in
+  `stop_hook_active` flipping False to True.
+
+- [x] ✅ **Task 5.2**: **Not a cadence — the code is exonerated.** Measured over
+  all 27 of today's `R-STOP-AFTER-TOOL-ERROR` events, the gaps run 482-3557 s
+  with a coefficient of variation of 0.74; a timer would give ~0. The eye
+  picked out the cluster around 500-900 s and missed the 3557 s ones. The
+  events track how often the agent trips a PreToolUse block and then ends its
+  turn, which bunches naturally in a long session.
+
 - [ ] ⬜ **Task 5.3**: Only if the data shows waste, propose tuning. If it shows
   the handler working correctly, record that and close the phase — a
   measurement that exonerates the code is a real result.
