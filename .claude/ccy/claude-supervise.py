@@ -1497,6 +1497,7 @@ class Decision(enum.Enum):
     WOULD_COMPACT = "would-compact"
     WOULD_CONTINUE = "would-continue"
     WOULD_ESCAPE = "would-escape"
+    WOULD_RESUBMIT = "would-resubmit"
     WOULD_GOAL = "would-goal"
     WOULD_GOAL_CLEAR = "would-goal-clear"
     WOULD_STANDING_AUTH = "would-standing-auth"
@@ -3969,6 +3970,24 @@ class CompactStateMachine:
                 )
             self._escapes_sent += 1
             self._last_action_ts = now
+            # Two causes, two remedies, and no way to tell them apart from here:
+            # the supervisor's own injections are kept out of the input-box model
+            # (so they can never mark it non-empty), which is exactly the signal
+            # that would distinguish "queued" from "never submitted".
+            #
+            # ESC stays FIRST because the queued cause is the one observed
+            # resolving in the field. From the second attempt the remedies
+            # ALTERNATE, so a line stuck in the input box gets an Enter as soon
+            # as ESC has visibly failed once, and neither cause is starved.
+            # Both share the one budget: adding a remedy must not double how
+            # long a wedged session escalates before giving up.
+            if self._escapes_sent % 2 == 0:
+                return Evaluation(
+                    Decision.WOULD_RESUBMIT,
+                    f"/compact stalled and [esc] did not flush it -> may be "
+                    f"unsubmitted in the input box; would press [enter] "
+                    f"({self._escapes_sent}/{self._policy.max_escapes})",
+                )
             return Evaluation(
                 Decision.WOULD_ESCAPE,
                 f"queued /compact stalled -> would inject [esc] to flush "
@@ -4068,6 +4087,20 @@ _CONTINUE_BODY = "continue"
 # session, so in dry-run a visible marker is shown instead of a real ESC.
 _ESC_PAYLOAD = "\x1b"
 _DRY_RUN_ESCAPE_BODY = "would send [esc] to flush a queued /compact (dry-run — no real ESC sent)"
+# A stalled `/compact` has two possible causes and they need opposite remedies.
+# ESC (above) flushes a command Claude Code QUEUED behind an in-flight turn. But
+# the line may never have been submitted at all: `_perform_injection` separates
+# the payload from its Enter by a sender-side sleep, and coalescing is decided
+# at the READER, so a TUI event loop blocked longer than that sleep drains both
+# writes in one read and absorbs the carriage return into the input box as a
+# literal newline. ESC cannot submit a line that is sitting in the box; only
+# another Enter can. Like ESC this is a raw KEY, injected with no trailing
+# Enter of its own -- submitting the submit would send two.
+_RESUBMIT_PAYLOAD = "\r"
+_DRY_RUN_RESUBMIT_BODY = (
+    "would press [enter] to submit a /compact left unsubmitted in the input box "
+    "(dry-run — no real Enter sent)"
+)
 
 
 def _format_bot_prefix(now_wall: float | None = None) -> str:
@@ -4224,6 +4257,8 @@ def _resolve_payload(
         return f"{prefix} {_CONTINUE_BODY}"
     if decision is Decision.WOULD_ESCAPE:
         return f"{prefix} {_DRY_RUN_ESCAPE_BODY}" if dry_run else _ESC_PAYLOAD
+    if decision is Decision.WOULD_RESUBMIT:
+        return f"{prefix} {_DRY_RUN_RESUBMIT_BODY}" if dry_run else _RESUBMIT_PAYLOAD
     return None
 
 
@@ -4494,8 +4529,12 @@ def decide_once(
         else:
             machine.mark_dry_run_fired()
     # The raw ESC is an interrupt key, not a line -- inject it WITHOUT a trailing
-    # Enter. Every other payload (compact / continue / markers) is a line.
-    submit = not (evaluation.decision is Decision.WOULD_ESCAPE and not dry_run)
+    # Enter. The resubmit is the same shape: its payload IS the Enter, so
+    # submitting it would send two and the second would submit an empty box.
+    # Every other payload (compact / continue / markers) is a line.
+    submit = not (
+        evaluation.decision in (Decision.WOULD_ESCAPE, Decision.WOULD_RESUBMIT) and not dry_run
+    )
     # Consume the signal ONLY after a resume actually fired (the host does the
     # consuming, so a failed PTY write never loses the resume).
     consume_signal_path = (

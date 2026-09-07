@@ -565,19 +565,25 @@ class TestEscapeFlush:
         )
         assert result.decision is Decision.WOULD_ESCAPE
 
-    def test_escape_refires_until_compaction(self) -> None:
-        # "fire escape until it does" — repeated ESC at escape_after intervals.
+    def test_flush_refires_until_compaction(self) -> None:
+        # "fire until it does" — a flush keeps firing at escape_after intervals.
+        # The FIRST is ESC; from the second the remedy ALTERNATES with a bare
+        # Enter, because a stalled /compact may be sitting UNSUBMITTED in the
+        # input box rather than queued, and ESC cannot submit it. See
+        # test_stuck_injection_resubmit.py.
         sm = CompactStateMachine(
             CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600, max_escapes=5)
         )
         sm.evaluate(_reading(critical=True), idle=True, now=1000.0)
         first = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1065.0)
-        # A full escape_after AFTER the first ESC re-armed the interval.
+        # A full escape_after AFTER the first flush re-armed the interval.
         second = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1130.0)
         assert first.decision is Decision.WOULD_ESCAPE
-        assert second.decision is Decision.WOULD_ESCAPE
+        assert second.decision is Decision.WOULD_RESUBMIT
 
-    def test_escape_stops_after_max_escapes(self) -> None:
+    def test_flush_stops_after_max_escapes(self) -> None:
+        # Both remedies draw on the ONE budget, so a wedged session still gives
+        # up after max_escapes attempts rather than escalating twice as long.
         sm = CompactStateMachine(
             CompactPolicy(escape_after_seconds=60, await_timeout_seconds=100000, max_escapes=2)
         )
@@ -586,7 +592,7 @@ class TestEscapeFlush:
         e2 = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1130.0)
         gave_up = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1200.0)
         assert e1.decision is Decision.WOULD_ESCAPE
-        assert e2.decision is Decision.WOULD_ESCAPE
+        assert e2.decision is Decision.WOULD_RESUBMIT
         assert gave_up.decision is Decision.NOOP
         assert sm.state is SupervisorState.MONITOR
 
