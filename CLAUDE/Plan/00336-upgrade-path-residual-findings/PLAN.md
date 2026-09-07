@@ -115,7 +115,36 @@ a documented bootstrap command that this project's own new handler denies.
   `config_differ.py` reaches the upgrade that delivers it; a fix in
   `config_preserve.sh` does not.
 
-- [ ] ⬜ **Task 2.5** (added, and the largest finding in this phase): **On a
+- [x] ✅ **Task 2.5** (added, and the largest finding in this phase) — **OWNER
+  RULING: leave it. Not a bug.** "Leave it — because post upgrade we are
+  supposed to handle the config optimisation." Upgrading must NOT rewrite a
+  user's config file; `/optimise` is the adoption path. Do not "fix" this
+  later without re-reading the ruling below.
+
+  The ruling is safe because a handler absent from a project config is
+  **enabled**, which was the owner's follow-up question and is now proven
+  rather than assumed:
+
+  ```
+  EventHandlersConfig().get_handler('absent')          -> enabled = True
+  ...model_validate({'h': {'enabled': False}})         -> enabled = False
+  ...same config, a DIFFERENT absent handler           -> enabled = True
+  ```
+
+  `EventHandlersConfig.get_handler()` (models.py:87) returns a bare
+  `HandlerConfig()` for anything not present, and `HandlerConfig.enabled`
+  defaults to `True` (models.py:61). models.py:214 states the same rule in a
+  comment: "Not in config = use defaults (enabled)". The field report supplies
+  the third confirmation — five handlers new in v3.62.0 were registered and
+  firing in a client project whose config predated the release, and one of them
+  denied a write, before `/optimise` had run.
+
+  So a handler must be **actively configured `enabled: false`** to be off, and
+  a new default-enabled handler activates on upgrade with no config change.
+  The residual gap `/optimise` genuinely fills is the opposite case: a handler
+  that ships default-DISABLED stays off, and nothing but the review surfaces it.
+
+  Retained for context — **On a
   standard Layer 1 tag upgrade, config preservation and merging never run at
   all.** Layer 1 checks out first, so Layer 2's Step 2 finds
   `ROLLBACK_REF == TARGET_VERSION`, takes the idempotent fast path, and
