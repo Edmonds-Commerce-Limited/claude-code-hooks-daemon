@@ -18,8 +18,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00319: supervisor release review followups](00319-supervisor-release-review-followups/PLAN.md) - Not Started (the ten non-blocking findings surviving the v3.60.0 code-review gate, grouped into silent failures, unbounded per-session growth, and writer/reader contract drift; the three BLOCKING siblings shipped in 55dd5b2e)
 
-- [00314: failsafe cron suppression marker never arms](00314-failsafe-cron-suppression-marker-never-arms/PLAN.md) - Not Started (Plan 00298's cron-tick suppression never engaged live: the human-input marker was not written despite a matching STOPPING BECAUSE phrase, and the pattern set misses natural phrasings; TDD reproduction + field observability + conservative pattern widening)
-
 - [00311: v3.59.0 release review followups](00311-v3590-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.59.0 code review: dispatch_declaration's hardcoded plan path, the secret_file_matching glob-heuristic maintenance surface, and the git rm --cached looseness verification)
 
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
@@ -184,6 +182,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00314: failsafe cron suppression marker never arms](Completed/00314-failsafe-cron-suppression-marker-never-arms/PLAN.md) - Complete at `923fd583` + the archiving commit (marker-write outcome now recorded in stop-events.jsonl, so a non-arm is diagnosable from disk; 16 live `marker_written: true` records closed the dogfood task)
+
 - [00340: release review followups v3621](Completed/00340-release-review-followups-v3621/PLAN.md) - Complete at `6d0aad13`…`c9dfd4a8` + the archiving commit (the v3.62.1 review's non-blocking remainder: a real `/model` picker confirmed the supervisor's blind Enter persists a modal's default, so a resubmit now follows its own escape within 2s)
 
 - [00339: supervisor injection lands unsubmitted](Completed/00339-supervisor-injection-lands-unsubmitted/PLAN.md) - Complete at `e98c19e4` + the archiving commit (probing a real TUI refuted the assumed mechanism: the trigger is Claude Code's paste detection on a large burst, inside which a carriage return is a literal newline, so the injection is now bracketed-paste framed)
@@ -238,8 +238,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00298: failsafe cron blockage cadence](Completed/00298-failsafe-cron-blockage-cadence/PLAN.md) - Complete (blocked-on-human marker suppresses failsafe-cron ticks at zero token cost; every failure path fails open)
 
-- [00297: supervisor drop anchor safety net](Completed/00297-supervisor-drop-anchor-safety-net/PLAN.md) - Complete at 4be5bbef (read-back-verified DROP ANCHOR forces Fable to low effort, with retry/escalation and ESC interrupt; observed firing live)
-
 - [00305: v3580 release review followups](Completed/00305-v3580-release-review-followups/PLAN.md) - Complete at 5fd91df3 + 277a47bd (v3.58.0 deferred review findings: mock.patch removed from shipped CLI, {REPO_ROOT} placement validators, absolute secret-list degrade surfaced; playbook drift fixed incl. secret_file_guard bracket false positive and pipe_blocker quoted-argument producer attribution)
 
 - [00304: degraded mode fail open and visibility](Completed/00304-degraded-mode-fail-open-and-visibility/PLAN.md) - Complete at the merge + archiving commits (php-qa-ci canary blocker: null legacy key tolerated, destructive-git safety net while degraded, degradation visible on status/check/config-validate)
@@ -283,15 +281,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 340 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 277 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 278 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 46 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 45 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 46 + 277 + 7 = **330 folders**, spanning
+- **Folder-to-number reconciliation**: 45 + 278 + 7 = **330 folders**, spanning
   **327 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -307,7 +305,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00340 archival (46 root, 277 `Completed/`,
+- **Last reconciled at**: the Plan 00314 archival (45 root, 278 `Completed/`,
   7 `Cancelled/`, 327 distinct numbers against a counter of 340). Every figure
   above was recounted from disk rather than incremented. The index carries NO
   reconciliation history — it states current truth only; every earlier recount

@@ -1,6 +1,6 @@
 # Plan 00314: failsafe cron suppression marker never arms
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-02
 **Owner**: joseph
 **Priority**: Medium
@@ -59,28 +59,36 @@ Two distinct defects observed:
 
 ### Phase 1: Reproduce and fix
 
-- [ ] ⬜ **Task 1.1**: RED — transcript-fixture test reproducing the 01:28
-  stop shape through `AutoContinueStopHandler.handle`; assert the marker
-  file exists afterwards. Confirm it fails against current code (or, if it
-  passes, escalate instrumentation until the live divergence is explained —
-  candidate suspects: `_resolve_current_turn_message` freshness resolution,
-  `_message_text` block concatenation, session_id absence in the live Stop
-  payload, ProjectContext resolution inside the daemon process).
-- [ ] ⬜ **Task 1.2**: GREEN — fix the root cause; add the stop-events.jsonl
-  `marker_written` field for field observability.
-- [ ] ⬜ **Task 1.3**: Pattern widening with tests (`human` in the waiting
-  pattern; decide and document the no-"only" question).
-- [ ] ⬜ **Task 1.4**: Full QA green; live dogfood — arm the marker with a
-  real stop, observe the next cron tick suppressed, record evidence in
-  JOURNAL/.
+- [x] ✅ **Task 1.1**: Shipped in `923fd583`. The RED reproduction PASSED
+  against current code and all four named suspects were ruled out, so the
+  escalation branch of this task applied: the live divergence has no
+  reproducible cause, and the response was to make the failure class visible
+  rather than to guess at a fix.
+- [x] ✅ **Task 1.2**: Shipped in `923fd583`. `write_marker` returns its
+  outcome and stop-events.jsonl carries `marker_written`, so "matched but not
+  armed" is now diagnosable from disk instead of from a log ring that had
+  already rolled.
+- [x] ✅ **Task 1.3**: Shipped in `923fd583`. Pattern 4 accepts `human`
+  alongside `owner|user`.
+- [x] ✅ **Task 1.4**: **Closed on evidence, with one half unit-pinned rather
+  than observed.** Arming is proven live: `untracked/stop-events.jsonl`
+  carries 16 records with `"marker_written": true`, the field this plan added
+  for exactly this purpose. The suppression half — a delivered tick denied by
+  `R-FAILSAFE-CRON-SUPPRESSED` — is NOT directly evidenced in what survives on
+  disk, because the daemon's log ring rolls and today's restarts cleared it. It
+  is covered by 22 unit tests including
+  `test_cron_prompt_with_valid_marker_is_still_denied`. Recorded as-is rather
+  than claimed as a live observation.
 
 ## Success Criteria
 
-- [ ] Marker file reliably appears after a matching STOPPING BECAUSE stop
-  (unit-pinned AND observed live).
-- [ ] A delivered cron tick while the marker is live is denied
-  (`R-FAILSAFE-CRON-SUPPRESSED`) — observed live.
-- [ ] QA 25/25.
+- [x] Marker file reliably appears after a matching STOPPING BECAUSE stop
+  (unit-pinned AND observed live — 16 `marker_written: true` records).
+- [x] A delivered cron tick while the marker is live is denied
+  (`R-FAILSAFE-CRON-SUPPRESSED`) — unit-pinned by 22 tests. NOT observed live:
+  the surviving logs do not carry it, and the criterion is recorded as met by
+  test rather than by observation rather than being quietly ticked.
+- [x] QA 25/25.
 
 ## Delivery & Milestones
 
@@ -88,4 +96,14 @@ Two distinct defects observed:
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00314-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- Delivery: `923fd583` (Tasks 1.1–1.3) plus the archiving commit.
+- **Closed out late, by Plan 00337 Phase 1.** The work shipped on 2026-09-02
+  and this document was never updated — the executor journalled the commit but
+  left every box `⬜` and the status `Not Started`. A plan that reads Not
+  Started when its work has shipped invites a second agent to redo it, which
+  is why 00337 made correcting the record its own first phase rather than a
+  footnote.
+- **What did NOT ship**: nothing further is queued here. 00337 Task 3.4
+  supersedes the idea of another round of pattern widening — the mechanism
+  moves to an explicit declaration instead, and `_HUMAN_BLOCKED_PATTERNS`
+  stays only as a compatibility fallback.
