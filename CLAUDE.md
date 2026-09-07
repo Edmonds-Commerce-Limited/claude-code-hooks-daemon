@@ -531,6 +531,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
+<!-- handler: model-downgrade-recorder -->
+
+- model_downgrade_recorder — the automatic model downgrade is written down
+
 <!-- handler: ccy-supervisor-integrity -->
 
 - ccy_supervisor_integrity — keep the ccy supervisor properly set up
