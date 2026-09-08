@@ -386,7 +386,10 @@ if [ -f "$SETTINGS_JSON_SOURCE" ]; then
     # settings.json its own way, and its two `cp`s went unchecked: a failed
     # backup or a failed deploy both reported success. There is no rollback
     # snapshot on the install path, so the empty third argument is accurate.
-    deploy_settings_json "$SETTINGS_JSON_SOURCE" "$TARGET_SETTINGS" "" ||
+    # No baseline on an install: there is no previous version to have shipped
+    # one, so the merge preserves every client value and upgrades none.
+    deploy_settings_json_checked "$SETTINGS_JSON_SOURCE" "$TARGET_SETTINGS" "" \
+        "$VENV_PYTHON" "" ||
         fail_fast "Could not preserve the existing settings.json"
 else
     # Generate settings.json if template not available (older daemon versions)

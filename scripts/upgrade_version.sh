@@ -309,7 +309,8 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ]; then
     # helper takes its own backup. Previously this copy was silent AND
     # uncovered, on the path the comment above calls the effective single
     # deployment path for every client upgrade (Plan 00176 Task 2.0).
-    deploy_settings_json "$SETTINGS_JSON_SOURCE" "$PROJECT_ROOT/.claude/settings.json" "" \
+    deploy_settings_json_checked "$SETTINGS_JSON_SOURCE" "$PROJECT_ROOT/.claude/settings.json" "" \
+        "$VENV_PYTHON" "${HOOKS_DAEMON_OLD_DEFAULT_SETTINGS:-}" \
         || fail_fast "Could not preserve the existing settings.json"
 
     setup_all_gitignores "$PROJECT_ROOT" "$DAEMON_DIR" "normal" || print_warning ".gitignore setup had warnings (non-fatal)"
@@ -876,7 +877,8 @@ else
     SETTINGS_SNAPSHOT_COPY=""
 fi
 
-deploy_settings_json "$SETTINGS_JSON_SOURCE" "$TARGET_SETTINGS" "$SETTINGS_SNAPSHOT_COPY" \
+deploy_settings_json_checked "$SETTINGS_JSON_SOURCE" "$TARGET_SETTINGS" "$SETTINGS_SNAPSHOT_COPY" \
+    "$VENV_PYTHON" "${HOOKS_DAEMON_OLD_DEFAULT_SETTINGS:-}" \
     || fail_fast "Could not preserve the existing settings.json"
 
 # ============================================================

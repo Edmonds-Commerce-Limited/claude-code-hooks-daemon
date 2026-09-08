@@ -145,7 +145,10 @@ _PYTHON_DISCOVERY_FETCHED_TMP=""
 # HOOKS_DAEMON_OLD_DEFAULT_CONFIG so an export the CALLER set is never deleted
 # by us: this variable only ever holds a file this script created.
 _PRESERVED_OLD_DEFAULT_TMP=""
-trap 'rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP" "$_PRESERVED_OLD_DEFAULT_TMP"' EXIT
+# The settings baseline preserved at Step 3d, tracked for the same reason and
+# on the same terms: only ever a file this script created.
+_PRESERVED_OLD_DEFAULT_SETTINGS_TMP=""
+trap 'rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP" "$_PRESERVED_OLD_DEFAULT_TMP" "$_PRESERVED_OLD_DEFAULT_SETTINGS_TMP"' EXIT
 
 _fetch_python_discovery_lib() {
     local ref base_url url tmp curl_path
@@ -339,6 +342,24 @@ if [ -f "$OLD_DEFAULT_EXAMPLE" ]; then
     HOOKS_DAEMON_OLD_DEFAULT_PID=$$
     export HOOKS_DAEMON_OLD_DEFAULT_CONFIG HOOKS_DAEMON_OLD_DEFAULT_PID
     _ok "Preserved pre-upgrade config baseline for diffing"
+fi
+
+# Step 3d: Capture the OLD default settings.json, same deadline and same reason.
+#
+# The settings merge needs to tell a default the client merely ACCEPTED from one
+# they deliberately chose, and the only thing that can say which is the file the
+# previous version shipped. Settings differs from the config above in one way
+# that makes it simpler: the daemon's own `.claude/settings.json` IS its shipped
+# default, so there is no `.example` to resolve — copying that file before the
+# checkout is the whole job. Without this the merge preserves every client value
+# and upgrades none, which is safe but never delivers a new recommendation.
+OLD_DEFAULT_SETTINGS_SOURCE="$DAEMON_DIR/.claude/settings.json"
+if [ -f "$OLD_DEFAULT_SETTINGS_SOURCE" ]; then
+    HOOKS_DAEMON_OLD_DEFAULT_SETTINGS="$(mktemp "${TMPDIR:-/tmp}/hooks_daemon_from_settings_XXXXXX.json")"
+    cp "$OLD_DEFAULT_SETTINGS_SOURCE" "$HOOKS_DAEMON_OLD_DEFAULT_SETTINGS"
+    _PRESERVED_OLD_DEFAULT_SETTINGS_TMP="$HOOKS_DAEMON_OLD_DEFAULT_SETTINGS"
+    export HOOKS_DAEMON_OLD_DEFAULT_SETTINGS
+    _ok "Preserved pre-upgrade settings baseline for merging"
 fi
 
 # Step 4: Best-effort daemon stop (before checkout)
