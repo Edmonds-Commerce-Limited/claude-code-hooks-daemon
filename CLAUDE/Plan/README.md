@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00348: project context leaks across test files](00348-project-context-leaks-across-test-files/PLAN.md) - Not Started (`test_goal_injection.py` leaves a patched `ProjectContext.daemon_untracked_dir` behind, so two tests in `test_project_context.py` fail when they run after it — the failure accuses a correct, unchanged file, and the full suite currently passes because random ordering happens not to hit the pair)
-
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
@@ -174,6 +172,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00348: project context leaks across test files](Completed/00348-project-context-leaks-across-test-files/PLAN.md) - Complete at `b8fc7c23`…the fixing commit (four test files patched `ProjectContext.daemon_untracked_dir` while an autouse fixture already had, and the two unwound in the wrong order — leaving the fixture's `tmp_path` on the singleton so an unrelated file failed next, accusing correct code)
+
 - [00347: handlers raise on unstattable paths](Completed/00347-handlers-raise-on-unstattable-paths/PLAN.md) - Complete at `f17fabcd`…`c731add6` + the gate and archiving commit (pathlib does not ignore EACCES, so a caller-supplied path behind an unreadable parent RAISED and the guard silently stopped applying on the client default; the fallback is now a required argument because no single value is safe — `write_clobber_guard` needs `True`, `comment_size` `False`, `plan_qa_edit` `None`)
 
 - [00346: the QA venv ignores uv.lock](Completed/00346-pin-qa-toolchain-versions/PLAN.md) - Complete at `2de920a3`…`f8e852a1` + the archiving commit (the lockfile was committed and CI-gated while every provisioning path resolved `pyproject.toml` against PyPI instead; locking them fixed a live CI failure — `Format (black)` had been red on main because CI's floating black disagreed with the tree)
@@ -232,8 +232,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00315: hidden agent budget detection](Completed/00315-hidden-agent-budget-detection/PLAN.md) - Complete at 0ee38866 + 74f3405e (BUDGETS.md catalogue of opaque per-session budgets with source-of-truth honesty; generic budget_exhaustion_detector PostToolUse advisory with mandatory prominent user reporting and an untracked occurrence ledger; live dogfood closed a self-feeding-loop false-fire the same day)
 
-- [00313: venv resolver cross-view reuse](Completed/00313-venv-resolver-cross-view-reuse/PLAN.md) - Complete at 3d71ff84, shipped in v3.59.0 (slug-mismatched `venv-*` candidates are now ineligible in the metadata and scan fallback resolution steps, so host and container views of the same repo each build their own venv; bash resolvers inherit via the Python SSOT)
-
 ## Blocked / On Hold Plans
 
 - **00032, 00034, 00035** - On hold pending upstream Claude Code delegate mode fix (GitHub #23447, #25037)
@@ -273,15 +271,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 348 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 289 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 290 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 42 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 42 + 289 + 7 = **338 folders**, spanning
+- **Folder-to-number reconciliation**: 41 + 290 + 7 = **338 folders**, spanning
   **335 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -297,7 +295,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00348 filing (42 root, 289 `Completed/`,
+- **Last reconciled at**: the Plan 00348 archiving (41 root, 290 `Completed/`,
   7 `Cancelled/`, 335 distinct numbers against a counter of 348). Every figure
   above was recounted from disk rather than incremented. The index carries NO
   reconciliation history — it states current truth only; every earlier recount

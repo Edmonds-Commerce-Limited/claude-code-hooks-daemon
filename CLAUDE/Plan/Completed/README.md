@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00313: venv resolver cross-view reuse](00313-venv-resolver-cross-view-reuse/PLAN.md) - Complete at 3d71ff84, shipped in v3.59.0 (slug-mismatched `venv-*` candidates are now ineligible in the metadata and scan fallback resolution steps, so host and container views of the same repo each build their own venv; bash resolvers inherit via the Python SSOT)
+
 - [00310: plan readme completed row ageout](00310-plan-readme-completed-row-ageout/PLAN.md) - Complete (Completed rows now age out: main README retains the 30 highest-numbered; older rows archived verbatim in Completed/README.md, enforced by test_plan_index_navigability.py)
 
 - [00309: lint on edit per language timeout](00309-lint-on-edit-per-language-timeout/PLAN.md) - Complete at 373db1f9, merged at 6ca8bf79 (per-language `options.timeouts.<Language>` for lint_on_edit; fail-open kept, fired timeouts now name the language, budget and config key)

@@ -1,6 +1,6 @@
 # Plan 00348: project context leaks across test files
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Medium
@@ -67,43 +67,57 @@ test that reads `ProjectContext` after `test_goal_injection.py` has run.
 
 ### Phase 1: Reproduce, then find the actual mechanism
 
-- [ ] ⬜ **Task 1.1**: A test that FAILS on the leak — the two-file order run
-  as a subprocess, so it does not depend on the ambient run's ordering.
-- [ ] ⬜ **Task 1.2**: Establish why the patch survives. `test_goal_injection`
-  uses both `pytest.MonkeyPatch.context()` inside an autouse fixture and the
-  function-scoped `monkeypatch` fixture, sometimes against the same attribute.
-  Restore ORDER is the leading suspect — an outer context restoring the
-  original before an inner one restores what it captured (the outer's patched
-  value) leaves the patched value installed permanently. **Confirm it rather
-  than assuming it**; the fix differs per mechanism, and a second candidate is
-  that patching a `classmethod` via `getattr` restores a bound method rather
-  than the descriptor.
+- [x] ✅ **Task 1.1**: `tests/integration/test_project_context_isolation.py`
+  runs the pair in a SUBPROCESS, so it tests the ordering it names rather than
+  reporting on whatever order `pytest-randomly` happened to pick.
+
+- [x] ✅ **Task 1.2**: **Measured, not inferred.** Reading
+  `ProjectContext.__dict__["daemon_untracked_dir"]` after the offending test
+  showed a `classmethod` wrapping the *fixture's* lambda — so it is the
+  FIXTURE's patch that survives, which rules the classmethod-descriptor theory
+  out and confirms restore order:
+
+  > A test-level `monkeypatch` patches an attribute the class's autouse fixture
+  > has already patched. The fixture's context exits FIRST and restores the
+  > original; the test-level undo then runs and faithfully restores what IT
+  > recorded as the previous value — the fixture's lambda — which stays on the
+  > class for the rest of the process.
+
+  This also explains why only one test in that file leaked: the others patch
+  `write_goal_signal`, a different attribute, so their unwind cannot collide.
 
 ### Phase 2: Fix it where it cannot recur
 
-- [ ] ⬜ **Task 2.1**: Fix the leak identified in Task 1.2.
-- [ ] ⬜ **Task 2.2**: Decide whether the repo-wide `reset_project_context`
-  autouse fixture in `tests/conftest.py` should also restore the class's
-  patchable attributes, not just `ProjectContext.reset()`. It already runs for
-  every test, so it is the natural place for a backstop — but a backstop that
-  hides a leaking fixture is worse than none, so it must be loud if it fires.
+- [x] ✅ **Task 2.1**: Four tests converted from the function-scoped
+  `monkeypatch` to a local `pytest.MonkeyPatch.context()` around just the call
+  under test, which keeps the unwind properly nested. **The sweep found three
+  more leakers than the diagnosis predicted** — `test_compaction_signal.py`,
+  `test_context_sidecar.py` and `test_goal_ledger_stop_defence.py`, all the
+  identical shape: patch `ProjectContext.daemon_untracked_dir` to raise, to
+  prove a handler fails open. That is a recurring idiom, not three accidents.
+- [x] ✅ **Task 2.2**: Decided **against** a backstop in `tests/conftest.py`.
+  With every known leaker fixed and a check in place, a repo-wide restore would
+  only ever mask the next one — and this defect's whole cost was that it was
+  masked. Revisit if a leak recurs that the check cannot attribute.
 
 ### Phase 3: Stop the class coming back
 
-- [ ] ⬜ **Task 3.1**: Consider a check that a test module patching
-  `ProjectContext` cannot leave the class mutated, along the lines of the
-  session-scoped fingerprint idea: snapshot the patchable attributes before and
-  after each module and fail the module that changed one. Weigh the runtime
-  cost against a suite of 18,619 tests before committing to it.
+- [x] ✅ **Task 3.1**: The parametrised regression test covers all four files,
+  each as its own subprocess pair. A per-module fingerprint over the whole
+  suite was **rejected on cost**: it would run for all 18,627 tests to catch a
+  defect with four known instances, and the pair-check gives the same signal
+  where the risk actually is.
 
 ## Success Criteria
 
-- [ ] The two-file reproduction passes.
-- [ ] Running every `tests/unit/handlers/**` file followed by
-  `tests/unit/core/test_project_context.py` passes for all of them, not just
-  the one file found here — the bisect found `test_goal_injection.py` first,
-  which is not proof it is the only one.
-- [ ] Full QA stays green, and the suite's runtime is not materially worse.
+- [x] The two-file reproduction passes.
+- [x] Every `tests/unit/handlers/**` directory followed by
+  `tests/unit/core/test_project_context.py` passes — and the sweep was widened
+  to every `tests/unit/*` directory and `tests/integration` as well, since a
+  process-wide singleton is not leaked only by handler tests. That caution paid
+  for itself: three of the four leakers were outside the directory the original
+  bisect landed in.
+- [x] Full QA green — 26/26, 18627 tests, 95.2% coverage.
 
 ## Delivery & Milestones
 
@@ -113,3 +127,8 @@ test that reads `ProjectContext` after `test_goal_injection.py` has run.
 
 - Found during Plan 00347's regression testing, and confirmed pre-existing on a
   clean worktree at `85a07f14` before any of that plan's changes.
+- **The bisect's first answer was incomplete, and the plan was written
+  expecting that.** One file reproduced the failure, and the success criterion
+  deliberately demanded a sweep anyway. Three more leakers turned up — so the
+  four-line fix this could have been would have left three quarters of the
+  defect in place, still invisible, still ready to accuse the wrong file.

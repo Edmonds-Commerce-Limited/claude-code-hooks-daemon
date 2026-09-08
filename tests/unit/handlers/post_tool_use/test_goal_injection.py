@@ -665,20 +665,30 @@ class TestGoalLedgerIntegration:
         result = handler.handle(self._hook_input(second))
         assert result.context == []
 
-    def test_ledger_failure_never_blocks(
-        self, handler: GoalInjectionHandler, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_ledger_failure_never_blocks(self, handler: GoalInjectionHandler) -> None:
         plan = self._write_plan("00274-first-plan")
 
         def _boom(cls: object) -> Path:
             raise RuntimeError("no project context")
 
-        monkeypatch.setattr(
-            "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
-            "ProjectContext.daemon_untracked_dir",
-            classmethod(_boom),
-        )
-        result = handler.handle(self._hook_input(plan))
+        # A local context rather than the function-scoped `monkeypatch`
+        # fixture, because `mock_project_context` above has ALREADY patched
+        # this same attribute (Plan 00348). Two patches on one attribute unwind
+        # in fixture-teardown order, not nesting order: the fixture's context
+        # exits first and restores the original, then the test-level undo
+        # faithfully restores what IT recorded -- the fixture's lambda -- which
+        # then stays on the class for the rest of the process. The failure
+        # lands in whatever reads ProjectContext next, naming a tmp_path from
+        # this file. Entering and exiting here keeps the unwind properly
+        # nested.
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.daemon_untracked_dir",
+                classmethod(_boom),
+            )
+            result = handler.handle(self._hook_input(plan))
+
         assert result.decision == Decision.ALLOW
 
 

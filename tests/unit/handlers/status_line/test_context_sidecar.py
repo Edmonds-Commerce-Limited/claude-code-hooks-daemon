@@ -280,18 +280,25 @@ class TestContextSidecarHandler:
     # ---- handle: resilience (explicit, logged, never silent) ------------
 
     def test_uninitialised_project_context_is_survived(
-        self, handler: ContextSidecarHandler, monkeypatch: pytest.MonkeyPatch
+        self, handler: ContextSidecarHandler
     ) -> None:
         def _raise(cls: Any) -> Path:
             raise RuntimeError("ProjectContext not initialised")
 
-        monkeypatch.setattr(
-            "claude_code_hooks_daemon.handlers.status_line.context_sidecar."
-            "ProjectContext.daemon_untracked_dir",
-            classmethod(_raise),
-        )
-        # Must not raise; still returns a display-silent result.
-        result = handler.handle(_hook_input(session_id="s"))
+        # A local context, not the `monkeypatch` fixture: this class's autouse
+        # fixture has already patched this same attribute, and two patches on
+        # one attribute unwind in fixture-teardown order rather than nesting
+        # order — leaving the FIXTURE's value installed process-wide (Plan
+        # 00348).
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.status_line.context_sidecar."
+                "ProjectContext.daemon_untracked_dir",
+                classmethod(_raise),
+            )
+            # Must not raise; still returns a display-silent result.
+            result = handler.handle(_hook_input(session_id="s"))
+
         assert result.context == []
 
     def test_os_error_is_survived(

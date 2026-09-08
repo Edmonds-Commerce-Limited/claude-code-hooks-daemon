@@ -108,17 +108,24 @@ class TestGoalLedgerStopDefence:
         assert "GOAL LEDGER" not in result.reason
 
     def test_uninitialised_project_context_fails_open(
-        self, handler: AutoContinueStopHandler, monkeypatch: pytest.MonkeyPatch
+        self, handler: AutoContinueStopHandler
     ) -> None:
         def _boom(cls: object) -> Path:
             raise RuntimeError("not initialised")
 
-        monkeypatch.setattr(
-            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
-            "ProjectContext.daemon_untracked_dir",
-            classmethod(_boom),
-        )
-        result = handler.handle({})
+        # A local context, not the `monkeypatch` fixture: this class's autouse
+        # fixture has already patched this same attribute, and two patches on
+        # one attribute unwind in fixture-teardown order rather than nesting
+        # order — leaving the FIXTURE's value installed process-wide (Plan
+        # 00348).
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+                "ProjectContext.daemon_untracked_dir",
+                classmethod(_boom),
+            )
+            result = handler.handle({})
+
         assert result.decision == Decision.DENY
         assert result.reason is not None
 

@@ -95,18 +95,22 @@ class TestCompactionSignalHandler:
 
     # ---- resilience -----------------------------------------------------
 
-    def test_no_project_context_survived(
-        self, handler: CompactionSignalHandler, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_project_context_survived(self, handler: CompactionSignalHandler) -> None:
         def _raise(cls: Any) -> Path:
             raise RuntimeError("no project context")
 
-        monkeypatch.setattr(
-            "claude_code_hooks_daemon.handlers.pre_compact.compaction_signal."
-            "ProjectContext.daemon_untracked_dir",
-            classmethod(_raise),
-        )
-        assert handler.handle({"session_id": "abc"}).decision is Decision.ALLOW
+        # A local context, not the `monkeypatch` fixture: this class's autouse
+        # fixture has already patched this same attribute, and two patches on
+        # one attribute unwind in fixture-teardown order rather than nesting
+        # order — leaving the FIXTURE's value installed process-wide (Plan
+        # 00348).
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.pre_compact.compaction_signal."
+                "ProjectContext.daemon_untracked_dir",
+                classmethod(_raise),
+            )
+            assert handler.handle({"session_id": "abc"}).decision is Decision.ALLOW
 
     def test_os_error_survived(
         self, handler: CompactionSignalHandler, monkeypatch: pytest.MonkeyPatch
