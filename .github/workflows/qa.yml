@@ -21,6 +21,21 @@ jobs:
         # pyproject declares requires-python = ">=3.11".
         python-version: ["3.11", "3.12", "3.13"]
 
+    # Plan 00250: job-scoped, not step-scoped, because the tests SPAWN the CLI.
+    # `test_playbook_harness.py` runs `bin/hooks-daemon generate-playbook` as a
+    # subprocess, which resolves the venv itself and cannot see a variable set
+    # only on the daemon-start step — it failed with "no usable venv found"
+    # while the daemon it was talking to had started fine.
+    #
+    # resolve_venv.sh checks this BEFORE its untracked/venv-*/ fingerprint glob.
+    # `uv sync` builds .venv at the repo root, which that glob cannot see.
+    #
+    # Scoping it here was measured, not assumed: the venv-resolution suites
+    # (test_init_sh_venv_resolution, test_paths_resolve_*, python_discovery_bash
+    # — 83 tests) all pass with it set, as does a full local QA run.
+    env:
+      HOOKS_DAEMON_VENV_PATH: ${{ github.workspace }}/.venv
+
     steps:
       # fetch-depth: 0 (full history AND tags) is required, not a nicety.
       # tests/acceptance/conftest.py makes a local clone of this checkout and
@@ -133,18 +148,12 @@ jobs:
       # (init.sh:246-264) accepts on mere existence. It is gitignored
       # (.claude/.gitignore:16), so writing it leaves the tree clean.
       #
-      # HOOKS_DAEMON_VENV_PATH is checked by resolve_venv.sh BEFORE its
-      # untracked/venv-*/ fingerprint glob. `uv sync` above builds .venv at the
-      # repo root, which that glob cannot see, so the override points the daemon
-      # at the toolchain CI already installed rather than building a second one.
-      # Scoped to this step: setting it job-wide would change the behaviour of
-      # the tests that assert on venv resolution.
+      # HOOKS_DAEMON_VENV_PATH is set at JOB level above, not here — the tests
+      # spawn the CLI as a subprocess and need it too.
       #
       # Full evidence: CLAUDE/Plan/00250-*/RESEARCH-ci-install.md
       - name: Start daemon (for the acceptance gates)
         if: ${{ !cancelled() }}
-        env:
-          HOOKS_DAEMON_VENV_PATH: ${{ github.workspace }}/.venv
         run: |
           printf 'HOOKS_DAEMON_ROOT_DIR="%s"\n' "$GITHUB_WORKSPACE" \
             > .claude/hooks-daemon.env

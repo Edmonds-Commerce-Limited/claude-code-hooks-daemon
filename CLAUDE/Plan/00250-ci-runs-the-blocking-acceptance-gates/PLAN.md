@@ -138,55 +138,28 @@ have reopened a plan whose success criteria were satisfied.
 
 ### Phase 1: Establish the gap as a test, not a claim
 
-- [x] ✅ **Task 1.1**: Observed, and **the count in this plan's overview is
-  wrong**. Reproduced without stopping the live daemon by running the suite in
-  a `git worktree`, whose own `untracked/` holds no socket — the same condition
-  a runner is in, at no cost to the session:
+Both tasks are complete and both found the plan's own premises stale. Evidence
+and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 
-  | File                                | Daemon skips |
-  | ----------------------------------- | ------------ |
-  | `test_absolute_path_socket_deny.py` | 6            |
-  | `test_playbook_harness.py`          | **5**        |
-  | `test_stop_hook_hard_block.py`      | 3            |
-  | `test_tool_use_error_recovery.py`   | 2            |
+- [x] ✅ **Task 1.1**: Observed by running the suite in a `git worktree` (whose
+  own `untracked/` holds no socket — a runner's condition, at no cost to the
+  session). **16 skips across four files, not the 11 across three this plan was
+  written with.** The extra file is `test_playbook_harness.py`, which post-dates
+  the plan, IS in the blocking set, and had been skipping in CI uncounted ever
+  since — the plan's own thesis reproducing itself while it sat unstarted.
+  Separately, 11 more skips in `test_transport_toggle_cycle.py` are a different
+  provisioning gap (relay binary), out of scope but recorded.
 
-  **16 across four files, not 11 across three.** `test_playbook_harness.py`
-  post-dates this plan (Plan 00243), is IN Step 12.0's blocking set, and
-  RELEASING.md says of it: *"A skip here means no daemon was running, which
-  under H-1 is itself an abort condition."* It has been skipping in CI,
-  uncounted, ever since — this plan's own thesis reproducing itself while the
-  plan sat unstarted.
-
-  Also found, and NOT daemon-related: **11 further skips in
-  `test_transport_toggle_cycle.py`**, all "relay binary not built:
-  `untracked/bin/hooks-relay`". A second provisioning gap of the same shape,
-  out of scope here but recorded so the next count is not surprised by it.
-
-- [x] ✅ **Task 1.2**: The blocking set is declared as **one hardcoded `pytest`
-  invocation inside a fenced bash block** at `RELEASING.md` Step 12.0, naming
-  six files:
-
-  ```
-  test_diagnostic_scripts.py  test_install_sh_end_to_end.py
-  test_tool_use_error_recovery.py  test_stop_hook_hard_block.py
-  test_skill_install_python_discovery.py  test_playbook_harness.py
-  ```
-
-  **It CAN be read mechanically** — a stable single-line command whose
-  `tests/acceptance/*.py` arguments a parser can lift — so Phase 3's guard does
-  not need a second copy, and must not make one.
-
-  Two things found while establishing that, both of which change later phases:
-
-  - **`test_absolute_path_socket_deny.py` is not in the set**, though it is 6
-    of the 16 skips. A declaration-keyed guard cannot cover it; decide whether
-    it belongs in the set.
-  - [x] ✅ **The expected COUNTS were a second copy, and every one was stale.**
-    Measured against a live daemon: `combined: 27 passed, 1 skipped` is really
-    **31 passed, 0 skipped**. **Removed from RELEASING.md**, replaced with the
-    properties that do not drift — *0 failed, 0 skipped* — so Phase 3 has only
-    the file list to read. The `1 skipped` was the worst of them: it documented
-    as normal exactly the condition this gate exists to catch.
+- [x] ✅ **Task 1.2**: The set is **one hardcoded `pytest` invocation** at
+  `RELEASING.md` Step 12.0 naming six files, and it **can** be read
+  mechanically — so Phase 3 needs no second copy and must not make one. Two
+  consequences: `test_absolute_path_socket_deny.py` is **not** in the set
+  despite being 6 of the 16 skips (**recommendation: add it** — the set contains
+  the playbook harness yet omits the one file covering what that harness
+  structurally cannot reach; left to the owner, since the set defines what a
+  human release gates on), and the expected **counts** beside the command were a
+  stale second copy, now **removed from RELEASING.md** in favour of *0 failed,
+  0 skipped*.
 
 ### Phase 2: Make the gates run
 
@@ -221,14 +194,33 @@ have reopened a plan whose success criteria were satisfied.
     So `init.sh`'s CI passthrough mode (documented in `test_ci_passthrough.py`,
     active under `GITHUB_ACTIONS=true`) governs the forwarder path only and does
     not interfere with them.
-- [ ] ⬜ **Task 2.2**: Confirm all 16 tests EXECUTE on all three interpreters
-  - [ ] ⬜ Expect first-run failures and treat them as long-standing, not as
-    regressions — the LESSONS.md entry on waking skipped tests applies directly
-- [ ] ⬜ **Task 2.3**: Verify the CI daemon cannot collide with anything (its own
-  `HOSTNAME`-derived socket, per the hostname-isolation design)
-  - Analysis done, pending confirmation from the run — see
-    [RESEARCH-ci-install.md](RESEARCH-ci-install.md). Short version: collision is
-    impossible for a reason stronger than the hostname suffix.
+- [x] ✅ **Task 2.2**: **11 of the 16 execute and PASS.** First daemon-enabled
+  run, identical on all three interpreters:
+  `test_absolute_path_socket_deny.py` 6 passed, `test_stop_hook_hard_block.py`
+  3 passed, `test_tool_use_error_recovery.py` 2 passed. The suite went from
+  4 failed to **1 failed, 18605 passed, 5 errors**, coverage 95.46%.
+  - [x] ✅ The remaining 5 (`test_playbook_harness.py`) ERRORED rather than
+    passed, for a reason worth keeping: it runs `bin/hooks-daemon generate-playbook` as a **subprocess**, which resolves the venv itself and
+    could not see `HOOKS_DAEMON_VENV_PATH` set only on the daemon-start step.
+    Now set at JOB level. I had scoped it narrowly on the guess that job-wide
+    would disturb the venv-resolution tests; measured instead — those 83 tests
+    and a full local QA run both pass with it set.
+  - The 11 `test_transport_toggle_cycle.py` skips remain and are **out of
+    scope**: a separate provisioning gap (relay binary not built), recorded by
+    Task 1.1 so it is not mistaken for daemon fallout.
+- [x] ✅ **Task 2.3**: No collision, and for a stronger reason than the hostname
+  suffix — see [RESEARCH-ci-install.md](RESEARCH-ci-install.md). Borne out by
+  three matrix jobs each starting a daemon successfully.
+- [ ] ⬜ **Task 2.4c**: `test_dogfooding_hook_scripts.py::test_hook_scripts_match_installer`
+  — the 4th pre-existing CI failure, present in the baseline run and NOT caused
+  by the daemon. Every forwarder mismatches because the tracked
+  `.claude/hooks/*` bake an absolute path at generation time
+  (`_rl_dir="/workspace/untracked"`, `_rl_bin=".../hooks-relay"`), so a fresh
+  generation anywhere else differs. Same `/workspace` family as Task 2.4a, but
+  structural rather than a stray literal: a **tracked** artefact carrying the
+  path of the machine that generated it. Passes locally for exactly that reason.
+  Fixing it means deriving the relay dir at runtime rather than baking it —
+  which touches forwarder generation, so scope it before starting.
 - [x] ✅ **Task 2.4a**: The two failures that were plain defects rather than
   provisioning gaps — neither needed a daemon at all, and both were fixed with a
   test reproducing the CI condition locally. `test_deployed_skill_trees.py`
