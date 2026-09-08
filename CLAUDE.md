@@ -563,17 +563,17 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths
 
-<!-- handler: tool-disable-advisor -->
+<!-- handler: model-fallback-detector -->
 
-- tool_disable_advisor — declared never-want tools are checked at session start
+- model_fallback_detector — silent model substitution is surfaced
 
 <!-- handler: docs-qa-sweep -->
 
 - docs_qa_sweep — documentation drift report at session start
 
-<!-- handler: model-fallback-detector -->
+<!-- handler: tool-disable-advisor -->
 
-- model_fallback_detector — silent model substitution is surfaced
+- tool_disable_advisor — declared never-want tools are checked at session start
 
 <!-- handler: idle-housekeeping-advisory -->
 

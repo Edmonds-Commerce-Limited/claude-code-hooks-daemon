@@ -1,5 +1,6 @@
 """Tests for EnforceLlmQaHandler - blocks run_all.sh, requires llm_qa.py."""
 
+import re
 from typing import Any
 
 import pytest
@@ -296,3 +297,40 @@ class TestEnforceLlmQaHandler:
         allow_tests = [t for t in tests if t.expected_decision == Decision.ALLOW]
         assert allow_tests, "Expected at least one ALLOW acceptance test (near-miss case)"
         assert any("cat " in t.command for t in allow_tests)
+
+    def test_every_acceptance_test_declares_a_tool_payload(
+        self, handler: EnforceLlmQaHandler
+    ) -> None:
+        """Plan 00319 Task 4.6: both `command` values here are literal bash --
+
+        a CI-time contract test needs `tool_payload` to drive them directly
+        rather than treating `command` as prose.
+        """
+        tests = handler.get_acceptance_tests()
+        assert all(t.tool_payload is not None for t in tests)
+
+    def test_every_declared_payload_produces_its_declared_verdict(
+        self, handler: EnforceLlmQaHandler
+    ) -> None:
+        """The contract half, local to this handler (Plan 00319 Task 4.6).
+
+        A handler that correctly declines to match returns no verdict at
+        all -- fine for an ALLOW-expecting test (nothing was denied), a real
+        failure for a DENY-expecting one (the payload never reaches the
+        deny path at all).
+        """
+        from claude_code_hooks_daemon.core.hook_result import Decision
+
+        for test in handler.get_acceptance_tests():
+            assert test.tool_payload is not None
+            hook_input = {
+                "tool_name": test.tool_payload.tool_name,
+                "tool_input": test.tool_payload.tool_input,
+            }
+            if not handler.matches(hook_input):
+                assert test.expected_decision != Decision.DENY, test.title
+                continue
+            result = handler.handle(hook_input)
+            assert result.decision == test.expected_decision, test.title
+            for pattern in test.expected_message_patterns:
+                assert re.search(pattern, result.reason or ""), (test.title, pattern)

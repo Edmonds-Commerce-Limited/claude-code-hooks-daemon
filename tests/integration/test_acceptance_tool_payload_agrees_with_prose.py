@@ -108,6 +108,12 @@ _OUTSIDE_SCRATCH_BY_CONTRACT = frozenset(
         # regressed handler would leave in plain sight and `git status` names
         # immediately. It carries no code and no credential.
         "MarkdownOrganizationHandler",
+        # Judges the path STRUCTURALLY -- a "CLAUDE"/"Plan"/<folder>/PLAN.md
+        # segment sequence -- so a scratch-relocated probe would stop
+        # exercising it entirely, the same shape of exemption as
+        # MarkdownOrganizationHandler above (Plan 00319 Task 4.6). It carries
+        # no code and no credential.
+        "PlanDoneRequiresHoldingAreaHandler",
     }
 )
 

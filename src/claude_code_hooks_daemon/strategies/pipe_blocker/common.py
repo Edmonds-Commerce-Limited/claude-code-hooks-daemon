@@ -13,7 +13,8 @@ ever cost someone a blocked command they were entitled to run. Reusing the
 grammar is the same DRY fix Plan 00202 applied to the evasion class.
 """
 
-from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
+from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION, OPTIONAL_PATH
+from claude_code_hooks_daemon.utils.secret_file_matching import SECRET_META_SUBCOMMAND
 
 # Commands whose output is always cheap/safe to pipe to tail/head.
 # These are filtering/processing commands that don't do expensive computation.
@@ -67,4 +68,23 @@ UNIVERSAL_WHITELIST_PATTERNS: tuple[str, ...] = (
     # Correcting that attribution (Plan 00221) made the omission visible.
     r"^pgrep\b",
     r"^df\b",
+    # The `secret-meta` metadata helper (Plan 00272) is the documented
+    # recovery path `secret_file_guard`'s own deny message offers, so its
+    # output must be pipeable to a preview command like any other cheap,
+    # bounded-output CLI. Two invocation shapes: the direct entrypoint
+    # (`hooks-daemon secret-meta`, at any install path — `OPTIONAL_PATH`
+    # covers `bin/hooks-daemon`, `.claude/hooks-daemon/bin/hooks-daemon` and
+    # a bare PATH install) and the skill wrapper that forwards arbitrary
+    # subcommands to it (`daemon-cli.sh secret-meta` — see
+    # `.claude/skills/hooks-daemon/scripts/daemon-cli.sh`'s fallback
+    # branch). Scoped to the `secret-meta` subcommand only: a bare
+    # `hooks-daemon` invocation of some other subcommand is not whitelisted
+    # by this entry and still falls through to the normal unknown tier.
+    # `daemon-cli.sh` accepts an optional leading `bash ` interpreter
+    # invocation because that is exactly how SKILL.md's own case statement
+    # forwards every subcommand it dispatches (`bash "$SKILL_DIR/scripts/
+    # daemon-cli.sh" "$SUBCOMMAND" "$@"`) -- the script is also independently
+    # executable via its own shebang, so both spellings must match.
+    rf"^{OPTIONAL_PATH}hooks-daemon\s+{SECRET_META_SUBCOMMAND}\b",
+    rf"^(?:bash\s+)?{OPTIONAL_PATH}daemon-cli\.sh\s+{SECRET_META_SUBCOMMAND}\b",
 )

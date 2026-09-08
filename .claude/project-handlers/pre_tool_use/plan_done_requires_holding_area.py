@@ -16,7 +16,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
+from claude_code_hooks_daemon.core.acceptance_test import ToolPayload
 from claude_code_hooks_daemon.core.hook_result import Decision
 
 _PLAN_FILENAME = "PLAN.md"
@@ -128,14 +130,27 @@ class PlanDoneRequiresHoldingAreaHandler(Handler):
         # never lands; the allowed Edit is a status flip on a file that does
         # not exist, which this handler passes (nothing to judge) and the Edit
         # tool itself then refuses — so nothing lands there either.
+        probe_content = (
+            "# Plan 00000: probe\n\n**Status**: Complete\n\n"
+            "## Success Criteria\n\n- [x] All QA checks passing\n"
+        )
+        probe_payload = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                # $CLAUDE_PROJECT_DIR-rooted, not `untracked/scratch/`: this
+                # handler judges the path structurally (a "CLAUDE"/"Plan"
+                # segment pair), so a scratch-relocated probe would exercise
+                # nothing (Plan 00319 Task 4.6 -- see the matching entry in
+                # test_acceptance_tool_payload_agrees_with_prose.py's
+                # _OUTSIDE_SCRATCH_BY_CONTRACT).
+                "file_path": "$CLAUDE_PROJECT_DIR/CLAUDE/Plan/00000-acceptance-probe/PLAN.md",
+                "content": probe_content,
+            },
+        )
         return [
             AcceptanceTest(
                 title="Deny a Complete flip with no holding-area criterion",
-                command=(
-                    "Write CLAUDE/Plan/00000-acceptance-probe/PLAN.md with content: "
-                    "'# Plan 00000: probe\\n\\n**Status**: Complete\\n\\n"
-                    "## Success Criteria\\n\\n- [x] All QA checks passing\\n'"
-                ),
+                command=probe_payload.as_instruction(),
                 description=(
                     "A plan flipping to Complete whose Success Criteria never say "
                     "where its release-bound consequences went is not done."
@@ -144,6 +159,7 @@ class PlanDoneRequiresHoldingAreaHandler(Handler):
                 expected_message_patterns=[r"holding area", r"UNRELEASED"],
                 safety_notes="Denied before anything is written.",
                 test_type=TestType.BLOCKING,
+                tool_payload=probe_payload,
             ),
             AcceptanceTest(
                 title="Allow a status flip the handler has no content to judge",

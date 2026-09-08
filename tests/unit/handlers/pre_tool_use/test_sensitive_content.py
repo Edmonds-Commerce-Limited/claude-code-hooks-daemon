@@ -691,4 +691,39 @@ class TestDeclaredAcceptancePatternsAreProducible:
         )
         for pattern in declared.expected_message_patterns:
             assert re.search(pattern, reason or ""), f"{pattern!r} no longer appears in: {reason}"
+
+    def test_secret_term_commit_message_deny_reason_matches_declared_patterns_after_write_probe(
+        self, tmp_path: Path
+    ) -> None:
+        """Plan 00319 Task 4.2: the two secret-term deny acceptance tests
+
+        ("without revealing it" and "in a commit message") share ONE
+        per-transcript verbose-disclosure budget for
+        ``RuleID.SENSITIVE_SECRET_TERM``. A human tester runs a playbook
+        top-to-bottom in ONE continuous session, so the Write probe fires
+        first and spends that budget -- the commit-message probe that
+        follows necessarily sees the TERSE form. Its declared patterns must
+        hold under that realistic order, not only in isolation.
+        """
+        wordlist_file = tmp_path / "wordlist.txt"
+        wordlist_file.write_text("zzqx-nonsense-term\n")
+        handler = _handler_with_secret_file(wordlist_file)
+        transcript_path = "/tmp/acceptance-transcript-shared.jsonl"
+
+        write_input = _write_input(str(tmp_path / "probe.txt"), "contains zzqx-nonsense-term here")
+        write_input["transcript_path"] = transcript_path
+        handler.handle(write_input)  # spends the verbose budget, as the real first test does
+
+        commit_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'git commit -m "zzqx-nonsense-term"'},
+            "transcript_path": transcript_path,
+        }
+        reason = handler.handle(commit_input).reason
+
+        declared = next(
+            test for test in handler.get_acceptance_tests() if "in a commit message" in test.title
+        )
+        for pattern in declared.expected_message_patterns:
+            assert re.search(pattern, reason or ""), f"{pattern!r} no longer appears in: {reason}"
         assert "zzqx-nonsense-term" not in (reason or "")

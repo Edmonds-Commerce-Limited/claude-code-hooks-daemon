@@ -748,6 +748,89 @@ class TestPipeBlockerHandleBlacklisted:
         assert "Completed with errors (exit code: $EXIT_CODE)" in result.reason
 
 
+class TestPipeBlockerPythonModuleLabel:
+    """Plan 00319 Task 4.3: `-m` means MODULE to `python`/`python3`, not the
+
+    producer's display name. The block's own remediation snippet already
+    echoes the real command (`python -m pytest tests/ ...`), and CLAUDE.md
+    documents that the producer for whitelist purposes is `python` (the
+    regex must anchor on the real first word to actually match) -- but the
+    human-facing LABEL ("Piping X to tail/head...", "X is expensive") had
+    drifted to name the interpreter instead of the module a reader actually
+    recognises.
+    """
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    def test_blacklisted_verbose_label_names_module_not_interpreter(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/ | tail -5"},
+        }
+        result = handler.handle(hook_input)
+        assert "Piping pytest to tail/head" in result.reason
+        assert "Piping python to tail/head" not in result.reason
+
+    def test_blacklisted_terse_label_names_module_not_interpreter(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/ | tail -5"},
+        }
+        # First fire is verbose; mark it disclosed so the second fire is terse.
+        transcript_input = {**hook_input, "transcript_path": "/tmp/t-py-module-terse"}
+        handler.handle(transcript_input)
+        result = handler.handle(transcript_input)
+        assert "pytest is expensive" in result.reason
+        assert "python is expensive" not in result.reason
+
+    def test_unknown_terse_label_names_module_not_interpreter(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """An unrecognised module still gets a module-named label, but the
+        extra_whitelist regex suggestion must keep anchoring on the REAL
+        first word (`python`) -- a `^mymodule\\b` pattern would never match
+        a `python -m mymodule ...` producer."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m mymodule | tail -5"},
+        }
+        transcript_input = {**hook_input, "transcript_path": "/tmp/t-py-module-unknown-terse"}
+        handler.handle(transcript_input)
+        result = handler.handle(transcript_input)
+        assert "mymodule unrecognized" in result.reason
+        assert "python unrecognized" not in result.reason
+        assert r'"^python\\b"' in result.reason
+
+    def test_unknown_verbose_extra_whitelist_still_anchors_on_python(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m mymodule | tail -5"},
+        }
+        result = handler.handle(hook_input)
+        assert r'"^python\\b"' in result.reason
+
+    def test_plain_python_script_without_dash_m_is_unaffected(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """No `-m` present: the label stays the plain first word, unchanged."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "python script.py | tail -5"},
+        }
+        transcript_input = {**hook_input, "transcript_path": "/tmp/t-py-plain-script-terse"}
+        handler.handle(transcript_input)
+        result = handler.handle(transcript_input)
+        assert "python unrecognized" in result.reason
+
+
 class TestPipeBlockerHandleUnknown:
     """Tests for handle() when command is unknown (not in whitelist or blacklist)."""
 
@@ -1181,3 +1264,92 @@ class TestPipeBlockerWhitelistExpansion:
             "tool_input": {"command": 'grep "error\\|warning" /var/log/syslog | tail -n 30'},
         }
         assert handler.matches(hook_input) is False
+
+
+class TestPipeBlockerSecretMetaWhitelist:
+    """Plan 00319 Task 4.1: `secret-meta` is the documented recovery path
+
+    ``secret_file_guard``'s own deny message offers, so piping its output to
+    a preview command must not be denied by an unrelated handler. Both
+    invocation shapes are covered: the direct CLI entrypoint
+    (``bin/hooks-daemon secret-meta``) and the skill wrapper that forwards
+    arbitrary subcommands to it (``daemon-cli.sh secret-meta`` — see
+    ``.claude/skills/hooks-daemon/scripts/daemon-cli.sh``'s fallback branch).
+    """
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    def test_no_match_bin_hooks_daemon_secret_meta_piped_to_head(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "bin/hooks-daemon secret-meta config.yaml | head -20"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_client_install_hooks_daemon_secret_meta_piped_to_tail(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    ".claude/hooks-daemon/bin/hooks-daemon secret-meta config.yaml | tail -20"
+                )
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_bare_hooks_daemon_secret_meta_piped_to_head(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "hooks-daemon secret-meta config.yaml | head -20"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_skill_wrapper_daemon_cli_secret_meta_piped_to_tail(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    "bash .claude/skills/hooks-daemon/scripts/daemon-cli.sh "
+                    "secret-meta config.yaml | tail -20"
+                )
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_daemon_cli_secret_meta_run_directly_piped_to_tail(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """`daemon-cli.sh` is executable via its own shebang, so a caller may
+        run it directly instead of prefixing `bash `."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    ".claude/skills/hooks-daemon/scripts/daemon-cli.sh "
+                    "secret-meta config.yaml | tail -20"
+                )
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_still_denies_unrelated_command_named_similarly(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """The whitelist entry is scoped to the `secret-meta` subcommand only —
+        a bare `hooks-daemon` invocation of some other subcommand must still
+        fall through to the normal unknown-command tier."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "hooks-daemon status | tail -20"},
+        }
+        assert handler.matches(hook_input) is True

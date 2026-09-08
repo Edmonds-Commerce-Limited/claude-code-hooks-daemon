@@ -72,7 +72,7 @@ class TestUnknownKeyword:
         assert "test_id" in found[0].message
 
     def test_flags_every_unknown_kwarg(self, mod: Any) -> None:
-        found = mod.check_snippet("doc.md", 1, "AcceptanceTest(test_id='x', hook_input={})")
+        found = mod.check_snippet("doc.md", 1, "AcceptanceTest(test_id='x', bogus_field={})")
         assert len(found) == 2
 
     def test_accepts_real_kwargs(self, mod: Any) -> None:
