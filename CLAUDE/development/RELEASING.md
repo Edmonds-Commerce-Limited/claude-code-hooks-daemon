@@ -292,6 +292,15 @@ there.
 
 Creates `RELEASES/vX.Y.Z.md` with: summary, changelog, upgrade instructions (if breaking), install/upgrade commands, test stats, contributor list, comparison link.
 
+**Fold in the pending callouts first.** `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+holds one short callout per plan that closed since the last release, written
+by the plan in the voice of the release notes (Plan 00360; schema in that
+directory's README). Read every `NN-*.md` there and place each under the
+Highlights section, grouped by its `Audience` header where that helps the
+reader. These are the sentences the commit log cannot supply, so a callout is
+never dropped and never paraphrased down to a changelog line. Step 6 then
+moves the files out; a callout still in the directory after that is an ABORT.
+
 ---
 
 ## Step 6: Move UNRELEASED Post-Upgrade Tasks (BLOCKING)
@@ -358,6 +367,27 @@ After upgrading, review `CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade
 ```
 
 **ABORT condition**: any `NN-*.md` file remains in `UNRELEASED/post-upgrade-tasks/` when moving to the next step.
+
+### Move UNRELEASED release-notes
+
+Every callout in `UNRELEASED/release-notes/` was folded into `RELEASES/vX.Y.Z.md`
+in Step 5. Move the files beside the post-upgrade tasks in the versioned
+upgrade guide so the provenance of each sentence survives:
+
+```bash
+TARGET="CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/release-notes"
+mkdir -p "$TARGET"
+git mv CLAUDE/UPGRADES/UNRELEASED/release-notes/[0-9][0-9]-*.md "$TARGET/"
+ls CLAUDE/UPGRADES/UNRELEASED/release-notes/
+# Expected: README.md  (nothing else)
+```
+
+If only `README.md` is present there is nothing to move and no `release-notes/`
+directory is created in the guide.
+
+**ABORT condition**: any `NN-*.md` file remains in `UNRELEASED/release-notes/`
+when moving to the next step, or a moved callout's sentence is absent from
+`RELEASES/vX.Y.Z.md`.
 
 ### Move UNRELEASED truth-changes
 
@@ -428,6 +458,7 @@ Opus reviews **documentation only** (not code/QA):
 - `UNRELEASED/post-upgrade-tasks/` contains only `README.md` (all tasks moved in Step 6)
 - Moved tasks have populated the versioned guide's `post-upgrade-tasks/README.md` task index
 - Release notes reference post-upgrade tasks if any are `critical` or `recommended`
+- Every callout moved out of `UNRELEASED/release-notes/` in Step 6 appears in the release notes, and that directory contains only `README.md`
 - **Did this release change a documented truth?** (a workflow, command, or convention a project's own docs are likely to assert) — if so, a `truth-changes/v{X.Y.Z}.yaml` entry exists (`was → now`, or `now: ~` to retire it) and `UNRELEASED/truth-changes/` contains only `README.md`
 - **Did this release add an opt-in feature or flip a default?** (a feature that would otherwise ship dormant in client projects) — if so, a `config-changes/v{X.Y.Z}.yaml` entry exists with `recommended: true` (and `recommended_value:` for a default flip) so the upgrade advisory actively promotes enabling it, and `UNRELEASED/config-changes/` contains only `README.md`
 
@@ -911,7 +942,9 @@ gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
 # 2. Update CHANGELOG.md (Keep a Changelog format)
 # 3. Create RELEASES/vX.Y.Z.md
 # 4. Move UNRELEASED/post-upgrade-tasks/NN-*.md into the versioned upgrade guide
-#    and populate its post-upgrade-tasks/README.md task index
+#    and populate its post-upgrade-tasks/README.md task index; fold every
+#    UNRELEASED/release-notes/NN-*.md callout into RELEASES/vX.Y.Z.md and move
+#    the files into the guide's release-notes/
 # 5. Run QA: ./scripts/qa/llm_qa.py all
 # 6. Commit and push
 # 7. Tag: git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z

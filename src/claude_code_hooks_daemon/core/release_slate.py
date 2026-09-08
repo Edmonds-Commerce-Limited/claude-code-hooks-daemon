@@ -32,6 +32,14 @@ _PLAN_FILENAME: Final[str] = "PLAN.md"
 _MAIN_BRANCH: Final[str] = "main"
 _CI_SUCCESS: Final[str] = "success"
 _CI_COMPLETED: Final[str] = "completed"
+# A pending release-notes callout (Plan 00360) opens with this heading; the
+# README that documents the holding area is the one file there that is not one.
+_CALLOUT_HEADING: Final[str] = "# Callout:"
+_HOLDING_AREA_README: Final[str] = "README.md"
+_CALLOUT_SUFFIX: Final[str] = ".md"
+# Where this repository's plans leave their callouts, relative to the repo root
+# (`CLAUDE/UPGRADES/UNRELEASED/README.md` names the four holding-area shapes).
+PENDING_RELEASE_NOTES_DIR: Final[Path] = Path("CLAUDE/UPGRADES/UNRELEASED/release-notes")
 
 RunGit = Callable[..., "subprocess.CompletedProcess[str]"]
 CiLookup = Callable[[str], "CiRunState | None"]
@@ -85,13 +93,18 @@ class SlateReport:
     attention_plans: tuple[PlanSummary, ...]
     branches_ahead: tuple[BranchAhead, ...]
     worktrees: tuple[Path, ...]
+    # Titles of the callouts waiting in the release-notes holding area. What
+    # the release will say, listed for the human; never part of the verdict.
+    pending_release_notes: tuple[str, ...] = ()
 
     @property
     def is_clean(self) -> bool:
         """Nothing for a human to decide.
 
-        Attention plans do not count: they are surfaced, but whether a
-        high-priority unstarted plan should hold a release is scope, not state.
+        Attention plans and pending release notes do not count: both are
+        surfaced, but whether a high-priority unstarted plan should hold a
+        release is scope, not state, and a pending note is the release's own
+        input rather than anything in flight.
         """
         return (
             self.head_ci.is_green
@@ -117,6 +130,7 @@ class SlateReport:
             )
         )
         lines.append(_section("Live worktrees", [str(p) for p in self.worktrees]))
+        lines.append(_section("This release will say", list(self.pending_release_notes)))
         lines.append("")
         lines.append("Slate: CLEAN" if self.is_clean else "Slate: NOT CLEAN — a human decides")
         return "\n".join(lines)
@@ -222,6 +236,32 @@ def _classify_plans(
     return tuple(in_flight), tuple(release_gated), tuple(attention)
 
 
+def _callout_title(path: Path) -> str:
+    """The callout's own title, or its filename when the heading is absent."""
+    try:
+        first_line = path.read_text(encoding="utf-8").partition("\n")[0]
+    except (OSError, UnicodeDecodeError):
+        # An unreadable callout is still pending; its name is enough to list
+        # it, and the release step that folds it in reads it again and fails there.
+        return path.name
+    if first_line.startswith(_CALLOUT_HEADING):
+        title = first_line[len(_CALLOUT_HEADING) :].strip()
+        if title:
+            return title
+    return path.name
+
+
+def _pending_release_notes(notes_root: Path | None) -> tuple[str, ...]:
+    if notes_root is None or not notes_root.is_dir():
+        return ()
+    callouts = sorted(
+        p
+        for p in notes_root.iterdir()
+        if p.is_file() and p.suffix == _CALLOUT_SUFFIX and p.name != _HOLDING_AREA_README
+    )
+    return tuple(_callout_title(p) for p in callouts)
+
+
 def _head_ci(ci_lookup: CiLookup, sha: str) -> CiRunState:
     """Never lets a lookup failure read as clean: a problem is reported, and is not green."""
     try:
@@ -240,8 +280,13 @@ def collect_slate(
     archive_dir_names: frozenset[str],
     run_fn: RunGit,
     ci_lookup: CiLookup,
+    release_notes_root: Path | None = None,
 ) -> SlateReport:
-    """Everything a human would want on one screen before a release begins."""
+    """Everything a human would want on one screen before a release begins.
+
+    ``release_notes_root`` is the pending release-notes holding area
+    (Plan 00360); None, or a missing directory, lists nothing.
+    """
     head = _head_sha(run_fn, repo_root)
     in_flight, release_gated, attention = _classify_plans(plan_root, archive_dir_names)
     return SlateReport(
@@ -252,4 +297,5 @@ def collect_slate(
         attention_plans=attention,
         branches_ahead=_branches_ahead(run_fn, repo_root),
         worktrees=_worktrees(run_fn, repo_root),
+        pending_release_notes=_pending_release_notes(release_notes_root),
     )

@@ -33,7 +33,7 @@ At release time, the `/release` skill:
 1. Reads every file under `UNRELEASED/`.
 2. Moves them into the new versioned upgrade directory, e.g. `CLAUDE/UPGRADES/v3/v3.2-to-v3.3/`.
 3. Renumbers task files if the versioned directory already has tasks from earlier drafts.
-4. Links the new upgrade guide's `post-upgrade-tasks/README.md` from `RELEASES/vX.Y.Z.md`.
-5. Leaves `UNRELEASED/` empty (except for its own `README.md` and `post-upgrade-tasks/README.md` scaffolding), ready for the next release cycle.
+4. Links the new upgrade guide's `post-upgrade-tasks/README.md` from `RELEASES/vX.Y.Z.md`, and folds every `release-notes/` callout into those notes before moving the files.
+5. Leaves `UNRELEASED/` empty (except for its own `README.md` and each shape's `README.md` scaffolding), ready for the next release cycle.
 
 See `CLAUDE/development/RELEASING.md` for the authoritative release process.

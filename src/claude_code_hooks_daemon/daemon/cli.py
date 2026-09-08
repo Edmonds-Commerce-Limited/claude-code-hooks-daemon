@@ -2960,7 +2960,10 @@ def _gh_ci_lookup(sha: str) -> "CiRunState | None":
 def _collect_release_slate() -> "SlateReport":
     """Gather the slate for THIS repository, using the configured plan layout."""
     from claude_code_hooks_daemon.config.models import Config
-    from claude_code_hooks_daemon.core.release_slate import collect_slate
+    from claude_code_hooks_daemon.core.release_slate import (
+        PENDING_RELEASE_NOTES_DIR,
+        collect_slate,
+    )
     from claude_code_hooks_daemon.utils.git_repo import run_git
 
     project_root = Path.cwd()
@@ -2975,6 +2978,7 @@ def _collect_release_slate() -> "SlateReport":
         archive_dir_names=frozenset(archive),
         run_fn=run_git,
         ci_lookup=_gh_ci_lookup,
+        release_notes_root=project_root / PENDING_RELEASE_NOTES_DIR,
     )
 
 
@@ -3029,6 +3033,7 @@ def _slate_as_json(report: "SlateReport") -> dict[str, Any]:
         "attention_plans": plans(report.attention_plans),
         "branches_ahead": [{"name": b.name, "ahead": b.ahead} for b in report.branches_ahead],
         "worktrees": [str(p) for p in report.worktrees],
+        "pending_release_notes": list(report.pending_release_notes),
     }
 
 

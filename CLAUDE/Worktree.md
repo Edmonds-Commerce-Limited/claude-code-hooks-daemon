@@ -93,6 +93,14 @@ pytest tests/  # ModuleNotFoundError: No module named 'claude_code_hooks_daemon'
 Fix: always create worktrees with `./scripts/setup_worktree.sh`, which builds
 the worktree and its venv together.
 
+The worse variant is a worktree whose `untracked/venv` is a SYMLINK to the
+main checkout's venv: the package then imports from `/workspace/src`, so the
+worktree's tests silently exercise main's code and a correct fix fails its
+own tests. `tests/conftest.py` refuses to start such a session, naming the
+imported path, the expected path and this remedy (Plan 00358). A harness
+worktree (`Agent(isolation: "worktree")`) arrives with no venv at all; run
+`./scripts/setup_worktree.sh` there rather than linking one.
+
 ## See Also (This Repo's Own Docs)
 
 - Agent team workflow, lessons from the Wave 1 proof-of-concept, and

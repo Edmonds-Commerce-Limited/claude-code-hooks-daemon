@@ -1,6 +1,6 @@
 # Plan 00358: a worktree venv can silently test the WRONG source tree
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: High
@@ -86,47 +86,47 @@ that fires regardless of how the worktree was made.
 
 ### Phase 1: Decide the check
 
-- [ ] ⬜ **Task 1.1**: Decide where the assertion lives. Leading candidate is a
-  session-scoped `conftest.py` check comparing the imported package's resolved
-  path against the repository root that `pytest` was invoked from, failing with
-  BOTH paths. Alternative: a `venv-include.bash` check at activation, which
-  covers non-pytest entry points too but cannot see what Python ultimately
-  imports. Record which, and why the other was not chosen.
+- [x] ✅ **Task 1.1**: The assertion lives in `tests/source_tree_guard.py`,
+  called once per session from `tests/conftest.py`'s `pytest_sessionstart`.
+  The activation-time alternative was not chosen because it cannot see what
+  Python ultimately imports, and the defect is exactly what Python imports.
 
-- [ ] ⬜ **Task 1.2**: Decide the failure mode. A hard error is right for a
-  test session (a silent wrong answer is the whole problem), but confirm it
-  cannot break the legitimate cases: the acceptance fixture that clones the
-  repo to a temp dir, and any deliberate cross-checkout invocation.
+- [x] ✅ **Task 1.2**: Hard error, raised before any test runs. The nested
+  pytest runs some integration tests spawn write their own `conftest.py` in a
+  temp directory and never load `tests/conftest.py`, so they are unaffected;
+  a clone that used a foreign venv WOULD be refused, which is the correct
+  answer for a clone too.
 
 ### Phase 2: Build it
 
-- [ ] ⬜ **Task 2.1**: RED — a test proving the check fires when the resolved
-  package sits outside the invoking repository root.
+- [x] ✅ **Task 2.1**: RED — `tests/unit/test_source_tree_guard.py` proves the
+  check fires for a package resolved from another checkout, including the
+  incident shape where a symlinked `src/` looks local until resolved.
 
-- [ ] ⬜ **Task 2.2**: GREEN — the check, with a message that names the
-  resolved path, the expected root, and the one-line remedy
-  (`./scripts/setup_worktree.sh`).
+- [x] ✅ **Task 2.2**: GREEN — `assert_package_is_this_checkout` names the
+  imported path, the expected root and `./scripts/setup_worktree.sh`.
 
-- [ ] ⬜ **Task 2.3**: Confirm the legitimate cases from Task 1.2 still pass —
-  specifically the end-to-end install acceptance fixture, which deliberately
-  runs against a clone.
+- [x] ✅ **Task 2.3**: Full QA on `main` is the legitimate case and passes with
+  the guard armed; the nested-pytest integration tests pass unchanged.
 
 ### Phase 3: Close the dispatch gap
 
-- [ ] ⬜ **Task 3.1**: Make the remedy discoverable at the moment it is needed.
-  The `worktree_create` advisory already fires on worktree creation; adding the
-  `setup_worktree.sh` step to what an agent is told there costs nothing and
-  addresses gap 3 directly. This is belt-and-braces to the Phase 2 check, not a
-  substitute for it — advice is not a check.
+- [x] ✅ **Task 3.1**: The `worktree_create` handler's injected CLAUDE.md
+  guidance now states that a fresh worktree has no venv and names the setup
+  script, with a test pinning both strings; `CLAUDE/Worktree.md` describes
+  the symlink variant and the guard.
 
 ## Success Criteria
 
-- [ ] A test run whose package resolves outside the invoking repository root
+- [x] A test run whose package resolves outside the invoking repository root
   fails, naming both paths
-- [ ] The end-to-end install acceptance fixture (which legitimately runs
+- [x] The end-to-end install acceptance fixture (which legitimately runs
   against a clone) still passes
-- [ ] The remedy is stated where a worktree is created, not only in
+- [x] The remedy is stated where a worktree is created, not only in
   `CLAUDE/Worktree.md`
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/06-worktree-guidance-names-the-venv-remedy.md`
+  (the conftest guard itself is this repository's; the handler guidance ships)
 
 ## Delivery & Milestones
 
@@ -136,3 +136,6 @@ that fires regardless of how the worktree was made.
 
 - Filed from a live incident: a sub-agent's correct fix appeared as 15 test
   failures, and the symlink chain was traced on disk rather than guessed.
+- Shipped the same day, while seven worktree agents were mid-flight on the
+  release-review ledgers; their reported test results are treated as
+  unverified and each branch is re-run on `main` after merge.

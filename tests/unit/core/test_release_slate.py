@@ -86,7 +86,13 @@ def _green(sha: str) -> CiRunState:
     return CiRunState(sha=sha, status="completed", conclusion="success")
 
 
-def _collect(tmp_path: Path, *, git: _FakeGit | None = None, ci: object = None) -> SlateReport:
+def _collect(
+    tmp_path: Path,
+    *,
+    git: _FakeGit | None = None,
+    ci: object = None,
+    notes: Path | None = None,
+) -> SlateReport:
     plan_root = _plan_tree(tmp_path)
     return collect_slate(
         repo_root=tmp_path,
@@ -94,6 +100,7 @@ def _collect(tmp_path: Path, *, git: _FakeGit | None = None, ci: object = None) 
         archive_dir_names=frozenset({"Completed", "Cancelled"}),
         run_fn=git if git is not None else _FakeGit(),
         ci_lookup=ci if ci is not None else _green,
+        release_notes_root=notes,
     )
 
 
@@ -265,3 +272,63 @@ class TestTheReportReadsAsAReportNotAQuestion:
         assert "agent-x" in text
         assert "cancelled" in text
         assert _HEAD[:8] in text
+
+
+def _notes_dir(tmp_path: Path, *callouts: tuple[str, str]) -> Path:
+    """The pending release-notes holding area, with its README and any callouts."""
+    notes = tmp_path / "CLAUDE" / "UPGRADES" / "UNRELEASED" / "release-notes"
+    notes.mkdir(parents=True)
+    (notes / "README.md").write_text("# Release Notes — Pending Callouts\n", encoding="utf-8")
+    for filename, title in callouts:
+        (notes / filename).write_text(
+            f"# Callout: {title}\n\n**Plan**: 00359\n**Audience**: everyone\n\nA sentence.\n",
+            encoding="utf-8",
+        )
+    return notes
+
+
+class TestPendingReleaseNotesAreInformationOnly:
+    """Plan 00360: the slate check says what the release WILL SAY, never blocks on it."""
+
+    def test_pending_callouts_are_listed_by_their_titles(self, tmp_path: Path) -> None:
+        notes = _notes_dir(
+            tmp_path,
+            ("01-slate-gate.md", "the release now checks the slate"),
+            ("02-glob-fix.md", "a malformed glob no longer skips the guard"),
+        )
+        report = _collect(tmp_path, notes=notes)
+        assert report.pending_release_notes == (
+            "the release now checks the slate",
+            "a malformed glob no longer skips the guard",
+        )
+        text = report.render()
+        assert "This release will say" in text
+        assert "the release now checks the slate" in text
+
+    def test_a_callout_without_a_title_line_is_named_by_its_file(self, tmp_path: Path) -> None:
+        notes = _notes_dir(tmp_path)
+        (notes / "03-untitled.md").write_text("no heading here\n", encoding="utf-8")
+        assert _collect(tmp_path, notes=notes).pending_release_notes == ("03-untitled.md",)
+
+    def test_the_readme_alone_means_nothing_pending(self, tmp_path: Path) -> None:
+        report = _collect(tmp_path, notes=_notes_dir(tmp_path))
+        assert report.pending_release_notes == ()
+        assert "This release will say: none" in report.render()
+
+    def test_a_missing_holding_area_means_nothing_pending(self, tmp_path: Path) -> None:
+        missing = tmp_path / "nowhere"
+        assert _collect(tmp_path, notes=missing).pending_release_notes == ()
+
+    def test_pending_callouts_never_change_the_verdict(self, tmp_path: Path) -> None:
+        root = tmp_path / "CLAUDE" / "Plan"
+        root.mkdir(parents=True)
+        report = collect_slate(
+            repo_root=tmp_path,
+            plan_root=root,
+            archive_dir_names=frozenset(),
+            run_fn=_FakeGit(),
+            ci_lookup=_green,
+            release_notes_root=_notes_dir(tmp_path, ("01-x.md", "x")),
+        )
+        assert report.pending_release_notes == ("x",)
+        assert report.is_clean is True

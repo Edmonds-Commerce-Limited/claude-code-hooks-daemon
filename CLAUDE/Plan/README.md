@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00360: pending release notes holding area](00360-pending-release-notes-holding-area/PLAN.md) - In Progress, the area and its project-only gate shipped, the release-side consumption remains (a plan closes by writing its release-note callout into `UNRELEASED/release-notes/`, and the release folds the notes in mechanically — the fourth shape the holding area was missing once a release stopped being part of any plan's definition of done)
 
-- [00358: a worktree venv can silently test the WRONG source tree](00358-worktree-venv-tests-wrong-source-tree/PLAN.md) - Not Started (a sub-agent's correct fix appeared to fail, because the worktree's venv symlinks to main's, whose editable install points at `/workspace/src` — so GREEN can never pass and a green QA run is not evidence about the branch)
-
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
@@ -153,11 +151,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00358: a worktree venv can silently test the WRONG source tree](Completed/00358-worktree-venv-tests-wrong-source-tree/PLAN.md) - Complete (a test session now refuses to start when the package resolves outside the invoking checkout, naming both paths and the setup script; the `worktree_create` guidance says a fresh worktree has no venv)
+
 - [00356: secret guard bracket glob false positive](Completed/00356-secret-guard-bracket-glob-false-positive/PLAN.md) - Complete (a bracket expression at a token's edge was read as an open wildcard, so an ordinary jq array subscript was denied; fixed and merged by a worktree sub-agent, whose incidental finding shipped as Plan 00357)
 
 - [00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy](Completed/00110-python-discovery-dry-consolidation/PLAN.md) - Complete (interpreter discovery consolidated into one helper with a latest-always policy; the `UNRELEASED/` post-upgrade task carries the operator-facing change. Closed on the ruling that a release is never part of a plan's definition of done)
-
-- [00102: Hook Executable-Bit Defense](Completed/00102-hook-exec-bit-defense/PLAN.md) - Complete (multi-tier defence against hooks losing their executable bit, every criterion verified against its named test; closed on the ruling that a release-time acceptance gate is not a plan criterion — the probes are on main)
 
 - [00250: CI must actually run the acceptance gates it calls blocking](Completed/00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Complete at the warm-up commit + the archiving commit (CI now runs the blocking acceptance gates; the last flake, probe #144, was a Swift toolchain cold-start exceeding the lint budget, fixed by warming `swiftc` before the tests rather than widening the budget, and confirmed green on all three interpreters)
 
@@ -260,15 +258,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 360 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 304 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 305 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 35 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 34 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 11 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 35 + 304 + 11 = **350 folders**, spanning
+- **Folder-to-number reconciliation**: 34 + 305 + 11 = **350 folders**, spanning
   **347 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -284,8 +282,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the cancellation of Plans 00032, 00034, 00035 and
-  00131 (35 root, 304
+- **Last reconciled at**: the completion of Plan 00358 (34 root, 305
   `Completed/`, 11 `Cancelled/`, 347 distinct numbers against a counter of 360 —
   350 folders, three of which share a number with another from before the
   counter existed: 00034, 00039, 00041). Every figure above was recounted from

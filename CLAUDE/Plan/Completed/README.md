@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00102: Hook Executable-Bit Defense](00102-hook-exec-bit-defense/PLAN.md) - Complete (multi-tier defence against hooks losing their executable bit, every criterion verified against its named test; closed on the ruling that a release-time acceptance gate is not a plan criterion — the probes are on main)
+
 - [00328: human model choice cannot be read from keystrokes](00328-human-model-choice-cannot-be-read-from-keystrokes/PLAN.md) - Complete at `c4e22ac0`…`dd7f43f3` + the archiving commit (the picker types no text a parser can read, so the restore now arms only on Claude Code's OWN downgrade record and the keystroke-recognition channel is deleted)
 
 - [00326: remote docs vendoring and staleness](00326-remote-docs-vendoring-and-staleness/PLAN.md) - Complete at `43cf91a0` through `ef342df4` (upstream docs vendored as markdown carrying provenance frontmatter, with a `fidelity` field that separates a citable corpus from a cache; four handlers gate writes and commits, route `WebFetch` to the local copy, and report staleness)

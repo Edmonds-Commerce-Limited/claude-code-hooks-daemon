@@ -124,9 +124,10 @@ class PlanDoneRequiresHoldingAreaHandler(Handler):
         return None
 
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
-        # Both probes are Write calls the playbook runner issues for real; the
-        # denied one never lands, and the allowed one targets a folder number
-        # no real plan uses, under a name the plan-number guard ignores.
+        # Both probes name a folder number no real plan uses. The denied Write
+        # never lands; the allowed Edit is a status flip on a file that does
+        # not exist, which this handler passes (nothing to judge) and the Edit
+        # tool itself then refuses — so nothing lands there either.
         return [
             AcceptanceTest(
                 title="Deny a Complete flip with no holding-area criterion",
@@ -143,5 +144,21 @@ class PlanDoneRequiresHoldingAreaHandler(Handler):
                 expected_message_patterns=[r"holding area", r"UNRELEASED"],
                 safety_notes="Denied before anything is written.",
                 test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="Allow a status flip the handler has no content to judge",
+                command=(
+                    "Edit CLAUDE/Plan/00000-acceptance-probe/PLAN.md replacing "
+                    "'**Status**: In Progress' with '**Status**: Complete'"
+                ),
+                description=(
+                    "A near miss: the same Complete flip, but on a file that does "
+                    "not exist. The handler fails open (the Edit tool refuses an "
+                    "unreadable target itself), so the gate must not fire."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="The Edit tool rejects the missing file; nothing is written.",
+                test_type=TestType.ADVISORY,
             ),
         ]

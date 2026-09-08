@@ -328,6 +328,13 @@ class TestSeedingGuidance:
 
         assert "seed" not in guidance.lower()
 
+    def test_guidance_names_the_venv_remedy_where_a_worktree_is_created(self) -> None:
+        """Plan 00358: the harness makes the worktree without a venv, so say so here."""
+        guidance = WorktreeCreateHandler().get_claude_md() or ""
+
+        assert "./scripts/setup_worktree.sh" in guidance
+        assert "untracked/venv" in guidance
+
     def test_symlink_write_through_hazard_is_stated_when_configured(self) -> None:
         handler = WorktreeCreateHandler()
         handler._seed = {"entries": [".env.local"]}

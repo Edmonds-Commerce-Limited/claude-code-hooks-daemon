@@ -61,12 +61,16 @@ class TestAWriteThatCompletesAPlan:
     def test_allowed_when_the_criterion_names_an_artefact(
         self, handler: PlanDoneRequiresHoldingAreaHandler, write_hook_input: Any
     ) -> None:
-        assert handler.matches(write_hook_input(_ACTIVE, _plan("Complete", _CRITERIA_WITH))) is False
+        assert (
+            handler.matches(write_hook_input(_ACTIVE, _plan("Complete", _CRITERIA_WITH))) is False
+        )
 
     def test_allowed_when_the_plan_declares_no_consequences(
         self, handler: PlanDoneRequiresHoldingAreaHandler, write_hook_input: Any
     ) -> None:
-        assert handler.matches(write_hook_input(_ACTIVE, _plan("Complete", _CRITERIA_NONE))) is False
+        assert (
+            handler.matches(write_hook_input(_ACTIVE, _plan("Complete", _CRITERIA_NONE))) is False
+        )
 
     def test_a_non_terminal_status_is_never_judged(
         self, handler: PlanDoneRequiresHoldingAreaHandler, write_hook_input: Any
@@ -118,7 +122,9 @@ class TestScope:
     def test_tools_other_than_write_and_edit_are_ignored(
         self, handler: PlanDoneRequiresHoldingAreaHandler, bash_hook_input: Any
     ) -> None:
-        assert handler.matches(bash_hook_input("git mv CLAUDE/Plan/x CLAUDE/Plan/Completed/")) is False
+        assert (
+            handler.matches(bash_hook_input("git mv CLAUDE/Plan/x CLAUDE/Plan/Completed/")) is False
+        )
 
 
 class TestAnEditThatCompletesAPlan:

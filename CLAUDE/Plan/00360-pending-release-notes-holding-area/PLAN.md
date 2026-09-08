@@ -71,26 +71,30 @@ pipeline to fold it in.
 
 ### Phase 2: The release consumes it
 
-- [ ] ⬜ **Task 2.1**: RELEASING.md Step 5 (Release Notes Creation): the agent
+- [x] ✅ **Task 2.1**: RELEASING.md Step 5 (Release Notes Creation): the agent
   reads every note in the area and folds each into the notes under a
   "Highlights" (or audience-matching) section. Step 6 gains a sibling
   BLOCKING check: the directory must hold only its README once the notes are
   written, moved with `git mv` into the versioned upgrade guide beside the
-  post-upgrade tasks so provenance survives.
+  post-upgrade tasks so provenance survives. Step 7's Opus checklist and the
+  manual-release recipe name the directory too.
 
-- [ ] ⬜ **Task 2.2**: The release agent definition and the release skill's
+- [x] ✅ **Task 2.2**: The release agent definition and the release skill's
   `invoke.sh` name the new directory where they name `post-upgrade-tasks/`,
   so the procedure is not only in RELEASING.md.
 
-- [ ] ⬜ **Task 2.3**: `release-slate-check` prints the pending notes under
-  an informational heading ("This release will say"), with no effect on the
-  exit code.
+- [x] ✅ **Task 2.3**: `release-slate-check` prints the pending notes under
+  an informational heading ("This release will say"), by callout title, with
+  no effect on the exit code; the JSON form carries `pending_release_notes`.
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: A test asserts the release-notes directory holds only
-  its README on main after a release (the same shape as the post-upgrade-tasks
-  check), and the slate-check test covers the informational listing.
+- [x] ✅ **Task 3.1**: `tests/integration/test_pending_release_notes_holding_area.py`
+  reads the REAL holding area and fails CI on any callout that is not the
+  shape the release folds in (name, title, plan, audience, body). "Holds only
+  its README after a release" is not a property of main between releases,
+  so the test pins the schema instead and the abort in Step 6 pins the
+  emptying; the slate-check unit tests cover the informational listing.
 
 - [ ] ⬜ **Task 3.2**: Full QA green, daemon restart RUNNING.
 

@@ -80,6 +80,8 @@ Follow the Release Agent specification (.claude/agents/release-agent.md) for:
 5. Release Notes Creation
    - Create RELEASES/vX.Y.Z.md
    - Include summary, highlights, full changelog
+   - Fold every CLAUDE/UPGRADES/UNRELEASED/release-notes/NN-*.md callout into
+     the highlights (RELEASING.md Step 5); Step 6 moves the files out
    - Add installation/upgrade instructions
 
 **DO NOT:**

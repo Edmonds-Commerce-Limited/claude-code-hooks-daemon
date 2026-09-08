@@ -192,7 +192,9 @@ Create comprehensive release notes in `RELEASES/vX.Y.Z.md`:
 
 - **[Feature/Fix Name]**: Brief description
 - **[Feature/Fix Name]**: Brief description
-[3-5 key highlights]
+[3-5 key highlights, PLUS every pending callout from
+CLAUDE/UPGRADES/UNRELEASED/release-notes/NN-*.md in the author's own words —
+see RELEASING.md Step 5]
 
 ## Changes
 

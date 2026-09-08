@@ -27,8 +27,19 @@ from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegi
 # relay-dependent gates it covers straddle `acceptance/` and `integration/`.
 # Outside CI it does nothing at all — see the module docstring.
 from tests.relay_gate_guard import pytest_runtest_makereport
+from tests.source_tree_guard import assert_package_is_this_checkout
 
 __all__ = ["pytest_runtest_makereport"]
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Plan 00358: refuse to test another checkout's source.
+
+    A worktree whose venv is a symlink to the main checkout's imports the
+    package from main's ``src/``; every result would then describe main's
+    code. Fails the session up front, naming both paths and the remedy.
+    """
+    assert_package_is_this_checkout(repo_root=Path(__file__).resolve().parents[1])
 
 
 @pytest.fixture

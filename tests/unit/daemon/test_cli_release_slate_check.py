@@ -37,6 +37,7 @@ def _report(*, clean: bool) -> SlateReport:
         attention_plans=(),
         branches_ahead=(BranchAhead("agent-x", 3),),
         worktrees=(Path("/w/.claude/worktrees/x"),),
+        pending_release_notes=("the release now checks the slate",),
     )
 
 
@@ -103,6 +104,7 @@ class TestJsonOutput:
         assert payload["head_ci"]["green"] is False
         assert [p["number"] for p in payload["in_flight_plans"]] == [1]
         assert payload["branches_ahead"][0]["name"] == "agent-x"
+        assert payload["pending_release_notes"] == ["the release now checks the slate"]
 
 
 class TestTheSubcommandIsRegistered:

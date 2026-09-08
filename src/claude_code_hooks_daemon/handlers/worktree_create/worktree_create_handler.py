@@ -172,7 +172,12 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             "path. Name an agent semantically (the Agent tool's `name:`) to get a "
             "readable worktree directory (e.g. `refactor-auth-4f2a1c9b`) instead of "
             "an opaque `wf_<hash>`. The short hash suffix keeps identically-named "
-            "agents from colliding." + self._seeding_guidance()
+            "agents from colliding.\n\n"
+            "**A fresh worktree has no Python venv.** Build its own with "
+            "`./scripts/setup_worktree.sh` — never symlink `untracked/venv` to "
+            "the main checkout's, whose editable install points at main's `src/`: "
+            "the tests would then run against main's code, and the suite refuses "
+            "to start against another checkout's source." + self._seeding_guidance()
         )
 
     def _seeding_guidance(self) -> str:
