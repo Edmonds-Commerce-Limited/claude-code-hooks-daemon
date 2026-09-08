@@ -242,6 +242,8 @@ Refer to detailed info in supporting docs as required
 - [ ] Criterion 1 that must be met
 - [ ] Criterion 2 that must be met
 - [ ] All QA checks passing
+- [ ] Every release-bound consequence is in the pending-release holding area
+      (or: this plan has no release-bound consequences)
 
 ## Risks & Mitigations
 
@@ -562,6 +564,14 @@ definition of done, record where its substance lives, and close the plan.
 
 When a plan is complete, follow these steps to properly close it out. Skipping steps leads to stale plan indexes and orphaned folders.
 
+0. **Holding area is current (gate — do this BEFORE flipping the status)**:
+   every release-bound consequence of this plan is already written into the
+   pending-release holding area, in whichever of its shapes applies — a
+   post-upgrade task, a truth change, a config change, a release-notes
+   callout, an upgrade-guide entry. If the plan has none, the last Success
+   Criterion says so explicitly ("no release-bound consequences"). A plan
+   whose release-bound content is still in someone's head is not done, and a
+   plan waiting for the release to consume that content is already done.
 1. **Update PLAN.md status**: Change `**Status**:` to `Complete`. Do NOT add a completion date — git history is authoritative for "when". Cite the delivery commit hash(es) in the "Delivery & Milestones" section instead.
 2. **Mark all tasks**: Change `- [ ]` to `- [x]` for all completed tasks in the plan
 3. **Move to Completed folder**: Relocate the plan directory into the archive
