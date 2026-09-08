@@ -36,6 +36,13 @@ from __future__ import annotations
 import subprocess  # nosec B404 - trusted system tool (git) for repo fixtures
 from pathlib import Path
 
+from tests.acceptance.blocking_gate_guard import pytest_runtest_makereport
+
+# pytest only collects hooks from a conftest or a plugin, so the guard is
+# re-exported here to register it. It lives in its own module so a nested
+# pytest run can import the same implementation rather than a copy of it.
+__all__ = ["pytest_runtest_makereport"]
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 

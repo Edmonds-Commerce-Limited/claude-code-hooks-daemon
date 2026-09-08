@@ -65,8 +65,7 @@ is the CI-safe equivalent."* Nothing in this workflow has ever installed or
 started one.
 
 The conclusion survives — it IS a provisioning gap — but the cheap route to it
-does not. There is nothing to reuse, so Phase 2 has to decide what a CI install
-looks like rather than copy a step.
+does not: there was nothing to reuse.
 
 **The answer turned out to be that there is no install** — see
 [RESEARCH-ci-install.md](RESEARCH-ci-install.md). A checkout already has the
@@ -74,13 +73,8 @@ config, the forwarders and the package; the only missing piece is the gitignored
 `.claude/hooks-daemon.env`, which the repo guard accepts on mere existence. CI
 writes that and starts the daemon, touching no tracked file.
 
-Running the installer was tried first and the runner rejected it. Both
-`create_settings_json` and `create_daemon_config` **rename** an existing file to
-`.bak` and write a default template over it — `force` only decides whether the
-backup happens — so every invocation replaces this project's 1188-line handler
-config. The daemon then refused to start at all, because that template is
-invalid against the current schema, and the run went from 4 failures per
-interpreter to 31 failures plus 7 errors.
+Running the installer was tried first and the runner rejected it; the mechanism
+and the misreading behind it are in Task 2.1's first sub-bullet.
 
 ## The same gap has a louder sibling, and CI is no longer green
 
@@ -92,12 +86,10 @@ regression-testing Plan 00347), and is **4** after Task 2.4a:
 All three are now fixed — see
 [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md) for what each one was.
 
-Two of the three turned out NOT to be this plan's subject at all: they were
-plain defects that would fail on any machine without a deployed install, and
-only *looked* like daemon fallout. Both were found by reproducing the runner
-condition locally rather than reading a CI log — a `git worktree` for the
-missing install, `env -u HOSTNAME` for the unexported shell variable — seconds
-each, no round trip. Only `test_forwarder_socket_stdin.py`'s remaining failure
+Two of the three turned out NOT to be this plan's subject: plain defects that
+would fail on any machine without a deployed install, found by reproducing the
+runner condition locally rather than reading a CI log (`git worktree`;
+`env -u HOSTNAME`). Only `test_forwarder_socket_stdin.py`'s remaining failure
 genuinely needs a daemon, which Task 2.1 provisions.
 
 **Consequence for this plan**: Task 4.2 ("a green CI run") needs all three
@@ -253,10 +245,16 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 
 ### Phase 3: Guard the class
 
-- [ ] ⬜ **Task 3.1**: A skip of a declared-blocking acceptance gate fails the
-  run, naming the file and that it is declared blocking
-- [ ] ⬜ **Task 3.2**: A test that fails when a file is added to the blocking set
-  without being covered, so the guard cannot drift from the declaration
+- [x] ✅ **Task 3.1**: `tests/acceptance/blocking_gate_guard.py` rewrites a
+  skipped report into a failed one naming the file, the declaration and the
+  **original skip reason**. Proven end-to-end by a nested pytest run, not only
+  by unit tests of the predicate: the declared file fails, an undeclared one
+  still skips.
+- [x] ✅ **Task 3.2**: the guard **reads** the set off Step 12.0's command line,
+  so "in the set but not covered" is unreachable rather than merely tested. The
+  risk that replaces it is a parser that quietly stops finding the declaration,
+  so parsing **raises** on a missing, duplicated or argument-less declaration —
+  each covered, plus "every declared file exists on disk".
 
 ### Phase 4: Verify
 
