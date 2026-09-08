@@ -110,7 +110,9 @@ class TestGenericBudgetShapes:
 
 
 class TestExcludedToolsByDefault:
-    @pytest.mark.parametrize("tool_name", ["Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit"])
+    @pytest.mark.parametrize(
+        "tool_name", ["Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Task", "Agent"]
+    )
     def test_default_excluded_tools_never_fire(
         self, handler: BudgetExhaustionDetectorHandler, tool_name: str
     ) -> None:
@@ -209,6 +211,201 @@ class TestExcludedToolsByDefault:
         hook_input = _tool_input(
             "Bash", {"stdout": "budget exhausted for this session", "stderr": ""}
         )
+        assert handler.matches(hook_input) is False
+
+
+# ─── Ledger self-feed: structural JSON-shape recognition (Task 1.4 / F2) ─────
+
+
+class TestLedgerSelfFeedStructural:
+    """A ledger LINE contains neither the handler name nor the ledger
+    filename, so the literal marker guards never covered it (PLAN.md F2).
+    These commands were the plan's own reproduction of the self-feed: none
+    of them spells `budget-exhaustion-events.jsonl`, so only a structural
+    recognition of the ledger's own JSON record shape closes the gap.
+    """
+
+    _LEDGER_LINE = (
+        '{"timestamp": "2026-09-02T00:00:00+00:00", "session_id": "sess-old", '
+        '"tool_name": "Bash", "matched_fragment": "budget exhausted for this '
+        'operation"}'
+    )
+
+    _LEDGER_PRETTY = (
+        "{\n"
+        '  "timestamp": "2026-09-02T00:00:00+00:00",\n'
+        '  "session_id": "sess-old",\n'
+        '  "tool_name": "Bash",\n'
+        '  "matched_fragment": "budget exhausted for this operation"\n'
+        "}"
+    )
+
+    def test_cat_glob_of_ledger_directory_never_fires(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """`cat untracked/*.jsonl` -- no filename is spelled in the command."""
+        hook_input = _tool_input("Bash", {"stdout": self._LEDGER_LINE, "stderr": ""})
+        hook_input["tool_input"] = {"command": "cat untracked/*.jsonl"}
+        assert handler.matches(hook_input) is False
+
+    def test_jq_pretty_printed_ledger_never_fires(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """`jq .` reformats the record across several lines, defeating a
+        naive per-line JSON parse -- the recognizer must survive that."""
+        hook_input = _tool_input("Bash", {"stdout": self._LEDGER_PRETTY, "stderr": ""})
+        hook_input["tool_input"] = {"command": "jq . untracked/budget*.jsonl"}
+        assert handler.matches(hook_input) is False
+
+    def test_tail_of_ledger_env_var_never_fires(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """`tail -n 20 "$LEDGER"` -- the path is a shell variable, never a
+        literal filename the command-marker guard could key on."""
+        hook_input = _tool_input("Bash", {"stdout": self._LEDGER_LINE, "stderr": ""})
+        hook_input["tool_input"] = {"command": 'tail -n 20 "$LEDGER"'}
+        assert handler.matches(hook_input) is False
+
+    def test_ledger_json_shape_recognized_independent_of_command(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """The JSON-shape recognition is a property of the RESPONSE text, not
+        the command that produced it -- a non-passthrough command (here,
+        python) dumping ledger-shaped JSON must still be excluded."""
+        hook_input = _tool_input("Bash", {"stdout": self._LEDGER_LINE, "stderr": ""})
+        hook_input["tool_input"] = {"command": "python3 -c \"print(open('x.jsonl').read())\""}
+        assert handler.matches(hook_input) is False
+
+    def test_ledger_shape_requires_all_four_keys(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """A JSON object missing two of the ledger's record keys (and
+        carrying neither self-referential marker string) is NOT recognized
+        as ledger content -- this guards against the recognizer being so
+        loose it swallows a genuine structured tool response that merely
+        happens to be a JSON object."""
+        partial = (
+            '{"tool_name": "Bash", "timestamp": "2026-01-01T00:00:00+00:00"} '
+            "budget exhausted here"
+        )
+        hook_input = _tool_input("Bash", {"stdout": partial, "stderr": ""})
+        assert handler.matches(hook_input) is True
+
+
+# ─── Content-passthrough Bash commands (Task 4.5) ────────────────────────────
+
+
+class TestContentPassthroughCommands:
+    """A Bash command whose entire pipeline is content-passthrough verbs
+    (cat/head/tail/grep/jq/awk/sed/...) reproduces or reformats bytes that
+    already exist somewhere -- it never independently discovers a live
+    budget signal. PLAN.md Task 4.5's `grep` reproduction is the concrete
+    case: a generated playbook quoting the Test 187 fixture, with neither
+    marker present.
+    """
+
+    # The Test 187 fixture, quoted the way a generated playbook would --
+    # deliberately carrying NEITHER self-referential marker (no
+    # "budget_exhaustion_detector", no "BudgetExhaustionDetectorHandler", no
+    # ledger filename), which is exactly what made this false-fire slip past
+    # the pre-existing marker guards during the v3.60.0 gate.
+    _QUOTED_FIXTURE = (
+        "#187 [PostToolUse]\n"
+        "  command  : Simulate a WebSearch tool response containing the text\n"
+        "    'Web search was not performed: this session has used its web\n"
+        "    search budget (200 of 200 WebSearch calls).'"
+    )
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'grep -A3 "Test 187" playbook.md',
+            "head -n 40 playbook.md",
+            "awk '/Test 187/{print}' playbook.md",
+        ],
+    )
+    def test_grep_of_generated_playbook_never_fires(
+        self, handler: BudgetExhaustionDetectorHandler, command: str
+    ) -> None:
+        hook_input = _tool_input("Bash", {"stdout": self._QUOTED_FIXTURE, "stderr": ""})
+        hook_input["tool_input"] = {"command": command}
+        assert handler.matches(hook_input) is False
+
+    def test_blank_command_is_not_passthrough(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """An empty/whitespace-only command has no verb at all -- it must not
+        vacuously satisfy "every segment is passthrough" and grant an
+        exemption nothing justified."""
+        hook_input = _tool_input(
+            "Bash", {"stdout": "budget exhausted for this operation", "stderr": ""}
+        )
+        hook_input["tool_input"] = {"command": "   "}
+        assert handler.matches(hook_input) is True
+
+    def test_curl_piped_to_jq_still_fires(self, handler: BudgetExhaustionDetectorHandler) -> None:
+        """A LIVE fetch piped through a passthrough formatter must stay
+        eligible -- jq alone in the pipeline must not blanket-exempt curl's
+        genuinely-fetched content. Guards against over-broadening the
+        passthrough classification to "any pipeline containing jq"."""
+        hook_input = _tool_input(
+            "Bash",
+            {"stdout": "Request denied: quota exceeded for this resource.", "stderr": ""},
+        )
+        hook_input["tool_input"] = {"command": "curl -s https://api.example.com/status | jq ."}
+        assert handler.matches(hook_input) is True
+
+    def test_live_curl_command_alone_still_fires(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """A bare live command (not a passthrough verb) must keep firing --
+        the passthrough classification must not weaken genuine detection."""
+        hook_input = _tool_input(
+            "Bash",
+            {"stdout": "budget exhausted for this operation", "stderr": ""},
+        )
+        hook_input["tool_input"] = {"command": "curl -s https://api.example.com/status"}
+        assert handler.matches(hook_input) is True
+
+    def test_python_generated_report_without_marker_still_fires(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """A generated-report command (python, not a passthrough verb)
+        producing genuinely new prose with no self-referential marker must
+        still fire -- only a passthrough VERB or a self-referential marker
+        exempts a Bash response, not "any script that prints text"."""
+        hook_input = _tool_input(
+            "Bash",
+            {"stdout": "quota exceeded for this resource right now.", "stderr": ""},
+        )
+        hook_input["tool_input"] = {"command": "python scripts/report.py"}
+        assert handler.matches(hook_input) is True
+
+
+# ─── Sub-agent dispatch reports (Task 4.5) ───────────────────────────────────
+
+
+class TestSubagentDispatchReportNeverFires:
+    """A dispatched sub-agent's final message is composed prose an LLM wrote,
+    not a field the Task/Agent tool integration populates from a live budget
+    check -- the same category as a file the model merely read. If the
+    sub-agent's OWN work genuinely hit a budget, that already fired directly
+    in the sub-agent's own session at the tool call that hit it; this
+    orchestrator-side echo is a redundant, quotation-prone restatement
+    (PLAN.md Task 4.5's "sub-agent dispatch prompt that cited the fixture
+    string" incident)."""
+
+    _SUBAGENT_REPORT = (
+        "Verified Test 187: the response contains 'Web search was not "
+        "performed: this session has used its web search budget (200 of "
+        "200 WebSearch calls).' as expected. All acceptance checks pass."
+    )
+
+    @pytest.mark.parametrize("tool_name", ["Task", "Agent"])
+    def test_subagent_report_quoting_fixture_never_fires(
+        self, handler: BudgetExhaustionDetectorHandler, tool_name: str
+    ) -> None:
+        hook_input = _tool_input(tool_name, {"content": self._SUBAGENT_REPORT})
         assert handler.matches(hook_input) is False
 
 

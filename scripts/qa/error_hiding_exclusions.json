@@ -555,6 +555,12 @@
       "reason": "Returns None when ProjectContext is not initialised (unit tests, or any non-daemon caller). The caller skips the best-effort state-file write when None — the rate-limited advisory is the primary function and must never crash a tool call. Same explicitly-non-fatal contract as hook_registration_checker._get_project_root (Plan 00142)."
     },
     {
+      "file": "handlers/post_tool_use/budget_exhaustion_detector.py",
+      "function": "_strip_ledger_records",
+      "rule": "silent-continue",
+      "reason": "Plan 00319 F2/Task 4.5: scans every brace-balanced span of a tool response for this handler's own ledger record shape, trying json.loads on each candidate span. Most candidate spans in ordinary prose (any '{...}' a tool response happens to contain) are not valid JSON at all — the standard JSONL/candidate-parsing pattern already excluded for transcript_reader.read_incremental and background_harvester.read_tracked_commands, just applied to brace-delimited spans instead of newline-delimited lines. A span that fails to parse is simply not a ledger record and is left untouched; a span that IS valid JSON but lacks the ledger's key set is also left untouched by the surrounding key-set check, so nothing here can conceal a genuine budget-exhaustion match."
+    },
+    {
       "file": "daemon/controller.py",
       "function": "_persist_project_handler_health",
       "rule": "log-and-continue",

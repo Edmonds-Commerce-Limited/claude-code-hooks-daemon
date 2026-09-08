@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`budget_exhaustion_detector` no longer self-triggers on its own ledger,
+  and no longer fires on text that merely quotes a budget message rather
+  than delivering one (Plan 00319 F2 / Task 4.5).** The prior guard keyed on
+  two literal strings (the handler name, the ledger filename), so `cat untracked/*.jsonl`, `jq . untracked/budget*.jsonl` and `tail -n 20 "$LEDGER"` -- none of which spells the filename -- re-fired the detector
+  on its own recorded `matched_fragment`, and a generated playbook's `grep`
+  output quoting the Test 187 fixture false-fired during the v3.60.0 gate.
+  Fixed structurally rather than by growing the marker list: `Task`/`Agent`
+  join the default-excluded tools (a dispatched sub-agent's `tool_response`
+  is composed prose, not a field the tool machinery populates from a live
+  budget check); a Bash `tool_response` is excluded when every pipeline
+  stage's leading verb is a content-passthrough utility (`cat`, `grep`,
+  `jq`, `tail`, ...) that can only reproduce or reformat bytes already on
+  disk; and any span of the response that parses as a JSON object carrying
+  the ledger's own record key set is stripped before matching, which
+  survives `jq .`'s pretty-printing. `"matched_fragment"` was also added to
+  the literal marker list as a zero-risk addition. None of this narrows the
+  pinned web-search fixture or the generic Bash "budget exhausted"/"quota
+  exceeded" shapes, which invoke no passthrough verb and carry no ledger
+  JSON shape. Design rationale (including two options the owner explicitly
+  rejected) recorded in
+  `CLAUDE/Plan/00319-supervisor-release-review-followups/BUDGET-DETECTOR-DESIGN.md`.
+
 ## [3.62.1] - 2026-09-07
 
 _Attribution: entries cite a plan as the TRACKING plan for a work area, not as
