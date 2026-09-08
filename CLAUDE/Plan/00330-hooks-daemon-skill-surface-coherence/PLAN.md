@@ -150,11 +150,67 @@ this plan generalises.
 - [ ] ⬜ **Task 4.3**: Wire the gate into the release pipeline's blocking QA
   step so a drifted skill surface cannot ship.
 
+## Technical Decisions
+
+Owner rulings on the seven questions [SURFACE-INVENTORY.md](SURFACE-INVENTORY.md)
+ends with, taken 2026-09-08. They bind Phases 2 to 4.
+
+### Decision 1: no opt-out mechanism — a relevance predicate instead
+
+"Default" and "optimal" are different things: the default is what is safe
+without knowing the project; optimal means enabled, making the most of the
+system. So `optimise` scores EVERY registered handler and never needs an
+exemption list. What a handler declares instead is when it is RELEVANT —
+most are always relevant; `lsp_enforcement` needs an LSP, the npm handlers a
+`package.json`, the PHP guards PHP, the ccy handlers (`goal_injection`,
+`compaction_signal`, `model_fallback_detector`, `tool_disable_advisor`) the
+supervisor, the flaggable-content trio that workflow. The optimal state of a
+relevant handler is enabled; an irrelevant one is reported as "not
+applicable here", never as a shortfall. Status-line components and the six
+daemon-integrity handlers are scored too: their optimal state is enabled, and
+a config that disabled one deserves the recommendation.
+
+### Decision 2: default-off handlers are conditional, not inferior
+
+Every default-off handler bar `idle_housekeeping_advisory` (beta) is off
+because it is CONDITIONAL, which is Decision 1's relevance predicate. So the
+rule is one rule: recommend enabling every relevant handler, whatever its
+default. The current checklist's unconditional `lsp_enforcement`
+recommendation is the inverse defect and goes away with the derivation.
+
+### Decision 3: five derived areas plus a sixth catch-all
+
+The five proposed areas stand, derived by the inventory's tag precedence
+rule; a sixth area, "other guards", takes the remainder so no handler is
+silently unclassified and no tagging pass gates delivery.
+
+### Decision 4: route 6, document 10, keep `report` and `bug-report` both routed
+
+They are different actions (an LLM-driven investigation versus a diagnostic
+bundle); the skill text says which to reach for.
+
+### Decision 5: report-only steps first, mutating steps after, `optimise` last
+
+`optimise` restarts the daemon, so every other step runs against the config
+the pass started with and `optimise` closes the pass.
+
+### Decision 6: only the idempotent formatters act without confirmation
+
+`format-markdown` and `regenerate-docs` may act; every other mutating step
+reports and acts only on explicit request, as the plan's own default says.
+
+### Decision 7: the housekeeping command reuses the idle advisory's runner
+
+Phase 3 is a routed `/hooks-daemon housekeeping` invocation built on the
+audit runner `idle_housekeeping_advisory` already has ("each sub-agent
+returns what it CHANGED"), extended to the full step list; the advisory stays
+the opt-in idle trigger for the same pass.
+
 ## Success Criteria
 
 - [ ] Adding a handler with no skill change fails the gate.
-- [ ] `optimise`'s covered set is derived, and any exclusion is declared at
-  the handler rather than listed in the skill.
+- [ ] `optimise`'s covered set is derived, and a handler's relevance is
+  declared at the handler rather than listed in the skill.
 - [ ] One invocation runs the full housekeeping pass and reports what it did.
 - [ ] Every routed subcommand is one a human invokes; the rest are documented
   capabilities.
