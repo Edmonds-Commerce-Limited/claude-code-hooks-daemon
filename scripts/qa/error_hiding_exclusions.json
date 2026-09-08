@@ -587,8 +587,8 @@
     {
       "file": "handlers/pre_tool_use/pipe_blocker.py",
       "function": "_resolve_echd_capture_path",
-      "rule": "silent-fallback",
-      "reason": "Plan 00200 Task 5.4: try/except RuntimeError around ProjectContext.daemon_untracked_dir(), falling back to None. Documented inline as 'an expected branch, not an error' (ProjectContext not initialised: default-config/standalone entry point/unit tests). The caller already handles None by falling back to temp-file guidance."
+      "rule": "return-none-on-error",
+      "reason": "Plan 00200 Task 5.4 (realigned by Plan 00362 Task 1.3, which moved the path lookup into echd_capture_path()): try/except RuntimeError around the ProjectContext-backed helper lookup, falling back to None. Documented inline as 'an expected branch, not an error' (ProjectContext not initialised: default-config/standalone entry point/unit tests). The caller already handles None by falling back to temp-file guidance."
     },
     {
       "file": "handlers/pre_tool_use/tdd_enforcement.py",
@@ -826,7 +826,7 @@
     {
       "file": "scripts/upgrade_version.sh",
       "lines": [
-        804
+        812
       ],
       "rule": "shell-&>/dev/null",
       "reason": "Plan 00200 Task 5.4: `if ! git ... rev-parse \"$TARGET_VERSION\" &>/dev/null; then fail_fast \"Version $TARGET_VERSION not found...\"` -- exit code explicitly checked, specific error printed on failure."

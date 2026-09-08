@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.constants.events import (
     raw_stdout_bash_keys,
     wired_event_metas,
 )
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.install.forwarder_generator import (
     apply_raw_stdout_daemon_down,
     generate_forwarder_content,
@@ -79,7 +80,7 @@ def _run_generated_forwarder(
         input='{"hook_event_name": "x"}',
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=Timeout.REQUEST_DEFAULT,
         env={"HOOKS_DAEMON_EVENTS_DIR": str(tmp_path / "no-sockets"), "PATH": "/usr/bin:/bin"},
     )
 

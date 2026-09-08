@@ -52,6 +52,9 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
      before removing the whole section.
    - If a doc does not assert the `was` truth, there is nothing to do for it
      (the step is idempotent — re-running is a no-op).
+   - An entry marked `revised in vX, vY` is the CURRENT form of a truth that
+     also changed in those earlier releases; their entries are deliberately
+     not shown. Reconcile any earlier form of the statement to the same `now`.
 
    Stage and commit any project-doc edits **separately** from the daemon
    upgrade commit below (they touch project files, not daemon-owned paths). You
@@ -78,10 +81,18 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
      memory into tracked docs first"), perform that migration **before**
      enabling — follow any referenced post-upgrade task.
    - Items under **💡 New Options Available** are informational; adopt if useful.
+   - Anything under **⚠️ Stale handler keys** is a `handlers.<event>.<key>`
+     entry the installed daemon does not register for that event: it names
+     the event or pseudo-event the handler lives under now, or says the
+     handler no longer exists. Move or delete the key as the line says
+     (`audit-handler-keys` re-runs this check on its own, any time).
 
-   This is advisory — enabling is your choice; the daemon never edits your config
-   for you. Stage and commit any `.claude/hooks-daemon.yaml` edits separately
-   from the daemon upgrade commit below.
+   This is advisory — enabling is your choice; the daemon never edits your
+   config for you, except that the upgrade merge moves a key whose handler
+   RELOCATED to a pseudo-event (the two nitpick detectors) to its new home,
+   keeping `enabled`/`priority`, and lists the move in `config_diff_summary`.
+   Stage and commit any `.claude/hooks-daemon.yaml` edits separately from the
+   daemon upgrade commit below.
 
 6. **Stage daemon-owned paths ONLY** with explicit `git add` — other
    working-tree changes are not part of this commit. Never `git add .`:

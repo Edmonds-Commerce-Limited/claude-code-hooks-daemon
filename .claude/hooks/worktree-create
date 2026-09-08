@@ -9,9 +9,7 @@
 #
 # Forwards WorktreeCreate hook calls to daemon via Unix socket.
 # CRITICAL: Pipes JSON directly - NEVER store in shell variables.
-# CRITICAL: Claude Code parses this hook's stdout as the created worktree's
-# absolute PATH (raw_stdout event), so NO error may ever reach stdout — a
-# failure is stderr + non-zero exit, never a JSON object.
+# CRITICAL: All errors output valid JSON to stdout for agent visibility.
 #
 
 set -euo pipefail
@@ -19,7 +17,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../init.sh"
 
-# Try to start daemon - if it fails, say so on stderr and exit non-zero
+# Try to start daemon - if it fails, output proper JSON error to stdout
 if ! ensure_daemon; then
     # raw_stdout event (generated; Plan 00189): Claude Code reads this
     # hook's stdout RAW, so a JSON error here would be taken literally.
