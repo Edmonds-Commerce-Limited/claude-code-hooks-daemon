@@ -120,7 +120,7 @@ class MyHandler(PreToolUseHandlerBase):
         super().__init__(
             name="my-handler",      # Unique identifier
             priority=50,            # 5-60 range (lower runs first)
-            terminal=True           # Stop dispatch after execution?
+            terminal=True           # A DENY from this handler may end the chain
         )
 
     def matches(self, hook_input: dict) -> bool:
@@ -345,8 +345,8 @@ Identify which Claude Code tools the handler works with:
 
 Describe handler behaviour:
 
-- `terminal` - Stops dispatch chain
-- `non-terminal` - Allows fall-through
+- `terminal` - A DENY from it ends the dispatch chain (an ALLOW never does)
+- `non-terminal` - Advisory; never short-circuits
 - `blocking` - Can deny operations
 
 #### Project Specificity Tags
@@ -518,7 +518,37 @@ shipped defaults.
 
 ## Terminal vs Non-Terminal
 
-### Terminal Handlers (default: True)
+**Terminality is a property of the DECISION, not of the handler** (Plan
+00242, `core/chain.py`). The chain runs handlers in priority order and merges
+every result most-restrictive-wins:
+
+- **An ALLOW never ends the chain.** Whatever a handler's `terminal` flag
+  says, an ALLOW (or advisory ALLOW-with-context) continues to the next
+  handler with its context accumulated. "I allow this, therefore nobody else
+  may look" is not a coherent claim, and honouring it is how a terminal
+  handler's advisory ALLOW used to silently disable every handler behind it
+  (the Plan 00241 defect class). That cannot happen for any handler now.
+- **A DENY (or ASK/DEFER) from a `terminal=True` handler ends the chain.**
+  Nothing later could un-deny it, so stopping is safe and cheap. A DENY from
+  a `terminal=False` handler survives too — later, laxer results never
+  overwrite it — but the chain keeps running so later advisories still land.
+- **The FIRST restrictive handler owns the response**: its reason is shown
+  and the `To disable:` footer names its config key, whether it is terminal
+  or not, so the two can never disagree (Task 3.3).
+- **One exception, per event**: the PermissionRequest chain is built with
+  `allow_is_final=True`, so `auto_approve_reads`' ALLOW concludes the
+  request — approving a permission IS the answer. That is an event-level
+  opt-in in `core/router.py`, never a handler flag.
+
+So `terminal` is now only an **optimisation for the blocked path**: it says
+"once I have denied, do not bother running the rest". It cannot change what
+the chain decides, only how much of it runs after a deny. Blocking handlers
+keep the default `terminal=True`; advisory handlers should say
+`terminal=False` for the sake of the generated handler table (its
+BLOCKING/ADVISORY column falls back to the flag), not because dispatch
+depends on it.
+
+### Blocking handler (default: `terminal=True`)
 
 **Use when**: You need to **block or enforce**
 
@@ -533,11 +563,11 @@ class BlockDangerousBashHandler(PreToolUseHandlerBase):
 
 **Behaviour**:
 
-- Stops dispatch immediately
-- Decision becomes final result
-- No other handlers run after this
+- A DENY ends the chain; the reason and footer are yours
+- An ALLOW from this handler continues to the next handler — it is not a
+  verdict on anybody else
 
-### Non-Terminal Handlers (terminal=False)
+### Advisory handler (`terminal=False`)
 
 **Use when**: You want to **warn or guide** without blocking
 
@@ -554,10 +584,34 @@ class SpellingAdviceHandler(PreToolUseHandlerBase):
 
 **Behaviour**:
 
-- Provides context/guidance
-- Allows subsequent handlers to run
-- Decision is ignored (always treated as allow)
-- Context accumulated into final result
+- Provides context/guidance; context is accumulated into the final result
+- Subsequent handlers run
+- A DENY from a non-terminal handler still denies (most-restrictive-wins)
+  — the flag does not weaken the decision, it only declines the short-circuit
+
+### Collect-all mode (`daemon.chain.collect_all_violations`, default off)
+
+With the flag on, a DENY no longer ends the chain either: every matching
+handler runs and the response is ONE merged report — the first deny leads and
+owns the footer, every other deny follows as a bounded excerpt naming its
+handler (`--- Also denied by: <handler> ---`), and the advisories are
+summarised in a table (their full text still travels as `additionalContext`).
+Bounds and the measured cost live in
+`CLAUDE/Plan/00242-terminal-handlers-are-a-flawed-primitive/MEASUREMENTS.md`.
+
+### Side effects run before the decision — commit them after it
+
+`handle()` runs before the chain has decided. A handler that spends a
+cooldown or advances a counter there (a rate limiter, a once-per-plan
+advisory) does so for a tool call another handler may then deny. Override
+`commit_side_effects(hook_input, chain_decision)` — called once per executed
+handler after the merged decision is settled, in every mode — and keep the
+mutation only when the call went ahead. `core/side_effect_journal.py`'s
+`SideEffectJournal` makes that two lines: `snapshot()` each key before you
+mutate it in `handle()`, then `rollback()` on a restrictive decision or
+`commit()` otherwise. `command_hints` and `recovery_cron_advisor` are the
+reference implementations. Do not make a new decision in
+`commit_side_effects` — the decision is final by then.
 
 ## Result Options
 

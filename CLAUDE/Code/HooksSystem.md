@@ -574,7 +574,7 @@ class MyHandler(PreToolUseHandlerBase):
         super().__init__(
             name="my-handler",       # Unique, kebab-case
             priority=50,             # Lower runs first (5-60)
-            terminal=True,           # Stop dispatch chain after match?
+            terminal=True,           # May a DENY from this handler end the chain?
             tags=["safety", "git"],  # Categorization tags
         )
 
@@ -601,9 +601,11 @@ boundaries derive from `PriorityRange` in
 
 ### Terminal vs Non-Terminal
 
-**Terminal (`terminal=True`)**: Stops the dispatch chain. The decision becomes final. Use when you need to **block or enforce**.
+Terminality belongs to the DECISION (Plan 00242): an ALLOW never ends the chain; a DENY/ASK from a `terminal=True` handler does. Full contract: [HANDLER_DEVELOPMENT.md — Terminal vs Non-Terminal](../HANDLER_DEVELOPMENT.md#terminal-vs-non-terminal).
 
-**Non-Terminal (`terminal=False`)**: Allows subsequent handlers to run. Decision is ignored (always treated as allow). Context is accumulated. Use when you want to **warn or guide**.
+**Terminal (`terminal=True`)**: A DENY ends the dispatch chain and owns the response. An ALLOW continues to the next handler. Use when you need to **block or enforce**.
+
+**Non-Terminal (`terminal=False`)**: Subsequent handlers always run. A DENY still denies (most-restrictive-wins); context is accumulated. Use when you want to **warn or guide**.
 
 ### Result Options
 

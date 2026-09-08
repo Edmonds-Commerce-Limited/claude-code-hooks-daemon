@@ -255,8 +255,10 @@ convenience:
 
 ### Terminal vs Non-Terminal
 
-- **Terminal (`terminal=True`)**: Stops dispatch on match, returns result immediately
-- **Non-Terminal (`terminal=False`)**: Continues dispatch, accumulates context
+- **Terminal (`terminal=True`)**: A DENY ends dispatch; an ALLOW never does (Plan 00242)
+- **Non-Terminal (`terminal=False`)**: Always continues dispatch, accumulates context; a DENY still denies
+
+Full contract: [CLAUDE/HANDLER_DEVELOPMENT.md — Terminal vs Non-Terminal](CLAUDE/HANDLER_DEVELOPMENT.md#terminal-vs-non-terminal).
 
 ### Error Handling
 
