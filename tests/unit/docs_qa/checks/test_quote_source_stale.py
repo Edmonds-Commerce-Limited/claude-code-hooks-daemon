@@ -4,7 +4,7 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.docs_qa.checks.quote_source_stale import CHECK_ID, CHECKS
 from claude_code_hooks_daemon.docs_qa.context import edit_context
-from claude_code_hooks_daemon.docs_qa.corpus import build_and_save_corpus
+from claude_code_hooks_daemon.docs_qa.corpus import build_and_save_corpus, load_edit_corpus
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.types import CheckContext, CheckStage, Finding, Severity
 
@@ -108,6 +108,58 @@ class TestEditOnSourceFile:
             corpus=corpus,
         )
         assert _run_edit(context) == []
+
+    def test_a_quoter_that_stopped_quoting_is_not_named(self, tmp_path: Path) -> None:
+        """Plan 00354: this check's quoter list is read from the SAME
+        unvalidated counterpart records ``duplicate-block`` was mis-citing,
+        so it inherits the identical staleness."""
+        policy = DocumentationPolicy()
+        corpus = self._build_corpus_with_quoter(tmp_path, policy)
+        assert corpus.documents["CLAUDE/Quoter.md"].quotes  # indexed as a quoter
+        # The quote is removed from Quoter.md after the index was built.
+        (tmp_path / "CLAUDE" / "Quoter.md").write_text("# Quoter\n\nNo longer quotes anything.\n")
+
+        source = tmp_path / "CLAUDE" / "Source.md"
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        new_content = "## Anchor\n\nThe section content has now genuinely changed entirely.\n"
+        context = edit_context(
+            project_root=tmp_path,
+            policy=policy,
+            file_path=source,
+            file_content=new_content,
+            file_exists_before=True,
+            file_content_before=source.read_text(),
+            corpus=load_edit_corpus(tmp_path, index_path, source, new_content),
+        )
+        assert _run_edit(context) == []
+
+    def test_a_quoter_that_started_quoting_is_named(self, tmp_path: Path) -> None:
+        policy = DocumentationPolicy()
+        (tmp_path / "CLAUDE").mkdir()
+        source = tmp_path / "CLAUDE" / "Source.md"
+        source.write_text(f"## Anchor\n\n{_LONG_SENTENCE}\n")
+        (tmp_path / "CLAUDE" / "Quoter.md").write_text("# Quoter\n\nQuotes nothing yet.\n")
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        build_and_save_corpus(tmp_path, policy, index_path)
+        # Quoter.md gains the quote after the index was built.
+        (tmp_path / "CLAUDE" / "Quoter.md").write_text(
+            f"<!-- ssot-quote: CLAUDE/Source.md#anchor -->\n{_LONG_SENTENCE}\n"
+            "<!-- /ssot-quote -->\n"
+        )
+
+        new_content = "## Anchor\n\nThe section content has now genuinely changed entirely.\n"
+        context = edit_context(
+            project_root=tmp_path,
+            policy=policy,
+            file_path=source,
+            file_content=new_content,
+            file_exists_before=True,
+            file_content_before=source.read_text(),
+            corpus=load_edit_corpus(tmp_path, index_path, source, new_content),
+        )
+        findings = _run_edit(context)
+        assert len(findings) == 1
+        assert "CLAUDE/Quoter.md" in findings[0].message
 
     def test_no_corpus_is_cold_safe_and_produces_no_findings(self, tmp_path: Path) -> None:
         (tmp_path / "CLAUDE").mkdir()

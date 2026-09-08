@@ -309,6 +309,66 @@ class TestQuoteSourceStaleWiring:
         assert result.decision == Decision.ALLOW
 
 
+class TestStaleCounterpartIndex:
+    """Plan 00354: the handler is the second EDIT-stage index consumer, so
+    the counterpart revalidation has to reach it too — fixing only the CLI
+    would leave the surface that actually runs on every doc edit broken."""
+
+    _FENCE = (
+        "```bash\n"
+        + "\n".join(f"echo 'line {n} of a block comfortably over the floor'" for n in range(6))
+        + "\n```\n"
+    )
+
+    def _policy(self) -> DocumentationPolicy:
+        return DocumentationPolicy(enabled=True, qa=DocumentationQaPolicy(edit_mode="warn"))
+
+    def test_a_counterpart_that_lost_the_block_is_not_cited(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.docs_qa.corpus import build_and_save_corpus
+
+        (tmp_path / "CLAUDE").mkdir()
+        partner = tmp_path / "CLAUDE" / "Partner.md"
+        partner.write_text(f"# Partner\n\n{self._FENCE}")
+        target = tmp_path / "CLAUDE" / "Target.md"
+        target.write_text("# Target\n\nplaceholder\n")
+        policy = self._policy()
+
+        with _patched_root(tmp_path):
+            build_and_save_corpus(
+                tmp_path, policy, tmp_path / "untracked" / "docs-qa" / "index.json"
+            )
+            partner.write_text("# Partner\n\nProse only, the block has moved.\n")
+            result = _handler(policy).handle(
+                _edit_input(target, "placeholder", self._FENCE.rstrip("\n"))
+            )
+
+        assert result.decision == Decision.ALLOW
+        assert not any("duplicate-block" in item for item in result.context)
+
+    def test_a_counterpart_that_gained_the_block_is_reported(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.docs_qa.corpus import build_and_save_corpus
+
+        (tmp_path / "CLAUDE").mkdir()
+        partner = tmp_path / "CLAUDE" / "Partner.md"
+        partner.write_text("# Partner\n\nNo block yet.\n")
+        target = tmp_path / "CLAUDE" / "Target.md"
+        target.write_text("# Target\n\nplaceholder\n")
+        policy = self._policy()
+
+        with _patched_root(tmp_path):
+            build_and_save_corpus(
+                tmp_path, policy, tmp_path / "untracked" / "docs-qa" / "index.json"
+            )
+            partner.write_text(f"# Partner\n\n{self._FENCE}")
+            result = _handler(policy).handle(
+                _edit_input(target, "placeholder", self._FENCE.rstrip("\n"))
+            )
+
+        assert result.decision == Decision.ALLOW
+        assert any("duplicate-block" in item for item in result.context)
+        assert any("CLAUDE/Partner.md" in item for item in result.context)
+
+
 class TestClaudeMdAndAcceptanceTests:
     def test_get_claude_md_returns_content(self) -> None:
         content = DocsQaEditHandler().get_claude_md()

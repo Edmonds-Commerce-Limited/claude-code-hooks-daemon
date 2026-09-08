@@ -4842,8 +4842,7 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.docs_qa.corpus import (
         build_and_save_corpus,
         is_lintable_path,
-        load_or_cold_corpus,
-        refresh_own_record,
+        load_edit_corpus,
     )
     from claude_code_hooks_daemon.docs_qa.policy import policy_from_config
     from claude_code_hooks_daemon.docs_qa.report import CLEAN_SCOPE_CORPUS, format_cli_report
@@ -4896,17 +4895,14 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
-        # A cheap CACHE read only (never a build) — the cold-index rule.
-        # Powers quote-source-stale's reverse lookup; every other EDIT check
-        # ignores it. Cold (no cache yet) degrades that one check to silence.
+        # A cheap CACHE read plus a stat-per-document revalidation (never a
+        # build) — the cold-index rule. Powers quote-source-stale's reverse
+        # lookup and duplicate-block's cross-document index; every other EDIT
+        # check ignores it. Cold (no cache yet) degrades those to silence.
         untracked_dir = _daemon_untracked_dir(project_root)
         index_path = untracked_dir / "docs-qa" / "index.json"
-        corpus = load_or_cold_corpus(project_root, index_path)
         lint_content = lint_path.read_text()
-        # Task 3.5: the cache read above performs NO staleness check, so
-        # without this the lint target's own record can lag the file on
-        # disk -- refresh it in place before any cross-document check runs.
-        corpus = refresh_own_record(corpus, project_root, lint_path, lint_content)
+        corpus = load_edit_corpus(project_root, index_path, lint_path, lint_content)
         context = edit_context(
             project_root=project_root,
             policy=policy,

@@ -20,9 +20,20 @@ is always built EXPLICITLY (:func:`build_and_save_corpus`, called from
 SessionStart/CLI) — never lazily inside a cheap PreToolUse budget, which
 instead calls :func:`load_or_cold_corpus` and gets a ``cold=True`` empty
 corpus when no cache exists yet (Cold/stale-index rule, DESIGN §2.1).
+
+The mtime+size invalidation applies on BOTH sides of a cross-document
+comparison, not just to the file being looked at. :func:`load_or_cold_corpus`
+returns the cache verbatim, so EDIT-stage callers go through
+:func:`load_edit_corpus`, which revalidates every counterpart record before
+any check consumes it — a cached record describing content that has since
+changed makes ``duplicate-block`` cite a line span that no longer holds the
+block it names, and hides a genuine duplicate against a file that gained one
+(Plan 00354). Building the index remains explicit; revalidating it is a
+``stat`` per document and re-parses only what disagrees.
 """
 
 import json
+import logging
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -44,6 +55,8 @@ from claude_code_hooks_daemon.utils.vendor_paths import (
     is_vendored_path_in_scopes,
     may_contain_vendor_exception_in_scopes,
 )
+
+logger = logging.getLogger(__name__)
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _CHANGELOG_FILENAME: Final[str] = "CHANGELOG.md"
@@ -533,6 +546,31 @@ def _save_corpus(corpus: DocCorpus, index_path: Path) -> None:
     tmp_path.replace(index_path)
 
 
+def _derive_record(rel_path: str, mtime_ns: int, size: int, text: str) -> DocRecord:
+    """Derive every cached field of one document from its text.
+
+    One definition shared by the three producers (:func:`build_and_save_corpus`,
+    :func:`revalidate_corpus`, :func:`refresh_own_record`) so a record built
+    on the EDIT path and one built by the sweep can never disagree about what
+    a given document contains. A copy per producer means a new field is added
+    in three places and missed in one -- exactly the reuse-carries-forward
+    hazard ``_CACHE_SCHEMA_VERSION`` exists to catch after the fact.
+    """
+    block_locations = extract_structured_block_locations(text)
+    return DocRecord(
+        rel_path=rel_path,
+        mtime_ns=mtime_ns,
+        size=size,
+        links=tuple(extract_link_targets(text)),
+        quotes=tuple(
+            QuoteRef(source_path=block.source_path, anchor=block.anchor)
+            for block in parse_quote_blocks(text)
+        ),
+        block_hashes=tuple(loc.block_hash for loc in block_locations),
+        block_locations=block_locations,
+    )
+
+
 def refresh_own_record(
     corpus: DocCorpus, project_root: Path, file_path: Path, content: str
 ) -> DocCorpus:
@@ -540,39 +578,101 @@ def refresh_own_record(
     fresh from ``content`` -- the content actually being linted, never
     whatever a possibly-stale on-disk cache last recorded for it.
 
-    ``load_or_cold_corpus`` performs no staleness check at all (that is
-    ``build_and_save_corpus``'s job, and it only runs at SessionStart/CLI
-    sweep time) -- so every EDIT-stage caller (``docs-qa --lint`` and
-    :class:`handlers.pre_tool_use.docs_qa_edit.DocsQaEditHandler`) must call
-    this immediately after loading the cache and before constructing the
-    check context. Without it, ``checks.duplicate_block``'s cross-document
-    index requires TWO *distinct corpus entries* sharing a hash before it
-    reports anything (``len(paths) >= 2`` in ``_hash_index``) -- so a block
-    the edit just introduced, matching an EXISTING partner, stays invisible
-    until a full sweep rebuilds the corpus, because the file's own stale
-    record never carried the new hash (Plan 00284 Task 3.5).
+    Without it, ``checks.duplicate_block``'s cross-document index requires
+    TWO *distinct corpus entries* sharing a hash before it reports anything
+    (``len(paths) >= 2`` in ``_hash_index``) -- so a block the edit just
+    introduced, matching an EXISTING partner, stays invisible until a full
+    sweep rebuilds the corpus, because the file's own stale record never
+    carried the new hash (Plan 00284 Task 3.5).
 
-    Every OTHER document's record is left exactly as loaded -- partner
-    staleness is accepted (that is the sweep's job); only the file actually
-    being linted must never lag its own content.
+    Handles the file being linted ONLY. ``content`` is the WOULD-BE content
+    of a pending edit, which by definition is not on disk yet, so this
+    cannot be derived by re-reading the file -- which is exactly why it is
+    separate from :func:`revalidate_corpus` and must run AFTER it. EDIT-stage
+    callers should use :func:`load_edit_corpus` rather than sequencing the
+    two by hand.
     """
     rel_path = str(file_path.relative_to(project_root))
-    block_locations = extract_structured_block_locations(content)
-    fresh_record = DocRecord(
-        rel_path=rel_path,
-        mtime_ns=0,
-        size=len(content.encode("utf-8")),
-        links=tuple(extract_link_targets(content)),
-        quotes=tuple(
-            QuoteRef(source_path=block.source_path, anchor=block.anchor)
-            for block in parse_quote_blocks(content)
-        ),
-        block_hashes=tuple(loc.block_hash for loc in block_locations),
-        block_locations=block_locations,
-    )
     documents = dict(corpus.documents)
-    documents[rel_path] = fresh_record
+    documents[rel_path] = _derive_record(rel_path, 0, len(content.encode("utf-8")), content)
     return DocCorpus(project_root=corpus.project_root, documents=documents, cold=corpus.cold)
+
+
+def revalidate_corpus(corpus: DocCorpus, project_root: Path) -> DocCorpus:
+    """Return ``corpus`` with every record re-checked against the filesystem.
+
+    :func:`load_or_cold_corpus` returns the cache verbatim, so on the EDIT
+    path a COUNTERPART record can describe content the last sweep saw and
+    nothing since. That is wrong in both directions (Plan 00354):
+    ``checks.duplicate_block`` cites a ``path:start-end`` span that no longer
+    holds the block it names, and misses a genuine duplicate against a file
+    that GAINED the block after the sweep; ``checks.quote_source_stale``
+    reads its quoter list from the same records and inherits both.
+
+    Same test :func:`build_and_save_corpus` already applies before reusing an
+    entry -- ``mtime_ns`` plus ``size`` -- so the EDIT and SWEEP paths now
+    agree about when a cached record may be trusted. A record whose file is
+    gone is DROPPED rather than carried, since a citation to a deleted file
+    is never actionable.
+
+    Cost is one ``stat`` per indexed document, and a re-parse only of the
+    records that actually disagree (usually none). Re-parsing everything
+    unconditionally was measured at roughly 2000x the cost of the ``stat``
+    pass and was rejected -- this runs inside a PreToolUse budget on every
+    documentation edit. See the plan's MEASUREMENT-staleness.md.
+
+    A file present on disk but ABSENT from the index cannot be revalidated:
+    discovering it needs the directory walk this deliberately avoids, so a
+    duplicate against a never-yet-swept file stays invisible until the next
+    sweep (the existing cold-index contract).
+    """
+    if corpus.cold:
+        return corpus  # nothing was loaded, so there is nothing to revalidate
+
+    documents: dict[str, DocRecord] = {}
+    for rel_path, record in corpus.documents.items():
+        abs_path = project_root / rel_path
+        try:
+            stat = abs_path.stat()
+        except OSError as exc:
+            # Deleted or unreachable since the sweep. Dropping it is the
+            # answer, not a failure to raise: the corpus is a cache of what
+            # is on disk, and this file is not. Logged rather than silent so
+            # an unexpected permission error is still traceable.
+            logger.debug("docs-qa corpus: dropping unstattable %s: %s", rel_path, exc)
+            continue
+        if record.mtime_ns == stat.st_mtime_ns and record.size == stat.st_size:
+            documents[rel_path] = record
+            continue
+        try:
+            text = abs_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            # Mirrors build_and_save_corpus: keep the identity, drop the
+            # derived fields, so both paths record an undecodable file the
+            # same way rather than disagreeing at the next sweep.
+            documents[rel_path] = DocRecord(
+                rel_path=rel_path, mtime_ns=stat.st_mtime_ns, size=stat.st_size, links=()
+            )
+            continue
+        documents[rel_path] = _derive_record(rel_path, stat.st_mtime_ns, stat.st_size, text)
+    return DocCorpus(project_root=corpus.project_root, documents=documents, cold=corpus.cold)
+
+
+def load_edit_corpus(
+    project_root: Path, index_path: Path, file_path: Path, content: str
+) -> DocCorpus:
+    """The EDIT-stage corpus entry point: load, revalidate, refresh own record.
+
+    Both EDIT-stage callers (``docs-qa --lint`` and
+    :class:`handlers.pre_tool_use.docs_qa_edit.DocsQaEditHandler`) go through
+    this rather than sequencing the three steps themselves, because the ORDER
+    is load-bearing and silently wrong the other way round: revalidating
+    AFTER :func:`refresh_own_record` would re-read the edited file from disk
+    and discard the would-be content the EDIT stage exists to judge.
+    """
+    corpus = load_or_cold_corpus(project_root, index_path)
+    corpus = revalidate_corpus(corpus, project_root)
+    return refresh_own_record(corpus, project_root, file_path, content)
 
 
 def build_and_save_corpus(
@@ -609,19 +709,7 @@ def build_and_save_corpus(
                 rel_path=rel_path, mtime_ns=stat.st_mtime_ns, size=stat.st_size, links=()
             )
             continue
-        block_locations = extract_structured_block_locations(text)
-        documents[rel_path] = DocRecord(
-            rel_path=rel_path,
-            mtime_ns=stat.st_mtime_ns,
-            size=stat.st_size,
-            links=tuple(extract_link_targets(text)),
-            quotes=tuple(
-                QuoteRef(source_path=block.source_path, anchor=block.anchor)
-                for block in parse_quote_blocks(text)
-            ),
-            block_hashes=tuple(loc.block_hash for loc in block_locations),
-            block_locations=block_locations,
-        )
+        documents[rel_path] = _derive_record(rel_path, stat.st_mtime_ns, stat.st_size, text)
 
     corpus = DocCorpus(project_root=project_root, documents=documents, cold=False)
     _save_corpus(corpus, index_path)

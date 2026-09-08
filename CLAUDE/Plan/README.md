@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00354: docs qa stale counterpart index](00354-docs-qa-stale-counterpart-index/PLAN.md) - Not Started (the docs-qa EDIT path reuses every COUNTERPART index record without revalidating its `mtime_ns`/`size`, so `duplicate-block` cites spans whose content has moved and misses duplicates against files that changed since the last sweep; `quote-source-stale` shares the shape)
+
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
