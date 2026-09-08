@@ -168,11 +168,9 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
     rejected it** — recorded because the reasoning that produced it was wrong,
     not just the outcome. I read `if <file>.exists() and not force:` in both
     config writers and took it for an early return; it is a **rename-to-`.bak`
-    followed by an unconditional template write**, so `force` only decides
-    whether a backup happens and every invocation replaces the config. The
-    daemon then refused to start because that template is invalid against the
-    current schema, and the run went 4 → **31 failures + 7 errors**.
-    Full evidence in [RESEARCH-ci-install.md](RESEARCH-ci-install.md).
+    followed by an unconditional template write**, so every invocation replaces
+    the config. The run went 4 → **31 failures + 7 errors**. Full evidence in
+    [RESEARCH-ci-install.md](RESEARCH-ci-install.md).
   - [x] ✅ **Nothing needs installing.** A checkout already carries the config,
     the forwarders and the package. The only missing piece is
     `.claude/hooks-daemon.env`, which the repo guard (`init.sh:246-264`) accepts
@@ -182,10 +180,8 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
     ahead of the fingerprint glob (`resolve_venv.sh:113-121`) so the daemon uses
     the `.venv` that `uv sync` already built.
   - [x] ✅ The gates need a **running** daemon, not an installed one — the skip
-    is keyed on a live socket under `untracked/`, which the tests open directly.
-    So `init.sh`'s CI passthrough mode (documented in `test_ci_passthrough.py`,
-    active under `GITHUB_ACTIONS=true`) governs the forwarder path only and does
-    not interfere with them.
+    is keyed on a live socket the tests open directly, so `init.sh`'s CI
+    passthrough mode governs the forwarder path only.
 - [x] ✅ **Task 2.2**: **11 of the 16 execute and PASS.** First daemon-enabled
   run, identical on all three interpreters:
   `test_absolute_path_socket_deny.py` 6 passed, `test_stop_hook_hard_block.py`
@@ -213,14 +209,20 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
   Each fixed with a class-level guard rather than a one-off. Detail and the
   reproduction in [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 - [ ] ⬜ **Task 2.4c**: `test_dogfooding_hook_scripts.py::test_hook_scripts_match_installer`
-  — pre-existing, present in the baseline run, NOT caused by the daemon. The
-  tracked `.claude/hooks/*` bake an absolute path at generation time
-  (`_rl_dir="/workspace/untracked"`), so a fresh generation anywhere else
-  differs, and it passes locally for exactly that reason. **"Derive it at
-  runtime" is NOT available** — the baking is deliberate and documented
-  (zero-spawn hot path). Three candidate fixes, none free, plus the prior
-  question of whether `.claude/hooks/*` should be tracked at all:
-  [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
+  — pre-existing, NOT caused by the daemon. The tracked `.claude/hooks/*` bake
+  an absolute path at generation time, so a fresh generation elsewhere differs.
+  Root-normalisation and a surviving-path guard have landed; **they are not
+  sufficient** — a runner-length checkout crosses the AF_UNIX limit and takes a
+  different generator branch, so the artefacts differ in shape. **The prior
+  question is now answered**: `hooks_deploy.sh` copies the tracked forwarders
+  into client projects and hard-fails without them, so they must stay tracked.
+  Remaining work is the measured candidate — regenerate at the root the tracked
+  file records — see [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
+- [ ] ⬜ **Task 2.4e**: Playbook probe **#144** (Swift lint — invalid code
+  blocked) reports "no decision at all" on Python 3.11 while passing on 3.12 and
+  3.13, same runner image. Not a timeout (that branch returns an advisory, so it
+  would show text, not silence) and not a missing tool (`required_tools` gates
+  it). Needs a reproduction, not a patch.
 - [x] ✅ **Task 2.4a**: The two failures that were plain defects rather than
   provisioning gaps — neither needed a daemon at all, and both were fixed with a
   test reproducing the CI condition locally. `test_deployed_skill_trees.py`
@@ -236,18 +238,14 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
   provisioning gap, and nothing to do with `nc`. It was a **test bug**, and the
   task's own instruction to confirm before fixing is what caught it.
   The test derived its socket path from `os.environ.get("HOSTNAME", "localhost")`,
-  omitting the middle rung both real implementations have (`$HOSTNAME` →
-  `socket.gethostname()` → `"localhost"`). bash populates `$HOSTNAME` as a
-  **shell** variable without exporting it, so on a runner `init.sh` resolved a
-  real OS hostname while the test resolved `"localhost"` — server and nc rung
-  used different paths. **Reproduced locally** with `env -u HOSTNAME pytest …`,
-  so no CI round trip was needed; fixed by calling
-  `paths._get_hostname_suffix()`. **Class guarded**:
-  `test_hostname_suffix_parity.py` pinned the two production helpers against
-  each other but nothing stopped a TEST adding a third computation, so it now
-  scans `tests/` for unexempted `$HOSTNAME` reads with a
-  `# hostname-suffix-exempt: <reason>` marker and a vacuity class. No silent
-  skip was added. Full narrative in `JOURNAL/`.
+  omitting the middle rung both real implementations have
+  (`socket.gethostname()`). bash sets `$HOSTNAME` as a **shell** variable without
+  exporting it, so a runner resolved a real hostname where the test resolved
+  `"localhost"`. **Reproduced locally** with `env -u HOSTNAME pytest …`; fixed by
+  calling `paths._get_hostname_suffix()`. **Class guarded**:
+  `test_hostname_suffix_parity.py` now scans `tests/` for unexempted `$HOSTNAME`
+  reads, with an exemption marker and a vacuity class. Full narrative in
+  `JOURNAL/`.
 
 ### Phase 3: Guard the class
 
