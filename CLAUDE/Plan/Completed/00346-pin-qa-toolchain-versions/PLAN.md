@@ -1,6 +1,6 @@
 # Plan 00346: the QA venv ignores uv.lock
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Medium
@@ -121,18 +121,28 @@ Two aggravating details:
 
 ### Phase 3: Correct the documentation
 
-- [ ] ⬜ **Task 3.1**: `CONTRIBUTING.md:73` states that `uv.lock` and
+- [x] ✅ **Task 3.1**: `CONTRIBUTING.md:73` states that `uv.lock` and
   `pyproject.toml` are "the same ones `scripts/qa/` uses". Make it true, or
   make it accurate — but not before Phase 1, so the doc describes the fixed
-  behaviour rather than a second aspiration.
+  behaviour rather than a second aspiration. (Phase 1 made it true. The same
+  file's own **setup instructions** were a live instance of the bypass,
+  telling every contributor to run `pip install -e ".[dev]"`, and listing
+  "pip and venv" as the prerequisites — so those are rewritten too.)
 
 ## Success Criteria
 
-- [ ] The tools that run QA are the versions `uv.lock` records, verified by
+- [x] The tools that run QA are the versions `uv.lock` records, verified by
   comparing an actual venv against the lock rather than by assertion.
-- [ ] A toolchain that drifts from the lock fails a check instead of passing
-  quietly.
-- [ ] No provisioning path installs QA tools without consulting the lock.
+  `assert_venv_matches_lock` runs `uv sync --frozen --all-extras --check`
+  against the resolved venv on every QA run.
+- [x] A toolchain that drifts from the lock fails a check instead of passing
+  quietly — and the check is tested against a venv that genuinely drifts, not
+  only against one that matches.
+- [x] No provisioning path installs QA tools without consulting the lock:
+  `install_deps` (T1.1), both CI jobs (T2.2) and `create_venv_at_path` (T2.3)
+  all sync `--frozen`. `install_package_editable` still runs
+  `uv pip install -e <dir>`, which reads no lock — it installs the daemon
+  package alone with no `dev` extra, so it provisions no QA tools.
 
 ## Delivery & Milestones
 
@@ -140,9 +150,14 @@ Two aggravating details:
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00346-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- **Phase 2 (T2.1, T2.2)** — `assert_venv_matches_lock` gates every QA run on
-  the INSTALLED packages matching the lock, and CI provisions with
-  `uv sync --frozen --all-extras` instead of resolving `pyproject.toml`.
+- **Phase 3** — `CONTRIBUTING.md` now documents the uv/lockfile setup, and its
+  claim about what `scripts/qa/` uses is true.
+- **Phase 2** — `d3978800` (T2.1 `assert_venv_matches_lock` gates every QA run
+  on the INSTALLED packages matching the lock; T2.2 both CI jobs provision with
+  `uv sync --frozen --all-extras`) and `f8e852a1` (T2.3 `--frozen` on all three
+  `create_venv_at_path` sync branches; T2.4 three test files whose stubs were
+  shadowed by a PATH export placed before the script was sourced, so the real
+  `uv`/`stat`/`uname` ran and the assertions proved nothing).
 - **Phase 1 complete** — `2de920a3` (`install_deps` syncs from `uv.lock`,
   `--frozen`, loud failure absent `uv`) and `0de54287` (an empty `VENV_DIR`
   built a venv in the caller's cwd and reported success; found while writing

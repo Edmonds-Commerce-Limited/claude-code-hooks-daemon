@@ -7,7 +7,8 @@ Thank you for your interest in contributing! This document provides guidelines a
 ### Prerequisites
 
 - Python 3.11 or higher
-- pip and venv
+- [uv](https://docs.astral.sh/uv/) — the toolchain is installed from
+  `uv.lock`, and `pip` cannot read a lockfile
 
 ### Installation
 
@@ -16,13 +17,24 @@ Thank you for your interest in contributing! This document provides guidelines a
 git clone https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git
 cd claude-code-hooks-daemon
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install in development mode with dev dependencies
-pip install -e ".[dev]"
+# Install the locked toolchain into .venv
+uv sync --frozen --all-extras
+source .venv/bin/activate
 ```
+
+`--frozen` is the load-bearing flag: it installs exactly what `uv.lock`
+records. A bare `uv sync` *updates* the lock to satisfy `pyproject.toml` when
+the two disagree, which re-resolves against PyPI.
+
+These instructions previously said `pip install -e ".[dev]"`, and `scripts/qa/`
+provisioned its venv the same way. `pip` never reads `uv.lock` — it resolves
+`pyproject.toml`'s lower bounds against PyPI — so the toolchain deciding
+whether QA passed was whatever was newest the day a venv happened to be built.
+It drifted: one checkout ran mypy 2.3.0 against a locked 1.20.2, and every gate
+stayed green. `scripts/qa/run_dependency_check.sh` now fails if the venv
+running QA does not match the lock. If you genuinely cannot install uv, set
+`HOOKS_DAEMON_ALLOW_UNLOCKED_VENV=1` — it restores the old resolution and says
+what that costs.
 
 ### Running Tests
 
@@ -70,8 +82,13 @@ pre-commit run --all-files   # verify the hooks work before relying on them
 
 The black/ruff/mypy/bandit hooks run the tools from **this** environment rather
 than from upstream mirror repos, so their versions and configuration come from
-`uv.lock` and `pyproject.toml` — the same ones `scripts/qa/` uses. See the note
-at the top of `.pre-commit-config.yaml` for why.
+`uv.lock` and `pyproject.toml` — the same ones `scripts/qa/` and CI use. See
+the note at the top of `.pre-commit-config.yaml` for why.
+
+All three surfaces now provision the same way, which is what makes that claim
+hold: `scripts/venv-include.bash` and `.github/workflows/qa.yml` both run
+`uv sync --frozen --all-extras`, and pre-commit invokes whatever the resulting
+environment provides.
 
 ### Dependency Lockfile (`uv.lock`)
 
