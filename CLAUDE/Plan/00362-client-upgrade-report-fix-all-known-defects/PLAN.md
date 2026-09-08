@@ -103,8 +103,8 @@ while the detectors silently do not run.
   for 20 of 31 wired events is silently dropped because `HandlersConfig`
   declares 11 event fields; `PluginConfig.event_type` omits the worktree
   events.
-- [ ] ⬜ **Task 2.4** (D1, D7 — Plan 00252 Phase 3 and Plan 00264 Question 7,
-  HIGH): staged content is never inspected for secret-list terms, and a `gh`
+- [x] ✅ **Task 2.4** (D1, D7 — Plan 00252 Phase 3 and Plan 00264 Question 7,
+  HIGH; merged at `bbd213f6`): staged content is never inspected for secret-list terms, and a `gh`
   issue/PR comment body is not a candidate at all. Decision: both belong to
   `sensitive_content`, as two more surfaces of the one guard.
 - [x] ✅ **Task 2.5** (D8 — Plan 00189 Tasks 1.1 to 1.3, MEDIUM): a daemon-down
@@ -113,7 +113,7 @@ while the detectors silently do not run.
 - [x] ✅ **Task 2.6** (D10 — Plan 00252 Phases 1 and 2, MEDIUM; `772ef675`): the test suite
   neutralises ambient git identity and config so a fresh runner and a local
   run agree. (`772ef675`)
-- [ ] ⬜ **Task 2.7** (D13 — Plan 00329, MEDIUM): the truth-changes
+- [x] ✅ **Task 2.7** (D13 — Plan 00329, MEDIUM; merged before `bbd213f6`): the truth-changes
   reconciliation collapses superseded entries so only the current truth is
   asserted. Decision: collapse by truth key, keeping the highest-version
   entry.
@@ -129,9 +129,13 @@ while the detectors silently do not run.
   mutation is serialised with a lock, after the bind-mount `flock` spike the
   plan asks for. Spike passed in the CCY container (Podman bind mount);
   `ensure_venv` and `hooks-daemon repair` share one lock — commit `80417d4b`.
-- [ ] ⬜ **Task 2.11** (R1 — Plan 00327 Phase 1): measure the delta between the
+- [x] ✅ **Task 2.11** (R1 — Plan 00327 Phase 1; merged at `b1436863`): measure the delta between the
   vendored hook contract and current upstream so a stability release does not
   rest on an unaudited contract; any drifted claim becomes a task here.
+  Result: no drifted claim against 2.1.263, so no task was added; the
+  observations Plan 00327 kept (contract_staleness, whether
+  `permission_suggestions` is required in the input schema, the refresh
+  guide) stay in Plan 00327.
 - [ ] ⬜ **Task 2.12** (D15 — Plan 00242): NOT in this push. A terminal ALLOW
   ending the chain is a structural change with a measurement-gated staged
   rollout; it stays in its own plan and is named here so the release notes
