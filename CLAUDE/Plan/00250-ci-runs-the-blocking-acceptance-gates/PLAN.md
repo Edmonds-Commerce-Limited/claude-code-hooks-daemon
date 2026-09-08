@@ -82,29 +82,20 @@ expired.** `Tests + coverage` is RED on `main` and has been for a long stretch.
 It was 9 failures per interpreter across three files when found (while
 regression-testing Plan 00347), and is **4** after Task 2.4a:
 
-| File                                               | Why it fails on a runner                                                                                                             |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `tests/integration/test_deployed_skill_trees.py`   | Asked git about a directory-only ignore pattern for a path absent on a runner. **Fixed (2.4a).**                                     |
-| `tests/integration/test_forwarder_socket_stdin.py` | Hardcoded `/workspace`, so the forwarders were never found. **Path fixed (2.4a)**; now reaches the daemon and fails there instead.   |
-| `tests/integration/test_relay_guard_fail_open.py`  | Re-derived the hostname socket suffix without the `gethostname()` rung, so it dialled a path nothing was bound to. **Fixed (2.4b).** |
+All three are now fixed — see
+[RESEARCH-ci-failures.md](RESEARCH-ci-failures.md) for what each one was.
 
-Two of the three turned out NOT to be the same missing dependency at all — they
-were plain defects that would fail on any machine without a deployed install,
-and only *looked* like daemon fallout. That difference matters in both
-directions: a failure is louder than a skip, but a run that is *always* red
-teaches readers to skim it, which is how the `Format (black)` breakage in Plan
-00346 stayed hidden for hours inside the noise.
+Two of the three turned out NOT to be this plan's subject at all: they were
+plain defects that would fail on any machine without a deployed install, and
+only *looked* like daemon fallout. Both were found by reproducing the runner
+condition locally rather than reading a CI log — a `git worktree` for the
+missing install, `env -u HOSTNAME` for the unexported shell variable — seconds
+each, no round trip. Only `test_forwarder_socket_stdin.py`'s remaining failure
+genuinely needs a daemon, which Task 2.1 provisions.
 
 **Consequence for this plan**: Task 4.2 ("a green CI run") needs all three
-fixed, whatever happens to the skips (**16**, per Task 1.1's measurement — the
-"11" this plan was written with was already stale). All three are now fixed;
-what remains of `test_forwarder_socket_stdin.py` genuinely does need a daemon,
-which Task 2.1 now provisions.
-
-Method worth keeping: both separable defects were found by reproducing the
-runner condition locally, not by reading a CI log — a `git worktree` for the
-missing install, `env -u HOSTNAME` for the unexported shell variable. Seconds
-each, no round trip.
+fixed, whatever happens to the skips — **16** of them, per Task 1.1's
+measurement; the "11" this plan was written with was already stale.
 
 ## Goals
 
@@ -225,6 +216,9 @@ have reopened a plan whose success criteria were satisfied.
     regressions — the LESSONS.md entry on waking skipped tests applies directly
 - [ ] ⬜ **Task 2.3**: Verify the CI daemon cannot collide with anything (its own
   `HOSTNAME`-derived socket, per the hostname-isolation design)
+  - Analysis done, pending confirmation from the run — see
+    [RESEARCH-ci-install.md](RESEARCH-ci-install.md). Short version: collision is
+    impossible for a reason stronger than the hostname suffix.
 - [x] ✅ **Task 2.4a**: The two failures that were plain defects rather than
   provisioning gaps — neither needed a daemon at all, and both were fixed with a
   test reproducing the CI condition locally. `test_deployed_skill_trees.py`

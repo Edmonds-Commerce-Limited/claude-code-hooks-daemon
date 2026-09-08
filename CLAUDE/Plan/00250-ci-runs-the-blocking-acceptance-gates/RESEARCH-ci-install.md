@@ -169,6 +169,20 @@ Which gives the workflow steps now in `qa.yml`:
     ./bin/hooks-daemon status
 ```
 
+## Socket collision across the matrix (Task 2.3)
+
+Collision is impossible for a reason stronger than the hostname suffix the task
+names. The socket lives under `daemon_dir / "untracked"` — **inside the
+checkout** — and each matrix job runs on its own runner VM with its own
+filesystem, so the three interpreters share nothing to collide over. The
+hostname suffix is a second layer, not the mechanism.
+
+Worth stating explicitly because Task 2.4b showed this resolution is subtler
+than it looks: on a runner `$HOSTNAME` is unexported, so the suffix comes from
+`socket.gethostname()`. If the suffix were the *only* isolation, the answer
+would depend on how GitHub names runner VMs — which is not a property this
+project controls or should rely on.
+
 **Unverified until a runner executes it.** Every mechanism above is read from
 source; none of it has been observed end-to-end, because the install cannot be
 rehearsed inside this repo (see above). Two consequences to expect rather than
