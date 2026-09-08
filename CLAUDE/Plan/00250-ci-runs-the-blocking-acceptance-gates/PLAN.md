@@ -194,7 +194,10 @@ have reopened a plan whose success criteria were satisfied.
   inventing a second way to start one~~ — **there is nothing to reuse**, per the
   struck-through claim above. **Implemented as ONE step** in the existing `qa`
   job, after `mypy` and before `Tests + coverage`, so the gates run on all three
-  interpreters without a second job to keep in sync. Re-run pending.
+  interpreters without a second job to keep in sync. **Verified on a runner**:
+  `Start daemon (for the acceptance gates)` reports `success` on Python 3.11,
+  3.12 and 3.13, which is the first time this pipeline has ever had a live
+  daemon during `Tests + coverage`.
   - [x] ✅ **First attempt ran `install.py --self-install` and the runner
     rejected it** — recorded because the reasoning that produced it was wrong,
     not just the outcome. I read `if <file>.exists() and not force:` in both
