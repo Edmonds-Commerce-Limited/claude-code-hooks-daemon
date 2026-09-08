@@ -163,6 +163,24 @@ class TestTheBaselineIsUsedWhenItIsGivenAndNotGuessedWhenItIsNot:
         assert written["statusLine"]["refreshInterval"] == 1000
         assert outcome.status is not MergeStatus.ESCALATED
 
+    def test_but_an_unreadable_baseline_is_reported_rather_than_swallowed(
+        self, paths: dict[str, Path]
+    ) -> None:
+        """Degrading silently looks identical to having nothing to apply."""
+        broken = paths["root"] / "broken-baseline.json"
+        broken.write_text("{ not json", encoding="utf-8")
+        paths["client"].write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+        outcome = run_settings_merge(paths["client"], paths["new_default"], broken)
+        assert any("baseline" in message for message in outcome.messages), outcome.messages
+
+    def test_an_absent_baseline_is_the_expected_case_and_says_nothing(
+        self, paths: dict[str, Path]
+    ) -> None:
+        """Only a SUPPLIED-but-unusable baseline is worth a warning."""
+        paths["client"].write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+        outcome = run_settings_merge(paths["client"], paths["new_default"])
+        assert outcome.messages == ()
+
 
 class TestTheGateMustNotContradictTheMergesOwnRule:
     """Found by the end-to-end gate, which is the only place it could be.

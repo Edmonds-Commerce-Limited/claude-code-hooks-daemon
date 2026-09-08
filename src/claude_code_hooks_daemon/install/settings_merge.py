@@ -367,17 +367,26 @@ class MergeOutcome:
         return self.status is MergeStatus.ESCALATED
 
 
-def _load_json_object(path: Path) -> dict[str, Any] | None:
-    """Parse a settings document, or None if it is missing or not an object."""
+def _load_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """Parse a settings document, returning ``(document, problem)``.
+
+    The problem string is carried rather than discarded so no caller can turn a
+    corrupt file into a silent default. It matters most for the OLD-DEFAULT
+    baseline: absent and unreadable both degrade to "no baseline", but only one
+    of them is expected, and a client whose handover is corrupt would otherwise
+    stop receiving recommended defaults with nothing said.
+    """
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
+    except OSError as exc:
+        return None, f"{path} could not be read: {exc}"
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError as exc:
+        return None, f"{path} is not valid JSON: {exc}"
+    if not isinstance(parsed, dict):
+        return None, f"{path} is not a JSON object"
+    return parsed, None
 
 
 def _serialise(settings: Mapping[str, Any]) -> str:
@@ -404,26 +413,36 @@ def run_settings_merge(
         A ``MergeOutcome``. On ``ESCALATED`` nothing was written to
         ``client_path`` and the proposed merge is at ``proposal_path``.
     """
-    new_default = _load_json_object(new_default_path)
+    new_default, problem = _load_json_object(new_default_path)
     if new_default is None:
         return MergeOutcome(
             status=MergeStatus.ESCALATED,
-            messages=(f"Could not read the daemon's settings at {new_default_path}.",),
+            messages=(f"Could not read the daemon's own settings: {problem}",),
         )
 
     if not client_path.exists():
         client_path.write_text(_serialise(new_default), encoding="utf-8")
         return MergeOutcome(status=MergeStatus.INSTALLED)
 
-    old_default = _load_json_object(old_default_path) if old_default_path is not None else None
+    notes: list[str] = []
+    old_default = None
+    if old_default_path is not None:
+        old_default, baseline_problem = _load_json_object(old_default_path)
+        if baseline_problem is not None:
+            # Degrade, but say so. Treating this as an empty baseline would call
+            # every client value a deliberate override and freeze their settings.
+            notes.append(
+                f"No usable settings baseline ({baseline_problem}), so your values "
+                "are all preserved and no new default is applied."
+            )
 
-    client = _load_json_object(client_path)
+    client, client_problem = _load_json_object(client_path)
     if client is None:
         return _escalate(
             client_path,
             new_default,
             (
-                f"{client_path} is not a JSON object, so it cannot be merged.",
+                f"{client_problem}, so it cannot be merged.",
                 "It has been left exactly as it is.",
             ),
         )
@@ -440,19 +459,19 @@ def run_settings_merge(
         )
 
     if not report.changed:
-        return MergeOutcome(status=MergeStatus.UNCHANGED, report=report)
+        return MergeOutcome(status=MergeStatus.UNCHANGED, report=report, messages=tuple(notes))
 
     # Re-read immediately before writing. Four things write this file with no
     # lock between them; every whole-file writer is atomic or can be, so the
     # failure mode is a LOST UPDATE rather than corruption, and re-reading is
     # the cheap mitigation. A lock is worth adding when one is actually
     # observed, not in anticipation.
-    latest = _load_json_object(client_path)
+    latest, _ = _load_json_object(client_path)
     if latest is not None and latest != client:
         merged, report = merge_settings(latest, new_default, old_default)
 
     client_path.write_text(_serialise(merged), encoding="utf-8")
-    return MergeOutcome(status=MergeStatus.MERGED, report=report)
+    return MergeOutcome(status=MergeStatus.MERGED, report=report, messages=tuple(notes))
 
 
 def _top_level_diff(client: Mapping[str, Any], proposal: Mapping[str, Any]) -> tuple[str, ...]:

@@ -2880,6 +2880,12 @@ def cmd_settings_merge(args: argparse.Namespace) -> int:
             print(f"WARNING: {message}", file=sys.stderr)
         return ESCALATION_EXIT_CODE
 
+    # A degradation that is not an escalation still has to be said out loud —
+    # a merge that quietly stopped applying new defaults looks identical to one
+    # that had nothing to apply.
+    for note in outcome.messages:
+        print(f"WARNING: {note}", file=sys.stderr)
+
     if outcome.status is MergeStatus.INSTALLED:
         print(f"Installed settings.json at {args.client}")
         return 0

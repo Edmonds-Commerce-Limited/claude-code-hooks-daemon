@@ -1,0 +1,47 @@
+version: "3.63.0"
+truth_changes:
+  - was: >
+      Upgrading the hooks daemon overwrites `.claude/settings.json` with the
+      daemon's own copy, so any customisation you keep there — your own
+      `statusLine`, an extra hook you registered, a `permissions` block, a
+      `plansDirectory`, a deliberately-chosen `refreshInterval` — is replaced
+      and has to be re-applied by hand afterwards. Project runbooks and
+      upgrade checklists tell readers to save their settings.json before
+      upgrading, or to restore their customisations from the `.bak` copy once
+      the upgrade finishes.
+    now: >
+      The upgrade MERGES instead. The daemon owns the wired-hook block under
+      `hooks` and refreshes it — including repairing an entry that exists but
+      is stale — while everything else in the file is yours and is preserved,
+      including a hook of your own sitting in the same event array as a daemon
+      forwarder, and including the ABSENCE of a key you deliberately removed.
+      There is nothing to save first and nothing to re-apply afterwards, so a
+      runbook step that says otherwise can go. The `install.py` bootstrap
+      preserves your top-level keys too, with one stated limit: it runs before
+      any interpreter exists so it cannot separate your hook from ours inside a
+      wired event's array, and replaces that array.
+  - was: >
+      A value you left at the daemon's default in `settings.json` stays at that
+      old value forever once you have upgraded, because the file is either
+      overwritten wholesale or left alone.
+    now: >
+      A recommended default you never expressed an opinion about — currently
+      `statusLine.command` and `statusLine.refreshInterval` — is upgraded to the
+      new one, while a value you actually chose is preserved. The two are told
+      apart by comparing against the settings the PREVIOUS version shipped, which
+      the upgrade captures before it checks out the new one. When that baseline
+      is unavailable nothing is guessed: every value of yours is preserved and
+      none is upgraded.
+  - was: >
+      If the daemon cannot deploy `settings.json` during an upgrade, the upgrade
+      fails and you retry it.
+    now: >
+      A settings merge that cannot be completed safely — your file is not
+      readable as JSON, or the merged result does not validate — changes
+      NOTHING and lets the upgrade finish. Your file is left exactly as it is,
+      the merge it would have applied is written beside it as
+      `settings.json.merge-proposal`, and the warning names both paths plus the
+      top-level keys that would have changed. Compare the two and apply what you
+      want by hand; delete the proposal when you are done. Aborting instead
+      would leave newly-deployed forwarders over old settings with no rollback
+      snapshot behind them, which is strictly worse.
