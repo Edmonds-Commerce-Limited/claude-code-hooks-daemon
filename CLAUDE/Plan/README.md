@@ -4,11 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00359: the release pipeline checks the slate is clean before it starts](00359-release-slate-clean-gate/PLAN.md) - In Progress, built and verified live; only the full-QA tick remains (`release-slate-check` runs as Stage 0 of `/release`: HEAD's exact sha must be CI-green, mid-work plans and unlanded branches stop for a human, and `accept-wip` is the only way to proceed over them)
-
 - [00358: a worktree venv can silently test the WRONG source tree](00358-worktree-venv-tests-wrong-source-tree/PLAN.md) - Not Started (a sub-agent's correct fix appeared to fail, because the worktree's venv symlinks to main's, whose editable install points at `/workspace/src` — so GREEN can never pass and a green QA run is not evidence about the branch)
-
-- [00357: a ValueError escapes glob expansion and fails a security guard open](00357-glob-expansion-valueerror-escapes-fail-open/PLAN.md) - In Progress, reach established and the fix not started (`Path.glob` is a generator, so the `ValueError` fires on iteration OUTSIDE the `try`; the sole reachable caller is `quarantine_artefact_read_guard`, which the fail-open design then skips — the redaction paths cannot reach it)
 
 - [00356: secret guard bracket glob false positive](00356-secret-guard-bracket-glob-false-positive/PLAN.md) - In Progress; the reported defect is fixed and shipped, and the plan stays open for one unrelated fail-open found while working on it (a bracket expression at a token's edge was read as an open wildcard, so an ordinary jq array subscript was denied)
 
@@ -178,6 +174,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00359: the release pipeline checks the slate is clean before it starts](Completed/00359-release-slate-clean-gate/PLAN.md) - Complete at `7f0f6f40`…`268dab5b` + the archiving commit (`release-slate-check` runs as Stage 0 of `/release`: HEAD's exact sha must be CI-green, mid-work plans and unlanded branches stop for a human, and `accept-wip` is the only way to proceed over them)
+
+- [00357: a ValueError escapes glob expansion and fails a security guard open](Completed/00357-glob-expansion-valueerror-escapes-fail-open/PLAN.md) - Complete at `ce95acae` + the archiving commit (`Path.glob` is a generator, so the `ValueError` fired on iteration OUTSIDE the `try` and the quarantine artefact read guard was skipped for the whole tool call; the guard now wraps the consumption, proven by tests that failed pre-fix)
+
 - [00355: supervisor announces every keystroke it sends](Completed/00355-supervisor-announces-every-keystroke-it-sends/PLAN.md) - Complete at `e105530e` + the follow-on supervisor commits and the archiving commit (the ESC injected to flush a stalled compaction was silent; every keystroke the supervisor sends now raises the status-line banner on the tick that sends it, and repeats collapse to a tally like `esc (20), compact (15)`)
 
 - [00354: docs qa stale counterpart index](Completed/00354-docs-qa-stale-counterpart-index/PLAN.md) - Complete at `82bbd550`…`644ba92c` + the merge commit (the EDIT path reused every COUNTERPART index record without revalidating `mtime_ns`/`size`, so `duplicate-block` cited spans whose content had moved or gone and missed duplicates against files changed since the last sweep; `quote-source-stale` shared the shape, because the dividing line is the stage rather than the check)
@@ -234,10 +234,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00323: optimise checklist names retired handlers](Completed/00323-optimise-checklist-names-retired-handlers/PLAN.md) - Complete (the config-optimisation checklist scored four handlers Plan 00237 deleted, so a fully-configured project could never exceed 25/29 and was told to enable handlers that do not exist)
 
-- [00322: post upgrade optimise deferral and client noise](Completed/00322-post-upgrade-optimise-deferral-and-client-noise/PLAN.md) - Complete (the mandatory post-upgrade config-optimisation review deferred itself to "your NEXT Claude Code session" and was duly filed as optional; it now claims the current session and lives at `/hooks-daemon optimise`)
-
-- [00321: injected goal has no retraction path](Completed/00321-injected-goal-has-no-retraction-path/PLAN.md) - Complete (the supervisor could set the `/goal` slot but nothing could clear it; adds a no-payload `.goal-clear` trigger, a supervisor-typed `/goal clear`, and a `hooks-daemon clear-goal` CLI for the already-empty-ledger case)
-
 ## Blocked / On Hold Plans
 
 - **00032, 00034, 00035** - On hold pending upstream Claude Code delegate mode fix (GitHub #23447, #25037)
@@ -277,15 +273,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 359 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 298 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 300 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 44 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 42 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 44 + 298 + 7 = **349 folders**, spanning
+- **Folder-to-number reconciliation**: 42 + 300 + 7 = **349 folders**, spanning
   **346 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -301,7 +297,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the archiving of Plan 00355 (44 root, 298
+- **Last reconciled at**: the archiving of Plans 00357 and 00359 (42 root, 300
   `Completed/`, 7 `Cancelled/`, 346 distinct numbers against a counter of 359 —
   349 folders, three of which share a number with another from before the
   counter existed: 00034, 00039, 00041). Every figure above was recounted from

@@ -1,6 +1,6 @@
 # Plan 00357: a ValueError escapes glob expansion and fails a security guard open
 
-**Status**: In Progress (fix landed with RED-then-GREEN tests; awaiting full QA and the end-to-end observation)
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: High
@@ -142,7 +142,9 @@ earlier draft of this plan described.
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: Full QA green, daemon restart RUNNING.
+- [x] ✅ **Task 3.1**: Full QA 25/26 with the one failure black's own
+  auto-fix of a new test, committed before the tick; daemon restarted and
+  RUNNING on the fixed code (the same restart that served Task 3.2).
 
 - [x] ✅ **Task 3.2**: Observed live after a daemon restart on the fixed code:
   a real Bash call `cat untracked/scratch/a**b.md <literal DETAIL token>` was
@@ -153,11 +155,11 @@ earlier draft of this plan described.
 
 ## Success Criteria
 
-- [ ] A malformed recursive-wildcard token cannot raise out of
+- [x] A malformed recursive-wildcard token cannot raise out of
   `find_protected_mention_strict`
-- [ ] The regression test fails on the pre-fix code
-- [ ] Every dependant is recorded as reachable or not, with its reason
-- [ ] No other guarded-generator-construction remains in the module
+- [x] The regression test fails on the pre-fix code
+- [x] Every dependant is recorded as reachable or not, with its reason
+- [x] No other guarded-generator-construction remains in the module
 
 ## Delivery & Milestones
 
@@ -168,3 +170,5 @@ earlier draft of this plan described.
 - Filed from a sub-agent's incidental finding during Plan 00356, confirmed
   independently against the interpreter before filing rather than taken on
   report.
+- Fixed at `ce95acae` (guard the consumption, two RED-then-GREEN tests, the
+  registry entry reworded), observed live at `fcd2f96e`.

@@ -1,6 +1,6 @@
 # Plan 00359: the release pipeline checks the slate is clean before it starts
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: High
@@ -132,7 +132,11 @@ never proceeds.
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: Full QA green, daemon restart RUNNING.
+- [x] ✅ **Task 3.1**: Full QA 25/26 with the one failure black's own
+  auto-fix, committed before the tick; the earlier 22/26 run's real findings
+  (a direct git spawn in the CI lookup, a short-refname listing, an
+  unannotated subprocess import) are each fixed and committed. Daemon
+  restarted and RUNNING.
 
 - [x] ✅ **Task 3.2**: Run against this repository as it stood: exit 2, HEAD's
   run `in_progress`, eight plans in flight, 00102 correctly under "waiting for
@@ -145,12 +149,12 @@ never proceeds.
 
 ## Success Criteria
 
-- [ ] `release-slate-check` on a HEAD with no completed successful run exits
+- [x] `release-slate-check` on a HEAD with no completed successful run exits
   non-zero, naming the sha and the run state it found
-- [ ] An In Progress plan whose status names `/release` is listed as waiting,
+- [x] An In Progress plan whose status names `/release` is listed as waiting,
   not as in flight
-- [ ] A clean slate exits 0 and prints nothing that reads as a question
-- [ ] `accept-wip` proceeds with the report still printed
+- [x] A clean slate exits 0 and prints nothing that reads as a question
+- [x] `accept-wip` proceeds with the report still printed
 
 ## Delivery & Milestones
 
@@ -160,3 +164,5 @@ never proceeds.
 
 - Filed from the owner's question, with the state that prompted it recorded in
   the Overview rather than reconstructed later.
+- Shipped at `7f0f6f40` (module, CLI command, RELEASING.md Step 1a, skill
+  Stage 0), hardened at `268dab5b` (bounded git runner, full refnames).
