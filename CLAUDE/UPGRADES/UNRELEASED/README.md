@@ -7,7 +7,7 @@ Anything in this directory is destined for the **next** upgrade guide. It accumu
 - **`post-upgrade-tasks/`** — instructions for LLMs/humans to follow *after* they have upgraded to the next version. See `post-upgrade-tasks/README.md` for the convention.
 - **`truth-changes/`** — the per-version truth-changes manifest the upgrade flow reconciles. See `truth-changes/README.md`.
 - **`config-changes/`** — config-key changes the upgrade flow previews. See `config-changes/README.md`.
-- **`release-notes/`** (Plan 00360, pending) — one short callout per plan, in the voice of the release notes, for the release to fold in.
+- **`release-notes/`** — one short callout per plan, in the voice of the release notes, for the release to fold in. See `release-notes/README.md`.
 
 **This directory is part of every plan's definition of done.** A plan closes only once its release-bound consequences are written here (`CLAUDE/core/PlanWorkflow.core.md`, "Definition of done" and step 0 of the Plan Completion Checklist). A plan never waits for the release to consume them.
 

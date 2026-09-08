@@ -288,6 +288,8 @@ chose this for `uv`, and the argument is identical.
   set off Step 12.0's command line, and parsing raises rather than quietly
   finding nothing.
 - [x] Local `llm_qa.py all` still passes — 26/26.
+- [x] This plan has no release-bound consequences: it changes CI workflow
+  files and tests only; nothing an operator or client project sees.
 
 ## Risks & Mitigations
 

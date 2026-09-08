@@ -195,3 +195,5 @@ for any event.
 - [x] Plan 00091 is closed as superseded — `CLAUDE/Plan/Cancelled/00091-hook-executable-permissions/`.
 - [x] ~~The full flow acceptance-tested at release time~~ — struck: a
   release-time condition is not a plan criterion. The probes are on main.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/05-hook-executable-bit-defence.md`.

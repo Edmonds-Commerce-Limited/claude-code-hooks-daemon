@@ -160,6 +160,8 @@ earlier draft of this plan described.
 - [x] The regression test fails on the pre-fix code
 - [x] Every dependant is recorded as reachable or not, with its reason
 - [x] No other guarded-generator-construction remains in the module
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/02-malformed-glob-no-longer-skips-quarantine-guard.md`.
 
 ## Delivery & Milestones
 

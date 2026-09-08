@@ -1,6 +1,6 @@
 # Plan 00360: pending release notes holding area
 
-**Status**: Not Started
+**Status**: In Progress (Phase 1 shipped; the release-side consumption is Phase 2)
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Medium
@@ -52,14 +52,22 @@ pipeline to fold it in.
 
 ### Phase 1: The holding area
 
-- [ ] ⬜ **Task 1.1**: Create `CLAUDE/UPGRADES/UNRELEASED/release-notes/` with
-  a README defining the file schema: one `NN-<slug>.md` per note, a `Plan:`
-  and `Audience:` header (operators / handler authors / client projects), and
-  a body of one to three sentences written in the voice of the release notes.
-  Update `UNRELEASED/README.md` to name the fourth directory.
+- [x] ✅ **Task 1.1**: `CLAUDE/UPGRADES/UNRELEASED/release-notes/` exists with
+  its README schema (`Plan:` and `Audience:` headers, one to three sentences
+  in the notes' voice); `UNRELEASED/README.md` names all four shapes and
+  states that the area is part of every plan's definition of done.
 
-- [ ] ⬜ **Task 1.2**: Seed the first note from Plan 00110's struck Task 7.2
-  (the host-a scenario), so the area is exercised on the very next release.
+- [x] ✅ **Task 1.2**: Seeded with five callouts, one per plan closed on the
+  ruling that had a reader-facing consequence (00359, 00357, 00356, 00355,
+  00102). Plan 00110's consequence was already a post-upgrade task, so it
+  cites that instead of a note.
+
+- [x] ✅ **Task 1.3** (added): the rule bites. A PROJECT-ONLY handler,
+  `.claude/project-handlers/pre_tool_use/plan_done_requires_holding_area.py`,
+  denies a Write/Edit that flips an active PLAN.md to Complete unless its
+  Success Criteria cite a holding-area artefact or declare no release-bound
+  consequences. Archived plans, other statuses and Cancelled/Superseded are
+  out of scope. Not a daemon handler: the layout is this project's.
 
 ### Phase 2: The release consumes it
 

@@ -185,6 +185,8 @@ accept, so the shape gate is rejected.
   and 00359 covered this tree).
 - [x] Plan 00311 Task 1.2 carries a cross-reference recording this as the
   predicted next incident.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/03-bracket-expression-no-longer-read-as-wildcard.md`.
 
 ## Delivery & Milestones
 

@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00360: pending release notes holding area](00360-pending-release-notes-holding-area/PLAN.md) - Not Started (a plan closes by writing its release-note callout into `UNRELEASED/release-notes/`, and the release folds the notes in mechanically — the fourth shape the holding area was missing once a release stopped being part of any plan's definition of done)
+- [00360: pending release notes holding area](00360-pending-release-notes-holding-area/PLAN.md) - In Progress, the area and its project-only gate shipped, the release-side consumption remains (a plan closes by writing its release-note callout into `UNRELEASED/release-notes/`, and the release folds the notes in mechanically — the fourth shape the holding area was missing once a release stopped being part of any plan's definition of done)
 
 - [00358: a worktree venv can silently test the WRONG source tree](00358-worktree-venv-tests-wrong-source-tree/PLAN.md) - Not Started (a sub-agent's correct fix appeared to fail, because the worktree's venv symlinks to main's, whose editable install points at `/workspace/src` — so GREEN can never pass and a green QA run is not evidence about the branch)
 

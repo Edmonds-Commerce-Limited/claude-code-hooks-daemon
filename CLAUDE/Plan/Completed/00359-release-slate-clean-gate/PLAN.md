@@ -155,6 +155,8 @@ never proceeds.
   not as in flight
 - [x] A clean slate exits 0 and prints nothing that reads as a question
 - [x] `accept-wip` proceeds with the report still printed
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/01-release-slate-clean-gate.md`.
 
 ## Delivery & Milestones
 

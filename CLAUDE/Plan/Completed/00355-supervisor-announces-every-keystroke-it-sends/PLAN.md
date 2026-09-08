@@ -170,6 +170,8 @@ slash-command families, whose sequence genuinely is meaningful.
 - [x] A stack of actions renders as `esc (N), compact (M)`, comma-separated
 - [x] A `/model` + coupled `/effort` sequence still surfaces as ONE banner
 - [x] `decision.log` still records every injection regardless of banner outcome
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/04-supervisor-announces-every-keystroke.md`.
 
 ## Delivery & Milestones
 

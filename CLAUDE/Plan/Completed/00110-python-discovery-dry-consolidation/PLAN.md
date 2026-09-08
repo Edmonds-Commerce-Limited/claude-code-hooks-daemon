@@ -210,6 +210,8 @@ not the performing of one.
 - [x] H-1 gate count in RELEASING.md — the "19 → 20" this criterion names never happened and cannot now: Task 5.2 shipped it as 22 → 23, and later plans have taken it to **27 passed, 1 skipped**. The criterion behind the number — that Step 12.0 counts the host-a test — is met, and the number itself is not a thing this plan can own.
 - [x] ~~Release notes reference the host-a scenario by name~~ — struck: a
   release-time condition is not a plan criterion; the `UNRELEASED/` task is on main.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/post-upgrade-tasks/01-drop-hooks-daemon-python-workaround.md`.
 
 ## Risks & Mitigations
 
