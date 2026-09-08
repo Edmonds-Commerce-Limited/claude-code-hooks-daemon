@@ -46,8 +46,10 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.chain import is_restrictive
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.core.side_effect_journal import SideEffectJournal
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
@@ -255,17 +257,23 @@ def _is_plan_path(file_path: str, plan_dir: str = _FALLBACK_PLAN_DIR) -> tuple[b
 # ─── Bounded per-plan tracking helper ─────────────────────────────────────────
 
 
-def _evict_oldest_tracked_entry_if_full(tracked: dict[str, Any]) -> None:
+def _evict_oldest_tracked_entry_if_full(
+    tracked: dict[str, Any], journal: SideEffectJournal | None = None
+) -> None:
     """Evict the oldest inserted key from a bounded per-plan tracking map.
 
     Shared by every per-plan tracking map on this handler (progress counts,
     creation-seen markers, completion-seen markers) so the bound
     (_MAX_TRACKED_PLANS) and eviction policy — oldest-first, relying on
     insertion-ordered dict iteration — live in exactly one place rather than
-    being copy-pasted per map.  No-op while the map has room.
+    being copy-pasted per map.  No-op while the map has room. The eviction
+    is journalled when a ``journal`` is given, so a rolled-back call restores
+    the entry it evicted.
     """
     if len(tracked) >= _MAX_TRACKED_PLANS:
         oldest_key = next(iter(tracked))
+        if journal is not None:
+            journal.snapshot(tracked, oldest_key)
         del tracked[oldest_key]
 
 
@@ -433,6 +441,10 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         # _progress_counts, via the shared _evict_oldest_tracked_entry helper.
         self._creation_seen: dict[str, bool] = {}
         self._completion_seen: dict[str, bool] = {}
+        # Undo journal for the three maps above (Plan 00242 Phase 2): the
+        # advice state a call records is rolled back in commit_side_effects()
+        # if the Write/Edit that triggered it ends up denied.
+        self._journal = SideEffectJournal()
         # Phase computed in matches() and reused in handle() (avoids running the
         # detection twice per event).  Set per-call; never relied on across
         # events.
@@ -486,8 +498,9 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         shared eviction helper.
         """
         count = self._progress_counts.get(plan_folder)
+        self._journal.snapshot(self._progress_counts, plan_folder)
         if count is None:
-            _evict_oldest_tracked_entry_if_full(self._progress_counts)
+            _evict_oldest_tracked_entry_if_full(self._progress_counts, self._journal)
             count = _PROGRESS_COUNT_START
         else:
             count += 1
@@ -507,9 +520,17 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         """
         if plan_folder in tracked:
             return False
-        _evict_oldest_tracked_entry_if_full(tracked)
+        self._journal.snapshot(tracked, plan_folder)
+        _evict_oldest_tracked_entry_if_full(tracked, self._journal)
         tracked[plan_folder] = True
         return True
+
+    def commit_side_effects(self, hook_input: dict[str, Any], chain_decision: Decision) -> None:
+        """Keep this call's advice bookkeeping only if the Write/Edit landed."""
+        if is_restrictive(chain_decision):
+            self._journal.rollback()
+        else:
+            self._journal.commit()
 
     def _resolve_plan_folder(self, hook_input: dict[str, Any]) -> str:
         """Return the plan-folder key used by every per-plan tracking map.
@@ -536,6 +557,9 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         Returns:
             BlockingResult with ALLOW decision, and context[] when advising.
         """
+        # A previous call that was never committed (a caller outside the
+        # chain) counts as accepted; only THIS call's mutations stay undoable.
+        self._journal.commit()
         phase = self._resolve_phase(hook_input)
         if phase is None:
             return BlockingResult(decision=Decision.ALLOW)

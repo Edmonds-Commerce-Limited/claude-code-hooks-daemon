@@ -269,6 +269,71 @@ class TestEventRouter:
         # Result should be from terminal handler
         assert result.result.decision == Decision.DENY
 
+    def test_route_terminal_allow_does_not_stop_pre_tool_use(self, router: EventRouter) -> None:
+        """Plan 00242: an ALLOW never ends the chain — the successor still denies."""
+        allower = MockHandler(name="terminal-allower", priority=10, terminal=True)
+        allower.handle_result = HookResult.allow(context=["advice"])
+        blocker = MockHandler(name="blocker", priority=20, terminal=True)
+        blocker.handle_result = HookResult.deny(reason="Blocked by successor")
+
+        router.register(EventType.PRE_TOOL_USE, allower)
+        router.register(EventType.PRE_TOOL_USE, blocker)
+
+        result = router.route(EventType.PRE_TOOL_USE, {"toolName": "Bash"})
+
+        assert blocker.handle_called is True
+        assert result.result.decision == Decision.DENY
+        assert result.decided_by == "blocker"
+        assert "To disable: handlers.pre_tool_use.blocker" in (result.result.reason or "")
+
+    def test_route_passes_collect_all_through_to_the_chain(self, router: EventRouter) -> None:
+        """daemon.chain.collect_all_violations reaches HandlerChain.execute (Plan 00242)."""
+        first = MockHandler(name="first", priority=10, terminal=True)
+        first.handle_result = HookResult.deny(reason="first")
+        second = MockHandler(name="second", priority=20, terminal=True)
+        second.handle_result = HookResult.deny(reason="second")
+        router.register(EventType.PRE_TOOL_USE, first)
+        router.register(EventType.PRE_TOOL_USE, second)
+
+        short = router.route(EventType.PRE_TOOL_USE, {"toolName": "Bash"})
+        assert second.handle_called is False
+        assert "Also denied by" not in (short.result.reason or "")
+
+        # Fresh results: the router appends the footer to the result IN PLACE.
+        first.handle_result = HookResult.deny(reason="first")
+        second.handle_result = HookResult.deny(reason="second")
+        second.handle_called = False
+        merged = router.route(EventType.PRE_TOOL_USE, {"toolName": "Bash"}, collect_all=True)
+        assert second.handle_called is True
+        assert "Also denied by: second" in (merged.result.reason or "")
+        # The footer still names the FIRST restrictive handler, after the merge.
+        assert (merged.result.reason or "").endswith(
+            "To disable: handlers.pre_tool_use.first  (set enabled: false)"
+        )
+
+    def test_permission_request_chain_is_allow_final(self, router: EventRouter) -> None:
+        """PermissionRequest is the one event where 'approve and stop' is the semantic."""
+        assert router.get_chain(EventType.PERMISSION_REQUEST).allow_is_final is True
+        for event_type in EventType:
+            if event_type is EventType.PERMISSION_REQUEST:
+                continue
+            assert router.get_chain(event_type).allow_is_final is False, event_type
+
+    def test_permission_request_terminal_allow_concludes_the_request(
+        self, router: EventRouter
+    ) -> None:
+        approver = MockHandler(name="approver", priority=10, terminal=True)
+        approver.handle_result = HookResult.allow()
+        later = MockHandler(name="later", priority=20, terminal=False)
+
+        router.register(EventType.PERMISSION_REQUEST, approver)
+        router.register(EventType.PERMISSION_REQUEST, later)
+
+        result = router.route(EventType.PERMISSION_REQUEST, {"toolName": "Read"})
+
+        assert later.handle_called is False
+        assert result.terminated_by == "approver"
+
     def test_route_non_matching_handler(self, router: EventRouter) -> None:
         """Non-matching handlers should be skipped."""
         handler1 = MockHandler(name="no-match")
@@ -324,7 +389,7 @@ class TestEventRouter:
         """
         from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 
-        def mock_execute(self, hook_input, strict_mode=False):
+        def mock_execute(self, hook_input, strict_mode=False, **kwargs):
             # Return DENY result but with empty handlers_executed list
             return ChainExecutionResult(
                 result=HookResult.deny(reason="Edge case denial"),

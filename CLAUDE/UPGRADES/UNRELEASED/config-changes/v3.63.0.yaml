@@ -20,3 +20,25 @@ config_changes:
         `tests/Large/<mirror>`) can re-enable it and declare one mirror entry
         per root -- or list the same directories in `layout.test_dirs`, which
         now doubles as a mirror-root declaration for sources under `src/`.
+    - key: daemon.chain.collect_all_violations
+      recommended: false
+      dormant: true
+      description: >-
+        NEW boolean (Plan 00242, default false). When true the handler chain
+        keeps running after a deny, collects every deny and every advisory
+        for the tool call, and returns ONE merged response: the first
+        (highest-priority) deny leads and owns the `To disable:` footer, the
+        other denies follow as bounded excerpts naming their handler, and the
+        advisories are summarised in one table. Off, a terminal deny ends the
+        chain as before. Independent of this flag, an ALLOW never ends the
+        chain any more (the release-notes callout "an ALLOW never ends the
+        chain"), so a terminal handler's advisory ALLOW cannot disable the
+        handlers behind it.
+      example_yaml: |
+        daemon:
+          chain:
+            collect_all_violations: true
+      migration_note: >-
+        No action needed. Enable it if you would rather see all of a tool
+        call's violations at once than one per retry; the blocked path then
+        runs every matching handler (measured in the plan's MEASUREMENTS.md).

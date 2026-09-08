@@ -353,10 +353,15 @@ class TestHandlerChain:
         assert h3.handle_called == 1
 
     def test_execute_stops_at_terminal_handler(self) -> None:
-        """execute stops chain at terminal handler."""
+        """execute stops chain at a terminal handler that DENIES (Plan 00242)."""
         chain = HandlerChain()
         h1 = MockHandler("h1", priority=10, terminal=False)
-        h2 = MockHandler("h2", priority=20, terminal=True)
+        h2 = MockHandler(
+            "h2",
+            priority=20,
+            terminal=True,
+            result=HookResult(decision=Decision.DENY, reason="stop here"),
+        )
         h3 = MockHandler("h3", priority=30, terminal=False)
 
         chain.add(h1)
@@ -536,12 +541,13 @@ class TestHandlerChain:
         assert result.decided_by is None
 
     def test_decided_by_tracks_the_result_actually_shown(self) -> None:
-        """Plan 00190 Task 0.5: attribution must follow the DISPLAYED result.
+        """Attribution must follow the DISPLAYED result (Plan 00190 Task 0.5).
 
-        A non-terminal deny followed by a TERMINAL deny replaces final_result
-        with the terminal handler's, but decided_by kept naming the first
-        denier — so the reason came from one handler while the 'To disable:'
-        footer named a different one, pointing users at the wrong config key.
+        Plan 00242 Task 3.3 makes the rule deliberate and symmetric: the FIRST
+        restrictive handler (highest priority) owns both the reason shown and
+        the 'To disable:' footer, whether it is terminal or not. A later
+        terminal deny still ends the chain, but it does not take over the
+        response — so the reason and the config key can never disagree.
         """
         chain = HandlerChain()
         chain.add(
@@ -563,8 +569,9 @@ class TestHandlerChain:
 
         result = chain.execute({"tool_name": "Write"})
 
-        assert result.result.reason == "terminal reason"
-        assert result.decided_by == "terminal-denier"
+        assert result.result.reason == "first reason"
+        assert result.decided_by == "first-denier"
+        assert result.terminated_by == "terminal-denier"
 
     def test_non_terminal_deny_keeps_attribution_over_a_laxer_terminal(self) -> None:
         """The Plan 00144 semantics must survive: a laxer terminal result does
@@ -588,8 +595,9 @@ class TestHandlerChain:
     def test_non_terminal_deny_survives_later_terminal_allow(self) -> None:
         """A later TERMINAL ALLOW still cannot wash out an earlier deny.
 
-        The terminal handler stops the chain as always, but the chain's
-        outcome keeps the most restrictive decision already recorded.
+        Since Plan 00242 an ALLOW never ends the chain, so the terminal
+        allower continues rather than terminating; the chain's outcome keeps
+        the most restrictive decision already recorded either way.
         """
         chain = HandlerChain()
         denier = MockHandler(
@@ -611,7 +619,8 @@ class TestHandlerChain:
 
         assert result.result.decision == Decision.DENY
         assert result.result.reason == "bad content"
-        assert result.terminated_by == "terminal-allower"
+        assert result.terminated_by is None
+        assert result.result.context == ["tctx"]
 
     def test_execute_records_handler_names_in_result(self) -> None:
         """execute records handler names in HookResult."""
@@ -729,9 +738,10 @@ class TestHandlerChain:
         result = chain.execute(hook_input, strict_mode=False)
 
         # NON-STRICT MODE: h1 crashes but chain continues, h2 IS called
-        assert result.terminated_by == "h2"
         assert h2.handle_called == 1
-        # h2 is terminal with default ALLOW, so final result is ALLOW
+        # h2 is terminal with default ALLOW, so final result is ALLOW — and an
+        # ALLOW never ends the chain (Plan 00242), so nothing terminated it
+        assert result.terminated_by is None
         assert result.result.decision == Decision.ALLOW
         # Exception context should be accumulated
         assert any("Handler exception:" in ctx for ctx in result.result.context)
@@ -1050,3 +1060,513 @@ class TestChainDecisions:
 
         names = [d.handler for d in result.decisions]
         assert names == ["h2"]
+
+
+class TestAllowNeverEndsTheChain:
+    """Plan 00242: terminality is a property of the DECISION, not the handler.
+
+    A DENY (or ASK/DEFER) from a terminal handler may end the chain; an ALLOW
+    from a terminal handler continues to the next handler with its context
+    accumulated. This is the general form of the Plan 00241 defect class (a
+    terminal advisory ALLOW silently disabling every successor), and it holds
+    for EVERY handler, whatever its ``terminal`` flag says.
+    """
+
+    def test_terminal_allow_does_not_stop_the_chain(self) -> None:
+        chain = HandlerChain()
+        terminal_allower = MockHandler(
+            "terminal-allower",
+            priority=10,
+            terminal=True,
+            result=HookResult(decision=Decision.ALLOW, context=["advice"]),
+        )
+        successor = MockHandler("successor", priority=20, terminal=False)
+        chain.add(terminal_allower)
+        chain.add(successor)
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert successor.handle_called == 1
+        assert result.terminated_by is None
+        assert result.handlers_executed == ["terminal-allower", "successor"]
+
+    def test_terminal_allow_keeps_its_context_when_the_chain_continues(self) -> None:
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "terminal-allower",
+                priority=10,
+                terminal=True,
+                result=HookResult(decision=Decision.ALLOW, context=["first"]),
+            )
+        )
+        chain.add(
+            MockHandler(
+                "successor",
+                priority=20,
+                terminal=False,
+                result=HookResult(decision=Decision.ALLOW, context=["second"]),
+            )
+        )
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.decision == Decision.ALLOW
+        assert result.result.context == ["first", "second"]
+
+    def test_a_successor_can_still_deny_after_a_terminal_allow(self) -> None:
+        """The Plan 00241 defect class: the successor's deny must land."""
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "terminal-allower",
+                priority=10,
+                terminal=True,
+                result=HookResult(decision=Decision.ALLOW, context=["advice"]),
+            )
+        )
+        chain.add(
+            MockHandler(
+                "blocker",
+                priority=20,
+                terminal=True,
+                result=HookResult(decision=Decision.DENY, reason="blocked by successor"),
+            )
+        )
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason == "blocked by successor"
+        assert result.decided_by == "blocker"
+        assert result.terminated_by == "blocker"
+        assert result.result.context == ["advice"]
+
+    def test_terminal_deny_still_ends_the_chain(self) -> None:
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "blocker",
+                priority=10,
+                terminal=True,
+                result=HookResult(decision=Decision.DENY, reason="no"),
+            )
+        )
+        skipped = MockHandler("skipped", priority=20, terminal=False)
+        chain.add(skipped)
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert skipped.handle_called == 0
+        assert result.terminated_by == "blocker"
+
+    def test_terminal_ask_still_ends_the_chain(self) -> None:
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "asker",
+                priority=10,
+                terminal=True,
+                result=HookResult(decision=Decision.ASK, reason="confirm"),
+            )
+        )
+        skipped = MockHandler("skipped", priority=20, terminal=False)
+        chain.add(skipped)
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert skipped.handle_called == 0
+        assert result.terminated_by == "asker"
+
+    def test_terminal_continue_decision_does_not_stop_the_chain(self) -> None:
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "continuer",
+                priority=10,
+                terminal=True,
+                result=HookResult(decision=Decision.CONTINUE),
+            )
+        )
+        successor = MockHandler("successor", priority=20, terminal=False)
+        chain.add(successor)
+
+        chain.execute({"tool_name": "Bash"})
+
+        assert successor.handle_called == 1
+
+    def test_every_terminal_flag_combination_lets_a_later_deny_land(self) -> None:
+        """No handler can silently disable another, whatever its flag."""
+        for first_terminal in (True, False):
+            for second_terminal in (True, False):
+                chain = HandlerChain()
+                chain.add(
+                    MockHandler(
+                        "first",
+                        priority=10,
+                        terminal=first_terminal,
+                        result=HookResult(decision=Decision.ALLOW),
+                    )
+                )
+                chain.add(
+                    MockHandler(
+                        "second",
+                        priority=20,
+                        terminal=second_terminal,
+                        result=HookResult(decision=Decision.DENY, reason="late deny"),
+                    )
+                )
+
+                result = chain.execute({"tool_name": "Bash"})
+
+                assert result.result.decision == Decision.DENY, (first_terminal, second_terminal)
+                assert result.decided_by == "second"
+
+
+def _deny(name: str, priority: int, reason: str, *, terminal: bool = True) -> MockHandler:
+    return MockHandler(
+        name,
+        priority=priority,
+        terminal=terminal,
+        result=HookResult(decision=Decision.DENY, reason=reason),
+    )
+
+
+def _advise(name: str, priority: int, *lines: str) -> MockHandler:
+    return MockHandler(
+        name,
+        priority=priority,
+        terminal=False,
+        result=HookResult(decision=Decision.ALLOW, context=list(lines)),
+    )
+
+
+class TestCollectAllViolations:
+    """``daemon.chain.collect_all_violations`` (Plan 00242, Phase 3).
+
+    Off by default: a terminal deny short-circuits as before. On: the chain
+    keeps running after a deny, collects every deny and every advisory, and
+    returns ONE merged response led by the first (highest-priority) deny.
+    """
+
+    def test_default_execute_keeps_the_deny_short_circuit(self) -> None:
+        chain = HandlerChain()
+        chain.add(_deny("first", 10, "first reason"))
+        second = _deny("second", 20, "second reason")
+        chain.add(second)
+
+        result = chain.execute({"tool_name": "Write"})
+
+        assert second.handle_called == 0
+        assert result.terminated_by == "first"
+
+    def test_collect_all_runs_every_matching_handler_after_a_terminal_deny(self) -> None:
+        chain = HandlerChain()
+        chain.add(_deny("first", 10, "first reason"))
+        second = _deny("second", 20, "second reason")
+        third = _advise("third", 30, "some advice")
+        chain.add(second)
+        chain.add(third)
+
+        result = chain.execute({"tool_name": "Write"}, collect_all=True)
+
+        assert second.handle_called == 1
+        assert third.handle_called == 1
+        assert result.handlers_executed == ["first", "second", "third"]
+        assert result.terminated_by is None
+
+    def test_collect_all_leads_with_the_first_deny_and_attributes_it(self) -> None:
+        chain = HandlerChain()
+        chain.add(_deny("first", 10, "first reason"))
+        chain.add(_deny("second", 20, "second reason"))
+
+        result = chain.execute({"tool_name": "Write"}, collect_all=True)
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert result.result.reason.startswith("first reason")
+        assert result.decided_by == "first"
+
+    def test_collect_all_appends_every_other_deny_naming_its_handler(self) -> None:
+        chain = HandlerChain()
+        chain.add(_deny("first", 10, "first reason"))
+        chain.add(_deny("second", 20, "second reason"))
+        chain.add(_deny("third", 30, "third reason", terminal=False))
+
+        result = chain.execute({"tool_name": "Write"}, collect_all=True)
+
+        reason = result.result.reason or ""
+        assert "Also denied by: second" in reason
+        assert "second reason" in reason
+        assert "Also denied by: third" in reason
+        assert "third reason" in reason
+        assert reason.index("second reason") < reason.index("third reason")
+
+    def test_collect_all_records_every_deny_verdict(self) -> None:
+        chain = HandlerChain()
+        chain.add(_deny("first", 10, "first reason"))
+        chain.add(_deny("second", 20, "second reason"))
+
+        result = chain.execute({"tool_name": "Write"}, collect_all=True)
+
+        assert [d.decision for d in result.decisions] == [Decision.DENY, Decision.DENY]
+
+    def test_collect_all_puts_advisories_in_one_table(self) -> None:
+        chain = HandlerChain()
+        chain.add(_deny("blocker", 10, "blocked"))
+        chain.add(_advise("hinter", 20, "use the Edit tool\nsecond line"))
+        chain.add(_advise("reminder", 30, "remember the journal"))
+
+        result = chain.execute({"tool_name": "Write"}, collect_all=True)
+
+        reason = result.result.reason or ""
+        assert "| Handler | Advisory |" in reason
+        assert "| hinter | use the Edit tool |" in reason
+        assert "| reminder | remember the journal |" in reason
+        # The full advisory text still travels as context, unchanged.
+        assert result.result.context == ["use the Edit tool\nsecond line", "remember the journal"]
+
+    def test_collect_all_with_a_single_deny_and_no_advisories_is_unchanged(self) -> None:
+        chain = HandlerChain()
+        chain.add(_deny("only", 10, "only reason"))
+
+        result = chain.execute({"tool_name": "Write"}, collect_all=True)
+
+        assert result.result.reason == "only reason"
+
+    def test_collect_all_without_any_deny_returns_a_plain_allow(self) -> None:
+        chain = HandlerChain()
+        chain.add(_advise("hinter", 20, "advice"))
+
+        result = chain.execute({"tool_name": "Write"}, collect_all=True)
+
+        assert result.result.decision == Decision.ALLOW
+        assert result.result.reason is None
+        assert result.result.context == ["advice"]
+
+    def test_collect_all_bounds_the_number_of_extra_denies(self) -> None:
+        from claude_code_hooks_daemon.core.chain import COLLECT_ALL_MAX_EXTRA_DENIES
+
+        chain = HandlerChain()
+        chain.add(_deny("lead", 1, "lead reason"))
+        for i in range(COLLECT_ALL_MAX_EXTRA_DENIES + 3):
+            chain.add(_deny(f"extra-{i:02d}", 10 + i, f"extra reason {i:02d}"))
+
+        result = chain.execute({"tool_name": "Write"}, collect_all=True)
+
+        reason = result.result.reason or ""
+        assert reason.count("Also denied by:") == COLLECT_ALL_MAX_EXTRA_DENIES
+        assert "3 more" in reason
+        # The overflowed handlers are still NAMED, so nothing is silent.
+        last = f"extra-{COLLECT_ALL_MAX_EXTRA_DENIES + 2:02d}"
+        assert last in reason
+
+    def test_collect_all_bounds_each_extra_deny_excerpt(self) -> None:
+        from claude_code_hooks_daemon.core.chain import COLLECT_ALL_DENY_EXCERPT_CHARS
+
+        chain = HandlerChain()
+        chain.add(_deny("lead", 1, "lead reason"))
+        chain.add(_deny("verbose", 10, "x" * (COLLECT_ALL_DENY_EXCERPT_CHARS * 3)))
+
+        result = chain.execute({"tool_name": "Write"}, collect_all=True)
+
+        reason = result.result.reason or ""
+        assert "x" * COLLECT_ALL_DENY_EXCERPT_CHARS in reason
+        assert "x" * (COLLECT_ALL_DENY_EXCERPT_CHARS + 1) not in reason
+        assert "truncated" in reason
+
+    def test_collect_all_bounds_the_advisory_table(self) -> None:
+        from claude_code_hooks_daemon.core.chain import (
+            COLLECT_ALL_ADVISORY_EXCERPT_CHARS,
+            COLLECT_ALL_MAX_ADVISORY_ROWS,
+        )
+
+        chain = HandlerChain()
+        chain.add(_deny("lead", 1, "lead reason"))
+        for i in range(COLLECT_ALL_MAX_ADVISORY_ROWS + 2):
+            chain.add(
+                _advise(f"adv-{i:02d}", 10 + i, "y" * (COLLECT_ALL_ADVISORY_EXCERPT_CHARS * 2))
+            )
+
+        result = chain.execute({"tool_name": "Write"}, collect_all=True)
+
+        reason = result.result.reason or ""
+        assert reason.count("| adv-") == COLLECT_ALL_MAX_ADVISORY_ROWS
+        assert "2 more" in reason
+        assert "y" * (COLLECT_ALL_ADVISORY_EXCERPT_CHARS + 1) not in reason
+
+    def test_collect_all_never_lets_an_allow_end_the_chain_either(self) -> None:
+        chain = HandlerChain()
+        allower = MockHandler("allower", priority=10, terminal=True)
+        chain.add(allower)
+        chain.add(_deny("blocker", 20, "late"))
+
+        result = chain.execute({"tool_name": "Write"}, collect_all=True)
+
+        assert result.result.decision == Decision.DENY
+
+    def test_collect_all_respects_allow_is_final(self) -> None:
+        """PermissionRequest's approve-and-stop is unaffected by collect-all."""
+        chain = HandlerChain(allow_is_final=True)
+        chain.add(MockHandler("approver", priority=10, terminal=True))
+        later = MockHandler("later", priority=20, terminal=False)
+        chain.add(later)
+
+        chain.execute({"tool_name": "Read"}, collect_all=True)
+
+        assert later.handle_called == 0
+
+
+class CommittingHandler(MockHandler):
+    """Records every post-decision commit it receives (Plan 00242, Phase 2)."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.commits: list[Decision] = []
+
+    def commit_side_effects(self, hook_input: dict[str, Any], chain_decision: Decision) -> None:
+        self.commits.append(chain_decision)
+
+
+class ExplodingCommitHandler(CommittingHandler):
+    def commit_side_effects(self, hook_input: dict[str, Any], chain_decision: Decision) -> None:
+        raise RuntimeError("commit exploded")
+
+
+class TestSideEffectCommit:
+    """Every executed handler hears the chain's FINAL decision after the loop."""
+
+    def test_base_handler_commit_is_a_no_op(self) -> None:
+        handler = MockHandler("plain", priority=10)
+        handler.commit_side_effects({"tool_name": "Bash"}, Decision.DENY)
+
+    def test_executed_handlers_are_told_the_merged_decision(self) -> None:
+        chain = HandlerChain()
+        advisor = CommittingHandler(
+            "advisor",
+            priority=10,
+            terminal=False,
+            result=HookResult(decision=Decision.ALLOW, context=["hint"]),
+        )
+        blocker = CommittingHandler(
+            "blocker",
+            priority=20,
+            terminal=True,
+            result=HookResult(decision=Decision.DENY, reason="no"),
+        )
+        chain.add(advisor)
+        chain.add(blocker)
+
+        chain.execute({"tool_name": "Bash"})
+
+        assert advisor.commits == [Decision.DENY]
+        assert blocker.commits == [Decision.DENY]
+
+    def test_an_allowed_call_commits_allow(self) -> None:
+        chain = HandlerChain()
+        advisor = CommittingHandler("advisor", priority=10, terminal=False)
+        chain.add(advisor)
+
+        chain.execute({"tool_name": "Bash"})
+
+        assert advisor.commits == [Decision.ALLOW]
+
+    def test_a_handler_the_chain_never_reached_is_not_committed(self) -> None:
+        chain = HandlerChain()
+        chain.add(_deny("blocker", 10, "no"))
+        unreached = CommittingHandler("unreached", priority=20, terminal=False)
+        chain.add(unreached)
+
+        chain.execute({"tool_name": "Bash"})
+
+        assert unreached.commits == []
+
+    def test_a_non_matching_handler_is_not_committed(self) -> None:
+        chain = HandlerChain()
+        silent = CommittingHandler("silent", priority=10, should_match=False)
+        chain.add(silent)
+
+        chain.execute({"tool_name": "Bash"})
+
+        assert silent.commits == []
+
+    def test_commit_runs_after_the_whole_chain_in_collect_all_mode(self) -> None:
+        chain = HandlerChain()
+        first = CommittingHandler(
+            "first",
+            priority=10,
+            terminal=False,
+            result=HookResult(decision=Decision.ALLOW, context=["hint"]),
+        )
+        chain.add(first)
+        chain.add(_deny("blocker", 20, "no"))
+
+        chain.execute({"tool_name": "Bash"}, collect_all=True)
+
+        assert first.commits == [Decision.DENY]
+
+    def test_a_crashing_commit_is_logged_and_does_not_change_the_decision(self) -> None:
+        chain = HandlerChain()
+        chain.add(ExplodingCommitHandler("boom", priority=10, terminal=False))
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.decision == Decision.ALLOW
+        assert any("commit exploded" in line for line in result.result.context)
+
+    def test_a_crashed_handler_is_not_committed(self) -> None:
+        chain = HandlerChain()
+        crasher = CommittingHandler("crasher", priority=10, raise_exception=ValueError("x"))
+        chain.add(crasher)
+
+        chain.execute({"tool_name": "Bash"}, strict_mode=False)
+
+        assert crasher.commits == []
+
+
+class TestAllowIsFinalOptIn:
+    """PermissionRequest's 'approve and stop' is an EVENT-level opt-in.
+
+    ``HandlerChain(allow_is_final=True)`` restores allow-short-circuits for
+    the one chain whose semantic is that an approval concludes the request.
+    It is never the default and it is not a handler flag.
+    """
+
+    def test_default_chain_is_not_allow_final(self) -> None:
+        assert HandlerChain().allow_is_final is False
+
+    def test_allow_final_chain_stops_at_a_terminal_allow(self) -> None:
+        chain = HandlerChain(allow_is_final=True)
+        chain.add(
+            MockHandler(
+                "approver",
+                priority=10,
+                terminal=True,
+                result=HookResult(decision=Decision.ALLOW),
+            )
+        )
+        skipped = MockHandler("skipped", priority=20, terminal=False)
+        chain.add(skipped)
+
+        result = chain.execute({"tool_name": "Read"})
+
+        assert skipped.handle_called == 0
+        assert result.terminated_by == "approver"
+        assert result.result.decision == Decision.ALLOW
+
+    def test_allow_final_chain_does_not_stop_at_a_non_terminal_allow(self) -> None:
+        chain = HandlerChain(allow_is_final=True)
+        chain.add(
+            MockHandler(
+                "advisor",
+                priority=10,
+                terminal=False,
+                result=HookResult(decision=Decision.ALLOW, context=["fyi"]),
+            )
+        )
+        successor = MockHandler("successor", priority=20, terminal=True)
+        chain.add(successor)
+
+        chain.execute({"tool_name": "Read"})
+
+        assert successor.handle_called == 1

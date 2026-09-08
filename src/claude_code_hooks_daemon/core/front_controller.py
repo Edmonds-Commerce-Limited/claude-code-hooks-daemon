@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.core.chain import is_restrictive
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
@@ -75,16 +76,14 @@ class FrontController:
         self.handlers.sort(key=lambda h: h.priority)
 
     def dispatch(self, hook_input: dict[str, Any]) -> HookResult:
-        """Dispatch to matching handlers, supporting terminal and non-terminal execution.
+        """Dispatch to matching handlers under the Plan 00242 invariant.
 
-        Terminal handlers (terminal=True):
-            - Execute and STOP dispatch immediately
-            - Return their result as-is
-
-        Non-terminal handlers (terminal=False):
-            - Execute but allow subsequent handlers to run
-            - Accumulate their context into final result
-            - Decision from non-terminal is ignored (always treated as "allow")
+        A restrictive decision (deny/ask/defer) from a terminal handler stops
+        dispatch and is returned with the context accumulated so far. An ALLOW
+        never stops dispatch, whatever the handler's ``terminal`` flag says:
+        its context is accumulated and the next handler runs. A restrictive
+        decision from a non-terminal handler survives later, laxer results
+        (most-restrictive-wins, first restrictive owns the footer).
 
         Args:
             hook_input: Hook input dictionary from Claude Code
@@ -110,38 +109,31 @@ class FrontController:
 
                     # Track handler
                     result.add_handler(handler.name)
+                    accumulated_context.extend(result.context)
 
-                    if handler.terminal:
-                        # Terminal handler - stop dispatch and return result
-                        # Merge accumulated context from non-terminal handlers
-                        if accumulated_context:
-                            result.context = accumulated_context + result.context
-
-                        # Add all matched handlers
-                        for h in handlers_matched[:-1]:
-                            result.add_handler(h)
-
-                        self._inject_config_key_footer(result, handler)
-                        return result
-                    else:
-                        # Non-terminal handler - accumulate context and continue
-                        accumulated_context.extend(result.context)
+                    restrictive = is_restrictive(result.decision)
+                    # First restrictive result owns the response and the footer;
+                    # a laxer later result never overwrites it.
+                    if final_result is None or (
+                        restrictive and not is_restrictive(final_result.decision)
+                    ):
                         final_result = result
-                        # Track the handler that PRODUCED final_result so the footer
-                        # points at the correct config_key even if a later handler
-                        # does not match (mirrors router.py handlers_executed[-1]).
                         final_handler = handler
 
-            # No terminal handler matched - return last non-terminal result or default allow
-            if final_result:
-                # Merge accumulated context
-                if accumulated_context:
-                    final_result.context = accumulated_context
-                self._inject_config_key_footer(final_result, final_handler)
-                return final_result
-            else:
+                    if handler.terminal and restrictive:
+                        # A restrictive decision may end dispatch — nothing
+                        # later could un-deny it. An ALLOW never does.
+                        break
+
+            if final_result is None:
                 # No handlers matched at all
                 return HookResult.allow()
+
+            final_result.context = list(accumulated_context)
+            for h in handlers_matched:
+                final_result.add_handler(h)
+            self._inject_config_key_footer(final_result, final_handler)
+            return final_result
 
         except Exception as e:
             # Handler crashed - log to file and return error details

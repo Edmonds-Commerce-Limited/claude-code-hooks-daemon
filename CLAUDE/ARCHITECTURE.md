@@ -175,9 +175,10 @@ Need to validate something?
 │            Front Controller Engine           │
 │  - Sort handlers by priority (low → high)   │
 │  - Match handlers against hook input        │
-│  - Dispatch to terminal or non-terminal     │
-│  - Accumulate context from non-terminal     │
-│  - Return first terminal decision or allow  │
+│  - Run every match; merge most-restrictive  │
+│  - Accumulate context from every handler    │
+│  - A terminal DENY may end the chain;       │
+│    an ALLOW never does                      │
 └─────────────────────┬───────────────────────┘
                       │
                       ▼
@@ -208,28 +209,30 @@ Need to validate something?
 - Register handlers and sort by priority
 - Read hook input from stdin (JSON)
 - Dispatch to matching handlers
-- Handle terminal vs non-terminal execution
-- Accumulate context from non-terminal handlers
+- Merge every result most-restrictive-wins (Plan 00144)
+- Accumulate context from every executed handler
 - Write JSON output to stdout
 - Log errors without blocking execution
 
-**Dispatch Algorithm**:
+**Dispatch Algorithm** (`core/chain.py`, Plan 00242):
 
 ```python
 for handler in sorted_handlers:
     if handler.matches(hook_input):
         result = handler.handle(hook_input)
+        accumulated_context.extend(result.context)
+        if is_restrictive(result.decision) and decided_by is None:
+            decided_by = handler.name      # first deny owns reason + footer
+            final_result = result
+        # Terminality belongs to the DECISION: a restrictive result from a
+        # terminal handler ends the chain (unless collect-all mode); an
+        # ALLOW never does (unless the chain is allow_is_final).
+        if handler.terminal and is_restrictive(result.decision):
+            break
 
-        if handler.terminal:
-            # Stop dispatch, return result
-            return result
-        else:
-            # Accumulate context, continue
-            accumulated_context.append(result.context)
-            continue
-
-# No terminal handler matched
-return HookResult(decision=Decision.ALLOW, context=accumulated_context)
+for handler in executed_handlers:
+    handler.commit_side_effects(hook_input, final_result.decision)
+return final_result or HookResult(decision=Decision.ALLOW, context=accumulated_context)
 ```
 
 `HookResult` is a Pydantic model with keyword-only fields — a positional
@@ -237,10 +240,19 @@ argument raises `TypeError`.
 
 **Key Features**:
 
-- **Terminal handlers**: Stop dispatch immediately (block/allow/ask)
-- **Non-terminal handlers**: Provide guidance, allow fall-through
+- **An ALLOW never ends the chain**: a terminal handler's ALLOW continues,
+  so no handler can silently disable the handlers behind it
+- **A terminal DENY may end the chain**: nothing later could un-deny it, so
+  `terminal` is an optimisation for the blocked path, not a semantic
+- **First restrictive wins**: reason shown and `To disable:` footer name the
+  same handler
 - **Priority-based**: Lower number runs first (5-60 range)
 - **Fail-open**: Exceptions logged, execution continues
+- **Collect-all mode** (`daemon.chain.collect_all_violations`, off by
+  default): a deny no longer ends the chain either; every violation of the
+  call is reported in one merged response
+- **PermissionRequest opt-in**: that chain alone is `allow_is_final`, so
+  `auto_approve_reads`' approval concludes the request
 
 ### 2. Handler Base Class (`core/handler.py`)
 
@@ -549,18 +561,25 @@ derive from `PriorityRange` in
 
 1. **Safety First** - Destructive operations blocked before workflow checks
 2. **Fail Fast** - Critical issues caught early in dispatch
-3. **Efficiency** - Skip unnecessary checks after terminal handler matches
+3. **Efficiency** - Skip the remaining checks once a terminal handler DENIES
 
 ---
 
 ## Terminal vs Non-Terminal Handlers
 
+Terminality is a property of the DECISION (Plan 00242): an ALLOW never ends
+the chain, a DENY/ASK/DEFER from a `terminal=True` handler does. The full
+contract, the collect-all mode and the post-decision side-effect commit are
+documented in
+[HANDLER_DEVELOPMENT.md — Terminal vs Non-Terminal](HANDLER_DEVELOPMENT.md#terminal-vs-non-terminal);
+this section only shows the two shapes.
+
 ### Terminal Handlers (default)
 
 **Behaviour**:
 
-- Stop dispatch immediately after execution
-- Decision becomes final result (allow/deny/ask)
+- A DENY ends dispatch; its reason and `To disable:` footer are shown
+- An ALLOW continues to the next handler with its context kept
 - Use for enforcement and blocking
 
 **Example**:
@@ -581,8 +600,9 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
 
 **Behaviour**:
 
-- Provide context/guidance but allow dispatch to continue
-- Decision is ignored (treated as "allow")
+- Provide context/guidance; dispatch always continues
+- A DENY still denies (most-restrictive-wins) — the flag only declines the
+  short-circuit
 - Context accumulated into final result
 - Use for warnings, guidance, reminders
 
@@ -666,7 +686,7 @@ remedy instead (upgrade, else report upstream) — see the handler's entry in
 
 1. **Single Process** - No subprocess spawning (200ms → 20ms)
 2. **Lazy Loading** - Handlers loaded only when enabled
-3. **Early Exit** - Terminal handlers stop dispatch immediately
+3. **Early Exit** - A terminal handler's DENY stops dispatch (an ALLOW never does)
 4. **Regex Compilation** - Compile patterns in `__init__`
 5. **Minimal I/O** - Read stdin once, write stdout once
 

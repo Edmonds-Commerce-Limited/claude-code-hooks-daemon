@@ -23,6 +23,15 @@ def _get_enforcement_line() -> str:
         return "  # enforce_single_daemon_process: false  # Enable to prevent multiple daemon instances (auto-enabled in containers)\n"
 
 
+# daemon.chain (Plan 00242). Shipped OFF: a terminal deny short-circuits the
+# chain. ON keeps running after a deny and merges every violation into one
+# response — costs the extra handlers' time on the blocked path.
+_CHAIN_BLOCK = (
+    "  chain:\n"
+    "    collect_all_violations: false  # true = report EVERY violation of a tool call in one response\n"
+)
+
+
 class ConfigTemplate:
     """Generate configuration templates for hooks-daemon.yaml.
 
@@ -45,7 +54,10 @@ class ConfigTemplate:
             "# Daemon Settings\n"
             "daemon:\n"
             "  idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes\n"
-            "  log_level: INFO            # DEBUG, INFO, WARNING, ERROR\n" + enforcement_line + "\n"
+            "  log_level: INFO            # DEBUG, INFO, WARNING, ERROR\n"
+            + enforcement_line
+            + _CHAIN_BLOCK
+            + "\n"
             "# Handler Configuration\n"
             "# Enable/disable handlers per event type\n"
             "# Priority: lower numbers run first (5-60 range)\n"
@@ -104,7 +116,10 @@ class ConfigTemplate:
             "# Daemon Settings\n"
             "daemon:\n"
             "  idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes\n"
-            "  log_level: INFO            # DEBUG, INFO, WARNING, ERROR\n" + enforcement_line + "\n"
+            "  log_level: INFO            # DEBUG, INFO, WARNING, ERROR\n"
+            + enforcement_line
+            + _CHAIN_BLOCK
+            + "\n"
             "# Handler Configuration\n"
             "# Enable/disable handlers per event type\n"
             "# Priority: lower numbers run first (5-60 range)\n"
@@ -301,8 +316,8 @@ class ConfigTemplate:
             "  session_end: {}\n"
             "\n"
             "  # Stop - Control agent continuation. auto_continue_stop is terminal and\n"
-            "  # matches nearly every stop, so anything registered above it never runs\n"
-            "  # (Plan 00237) — put message-auditing handlers on nitpick instead.\n"
+            "  # matches nearly every stop; when it BLOCKS a stop nothing registered above\n"
+            "  # it runs (Plan 00237/00242) — put message-auditing handlers on nitpick.\n"
             "  stop:\n"
             "    auto_continue_stop: {enabled: true, priority: 15}  # Auto-continue after stop events\n"
             "\n"

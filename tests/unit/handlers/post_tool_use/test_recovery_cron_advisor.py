@@ -825,6 +825,69 @@ class TestCreationAndCompletionFireOncePerPlan:
         assert len(handler._completion_seen) <= _MAX_TRACKED_PLANS
 
 
+class TestAdviceIsNotSpentOnADeniedCall:
+    """Plan 00242 Phase 2: per-plan advice state commits only if the call ran.
+
+    A creation/completion advisory fires once per plan folder and a progress
+    advisory every Nth edit. If the Write/Edit that triggered the advice is
+    then denied by another handler, the edit never landed — so the once-only
+    marker and the progress counter roll back and the next real edit is
+    advised as it should be.
+    """
+
+    def test_denied_creation_write_is_advised_again_next_time(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        hook_input = _write_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            "# Plan\n\n**Status**: Not Started\n",
+        )
+        assert handler.handle(hook_input).context
+        handler.commit_side_effects(hook_input, Decision.DENY)
+
+        assert handler.handle(hook_input).context
+
+    def test_allowed_creation_write_stays_once_only(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        hook_input = _write_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            "# Plan\n\n**Status**: Not Started\n",
+        )
+        handler.handle(hook_input)
+        handler.commit_side_effects(hook_input, Decision.ALLOW)
+
+        assert not handler.handle(hook_input).context
+
+    def test_denied_progress_edit_does_not_advance_the_counter(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        path = "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md"
+        first = handler.handle(_progress_edit(path))
+        assert first.context
+        handler.commit_side_effects(_progress_edit(path), Decision.ALLOW)
+        # A denied edit in the interval must not count as one of the N.
+        for _ in range(_PROGRESS_ADVISE_INTERVAL - 1):
+            assert not handler.handle(_progress_edit(path)).context
+            handler.commit_side_effects(_progress_edit(path), Decision.DENY)
+
+        assert not handler.handle(
+            _progress_edit(path)
+        ).context, "denied edits advanced the progress counter"
+
+    def test_denied_completion_write_is_advised_again_next_time(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        hook_input = _write_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            "**Status**: Complete\n",
+        )
+        assert handler.handle(hook_input).context
+        handler.commit_side_effects(hook_input, Decision.DENY)
+
+        assert handler.handle(hook_input).context
+
+
 class TestPhaseCacheContract:
     """matches() caches the phase; handle() reuses it without re-detecting."""
 

@@ -20,6 +20,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Events whose chain treats a terminal ALLOW as conclusive (Plan 00242). This
+# is an EVENT-level opt-in, never a handler flag: "approve and stop" is the
+# meaning of a PermissionRequest approval and of nothing else.
+_ALLOW_IS_FINAL_EVENTS: frozenset[EventType] = frozenset({EventType.PERMISSION_REQUEST})
+
 # Format string for the config key disable footer appended to DENY/ASK reasons
 _DISABLE_FOOTER_TEMPLATE = (
     "\n\nTo disable: handlers.{event_config_key}.{handler_config_key}  (set enabled: false)"
@@ -72,9 +77,16 @@ class EventRouter:
     __slots__ = ("_chains",)
 
     def __init__(self) -> None:
-        """Initialise router with empty chains for all event types."""
+        """Initialise router with empty chains for all event types.
+
+        PermissionRequest is the one chain where a terminal ALLOW concludes the
+        request (Plan 00242): approving a permission IS the answer, so
+        ``auto_approve_reads`` approving and stopping is the intended semantic.
+        Every other chain lets an ALLOW fall through to the next handler.
+        """
         self._chains: dict[EventType, HandlerChain] = {
-            event_type: HandlerChain() for event_type in EventType
+            event_type: HandlerChain(allow_is_final=event_type in _ALLOW_IS_FINAL_EVENTS)
+            for event_type in EventType
         }
 
     def get_chain(self, event_type: EventType) -> HandlerChain:
@@ -127,7 +139,12 @@ class EventRouter:
         return self._chains[event_type].remove(handler_name)
 
     def route(
-        self, event_type: EventType, hook_input: dict[str, Any], strict_mode: bool = False
+        self,
+        event_type: EventType,
+        hook_input: dict[str, Any],
+        strict_mode: bool = False,
+        *,
+        collect_all: bool = False,
     ) -> ChainExecutionResult:
         """Route an event to its handler chain.
 
@@ -135,6 +152,9 @@ class EventRouter:
             event_type: Type of hook event
             hook_input: Hook input dictionary
             strict_mode: If True, FAIL FAST on handler exceptions (fail-closed)
+            collect_all: ``daemon.chain.collect_all_violations`` (Plan 00242):
+                keep running after a deny and merge every violation into one
+                response. See ``HandlerChain.execute``.
 
         Returns:
             Execution result from the handler chain
@@ -162,7 +182,9 @@ class EventRouter:
                 json.dumps(payload, indent=2, default=str),
             )
 
-        execution_result = chain.execute(hook_input, strict_mode=strict_mode)
+        execution_result = chain.execute(
+            hook_input, strict_mode=strict_mode, collect_all=collect_all
+        )
 
         # Inject config key footer into DENY/ASK results
         self._inject_config_key_footer(execution_result, event_type, chain)

@@ -2771,6 +2771,7 @@ def _build_initialised_controller(config: Config, project_path: Path) -> "Daemon
         project_layout=ProjectLayout.from_config(config),
         project_registry=ProjectRegistry.from_config(config, project_path),
         claude_md=config.claude_md,
+        chain=config.daemon.chain,
     )
     return controller
 

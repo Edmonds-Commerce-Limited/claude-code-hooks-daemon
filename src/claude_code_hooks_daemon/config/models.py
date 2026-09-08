@@ -1486,6 +1486,39 @@ class TransportConfig(BaseModel):
         return self.relay_enabled or self.nc_enabled
 
 
+class ChainConfig(BaseModel):
+    """Handler-chain dispatch options — ``daemon.chain`` (Plan 00242).
+
+    The chain merges every matched handler's result most-restrictive-wins,
+    and an ALLOW never ends the chain. What this block controls is what
+    happens AFTER a deny.
+
+    Attributes:
+        collect_all_violations: When False (default) a restrictive decision
+            from a terminal handler ends the chain, so a tool call that
+            violates three rules is reported one rule per round trip. When
+            True the chain keeps running after a deny, collects every deny
+            and every advisory, and returns ONE merged response: the first
+            (highest-priority) deny leads and owns the ``To disable:``
+            footer, the other denies follow as bounded excerpts naming
+            their handler, and the advisories are summarised in one table.
+            Costs the extra handlers' execution time on the blocked path;
+            ``CLAUDE/Plan/00242-terminal-handlers-are-a-flawed-primitive/
+            MEASUREMENTS.md`` records the numbers.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    collect_all_violations: bool = Field(
+        default=False,
+        description=(
+            "Keep running after a deny and report every violation of a tool "
+            "call in one merged response (opt-in; default short-circuits on "
+            "the first terminal deny)"
+        ),
+    )
+
+
 class DaemonConfig(BaseModel):
     """Configuration for the daemon server.
 
@@ -1547,6 +1580,10 @@ class DaemonConfig(BaseModel):
     transport: TransportConfig = Field(
         default_factory=TransportConfig,
         description="Per-event socket + Rust relay transport rungs (Plan 00290)",
+    )
+    chain: ChainConfig = Field(
+        default_factory=ChainConfig,
+        description="Handler-chain dispatch options (Plan 00242): collect-all-violations mode",
     )
     languages: list[str] | None = Field(
         default=None,

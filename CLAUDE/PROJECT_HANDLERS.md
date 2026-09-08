@@ -260,7 +260,7 @@ after any change to a handler's decisions:
 | ------------ | ----------- | ------------------ | --------------------------------- |
 | `handler_id` | `str`       | Yes                | Unique identifier (kebab-case)    |
 | `priority`   | `int`       | No (default: 50)   | Execution order (lower = earlier) |
-| `terminal`   | `bool`      | No (default: True) | Stop dispatch after execution?    |
+| `terminal`   | `bool`      | No (default: True) | May a DENY from it end dispatch?  |
 | `tags`       | `list[str]` | No (default: [])   | Tags for categorisation/filtering |
 
 #### Abstract Methods (must implement)
@@ -368,19 +368,25 @@ AcceptanceTest(
 
 ## Terminal vs Non-Terminal
 
+Terminality belongs to the DECISION, not the handler (Plan 00242): **an ALLOW
+never ends the chain**, whatever the flag says, so your handler can never
+silently disable a built-in behind it and a built-in cannot disable yours.
+The full contract lives in
+[HANDLER_DEVELOPMENT.md — Terminal vs Non-Terminal](HANDLER_DEVELOPMENT.md#terminal-vs-non-terminal).
+
 ### Terminal Handlers (`terminal=True`, default)
 
-- Stop the dispatch chain immediately when matched
-- Decision becomes the final result (ALLOW/DENY/ASK)
+- A DENY/ASK ends the dispatch chain; the reason and `To disable:` footer are yours
+- An ALLOW continues to the next handler with your context kept
 - Use for **enforcement**: blocking operations, requiring approval
 
 ### Non-Terminal Handlers (`terminal=False`)
 
-- Allow the dispatch chain to continue after execution
-- Context is accumulated into the final result
+- The dispatch chain always continues after execution
+- Context is accumulated into the final result; a DENY still denies
 - Use for **advisory**: reminders, warnings, context injection
 
-**Recommendation**: Start with `terminal=False` (advisory) for project handlers. This is safer -- your handler provides guidance without blocking workflow. Upgrade to `terminal=True` only when blocking is needed.
+**Recommendation**: Start with `terminal=False` (advisory) for project handlers. It documents the intent in the generated handler table, and the chain semantics are identical for an ALLOW either way. Switch to `terminal=True` only when the handler blocks and you want the rest of the chain skipped once it has.
 
 ---
 
@@ -667,7 +673,7 @@ class SessionCheckHandler(SessionStartHandlerBase):
 1. **Check event type**: Is the handler in the correct subdirectory for the event?
 2. **Check `matches()`**: Is the matching logic correct? Test with `validate-project-handlers`.
 3. **Check daemon logs**: `.claude/hooks-daemon/bin/hooks-daemon logs`
-4. **Check priority**: A higher-priority terminal handler may be stopping dispatch before yours runs.
+4. **Check priority**: A higher-priority terminal handler that DENIED the call stops dispatch before yours runs (an ALLOW never does — if the call was allowed and yours stayed silent, the problem is in `matches()`).
 
 ### Field name issues
 
