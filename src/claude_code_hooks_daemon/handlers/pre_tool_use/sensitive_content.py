@@ -678,7 +678,16 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                     "a commit message is denied with an entry index only, never the term."
                 ),
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"entry \d+ of \d+", r"deliberately not shown"],
+                # Plan 00319 Task 4.2: NOT "deliberately not shown" -- this test
+                # and its Write-probe sibling above share ONE per-transcript
+                # verbose-disclosure budget for RuleID.SENSITIVE_SECRET_TERM. A
+                # tester runs the playbook top-to-bottom in one session, so the
+                # sibling fires first and spends the budget; this test then
+                # genuinely sees the TERSE form, which never carries the verbose
+                # rationale sentence. The index-only pattern below still holds on
+                # every fire, verbose or terse, and is the substantive contract
+                # this test exists to check (see the safety_notes leak check).
+                expected_message_patterns=[r"entry \d+ of \d+"],
                 safety_notes=(
                     "Deny path — no commit is made. Verify the deny reason contains "
                     "neither the term nor the raw command line."
