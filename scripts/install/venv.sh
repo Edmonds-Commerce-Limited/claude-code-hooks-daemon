@@ -549,12 +549,25 @@ create_venv_at_path() {
     local uv_output="/tmp/uv_sync_output.$$.txt"
     local uv_rc=0
 
+    # Plan 00346 Task 2.3: every sync below passes --frozen.
+    #
+    # A bare `uv sync` treats uv.lock as a cache rather than an instruction: if
+    # it disagrees with pyproject.toml, uv RE-LOCKS against PyPI, installs that
+    # new resolution and rewrites the lockfile. So a checkout whose two files
+    # have drifted apart gets a package set nobody recorded, silently, and a
+    # lockfile edited to agree with it.
+    #
+    # This does not make a sound install fail. uv only re-locks when the two
+    # files disagree, and run_dependency_check.sh already gates exactly that
+    # with `uv lock --check` -- so --frozen turns a state the project treats as
+    # a defect into an error rather than a silent substitution.
+
     # First attempt: proactively-chosen link mode. Two explicit invocations —
     # the hardlink branch runs with UV_LINK_MODE absent (uv's default), the copy
     # branch applies it inline via a variable (not a hardcoded literal).
     if [ -n "$first_link_mode" ]; then
         if UV_LINK_MODE="$first_link_mode" UV_PROJECT_ENVIRONMENT="$venv_path" \
-                uv sync --project "$daemon_dir" "${python_args[@]}" \
+                uv sync --frozen --project "$daemon_dir" "${python_args[@]}" \
                 > "$uv_output" 2>&1; then
             uv_rc=0
         else
@@ -562,7 +575,7 @@ create_venv_at_path() {
         fi
     else
         if UV_PROJECT_ENVIRONMENT="$venv_path" \
-                uv sync --project "$daemon_dir" "${python_args[@]}" \
+                uv sync --frozen --project "$daemon_dir" "${python_args[@]}" \
                 > "$uv_output" 2>&1; then
             uv_rc=0
         else
@@ -580,7 +593,7 @@ create_venv_at_path() {
     if [ -f "$uv_output" ] && grep -q "Failed to hardlink" "$uv_output"; then
         print_warning "uv hardlink failed (likely overlay-fs) — retrying with UV_LINK_MODE=copy. Set UV_LINK_MODE=copy in your environment to skip the hardlink attempt and silence this notice."
         rm -rf "$venv_path"  # clean slate for the retry
-        if UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" "${python_args[@]}" \
+        if UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --frozen --project "$daemon_dir" "${python_args[@]}" \
                 > "$uv_output" 2>&1; then
             uv_rc=0
         else

@@ -89,10 +89,15 @@ def _run_create_venv(
     uv_log.write_text("")
     stub_dir = _write_stub_dir(tmp_path, fs_type, uv_log)
 
+    # PATH is exported AFTER sourcing, and the order is load-bearing. Sourcing
+    # venv.sh PREPENDS the daemon's own tool directory (~/.local/bin) to PATH,
+    # so a stub placed BEFORE the source is shadowed and the REAL uv and stat
+    # run instead — which silently made the fs-type probe read the true
+    # filesystem and the link-mode assertions test nothing.
     harness = textwrap.dedent(f"""\
         set -euo pipefail
-        export PATH="{stub_dir}:$PATH"
         . "{VENV_SH}"
+        export PATH="{stub_dir}:$PATH"
         create_venv_at_path "{daemon_dir}" "{venv_path}"
         """)
 

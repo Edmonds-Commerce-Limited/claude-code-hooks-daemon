@@ -109,11 +109,15 @@ Two aggravating details:
   and never runs a `scripts/qa/*.sh` wrapper, so the gate does not execute
   there at all. The real relationship is worse than a coupling — CI both
   provisions off-lock AND bypasses the only place a gate could catch it.)
-- [ ] ⬜ **Task 2.3**: `create_venv_at_path` in `scripts/install/venv.sh` runs
+- [x] ✅ **Task 2.3**: `create_venv_at_path` in `scripts/install/venv.sh` runs
   `uv sync` without `--frozen`, so a checkout whose `pyproject.toml` and
   `uv.lock` disagree gets its lockfile rewritten and re-resolved against PyPI
-  instead of an error. `tests/integration/test_ensure_venv.py` already drives
-  this function against real venv builds, so it takes a RED test first.
+  instead of an error. All three sync call sites now pass it.
+- [x] ✅ **Task 2.4**: Three `venv.sh` test files put their stub directory on
+  `PATH` *before* sourcing the script, which prepends its own tool directory
+  and shadows them — so the real `uv`, `stat` and `uname` ran and the
+  filesystem/link-mode assertions proved nothing. Found because Task 2.3's
+  `--frozen` made the real `uv` fail where the stub would not have.
 
 ### Phase 3: Correct the documentation
 

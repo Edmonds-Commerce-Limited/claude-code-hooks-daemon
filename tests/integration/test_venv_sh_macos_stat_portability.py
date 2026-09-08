@@ -91,10 +91,15 @@ def _run_create_venv(
     stat_marker = tmp_path / "stat_was_called"
     stub_dir = _write_stubs(tmp_path, uname_value, stat_marker)
 
+    # PATH is exported AFTER sourcing, and the order is load-bearing. Sourcing
+    # venv.sh PREPENDS the daemon's own tool directory (~/.local/bin) to PATH,
+    # so a stub placed BEFORE the source is shadowed and the REAL uv, stat and
+    # uname run instead — which is fatal to this test in particular, since the
+    # whole point is to make `uname -s` report Darwin.
     harness = textwrap.dedent(f"""\
         set -euo pipefail
-        export PATH="{stub_dir}:$PATH"
         . "{VENV_SH}"
+        export PATH="{stub_dir}:$PATH"
         create_venv_at_path "{daemon_dir}" "{venv_path}"
         """)
 
