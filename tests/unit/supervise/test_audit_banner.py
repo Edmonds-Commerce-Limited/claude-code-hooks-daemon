@@ -210,6 +210,96 @@ class TestAKeystrokeIsAnnouncedToo:
         assert "stalled" in outcome.noop_reason_log
 
 
+def _write_standing_auth(
+    sidecar_dir: Path, *, session_id: str = _SESSION, ts: float | None = None
+) -> Path:
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    path = sidecar_dir / f"{session_id}.standing-auth-intent"
+    payload = {
+        "ts": ts if ts is not None else _NOW - 1.0,
+        "session_id": session_id,
+        "rendered_lines": [_mod._STANDING_AUTH_HEADER_TEXT],
+        "source": "reinforcement",
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+class TestAuditFlushSurvivesAStandingAuthInjection:
+    """Plan 00319 F3: a same-tick standing-auth injection must not DROP the audit line.
+
+    Both families share the same NOOP-in-MONITOR precondition, so an armed audit
+    item and a due standing-auth reminder can both be ready on the same tick.
+    Standing-auth wins the injection (it actually types a payload), but
+    decision.log must still record that the audit ALSO flushed this tick, or a
+    banner keeps appearing with no matching decision.log line to explain it.
+    """
+
+    def test_the_audit_line_survives_as_its_own_field(self, tmp_path: Path) -> None:
+        sidecar_dir = tmp_path / "cs"
+        _write_sidecar(sidecar_dir)
+        _write_standing_auth(sidecar_dir)
+        machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+        machine.arm_audit("/model fable (auto-restore after downgrade)")
+
+        outcome = _mod.decide_once(
+            machine,
+            sidecar_dir=sidecar_dir,
+            facts=_facts(),
+            dry_run=False,
+            freshness_seconds=_mod.CompactPolicy().freshness_seconds,
+        )
+
+        # The standing-auth reminder wins the injection this tick...
+        assert outcome.decision_value == "would-standing-auth"
+        assert outcome.payload is not None
+        # ...but the audit flush that ALSO happened this tick must not vanish.
+        assert outcome.audit_flush_log is not None
+        assert "/model fable" in outcome.audit_flush_log
+
+    def test_the_banner_still_posts(self, tmp_path: Path) -> None:
+        sidecar_dir = tmp_path / "cs"
+        _write_sidecar(sidecar_dir)
+        _write_standing_auth(sidecar_dir)
+        machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+        machine.arm_audit("/effort low (coupled to model switch)")
+
+        _mod.decide_once(
+            machine,
+            sidecar_dir=sidecar_dir,
+            facts=_facts(),
+            dry_run=False,
+            freshness_seconds=_mod.CompactPolicy().freshness_seconds,
+        )
+
+        assert "effort low" in str(_banner_payload(tmp_path)["text"])
+
+    def test_apply_decision_writes_both_lines_to_the_log(self, tmp_path: Path) -> None:
+        sidecar_dir = tmp_path / "cs"
+        _write_sidecar(sidecar_dir)
+        _write_standing_auth(sidecar_dir)
+        machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+        machine.arm_audit("/model fable (auto-restore after downgrade)")
+
+        outcome = _mod.decide_once(
+            machine,
+            sidecar_dir=sidecar_dir,
+            facts=_facts(),
+            dry_run=False,
+            freshness_seconds=_mod.CompactPolicy().freshness_seconds,
+        )
+
+        log_path = tmp_path / "decision.log"
+        log = _mod.DecisionLog(path=log_path)
+        writes: list[bytes] = []
+        _mod._apply_decision(outcome, master_writer=writes.append, log=log)
+
+        log_text = log_path.read_text(encoding="utf-8")
+        assert "audit trail flush" in log_text
+        assert "/model fable" in log_text
+        assert "standing-auth" in log_text
+
+
 def _urgent_sidecar(sidecar_dir: Path, *, now: float) -> None:
     sidecar_dir.mkdir(parents=True, exist_ok=True)
     (sidecar_dir / "fg.json").write_text(

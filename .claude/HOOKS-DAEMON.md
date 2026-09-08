@@ -179,11 +179,12 @@
 |----------|---------|----------|-------------|
 | 2 | DogfoodingReminderHandler | ADVISORY | Reminds developers of dogfooding workflow and bug handling protocol |
 
-### Project (2 handlers)
+### Project (3 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 8 | ReleaseBlockerHandler | BLOCKING | Blocks Stop event while a release is in flight |
+| 20 | PlanDoneRequiresHoldingAreaHandler | BLOCKING | Deny a Complete flip whose Success Criteria never mention the holding area |
 | 41 | EnforceLlmQaHandler | BLOCKING | Block run_all.sh and direct LLM agents to llm_qa.py |
 
 ### Pseudo Nitpick (2 handlers)

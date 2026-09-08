@@ -309,15 +309,17 @@ class TestWriteCleanupStatus:
 
 
 class TestCleanupStaleSessionDirs:
-    """Tests for cleanup_stale_session_dirs() (Plan 00181 Task 3.2).
+    """Tests for cleanup_stale_session_dirs() (Plan 00181 Task 3.2; Plan 00319 F7).
 
     thread-registry/ and context-sidecar/ accumulate one JSON file per session
     that their writers never delete (they only skip stale entries at read time);
-    payload-capture/ holds per-event capture files. A file untouched for
-    max_age_days belongs to a dead session and must be aged out here.
+    payload-capture/ holds per-event capture files; downgrade-indicator/ holds
+    one per-session high-water state file (Plan 00278), read through the shared
+    ``MtimeCachedFile`` gate. A file untouched for max_age_days belongs to a
+    dead session and must be aged out here.
     """
 
-    _SUBDIRS = ("thread-registry", "context-sidecar", "payload-capture")
+    _SUBDIRS = ("thread-registry", "context-sidecar", "payload-capture", "downgrade-indicator")
 
     def test_returns_zero_when_untracked_dir_missing(self, tmp_path: Path) -> None:
         nonexistent = tmp_path / "nonexistent"
@@ -350,7 +352,7 @@ class TestCleanupStaleSessionDirs:
         ):
             removed = cleanup_stale_session_dirs(tmp_path, max_age_days=7)
 
-        assert removed == 3
+        assert removed == len(self._SUBDIRS)
         for name in self._SUBDIRS:
             assert not (tmp_path / name / "dead-session.json").exists()
 

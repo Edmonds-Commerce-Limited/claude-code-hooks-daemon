@@ -430,6 +430,61 @@ class TestNeverBlocks:
         assert result.decision == Decision.ALLOW
 
 
+# ─── Cross-event isolation (Plan 00319 F10) ──────────────────────────────────
+#
+# Handler instances are shared across events on the daemon's executor pool
+# (daemon/server.py dispatches `controller.dispatch` via
+# `loop.run_in_executor`), so instance state set by one event's matches() and
+# read by ANOTHER event's handle() before the first's own handle() runs is a
+# genuine cross-session leak, not a hypothetical one.
+
+
+class TestConcurrentEventIsolation:
+    def test_a_second_events_matches_call_does_not_corrupt_the_first(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """The interleaving a shared instance under concurrent dispatch permits.
+
+        Two events both match; B's matches() runs BEFORE A's handle() -- the
+        exact ordering a thread pool can produce. A's handle() must still
+        report A's OWN fragment, never B's.
+        """
+        hook_input_a = _tool_input(
+            "Bash", {"stdout": "budget exhausted for tool A", "stderr": ""}, session_id="sess-a"
+        )
+        hook_input_b = _tool_input(
+            "Bash", {"stdout": "quota exceeded for tool B", "stderr": ""}, session_id="sess-b"
+        )
+
+        assert handler.matches(hook_input_a) is True
+        assert handler.matches(hook_input_b) is True  # interleaved on another thread
+        result_a = handler.handle(hook_input_a)
+
+        combined = "\n".join(result_a.context)
+        assert "budget exhausted" in combined
+        assert "quota exceeded" not in combined
+
+    def test_a_non_matching_second_event_does_not_blank_the_first(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """A's fragment must survive even a B whose matches() call clears state."""
+        hook_input_a = _tool_input(
+            "Bash", {"stdout": "budget exhausted for tool A", "stderr": ""}, session_id="sess-a"
+        )
+        hook_input_b = _tool_input(
+            "Bash",
+            {"stdout": "ordinary output, nothing budget-related", "stderr": ""},
+            session_id="sess-b",
+        )
+
+        assert handler.matches(hook_input_a) is True
+        assert handler.matches(hook_input_b) is False
+        result_a = handler.handle(hook_input_a)
+
+        assert result_a.context
+        assert "budget exhausted" in "\n".join(result_a.context)
+
+
 # ─── Occurrence ledger (Task 2.2) ────────────────────────────────────────────
 
 

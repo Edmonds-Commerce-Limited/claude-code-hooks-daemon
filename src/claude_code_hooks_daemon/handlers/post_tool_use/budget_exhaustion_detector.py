@@ -433,11 +433,11 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
         self._excluded_tools: list[str] | None = None
         self._extra_patterns: list[str] | None = None
         # Cached compiled extra patterns, resolved lazily (options are applied
-        # by the registry after __init__ runs).
+        # by the registry after __init__ runs). Safe to cache: derived only
+        # from config options, which are stable for the handler's lifetime --
+        # unlike a per-event match result (see `_matched_fragment`), nothing
+        # about a compiled pattern varies by which event is in flight.
         self._compiled_extra_patterns: list[re.Pattern[str]] | None = None
-        # Matched fragment computed in matches() and reused by handle() for
-        # the same event, so the scan runs once per event.
-        self._cached_fragment: str | None = None
 
     def get_default_enabled(self) -> bool:
         """Opt-OUT handler — ON by default (owner ruling, Plan 00315).
@@ -514,22 +514,21 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Return True if the tool response matches a budget-exhaustion pattern."""
-        self._cached_fragment = None
-        text = self._prepared_response_text(hook_input)
-        if text is None:
-            return False
-        fragment = _find_matched_fragment(text, self._resolved_extra_patterns())
-        if fragment is None:
-            return False
-        self._cached_fragment = fragment
-        return True
+        return self._matched_fragment(hook_input) is not None
 
-    def _resolve_fragment(self, hook_input: dict[str, Any]) -> str | None:
-        """Return the matched fragment, reusing matches()'s cache if set."""
-        cached = self._cached_fragment
-        self._cached_fragment = None
-        if cached is not None:
-            return cached
+    def _matched_fragment(self, hook_input: dict[str, Any]) -> str | None:
+        """Return the matched fragment for THIS event's tool response, or None.
+
+        Plan 00319 F10: deliberately NOT cached on ``self``. The daemon shares
+        one handler instance across events, dispatching concurrently on an
+        executor pool (``daemon/server.py``'s ``run_in_executor``), so a
+        result stashed here by one event's ``matches()`` could be read back by
+        a DIFFERENT event's ``handle()`` if the two interleave -- a genuine
+        cross-session leak. This re-derives the fragment purely from
+        ``hook_input``, so ``matches()`` and ``handle()`` each get THEIR OWN
+        event's answer, at the cost of one extra cheap regex scan on the rare
+        path where a real match already fired ``matches()``.
+        """
         text = self._prepared_response_text(hook_input)
         if text is None:
             return None
@@ -580,7 +579,7 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
         legible, never to gate anything.
         """
         tool_name = str(hook_input.get(HookInputField.TOOL_NAME, "") or "unknown")
-        fragment = self._resolve_fragment(hook_input)
+        fragment = self._matched_fragment(hook_input)
         if fragment is None:
             return BlockingResult(decision=Decision.ALLOW)
 
