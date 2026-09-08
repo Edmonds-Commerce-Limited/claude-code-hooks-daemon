@@ -27,7 +27,7 @@ Full detail on any rule: `bin/hooks-daemon explain-rule <ID>`.
 
 **The four exemptions, in the order they are applied**:
 
-1. **None of them apply if sed is EXECUTED.** sed at a command HEAD (start, or after `;`, `&&`, `||`), any flag cluster containing `i`, `e` or `n`, or sed via `xargs`, is blocked no matter what else is in the command. So `grep x f; sed -i 's/a/b/' f` is still denied — the `grep` does not rescue it. Note `sed -n '1,20p' file` prints to stdout and cannot write, and is blocked anyway: `-n` and `-i` differ by one character, and `Read` with `offset`/`limit` does the same job.
+1. **None of them apply if sed is EXECUTED.** sed at a command HEAD (start, or after `;`, `&&`, `||`), any flag cluster containing `i`, `e` or `n`, or sed via `xargs`, is blocked no matter what else is in the command. So `grep x f; sed -i 's/a/b/' f` is still denied — the `grep` does not rescue it. Note `sed -n '1,20p' file` prints to stdout and cannot write, and is blocked anyway — DELIBERATELY, and the deny message says so: `-n` and `-i` differ by one character. `Read` with `offset`/`limit` does the same job, as does `awk 'NR>=1 && NR<=20' file`.
 2. A `git commit` message mentioning sed (sed must follow `git commit` with no command separator between).
 3. A `gh` issue/PR/release body mentioning sed (same separator rule).
 4. The command contains a `grep`, or an `echo` that does not itself carry a `sed 's/…'` substitution.
@@ -111,16 +111,15 @@ Commands piped to `tail` or `head` are **blocked** — piping truncates output a
 
 **Do NOT do the theatre** of capturing output to a file and then echoing the WHOLE file to stdout — that defeats the point and just bloats tokens.
 
-**Preferred — `echd-capture`**: capture the FULL output, see only a preview. When the block fires it prints the exact invocation to use — an ABSOLUTE path to the deployed helper, not a bare name — so copy the path from the block message (the helper is not guaranteed to be on `PATH`). If no helper path can be resolved, the block recommends the temp-file redirect below instead.
+**Preferred — the deployed `bin/echd-capture` helper**: capture the FULL output, see only a preview. Run it by the path below from the project root (the block message prints the absolute form); it is not on `PATH`, so never type the bare name.
 
 ```bash
 # WRONG — blocked (and truncates):
 pytest tests/ 2>&1 | tail -20
 
-# RIGHT — full capture, bounded preview + path to the rest. Use the ABSOLUTE
-# echd-capture path from the block message (shown here as /…/scripts/echd-capture):
+# RIGHT — full capture, bounded preview + path to the rest:
 set -o pipefail
-pytest tests/ 2>&1 | /…/scripts/echd-capture 20
+pytest tests/ 2>&1 | bin/echd-capture 20
 # prints the last 20 lines + '(full output: /…/command-output-….txt)'.
 # Use --head N for the first N lines. pipefail keeps pytest's exit code visible.
 ```
