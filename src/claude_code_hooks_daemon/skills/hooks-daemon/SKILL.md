@@ -46,8 +46,9 @@ configuration for this project":
 /hooks-daemon optimise
 ```
 
-Scores five areas, surfaces handlers that are new or disabled-but-relevant, and
-applies its recommendations only on explicit confirmation.
+Scores every registered handler across six derived areas, surfaces handlers
+that are new or disabled-but-relevant, reports the inapplicable ones as such,
+and applies its recommendations only on explicit confirmation.
 
 See [optimise.md](optimise.md) — it starts by running
 `scripts/optimise-invoke.sh`, which prints the procedure to follow.

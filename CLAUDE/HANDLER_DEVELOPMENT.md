@@ -960,6 +960,60 @@ carries a reason string, so the next person auditing coverage reads your
 reasoning instead of re-deriving it. The test fails if a handler appears in
 neither list.
 
+## `get_relevance()` — when is your handler worth enabling?
+
+`/hooks-daemon optimise` scores **every** registered handler (Plan 00330).
+There is no opt-out and no list in the skill to add yourself to: the checklist
+is derived from the registry (`iter_builtin_handler_classes` plus the
+pseudo-event registry), so a new handler is scored the moment it exists, and a
+release-gate test (`tests/integration/test_skill_surface_coherence.py`) fails
+if it is not.
+
+What a handler declares instead is **relevance** — when it is a fit for the
+project under review:
+
+```python
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
+
+def get_relevance(self, context: RelevanceContext) -> Relevance:
+    return Relevance.when(
+        context.has_file("package.json"),
+        present="package.json found, so npm is in use",
+        absent="no package.json at the project root, so there is no npm to advise on",
+    )
+```
+
+- The base implementation returns `Relevance.always()`. **Most handlers keep
+  it.** Override only when the handler needs something the project may lack:
+  `lsp_enforcement` an LSP, the npm handlers a `package.json`,
+  `validate_eslint_on_write` a JavaScript/TypeScript toolchain, the ccy
+  handlers an armed supervisor (`utils.ccy_supervisor.supervisor_relevance`),
+  the flaggable-content trio a deployed quarantine agent
+  (`handlers.utils.quarantine.quarantine_agent_relevance`). Reuse a shared
+  predicate when several handlers share a precondition, so they cannot
+  disagree about it.
+- The optimal state of a **relevant** handler is enabled, *whatever its
+  default*. `get_default_enabled()` answers "safe without knowing the
+  project"; `get_relevance()` answers "worth it, knowing the project". A
+  default-off handler whose precondition holds is recommended; one whose
+  precondition is missing is reported as "not applicable here", never as a
+  shortfall.
+- Decide from `context` only — `project_root`, `languages` (from
+  `daemon.languages` or root-level toolchain markers), `has_file(...)`,
+  `uses_any_language(...)`. Cheap existence checks; no subprocesses, no
+  directory walks, because every registered handler is asked in one pass.
+- The `reason` is shown to the human in the report, so write it as the
+  sentence they should read next to the handler's name.
+
+Report **area** is computed too (`config_optimisation.areas.area_for`) from
+the handler's event and tags, so tag your handler honestly (see the tagging
+section above): `safety` puts it under Safety, `planning`/`documentation`
+under Plan & documentation workflow, `qa-enforcement`/`validation`/
+`content-quality`/`tdd` under Code & content quality, `environment`/`daemon`/
+`health` (or a SessionStart/status-line event) under Session, environment &
+daemon; Stop, SubagentStop and nitpick handlers are Agent behaviour & message
+quality; anything else lands in Other guards.
+
 ## Checklist
 
 Before submitting handler:
@@ -967,11 +1021,14 @@ Before submitting handler:
 - [ ] Clear, descriptive name (kebab-case)
 - [ ] Appropriate priority (see guide)
 - [ ] Terminal flag set correctly
-- [ ] Comprehensive docstring
+- [ ] Comprehensive docstring — its first line is the summary `optimise`
+  prints beside the handler
 - [ ] Efficient pattern matching (regex compiled in __init__)
 - [ ] Clear error messages with alternatives
 - [ ] `get_claude_md()` answered against the four tests above, and the verdict
   recorded in the guidance-coverage classification table
+- [ ] `get_relevance()` overridden if, and only if, the handler needs
+  something a project may lack
 - [ ] Unit tests (95%+ coverage)
 - [ ] Integration test (full dispatch cycle)
 - [ ] Documentation in handler file

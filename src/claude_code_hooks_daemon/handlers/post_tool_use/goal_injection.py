@@ -57,8 +57,10 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc
+from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger, LivePlanRef
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
@@ -528,6 +530,10 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
     def get_default_enabled(self) -> bool:
         """Opt-in: only useful when a PTY supervisor is watching."""
         return False
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only under an armed ccy supervisor (Plan 00330)."""
+        return supervisor_relevance(context)
 
     def _plan_dir(self) -> str:
         """Configured plan directory (facade, or the matching default)."""

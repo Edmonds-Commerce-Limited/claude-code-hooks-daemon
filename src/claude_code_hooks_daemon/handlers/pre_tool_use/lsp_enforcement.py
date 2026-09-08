@@ -18,6 +18,7 @@ No-LSP modes (when ENABLE_LSP_TOOL env var not set):
     disable: Handler doesn't match when LSP not available
 """
 
+import json
 import logging
 import os
 import re
@@ -33,6 +34,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
@@ -60,6 +62,25 @@ class NoLspMode:
 # --- Environment variable ---
 
 _LSP_ENV_VAR = "ENABLE_LSP_TOOL"
+
+
+def _settings_json_enables_lsp(context: RelevanceContext) -> bool:
+    """Whether ``.claude/settings.json`` sets ``ENABLE_LSP_TOOL`` in its ``env``.
+
+    Malformed or absent settings mean "not configured", not an error: this is
+    advisory input to a report, so it degrades rather than aborts.
+    """
+    settings = context.project_root / ".claude" / "settings.json"
+    if not settings.is_file():
+        return False
+    try:
+        data = json.loads(settings.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.debug("Could not read %s for LSP relevance: %s", settings, exc)
+        return False
+    env = data.get("env") if isinstance(data, dict) else None
+    return bool(isinstance(env, dict) and env.get(_LSP_ENV_VAR))
+
 
 # --- Pattern detection constants ---
 
@@ -197,6 +218,25 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
     def _get_no_lsp_mode(self) -> str:
         """Get configured no_lsp_mode (set by registry via setattr)."""
         return getattr(self, "_no_lsp_mode", NoLspMode.BLOCK)
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only where an LSP is configured (Plan 00330).
+
+        The handler decides at fire time from the ``ENABLE_LSP_TOOL``
+        environment variable; the review runs in a CLI process, which
+        inherits that variable from the session, and also reads the
+        project's ``.claude/settings.json`` ``env`` block, since that is
+        where a project pins the setting for every session.
+        """
+        available = self._is_lsp_available() or _settings_json_enables_lsp(context)
+        return Relevance.when(
+            available,
+            present=f"{_LSP_ENV_VAR} is set, so LSP tools are available",
+            absent=(
+                f"no LSP configured ({_LSP_ENV_VAR} unset in the environment and in "
+                ".claude/settings.json env)"
+            ),
+        )
 
     def _is_lsp_available(self) -> bool:
         """Check if LSP is configured via environment variable."""

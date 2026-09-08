@@ -352,7 +352,7 @@ config-optimisation step (Skill tool: `skill=hooks-daemon`, `args=optimise`,
 or `/hooks-daemon optimise` in a session) — this is the formalised "enable all relevant handlers and ensure optimal
 configuration" step (Plan 00308), the same one an upgrade runs automatically
 afterwards. It profiles the project (languages, tests, CI, plan directory),
-scores the config across five areas, and produces a prioritised per-handler
+scores every registered handler across six derived areas, and produces a prioritised per-handler
 enable/skip recommendation list with ready-to-apply config snippets — it only
 applies changes on your explicit confirmation. Run this before moving on to
 Planning Workflow Setup below; it decides which handlers from that section (and

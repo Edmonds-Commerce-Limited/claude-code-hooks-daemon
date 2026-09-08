@@ -4608,6 +4608,58 @@ def cmd_record_config_optimisation_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_optimise_checklist(args: argparse.Namespace) -> int:
+    """Print the registry-derived config-optimisation checklist (Plan 00330).
+
+    The ``optimise`` skill step runs this verb and reads its output instead of
+    carrying a handler list of its own: the checklist is a derivation over
+    the live registry, each handler's relevance verdict for THIS project, and
+    the computed report areas, so it cannot omit a handler because nothing
+    lists them.
+
+    Returns:
+        0 on a rendered report (a shortfall is a finding, not an error);
+        2 when the config cannot be read.
+    """
+    from claude_code_hooks_daemon.config.loader import ConfigLoader
+    from claude_code_hooks_daemon.config_optimisation.checklist import (
+        build_checklist,
+        render_report,
+        report_as_json,
+    )
+    from claude_code_hooks_daemon.core.relevance import RelevanceContext
+
+    override = getattr(args, "project_root", None)
+    project_root = Path(override) if override else Path(get_project_path(None))
+    config_override = getattr(args, "config", None)
+    config_path = (
+        Path(config_override) if config_override else project_root / ".claude" / "hooks-daemon.yaml"
+    )
+    if not config_path.is_file():
+        print(f"ERROR: config not found at {config_path}", file=sys.stderr)
+        return 2
+
+    # Handler constructors may consult ProjectContext (npm_command probes
+    # package.json through it), so it must be live before the registry walk.
+    if not ProjectContext.is_initialized():
+        ProjectContext.initialize(config_path)
+
+    config_dict = ConfigLoader.load(config_path)
+    daemon_section = config_dict.get("daemon")
+    declared = daemon_section.get("languages") if isinstance(daemon_section, dict) else None
+    context = RelevanceContext.probe(
+        project_root,
+        declared_languages=declared if isinstance(declared, list) else None,
+    )
+    items = build_checklist(config_dict, context)
+
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(report_as_json(items), indent=2))
+    else:
+        print(render_report(items), end="")
+    return 0
+
+
 def cmd_transport_probe(args: argparse.Namespace) -> int:
     """Report Plan 00290 transport rung availability (read-only, cheap).
 
@@ -6717,6 +6769,26 @@ def main() -> int:
         help="Path to config YAML to validate (default: the project's .claude/hooks-daemon.yaml)",
     )
     parser_config_validate.set_defaults(func=cmd_config_validate)
+
+    # optimise-checklist (Plan 00330) — the registry-derived checklist the
+    # optimise skill step reads instead of a hardcoded handler list
+    parser_optimise_checklist = subparsers.add_parser(
+        "optimise-checklist",
+        help="Score every registered handler for this project (the optimise step's checklist)",
+    )
+    parser_optimise_checklist.add_argument(
+        "--config",
+        metavar="PATH",
+        default=None,
+        help="Path to hooks-daemon.yaml (default: <project-root>/.claude/hooks-daemon.yaml)",
+    )
+    parser_optimise_checklist.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    parser_optimise_checklist.set_defaults(func=cmd_optimise_checklist)
 
     # check-config-migrations command
     parser_check_migrations = subparsers.add_parser(

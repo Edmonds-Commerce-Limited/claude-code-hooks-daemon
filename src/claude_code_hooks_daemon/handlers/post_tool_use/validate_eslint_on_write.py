@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.core import (
 )
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.core.workspace import resolve_workspace
@@ -230,6 +231,14 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
         # ESLint cannot read it either, so reporting it as checkable would only
         # produce a diagnostic about content nobody saw.
         return path_exists(file_path, unreadable_means=False)
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only where JavaScript or TypeScript is written (Plan 00330)."""
+        return Relevance.when(
+            context.uses_any_language("javascript", "typescript"),
+            present="a JavaScript/TypeScript toolchain is present, so ESLint applies",
+            absent="no JavaScript/TypeScript toolchain (package.json/tsconfig.json) detected",
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing TypeScript/TSX file that needs validation."""

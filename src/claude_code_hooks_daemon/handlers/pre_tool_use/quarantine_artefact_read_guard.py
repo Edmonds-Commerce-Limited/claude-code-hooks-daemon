@@ -43,7 +43,9 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_relevance
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
@@ -170,6 +172,10 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
     def get_default_enabled(self) -> bool:
         """Opt-in: matches the estate's other Plan 00278 delegation surfaces."""
         return False
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only where the quarantine agent is deployed (Plan 00330)."""
+        return quarantine_agent_relevance(context)
 
     # ── Effective config (mode: additive | replace) ─────────────────────────
 

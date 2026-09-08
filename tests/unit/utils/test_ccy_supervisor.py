@@ -19,6 +19,27 @@ import pytest
 from claude_code_hooks_daemon.utils import ccy_supervisor
 
 
+class TestSupervisorRelevance:
+    """Plan 00330: the ccy handlers are relevant only under an armed supervisor."""
+
+    def test_armed_supervisor_is_relevant(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.relevance import RelevanceContext
+
+        env = ccy_supervisor.ccy_dir(tmp_path) / "ccy.env"
+        env.parent.mkdir(parents=True)
+        env.write_text('export CCY_CLAUDE_WRAPPER="$PWD/.claude/ccy/claude-supervise.py"\n')
+        context = RelevanceContext(project_root=tmp_path, languages=frozenset())
+        assert ccy_supervisor.supervisor_relevance(context).applicable is True
+
+    def test_unarmed_project_is_not_applicable(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.relevance import RelevanceContext
+
+        context = RelevanceContext(project_root=tmp_path, languages=frozenset())
+        verdict = ccy_supervisor.supervisor_relevance(context)
+        assert verdict.applicable is False
+        assert "supervisor" in verdict.reason
+
+
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")

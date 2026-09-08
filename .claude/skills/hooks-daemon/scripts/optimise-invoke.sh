@@ -92,8 +92,8 @@ installed daemon version's capabilities:
    entries each have a `key`, `description`, and `migration_note`. These are
    NEW capabilities/behaviour this project has not yet been reviewed against.
 5. Fold each `added` entry whose `key` names a `handlers.<event>.<name>` path into the
-   Step 5 recommendations list below (even if Step 3's five-area scan does not cover
-   that specific handler) — tag it "New since v<manifest version>" so it reads as an
+   Step 5 recommendations list below when the Step 3 checklist reports it as a
+   shortfall — tag it "New since v<manifest version>" so it reads as an
    upgrade-driven recommendation, not a stale one. `changed`/`removed` entries are
    informational only — surface them in the report but do not turn them into
    enable/disable recommendations, since they describe existing config, not a new
@@ -163,87 +163,54 @@ If it exists, count:
 
 ---
 
-## Step 3: Analyse Five Areas
+## Step 3: Score Every Registered Handler
 
-For each area, check whether specific handlers are enabled. Score each area:
-- PASS: all handlers enabled
-- WARN: 1 or more items missing but more than half present
-- FAIL: half or fewer items present
+The checklist is DERIVED from the daemon's handler registry — there is no list
+of handler names in these instructions, so a handler cannot be missed. Run:
 
-### Area 1: Safety (Critical)
+  DAEMON_CLI --project-root PROJECT_ROOT optimise-checklist --config CONFIG
 
-Check handlers.pre_tool_use.<name>.enabled for each:
+(Replace DAEMON_CLI, PROJECT_ROOT and CONFIG with the values printed at the
+top.) It scores every registered handler, built-in and nitpick alike, against
+the config and against the handler's own RELEVANCE declaration for this
+project, and groups them into six areas: Safety; Agent behaviour & message
+quality; Plan & documentation workflow; Code & content quality; Session,
+environment & daemon; Other guards.
 
-  destructive_git        - blocks git reset --hard, force push
-  sed_blocker            - prevents inplace file edit destruction
-  security_antipattern   - blocks hardcoded secrets, eval, innerHTML
-  error_hiding_blocker   - blocks swallowed exceptions and silent errors
-  absolute_path          - requires absolute file paths
-  curl_pipe_shell        - blocks curl piped to shell attacks
-  dangerous_permissions  - blocks chmod 777
+How to read it:
 
-Score: count enabled / 7
+- A handler is RELEVANT unless it declares a precondition this project lacks
+  (an LSP, a package.json, an armed ccy supervisor, a deployed quarantine
+  agent). The optimal state of every relevant handler is ENABLED, whatever
+  its default — a default-off handler is conditional, not inferior.
+- An area whose relevant handlers are all enabled collapses to one line.
+  Only shortfalls (relevant but disabled, marked ✗) and not-applicable
+  handlers (marked ○, with the reason) are listed in detail.
+- Area verdicts: PASS = every relevant handler enabled; WARN = more than half;
+  FAIL = half or fewer. The overall line and the numbered Recommendations
+  list are computed by the command, never by hand.
 
-### Area 2: Stop & Message Quality
+`--format json` gives the same data machine-readably if you need to script
+against it.
 
-Check handlers.stop.<name>.enabled:
+### Plan workflow config (not a handler, so checked here)
 
-  auto_continue_stop          - prevents Claude stopping without explanation
+Also check the top-level plan_workflow section, which no handler owns:
 
-Then check pseudo_events.nitpick.handlers.<name>.enabled (these audit
-assistant messages per turn; they are NOT Stop handlers — anything
-registered above auto_continue_stop's priority 10 never runs):
+  plan_workflow.enabled                             - plan tracking config present
+  (filesystem) plan directory has at least 1 plan   - confirms workflow actively used
 
-  hedging_language            - catches guessing instead of researching
-  dismissive_language         - catches avoiding-work, out-of-scope deflection
-
-Also check pseudo_events.nitpick.enabled - the two above are inert without it.
-
-Score: count enabled / 4
-
-### Area 3: Plan Workflow
-
-Check these items:
-
-  plan_workflow.enabled                              - plan tracking config present
-  handlers.pre_tool_use.plan_number_helper           - gives correct next plan number
-  handlers.pre_tool_use.plan_workflow                - guides plan creation workflow
-  handlers.pre_tool_use.plan_time_estimates          - blocks time estimates (anti-pattern)
-  (filesystem) plan directory has at least 1 plan    - confirms workflow actively used
-
-For "plans in use": PASS if the plan directory exists and has at least 1 plan (active or completed).
-Score: count of enabled/present items / 5
-
-### Area 4: Code Quality
-
-Check these handlers:
-
-  handlers.pre_tool_use.tdd_enforcement        - tests written before production code
-  handlers.pre_tool_use.qa_suppression         - blocks inline QA suppression comments
-  handlers.post_tool_use.lint_on_edit          - linting after every file edit
-  handlers.pre_tool_use.lsp_enforcement        - LSP tools instead of grep for symbols
-  handlers.pre_tool_use.daemon_restart_verifier - verifies daemon restart before commits
-
-Score: count enabled / 5
-
-### Area 5: Daemon Settings
-
-Check these handlers:
-
-  handlers.session_start.version_check             - notifies when daemon updates available
-  handlers.session_start.optimal_config_checker    - checks Claude Code env on startup
-  handlers.user_prompt_submit.git_context_injector - injects git status into prompts
-  handlers.user_prompt_submit.critical_thinking_advisory - periodic critical thinking nudge
-
-Score: count enabled / 4
+"Plans in use" is informational: PASS if the plan directory exists and holds at
+least one plan (active or completed). It cannot be fixed by enabling a handler,
+so report it but never turn it into a recommendation.
 
 ---
 
 ## Step 4: Output the Scored Report
 
-Format the report using Unicode box-drawing characters as shown. Use the actual values
-from your analysis. Use the check mark character (✓) for enabled/present items and
-the cross character (✗) for disabled/missing items.
+Print the profile header, then the optimise-checklist output VERBATIM — do not
+re-summarise it, shorten it, or re-order it. It is already collapsed to what a
+human needs to read.
 
   ╔══════════════════════════════════════════════════════════════╗
   ║           Hooks Daemon Configuration Optimiser               ║
@@ -254,61 +221,22 @@ the cross character (✗) for disabled/missing items.
     Test directory:     <directory name ✓, or "none detected">
     CI config:          <ci system ✓, or "none detected">
     Plan directory:     <path> (<N active, N completed> or "exists, no plans yet" or "not found")
+    plan_workflow:      enabled ✓ (directory <path>)  |  DISABLED or missing
 
-  ━━━ Area 1: Safety ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/7)
-    ✓|✗ destructive_git          enabled: blocks force push + reset --hard  |  DISABLED
-    ✓|✗ sed_blocker              enabled: prevents inplace file edit destruction  |  DISABLED
-    ✓|✗ security_antipattern     enabled: blocks hardcoded secrets + injection  |  DISABLED
-    ✓|✗ error_hiding_blocker     enabled: blocks swallowed exceptions + silent errors  |  DISABLED
-    ✓|✗ absolute_path            enabled: requires absolute file paths  |  DISABLED
-    ✓|✗ curl_pipe_shell          enabled: blocks curl piped to shell  |  DISABLED
-    ✓|✗ dangerous_permissions    enabled: blocks chmod 777  |  DISABLED
+  <optimise-checklist output, verbatim>
 
-  ━━━ Area 2: Stop & Message Quality ━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/4)
-    ✓|✗ auto_continue_stop           enabled: prevents unexplained stops  |  DISABLED
-    ✓|✗ nitpick (pseudo-event)       enabled: per-turn message auditing  |  DISABLED
-    ✓|✗ nitpick.hedging_language     enabled: catches guessing language  |  DISABLED
-    ✓|✗ nitpick.dismissive_language  enabled: catches avoiding-work language  |  DISABLED
-
-  ━━━ Area 3: Plan Workflow ━━━━━━━━━━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/5)
-    ✓|✗ plan_workflow (config)        enabled + directory set  |  DISABLED or missing
-    ✓|✗ plan_number_helper            enabled: gives correct next plan number  |  DISABLED
-    ✓|✗ plan_workflow (handler)       enabled: guides plan creation  |  DISABLED
-    ✓|✗ plan_time_estimates           enabled: blocks time estimates (anti-pattern)  |  DISABLED
-    ✓|✗ plans in use                  N plans found - workflow is active  |  no plans found yet
-
-  ━━━ Area 4: Code Quality ━━━━━━━━━━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/5)
-    ✓|✗ tdd_enforcement           enabled: tests before production code  |  DISABLED
-    ✓|✗ qa_suppression            enabled: blocks inline QA suppression comments  |  DISABLED
-    ✓|✗ lint_on_edit              enabled: lints after every file edit  |  DISABLED
-    ✓|✗ lsp_enforcement           enabled: LSP tools over grep for symbols  |  DISABLED
-    ✓|✗ daemon_restart_verifier   enabled: verifies daemon restart before commits  |  DISABLED
-
-  ━━━ Area 5: Daemon Settings ━━━━━━━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/4)
-    ✓|✗ version_check              enabled: notifies when updates available  |  DISABLED
-    ✓|✗ optimal_config_checker     enabled: checks Claude Code env on startup  |  DISABLED
-    ✓|✗ git_context_injector       enabled: injects git status into prompts  |  DISABLED
-    ✓|✗ critical_thinking_advisory enabled: periodic critical thinking nudge  |  DISABLED
-
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Overall Score: TOTAL/25 (PCT%)
-
-Where TOTAL = sum of all ✓ items, PCT = TOTAL*100/25 rounded to nearest integer.
+Then fold in Step 0: append any `added` manifest entry naming a
+`handlers.<event>.<name>` path that the checklist reports as a shortfall, tagged
+"New since v<manifest version>", so an upgrade-driven recommendation reads as
+one.
 
 ---
 
-## Step 5: Generate Recommendations
+## Step 5: Offer to Apply
 
-After the score line, list each disabled handler as a numbered recommendation.
-Group by area. Only list items that are currently disabled/missing.
-
-Example format:
-
-  Recommendations (N improvements available):
-    [1] Safety: Enable error_hiding_blocker — catches swallowed exceptions and silent errors
-    [2] Message Quality: Enable nitpick.hedging_language — catches guessing instead of researching
-    [2] Message Quality: Enable nitpick.dismissive_language — catches avoiding-work deflection
-    [3] Plan Workflow: Enable plan_time_estimates — blocks time estimates in plan documents
+The Recommendations list printed by the command is the numbered list the user
+chooses from. If plan_workflow is disabled or missing, append it as the last
+numbered recommendation. Then ask:
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Apply recommendations?
@@ -317,8 +245,8 @@ Example format:
     - Type "skip" to view report only
     - Use /configure to make targeted changes
 
-If score = 25/25 with no disabled items, output instead:
-  No recommendations — configuration is fully optimised.
+If the command printed "No recommendations" and plan_workflow is present, say
+so and go straight to Step 7.
 
 ---
 
@@ -403,15 +331,17 @@ failure of the review itself.
 
 - Preserve YAML comments when editing the config — do not strip them
 - Only recommend enabling handlers — never recommend disabling them
-- Plan workflow area: if plan_workflow.enabled is already true but some handlers
-  (plan_number_helper, plan_workflow, etc.) are disabled, recommend enabling those
-  handlers specifically rather than changing the plan_workflow section
+- Never recommend a handler the checklist reports as "not applicable here":
+  its precondition is missing, so enabling it would add noise, not protection.
+  If the user sets the precondition up later, the next run recommends it.
+- The checklist output is the source of truth for what is enabled, relevant
+  and recommended. Do not add, drop or re-score handlers by hand; if the
+  output looks wrong, report that rather than correcting it silently.
+- Plan workflow: if plan_workflow.enabled is already true but plan-related
+  handlers are shortfalls, recommend enabling those handlers specifically rather
+  than changing the plan_workflow section
 - "plans in use" check: this is informational only — it cannot be fixed by enabling a
   handler. Note it in the report but do not include it in the recommendations list
-- Area scoring thresholds:
-    PASS: all items enabled/present
-    WARN: 1 or more items missing but more than half present
-    FAIL: half or fewer items present
 
 Begin by reading the config file, then profile the project, then output the full report.
 SKILL_INSTRUCTIONS

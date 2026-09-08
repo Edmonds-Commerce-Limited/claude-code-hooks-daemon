@@ -44,7 +44,9 @@ from typing import Any, Final
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.utils import secret_redaction
+from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.model_fallback_records import (
     KEY_FALLBACK_MODEL,
     KEY_ORIGINAL_MODEL,
@@ -182,6 +184,10 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         projects; the ``downgrade_indicator`` status line covers the live one
         (Plan 00278)."""
         return False
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only under an armed ccy supervisor (Plan 00330)."""
+        return supervisor_relevance(context)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Fire on every SessionStart carrying a transcript path.

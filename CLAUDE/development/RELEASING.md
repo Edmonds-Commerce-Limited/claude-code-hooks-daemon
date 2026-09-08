@@ -475,6 +475,13 @@ Every check the script runs must pass. ANY failure = ABORT.
 The script is the single source of truth for which checks exist — do not
 restate the count here. It previously said "10" while the suite ran 13.
 
+The `hooks-daemon` skill's coherence with the shipped daemon is part of this
+gate, not a separate step: `tests/integration/test_skill_surface_coherence.py`
+(Plan 00330) runs inside the `tests` check and fails the release when a
+registered handler is invisible to `optimise`, when the skill documents a CLI
+verb that does not exist, names a retired handler, or references a config key
+the schema does not define.
+
 ---
 
 ## Step 9: Breaking Changes Check (BLOCKING)

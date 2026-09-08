@@ -13,6 +13,7 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.core.workspace import resolve_workspace
@@ -190,6 +191,14 @@ class NpmCommandHandler(PreToolUseHandlerBase):
         # an unrelated formatting test does not depend on daemon bootstrap.
         fallback_root = project_root if project_root is not None else base
         return resolve_workspace(self._project_registry, base, fallback_root).root
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only to an npm project (Plan 00330)."""
+        return Relevance.when(
+            context.has_file("package.json"),
+            present="package.json found, so npm commands are in scope",
+            absent="no package.json at the project root, so there are no npm commands to route",
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is an npm run or npx command that needs validation."""
