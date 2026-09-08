@@ -35,7 +35,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
@@ -55,6 +54,7 @@ from claude_code_hooks_daemon.utils.model_fallback_records import (
     parse_fallback_payload,
 )
 from claude_code_hooks_daemon.utils.repo_relative_path import normalise_repo_relative_path
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 # Module-level aliases so tests can monkeypatch this module's own names, and
 # so the snapshot path has exactly one redaction entry point.
@@ -464,7 +464,7 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         }
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = path.parent / f".{path.name}.{os.getpid()}.tmp"
+            tmp_path = unique_temp_path(path)
             tmp_path.write_text(json.dumps(payload), encoding="utf-8")
             tmp_path.replace(path)
         except OSError as exc:

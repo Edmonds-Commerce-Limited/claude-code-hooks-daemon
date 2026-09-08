@@ -118,10 +118,8 @@ class TestCompactionSignalHandler:
         def _raise(*args: Any, **kwargs: Any) -> None:
             raise OSError("disk full")
 
-        monkeypatch.setattr(
-            "claude_code_hooks_daemon.handlers.pre_compact.compaction_signal.os.replace",
-            _raise,
-        )
+        # Path.replace delegates to os.replace; the handler does not import os.
+        monkeypatch.setattr("os.replace", _raise)
         assert handler.handle({"session_id": "abc"}).decision is Decision.ALLOW
 
     def test_get_claude_md_none(self, handler: CompactionSignalHandler) -> None:

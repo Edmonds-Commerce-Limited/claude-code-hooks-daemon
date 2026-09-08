@@ -94,13 +94,13 @@ Investigation findings (file:line anchors):
 
 ### Phase 1: Correct the default at every origin
 
-- [ ] ⬜ **Task 1.1**: Confirm the deployed default `refreshInterval: 1` in
+- [x] ✅ **Task 1.1** (`144d8dbb`, via Plan 00362 Task 2.8): Confirm the deployed default `refreshInterval: 1` in
   `.claude/settings.json` (already edited; this file IS the installer template)
   and verify it survives the primary install-copy path.
-- [ ] ⬜ **Task 1.2**: Add `"refreshInterval": 1` to the fallback
+- [x] ✅ **Task 1.2** (`144d8dbb`): Add `"refreshInterval": 1` to the fallback
   `generate_settings_json()` in `scripts/install_version.sh:79-81`; keep
   shellcheck clean.
-- [ ] ⬜ **Task 1.3**: Lower `_RECOMMENDED_REFRESH_INTERVAL_S` 10 → 1 in
+- [x] ✅ **Task 1.3** (`144d8dbb`; the constant is now public as `RECOMMENDED_REFRESH_INTERVAL_S` so the tests can pin settings.json and the fallback to it): Lower `_RECOMMENDED_REFRESH_INTERVAL_S` 10 → 1 in
   `suggest_statusline.py`, update the rationale comment and suggestion body to
   the measured facts (39 ms cached render; idle Ctrl+Z / clock / multithread
   freshness), and update `test_suggest_statusline.py`.
@@ -195,6 +195,7 @@ enforcement channel does not touch settings.json.
      "when"). Blow-by-blow lives in JOURNAL/00175-Journal-YY-MM-DD.md. -->
 
 - Design + investigation complete (this PLAN.md); implementation pending approval.
+- Phase 1 delivered by Plan 00362 Task 2.8 (`144d8dbb`): one constant, three origins pinned by test.
 
 ## Notes & Updates
 

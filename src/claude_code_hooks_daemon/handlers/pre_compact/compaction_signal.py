@@ -16,7 +16,6 @@ feature; the supervisor is the separate actuator.
 
 import json
 import logging
-import os
 import re
 import time
 from typing import Any
@@ -25,6 +24,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PreCompactHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ class CompactionSignalHandler(PreCompactHandlerBase):
 
             stem = self._safe_session_stem(session_id)
             final_path = target_dir / f"{stem}{_SIGNAL_SUFFIX}"
-            tmp_path = target_dir / f".{stem}.{os.getpid()}.tmp"
+            tmp_path = unique_temp_path(final_path)
 
             payload = {"ts": self._now(), "session_id": session_id}
             tmp_path.write_text(json.dumps(payload), encoding="utf-8")

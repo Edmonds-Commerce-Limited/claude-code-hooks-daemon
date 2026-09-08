@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
     is_critical,
     is_red,
 )
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +193,7 @@ class ContextSidecarHandler(StatusLineHandlerBase):
 
             safe_stem = self._safe_session_stem(session_id)
             final_path = target_dir / f"{safe_stem}.json"
-            tmp_path = target_dir / f".{safe_stem}.{os.getpid()}.tmp"
+            tmp_path = unique_temp_path(final_path)
 
             tmp_path.write_text(json.dumps(payload), encoding="utf-8")
             tmp_path.replace(final_path)

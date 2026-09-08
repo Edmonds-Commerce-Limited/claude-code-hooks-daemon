@@ -52,7 +52,6 @@ that framing is both a worse prompt and a mechanism that should not exist.
 
 import json
 import logging
-import os
 import re
 import time
 from collections.abc import Callable
@@ -65,6 +64,7 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils import ccy_supervisor
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +269,7 @@ def write_standing_auth_signal(
         target_dir.mkdir(parents=True, exist_ok=True)
         stem = _UNSAFE_SESSION_CHARS.sub("_", session_id) if session_id else _SESSION_ID_FALLBACK
         final_path = target_dir / f"{stem}{_SIGNAL_SUFFIX}"
-        tmp_path = target_dir / f".{stem}.{os.getpid()}.tmp"
+        tmp_path = unique_temp_path(final_path)
         payload = {
             _FIELD_TS: time.time(),
             _FIELD_SESSION_ID: session_id,

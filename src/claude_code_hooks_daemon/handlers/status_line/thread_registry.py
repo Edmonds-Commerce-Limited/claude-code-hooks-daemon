@@ -36,10 +36,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Any
+
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,7 @@ def upsert_heartbeat(
         "session_name": session_name,
         "agent_type": agent_type,
     }
-    tmp_path = registry_dir / f".{stem}.{os.getpid()}.tmp"
+    tmp_path = unique_temp_path(path)
     tmp_path.write_text(json.dumps(entry), encoding="utf-8")
     tmp_path.replace(path)
 

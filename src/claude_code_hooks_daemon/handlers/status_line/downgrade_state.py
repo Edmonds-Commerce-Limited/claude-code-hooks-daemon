@@ -33,13 +33,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
 from claude_code_hooks_daemon.handlers.status_line.thread_registry import safe_session_stem
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +212,7 @@ def _atomic_write(dir_path: Path, session_id: str, payload: dict[str, Any]) -> N
     dir_path.mkdir(parents=True, exist_ok=True)
     stem = safe_session_stem(session_id)
     path = dir_path / f"{stem}.json"
-    tmp_path = dir_path / f".{stem}.{os.getpid()}.tmp"
+    tmp_path = unique_temp_path(path)
     tmp_path.write_text(json.dumps(payload), encoding="utf-8")
     tmp_path.replace(path)
 

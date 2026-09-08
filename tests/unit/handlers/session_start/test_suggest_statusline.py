@@ -7,6 +7,9 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.handlers.session_start import SuggestStatusLineHandler
+from claude_code_hooks_daemon.handlers.session_start.suggest_statusline import (
+    RECOMMENDED_REFRESH_INTERVAL_S,
+)
 
 # is_resume_session is a shared utility (utils/session_helpers.py); patch it
 # where this module imports it. Edge-case coverage for the function itself
@@ -123,6 +126,31 @@ class TestSuggestStatusLineHandler:
         assert '"refreshInterval"' in context_text
         assert "refreshInterval" in context_text
         assert "🧵" in context_text
+
+    def test_suggested_refresh_interval_is_the_shipped_default(
+        self, handler: SuggestStatusLineHandler
+    ) -> None:
+        """The suggestion recommends the interval the repo's own settings ship.
+
+        Plan 00175 measured a cached render at ~39 ms and concluded ``1`` is
+        right; ``.claude/settings.json`` shipped it while the suggestion kept
+        saying ``10`` (Plan 00362 D14). Both must read the one constant.
+        """
+        repo_settings = json.loads(
+            (Path(__file__).resolve().parents[4] / ".claude" / "settings.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        shipped = repo_settings["statusLine"]["refreshInterval"]
+
+        context_text = "\n".join(handler.handle({}).context)
+        snippet = context_text.split("```json")[1].split("```")[0]
+        suggested = json.loads(snippet)["statusLine"]["refreshInterval"]
+
+        assert RECOMMENDED_REFRESH_INTERVAL_S == 1
+        assert suggested == RECOMMENDED_REFRESH_INTERVAL_S
+        assert shipped == RECOMMENDED_REFRESH_INTERVAL_S
+        assert f"({RECOMMENDED_REFRESH_INTERVAL_S}s)" in context_text
 
     def test_suggestion_describes_features(self, handler: SuggestStatusLineHandler) -> None:
         """Test suggestion describes what status line shows."""
