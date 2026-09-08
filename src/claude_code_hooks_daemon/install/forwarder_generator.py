@@ -172,6 +172,71 @@ def strip_relay_guard_block(source_content: str) -> str:
     return _GUARD_BLOCK_PATTERN.sub("", source_content)
 
 
+#: Stands in for the project root when two checkouts' forwarders are compared.
+PROJECT_ROOT_PLACEHOLDER = "@@PROJECT_ROOT@@"
+
+#: Absolute paths a forwarder may legitimately name on ANY machine. Anything
+#: else surviving :func:`normalise_project_root` is machine-specific content the
+#: comparison would otherwise hide — see :func:`surviving_absolute_paths`.
+_PORTABLE_PATH_PREFIXES = ("/usr/", "/bin/", "/sbin/", "/etc/", "/dev/", "/proc/")
+
+#: An absolute path as it appears in a shell script. Two conditions, and both
+#: were added because a naive `/foo/bar` match reported ordinary shell as
+#: machine-specific:
+#:
+#: - It must not FOLLOW a name character. `$_rl_dir/events` and
+#:   `CLAUDE/LLM-INSTALL.md` are a variable expansion and a relative path; only
+#:   their tail looks absolute.
+#: - Its first component must contain an alphanumeric, so the `/-` inside
+#:   `${_rl_sfx// /-}` — a substitution pattern, not a path — is not one.
+_ABSOLUTE_PATH = re.compile(
+    r"(?<![A-Za-z0-9_.$])" r"/[A-Za-z0-9._+-]*[A-Za-z0-9][A-Za-z0-9._+-]*" r"(?:/[A-Za-z0-9._+-]+)*"
+)
+
+#: A path already rooted at the placeholder, INCLUDING its trailing components.
+#: Removed whole before scanning, because leaving it would let the scanner match
+#: its tail (`@@PROJECT_ROOT@@/untracked` → `/untracked`) and report an
+#: already-normalised path as machine-specific.
+_PLACEHOLDER_ROOTED_PATH = re.compile(
+    re.escape(PROJECT_ROOT_PLACEHOLDER) + r"(?:/[A-Za-z0-9._+-]+)*"
+)
+
+
+def normalise_project_root(content: str, project_root: str) -> str:
+    """Replace a checkout's own absolute root with a stable placeholder.
+
+    The generated forwarders bake the project root as a literal, deliberately:
+    ``build_relay_guard_block`` is a zero-spawn hot path that must not compute
+    a path at hook-run time. That makes the artefact correct and
+    machine-specific at once, so a byte comparison between two checkouts fails
+    on the root alone.
+
+    Normalising it lets the comparison stay EXACT on everything else. The
+    surface is small enough to be safe: two distinct lines, in 27 of the 31
+    tracked hook files (Plan 00250 Task 2.4c). Pair this with
+    :func:`surviving_absolute_paths` so normalising one path cannot hide a
+    second one appearing later.
+    """
+    return content.replace(project_root.rstrip("/"), PROJECT_ROOT_PLACEHOLDER)
+
+
+def surviving_absolute_paths(content: str) -> list[str]:
+    """Machine-specific absolute paths left after normalisation, if any.
+
+    Without this, :func:`normalise_project_root` would be a blind spot: a third
+    baked path added later would be compared away rather than caught. System
+    paths (``/usr/bin/env`` and the like) are portable and excluded.
+    """
+    scannable = _PLACEHOLDER_ROOTED_PATH.sub("", content)
+    return sorted(
+        {
+            match.group(0)
+            for match in _ABSOLUTE_PATH.finditer(scannable)
+            if not match.group(0).startswith(_PORTABLE_PATH_PREFIXES)
+        }
+    )
+
+
 #: Matches the single `send_request_stdin "Event" [mode]` or
 #: `forward_stop_event "Event"` call line every deployed forwarder ends with.
 #: Captures: (1) function name, (2) the already-quoted argument list.

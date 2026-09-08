@@ -11,10 +11,16 @@ CRITICAL: If this test fails, either:
 - Or the hook scripts need regenerating
 """
 
+import difflib
 import tempfile
 from pathlib import Path
 
 import pytest
+
+from claude_code_hooks_daemon.install.forwarder_generator import (
+    normalise_project_root,
+    surviving_absolute_paths,
+)
 
 
 def get_project_root() -> Path:
@@ -118,9 +124,25 @@ class TestDogfoodingHookScripts:
         - Installer creates correct scripts
         - No manual edits have drifted from installer
         - Script updates are propagated to installer code
+
+        The comparison normalises the project root first, and ONLY the project
+        root. The forwarders bake it as a literal on purpose — the relay guard
+        is a zero-spawn hot path that must not compute a path at hook-run time
+        — so a verbatim comparison additionally asserted "this checkout sits at
+        the same absolute path as the machine that generated the committed
+        file". True on one box, false on every CI runner, and none of the three
+        properties above. `test_no_other_machine_specific_path_survives` keeps
+        the normalisation from becoming a blind spot (Plan 00250 Task 2.4c).
         """
-        installed = get_installed_hook_scripts()
-        fresh = generate_fresh_hook_scripts()
+        root = str(get_project_root())
+        installed = {
+            name: normalise_project_root(content, root)
+            for name, content in get_installed_hook_scripts().items()
+        }
+        fresh = {
+            name: normalise_project_root(content, root)
+            for name, content in generate_fresh_hook_scripts().items()
+        }
 
         # Check for missing or extra scripts
         installed_names = set(installed.keys())
@@ -158,9 +180,21 @@ class TestDogfoodingHookScripts:
                 "\nMismatched scripts:",
             ]
 
+            # A mismatch that only names the file leaves regenerating blindly as
+            # the cheapest response — which is the drift this test exists to
+            # catch. Show which lines differ.
             for script_name in mismatches:
                 error_msg.append(f"\n  {script_name}:")
-                error_msg.append("    Installed version differs from installer output")
+                diff = difflib.unified_diff(
+                    installed[script_name].splitlines(),
+                    fresh[script_name].splitlines(),
+                    fromfile=f"installed/{script_name}",
+                    tofile=f"installer-output/{script_name}",
+                    lineterm="",
+                    n=1,
+                )
+                for line in list(diff)[:40]:
+                    error_msg.append(f"\n    {line}")
 
             error_msg.extend(
                 [
@@ -173,6 +207,28 @@ class TestDogfoodingHookScripts:
             )
 
             pytest.fail("".join(error_msg))
+
+    def test_no_other_machine_specific_path_survives(self):
+        """Normalising the project root must not hide a SECOND baked path.
+
+        The comparison above normalises exactly one thing. If a future change
+        bakes another absolute path into a forwarder, the comparison would
+        silently treat it as template — so it is asserted here instead, over
+        the tracked files themselves.
+        """
+        root = str(get_project_root())
+        offenders = {}
+        for name, content in get_installed_hook_scripts().items():
+            surviving = surviving_absolute_paths(normalise_project_root(content, root))
+            if surviving:
+                offenders[name] = surviving
+
+        assert not offenders, (
+            "a tracked hook script names an absolute path that is neither the "
+            "project root nor a portable system path, so it is machine-specific "
+            "content the dogfooding comparison would normalise away rather than "
+            f"catch:\n{offenders}"
+        )
 
     def test_all_hook_scripts_are_executable(self):
         """All hook scripts must have executable permissions."""

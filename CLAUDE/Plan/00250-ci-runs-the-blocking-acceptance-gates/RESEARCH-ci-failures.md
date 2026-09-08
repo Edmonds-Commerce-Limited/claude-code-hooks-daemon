@@ -307,3 +307,86 @@ differs from installer output"*. No diff, no line number. A dogfooding failure
 that cannot be diagnosed from its own message is one more reason to regenerate
 blindly rather than investigate — which is precisely the drift the test exists
 to prevent.
+
+### Correction: root-normalisation is necessary and NOT sufficient
+
+The section above is right about the measurement and wrong about the
+conclusion. Implementing it turned up the reason, and the guard it recommends —
+"assert no OTHER machine-specific absolute path survives" — is what caught it,
+on its first real run.
+
+`build_relay_guard_block` has **two branches**, and its own docstring explains
+why (Plan 00290 F3):
+
+- Normally the events directory is computed dynamically in bash
+  (`$_rl_dir/events$_rl_sfx`), so the project root is the only baked path.
+- When that dynamic path would exceed the **AF_UNIX 108-byte limit**, the
+  function bakes the daemon's resolved fallback directory as a literal instead.
+
+Which branch you get is a function of the checkout path's LENGTH:
+
+| Root                                                                | Length | Branch   | Second baked path                            |
+| ------------------------------------------------------------------- | ------ | -------- | ---------------------------------------------- |
+| `/workspace`                                                        | 10     | dynamic  | none                                           |
+| `/home/runner/work/claude-code-hooks-daemon/claude-code-hooks-daemon` | 67     | fallback | `/run/user/1000/hooks-daemon-5768fca8-events` |
+
+So the tracked forwarders (generated at a 10-character root) and a runner's
+regeneration (at a 67-character one) differ in **shape**, not merely in a
+literal. Both are correct outputs for their own machine. No amount of
+root-normalisation reconciles them, and it would be wrong to try — the
+difference is real.
+
+**The 2-distinct-lines measurement was true, and true only of this container.**
+It was taken on the tracked files here, which is precisely the machine that
+cannot exhibit the fallback branch. Measuring the artefact told me nothing about
+the generator's other branch; the mistake was generalising from one to the
+other, having just spent the day warning about that exact move.
+
+### What this does to the prior question
+
+It sharpens it into the decisive one: **a tracked artefact whose content SHAPE
+depends on the deploying machine's path length cannot be byte-compared against a
+regeneration anywhere else.** The test as conceived is unsatisfiable on a runner
+by construction, not by oversight.
+
+A candidate that survives this, for whoever takes the task on: the tracked file
+records the root it was generated at, in `_rl_dir="..."`. Regenerating at THAT
+root — rather than at the current checkout's — and comparing exactly would test
+all three stated purposes on any machine, with no normalisation at all. It needs
+checking that a short root still takes the dynamic branch on a runner (the
+fallback lookup may also depend on a runtime directory existing), which is one
+measurement rather than a redesign.
+
+### What landed anyway
+
+The normalisation and the surviving-path guard are both in, tested, and worth
+keeping regardless of how the prior question is answered: the guard is what
+turned an invisible second baked path into a named test failure, and it will do
+the same for a third.
+
+### The branch decision, measured
+
+`event_socket_dir_is_fallback` depends on the hostname as well as the root — it
+builds `{untracked}/events{hostname_suffix}/{longest_event}.sock` and asks
+whether it fits AF_UNIX's 108 bytes. Longest wired event name:
+`user-prompt-expansion` (21 chars).
+
+| Checkout root                                                       | Resulting socket path | Margin  | Branch   |
+| ------------------------------------------------------------------- | --------------------- | ------- | -------- |
+| `/workspace`                                                        | 67 bytes              | **+41** | dynamic  |
+| `/home/runner/work/claude-code-hooks-daemon/claude-code-hooks-daemon` | 124 bytes             | **−16** | fallback |
+
+A runner is 16 bytes over. Not marginal, and not fixable by shortening a name.
+
+**This is the number the candidate fix needs.** With the short `/workspace`
+root and an EMPTY hostname suffix the path is 54 bytes, leaving **54 characters
+of headroom for the hostname suffix**. Linux caps a hostname at 64 and the
+suffix is `-` plus the lowercased hostname, so a 53-character hostname would be
+required to flip the branch. Regenerating at the root the tracked file records
+therefore takes the dynamic branch on any realistic machine — the candidate is
+viable, with a measured margin rather than an assumption.
+
+The third machine-specific input is worth naming explicitly, since two of the
+three surprised someone today: the generated guard depends on the checkout
+**root**, the **hostname**, and the set of **wired event names** (a longer event
+name added later eats the same budget).
