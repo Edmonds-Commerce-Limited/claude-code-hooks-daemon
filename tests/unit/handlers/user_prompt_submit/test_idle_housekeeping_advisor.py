@@ -14,6 +14,7 @@ from unittest.mock import patch
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.transcript_reader import ContentBlock, TranscriptMessage
+from claude_code_hooks_daemon.daemon.housekeeping import report_only_steps
 from claude_code_hooks_daemon.handlers.user_prompt_submit.idle_housekeeping_advisor import (
     _RECOVERY_MARKER,
     IdleHousekeepingAdvisoryHandler,
@@ -253,6 +254,16 @@ class TestCustomGuidanceDoc:
         handler = IdleHousekeepingAdvisoryHandler()
         blob = self._fire(handler)
         assert "HOUSEKEEPING MODE" in blob
+
+    def test_default_guidance_names_the_shared_housekeeping_pass(self) -> None:
+        """Plan 00330 Decision 7: the advisory is the idle trigger for the SAME
+        pass the routed ``housekeeping`` command runs, so its candidate audits
+        are the pass's report-only steps, not a second hand-written list."""
+        blob = self._fire(IdleHousekeepingAdvisoryHandler())
+        assert "hooks-daemon housekeeping" in blob
+        for step in report_only_steps():
+            assert " ".join(step.cli_argv) in blob, step.name
+        assert "CHANGED" in blob
 
     def test_additive_appends_custom_doc(self, tmp_path: Path) -> None:
         doc = tmp_path / "housekeeping.md"
