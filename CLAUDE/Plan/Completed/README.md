@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00323: optimise checklist names retired handlers](00323-optimise-checklist-names-retired-handlers/PLAN.md) - Complete (the config-optimisation checklist scored four handlers Plan 00237 deleted, so a fully-configured project could never exceed 25/29 and was told to enable handlers that do not exist)
+
 - [00322: post upgrade optimise deferral and client noise](00322-post-upgrade-optimise-deferral-and-client-noise/PLAN.md) - Complete (the mandatory post-upgrade config-optimisation review deferred itself to "your NEXT Claude Code session" and was duly filed as optional; it now claims the current session and lives at `/hooks-daemon optimise`)
 
 - [00321: injected goal has no retraction path](00321-injected-goal-has-no-retraction-path/PLAN.md) - Complete (the supervisor could set the `/goal` slot but nothing could clear it; adds a no-payload `.goal-clear` trigger, a supervisor-typed `/goal clear`, and a `hooks-daemon clear-goal` CLI for the already-empty-ledger case)

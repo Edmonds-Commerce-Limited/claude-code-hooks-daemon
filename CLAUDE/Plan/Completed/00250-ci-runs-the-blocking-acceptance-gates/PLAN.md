@@ -1,6 +1,6 @@
 # Plan 00250: CI must actually run the acceptance gates it calls blocking
 
-**Status**: In Progress — every success criterion is met; the one open item is Task 2.4e, now DIAGNOSED (a Swift toolchain cold-start timeout) and fixed with a CI warm-up step, awaiting a single green run on all three interpreters to confirm the fix holds
+**Status**: Complete
 **Created**: 2026-08-17
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -196,7 +196,10 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
   offenders. The baked roots are now an argument
   (`unexpected_absolute_paths`), measured against the real artefact: 27 files
   before, none after.
-- [ ] 🔄 **Task 2.4e**: Playbook probe **#144** (Swift lint) — **diagnosed on
+- [x] ✅ **Task 2.4e**: **Confirmed**: run `34224302999` green on 3.11, 3.12
+  and 3.13 with the warm-up in place, and the run before it (`34222876313`)
+  also ran probe #144 clean on all three, failing only on two unrelated
+  defects fixed by then. Playbook probe **#144** (Swift lint) — **diagnosed on
   recurrence**, run `34220935600` (3.12 only). Quoting the observed text paid
   for itself on the first recurrence: *"Swift lint check timed out after 15s …
   the write was ALLOWED without this check passing"*. It IS the timeout branch
@@ -299,3 +302,5 @@ chose this for `uv`, and the argument is identical.
 <!-- Curated milestones + delivery commit hashes. Blow-by-blow log lives in JOURNAL/. -->
 
 - Filed at the commit that adds this plan.
+- Closed on CI run `34224302999`: the first fully green run on all three
+  interpreters with the Swift warm-up step in the workflow.
