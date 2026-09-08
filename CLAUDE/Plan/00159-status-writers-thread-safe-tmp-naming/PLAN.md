@@ -63,13 +63,13 @@ Observation 1, confidence ~72%):
 
 ### Phase 1: Harden temp-file naming across the sibling writers
 
-- [ ] ⬜ **Task 1.1**: Enumerate every writer using the `.{stem}.{pid}.tmp`
+- [x] ✅ **Task 1.1** (`144d8dbb`, via Plan 00362 Task 2.8; nine writers found, listed in `tests/unit/utils/test_temp_names.py`): Enumerate every writer using the `.{stem}.{pid}.tmp`
   convention and confirm each exact `file:line` (`thread_registry.py`,
   `context_sidecar.py`, `compaction_signal.py`, and any fourth surfaced by a
   repo-wide search for the pattern).
-- [ ] ⬜ **Task 1.2**: Add a failing test per writer asserting two concurrent
+- [x] ✅ **Task 1.2** (`144d8dbb`; one concurrency test on the shared helper plus a grep guard over every writer, rather than nine copies): Add a failing test per writer asserting two concurrent
   writes to the SAME stem do not leave a torn/partial final file (RED).
-- [ ] ⬜ **Task 1.3**: Make temp names unique per writer — include
+- [x] ✅ **Task 1.3** (`144d8dbb`; `utils/temp_names.unique_temp_path`, pid + thread ident + random token): Make temp names unique per writer — include
   `threading.get_ident()` in the suffix (or `tempfile.mkstemp(dir=...)`) —
   and get the tests green (GREEN), keeping the four writers uniform.
 - [ ] ⬜ **Task 1.4**: Run QA (`./scripts/qa/llm_qa.py all`), restart the daemon,
@@ -77,7 +77,7 @@ Observation 1, confidence ~72%):
 
 ### Phase 2: Supervisor `supervise()` stdin_fd type narrowing (v3.44.0 review)
 
-- [ ] ⬜ **Task 2.1**: In `.claude/ccy/claude-supervise.py`, `supervise()`
+- [x] ✅ **Task 2.1** (already fixed on main before `144d8dbb`: `resolved_stdin_fd: int` is the local every later site and the `_on_winch` closure use; `pyright .claude/ccy/claude-supervise.py` reports 0 errors, verified under Plan 00362 Task 2.8): In `.claude/ccy/claude-supervise.py`, `supervise()`
   resolves `stdin_fd: int | None` at ~line 2602
   (`stdin_fd = stdin_fd if stdin_fd is not None else sys.stdin.fileno()`), but
   because the resolved value is captured by the `_on_winch` closure (~line 2656)

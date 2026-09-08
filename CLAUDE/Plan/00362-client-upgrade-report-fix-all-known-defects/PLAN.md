@@ -110,7 +110,7 @@ while the detectors silently do not run.
   reconciliation collapses superseded entries so only the current truth is
   asserted. Decision: collapse by truth key, keeping the highest-version
   entry.
-- [ ] ⬜ **Task 2.8** (D14, D19, R2, D21 — Plans 00175 and 00159, plus the
+- [x] ✅ **Task 2.8** (`144d8dbb`; D19 and D21 were found already closed on main and are pinned by pyright and a new test respectively) (D14, D19, R2, D21 — Plans 00175 and 00159, plus the
   bug-report tool): the statusline suggestion and the install fallback both
   recommend `refreshInterval: 1`; the seven Pyright `int | None` sites in
   `supervise()`; the nine pid-keyed temp filenames gain a unique component;
