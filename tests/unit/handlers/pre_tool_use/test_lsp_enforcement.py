@@ -923,6 +923,32 @@ class TestLspEnforcementAcceptanceTests:
             assert test.command
             assert test.description
 
+    def test_grep_tool_tests_note_they_are_unreachable_if_grep_is_disabled_at_source(
+        self,
+    ) -> None:
+        """Plan 00295 Task 3.9: a project can deny the Grep tool at source via
+        `permissions.deny: ["Grep"]` in .claude/settings.json (the same
+        generic mechanism artifact_publish_blocker's tests already document
+        for Artifact/enableArtifact) -- the two tests that dispatch the Grep
+        TOOL directly must say so, or a runner in such a project reports a
+        false daemon defect instead of a valid SKIP."""
+        from claude_code_hooks_daemon.core.acceptance_test import ToolPayload
+        from claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement import (
+            LspEnforcementHandler,
+        )
+
+        handler = LspEnforcementHandler()
+        grep_tool_tests = [
+            test
+            for test in handler.get_acceptance_tests()
+            if isinstance(test.tool_payload, ToolPayload) and test.tool_payload.tool_name == "Grep"
+        ]
+        assert len(grep_tool_tests) == 2, "expected exactly the two Grep-tool probes"
+        for test in grep_tool_tests:
+            assert test.safety_notes is not None
+            assert "permissions.deny" in test.safety_notes
+            assert "Grep" in test.safety_notes
+
 
 class TestLspEnforcementGetRules:
     """get_rules() (Plan 00116): one rule; mode is a cadence knob, not a category."""

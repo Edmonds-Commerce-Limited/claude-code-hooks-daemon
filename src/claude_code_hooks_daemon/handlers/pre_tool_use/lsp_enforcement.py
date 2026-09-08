@@ -499,7 +499,14 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
                     r"LSP",
                     r"goToDefinition|workspaceSymbol",
                 ],
-                safety_notes="Uses Grep tool - safe, read-only operation",
+                safety_notes=(
+                    "Uses Grep tool - safe, read-only operation. A project denying "
+                    'Grep at source (`permissions.deny: ["Grep"]` in '
+                    "`.claude/settings.json` -- the same generic mechanism "
+                    "artifact_publish_blocker documents for Artifact/enableArtifact) "
+                    "removes the tool entirely; a runner without it available "
+                    "records a valid SKIP rather than attempting this test."
+                ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
@@ -515,7 +522,14 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses Grep tool - safe, read-only operation",
+                safety_notes=(
+                    "Uses Grep tool - safe, read-only operation. A project denying "
+                    'Grep at source (`permissions.deny: ["Grep"]` in '
+                    "`.claude/settings.json` -- the same generic mechanism "
+                    "artifact_publish_blocker documents for Artifact/enableArtifact) "
+                    "removes the tool entirely; a runner without it available "
+                    "records a valid SKIP rather than attempting this test."
+                ),
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
