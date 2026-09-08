@@ -25,6 +25,8 @@ from typing import Any
 
 import yaml
 
+from claude_code_hooks_daemon.install.version_parse import parse_version_tuple
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -112,11 +114,8 @@ class TruthChangeManifest:
 
 
 def _parse_version(version: str) -> tuple[int, ...]:
-    """Parse a version string like '3.16.0' into a sortable tuple."""
-    try:
-        return tuple(int(x) for x in version.split(_VERSION_SEPARATOR))
-    except (ValueError, AttributeError) as exc:
-        raise ValueError(f"Invalid version string: {version!r}") from exc
+    """Parse '3.16.0' or 'v3.16.0' into a sortable tuple (shared parser)."""
+    return parse_version_tuple(version)
 
 
 def _default_truth_changes_dir() -> Path:
