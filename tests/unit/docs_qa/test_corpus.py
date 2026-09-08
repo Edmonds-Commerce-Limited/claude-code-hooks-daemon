@@ -1192,3 +1192,54 @@ class TestIterMarkdownPaths:
         assert matches == ["src/NOTES.md"]
         assert entered_dirs
         assert not any("node_modules" in entered for entered in entered_dirs)
+
+
+class TestProjectExcludePaths:
+    """Plan 00362 Task 2.9: ``daemon.exclude_paths`` (carried on
+    ``policy.exclude_paths``) removes a path from every docs-QA scope
+    judgement, through the same glob dialect the content blockers use."""
+
+    def test_an_excluded_tree_file_is_out_of_scope(self, tmp_path: Path) -> None:
+        (tmp_path / "docs" / "fixtures").mkdir(parents=True)
+        target = tmp_path / "docs" / "fixtures" / "bad.md"
+        target.write_text("# bad\n")
+        policy = DocumentationPolicy(exclude_paths=("docs/fixtures/**",))
+        assert not is_in_scope(target, tmp_path, policy)
+        assert is_in_scope(target, tmp_path, DocumentationPolicy())
+
+    def test_an_anchored_pattern_resolves_against_the_project_root(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        target = tmp_path / "CLAUDE" / "Foo.md"
+        target.write_text("# foo\n")
+        assert not is_in_scope(target, tmp_path, DocumentationPolicy(exclude_paths=("/CLAUDE/*",)))
+
+    def test_excluded_paths_drop_out_of_the_corpus_inventory(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE" / "fixtures").mkdir(parents=True)
+        kept = tmp_path / "CLAUDE" / "Kept.md"
+        kept.write_text("# kept\n")
+        dropped = tmp_path / "CLAUDE" / "fixtures" / "Dropped.md"
+        dropped.write_text("# dropped\n")
+        policy = DocumentationPolicy(exclude_paths=("**/fixtures/**",))
+        assert iter_corpus_paths(tmp_path, policy) == [kept]
+
+    def test_a_manifest_or_module_doc_path_is_not_lintable_when_excluded(
+        self, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.docs_qa.corpus import is_lintable_path
+        from claude_code_hooks_daemon.docs_qa.policy import GeneratedDocEntry
+
+        (tmp_path / "vendored" / "pkg").mkdir(parents=True)
+        module_doc = tmp_path / "vendored" / "pkg" / "CLAUDE.md"
+        module_doc.write_text("# module\n")
+        generated = tmp_path / "vendored" / "GENERATED.md"
+        generated.write_text("# generated\n")
+        qa = DocumentationQaPolicy(
+            generated_docs=(GeneratedDocEntry(glob="vendored/GENERATED.md", generator="x"),)
+        )
+        included = DocumentationPolicy(qa=qa)
+        excluded = DocumentationPolicy(qa=qa, exclude_paths=("vendored/**",))
+
+        assert is_lintable_path("vendored/pkg/CLAUDE.md", module_doc, tmp_path, included)
+        assert is_lintable_path("vendored/GENERATED.md", generated, tmp_path, included)
+        assert not is_lintable_path("vendored/pkg/CLAUDE.md", module_doc, tmp_path, excluded)
+        assert not is_lintable_path("vendored/GENERATED.md", generated, tmp_path, excluded)

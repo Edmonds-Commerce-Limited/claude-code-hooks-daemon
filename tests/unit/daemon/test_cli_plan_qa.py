@@ -254,3 +254,30 @@ class TestCheckStaged:
     def test_clean_stage_exits_zero(self, tmp_path: Path) -> None:
         root = _scaffold(tmp_path)
         assert cmd_plan_qa(_args(root, check_staged=True)) == 0
+
+
+class TestProjectExcludePaths:
+    """Plan 00362 Task 2.9: the CLI reads ``daemon.exclude_paths`` from config."""
+
+    def test_sweep_skips_an_excluded_plan_folder(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        rogue = root / "CLAUDE" / "Plan" / "00002-rogue"
+        rogue.mkdir()
+        (rogue / "PLAN.md").write_text("# Plan 00002: rogue\n\n**Status**: Complete\n")
+        assert cmd_plan_qa(_args(root, sweep=True)) == 1
+
+        (root / ".claude" / "hooks-daemon.yaml").write_text(
+            _CONFIG_ENABLED + "daemon:\n  exclude_paths:\n    - 'CLAUDE/Plan/00002-rogue/**'\n"
+        )
+        assert cmd_plan_qa(_args(root, sweep=True)) == 0
+
+    def test_lint_of_an_excluded_file_reports_clean(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        target = root / "CLAUDE" / "Plan" / "00001-first" / "PLAN.md"
+        target.write_text("# Plan 00001: first\n\nno status line\n")
+        assert cmd_plan_qa(_args(root, lint=target)) == 1
+
+        (root / ".claude" / "hooks-daemon.yaml").write_text(
+            _CONFIG_ENABLED + "daemon:\n  exclude_paths:\n    - 'CLAUDE/Plan/00001-first/**'\n"
+        )
+        assert cmd_plan_qa(_args(root, lint=target)) == 0

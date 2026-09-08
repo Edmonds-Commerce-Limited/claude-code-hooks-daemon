@@ -110,6 +110,20 @@ class QaPolicy(Protocol):
     def plan_doc_size(self) -> PlanDocSizePolicy: ...
 
 
+def _normalised_exclude_paths(exclude_paths: Sequence[str] | None) -> tuple[str, ...]:
+    """The project-wide ``daemon.exclude_paths`` as the tuple the context carries.
+
+    Plan 00362 Task 2.9. The tree and README views are deliberately NOT
+    filtered by it: removing a folder the index still lists would make the
+    cross-file checks report the index as wrong (a row with no folder, a
+    statistics block that no longer recounts). The exclusion is applied by
+    :func:`plan_qa.runner.run_stage` to the FINDINGS instead, so an excluded
+    plan is never reported on while every whole-tree invariant still sees
+    the tree as it is.
+    """
+    return () if exclude_paths is None else tuple(exclude_paths)
+
+
 def _tree_and_readme(
     project_root: Path,
     plan_dir_rel: str,
@@ -190,6 +204,7 @@ def sweep_context(
     policy: QaPolicy,
     today: date,
     layout: "ProjectLayout | None" = None,
+    exclude_paths: Sequence[str] | None = None,
 ) -> CheckContext:
     """Build the Stage 3 (SWEEP) context: full tree + readme + git facts.
 
@@ -197,7 +212,10 @@ def sweep_context(
     surface has a :class:`~claude_code_hooks_daemon.core.project_layout.ProjectLayout`
     available -- no check consults it yet (consumption refactors are later
     plan tasks), this only makes it AVAILABLE on the context.
+    ``exclude_paths`` is the project-wide ``daemon.exclude_paths`` (Plan
+    00362 Task 2.9); the runner drops every finding about an excluded path.
     """
+    excluded = _normalised_exclude_paths(exclude_paths)
     tree, readme = _tree_and_readme(project_root, plan_dir_rel, policy)
     return _with_journal(
         CheckContext(
@@ -214,6 +232,7 @@ def sweep_context(
             gitfacts=GitFacts(project_root),
             today=today,
             layout=layout,
+            exclude_paths=excluded,
         ),
         policy,
     )
@@ -226,6 +245,7 @@ def staged_context(
     commit_message: str | None = None,
     pathspecs: Sequence[str] | None = None,
     layout: "ProjectLayout | None" = None,
+    exclude_paths: Sequence[str] | None = None,
 ) -> CheckContext:
     """Build the Stage 2 (COMMIT) context: staged git facts + tree views.
 
@@ -239,7 +259,10 @@ def staged_context(
             the original index-based behaviour.
         layout: Optional ProjectLayout facade (Plan 00288), made AVAILABLE
             on the context; no check consults it yet.
+        exclude_paths: The project-wide ``daemon.exclude_paths`` (Plan 00362
+            Task 2.9); the runner drops every finding about an excluded path.
     """
+    excluded = _normalised_exclude_paths(exclude_paths)
     tree, readme = _tree_and_readme(project_root, plan_dir_rel, policy)
     return _with_journal(
         CheckContext(
@@ -256,6 +279,7 @@ def staged_context(
             gitfacts=GitFacts(project_root, pathspecs=pathspecs),
             commit_message=commit_message,
             layout=layout,
+            exclude_paths=excluded,
         ),
         policy,
     )
@@ -271,6 +295,7 @@ def edit_context(
     file_content_before: str | None = None,
     today: date | None = None,
     layout: "ProjectLayout | None" = None,
+    exclude_paths: Sequence[str] | None = None,
 ) -> CheckContext:
     """Build the Stage 1 (EDIT) context: would-be file content only.
 
@@ -279,7 +304,9 @@ def edit_context(
     stays a pure function. ``None`` for a creation. ``today`` is supplied by
     the (impure) handler so the day-file-naming check stays deterministic.
     ``layout`` (Plan 00288) is optional and made AVAILABLE on the context;
-    no check consults it yet.
+    no check consults it yet. ``exclude_paths`` is the project-wide
+    ``daemon.exclude_paths`` (Plan 00362 Task 2.9); the runner runs no check
+    at all when ``file_path`` is excluded.
     """
     return _with_journal(
         CheckContext(
@@ -297,6 +324,7 @@ def edit_context(
             file_content_before=file_content_before,
             today=today,
             layout=layout,
+            exclude_paths=_normalised_exclude_paths(exclude_paths),
         ),
         policy,
     )

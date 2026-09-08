@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.docs_qa.structured_blocks import (
     extract_structured_block_locations,
 )
 from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
+from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 from claude_code_hooks_daemon.utils.vendor_paths import (
     VendorScope,
     is_vendored_path_in_scopes,
@@ -373,7 +374,22 @@ def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> boo
         return True
     if matches_scope_exclude("/".join(rel_parts), policy.qa.scope_exclude_globs):
         return True
-    return False
+    return is_project_excluded("/".join(rel_parts), policy)
+
+
+def is_project_excluded(rel_path: str, policy: DocumentationPolicy) -> bool:
+    """Whether the project-wide ``daemon.exclude_paths`` covers ``rel_path``.
+
+    Plan 00362 Task 2.9. The one place docs QA consults the project-wide
+    exclusion, through the SAME matcher the content blockers use
+    (:func:`utils.path_exclusion.is_path_excluded`), so a project learns one
+    glob dialect. ``rel_path`` is project-relative and forward-slashed; the
+    matcher also tries it as a raw path, so an unanchored pattern matches at
+    any depth and a leading-``/`` pattern anchors to the project root.
+    Public because the STAGED view and the sweep's markdown walk judge
+    paths that never pass through :func:`is_in_scope`.
+    """
+    return is_path_excluded(rel_path, policy.exclude_paths, project_root="")
 
 
 def is_in_scope(path: Path, project_root: Path, policy: DocumentationPolicy) -> bool:
@@ -422,7 +438,9 @@ def is_lintable_path(
     declared in the generated-docs manifest (which may legitimately name a
     path outside the corpus scope -- ``.claude/HOOKS-DAEMON.md`` is exactly
     this case), OR any module-scoped ``CLAUDE.md`` (:func:`is_module_doc_path`,
-    deliberately wider than the corpus scope).
+    deliberately wider than the corpus scope). The project-wide
+    ``daemon.exclude_paths`` is judged FIRST, because the two wider arms
+    bypass :func:`is_in_scope` and would otherwise re-admit an excluded path.
     """
     # Deferred: docs_qa.checks/__init__ imports checks.duplicate_block, which
     # imports DocCorpus from this module -- a module-level import here would
@@ -431,6 +449,8 @@ def is_lintable_path(
         matched_manifest_entry,
     )
 
+    if is_project_excluded(rel_path.replace("\\", "/"), policy):
+        return False
     return (
         is_in_scope(path, project_root, policy)
         or matched_manifest_entry(rel_path, policy.qa.generated_docs) is not None

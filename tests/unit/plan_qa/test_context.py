@@ -460,3 +460,60 @@ class TestLayoutThreading:
         )
         assert context.layout is None
         assert Level.ADVISE.value == "advise"
+
+
+class TestProjectExcludePaths:
+    """Plan 00362 Task 2.9: the project-wide ``daemon.exclude_paths`` reaches
+    every surface's context, and an excluded plan folder leaves the tree."""
+
+    def test_default_is_nothing_excluded(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        context = sweep_context(root, "CLAUDE/Plan", _Policy(), today=date(2026, 1, 1))
+        assert context.exclude_paths == ()
+
+    def test_patterns_are_carried_on_every_surface(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        patterns = ["CLAUDE/Plan/fixtures/**"]
+        sweep = sweep_context(
+            root, "CLAUDE/Plan", _Policy(), today=date(2026, 1, 1), exclude_paths=patterns
+        )
+        staged = staged_context(root, "CLAUDE/Plan", _Policy(), exclude_paths=patterns)
+        edit = edit_context(
+            root,
+            "CLAUDE/Plan",
+            _Policy(),
+            file_path=root / "CLAUDE/Plan/00001-first/PLAN.md",
+            file_content="# Plan 00001: first\n",
+            file_exists_before=True,
+            exclude_paths=patterns,
+        )
+        assert sweep.exclude_paths == ("CLAUDE/Plan/fixtures/**",)
+        assert staged.exclude_paths == ("CLAUDE/Plan/fixtures/**",)
+        assert edit.exclude_paths == ("CLAUDE/Plan/fixtures/**",)
+
+    def test_the_tree_stays_complete_and_only_the_findings_are_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        """Removing the folder from the tree would make the index look wrong
+        (a row with no folder), so the exclusion acts on findings, not facts."""
+        from claude_code_hooks_daemon.plan_qa.runner import run_stage
+        from claude_code_hooks_daemon.plan_qa.types import Stage
+
+        root = _scaffold(tmp_path)
+        rogue = root / "CLAUDE" / "Plan" / "00002-rogue"
+        rogue.mkdir()
+        (rogue / "PLAN.md").write_text("# Plan 00002: rogue\n\n**Status**: Complete\n")
+
+        included = sweep_context(root, "CLAUDE/Plan", _Policy(), today=date(2026, 1, 1))
+        excluded = sweep_context(
+            root,
+            "CLAUDE/Plan",
+            _Policy(),
+            today=date(2026, 1, 1),
+            exclude_paths=["CLAUDE/Plan/00002-rogue/**"],
+        )
+
+        assert included.tree is not None and excluded.tree is not None
+        assert [folder.name for folder in excluded.tree.folders] == ["00001-first", "00002-rogue"]
+        assert any("00002-rogue" in (f.path or "") for f in run_stage(Stage.SWEEP, included))
+        assert not any("00002-rogue" in (f.path or "") for f in run_stage(Stage.SWEEP, excluded))

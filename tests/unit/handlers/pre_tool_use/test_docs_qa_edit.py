@@ -467,3 +467,20 @@ class TestBlockModeDisclosureLadder:
 
         assert "EDIT-stage catalogue" in first.reason
         assert "EDIT-stage catalogue" in second.reason
+
+
+class TestProjectExcludePaths:
+    """Plan 00362 Task 2.9: a path under ``daemon.exclude_paths`` is never linted."""
+
+    def test_excluded_rules_file_does_not_match(self, tmp_path: Path) -> None:
+        (tmp_path / ".claude" / "rules").mkdir(parents=True)
+        target = tmp_path / ".claude" / "rules" / "one.md"
+        content = "---\npaths: ['*']\ndescription: x\n---\n# T\n\n```bash\necho hi\n```\n"
+        policy = DocumentationPolicy(
+            enabled=True,
+            qa=DocumentationQaPolicy(edit_mode="block"),
+            exclude_paths=(".claude/rules/one.md",),
+        )
+        with _patched_root(tmp_path):
+            assert not _handler(policy).matches(_write_input(target, content))
+            assert _handler().matches(_write_input(target, content))

@@ -4878,6 +4878,10 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
 
     policy = plan_cfg.qa
     plan_dir_rel = plan_cfg.directory
+    # The project-wide exclusion reaches the CLI too (Plan 00362 Task 2.9),
+    # for the same reason the docs-qa CLI honours the vendor declaration: a
+    # by-hand run must agree with what the handlers skip.
+    exclude_paths = config.daemon.exclude_paths
 
     try:
         if getattr(args, "lint", None) is not None:
@@ -4897,6 +4901,7 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
                 file_path=lint_path,
                 file_content=lint_path.read_text(),
                 file_exists_before=True,
+                exclude_paths=exclude_paths,
             )
             # FAIL FAST on a target no check can apply to. Exiting 0 here would
             # certify a file that was never examined, and the exit code is what
@@ -4913,11 +4918,19 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
             findings = run_stage(Stage.EDIT, context)
         elif getattr(args, "check_staged", False):
             clean_scope = CLEAN_SCOPE_TREE
-            context = staged_context(project_root, plan_dir_rel, policy)
+            context = staged_context(
+                project_root, plan_dir_rel, policy, exclude_paths=exclude_paths
+            )
             findings = run_stage(Stage.COMMIT, context)
         else:
             clean_scope = CLEAN_SCOPE_TREE
-            context = sweep_context(project_root, plan_dir_rel, policy, today=date.today())
+            context = sweep_context(
+                project_root,
+                plan_dir_rel,
+                policy,
+                today=date.today(),
+                exclude_paths=exclude_paths,
+            )
             findings = run_stage(Stage.SWEEP, context)
     except FileNotFoundError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -5000,6 +5013,7 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     policy = policy_from_config(
         config.documentation,
         vendor_scopes=ProjectRegistry.from_config(config, project_root).vendor_scopes(),
+        exclude_paths=config.daemon.exclude_paths,
     )
 
     if getattr(args, "check_staged", False):

@@ -155,7 +155,14 @@ class DocsQaSweepHandler(SessionStartHandlerBase):
             "The CLI exits 1 while findings remain (CI-able). Single-file lint:\n"
             "`docs-qa --lint <file>`. Policy lives under `documentation.qa` in\n"
             "`.claude/hooks-daemon.yaml` (modes, per-check overrides, grandfather\n"
-            "allowlist, generated-docs manifest)."
+            "allowlist, generated-docs manifest).\n"
+            "\n"
+            "All three docs QA surfaces and the CLI honour the project-wide\n"
+            "`daemon.exclude_paths`: a markdown file matching one of its globs is\n"
+            "outside the corpus entirely — never swept, gated or linted — on top\n"
+            "of docs QA's own narrower `documentation.qa.scope_exclude_globs`. A\n"
+            "fixture tree that MUST keep producing findings is therefore kept OUT\n"
+            "of that list on purpose, not exempted by omission."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

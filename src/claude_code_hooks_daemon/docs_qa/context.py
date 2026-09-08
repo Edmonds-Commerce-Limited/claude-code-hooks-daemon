@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Final
 from claude_code_hooks_daemon.docs_qa.corpus import (
     DocCorpus,
     dir_matches_scope_exclude,
+    is_project_excluded,
     iter_markdown_paths,
 )
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
@@ -86,16 +87,20 @@ def sweep_context(
     exclusion (:func:`docs_qa.corpus.dir_matches_scope_exclude`) -- safe to
     apply to the one shared walk because every consumer already re-applies
     the equivalent file-level filter, so this only prunes what would have
-    been discarded anyway.
+    been discarded anyway. The project-wide ``daemon.exclude_paths`` (Plan
+    00362 Task 2.9) is applied as a per-file filter on the result, since its
+    consumers have no filter of their own for it.
     """
 
     def scope_exclusion(rel_parts: tuple[str, ...]) -> bool:
         return dir_matches_scope_exclude(rel_parts, tuple(policy.qa.scope_exclude_globs))
 
     markdown_paths = tuple(
-        iter_markdown_paths(
+        rel_path
+        for rel_path in iter_markdown_paths(
             project_root, vendor_scopes=policy.vendor_scopes, also_prune=scope_exclusion
         )
+        if not is_project_excluded(rel_path, policy)
     )
     return CheckContext(
         project_root=project_root,
@@ -120,7 +125,8 @@ def staged_context(
     view is scoped to exactly those paths' working-tree-vs-HEAD content
     (what THIS commit will actually contain), not the whole index.
     ``layout`` (Plan 00288) is optional and made AVAILABLE on the context;
-    no check consults it yet.
+    no check consults it yet. A staged path under the project-wide
+    ``daemon.exclude_paths`` (Plan 00362 Task 2.9) never enters the view.
     """
     gitfacts = GitFacts(project_root, pathspecs=pathspecs)
     staged_documents: dict[str, str] = {}
@@ -128,6 +134,8 @@ def staged_context(
         if change.status == _DELETE_STATUS:
             continue
         if not change.path.endswith(_MARKDOWN_SUFFIX):
+            continue
+        if is_project_excluded(change.path, policy):
             continue
         if pathspecs:
             # A pathspec'd commit ships the CURRENT WORKING TREE content of

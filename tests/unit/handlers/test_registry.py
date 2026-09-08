@@ -856,3 +856,30 @@ class TestIsDiscoverableHandler:
 
     def test_an_unrelated_class_is_not(self) -> None:
         assert not is_discoverable_handler(dict)
+
+
+class TestProjectExcludePathsReachDocsPolicy:
+    """Plan 00362 Task 2.9: ``daemon.exclude_paths`` travels WITH the docs policy,
+    the same way the vendor truth does (Plan 00331) -- injecting it only onto
+    the handler instance would leave docs QA's scope judgement, which reads the
+    policy, unable to see it."""
+
+    def test_register_all_copies_project_exclude_paths_into_the_docs_policy(self) -> None:
+        from claude_code_hooks_daemon.config.models import DocumentationConfig
+
+        registry = HandlerRegistry()
+        router = EventRouter()
+        registry.register_all(
+            router,
+            project_exclude_paths=["docs/fixtures/**"],
+            documentation=DocumentationConfig(enabled=True),
+        )
+
+        documented = [
+            handler
+            for handlers in router.get_all_handlers().values()
+            for handler in handlers
+            if getattr(handler, "_documentation", None) is not None
+        ]
+        assert documented, "no documentation-tagged handler registered"
+        assert all(h._documentation.exclude_paths == ("docs/fixtures/**",) for h in documented)

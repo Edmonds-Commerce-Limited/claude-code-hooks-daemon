@@ -82,6 +82,7 @@ class PlanQaSweepHandler(SessionStartHandlerBase):
                 plan_dir_rel=plan_dir_rel,
                 policy=self._plan_qa,
                 today=date.today(),
+                exclude_paths=self._project_exclude_paths,
             )
         except FileNotFoundError:
             # Structural finding, not a crash: the configured plan dir is gone.
@@ -136,7 +137,13 @@ class PlanQaSweepHandler(SessionStartHandlerBase):
             "The CLI exits 1 while findings remain (CI-able). Single-file lint:\n"
             "`plan-qa --lint <PLAN.md>`; staged-commit check: `plan-qa --check-staged`.\n"
             "Policy lives under `plan_workflow.qa` in `.claude/hooks-daemon.yaml`\n"
-            "(archive dir names, staleness window, legacy/collision allowlists)."
+            "(archive dir names, staleness window, legacy/collision allowlists).\n"
+            "\n"
+            "All three plan QA surfaces and the CLI honour the project-wide\n"
+            "`daemon.exclude_paths`: a plan folder or file matching one of its globs\n"
+            "is never swept, gated or linted. A fixture tree that MUST keep producing\n"
+            "findings is therefore kept OUT of that list on purpose, not exempted by\n"
+            "omission."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
