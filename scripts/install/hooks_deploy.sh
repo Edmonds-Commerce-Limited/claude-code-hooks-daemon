@@ -104,6 +104,38 @@ list_deployed_hook_paths() {
 }
 
 #
+# _strip_relay_guard_block() - Remove any relay guard block from a hook script
+#
+# Mirrors ``forwarder_generator.strip_relay_guard_block()`` (Python) exactly:
+# an idempotent removal of the header-through-footer marker comment lines the
+# generator emits verbatim, regardless of what the block's body contains.
+# Needed on the BASH side too (Plan 00295 Task 1.6) -- deploy_hook_scripts is
+# the ONE deployment step that ALWAYS runs, with or without a venv Python to
+# run regenerate_forwarders_for_transport's generator; this daemon's own
+# tracked .claude/hooks/* dogfoods the relay and so may already carry a
+# guard block pointing at THIS repo's own paths. Without stripping here
+# first, a no-venv deploy would copy that foreign guard forward verbatim --
+# the F1 guarantee ("clean by default") must hold without a venv or a
+# surviving generator, not only when the Python regenerator happens to run
+# afterward.
+#
+# Args:
+#   $1 - source_file: Path to the hook script to read
+#
+# Output:
+#   The file's content on stdout, with any relay guard block removed.
+#
+_strip_relay_guard_block() {
+    local source_file="$1"
+    awk '
+        /^# --- relay hot path \(generated; Plan 00290\) ---$/ { in_guard = 1; next }
+        /^# --- end relay hot path ---$/ { in_guard = 0; next }
+        in_guard { next }
+        { print }
+    ' "$source_file"
+}
+
+#
 # deploy_hook_scripts() - Deploy hook forwarder scripts to project
 #
 # Copies hook scripts from daemon installation to project .claude/hooks/.
@@ -164,8 +196,12 @@ deploy_hook_scripts() {
         local source="$source_hooks/$hook_file"
         local target="$target_hooks/$hook_file"
 
-        # Normal mode: copy files (never symlink hooks)
-        cp "$source" "$target"
+        # Normal mode: copy files (never symlink hooks). Strip any relay
+        # guard block FIRST (Plan 00295 Task 1.6) -- see
+        # _strip_relay_guard_block's own docstring for why this must happen
+        # here, unconditionally, ahead of the (venv-gated) Python
+        # regeneration step that runs later in deploy_all_hooks.
+        _strip_relay_guard_block "$source" > "$target"
         print_verbose "Copied: $hook_file"
 
         deployed_count=$((deployed_count + 1))
@@ -441,8 +477,11 @@ git_force_executable() {
 # Runs the forwarder_generator module against an already-deployed hooks dir.
 # With the config default (daemon.transport.relay_enabled: false) this is a
 # genuine no-op: the generator reads config, sees the rung disabled, and
-# touches nothing — the plain-cp deploy from deploy_hook_scripts stands
-# byte-identical. Only when a client has opted in does this rewrite the
+# touches nothing — deploy_hook_scripts already stripped any relay guard
+# block on the way in (Plan 00295 Task 1.6, _strip_relay_guard_block), so the
+# deployed forwarder is ALREADY the guard-free canonical shape before this
+# function ever runs, whether or not a venv Python was available to reach
+# this step at all. Only when a client has opted in does this rewrite the
 # deployed forwarders in place to add the guard block (DESIGN-socket-relay.md
 # §6.1).
 #
@@ -454,8 +493,9 @@ git_force_executable() {
 #
 # Returns:
 #   Exit code 0 always (advisory only) — a generation failure must never
-#   abort an install/upgrade; the plain-cp forwarders it leaves behind still
-#   work correctly via the permanent bash+python3 rung.
+#   abort an install/upgrade; the guard-free forwarders deploy_hook_scripts
+#   already left behind still work correctly via the permanent bash+python3
+#   rung.
 #
 regenerate_forwarders_for_transport() {
     local project_root="$1"

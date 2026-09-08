@@ -17,7 +17,15 @@ COMMON_SKIP_PATHS: tuple[str, ...] = tuple(
 
 
 def matches_skip_path(file_path: str, skip_paths: tuple[str, ...]) -> bool:
-    """Check if file path matches any skip path pattern.
+    """Check if file path matches any skip path pattern, segment-bounded.
+
+    Each ``skip`` pattern (e.g. ``"build/"``) must land on a path-segment
+    boundary in ``file_path``: at the start of the string, or immediately
+    preceded by ``/``. A bare substring test would also match ``"build/"``
+    inside ``"rebuild/"`` or ``"venv/"`` inside ``"myvenv/"`` -- both
+    first-party directories that merely end with the same letters as a
+    vendor/build directory -- which would wrongly skip lint/ESLint checks
+    on real source files (fail-open).
 
     Args:
         file_path: Full file path to check.
@@ -26,4 +34,13 @@ def matches_skip_path(file_path: str, skip_paths: tuple[str, ...]) -> bool:
     Returns:
         True if the file is in a skip path.
     """
-    return any(skip in file_path for skip in skip_paths)
+    for skip in skip_paths:
+        start = 0
+        while True:
+            index = file_path.find(skip, start)
+            if index == -1:
+                break
+            if index == 0 or file_path[index - 1] == "/":
+                return True
+            start = index + 1
+    return False

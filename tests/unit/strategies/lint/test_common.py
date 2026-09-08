@@ -94,3 +94,32 @@ class TestMatchesSkipPath:
         assert (
             matches_skip_path("/workspace/.venv/lib/python3.12/site.py", COMMON_SKIP_PATHS) is True
         )
+
+    def test_does_not_match_build_as_substring_of_rebuild(self) -> None:
+        # Plan 00295 Task 1.1: "build/" must not match inside "rebuild/" --
+        # that is a different, first-party directory that merely ends with
+        # the same letters.
+        custom = ("build/",)
+        assert matches_skip_path("src/rebuild/x.py", custom) is False
+
+    def test_does_not_match_venv_as_substring_of_myvenv(self) -> None:
+        custom = ("venv/",)
+        assert matches_skip_path("src/myvenv/x.py", custom) is False
+
+    def test_does_not_match_build_as_substring_of_prebuild(self) -> None:
+        custom = ("build/",)
+        assert matches_skip_path("app/prebuild/y.ts", custom) is False
+
+    def test_matches_build_as_a_real_path_segment(self) -> None:
+        custom = ("build/",)
+        assert matches_skip_path("app/build/y.ts", custom) is True
+
+    def test_matches_build_at_start_of_path_with_no_leading_separator(self) -> None:
+        custom = ("build/",)
+        assert matches_skip_path("build/y.ts", custom) is True
+
+    def test_matches_real_segment_even_when_a_false_substring_precedes_it(self) -> None:
+        # "rebuild/" is a false hit but "build/" also occurs later as a real
+        # segment -- the real occurrence must still be found.
+        custom = ("build/",)
+        assert matches_skip_path("src/rebuild/build/x.py", custom) is True

@@ -144,7 +144,17 @@ def _run_argv_with_socket_stdin(
             cwd=str(cwd) if cwd is not None else None,
         )
         child.close()
-        out, err = proc.communicate(timeout=PROBE_TIMEOUT_SECONDS)
+        try:
+            out, err = proc.communicate(timeout=PROBE_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            # A timed-out probe must not orphan its child (Plan 00295 Task
+            # 1.4): kill it and reap the exit status with a second
+            # (unbounded) communicate() before re-raising, so callers keep
+            # their existing `except subprocess.TimeoutExpired` handling
+            # unchanged.
+            proc.kill()
+            proc.communicate()
+            raise
         return proc.returncode, out, err
     finally:
         parent.close()
@@ -255,18 +265,40 @@ def probe_stop_hard_block(hooks_dir: Path) -> ProbeResult:
             return ProbeResult(name, False, f"timed out after {PROBE_TIMEOUT_SECONDS}s")
     if _ENXIO_MARKER in err:
         return ProbeResult(name, False, f"stdin socket re-open failed (ENXIO): {_snippet(err)}")
-    if returncode != _EXIT_HARD_BLOCK:
-        return ProbeResult(
-            name,
-            False,
-            f"expected exit 2 on a blockable Stop, got exit={returncode} "
-            f"stdout={_snippet(out)} stderr={_snippet(err)}",
-        )
     try:
         parsed = json.loads(out.decode().strip())
     except (UnicodeDecodeError, json.JSONDecodeError):
+        parsed = None
+    decision = parsed.get("decision") if isinstance(parsed, dict) else None
+    if returncode != _EXIT_HARD_BLOCK:
+        if decision != "block":
+            # Plan 00295 Task 1.5: `forward_stop_event` (init.sh) returns
+            # ONLY 0 or 2 -- never anything else -- and 0 covers every
+            # non-block decision, including a client with no blocking Stop
+            # handler active at all. That is a HEALTHY `transport on` state:
+            # the round trip worked and genuinely was not blocked, so a
+            # `transport on` toggle must not auto-revert just because this
+            # client disabled its Stop enforcement. A decision=block body
+            # paired with a non-2 exit code is NOT this case -- that is the
+            # exit-code translation itself being broken -- and falls through
+            # to the failure below instead.
+            return ProbeResult(
+                name,
+                True,
+                "Stop was not blocked (exit "
+                f"{returncode}, no block decision in the response) -- no "
+                "blocking Stop handler is active for this client, skipping",
+            )
+        return ProbeResult(
+            name,
+            False,
+            f"daemon emitted decision=block but exit code was {returncode} "
+            f"(expected {_EXIT_HARD_BLOCK}) -- exit-code translation broken: "
+            f"stdout={_snippet(out)} stderr={_snippet(err)}",
+        )
+    if not isinstance(parsed, dict):
         return ProbeResult(name, False, f"stdout is not the daemon JSON: {_snippet(out)}")
-    if parsed.get("decision") != "block":
+    if decision != "block":
         return ProbeResult(name, False, f"stdout carries no block decision: {_snippet(out)}")
     reason = parsed.get("reason", "")
     if not reason or reason.encode() not in err:

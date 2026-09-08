@@ -13,12 +13,15 @@ deployed-forwarder path is covered by the acceptance cycle test.
 from __future__ import annotations
 
 import socket
+import subprocess
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
 from claude_code_hooks_daemon.constants.events import wired_event_metas
+from claude_code_hooks_daemon.install import transport_verify
 from claude_code_hooks_daemon.install.forwarder_generator import (
     INIT_SH_ANCHOR,
     build_relay_guard_block,
@@ -110,13 +113,32 @@ class TestStopHardBlockProbe:
         assert result.passed, result.detail
         assert result.name == "stop-hard-block"
 
-    def test_exit_0_fails(self, tmp_path: Path) -> None:
+    def test_exit_0_with_block_decision_fails(self, tmp_path: Path) -> None:
+        # A response body carrying decision=block but exit code 0 means the
+        # exit-code TRANSLATION itself is broken (the Plan 00101 Phase 9
+        # defect this whole hard-reentry contract exists to catch) -- a real
+        # failure, not a skip.
         _write_script(
             tmp_path / "stop",
             'cat >/dev/null\necho \'{"decision":"block","reason":"r"}\'\n',
         )
         result = probe_stop_hard_block(tmp_path)
         assert not result.passed
+
+    def test_exit_0_with_no_block_decision_is_skipped_not_failed(self, tmp_path: Path) -> None:
+        # Plan 00295 Task 1.5: a client with no blocking Stop handler active
+        # is a HEALTHY `transport on` state -- the round trip worked and
+        # genuinely was not blocked. Failing this probe would auto-revert
+        # every relay-on toggle for any client that disabled Stop
+        # enforcement, even though nothing about the transport is broken.
+        _write_script(tmp_path / "stop", "cat >/dev/null\necho '{}'\n")
+        result = probe_stop_hard_block(tmp_path)
+        assert result.passed, result.detail
+
+    def test_exit_0_with_allow_decision_is_skipped_not_failed(self, tmp_path: Path) -> None:
+        _write_script(tmp_path / "stop", 'cat >/dev/null\necho \'{"decision":"allow"}\'\n')
+        result = probe_stop_hard_block(tmp_path)
+        assert result.passed, result.detail
 
     def test_reason_missing_from_stderr_fails(self, tmp_path: Path) -> None:
         _write_script(
@@ -330,3 +352,22 @@ class TestRunProbesComposition:
             "status-line-raw",
             "stop-hard-block",
         ]
+
+
+class TestRunArgvWithSocketStdinTimeout:
+    """Plan 00295 Task 1.4: a probe timeout must not orphan the child."""
+
+    def test_timeout_kills_and_reaps_the_process(self) -> None:
+        mock_proc = MagicMock()
+        mock_proc.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd=["x"], timeout=1),
+            (b"", b""),
+        ]
+        with patch(
+            "claude_code_hooks_daemon.install.transport_verify.subprocess.Popen",
+            return_value=mock_proc,
+        ):
+            with pytest.raises(subprocess.TimeoutExpired):
+                transport_verify._run_argv_with_socket_stdin(["true"], b"{}")
+        mock_proc.kill.assert_called_once()
+        assert mock_proc.communicate.call_count == 2
