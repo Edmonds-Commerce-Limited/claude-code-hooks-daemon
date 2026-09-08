@@ -67,8 +67,26 @@ than fixed in passing.
 - [ ] ⬜ **Task 2.1**: A `skipif` whose reason states something false is worse
   than one with no reason, because it answers the question that would otherwise
   be asked. Assert the root-case reason matches the condition that fires it.
-- [ ] ⬜ **Task 2.2**: Sweep `tests/` for `skipif` predicates that evaluate to a
-  constant at import time; report rather than auto-fix.
+
+  `test_skipif_reasons_match_their_conditions.py` parses each test module and
+  pairs every `skipif` reason that blames *the process being root* with the
+  condition that actually fires it, requiring the condition to read the
+  process's own euid. Both the original predicate and its replacement are
+  fixtures, so the check is shown to separate them rather than merely to pass.
+
+- [ ] ⬜ **Task 2.2**: Swept — **no other `skipif` guards on a constant**. Ten
+  sites: two now on `os.geteuid()`, three on `_RELAY_BINARY.exists()`, two on
+  `shutil.which(...)`, two on `_PROJECT_CONFIG.exists()`, one on
+  `_uv_available()`. Every one reads something that genuinely varies by
+  machine.
+
+  **The sweep this task originally described would not have caught the bug it
+  came from.** `Path("/").stat().st_uid == 0` is a live call, not a literal —
+  constant only in the semantic sense that `/` is owned by uid 0 everywhere. No
+  import-time constant-folding flags it. What separates it from the nine
+  sound guards is not constancy but that it asks a different question from the
+  one its reason states, which is why Task 2.1 checks the reason–condition pair
+  instead.
 
 ## Success Criteria
 

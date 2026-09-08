@@ -106,8 +106,9 @@ where a regression is both easy and expensive.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Full QA green, daemon restart RUNNING. Daemon restarted
-  and verified RUNNING; a QA run covering the final state is outstanding.
+- [x] ✅ **Task 4.1**: **QA 26/26, coverage 95.3%**, `18807 passed, 0 failed, 7 skipped`; daemon RUNNING. The seven local skips are the environment guards
+  that were always there — no `uv` and no Rust toolchain on this machine's PATH
+  — not the relay gates, which the built artefacts let run here too.
 
 - [x] ✅ **Task 4.2**: Run **34197901092 is green on all three interpreters**,
   identically: `18750 passed, 0 failed, 3 skipped`. **Skips 17 → 3** — every

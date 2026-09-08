@@ -170,8 +170,9 @@ reaper has to be designed against those constraints, not around them.
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: Full QA green, daemon restart RUNNING. Daemon restarted
-  and verified RUNNING; a QA run covering the final state is outstanding.
+- [x] ✅ **Task 3.1**: **QA 26/26, coverage 95.3%**, `18807 passed, 0 failed, 7 skipped`; daemon RUNNING. `core/worktree_reaping.py` is at 100%, and
+  `cmd_worktree_reap` has no uncovered line — the empty-repository branch was
+  the last one, and it was reached by a test rather than by an exclusion.
 
 - [ ] ⬜ **Task 3.2**: A dispatch that creates a worktree and a session end that
   disposes of it, observed rather than asserted. **Needs a real subagent
