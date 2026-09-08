@@ -32,6 +32,7 @@ from typing import Any, Final
 
 import yaml
 
+from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
 from claude_code_hooks_daemon.utils.path_exclusion import (
     path_matches_globs,
     resolve_project_root,
@@ -98,6 +99,20 @@ SECRET_META_SUBCOMMAND: Final[str] = "secret-meta"
 _GIT_EXECUTABLE: Final[str] = "git"
 _GIT_RM_SUBCOMMAND: Final[str] = "rm"
 _GIT_RM_CACHED_FLAG: Final[str] = "--cached"
+
+# Plan 00311 Task 1.3 (N5) second-look finding: `--pathspec-from-file=<file>`
+# makes `git rm` READ `<file>` and treat each line as a pathspec -- breaking
+# the "reads no content" invariant the whole exemption above rests on.
+# Empirically verified: a pathspec that matches nothing is echoed back
+# VERBATIM in git's own error text (`fatal: pathspec '<line content>' did
+# not match any files`), so `git rm --cached --pathspec-from-file=<protected>`
+# discloses the protected file's content through stderr even though the
+# command still "only" untracks -- exactly the shape this guard exists to
+# stop. Voided whenever this flag is present, in either `--flag value` or
+# `--flag=value` form, regardless of what it names: the exemption's
+# guarantee is that the command reads nothing, and this flag makes that
+# false on its own.
+_GIT_RM_PATHSPEC_FROM_FILE_FLAG: Final[str] = "--pathspec-from-file"
 
 _CONSUMER_KEY_COMMAND: Final[str] = "command"
 _CONSUMER_KEY_PATH_FLAGS: Final[str] = "path_flags"
@@ -278,6 +293,32 @@ _IMPORT_MODULE_RE: Final[re.Pattern[str]] = re.compile(
     r"^[ \t]*(?:from|import)[ \t]+([A-Za-z_][A-Za-z0-9_.]*)", re.MULTILINE
 )
 
+#: The same import-statement shape, anchored at the START of a `python -c`
+#: (or `python3 -c`) inline script instead of a physical line (Plan 00311
+#: Task 1.2 residual). `python -c "import <module>"` puts the statement on
+#: the SAME line as the interpreter invocation, so `_IMPORT_MODULE_RE`'s
+#: line-start anchor never reaches it -- the dotted module path was denied
+#: on the Bash surface even after the Write/Edit surface (the ``from``/
+#: ``import`` statement case above) was fixed for the identical name.
+#: Requiring the literal `-c` flag immediately before the opening quote (not
+#: a bare quote-lookbehind) keeps this exemption scoped to genuine inline
+#: Python source rather than any quoted prose that happens to start with the
+#: word "import".
+_IMPORT_MODULE_INLINE_RE: Final[re.Pattern[str]] = re.compile(
+    r"-c[ \t]+[\"'][ \t]*(?:from|import)[ \t]+([A-Za-z_][A-Za-z0-9_.]*)"
+)
+
+
+def _drop_module_path(match: re.Match[str]) -> str:
+    """Shared substitution callback for both import-statement regexes above.
+
+    Keeps everything up to the start of the captured module-path group
+    (the `import `/`from ` lead-in, and -- for the inline variant -- the
+    `-c "` prefix before it), dropping only the module path itself, so
+    `from a.b import X` still contributes its `X` token.
+    """
+    return match.group(0)[: match.start(1) - match.start(0)]
+
 
 def _without_import_module_paths(command: str) -> str:
     """``command`` with the dotted module path of each import statement removed.
@@ -298,23 +339,28 @@ def _without_import_module_paths(command: str) -> str:
     name from the matcher's view -- an escape hatch in a guard whose deny
     text states it has none, gating four DENY/suppress surfaces including
     payload capture. ``import`` is not a shell builtin, so such a line fails
-    harmlessly while the real command after it runs.
+    harmlessly while the real command after it runs. The inline
+    (``python -c``) variant carries the same positional guarantee: it only
+    ever deletes the module-path span sitting directly inside that one
+    ``-c "..."`` argument, never a later, independent occurrence of the same
+    text elsewhere in the command.
 
     A slash path still cannot be spelled as a module (the grammar admits no
-    ``/``), so a genuine path is untouched by this either way.
+    ``/``), so a genuine path is untouched by this either way. Nor can the
+    inline variant be used to smuggle a real path past a real reader: the
+    only way to make it match is to write the literal text ``import
+    <name>`` immediately inside a ``-c "..."``/``-c '...'`` argument, and a
+    shell argument carrying that literal prefix is no longer spelled
+    identically to the bare protected name, so no command that actually
+    reads ``<name>`` can be built this way.
 
     Applied only by :func:`find_protected_mention`, not the ``_strict``
     variant: strict serves the quarantine-artefact globs, whose hyphenated
     markers cannot collide with a Python module name in the first place, so
     changing it would be a fix for a problem it does not have.
     """
-
-    def _drop_module_path(match: re.Match[str]) -> str:
-        # Keep the `import `/`from ` lead-in, drop only the module path, so
-        # `from a.b import X` still contributes its `X` token.
-        return match.group(0)[: match.start(1) - match.start(0)]
-
-    return _IMPORT_MODULE_RE.sub(_drop_module_path, command)
+    without_line_anchored = _IMPORT_MODULE_RE.sub(_drop_module_path, command)
+    return _IMPORT_MODULE_INLINE_RE.sub(_drop_module_path, without_line_anchored)
 
 
 def _normalised_token_forms(token: str) -> list[str]:
@@ -1053,25 +1099,39 @@ def is_exempt_invocation(
     return False
 
 
-_GIT_C_FLAG: Final[str] = "-C"
-
-
 def _is_git_rm_cached(words: list[str]) -> bool:
-    """True when ``words`` is ``git [-C <path>] rm ... --cached ...`` --
-    untrack only.
+    """True when ``words`` is ``git <global options> rm ... --cached ...`` --
+    untrack only, with no content-reading flag present.
 
-    Requires the ``rm`` subcommand (immediately after ``git``, or after a
-    leading ``-C <path>`` -- Plan 00311 follow-up: an agent working from
-    another cwd via ``git -C /repo rm --cached <path>`` is exactly the shape
-    ``secret_file_hygiene_checker``'s own recommended remedy takes, and was
-    failing CLOSED before this) and ``--cached`` present anywhere after the
-    subcommand. No ``--cached`` (or no ``rm``) means the command can delete
-    the working-tree file too, so it is not exempt.
+    The subcommand is located via :func:`git_subcommand_index` (shared with
+    ``sensitive_content``'s identical need to see past git's global options)
+    rather than a single ``-C`` special case (Plan 00311 Task 1.4, replacing
+    the Plan 00311-follow-up ``-C``-only fix): git accepts a whole RUN of
+    global options before its subcommand -- ``-c <key>=<value>``,
+    ``--no-pager``, ``--git-dir=<path>``, and more -- and an agent invoking
+    ``secret_file_hygiene_checker``'s own recommended remedy with any one of
+    them (e.g. ``git -c core.pager=cat rm --cached <path>``, or
+    ``git -C /repo --no-pager rm --cached <path>``) was failing CLOSED
+    exactly the way plain ``git -C <path> rm --cached <path>`` did before
+    that follow-up. ``--cached`` present anywhere after the subcommand. No
+    ``--cached`` (or no ``rm``, or no locatable subcommand at all) means the
+    command can delete the working-tree file too, so it is not exempt.
+
+    ``--pathspec-from-file`` voids the exemption outright (Plan 00311 Task
+    1.3 second-look finding), whatever else is present: it makes ``rm``
+    itself READ a file's content, breaking the "reads no content" premise
+    the exemption otherwise relies on -- see
+    ``_GIT_RM_PATHSPEC_FROM_FILE_FLAG``'s docstring for the verified
+    disclosure route.
     """
-    subcommand_index = 1
-    if len(words) > 2 and words[1] == _GIT_C_FLAG:
-        subcommand_index = 3
-    if len(words) < subcommand_index + 2:
+    if any(
+        word.strip("\"'") == _GIT_RM_PATHSPEC_FROM_FILE_FLAG
+        or word.strip("\"'").startswith(_GIT_RM_PATHSPEC_FROM_FILE_FLAG + "=")
+        for word in words
+    ):
+        return False
+    subcommand_index = git_subcommand_index(words, 0)
+    if subcommand_index is None or len(words) < subcommand_index + 2:
         return False
     if words[subcommand_index] != _GIT_RM_SUBCOMMAND:
         return False

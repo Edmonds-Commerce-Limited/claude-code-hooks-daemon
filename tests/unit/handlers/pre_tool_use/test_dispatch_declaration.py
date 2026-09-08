@@ -169,3 +169,77 @@ class TestStrictMode:
         result = handler.handle(_task_input("refactor the config loader"))
 
         assert result.decision == Decision.DENY
+
+
+class TestConfiguredPlanDirectory:
+    """Plan 00311 Task 1.1 (N1): declaration option 1 must recognise the
+    project's CONFIGURED plan directory, not just the ``CLAUDE/Plan/``
+    literal -- a project with a non-default ``plan_workflow.directory`` could
+    never satisfy it otherwise, so the advisory (or, in strict mode, the
+    deny) fired on every compliant dispatch."""
+
+    def test_recognises_declaration_under_non_default_plan_dir(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """A non-default ``ProjectLayout.plan_dir`` (Plan 00288 facade,
+        injected unconditionally by the registry) is honoured, mirroring
+        ``plan_workflow.py``'s identical fix for the same facade."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="Plans",
+            plan_archive_dirs=("Completed",),
+        )
+        prompt = "This is Plan 00042 work: Plans/00042-widget/. Write your findings there."
+
+        result = handler.handle(_task_input(prompt))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_default_plan_dir_literal_no_longer_matches_non_default_dir(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """The old hardcoded ``CLAUDE/Plan/`` literal must NOT satisfy the
+        declaration once a non-default directory is configured -- otherwise
+        the pattern would silently accept a path the project does not use."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="Plans",
+            plan_archive_dirs=("Completed",),
+        )
+        prompt = "This is Plan 00042 work: CLAUDE/Plan/00042-widget/. Write your findings there."
+
+        result = handler.handle(_task_input(prompt))
+
+        assert result.decision == Decision.ALLOW
+        assert len(result.context) == 1
+
+    def test_no_layout_injected_falls_back_to_default_plan_dir(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """A handler constructed directly (no registry injection, as every
+        other test in this file does) must still recognise the default
+        ``CLAUDE/Plan/`` literal -- the fallback constant matches
+        ``PlanWorkflowConfig.directory``'s default."""
+        assert handler._project_layout is None
+
+        prompt = "Plan 00307: CLAUDE/Plan/00307-subagent-file-based-report-handoff/"
+
+        result = handler.handle(_task_input(prompt))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
