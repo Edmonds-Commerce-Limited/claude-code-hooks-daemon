@@ -157,7 +157,11 @@ def _branches_ahead(run_fn: RunGit, repo_root: Path) -> tuple[BranchAhead, ...]:
         if name == _MAIN_BRANCH:
             continue
         count_lines = _git_lines(
-            run_fn, repo_root, "rev-list", "--count", f"{branch_ref(_MAIN_BRANCH)}..{branch_ref(name)}"
+            run_fn,
+            repo_root,
+            "rev-list",
+            "--count",
+            f"{branch_ref(_MAIN_BRANCH)}..{branch_ref(name)}",
         )
         ahead = int(count_lines[0]) if count_lines and count_lines[0].strip().isdigit() else 0
         if ahead > 0:
