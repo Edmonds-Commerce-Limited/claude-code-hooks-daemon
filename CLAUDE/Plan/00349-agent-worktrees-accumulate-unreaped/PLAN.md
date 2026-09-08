@@ -170,9 +170,22 @@ reaper has to be designed against those constraints, not around them.
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: Full QA green, daemon restart RUNNING
+- [ ] ⬜ **Task 3.1**: Full QA green, daemon restart RUNNING. Daemon restarted
+  and verified RUNNING; a QA run covering the final state is outstanding.
+
 - [ ] ⬜ **Task 3.2**: A dispatch that creates a worktree and a session end that
-  disposes of it, observed rather than asserted
+  disposes of it, observed rather than asserted. **Needs a real subagent
+  dispatch**, which the session that built this was not permitted to make — so
+  the create-and-dispose round trip is still asserted rather than observed, and
+  saying otherwise would be exactly the substitution this task exists to
+  prevent.
+
+- [ ] ⬜ **Task 3.3**: Reap the 21 that are here now. **Left for a human on
+  purpose.** Task 2.1 decided report-and-offer, and the offer is not the
+  agent's to accept: `--reap` would remove 15 worktrees and 15 branches, which
+  no amount of measurement makes an agent's call to take unprompted. The
+  command reports them and stops. Run `bin/hooks-daemon worktree-reap` to see
+  the list, then add `--reap`.
 
 ## Success Criteria
 
