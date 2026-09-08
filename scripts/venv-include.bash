@@ -77,6 +77,23 @@ venv_exists() {
 # never via $(...) capture. The captured ensure_venv lives in
 # scripts/install/venv.sh and returns its venv path through stdout.
 ensure_venv() {
+    # An empty target is a resolution failure, and it is not safe to act on.
+    # `python3 -m venv ""` creates a venv in the CURRENT DIRECTORY, and the
+    # success check below then reads "${VENV_DIR}/bin/python3" -> "/bin/python3",
+    # which exists on any Linux -- so the failure authenticates itself and
+    # returns 0, having written bin/, lib/, lib64, include/ and pyvenv.cfg into
+    # whatever directory the caller was standing in. For a QA script that is the
+    # checkout, beside tracked files.
+    if [[ -z "${VENV_DIR}" ]]; then
+        echo -e "${RED}✗${NC} Venv path resolved to an empty string." >&2
+        echo "    Refusing to continue: creating a venv here would write into" >&2
+        echo "    the current directory ($(pwd)) rather than into a venv." >&2
+        echo "    Cause: scripts/lib/resolve_venv.sh produced no path. Check" >&2
+        echo "    that src/claude_code_hooks_daemon/daemon/paths.py is present" >&2
+        echo "    and that python3 is discoverable." >&2
+        return 1
+    fi
+
     if venv_exists; then
         # >&2 is LOAD-BEARING (Plan 00200). venv_tool() calls ensure_venv on
         # every invocation, and callers redirect a tool's stdout into files
