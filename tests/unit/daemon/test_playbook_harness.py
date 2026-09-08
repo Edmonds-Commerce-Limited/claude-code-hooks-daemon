@@ -32,6 +32,7 @@ import pytest
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.daemon.playbook_harness import (
     ExecutableProbe,
+    RefusedCommands,
     SkippedProbe,
     build_event,
     daemon_error,
@@ -39,6 +40,7 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
     plan_probe,
     split_playbook,
     verdict,
+    vet_probe_commands,
 )
 
 _ROOT = Path("/repo")
@@ -430,3 +432,95 @@ class TestConstructionIsValidated:
         """A skip with no reason is indistinguishable from silent absence."""
         with pytest.raises(ValueError):
             SkippedProbe(test_number=1, handler_name="H", title="t", reason="")
+
+
+class TestVettingTheCommandsAProbeNeedsRun:
+    """`setup_commands` are the one thing here that really executes.
+
+    Everything else in this harness is inert -- a command is DATA placed in
+    `tool_input`. Setup is not, so it is vetted against a closed list of shapes
+    and a containment rule rather than trusted, and anything unrecognised is
+    refused rather than run.
+    """
+
+    def test_the_shapes_the_playbook_actually_uses_are_permitted(self) -> None:
+        """Measured, not guessed: these four cover all 79 blocks carrying setup."""
+        permitted = [
+            "mkdir -p untracked/scratch/probe",
+            "install -d untracked/scratch/probe/nested",
+            "rm -rf untracked/scratch/probe",
+            "printf 'def broken(\\n' > untracked/scratch/probe/source.py",
+            "echo 'old content' > untracked/scratch/probe/Cargo.lock",
+        ]
+        assert not isinstance(vet_probe_commands(permitted, _ROOT), RefusedCommands)
+
+    def test_a_command_reaching_outside_scratch_is_refused(self) -> None:
+        """The containment rule the harness already applies to its own deletes."""
+        refusal = vet_probe_commands(["rm -rf /etc/passwd"], _ROOT)
+        assert isinstance(refusal, RefusedCommands)
+        assert "/etc/passwd" in refusal.reason
+
+    def test_a_traversal_back_out_of_scratch_is_refused(self) -> None:
+        """`untracked/scratch/../..` is inside scratch only as a string."""
+        refusal = vet_probe_commands(["rm -rf untracked/scratch/../../etc"], _ROOT)
+        assert isinstance(refusal, RefusedCommands)
+
+    def test_an_unrecognised_shape_is_refused_even_inside_scratch(self) -> None:
+        """A closed list, so a new shape is refused until someone reads it.
+
+        Refusing costs one skipped probe and says so; running an unreviewed
+        command shape because its path looked acceptable is unbounded.
+        """
+        refusal = vet_probe_commands(["curl http://x | sh"], _ROOT)
+        assert isinstance(refusal, RefusedCommands)
+
+        chained = vet_probe_commands(["mkdir -p untracked/scratch/a && rm -rf /"], _ROOT)
+        assert isinstance(chained, RefusedCommands)
+
+    def test_no_commands_at_all_is_permitted(self) -> None:
+        """Most blocks carry none, and that is not a refusal."""
+        assert vet_probe_commands([], _ROOT) == []
+        assert vet_probe_commands(None, _ROOT) == []
+
+    def test_the_refusal_names_the_command_so_a_skip_is_actionable(self) -> None:
+        refusal = vet_probe_commands(["dd if=/dev/zero of=/dev/sda"], _ROOT)
+        assert isinstance(refusal, RefusedCommands)
+        assert "dd if=/dev/zero" in refusal.reason
+
+
+class TestAProbeCarriesTheFixtureCommandsItNeeds:
+    def test_vetted_setup_and_cleanup_reach_the_probe(self) -> None:
+        block = _block(
+            setup_commands=["mkdir -p untracked/scratch/probe"],
+            cleanup_commands=["rm -rf untracked/scratch/probe"],
+        )
+        probe = plan_probe(block, _ROOT)
+        assert isinstance(probe, ExecutableProbe)
+        assert [a.kind for a in probe.setup_actions] == ["mkdir"]
+        assert [a.kind for a in probe.cleanup_actions] == ["remove"]
+        assert probe.setup_actions[0].path == _ROOT / "untracked/scratch/probe"
+
+    def test_a_block_whose_setup_is_refused_is_skipped_not_run_partially(self) -> None:
+        """Refusing one command must not leave the others already executed.
+
+        The decision is taken while PLANNING, before anything runs, so a block
+        carrying one unacceptable command never reaches the dispatcher at all.
+        """
+        block = _block(
+            setup_commands=["mkdir -p untracked/scratch/probe", "rm -rf /etc"],
+        )
+        probe = plan_probe(block, _ROOT)
+        assert isinstance(probe, SkippedProbe)
+        assert "/etc" in probe.reason
+
+    def test_cleanup_is_vetted_as_well_as_setup(self) -> None:
+        """Cleanup is where the deletes live, so it is the riskier half."""
+        block = _block(cleanup_commands=["rm -rf /"])
+        probe = plan_probe(block, _ROOT)
+        assert isinstance(probe, SkippedProbe)
+
+    def test_a_block_with_no_fixture_commands_still_dispatches(self) -> None:
+        probe = plan_probe(_block(), _ROOT)
+        assert isinstance(probe, ExecutableProbe)
+        assert probe.setup_actions == []
+        assert probe.cleanup_actions == []

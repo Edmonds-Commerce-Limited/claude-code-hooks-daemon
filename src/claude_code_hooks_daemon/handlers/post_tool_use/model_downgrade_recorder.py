@@ -196,7 +196,6 @@ class ModelDowngradeRecorderHandler(PostToolUseHandlerBase):
                     "'<daemon untracked dir>/context-sidecar/' and verify no "
                     "'<session>.model-downgrade' file was created."
                 ),
-                dispatch_as_bash=True,
                 description=(
                     "The recorder writes only when the transcript actually holds an "
                     "automatic model-downgrade record, so an undowngraded session "

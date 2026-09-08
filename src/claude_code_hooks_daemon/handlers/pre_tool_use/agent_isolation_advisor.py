@@ -155,7 +155,6 @@ class AgentIsolationAdvisorHandler(PreToolUseHandlerBase):
                     "sessions, NOT spawned sub-agents), use the Agent tool without "
                     "an isolation setting"
                 ),
-                dispatch_as_bash=True,
                 description=(
                     "Advises worktree isolation when agents share a checkout. "
                     "PRECONDITION (v3.55.0 Test 214 ruling): 'live threads' are "

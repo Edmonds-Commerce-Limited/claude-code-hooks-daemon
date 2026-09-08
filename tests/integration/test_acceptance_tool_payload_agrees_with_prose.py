@@ -29,12 +29,21 @@ off.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
 _FILE_PATH_KEY = "file_path"
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Shell constructs that make a string unambiguously a command even when its
+# first token is not an executable: pipelines, redirects, assignments,
+# conditionals, subshells. A `set -euo pipefail` prelude or a bare
+# `VAR=value cmd` is a real command with an unexecutable-looking head.
+_SHELL_CONSTRUCTS = ("$(", "&&", "||", ">>", "<<", "|", ";", "=", "[[", "\n")
 
 # Generous next to the 120s its neighbours here allow a QA checker: this
 # subprocess imports every handler module and walks all ~280 test blocks, so
@@ -171,6 +180,52 @@ class TestDeclaredPayloadsAgreeWithTheirProse:
             "same test:\n" + "\n".join(disagreements)
         )
 
+    def test_every_bash_payload_is_a_command_a_shell_could_run(self, playbook: list[dict]) -> None:
+        """A Bash payload carrying PROSE passes while testing nothing.
+
+        This caught eight real ones. Plan 00345's own classifier decided "this
+        is shell" by checking the command did NOT start with a known prose
+        opener — a blacklist — and eight blocks opened with words it had never
+        seen (`With`, `Simulate`, `Run any`, `Stage`, `WebFetch`). They describe
+        a scenario a human performs, not a command anything can execute.
+
+        Every one of the eight expected ALLOW, which is exactly why nothing
+        noticed: a prose string dispatched as a Bash command matches no
+        handler, returns no decision, and `verdict` correctly reads that
+        absence as an allow. The DENY siblings of the same handlers failed
+        loudly and were held back — so a dry run only exposes prose when the
+        test expects a refusal, and the allow half slips through in silence.
+
+        Asked as a WHITELIST, unlike the classifier that failed: the first
+        token must be something executable, or the command must carry a shell
+        construct that makes it unambiguously a command. An unrecognised shape
+        is reported for a human rather than assumed to be fine.
+        """
+        prose = []
+        for block in playbook:
+            payload = block.get("tool_payload") or {}
+            if (payload.get("tool_name") or "") != "Bash":
+                continue
+            command = (block.get("command") or "").strip()
+            tokens = command.split()
+            if not tokens:
+                continue
+            head = tokens[0].lstrip("!\\").split("/")[-1]
+            if shutil.which(head) or (REPO_ROOT / tokens[0]).exists():
+                continue
+            if any(marker in command for marker in _SHELL_CONSTRUCTS):
+                continue
+            prose.append(
+                f"#{block.get('test_number')} {block.get('handler_name')}: "
+                f"{command[:100]!r} starts with {tokens[0]!r}, which is not executable"
+            )
+
+        assert not prose, (
+            "a Bash payload's command does not look like something a shell "
+            "could run, so the probe would match no handler and an ALLOW test "
+            "would pass while testing nothing:\n" + "\n".join(prose)
+        )
+
     def test_every_declared_payload_names_a_tool(self, playbook: list[dict]) -> None:
         """An unnamed tool cannot be dispatched.
 
@@ -273,7 +328,7 @@ class TestDeclaredPayloadsAgreeWithTheirProse:
             for key, value in (payload.get("tool_input") or {}).items():
                 if isinstance(value, str) and value.startswith(_SELF_INSTALL_ROOT):
                     hardcoded.append(
-                        f"#{block.get('test_number')} {block.get('handler_name')} " f"{key}={value}"
+                        f"#{block.get('test_number')} {block.get('handler_name')} {key}={value}"
                     )
 
         assert not hardcoded, (

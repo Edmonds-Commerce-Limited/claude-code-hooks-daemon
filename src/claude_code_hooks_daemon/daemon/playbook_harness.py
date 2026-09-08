@@ -67,6 +67,12 @@ class ExecutableProbe:
     expected_message_patterns: list[str] = field(default_factory=list)
     requires_existing_file: bool = False
     requires_absent_file: bool = False
+    #: Already translated and contained by `vet_probe_commands`, so a probe
+    #: carrying any command the harness will not run is a SkippedProbe instead.
+    #: The dispatcher performs these as plain filesystem operations -- there is
+    #: no shell anywhere in this path.
+    setup_actions: list[FixtureAction] = field(default_factory=list)
+    cleanup_actions: list[FixtureAction] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.tool_name or not self.tool_name.strip():
@@ -77,6 +83,128 @@ class ExecutableProbe:
         """The path this probe writes to, if it declares one."""
         value = self.tool_input.get(_FILE_PATH_KEY)
         return value if isinstance(value, str) and value else None
+
+
+#: The ONLY command shapes the harness will execute, and the reason the list is
+#: closed rather than a path check. Measured across all 79 blocks that carry
+#: setup: 77 are `mkdir -p`, and the remaining handful author a small fixture
+#: file. Nothing else appears, so nothing else is permitted -- refusing an
+#: unrecognised shape costs one skipped probe and says so in the report, while
+#: running an unreviewed one because its path looked acceptable is unbounded.
+#:
+#: Anchored end to end, so a shape cannot be reached by appending to a
+#: permitted one: `mkdir -p <scratch> && rm -rf /` matches none of these.
+_PERMITTED_PROBE_COMMANDS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^mkdir -p (?P<path>[^\s;&|<>]+)$"), "mkdir"),
+    (re.compile(r"^install -d (?P<path>[^\s;&|<>]+)$"), "mkdir"),
+    (re.compile(r"^rm -[rf]{1,2} (?P<path>[^\s;&|<>]+)$"), "remove"),
+    (re.compile(r"^printf '(?P<printf>[^']*)' > (?P<path>[^\s;&|<>]+)$"), "write"),
+    (
+        re.compile(r"""^echo (?:'(?P<echo>[^']*)'|"(?P<echo2>[^"]*)") > (?P<path>[^\s;&|<>]+)$"""),
+        "write",
+    ),
+)
+
+#: Where a probe is allowed to act, relative to the checkout. The same rule the
+#: harness applies to its own deletes.
+_PROBE_SCRATCH = ("untracked", "scratch")
+
+
+@dataclass(frozen=True)
+class RefusedCommands:
+    """A probe whose fixture commands the harness declines to run, and why.
+
+    Returned rather than raised: a refusal turns into a SKIP with a reason,
+    which is this harness's whole contract for anything it will not do. Raising
+    would abort a run of ~190 probes over one unrecognised fixture command.
+    """
+
+    reason: str
+
+    def __post_init__(self) -> None:
+        if not self.reason or not self.reason.strip():
+            raise ValueError("a refusal must carry a reason")
+
+
+@dataclass(frozen=True)
+class FixtureAction:
+    """One filesystem effect a probe's setup or cleanup asks for.
+
+    A probe's fixture commands are TRANSLATED into these rather than handed to
+    a shell. That is the whole reason the permitted list is closed: each shape
+    corresponds to a plain filesystem operation, so the harness needs no shell
+    at all and there is no command-injection surface to reason about. A shape
+    nobody has translated is a shape nobody runs.
+    """
+
+    kind: str
+    path: Path
+    content: str = ""
+
+
+def vet_probe_commands(
+    commands: list[str] | None, project_root: Path
+) -> RefusedCommands | list[FixtureAction]:
+    """Translate a probe's fixture commands, or refuse them.
+
+    Fixture commands are the one part of this harness that is NOT inert.
+    Everywhere else a command is data placed in `tool_input` and answered by
+    the daemon; these describe real changes to the tree. So each is checked
+    twice -- the shape must be on the closed list above, and the path it acts
+    on must resolve inside the checkout's scratch directory -- and then
+    converted to a `FixtureAction` the caller performs directly.
+
+    Resolved, not string-matched: `untracked/scratch/../../etc` starts with the
+    sanctioned prefix and is not inside it.
+    """
+    actions: list[FixtureAction] = []
+    for command in commands or []:
+        stripped = command.strip()
+        for pattern, kind in _PERMITTED_PROBE_COMMANDS:
+            match = pattern.match(stripped)
+            if match is None:
+                continue
+            target = expand_project_dir(match.group("path"), project_root)
+            resolved = Path(target)
+            if not resolved.is_absolute():
+                resolved = project_root / resolved
+            scratch = project_root.joinpath(*_PROBE_SCRATCH)
+            try:
+                inside = resolved.resolve().is_relative_to(scratch.resolve())
+            except OSError:
+                inside = False
+            if not inside:
+                return RefusedCommands(
+                    reason=f"fixture command acts outside {'/'.join(_PROBE_SCRATCH)}: {command!r}"
+                )
+            actions.append(
+                FixtureAction(
+                    kind=kind,
+                    path=resolved,
+                    content=_fixture_content(match),
+                )
+            )
+            break
+        else:
+            return RefusedCommands(
+                reason=f"fixture command is not one the harness will run: {command!r}"
+            )
+    return actions
+
+
+def _fixture_content(match: re.Match[str]) -> str:
+    """The bytes a writing shape puts on disk, with shell escapes resolved.
+
+    `printf 'def broken(\\n'` writes a real newline; `echo` does not interpret
+    the escape. Getting this backwards would author a fixture whose content is
+    not what the playbook shows, which is the same class of defect as a payload
+    disagreeing with its prose.
+    """
+    groups = match.groupdict()
+    if groups.get("printf") is not None:
+        return groups["printf"].replace("\\n", "\n").replace("\\t", "\t")
+    literal = groups.get("echo") if groups.get("echo") is not None else groups.get("echo2")
+    return f"{literal}\n" if literal is not None else ""
 
 
 @dataclass(frozen=True)
@@ -176,6 +304,15 @@ def plan_probe(block: PlaybookBlock, project_root: Path) -> ExecutableProbe | Sk
     # path that already exists the event describes a CLOBBER instead, and
     # `write_clobber_guard` correctly denies it -- which turned three ALLOW
     # probes into failures on nothing worse than residue from an earlier run.
+    # Vetted while PLANNING, before anything runs, so a block carrying one
+    # unacceptable command is skipped whole rather than half-executed.
+    setup = vet_probe_commands(block.get("setup_commands"), project_root)
+    if isinstance(setup, RefusedCommands):
+        return _skip(block, setup.reason)
+    cleanup = vet_probe_commands(block.get("cleanup_commands"), project_root)
+    if isinstance(cleanup, RefusedCommands):
+        return _skip(block, cleanup.reason)
+
     names_a_file = bool(tool_input.get(_FILE_PATH_KEY))
     requires_existing_file = event_type == "PostToolUse" and names_a_file
     requires_absent_file = event_type == "PreToolUse" and names_a_file
@@ -192,6 +329,8 @@ def plan_probe(block: PlaybookBlock, project_root: Path) -> ExecutableProbe | Sk
         expected_message_patterns=list(block.get("expected_message_patterns") or []),
         requires_existing_file=requires_existing_file,
         requires_absent_file=requires_absent_file,
+        setup_actions=setup,
+        cleanup_actions=cleanup,
     )
 
 

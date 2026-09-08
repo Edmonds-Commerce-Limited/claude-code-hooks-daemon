@@ -723,6 +723,7 @@ warning, never crashes the handler."""
             AcceptanceTest(
                 title="Bash heredoc authoring invalid Python is DENIED",
                 command=(f"cat > {directory}/authored.py <<'EOF'\ndef broken(\nEOF"),
+                dispatch_as_bash=True,
                 description=(
                     "Plan 00260 Task 3.5. Before this, a heredoc put unparseable Python on "
                     "disk in silence while identical content through Write was denied -- so "
@@ -737,7 +738,17 @@ warning, never crashes the handler."""
                     "directory; removed by cleanup"
                 ),
                 test_type=TestType.BLOCKING,
-                setup_commands=[f"mkdir -p {directory}"],
+                setup_commands=[
+                    f"mkdir -p {directory}",
+                    # The heredoc in `command` is what authors this file when a
+                    # HUMAN runs the test. A harness never executes the command
+                    # -- probes are inert -- so the file has to be established
+                    # the same way its sibling below establishes `source.py`.
+                    # Without it `_is_lintable` ends at `Path(file_path).
+                    # exists()` and the handler correctly declines, which reads
+                    # as this test failing when nothing is wrong.
+                    f"printf 'def broken(\\n' > {directory}/authored.py",
+                ],
                 cleanup_commands=[f"rm -rf {directory}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,

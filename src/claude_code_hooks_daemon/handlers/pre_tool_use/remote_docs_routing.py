@@ -305,7 +305,6 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="remote-docs routing near-miss",
                 command="WebFetch a URL that is NOT vendored",
-                dispatch_as_bash=True,
                 description=(
                     "An unvendored URL is allowed through; only a capture "
                     "hint is added, never a block"

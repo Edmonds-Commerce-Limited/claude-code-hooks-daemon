@@ -844,7 +844,6 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
                     "PLAN.md '**Status**:' line to 'In Progress', then verify a "
                     "system-reminder advisory names the first plan as displaced."
                 ),
-                dispatch_as_bash=True,
                 description=(
                     "Plan 00276: emitting a goal while another ledgered plan is "
                     "still In Progress marks the older ledger entry displaced and "

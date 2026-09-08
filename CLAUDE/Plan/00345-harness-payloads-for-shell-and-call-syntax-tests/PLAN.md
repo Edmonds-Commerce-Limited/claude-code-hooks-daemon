@@ -24,10 +24,15 @@ Building the harness changed that ground without anyone re-deriving the
 residual. A harness needs a declared payload just as much for `echo "git reset --hard ..."` as for a sentence, so the prose-era number was carried into a
 post-harness world where it no longer described the gap.
 
-Converting them roughly doubles automated coverage, from 94 to about 201 of 228
-— which matters because every block that stays manual is a block a human
-re-executes on every release, and RELEASING.md Step 12's whole cost is that
-manual pass.
+Converting them roughly doubles automated coverage — which matters because every
+block that stays manual is a block a human re-executes on every release, and
+RELEASING.md Step 12's whole cost is that manual pass.
+
+**Delivered: 94 → 187 of 228.** The estimate here was ~201; the shortfall is
+accounted for and deliberate. Eight blocks were converted wrongly and reverted
+(prose that a blacklist classifier read as shell — see Task 3.1), and the
+remainder are Phase 5's, where a shell-shaped command drives another tool or a
+handler is gated by project configuration this checkout does not have.
 
 ## Goals
 
@@ -52,44 +57,48 @@ manual pass.
 
 ### Phase 1: Measure before converting
 
-- [ ] ⬜ **Task 1.1**: Re-derive the residual per handler file and record it,
-  so the conversion is driven by a list rather than by a grep at edit time
+- [x] ✅ **Task 1.1**: Residual re-derived per handler file and recorded, so
+  the conversion was driven by a list rather than by a grep at edit time
 
-  - [ ] ⬜ **The first classification attempt was wrong, and cheaply so.** A
+  - [x] ✅ **The first classification attempt was wrong, and cheaply so.** A
     naive filter (`not command.startswith("Use the "/"Create "/"Write ")`)
     reported all 104 as shell commands. It missed `Write(` — no space — so
-    `ErrorHidingBlockerHandler`'s call-syntax probes counted as shell. The
-    corrected split is below; re-derive it in the task rather than trusting
-    these numbers, since handlers change
-  - [ ] ⬜ Measured split of the 129: **79 shell command**, **18 shell-shaped
-    but unusual** (`python3 -c "..."`, `[[ "..." == 0 ]]`), **10 `Write(...)`
-    call syntax**, **22 English prose** (out of scope, see Non-Goals)
-  - [ ] ⬜ 17 of the no-payload blocks carry
-    `setup_commands`/`cleanup_commands` (Task 1.2 settles those) and 16 are
-    multi-line, which needs confirming as harmless before bulk conversion
+    `ErrorHidingBlockerHandler`'s call-syntax probes counted as shell
+  - [x] ✅ Re-derived against the LIVE playbook at conversion time rather than
+    trusting the recorded split, which had already moved: **94 shell + 25
+    prose**, being the earlier 129 less Phase 2's 10, with three `Write ...`
+    blocks reclassifying from shell to prose
+  - [x] ✅ Dry-run of all 94 as Bash payloads BEFORE converting any: **78
+    behave as declared**, 12 have unsatisfiable patterns, 2 need a fixture
+    file authored, 2 are not Bash tests at all
 
-- [ ] ⬜ **Task 1.2**: RUN `setup_commands` / `cleanup_commands` in the harness
+- [x] ✅ **Task 1.2**: RUN `setup_commands` / `cleanup_commands` in the harness
 
-  - [ ] ⬜ **Settled by reading all of them, not by judgement: RUN them**,
-    behind the containment guard the harness already has
-  - [ ] ⬜ **17, not the 14 first recorded** — that count was taken inside
-    Task 1.1's buggy shell-shaped filter, so it inherited the same mistake
-  - [ ] ⬜ Every one is scratch-scoped and trivial. **16 of 17 are
-    `mkdir -p <untracked/scratch/...>`** with an `rm -rf` cleanup; the other
-    two are `echo "test content" >` (#20 `sed_blocker`) and
-    `printf 'def broken(\n' >` (#149 `lint_on_edit`), also into scratch
-  - [ ] ⬜ The `mkdir` majority is nearly redundant already — `_run_probe`
-    calls `target.parent.mkdir(parents=True, exist_ok=True)` before a
-    PostToolUse write. That is the argument FOR running them: a small,
-    well-understood extension of what the harness already does to the tree,
-    not a new execution surface
-  - [ ] ⬜ Guard with `_is_removable_probe_target`'s rule (under
-    `untracked/scratch/` or the system temp dir) and SKIP with a reason if a
-    block ever carries setup reaching outside it, keeping the blast radius
-    identical to what the harness already permits itself
-  - [ ] ⬜ Skipping was the first instinct and was WRONG: it would have parked
-    17 convertible blocks over a precondition that turns out to be one `mkdir`
-    the harness performs anyway
+  - [x] ✅ Done, but **the argument in this task was retired by measurement**
+    and the honest record matters more than the tick. It claimed skipping
+    "would have parked 17 convertible blocks". It would have parked NONE: all
+    17 are converted and all 17 pass with their setup never running
+  - [x] ✅ Audited across the 197 blocks carrying a payload: **79 carry setup,
+    and 77 are nothing but `mkdir -p`** — which changes nothing for a Bash
+    probe, since no file needs to pre-exist for a command to be judged. Only
+    five have setup that AUTHORS a file, and only #149 among them is an ALLOW
+    probe passing on silence
+  - [x] ✅ **Zero** path tokens across every setup AND cleanup command reach
+    outside `untracked/scratch/`, so the containment claim is measured rather
+    than asserted
+  - [x] ✅ Worth doing anyway for a STRUCTURAL reason rather than an
+    arithmetic one: a Write probe gets its preconditions established by the
+    harness and a Bash probe did not. #148 is exactly a PostToolUse Bash probe
+    whose handler ends at `Path(file_path).exists()`
+  - [x] ✅ **No shell.** Each permitted command is TRANSLATED into a
+    `FixtureAction` (`mkdir` / `remove` / `write`) the harness performs as a
+    plain filesystem call, so there is no command-injection surface to reason
+    about at all. The permitted list is closed and each entry maps to an
+    operation: a shape nobody has translated is a shape nobody runs
+  - [x] ✅ Vetted while PLANNING, so a block carrying one unacceptable command
+    becomes a SKIP with a reason rather than being half-executed. Containment
+    is checked on the RESOLVED path — `untracked/scratch/../../etc` starts
+    with the sanctioned prefix and is not inside it
 
 ### Phase 2: The 10 call-syntax blocks (the Task 1.2 miss)
 
@@ -115,40 +124,115 @@ manual pass.
 
 ### Phase 3: The shell blocks
 
-- [ ] ⬜ **Task 3.1**: Add `ToolPayload(tool_name=ToolName.BASH, tool_input={"command": <the existing command string>})` to the shell blocks
+- [x] ✅ **Task 3.0**: Fix the event `cwd` the harness gives a Bash probe
 
-  - [ ] ⬜ Keep `command` byte-identical. For a shell test the bare command is
-    already the best thing a human can be handed; `as_instruction()` would
-    render `Use the Bash tool with command='echo "git reset --hard ..."'`,
-    which is strictly harder to paste
-  - [ ] ⬜ Delegable per handler file, as Plan 00243 Task 1.2 was
+  - [x] ✅ Not in the original plan, and found by dry-running rather than by
+    reading. The harness pointed the event's `cwd` at an isolated temp
+    directory, so a RELATIVE path in a command resolved outside the repository:
+    `mkdir -p CLAUDE/Plan/99999-probe` was answered by `project_containment` in
+    `plan_number_helper`'s place — a deny that still read as a pass — and its
+    sibling ALLOW probe denied outright
+  - [x] ✅ Plan 00243 measured the isolation as "changing nothing" and the
+    measurement was real, but it could not have found anything: all 94 probes
+    then were WRITE payloads whose `file_path` is absolute, and an absolute
+    path cannot notice its cwd. **A measurement taken over a population
+    structurally incapable of showing the effect reads exactly like evidence of
+    absence**
+  - [x] ✅ Fixed by REMOVING the argument, not by passing a better value:
+    `ExecutableProbe` carries the root it was planned against, so no caller has
+    a cwd knob to get wrong
 
-- [ ] ⬜ **Task 3.2**: Add the agreement invariant to
+- [x] ✅ **Task 3.1**: The shell blocks carry Bash payloads. Executable rises
+  **104 → 187** of 228 dispatchable, all green
+
+  - [x] ✅ `command` stays byte-identical, and the payload is DERIVED from it
+    via `dispatch_as_bash=True` rather than written out beside it. For a shell
+    test the bare command is already the best thing a human can be handed;
+    `as_instruction()` would render `Use the Bash tool with command='...'`,
+    strictly harder to paste
+  - [x] ✅ Still a per-site DECLARATION, not a classifier — nothing inspects a
+    command's shape. Declaring it alongside an explicit `tool_payload` raises,
+    which is what keeps the shell-shaped-but-another-tool blocks honest
+  - [x] ✅ An `InitVar`, not a field: `test_playbook_generator_json_field_ coverage` requires every field to reach the JSON, and emitting the flag
+    would invite a harness to read it INSTEAD of the payload, reopening the
+    split the derivation closes. A pre-existing test caught this
+  - [x] ✅ Converted by an `ast`-based script rather than text matching, after
+    two failures worth recording: a literal `git clean -fd` in a transform
+    script is itself denied by `destructive_git`, and matching on the command
+    alone was both ambiguous (handlers declare two tests with an IDENTICAL
+    command) and insufficient (several build `command` with an f-string)
+  - [x] ✅ **Eight blocks were converted WRONGLY and had to be reverted**, and
+    the count above is the corrected one. The conversion classifier was a
+    BLACKLIST — "shell" meant "does not open with a known prose phrase" — so
+    eight prose blocks opening `With`, `Simulate`, `Run any`, `Stage` and
+    `WebFetch` fell through to shell by default
+  - [x] ✅ Every one of the eight expected **ALLOW**, which is why nothing
+    caught them: a prose string dispatched as Bash matches no handler, returns
+    no decision, and `verdict` correctly reads that as an allow. The DENY
+    siblings of the same handlers failed loudly and were held back — so a dry
+    run exposes prose only when the test expects a refusal. **The danger is
+    concentrated entirely in the allow half**
+  - [x] ✅ Guarded now by `test_every_bash_payload_is_a_command_a_shell_could_run`,
+    asked as a WHITELIST: the first token must be executable, or the command
+    must carry a shell construct. Unrecognised shapes are reported for a human
+    rather than assumed fine
+
+- [x] ✅ **Task 3.2**: The agreement invariant is in
   `tests/integration/test_acceptance_tool_payload_agrees_with_prose.py` — for a
   Bash payload, `tool_input["command"]` must equal the block's `command`
 
-  - [ ] ⬜ The Write-payload half of that file checks `file_path` appears in
-    the command; this is the same guarantee for the other tool, and it is what
-    makes "the human and the harness run the same thing" checkable rather than
-    merely intended
+  - [x] ✅ Derivation makes this true by construction, so what the test
+    actually guards is a HAND-WRITTEN Bash payload. It earned its place
+    immediately: `project_containment` #45 was showing prose around its command
+    instead of the pasteable string
+
+- [x] ✅ **Task 3.3**: Repair the 12 assertions no message could satisfy
+
+  - [x] ✅ Seven case-only (all `destructive_git`: the pattern says
+    `permanently destroys`, the message opens `Permanently destroys`), widened
+    to a character class following Plan 00243's `[Tt]ime estimate` fix — the
+    capital is a function of sentence position, not of the phrase
+  - [x] ✅ Five wording rot, each now quoting the live message rather than
+    paraphrasing: #41/#42 `FLAGGABLE CONTENT CHANNEL` → the hyphenated rule ID,
+    #78 the reworded worktree message, #83 the words the message actually uses,
+    #110 `EXECUTED` → `command substitution` (the assertion had drifted to the
+    rule TABLE's summary, which the verbose block does not repeat)
+  - [x] ✅ PRE-EXISTING, not caused by this work. They passed all along because
+    a human reads the message for MEANING and ticks it — only a literal matcher
+    notices, and nothing ran one over these blocks until they gained payloads
 
 ### Phase 4: Verify the coverage actually moved
 
-- [ ] ⬜ **Task 4.1**: Run the harness and confirm the executable count rose
-  and no new failure appeared
-  - [ ] ⬜ **Run it TWICE.** Plan 00243's harness passed once and then failed
-    on `lsp_enforcement`, a `block_once` handler whose session had already
-    spent its block. A single green run does not establish repeatability
-  - [ ] ⬜ Raise the floor in `test_a_substantial_share_of_blocks_are_executable`
-    so a regression that silently stops reading the field is caught
+- [x] ✅ **Task 4.1**: Harness run, executable count risen, no new failure
+  - [x] ✅ **Run TWICE**, both green. Plan 00243's harness passed once and then
+    failed on `lsp_enforcement`, a `block_once` handler whose session had
+    already spent its block, so a single green run establishes nothing
+  - [x] ✅ Floor in `test_a_substantial_share_of_blocks_are_executable` raised
+    90 → 185, so a regression that silently stops reading the field is caught
+  - [x] ✅ Also measured what the green MEANS: 123 denies where the handler
+    denied, 32 allows where it spoke without deciding, 39 silent allows. The
+    silent ones are mostly NEGATIVE tests where declining to match IS the
+    assertion — see the journal, so the number is not misread later
+
+### Phase 5: The blocks that are not Bash tests
+
+- [ ] ⬜ **Task 5.1**: #217 `RemoteDocsRouting` and #245 `DispatchDeclaration`
+  have shell-shaped commands but are English prose driving another tool
+  (WebFetch, Agent). They need that tool's payload or a documented skip
+- [ ] ⬜ **Task 5.2**: #115 `ValidateEslintOnWrite` is unreachable in THIS
+  checkout by its own documented precondition — the handler only runs ESLint
+  when the project has a tracked `package.json` declaring `llm:` scripts, and
+  the daemon's own repo has none. Needs a precondition-aware skip; neither
+  `harness_cannot_produce` (about input rewriting) nor `required_tools` (about
+  PATH executables) says this
 
 ## Success Criteria
 
-- [ ] The harness dispatches ~201 of 228 dispatchable blocks, up from 94
+- [x] The harness dispatches 187 of 228 dispatchable blocks, up from 94
 - [ ] Every remaining skip still carries a reason, and each reason is either a
   permanent boundary or names what would make it convertible
-- [ ] Two consecutive harness runs are green on a clean tree
-- [ ] A Bash payload cannot disagree with the command a human is shown
+- [x] Two consecutive harness runs are green on a clean tree
+- [x] A Bash payload cannot disagree with the command a human is shown
 
 ## Technical Decisions
 

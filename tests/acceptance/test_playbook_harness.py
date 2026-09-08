@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -36,6 +37,7 @@ import pytest
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.playbook_harness import (
     ExecutableProbe,
+    FixtureAction,
     SkippedProbe,
     build_event,
     daemon_error,
@@ -192,10 +194,38 @@ def _is_removable_probe_target(target: Path) -> bool:
     return target.is_relative_to(scratch) or target.is_relative_to(temp_root)
 
 
+def _perform(actions: list[FixtureAction]) -> None:
+    """Establish (or clear) a probe's fixtures, as plain filesystem calls.
+
+    No shell. `vet_probe_commands` has already translated each declared command
+    into one of three operations and proved its path resolves inside
+    `untracked/scratch/`, so what arrives here is data rather than a string
+    anything could interpret. That translation is the reason the permitted list
+    is closed: a shape nobody has mapped to an operation is a shape nobody runs.
+    """
+    for action in actions:
+        if not _is_removable_probe_target(action.path):
+            raise AssertionError(f"vetting let through an out-of-bounds path: {action.path}")
+        if action.kind == "mkdir":
+            action.path.mkdir(parents=True, exist_ok=True)
+        elif action.kind == "remove":
+            if action.path.is_dir():
+                shutil.rmtree(action.path, ignore_errors=True)
+            elif action.path.exists():
+                action.path.unlink()
+        elif action.kind == "write":
+            action.path.parent.mkdir(parents=True, exist_ok=True)
+            action.path.write_text(action.content, encoding="utf-8")
+        else:
+            raise AssertionError(f"unknown fixture action kind: {action.kind!r}")
+
+
 def _run_probe(probe: ExecutableProbe) -> str | None:
     """Dispatch one probe, making the world match what its event claims."""
     created: Path | None = None
     target = Path(probe.file_path) if probe.file_path else None
+
+    _perform(probe.setup_actions)
 
     if target is not None and _is_removable_probe_target(target):
         if probe.requires_existing_file:
@@ -215,6 +245,12 @@ def _run_probe(probe: ExecutableProbe) -> str | None:
     finally:
         if created is not None and created.exists():
             created.unlink()
+        # Cleanup matters more here than tidiness: a fixture left behind is a
+        # file the NEXT run's probe can pass on without having established it.
+        # Measured, not hypothetical — #148 passed on an `authored.py` a human
+        # left in scratch two days earlier, because `lint_on_edit._is_lintable`
+        # ends at `Path(file_path).exists()` and does not care who wrote it.
+        _perform(probe.cleanup_actions)
 
 
 class TestThePlaybookIsReachable:
@@ -232,8 +268,8 @@ class TestThePlaybookIsReachable:
         almost nothing.
         """
         executable, _ = partitioned
-        assert len(executable) >= 90, (
-            f"only {len(executable)} blocks are executable; Task 1.2 left 97 "
+        assert len(executable) >= 185, (
+            f"only {len(executable)} blocks are executable; Plan 00345 left 195 "
             "declaring a payload, so a large drop means the field stopped "
             "being read rather than that the tests changed"
         )
