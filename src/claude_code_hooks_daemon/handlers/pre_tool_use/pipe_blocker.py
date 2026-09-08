@@ -961,14 +961,45 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             "heredoc for prose content"
         )
 
+    @staticmethod
+    def _producer_regex_anchor(source_segment: str) -> str:
+        """First word of the producer -- the text an `extra_whitelist` regex
+
+        must anchor `^` on to actually match this producer. Always the REAL
+        first word (e.g. `python`), never the module-aware label below: a
+        suggested pattern built from the module name (`^pytest\\b`) would
+        never match a `python -m pytest ...` producer, whose text starts
+        with `python`.
+        """
+        return source_segment.split()[0] if source_segment else "command"
+
+    @staticmethod
+    def _producer_label(source_segment: str) -> str:
+        """Human-facing name for the command that fed the offending pipe.
+
+        For `python -m <module>` / `python3 -m <module>`, the MODULE is what
+        a human calls this invocation -- `-m` here means MODULE, not the
+        interpreter (Plan 00222 established this for message-value
+        blanking; Plan 00319 Task 4.3 extends it to the label a block
+        message shows, which had drifted to name the interpreter instead:
+        "Piping python to tail/head..." for a `pytest` run). Every other
+        shape reports its own first word, unchanged.
+        """
+        words = source_segment.split()
+        if not words:
+            return "command"
+        if words[0] in ("python", "python3") and len(words) >= 3 and words[1] == "-m":
+            return words[2]
+        return words[0]
+
     def _blacklisted_reason(self, rule_id: str, source_segment: str, command: str) -> str:
         """Return verbose block message for known-expensive commands (blacklisted)."""
-        source_name = source_segment.split()[0] if source_segment else "command"
+        label = self._producer_label(source_segment)
         return (
             f"BLOCKED [{rule_id}]: Pipe to tail/head detected\n\n"
             f"COMMAND: {self._truncate_command(command)}\n\n"
             f"WHY BLOCKED:\n"
-            f"  • Piping {source_name} to tail/head causes information loss\n"
+            f"  • Piping {label} to tail/head causes information loss\n"
             f"  • If needed data isn't in those N truncated lines, the ENTIRE\n"
             f"    expensive command must be re-run\n"
             f"  • This wastes time and resources\n\n"
@@ -977,16 +1008,16 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
 
     def _blacklisted_terse_reason(self, rule_id: str, source_segment: str, command: str) -> str:
         """Return terse block message for known-expensive commands (subsequent blocks)."""
-        source_name = source_segment.split()[0] if source_segment else "command"
+        label = self._producer_label(source_segment)
         return (
-            f"BLOCKED [{rule_id}]: Pipe to tail/head — {source_name} is expensive\n\n"
+            f"BLOCKED [{rule_id}]: Pipe to tail/head — {label} is expensive\n\n"
             f"COMMAND: {self._truncate_command(command)}\n\n"
             f"{self._echd_capture_terse(source_segment)}"
         )
 
     def _unknown_reason(self, rule_id: str, source_segment: str, command: str) -> str:
         """Return verbose block message for unrecognized commands (not in whitelist or blacklist)."""
-        source_name = source_segment.split()[0] if source_segment else "command"
+        anchor = self._producer_regex_anchor(source_segment)
         return (
             f"BLOCKED [{rule_id}]: Pipe to tail/head detected\n\n"
             f"COMMAND: {self._truncate_command(command)}\n\n"
@@ -996,7 +1027,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             f".claude/hooks-daemon.yaml:\n\n"
             f"    {_CONFIG_YAML_KEY}:\n"
             f"      {_CONFIG_HINT_EXTRA_WHITELIST}:\n"
-            f'        - "^{source_name}\\\\b"\n\n'
+            f'        - "^{anchor}\\\\b"\n\n'
             f"  • If it IS expensive, capture it with the helper below\n\n"
             f"{self._echd_capture_recommendation(source_segment)}\n"
             f"INFO: WHITELISTED COMMANDS (piping is OK):\n"
@@ -1006,14 +1037,15 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
 
     def _unknown_terse_reason(self, rule_id: str, source_segment: str, command: str) -> str:
         """Return terse block message for unrecognized commands (subsequent blocks)."""
-        source_name = source_segment.split()[0] if source_segment else "command"
+        label = self._producer_label(source_segment)
+        anchor = self._producer_regex_anchor(source_segment)
         return (
-            f"BLOCKED [{rule_id}]: Pipe to tail/head — {source_name} unrecognized\n\n"
+            f"BLOCKED [{rule_id}]: Pipe to tail/head — {label} unrecognized\n\n"
             f"COMMAND: {self._truncate_command(command)}\n\n"
             f"Add to whitelist in .claude/hooks-daemon.yaml:\n"
             f"  {_CONFIG_YAML_KEY}:\n"
             f"    {_CONFIG_HINT_EXTRA_WHITELIST}:\n"
-            f'      - "^{source_name}\\\\b"\n\n'
+            f'      - "^{anchor}\\\\b"\n\n'
             f"{self._echd_capture_terse(source_segment)}"
         )
 
