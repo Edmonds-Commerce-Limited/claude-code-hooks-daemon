@@ -1,6 +1,6 @@
 # Plan 00252: guards for premises no write-time hook sees
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-17
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -99,27 +99,39 @@ expensive.
 
 ### Phase 1: Measure before choosing (finding A)
 
-- [ ] ⬜ **Task 1.1**: Run the whole suite under a neutralised git environment
+- [x] ✅ **Task 1.1**: Run the whole suite under a neutralised git environment
   (`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_SYSTEM=/dev/null`, and with
   `GIT_AUTHOR_*`/`GIT_COMMITTER_*` unset) and record every failure
-  - [ ] ⬜ This is the same invocation already used to prove the Plan 00248 fix
+  (`772ef675`, Plan 00362 Task 2.6 — full unit and integration suites under
+  the fixture: zero failures attributable to the neutralised config; the only
+  errors were the tracked-doc guard catching an external `CLAUDE.md`
+  regeneration, unrelated)
+  - [x] ✅ This is the same invocation already used to prove the Plan 00248 fix
     RED and GREEN, so it is known to work; what is unknown is how many other
     tests depend on the ambient premise
-  - [ ] ⬜ The result decides Phase 2's shape — do not choose the mechanism first
-- [ ] ⬜ **Task 1.2**: Confirm no test legitimately reads global or system git
+  - [x] ✅ The result decides Phase 2's shape — do not choose the mechanism first
+- [x] ✅ **Task 1.2**: Confirm no test legitimately reads global or system git
   config (a prior grep found zero matches for `config --global`,
   `GIT_CONFIG_GLOBAL` and `config … --system` under `tests/`; re-verify, since a
-  single legitimate reader changes the design)
+  single legitimate reader changes the design) (`772ef675` — re-verified: the
+  only readers are the guard's own proof test)
 
 ### Phase 2: Remove the opportunity (finding A)
 
-- [ ] ⬜ **Task 2.1**: Apply the neutralisation as an autouse session fixture in
+- [x] ✅ **Task 2.1**: Apply the neutralisation as an autouse session fixture in
   `tests/conftest.py`, unless Task 1.1 found a genuine dependency
-  - [ ] ⬜ Preferred over `scripts/qa/run_tests.sh` alone: a developer running
+  (`772ef675` — `hermetic_git_environment`: empty global/system config files
+  under a session temp dir, `GIT_CONFIG_NOSYSTEM=1`, ambient
+  `GIT_AUTHOR_*`/`GIT_COMMITTER_*` cleared and a fixed identity pinned so a
+  commit still succeeds with the same author on every machine)
+  - [x] ✅ Preferred over `scripts/qa/run_tests.sh` alone: a developer running
     `pytest` directly still gets the ambient premise there, and that is precisely
     how the seventh instance was written
-- [ ] ⬜ **Task 2.2**: Prove the guard catches the class — revert one known
-  instance and confirm it now fails LOCALLY, not only in CI
+- [x] ✅ **Task 2.2**: Prove the guard catches the class — revert one known
+  instance and confirm it now fails LOCALLY, not only in CI (`772ef675` —
+  `tests/unit/test_hermetic_git_environment.py` asserts `git config --get user.name` resolves to nothing and that no config value originates under
+  `HOME`; without the fixture it prints the developer's name locally, which
+  is the RED that was confirmed before the fixture landed)
 - [ ] ⬜ **Task 2.3**: Consolidate `test_git_repo.py`'s local `_git_init` onto the
   shared fixture, as a complementary narrowing
   - [ ] ⬜ Note for the record: `_git_init` PREDATES the fixture (`074b9de1`,
@@ -195,8 +207,8 @@ arrive by routes no hook sees at all.
 
 ## Success Criteria
 
-- [ ] The whole suite passes with ambient git configuration neutralised, and a
-  reverted known instance now fails locally
+- [x] The whole suite passes with ambient git configuration neutralised, and a
+  reverted known instance now fails locally (`772ef675`)
 - [ ] A `git commit` staging content that carries a secret-list term is denied,
   naming only an index
 - [ ] The original `mv`-then-commit sequence is reproduced and blocked

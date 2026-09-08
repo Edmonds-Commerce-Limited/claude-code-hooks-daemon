@@ -103,9 +103,9 @@ while the detectors silently do not run.
 - [ ] ⬜ **Task 2.5** (D8 — Plan 00189 Tasks 1.1 to 1.3, MEDIUM): a daemon-down
   `WorktreeCreate` hook writes JSON to a stdout Claude Code reads as a path;
   generalise over the `raw_stdout` event flag.
-- [ ] ⬜ **Task 2.6** (D10 — Plan 00252 Phases 1 and 2, MEDIUM): the test suite
+- [x] ✅ **Task 2.6** (D10 — Plan 00252 Phases 1 and 2, MEDIUM): the test suite
   neutralises ambient git identity and config so a fresh runner and a local
-  run agree.
+  run agree. (`772ef675`)
 - [ ] ⬜ **Task 2.7** (D13 — Plan 00329, MEDIUM): the truth-changes
   reconciliation collapses superseded entries so only the current truth is
   asserted. Decision: collapse by truth key, keeping the highest-version
