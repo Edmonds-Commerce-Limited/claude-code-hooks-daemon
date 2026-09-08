@@ -439,14 +439,45 @@ Recorded first as "fails on 3.11, passes on 3.12 and 3.13" from run
 | 34192920901 | pass | **fail** | pass |
 
 One interpreter per run, a different one each time — so the variable is not the
-interpreter. Two candidate causes remain, and the CI log cannot separate them:
-`handle()` has no `None` return, so an empty stdout is its terminal
-`BlockingResult(decision=ALLOW)` with no reason, reached either when the file
-was not lintable at lint time (`_is_lintable` ends with `Path(file_path).exists()`)
-or when `swiftc -typecheck` exited 0. A timeout is excluded — that branch
-returns an ALLOW *with* an advisory, so it would surface as text.
+interpreter.
 
-The fixture directory is shared by probes #143 and #144 and is `rm -rf`'d by
-each one's cleanup, which is where a reproduction should start looking.
-`swiftc` is not installed in this container, so the reproduction needs either a
-Swift toolchain or a stub that reproduces the ordering rather than the linting.
+### Correction: the timeout was excluded on bad grounds
+
+I wrote that a timeout was ruled out because that branch returns an ALLOW *with*
+an advisory, so it would surface as text. The first half is right and the
+conclusion does not follow, because **`verdict` threw the text away on exactly
+this branch**:
+
+```python
+if not denied:
+    return f"expected deny, observed {decision or 'no decision at all'} ..."
+```
+
+No `observed_text`, while the mirror-image "expected allow, observed deny"
+branch three lines later quotes 300 characters of it. So all three of
+`lint_on_edit`'s fail-open paths — a timeout, a linter that could not analyse
+the file, and a silent pass — arrive at the CI log as the same sentence. The
+advisory that separates them was generated, delivered, and then discarded by the
+harness.
+
+`verdict` now quotes the text here too, which puts the timeout back on the
+table as the leading hypothesis: `Timeout.LINT_CHECK` is 15s, `swiftc -typecheck` pays a stdlib-loading cost on first invocation, and three QA jobs
+run concurrently on the same class of runner. Load-dependent timing is exactly
+the signature of "a different single interpreter each run".
+
+**Deliberately not patched.** Raising the Swift budget now would be fixing a
+guess, and would also destroy the evidence: a raised timeout that made the probe
+pass would look identical to the defect having been something else. The next CI
+run names the cause in its own failure message.
+
+The remaining two candidates stay on the list: `handle()` has no `None` return,
+so an empty decision is its terminal `BlockingResult(decision=ALLOW)`, reached
+when the file was not lintable at lint time (`_is_lintable` ends with
+`Path(file_path).exists()`) or when `swiftc -typecheck` exited 0. The fixture
+directory shared by probes #143 and #144, `rm -rf`'d by each one's cleanup, is
+where the first of those would come from.
+
+**The generalisable point**: a harness that reports what it EXPECTED without
+reporting what it OBSERVED can only ever tell you that something is wrong. This
+one had the diagnostic in hand and dropped it, which cost two CI runs and a
+wrong exclusion.

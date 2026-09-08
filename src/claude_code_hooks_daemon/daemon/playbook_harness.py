@@ -461,9 +461,18 @@ def verdict(probe: ExecutableProbe, observed_decision: str, observed_text: str) 
 
     if probe.expected_decision == "deny":
         if not denied:
+            # Quote whatever the handler DID say. A handler that fails open can
+            # do so for several reasons and they all arrive as an empty
+            # decision, so the advisory text is the only thing separating them
+            # -- `lint_on_edit` alone names a timeout, a linter that could not
+            # analyse the file, and a silent pass. Reporting the decision alone
+            # made probe #144 unexplainable from a CI log, which is the one
+            # place it reproduces (Plan 00250 Task 2.4e). The mirror-image
+            # branch below already does this.
+            said = f": {observed_text[:300]!r}" if observed_text.strip() else ""
             return (
                 f"expected deny, observed {decision or 'no decision at all'} "
-                f"(handler {probe.handler_name})"
+                f"(handler {probe.handler_name}){said}"
             )
         missing = [
             pattern

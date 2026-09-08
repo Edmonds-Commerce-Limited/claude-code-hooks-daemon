@@ -219,6 +219,30 @@ class TestVerdict:
         failure = verdict(self._probe(), "deny", "")
         assert failure is not None
 
+    def test_a_missing_deny_reports_what_the_handler_DID_say(self) -> None:
+        """The one branch that threw its own diagnostic away (Plan 00250 2.4e).
+
+        `lint_on_edit` fails OPEN in three different ways, and two of them
+        ALLOW *with an advisory* naming the cause — a timeout, or a linter that
+        could not analyse the file. All three arrive here as an empty decision,
+        so the advisory is the only thing that separates them. Reporting the
+        decision alone turned a self-diagnosing CI failure into one that needs
+        the toolchain installed locally to guess at, which is how probe #144
+        stayed unexplained across two runs.
+
+        The mirror-image branch below already quotes the text; this one is the
+        asymmetry, not a new convention.
+        """
+        failure = verdict(self._probe(), "", "⚠️ Swift lint check timed out after 15s")
+        assert failure is not None
+        assert "timed out after 15s" in failure
+
+    def test_a_missing_deny_with_genuinely_no_text_still_says_so(self) -> None:
+        """Silence is itself the diagnostic, and must stay legible as silence."""
+        failure = verdict(self._probe(), "", "")
+        assert failure is not None
+        assert "no decision at all" in failure
+
     def test_a_post_tool_use_refusal_spells_deny_as_block(self) -> None:
         """One `Decision.DENY`, two wire spellings — see `REFUSAL_CAPABLE_EVENTS`.
 

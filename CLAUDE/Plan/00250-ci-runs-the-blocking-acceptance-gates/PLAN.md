@@ -207,22 +207,23 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
   (`recorded_untracked_dir` reads `_rl_dir="…"` back out), not for the current
   checkout's — so it is byte-exact on any machine, and refuses to guess when two
   forwarders disagree. Root-normalisation was the first attempt and was **not
-  sufficient**: a runner-length checkout crosses the AF_UNIX limit and takes a
-  different generator branch. The forwarders must stay tracked —
+  sufficient**: a runner-length root crosses the AF_UNIX limit and changes the
+  generator's branch. The forwarders must stay tracked —
   `hooks_deploy.sh` copies them into client projects and hard-fails without
   them. Hostname headroom measured at 54 characters. See
   [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 - [x] ✅ **Task 2.4f**: `test_no_other_machine_specific_path_survives` — the
-  guard added *for* 2.4c — carried 2.4c's own defect, judging the tracked
-  forwarders against the **live** checkout, so a runner read all 27 baked files
-  as offenders. The baked roots are now an argument
-  (`unexpected_absolute_paths`), measured against the real artefact from a
-  foreign root: 27 files before, none after.
+  guard added *for* 2.4c — carried 2.4c's own defect, judging the forwarders
+  against the **live** checkout, so a runner read all 27 baked files as
+  offenders. The baked roots are now an argument
+  (`unexpected_absolute_paths`), measured against the real artefact: 27 files
+  before, none after.
 - [ ] ⬜ **Task 2.4e**: Playbook probe **#144** (Swift lint) reports "no
   decision at all". **Flaky, not interpreter-specific** — a different single
-  interpreter in each of two runs. Not a timeout and not a missing tool, which
-  leaves an ALLOW. Needs a reproduction, not a patch; candidates and the
-  shared-fixture lead are in
+  interpreter in each of two runs. I excluded a timeout on bad grounds: that
+  branch does emit an advisory, but `verdict` **discarded** the observed text
+  here. It now quotes it, so the next CI run names the cause rather than
+  needing a Swift toolchain locally. See
   [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 - [x] ✅ **Task 2.4a**: The two failures that were plain defects rather than
   provisioning gaps — neither needed a daemon at all, and both were fixed with a
@@ -233,16 +234,14 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
   hardcoded `/workspace`; now derived. Detail in `JOURNAL/`.
 - [x] ✅ **Task 2.4b**: `test_relay_guard_fail_open.py`. ~~a provisioning gap
   needing an `nc` with `-U` on the runner~~ — **the hypothesis was wrong on both
-  counts**: a **test bug**, nothing to do with `nc`, and the task's own
-  instruction to confirm before fixing is what caught it.
-  The test derived its socket path from `os.environ.get("HOSTNAME", "localhost")`,
-  omitting the middle rung both real implementations have
-  (`socket.gethostname()`). bash sets `$HOSTNAME` as a **shell** variable without
-  exporting it, so a runner resolved a real hostname where the test resolved
-  `"localhost"`. **Reproduced locally** with `env -u HOSTNAME pytest …`; fixed by
-  calling `paths._get_hostname_suffix()`. **Class guarded**:
-  `test_hostname_suffix_parity.py` scans `tests/` for unexempted `$HOSTNAME`
-  reads, with an exemption marker and a vacuity class. Narrative in `JOURNAL/`.
+  counts**: a **test bug**, nothing to do with `nc`, caught by the task's own
+  instruction to confirm before fixing. The test read `$HOSTNAME` straight from
+  the environment, omitting the `socket.gethostname()` rung both real
+  implementations have; bash sets `$HOSTNAME` unexported, so a runner resolved a
+  real hostname where the test got `"localhost"`. **Reproduced locally** with
+  `env -u HOSTNAME pytest …`; fixed by calling `paths._get_hostname_suffix()`.
+  **Class guarded** by `test_hostname_suffix_parity.py`, which scans `tests/`
+  for unexempted `$HOSTNAME` reads. Narrative in `JOURNAL/`.
 
 ### Phase 3: Guard the class
 
