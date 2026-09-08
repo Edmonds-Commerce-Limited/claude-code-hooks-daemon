@@ -144,12 +144,33 @@ Escalate when, and only when:
 2. a client value and a new daemon default conflict in a way the ownership
    rules below do not resolve.
 
-**Non-interactive fallback (CI, headless) is: change nothing, and say so.** Keep
-the client's file exactly as it is, write the proposed merge alongside it, and
-report a non-zero status naming both paths. That fails toward not destroying
-client data, which is the Goal's stated tiebreak. It must never silently pick
-either side — an unattended run that guesses is how a customisation disappears
-with nobody watching.
+**Non-interactive fallback (CI, headless) is: change nothing, say so, and let
+the upgrade FINISH.** Keep the client's file exactly as it is, write the proposed
+merge alongside it, warn naming both paths, and carry the non-zero status to the
+end of the run. It must never silently pick either side — an unattended run that
+guesses is how a customisation disappears with nobody watching.
+
+**"Let it finish" is the part the audit corrected, and the ordering is why.**
+This spec first said *abort*. On the idempotent fast path `deploy_all_hooks`
+runs BEFORE the settings deploy, and `SNAPSHOT_ID`/`UPGRADE_STARTED` are not set
+until Step 3 — which that branch `exit 0`s before reaching. So an abort there
+leaves new forwarders, old settings, no restart and **no rollback to undo it
+with**. Aborting produces that half-state *plus* an unfinished upgrade;
+continuing produces the half-state alone, with the client's file intact and a
+warning on screen.
+
+The half-state is survivable by design rather than by luck: forwarder paths are
+stable across versions (`HOOK_COMMAND_TEMPLATE` keys by event, not by version),
+`reconcile_settings_hooks` adds any newly-wired event at runtime, and
+`hook_registration_checker` reports the drift at session start.
+
+**One distinction the audit blurred, worth keeping.** It argued the abort wedges
+a client permanently "since the conflict is deterministic". That holds for the
+FUTURE merge, where an unresolvable conflict recurs identically on every retry.
+It does not hold for today's `|| fail_fast`, which fires only when a backup or
+copy fails — an I/O condition that a retry after fixing disk or permissions
+clears. Today's abort is loud but recoverable; a merge-conflict abort would not
+be.
 
 ## Q4 — Backup retention
 
