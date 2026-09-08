@@ -146,7 +146,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Phases 0–3.9 **shipped** in v3.9.0 / v3.10.0 / v3.11.0 (canonical SSOT resolver, `.daemon-metadata.json` writers, dead-code removal, path slug, eager upgrade cleanup, H-1 gate coverage)
   - **Residue deferred from v3.12.0** (Plan 00107 Wave 4): Phase 3.5.2–3.5.7 (bootstrap-fallback wiring), Phase 4 (flock concurrency), Phase 5 (parameterised upgrade-cycle test), Phase 6 (docs) …
 
-- [00102: Hook Executable-Bit Defense](00102-hook-exec-bit-defense/PLAN.md) - Dormant (only Task 5.3 remains — release-time acceptance gate, executes with the next /release)
+- [00102: Hook Executable-Bit Defense](00102-hook-exec-bit-defense/PLAN.md) - In Progress, blocked SOLELY on a human running `/release` (every task and every success criterion is done and verified against its named test — 70 green across the seven criterion suites; only Task 5.3, the release-time acceptance gate, remains, and `/release` is the sole authorisation for it so no agent can close this)
 
   - Phases 1–4 complete (`bash <path>` invocation, auto-migration, self-heal, filemode checker)
   - **Task 5.3 pending**: acceptance gate at v3.12.0 release time (folded into meta plan 00107 Wave 6 `/release` execution)
