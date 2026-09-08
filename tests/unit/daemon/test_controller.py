@@ -7,8 +7,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from claude_code_hooks_daemon.config.models import VerdictLogConfig
+from claude_code_hooks_daemon.config.models import ChainConfig, VerdictLogConfig
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.event import EventType, HookEvent
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.controller import (
@@ -773,6 +774,120 @@ class TestControllerProcessEventErrors:
 
         # Stats should record error since context contains "Handler exception:"
         assert controller.get_stats().errors == 1
+
+
+class TestControllerChainConfig:
+    """``daemon.chain`` reaches dispatch (Plan 00242 Phase 3) and the handler
+    history records each handler's OWN verdict (Phase 2, lsp_enforcement's
+    block-once must not be burnt by another handler's deny)."""
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+        reset_data_layer()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        workspace = tmp_path / "test-workspace"
+        claude_dir = workspace / ".claude"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
+        return workspace
+
+    def _initialised_controller(
+        self, workspace_root: Path, chain: ChainConfig | None = None
+    ) -> DaemonController:
+        controller = DaemonController()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+            ]
+            controller.initialise(
+                workspace_root=workspace_root,
+                verdict_log=VerdictLogConfig(enabled=False),
+                chain=chain,
+            )
+        return controller
+
+    @staticmethod
+    def _bash_event(command: str) -> HookEvent:
+        from claude_code_hooks_daemon.core.event import HookInput
+
+        return HookEvent(
+            event=EventType.PRE_TOOL_USE,
+            hook_input=HookInput(
+                tool_name="Bash",
+                tool_input={"command": command},
+                transcript_path="/tmp/transcript.jsonl",
+                session_id="chain-config-session",
+            ),
+        )
+
+    # A command two real terminal blockers deny: destructive_git (reset
+    # --hard) and pipe_blocker (pytest | tail).
+    _TWO_VIOLATIONS = "git reset --hard HEAD~1 && pytest tests/ | tail -5"
+
+    def test_default_short_circuits_on_the_first_deny(self, workspace_root: Path) -> None:
+        controller = self._initialised_controller(workspace_root)
+
+        result = controller.process_event(self._bash_event(self._TWO_VIOLATIONS))
+
+        assert result.result.decision.value == "deny"
+        assert "Also denied by" not in (result.result.reason or "")
+        assert result.terminated_by is not None
+
+    def test_collect_all_reports_every_violation_in_one_response(
+        self, workspace_root: Path
+    ) -> None:
+        controller = self._initialised_controller(
+            workspace_root, chain=ChainConfig(collect_all_violations=True)
+        )
+
+        result = controller.process_event(self._bash_event(self._TWO_VIOLATIONS))
+
+        reason = result.result.reason or ""
+        assert result.result.decision.value == "deny"
+        assert "Also denied by:" in reason
+        assert result.terminated_by is None
+        denied_by = [d.handler for d in result.decisions if d.decision.value == "deny"]
+        assert len(denied_by) >= 2, denied_by
+
+    def test_history_records_each_handlers_own_verdict(self, workspace_root: Path) -> None:
+        """A handler that ALLOWED must not be recorded as having denied just
+        because another handler denied the same call — that is what burnt
+        lsp_enforcement's session block-once for someone else's deny."""
+        from claude_code_hooks_daemon.core.chain import HandlerVerdict
+        from claude_code_hooks_daemon.core.data_layer import get_data_layer
+        from claude_code_hooks_daemon.core.hook_result import Decision
+        from claude_code_hooks_daemon.core.hook_result import HookResult as HR
+        from claude_code_hooks_daemon.core.router import EventRouter
+
+        controller = self._initialised_controller(workspace_root)
+        mock_result = ChainExecutionResult(
+            result=HR.deny(reason="blocked by the-blocker"),
+            handlers_matched=["the-advisor", "the-blocker"],
+            handlers_executed=["the-advisor", "the-blocker"],
+            decided_by="the-blocker",
+            decisions=[
+                HandlerVerdict(handler="the-advisor", decision=Decision.ALLOW, terminal=False),
+                HandlerVerdict(handler="the-blocker", decision=Decision.DENY, terminal=True),
+            ],
+        )
+        with patch.object(EventRouter, "route", return_value=mock_result):
+            controller.process_event(self._bash_event("anything"))
+
+        history = get_data_layer().history
+        session = "chain-config-session"
+        assert history.count_blocks_by_handler("the-blocker", session_id=session) == 1
+        assert history.count_blocks_by_handler("the-advisor", session_id=session) == 0
 
 
 class TestGlobalController:

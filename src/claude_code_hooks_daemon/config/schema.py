@@ -63,6 +63,14 @@ class ConfigSchema:
                         "type": "string",
                         "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
                     },
+                    # Plan 00242: handler-chain dispatch options.
+                    "chain": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "collect_all_violations": {"type": "boolean"},
+                        },
+                    },
                 },
             },
             # Finding #31: 'plugins' is an OBJECT (matching PluginsConfig in

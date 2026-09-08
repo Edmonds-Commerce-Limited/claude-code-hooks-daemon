@@ -79,6 +79,16 @@ class TestConfigTemplate:
         assert "pre_tool_use:" in result
         assert "post_tool_use:" in result
 
+    def test_both_templates_document_collect_all_violations_off(self) -> None:
+        """daemon.chain.collect_all_violations (Plan 00242) ships documented and OFF."""
+        with patch(
+            "claude_code_hooks_daemon.daemon.init_config.is_container_environment",
+            return_value=False,
+        ):
+            for template in (ConfigTemplate.generate_minimal(), ConfigTemplate.generate_full()):
+                assert "  chain:\n" in template
+                assert "collect_all_violations: false" in template
+
     def test_generate_minimal_in_container_enables_enforcement(self) -> None:
         """generate_minimal includes enabled enforcement line in container."""
         with patch(

@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from claude_code_hooks_daemon.config.models import VerdictLogConfig
+from claude_code_hooks_daemon.config.models import ChainConfig, VerdictLogConfig
 from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
@@ -128,6 +128,7 @@ class DaemonController:
     """
 
     __slots__ = (
+        "_chain_config",
         "_config",
         "_config_errors",
         "_degraded",
@@ -162,6 +163,9 @@ class DaemonController:
         # no config and threads individual slices into initialise() instead).
         # Defaults enabled=True (metadata-only, no privacy reason to be dormant).
         self._verdict_log_config: VerdictLogConfig = VerdictLogConfig()
+        # Chain dispatch options (Plan 00242): same narrow-slice DI idiom.
+        # Defaults keep the deny short-circuit (collect_all_violations=False).
+        self._chain_config: ChainConfig = ChainConfig()
         self._pseudo_dispatcher: PseudoEventDispatcher | None = None
 
     def initialise(
@@ -179,6 +183,7 @@ class DaemonController:
         project_layout: "ProjectLayout | None" = None,
         project_registry: "ProjectRegistry | None" = None,
         claude_md: "ClaudeMdConfig | None" = None,
+        chain: "ChainConfig | None" = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -206,6 +211,8 @@ class DaemonController:
                 ``promotion.promoted_handlers`` for the injected block's
                 two-tier layout. ``None`` behaves like an empty promoted list
                 (pure progressive disclosure).
+            chain: Optional ChainConfig (Plan 00242) — ``daemon.chain``.
+                None keeps the default: a terminal deny short-circuits.
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -228,6 +235,7 @@ class DaemonController:
         # the caller passes nothing, e.g. every existing unit test) falls
         # back to VerdictLogConfig()'s own defaults (enabled).
         self._verdict_log_config = verdict_log or VerdictLogConfig()
+        self._chain_config = chain or ChainConfig()
 
         # Initialize ProjectContext singleton (single source of truth for project-level constants)
         # May already be initialized from CLI config validation
@@ -882,20 +890,29 @@ class DaemonController:
             # Get strict_mode from config (default to False if no config)
             strict_mode = self._config.strict_mode if self._config else False
 
-            result = self._router.route(event.event_type, hook_input_dict, strict_mode=strict_mode)
+            result = self._router.route(
+                event.event_type,
+                hook_input_dict,
+                strict_mode=strict_mode,
+                collect_all=self._chain_config.collect_all_violations,
+            )
             processing_time = (time.perf_counter() - start_time) * 1000
             self._stats.record_request(event.event_type.value, processing_time)
 
-            # Record handler decisions in data layer history
+            # Record each handler's OWN verdict in the data layer history
+            # (Plan 00242 Phase 2). Attributing the MERGED decision to every
+            # matched handler credited an advisory handler with a deny it
+            # never made — which is how lsp_enforcement's session block-once
+            # was burnt by another handler's deny.
             data_layer = get_data_layer()
-            for handler_name in result.handlers_matched:
-                tool_name = event.hook_input.tool_name or ""
+            tool_name = event.hook_input.tool_name or ""
+            for verdict in result.decisions:
                 data_layer.history.record(
-                    handler_id=handler_name,
+                    handler_id=verdict.handler,
                     event_type=event.event_type.value,
-                    decision=result.result.decision.value,
+                    decision=verdict.decision.value,
                     tool_name=tool_name,
-                    reason=result.result.reason,
+                    reason=result.result.reason if verdict.handler == result.decided_by else None,
                     session_id=event.hook_input.session_id,
                 )
 
