@@ -35,8 +35,11 @@ which records why each rule is what it is.
 from __future__ import annotations
 
 import copy
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.utils.hook_command_migration import (
@@ -47,6 +50,8 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     HOOK_EVENTS_IN_SETTINGS,
     build_hook_registration,
     canonical_hook_entry,
+    validate_hook_commands,
+    validate_settings_hooks,
 )
 
 _HOOKS_KEY: Final = "hooks"
@@ -278,3 +283,154 @@ def _merge_recommended_defaults(
         block[key] = copy.deepcopy(new_block[key])
         upgraded.append(f"{parent}.{key}")
     return tuple(upgraded)
+
+
+class MergeStatus(Enum):
+    """What ``run_settings_merge`` did to the file on disk."""
+
+    #: No client file existed; the shipped settings were written as-is.
+    INSTALLED = "installed"
+    #: Nothing was owed. The file is NOT rewritten — churning its mtime would
+    #: invite a pointless backup from the deploy helper on the next run.
+    UNCHANGED = "unchanged"
+    #: The merged document replaced the client's.
+    MERGED = "merged"
+    #: Nothing was written. See ``MergeOutcome.messages``.
+    ESCALATED = "escalated"
+
+
+#: Appended to the client path for the merge we WOULD have written. It sits
+#: beside the original so a human comparing the two needs no daemon command.
+PROPOSAL_SUFFIX: Final = ".merge-proposal"
+
+#: Deliberately not 1. To `install_version.sh` and `upgrade_version.sh` a 1 from
+#: this step means abort, and aborting the idempotent fast path leaves new
+#: forwarders over old settings with no snapshot to roll back to — strictly
+#: worse than carrying on with the client's file intact and a warning on screen.
+ESCALATION_EXIT_CODE: Final = 3
+
+
+@dataclass(frozen=True)
+class MergeOutcome:
+    """The result of merging one file, including the refusal case.
+
+    An escalation is deliberately not an exception: on the idempotent upgrade
+    fast path `deploy_all_hooks` runs BEFORE the settings deploy and the
+    rollback snapshot is not taken until a later step, so aborting there would
+    leave new forwarders, old settings and nothing to roll back with. The caller
+    is meant to warn, carry the status, and let the run FINISH.
+    """
+
+    status: MergeStatus
+    report: MergeReport | None = None
+    proposal_path: Path | None = None
+    messages: tuple[str, ...] = ()
+
+    @property
+    def escalated(self) -> bool:
+        return self.status is MergeStatus.ESCALATED
+
+
+def _load_json_object(path: Path) -> dict[str, Any] | None:
+    """Parse a settings document, or None if it is missing or not an object."""
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _serialise(settings: Mapping[str, Any]) -> str:
+    return json.dumps(settings, indent=2) + "\n"
+
+
+def run_settings_merge(
+    client_path: Path,
+    new_default_path: Path,
+    old_default_path: Path | None = None,
+) -> MergeOutcome:
+    """Merge the shipped settings into the client's file on disk.
+
+    Args:
+        client_path: The project's ``settings.json``. Written only on success.
+        new_default_path: The settings this daemon version ships.
+        old_default_path: The previous version's shipped settings, when a
+            handover captured one. A path that cannot be read is treated as NO
+            baseline rather than as an empty one — an empty baseline would call
+            every client value a deliberate override and freeze the project's
+            settings permanently.
+
+    Returns:
+        A ``MergeOutcome``. On ``ESCALATED`` nothing was written to
+        ``client_path`` and the proposed merge is at ``proposal_path``.
+    """
+    new_default = _load_json_object(new_default_path)
+    if new_default is None:
+        return MergeOutcome(
+            status=MergeStatus.ESCALATED,
+            messages=(f"Could not read the daemon's settings at {new_default_path}.",),
+        )
+
+    if not client_path.exists():
+        client_path.write_text(_serialise(new_default), encoding="utf-8")
+        return MergeOutcome(status=MergeStatus.INSTALLED)
+
+    old_default = _load_json_object(old_default_path) if old_default_path is not None else None
+
+    client = _load_json_object(client_path)
+    if client is None:
+        return _escalate(
+            client_path,
+            new_default,
+            (
+                f"{client_path} is not a JSON object, so it cannot be merged.",
+                "It has been left exactly as it is.",
+            ),
+        )
+
+    merged, report = merge_settings(client, new_default, old_default)
+
+    problems = validate_settings_hooks(merged) + validate_hook_commands(merged)
+    if problems:
+        return _escalate(
+            client_path,
+            merged,
+            (f"The merged settings did not validate: {'; '.join(problems)}.",),
+        )
+
+    if not report.changed:
+        return MergeOutcome(status=MergeStatus.UNCHANGED, report=report)
+
+    # Re-read immediately before writing. Four things write this file with no
+    # lock between them; every whole-file writer is atomic or can be, so the
+    # failure mode is a LOST UPDATE rather than corruption, and re-reading is
+    # the cheap mitigation. A lock is worth adding when one is actually
+    # observed, not in anticipation.
+    latest = _load_json_object(client_path)
+    if latest is not None and latest != client:
+        merged, report = merge_settings(latest, new_default, old_default)
+
+    client_path.write_text(_serialise(merged), encoding="utf-8")
+    return MergeOutcome(status=MergeStatus.MERGED, report=report)
+
+
+def _escalate(
+    client_path: Path, proposal: Mapping[str, Any], reasons: tuple[str, ...]
+) -> MergeOutcome:
+    """Write the merge we would have made, change nothing, and say both paths."""
+    proposal_path = client_path.with_name(client_path.name + PROPOSAL_SUFFIX)
+    proposal_path.write_text(_serialise(proposal), encoding="utf-8")
+    return MergeOutcome(
+        status=MergeStatus.ESCALATED,
+        proposal_path=proposal_path,
+        messages=(
+            *reasons,
+            f"Your settings are unchanged at {client_path}.",
+            f"The merge we would have applied is at {proposal_path}.",
+            "Compare them and apply what you want by hand.",
+        ),
+    )

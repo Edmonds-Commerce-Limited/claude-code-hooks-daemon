@@ -2849,6 +2849,58 @@ def cmd_config_merge(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_settings_merge(args: argparse.Namespace) -> int:
+    """Merge the daemon's settings.json into a client's, preserving theirs.
+
+    Args:
+        args: Parsed CLI arguments — client, new_default, and an optional
+            old_default baseline (an empty string means the handover captured
+            none, which is not an error).
+
+    Returns:
+        0 when the file is current or was merged; ``ESCALATION_EXIT_CODE`` when
+        nothing was written and a human needs to look. Never 1 for an
+        escalation: the calling scripts treat 1 as abort.
+    """
+    from claude_code_hooks_daemon.install.settings_merge import (
+        ESCALATION_EXIT_CODE,
+        MergeStatus,
+        run_settings_merge,
+    )
+
+    old_default = getattr(args, "old_default", None)
+    outcome = run_settings_merge(
+        Path(args.client),
+        Path(args.new_default),
+        Path(old_default) if old_default else None,
+    )
+
+    if outcome.escalated:
+        for message in outcome.messages:
+            print(f"WARNING: {message}", file=sys.stderr)
+        return ESCALATION_EXIT_CODE
+
+    if outcome.status is MergeStatus.INSTALLED:
+        print(f"Installed settings.json at {args.client}")
+        return 0
+
+    report = outcome.report
+    if outcome.status is MergeStatus.MERGED and report is not None:
+        for label, events in (
+            ("registered", report.hooks_added),
+            ("refreshed", report.hooks_refreshed),
+        ):
+            if events:
+                print(f"settings.json: {label} {', '.join(events)}")
+        for label, keys in (
+            ("upgraded", report.defaults_upgraded),
+            ("delivered", report.keys_delivered),
+        ):
+            if keys:
+                print(f"settings.json: {label} {', '.join(keys)}")
+    return 0
+
+
 def cmd_config_validate(args: argparse.Namespace) -> int:
     """Run config validation.
 
@@ -6336,6 +6388,33 @@ def main() -> int:
         "new_default_config", type=str, help="Path to default config from new version"
     )
     parser_config_merge.set_defaults(func=cmd_config_merge)
+
+    # settings-merge command
+    parser_settings_merge = subparsers.add_parser(
+        "settings-merge",
+        help="Merge the daemon's settings.json into a client's, preserving theirs",
+    )
+    parser_settings_merge.add_argument(
+        "--client", type=str, required=True, help="Path to the project's settings.json"
+    )
+    parser_settings_merge.add_argument(
+        "--new-default",
+        dest="new_default",
+        type=str,
+        required=True,
+        help="Path to the settings.json this daemon version ships",
+    )
+    parser_settings_merge.add_argument(
+        "--old-default",
+        dest="old_default",
+        type=str,
+        default=None,
+        help=(
+            "Path to the PREVIOUS version's settings.json, when a handover captured one. "
+            "Without it no baseline is guessed: client values are preserved, none upgraded."
+        ),
+    )
+    parser_settings_merge.set_defaults(func=cmd_settings_merge)
 
     # config-validate command
     parser_config_validate = subparsers.add_parser(
