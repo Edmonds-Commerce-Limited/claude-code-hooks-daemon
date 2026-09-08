@@ -380,7 +380,7 @@ class TestRunArgvWithSocketStdinTimeout:
     def test_timeout_kills_and_reaps_the_process(self) -> None:
         mock_proc = MagicMock()
         mock_proc.communicate.side_effect = [
-            subprocess.TimeoutExpired(cmd=["x"], timeout=1),
+            subprocess.TimeoutExpired(cmd=["x"], timeout=transport_verify.PROBE_TIMEOUT_SECONDS),
             (b"", b""),
         ]
         with patch(
