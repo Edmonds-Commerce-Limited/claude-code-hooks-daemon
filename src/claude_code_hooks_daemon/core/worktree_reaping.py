@@ -25,13 +25,29 @@ destroys work that exists nowhere else.
 
 from __future__ import annotations
 
-import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from claude_code_hooks_daemon.core.worktree_paths import WORKTREE_DIR_PATTERNS
 from claude_code_hooks_daemon.utils.git_repo import run_git
+
+
+class GitResult(Protocol):
+    """The three fields this module reads off a finished git command.
+
+    Stated structurally rather than as ``subprocess.CompletedProcess`` because
+    that is the true dependency: nothing here spawns a process — ``run_git``
+    owns every git invocation in the daemon (Plan 00246) — and importing
+    ``subprocess`` merely to name a return type would advertise a capability
+    this module does not have, to readers and to the security scanner alike.
+    """
+
+    returncode: int
+    stdout: str
+    stderr: str
+
 
 #: Stands in for a count git could not supply. NEGATIVE on purpose: every
 #: refusal rule below tests `!= 0`, so a collection failure can never be read
@@ -42,7 +58,7 @@ UNKNOWN_COUNT = -1
 #: space (`A  path`, `?? path`).
 _STATUS_PREFIX_WIDTH = 3
 
-RunGit = Callable[..., "subprocess.CompletedProcess[str]"]
+RunGit = Callable[..., GitResult]
 
 
 @dataclass(frozen=True)
@@ -124,7 +140,7 @@ def _worktree_paths(listing: str, repo_root: Path) -> list[Path]:
     return paths
 
 
-def _count(result: subprocess.CompletedProcess[str]) -> int:
+def _count(result: GitResult) -> int:
     """A git count, or :data:`UNKNOWN_COUNT` when git could not supply one.
 
     Covers both failure shapes: a non-zero exit, and a zero exit whose output
@@ -139,7 +155,7 @@ def _count(result: subprocess.CompletedProcess[str]) -> int:
         return UNKNOWN_COUNT
 
 
-def _unlanded(result: subprocess.CompletedProcess[str]) -> int:
+def _unlanded(result: GitResult) -> int:
     """`git cherry` lines marked `+`, or :data:`UNKNOWN_COUNT` on failure.
 
     `-` means git found an equivalent patch already on the base.
@@ -186,3 +202,78 @@ def collect_worktree_states(
             )
         )
     return tuple(states)
+
+
+@dataclass(frozen=True)
+class ReapOutcome:
+    """What happened to one worktree, in terms a report can print directly."""
+
+    name: str
+    removed: bool
+    branch_removed: bool
+    detail: str
+
+
+def reap_worktree(
+    repo_root: Path,
+    state: WorktreeState,
+    path: Path,
+    *,
+    run_fn: RunGit = run_git,
+    dry_run: bool = False,
+) -> ReapOutcome:
+    """Remove one worktree and its branch, if the predicate cleared it.
+
+    **Git is asked to disagree, twice.** ``git worktree remove`` runs WITHOUT
+    ``--force``, so git refuses a worktree carrying modified or untracked
+    files; the branch is deleted with ``-d``, never ``-D``, so git refuses one
+    that is not fully merged. If :func:`is_reapable` were ever wrong, two
+    independent checks still stand between it and lost work — a reap path whose
+    only safety is the predicate has a single bug between it and a deletion.
+    (``-D`` is a blocked operation in this project for the same reason.)
+
+    A git refusal is REPORTED, never retried with force. That is the whole
+    value of asking.
+    """
+    refusal = reap_refusal_reason(state)
+    if refusal is not None:
+        return ReapOutcome(state.name, removed=False, branch_removed=False, detail=refusal)
+
+    if dry_run:
+        return ReapOutcome(
+            state.name,
+            removed=False,
+            branch_removed=False,
+            detail=f"would remove {path} and its branch {state.name}",
+        )
+
+    removal = run_fn(repo_root, "worktree", "remove", str(path))
+    if removal.returncode != 0:
+        # git overruled the predicate. Leaving the branch alone is deliberate:
+        # a branch whose worktree still exists is not clutter, it is in use.
+        return ReapOutcome(
+            state.name,
+            removed=False,
+            branch_removed=False,
+            detail=f"git refused to remove {path}: {removal.stderr.strip()}",
+        )
+
+    # Task 2.3: a removed worktree that leaves its branch behind has only moved
+    # the clutter from `git worktree list` to `git branch`.
+    branch = run_fn(repo_root, "branch", "-d", state.name)
+    if branch.returncode != 0:
+        return ReapOutcome(
+            state.name,
+            removed=True,
+            branch_removed=False,
+            detail=(
+                f"removed {path}, but git kept the branch {state.name}: " f"{branch.stderr.strip()}"
+            ),
+        )
+
+    return ReapOutcome(
+        state.name,
+        removed=True,
+        branch_removed=True,
+        detail=f"removed {path} and its branch {state.name}",
+    )

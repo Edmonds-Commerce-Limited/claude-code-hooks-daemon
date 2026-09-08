@@ -144,11 +144,24 @@ reaper has to be designed against those constraints, not around them.
   explaining each refusal, and an **explicit command** to act — dry-run by
   default.
 
-- [ ] ⬜ **Task 2.2**: Implement it, respecting `R-GIT-BRANCH-FORCE-DELETE` and
-  never using `--force` on a worktree the predicate did not clear
+- [ ] ⬜ **Task 2.2**: `reap_worktree` is written and tested — dry-run by
+  default at the call site, no git command at all for a worktree the predicate
+  refused, and **git asked to disagree twice**: `git worktree remove` runs
+  without `--force`, so git refuses a worktree with modified or untracked
+  files, and the branch is deleted with `-d`, never `-D`, so git refuses one
+  that is not fully merged (also `R-GIT-BRANCH-FORCE-DELETE`). A git refusal is
+  reported, never retried with force — that is the whole value of asking. A
+  reap path whose only safety is the predicate has one bug between it and a
+  deletion.
 
-- [ ] ⬜ **Task 2.3**: Handle the branch as well as the worktree — a removed
-  worktree that leaves its branch behind has only moved the clutter
+  **Still open: nothing calls it yet.** Task 2.1's report-and-offer needs a
+  surface — a session-start advisory and an explicit command — before a human
+  can use any of this.
+
+- [x] ✅ **Task 2.3**: The branch is deleted after the worktree, in the same
+  call. A failed branch delete still reports the worktree as removed (the
+  expensive part succeeded) and names the leftover branch, rather than
+  reporting a total failure that would invite a retry.
 
 ### Phase 3: Verify
 
