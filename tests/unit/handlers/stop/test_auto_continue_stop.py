@@ -3339,6 +3339,46 @@ class TestAutoContinueStopGetRules:
             assert rule.verbose, f"{rule.rule_id} has empty verbose content"
 
 
+class TestGoalLedgerSingleProseSource:
+    """Task 2.8 (Plan 00295): STOP_GOAL_LEDGER's Rule.verbose (used by
+    RuleFormatter.verbose(), reachable only via _render_branch_message --
+    which STOP_GOAL_LEDGER is never passed to) and the dynamic
+    _GOAL_LEDGER_CHALLENGE_TEMPLATE (the text actually shown live, fully
+    present every fire per the goal-ledger design) previously hand-authored
+    the SAME mechanism description twice, independently. They must now
+    derive from ONE shared prose constant so the two cannot silently drift
+    apart -- this is a substring check on the shared constant, not the two
+    messages' full literal text, since the two serve different audiences
+    (static rule-table teaching vs. a live per-invocation challenge).
+    """
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        return AutoContinueStopHandler()
+
+    def test_rule_verbose_and_challenge_share_the_mechanism_constant(
+        self, handler: AutoContinueStopHandler
+    ) -> None:
+        mechanism = auto_continue_stop._GOAL_LEDGER_MECHANISM_NOTE
+        rule = next(r for r in handler.get_rules() if r.rule_id == RuleID.STOP_GOAL_LEDGER)
+        assert mechanism in rule.verbose
+
+        rendered_challenge = auto_continue_stop._GOAL_LEDGER_CHALLENGE_TEMPLATE.format(
+            plans="00123"
+        )
+        assert mechanism in rendered_challenge
+
+
+class TestRenderBranchMessageDocstringAccuracy:
+    """Task 2.8 (Plan 00295): _render_branch_message's docstring must not
+    undercount _RULE_DEFINITIONS (6 entries: STOP_GOAL_LEDGER is deliberately
+    excluded from this rendering path, not merely forgotten)."""
+
+    def test_docstring_does_not_claim_five_branch_rules(self) -> None:
+        doc = AutoContinueStopHandler._render_branch_message.__doc__ or ""
+        assert "five branch rules" not in doc
+
+
 class TestAutoContinueStopDisclosureLadder:
     """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116, Decision G).
 

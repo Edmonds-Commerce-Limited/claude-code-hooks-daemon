@@ -87,6 +87,43 @@ def test_digest_verification_mismatches(tmp_path: Path) -> None:
     assert result.relay_digest_verified is False
 
 
+def test_digest_verification_uses_deployed_digest_marker_without_manifest(
+    tmp_path: Path,
+) -> None:
+    """Task 2.4 (Plan 00295): deploy_relay_from_download's own verified
+    digest, recorded in the `.sha256` marker beside the binary, is enough
+    to report "verified" -- no shipped `relay/SHA256SUMS.released` release
+    manifest required (nothing in the release pipeline populates one)."""
+    content = b"downloaded-and-verified-binary"
+    binary = tmp_path / "hooks-relay-x86_64-unknown-linux-musl"
+    binary.write_bytes(content)
+    binary.chmod(0o755)
+    digest = hashlib.sha256(content).hexdigest()
+    (tmp_path / f"{binary.name}.sha256").write_text(digest + "\n")
+
+    result = probe_transport(
+        project_root=tmp_path, relay_binary=binary, sha256sums_path=tmp_path / "missing.sums"
+    )
+
+    assert result.relay_digest_verified is True
+
+
+def test_digest_verification_deployed_marker_mismatch_is_false(tmp_path: Path) -> None:
+    """The marker records what was verified at DEPLOY time -- if the binary
+    on disk no longer matches it (tampered, corrupted), that must surface
+    as a mismatch, not silently pass."""
+    binary = tmp_path / "hooks-relay-x86_64-unknown-linux-musl"
+    binary.write_bytes(b"bytes-that-changed-since-deploy")
+    binary.chmod(0o755)
+    (tmp_path / f"{binary.name}.sha256").write_text("0" * 64 + "\n")
+
+    result = probe_transport(
+        project_root=tmp_path, relay_binary=binary, sha256sums_path=tmp_path / "missing.sums"
+    )
+
+    assert result.relay_digest_verified is False
+
+
 def test_nc_absent_from_path(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("PATH", str(tmp_path))  # empty dir, no nc
 

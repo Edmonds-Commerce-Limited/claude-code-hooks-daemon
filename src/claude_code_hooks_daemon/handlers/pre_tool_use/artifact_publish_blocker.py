@@ -117,10 +117,19 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
         ``enableArtifact: false`` means no write, a one-shot backup is taken
         before the first rewrite, and any failure is logged rather than
         raised — a PreToolUse chain must never crash on a broken client file.
+
+        ``_source_disable_checked`` latches True on every terminal outcome
+        EXCEPT a write failure (Plan 00295 Task 2.9): a malformed/unreadable
+        settings file or an already-satisfied no-op will not change on the
+        next event, so latching immediately avoids re-doing pointless work —
+        but a write failure (disk full, a momentary permission hiccup) may
+        well succeed on a LATER PreToolUse event, and the whole point of
+        enforcing this option is that it must eventually take. Latching on a
+        write failure would silently disable the feature for the rest of
+        the daemon process over what could be a one-off blip.
         """
-        if self._source_disable_checked or not getattr(self, "_source_disable", False):
+        if self._source_disable_checked or not self._source_disable:
             return
-        self._source_disable_checked = True
 
         root = getattr(self, "_workspace_root", None)
         root_path = Path(root) if root is not None else ProjectContext.project_root()
@@ -134,11 +143,13 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
             try:
                 loaded = json.loads(settings_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                self._source_disable_checked = True
                 logger.warning(
                     "artifact source-disable skipped — cannot read %s: %s", settings_path, exc
                 )
                 return
             if not isinstance(loaded, dict):
+                self._source_disable_checked = True
                 logger.warning(
                     "artifact source-disable skipped — %s is not a JSON object", settings_path
                 )
@@ -146,6 +157,7 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
             settings = loaded
 
         if settings.get(_ENABLE_ARTIFACT_KEY) is False:
+            self._source_disable_checked = True
             return
 
         settings[_ENABLE_ARTIFACT_KEY] = False
@@ -167,8 +179,24 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
                 shutil.copymode(settings_path, tmp_path)
             tmp_path.replace(settings_path)
         except OSError as exc:
+            # The staged temp file survives a copymode/replace failure (its
+            # write_text already succeeded) unless explicitly removed here —
+            # otherwise it leaks on disk and accumulates across every retry.
+            # eacces-safe-exempt: sits beside the settings file above, in a
+            # directory this method has already written to successfully.
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError as cleanup_exc:
+                    logger.warning(
+                        "artifact source-disable: also failed to remove stale temp " "file %s: %s",
+                        tmp_path,
+                        cleanup_exc,
+                    )
             logger.warning("artifact source-disable aborted for %s: %s", settings_path, exc)
             return
+
+        self._source_disable_checked = True
         logger.info(
             "artifact source-disable applied: %s now sets enableArtifact=false", settings_path
         )
@@ -182,6 +210,17 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
         is the fail-safe reading -- a future action name this handler has never
         heard of is treated as publishing until proven otherwise, rather than
         being waved through.
+
+        The ``_ensure_source_disable()`` call below is a deliberate, narrow
+        exception to ``matches()`` normally being a pure predicate (Plan
+        00295 Task 2.9): the settings-level disable must run on the FIRST
+        PreToolUse event of ANY kind, which only ``matches()`` -- called on
+        every event, not just an eventual match -- can guarantee. It is a
+        no-op read (two boolean checks) for every project that has not
+        opted into ``source_disable``, and self-latches to a no-op read for
+        the rest of the process once applied (or once genuinely inapplicable
+        -- see that method's own docstring for the one exception, a transient
+        write failure, which retries instead of latching).
 
         Args:
             hook_input: Hook input containing tool_name and tool_input.
@@ -237,7 +276,7 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
                 tracker.mark_disclosed(transcript_path, RuleID.ARTIFACT_PUBLISH)
             reason = formatter.verbose(_RULE)
 
-        if getattr(self, "_source_disable", False):
+        if self._source_disable:
             reason += """
 
 NOTE: this project declares the Artifact tool a NEVER-WANT (`source_disable`).

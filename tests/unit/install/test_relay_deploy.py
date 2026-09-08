@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.install.relay_deploy import (
     deploy_relay_from_build,
     deploy_relay_from_download,
     deploy_relay_if_configured,
+    read_deployed_digest,
     read_deployed_route,
     resolve_relay_binary_path,
 )
@@ -52,6 +53,22 @@ class TestRouteMarker:
         binary.write_bytes(b"x")
         (tmp_path / "hooks-relay.route").write_text("build\n")
         assert read_deployed_route(binary) == "build"
+
+
+class TestDigestMarker:
+    """Task 2.4 (Plan 00295): the digest deploy_relay_from_download already
+    verifies against the release manifest is recorded alongside the
+    `.route` marker, so transport_probe can report "verified" without a
+    shipped `relay/SHA256SUMS.released` (which nothing populates today)."""
+
+    def test_absent_marker_returns_none(self, tmp_path: Path) -> None:
+        assert read_deployed_digest(tmp_path / "hooks-relay") is None
+
+    def test_marker_round_trips(self, tmp_path: Path) -> None:
+        binary = tmp_path / "hooks-relay"
+        binary.write_bytes(b"x")
+        (tmp_path / "hooks-relay.sha256").write_text("deadbeef" * 8 + "\n")
+        assert read_deployed_digest(binary) == "deadbeef" * 8
 
 
 class TestCheckMuslToolchain:
@@ -159,6 +176,66 @@ class TestDeployRelayFromBuild:
         assert target.stat().st_mode & 0o111  # executable
         assert read_deployed_route(target) == "build"
 
+    def test_passes_resolved_rustc_into_build_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Task 2.3 (Plan 00295): deploy_relay_from_build must resolve RUSTC
+        the same way check_musl_toolchain does (shutil.which("rustc") first,
+        falling back to ~/.cargo/bin/rustc) and pass it into the build
+        subprocess's env -- otherwise build.sh's own default
+        ($HOME/.cargo/bin/rustc) can silently diverge from the toolchain the
+        pre-flight probe actually verified.
+        """
+        monkeypatch.setattr("shutil.which", lambda name: "/opt/rust/bin/rustc")
+        daemon_dir = tmp_path / "daemon"
+        (daemon_dir / "relay").mkdir(parents=True)
+        (daemon_dir / "relay" / "build.sh").write_text("#!/bin/bash\n")
+        built_dir = daemon_dir / "untracked" / "relay-build"
+        built_dir.mkdir(parents=True)
+        (built_dir / RELAY_ASSET_NAME).write_bytes(b"pretend-static-binary")
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        captured_env: dict[str, str] = {}
+
+        def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            env = kwargs["env"]
+            assert isinstance(env, dict)
+            captured_env.update(env)
+            return _fake_process(0)
+
+        deploy_relay_from_build(daemon_dir, project_root, TransportConfig(), run_fn=fake_run)
+
+        assert captured_env["RUSTC"] == "/opt/rust/bin/rustc"
+
+    def test_falls_back_to_cargo_home_rustc_when_not_on_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Task 2.3 (Plan 00295): matches check_musl_toolchain's own fallback
+        when rustc is not on PATH at all."""
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        daemon_dir = tmp_path / "daemon"
+        (daemon_dir / "relay").mkdir(parents=True)
+        (daemon_dir / "relay" / "build.sh").write_text("#!/bin/bash\n")
+        built_dir = daemon_dir / "untracked" / "relay-build"
+        built_dir.mkdir(parents=True)
+        (built_dir / RELAY_ASSET_NAME).write_bytes(b"pretend-static-binary")
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        captured_env: dict[str, str] = {}
+
+        def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            env = kwargs["env"]
+            assert isinstance(env, dict)
+            captured_env.update(env)
+            return _fake_process(0)
+
+        deploy_relay_from_build(daemon_dir, project_root, TransportConfig(), run_fn=fake_run)
+
+        assert captured_env["RUSTC"] == str(tmp_path / "home" / ".cargo" / "bin" / "rustc")
+
 
 class TestDeployRelayFromDownload:
     def _sums(self, digest: str, name: str = RELAY_ASSET_NAME) -> bytes:
@@ -241,6 +318,7 @@ class TestDeployRelayFromDownload:
         assert target.read_bytes() == content
         assert target.stat().st_mode & 0o111
         assert read_deployed_route(target) == "download"
+        assert read_deployed_digest(target) == digest
 
     def test_url_targets_installed_version_tag(self, tmp_path: Path) -> None:
         seen_urls: list[str] = []

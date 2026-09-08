@@ -463,6 +463,60 @@ def test_nc_rung_round_trip_completes_promptly(live_pid_file: Path) -> None:
         shutil.rmtree(short_root, ignore_errors=True)
 
 
+def test_nc_rung_honours_events_dir_env_override(live_pid_file: Path) -> None:
+    """Task 2.5 (Plan 00295): HOOKS_DAEMON_EVENTS_DIR must outrank the
+    natural `$_untracked_dir/events$_hostname_suffix` path the nc rung
+    otherwise computes -- matching resolve_events_dir (transport_verify.py)
+    and the relay guard's own `${HOOKS_DAEMON_EVENTS_DIR:-...}` precedence.
+    The per-event socket is bound ONLY at the override location; a forwarder
+    that still ignored the override would find nothing there and silently
+    fall through to the (deliberately unreachable) legacy socket."""
+    short_root = Path(tempfile.mkdtemp(prefix="ncenv-"))
+    try:
+        untracked_dir = short_root / "untracked"
+        transport = TransportConfig(nc_enabled=True)
+        forwarder = _write_generated_forwarder(
+            short_root, "pre-tool-use", "PreToolUse", transport, untracked_dir
+        )
+
+        override_events_dir = Path(tempfile.mkdtemp(prefix="ncenv-override-"))
+        event_sock = override_events_dir / "pre-tool-use.sock"
+        canned = (
+            b'{"hookSpecificOutput":{"hookEventName":"PreToolUse",'
+            b'"additionalContext":"via-env-override"}}'
+        )
+        server = _RecordingSocketServer(event_sock, canned)
+        server.start()
+
+        # The NATURAL (unset-override) events dir is deliberately left
+        # without a socket, so a forwarder that ignored the override would
+        # find nothing there and fall through to the legacy socket instead
+        # of silently "succeeding" via the wrong path.
+        payload = json.dumps(
+            {"tool_name": "Bash", "tool_input": {"command": "env-override-roundtrip"}}
+        ).encode()
+        env = _base_env(short_root / "no-such-legacy-daemon.sock", live_pid_file)
+        env["HOOKS_DAEMON_NC_UNIX_CAPABLE"] = "1"
+        env["HOOKS_DAEMON_EVENTS_DIR"] = str(override_events_dir)
+
+        result = subprocess.run(
+            ["bash", str(forwarder)],
+            input=payload,
+            capture_output=True,
+            env=env,
+            timeout=_TIMEOUT_SECONDS,
+        )
+        server.join()
+
+        assert result.returncode == 0, result.stderr.decode()
+        assert server.received is not None, "the override events dir's socket was never reached"
+        request = json.loads(server.received)
+        assert request["tool_input"]["command"] == "env-override-roundtrip"
+    finally:
+        shutil.rmtree(short_root, ignore_errors=True)
+        shutil.rmtree(override_events_dir, ignore_errors=True)
+
+
 # ---------------------------------------------------------------------------
 # 4. --no-relay re-entry: loop-safety
 # ---------------------------------------------------------------------------

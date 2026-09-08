@@ -116,9 +116,12 @@ _CLAUDE_MD_FILENAME: Final[str] = "CLAUDE.md"
 # MEASUREMENT-vendored-dirs.md §3) is ACCEPT every delta from the canonical
 # core with ZERO domain extras kept local -- so this name is a straight
 # re-export of the core constant, not an independently-maintained set. Kept
-# under its original name so existing importers (``core/project_layout.py``'s
-# facade builder, ``checks/module_doc_budget.py``) and the pinned membership
-# tests need no change.
+# under its original name so existing in-package importers
+# (``checks/module_doc_budget.py``) and the pinned membership tests need no
+# change. ``core/project_layout.py`` imports ``CORE_VENDORED_BUILD_DIR_NAMES``
+# directly from ``constants.layout`` instead (Plan 00295 Task 2.10) -- that
+# module must never pull docs_qa (and transitively plan_qa) into core import
+# time, so it cannot go through this re-export.
 COMMON_VENDORED_BUILD_DIR_NAMES: Final[frozenset[str]] = CORE_VENDORED_BUILD_DIR_NAMES
 
 # Directories heavy enough (or otherwise out of scope) that a walk should

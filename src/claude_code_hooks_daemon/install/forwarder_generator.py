@@ -317,8 +317,10 @@ _TRANSPORT_CALL_PATTERN = re.compile(
 )
 
 
-def append_nc_socket_arg(source_content: str, event_file_name: str) -> str:
-    """Append the event's bash_key as a trailing literal arg (design §6.2).
+def append_nc_socket_arg(source_content: str, event_file_name: str, untracked_dir: Path) -> str:
+    """Append the event's bash_key + resolved events-dir override as trailing
+    literal args (design §6.2; events-dir override added by Plan 00295 Task
+    2.5).
 
     ``send_request_stdin``/``forward_stop_event`` receive the PascalCase
     event name at runtime and have no way to derive the per-event socket's
@@ -328,21 +330,40 @@ def append_nc_socket_arg(source_content: str, event_file_name: str) -> str:
     ever needs to string-concatenate this literal onto the (already
     computed) untracked dir + hostname suffix to reach the socket.
 
+    A SECOND trailing arg carries the resolved events directory, but only
+    when :func:`~claude_code_hooks_daemon.daemon.paths.event_socket_dir_is_fallback`
+    says the natural ``$_untracked_dir/events$_hostname_suffix`` path would
+    overflow the AF_UNIX socket length limit for at least one wired event —
+    the identical decision :func:`build_relay_guard_block` makes for its own
+    ``_rl_events_dir``. The common (non-overflowing) case appends an empty
+    string placeholder, so ``send_request_stdin`` keeps computing the
+    dynamic path at hook-run time exactly as before (a project checkout
+    shared across hosts over NFS still gets a correctly host-isolated path
+    on every host). ``send_request_stdin`` itself still checks
+    ``HOOKS_DAEMON_EVENTS_DIR`` FIRST, ahead of either this baked value or
+    the dynamic default — an operator's own override always wins.
+
     A missing existing ``response_mode`` argument is filled with an empty
-    string placeholder so the new argument always lands in a fixed position
-    (arg 3 for ``send_request_stdin``, arg 2 for ``forward_stop_event``).
-    Idempotent: a call line already carrying ``event_file_name`` as its
-    final argument is left untouched.
+    string placeholder so the new arguments always land in a fixed position
+    (args 3-4 for ``send_request_stdin``, args 2-3 for ``forward_stop_event``).
+    Idempotent: a call line whose second-to-last argument already matches
+    ``event_file_name`` is left untouched.
     """
+    baked_events_dir = (
+        str(get_event_socket_dir_from_untracked(untracked_dir))
+        if event_socket_dir_is_fallback(untracked_dir)
+        else ""
+    )
 
     def _augment(match: re.Match[str]) -> str:
         func = match.group(1)
         existing_args = re.findall(r'"([^"]*)"', match.group(2))
-        if existing_args and existing_args[-1] == event_file_name:
+        if len(existing_args) >= 2 and existing_args[-2] == event_file_name:
             return match.group(0)
         if func == "send_request_stdin" and len(existing_args) < 2:
             existing_args.append("")
         existing_args.append(event_file_name)
+        existing_args.append(baked_events_dir)
         rendered = " ".join(f'"{arg}"' for arg in existing_args)
         return f"{func} {rendered}"
 
@@ -404,7 +425,7 @@ def generate_forwarder_content(
         guard = build_relay_guard_block(event_file_name, transport, untracked_dir)
         result = result.replace(INIT_SH_ANCHOR, guard + INIT_SH_ANCHOR, 1)
     if transport.nc_enabled:
-        result = append_nc_socket_arg(result, event_file_name)
+        result = append_nc_socket_arg(result, event_file_name, untracked_dir)
     return result
 
 

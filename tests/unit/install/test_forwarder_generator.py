@@ -463,6 +463,72 @@ def test_both_rungs_enabled_together() -> None:
     assert 'send_request_stdin "PreToolUse" "" "pre-tool-use"' in result
 
 
+# ---------------------------------------------------------------------------
+# Task 2.5 (Plan 00295): the nc rung's events dir must honour the same
+# AF_UNIX-overflow fallback the relay guard and the daemon itself apply —
+# a short untracked_dir (the common case) appends an empty trailing arg (no
+# override needed, send_request_stdin computes the natural path dynamically
+# at hook-run time, unchanged); a deep untracked_dir whose natural events
+# dir would overflow the AF_UNIX length limit gets the resolved fallback
+# path baked in as a literal 4th/3rd arg, exactly as build_relay_guard_block
+# bakes its own `_rl_events_dir` literal for the identical case.
+# ---------------------------------------------------------------------------
+
+
+def test_nc_enabled_short_path_appends_empty_events_dir_override() -> None:
+    """The common case: untracked_dir is short enough that the natural
+    dynamic path never overflows, so no baked override is needed."""
+    transport = TransportConfig(nc_enabled=True)
+    result = generate_forwarder_content(
+        _SAMPLE_SOURCE, "pre-tool-use", transport, Path("/proj/untracked")
+    )
+    assert 'send_request_stdin "PreToolUse" "" "pre-tool-use" ""' in result
+
+
+def test_nc_enabled_deep_path_bakes_resolved_events_dir_override() -> None:
+    """A deep untracked_dir whose natural events dir would overflow AF_UNIX's
+    108-byte limit gets the daemon's own resolved fallback path baked in,
+    matching build_relay_guard_block's identical decision for the relay
+    guard's `_rl_events_dir`."""
+    from claude_code_hooks_daemon.daemon.paths import (
+        event_socket_dir_is_fallback,
+        get_event_socket_dir_from_untracked,
+    )
+
+    deep_untracked_dir = Path("/" + "a" * 90 + "/untracked")
+    assert event_socket_dir_is_fallback(deep_untracked_dir) is True
+    expected_fallback = str(get_event_socket_dir_from_untracked(deep_untracked_dir))
+
+    transport = TransportConfig(nc_enabled=True)
+    result = generate_forwarder_content(
+        _SAMPLE_SOURCE, "pre-tool-use", transport, deep_untracked_dir
+    )
+
+    assert f'send_request_stdin "PreToolUse" "" "pre-tool-use" "{expected_fallback}"' in result
+
+
+def test_nc_enabled_deep_path_forward_stop_event_bakes_override() -> None:
+    from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir_from_untracked
+
+    deep_untracked_dir = Path("/" + "a" * 90 + "/untracked")
+    expected_fallback = str(get_event_socket_dir_from_untracked(deep_untracked_dir))
+
+    source = _SAMPLE_SOURCE.replace('send_request_stdin "PreToolUse"', 'forward_stop_event "Stop"')
+    transport = TransportConfig(nc_enabled=True)
+    result = generate_forwarder_content(source, "stop", transport, deep_untracked_dir)
+
+    assert f'forward_stop_event "Stop" "stop" "{expected_fallback}"' in result
+
+
+def test_nc_enabled_deep_path_is_still_idempotent() -> None:
+    deep_untracked_dir = Path("/" + "a" * 90 + "/untracked")
+    transport = TransportConfig(nc_enabled=True)
+    once = generate_forwarder_content(_SAMPLE_SOURCE, "pre-tool-use", transport, deep_untracked_dir)
+    twice = generate_forwarder_content(once, "pre-tool-use", transport, deep_untracked_dir)
+    assert twice == once
+    assert once.count('"pre-tool-use"') == 1
+
+
 @pytest.mark.parametrize(
     "hook_file",
     sorted(p.name for p in _HOOKS_DIR.iterdir() if p.is_file() and p.name != "README.md"),

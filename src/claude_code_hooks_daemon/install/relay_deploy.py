@@ -46,6 +46,13 @@ _GITHUB_RELEASE_BASE: str = (
 #: re-derive it from config (which may have changed since the deploy ran).
 _ROUTE_MARKER_SUFFIX: str = ".route"
 
+#: Sidecar file recording the sha256 digest deploy_relay_from_download
+#: verified before writing the binary (Plan 00295 Task 2.4) — read back by
+#: the transport probe so a downloaded relay reports "verified" without
+#: depending on a shipped ``relay/SHA256SUMS.released`` release manifest,
+#: which nothing in the release pipeline populates today.
+_DIGEST_MARKER_SUFFIX: str = ".sha256"
+
 _TOOLCHAIN_PROBE_TIMEOUT_SECONDS = 10
 _BUILD_TIMEOUT_SECONDS = 300
 _FETCH_TIMEOUT_SECONDS = 30
@@ -116,6 +123,43 @@ def read_deployed_route(binary_path: Path) -> str | None:
     return text or None
 
 
+def _digest_marker_path(binary_path: Path) -> Path:
+    return binary_path.with_name(binary_path.name + _DIGEST_MARKER_SUFFIX)
+
+
+def _write_digest_marker(binary_path: Path, digest: str) -> None:
+    _digest_marker_path(binary_path).write_text(digest + "\n")
+
+
+def read_deployed_digest(binary_path: Path) -> str | None:
+    """Return the sha256 digest verified for ``binary_path`` at deploy time.
+
+    ``None`` when no marker exists — the binary is absent, was deployed by
+    the build route (which has no external manifest to verify against), or
+    predates this module (Plan 00295 Task 2.4).
+    """
+    marker = _digest_marker_path(binary_path)
+    if not marker.is_file():
+        return None
+    text = marker.read_text().strip()
+    return text or None
+
+
+def _resolve_rustc() -> str:
+    """The ``rustc`` path every relay toolchain touchpoint agrees on.
+
+    ``shutil.which("rustc")`` (PATH) wins when present; the rustup default
+    install location (``~/.cargo/bin/rustc``) is the fallback. Single source
+    of truth for :func:`check_musl_toolchain`'s pre-flight probe AND
+    :func:`deploy_relay_from_build`'s actual build invocation (Plan 00295
+    Task 2.3) — before this helper existed the two resolved independently,
+    so a ``rustc`` found via PATH could pass the probe while
+    ``relay/build.sh``'s own unset-``RUSTC`` default silently built with a
+    DIFFERENT (or missing) compiler at ``~/.cargo/bin/rustc``.
+    """
+    return shutil.which("rustc") or str(Path.home() / ".cargo" / "bin" / "rustc")
+
+
 def check_musl_toolchain(*, run_fn: RunFn = subprocess.run) -> bool:
     """True when a musl-capable ``rustc`` is available (Task 5.2).
 
@@ -124,7 +168,7 @@ def check_musl_toolchain(*, run_fn: RunFn = subprocess.run) -> bool:
     enough to run on every install/upgrade. Does not attempt an actual
     compile (that is the build route's own job, and its own failure mode).
     """
-    rustc = shutil.which("rustc") or str(Path.home() / ".cargo" / "bin" / "rustc")
+    rustc = _resolve_rustc()
     if not (shutil.which("rustc") or Path(rustc).is_file()):
         return False
     try:
@@ -168,7 +212,7 @@ def deploy_relay_from_build(
     try:
         result = run_fn(
             ["bash", str(build_script)],
-            env={**os.environ, "RELAY_TARGET": RELAY_TARGET},
+            env={**os.environ, "RELAY_TARGET": RELAY_TARGET, "RUSTC": _resolve_rustc()},
             capture_output=True,
             text=True,
             timeout=_BUILD_TIMEOUT_SECONDS,
@@ -298,6 +342,7 @@ def deploy_relay_from_download(
     target.write_bytes(binary_bytes)
     target.chmod(0o755)
     _write_route_marker(target, "download")
+    _write_digest_marker(target, actual_digest)
     return RelayDeployResult(
         True, "download", (f"Downloaded and digest-verified relay, deployed to {target}",)
     )

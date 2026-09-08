@@ -11,8 +11,13 @@ committed config list, not this recommendation.
 
 from __future__ import annotations
 
+from typing import Any
+
+import pytest
+
 from claude_code_hooks_daemon.block_report.analyser import BlockSummary, BlockUsage
 from claude_code_hooks_daemon.block_report.report import (
+    BlockReport,
     Drift,
     build_report,
     render_markdown,
@@ -118,6 +123,33 @@ class TestBuildReport:
         assert report.transcripts_scanned == 7
         assert report.sessions_scanned == 4
         assert report.unattributed_denies == 2
+
+
+class TestBlockReportRequiresThresholds:
+    """Task 2.7 (Plan 00295): BlockReport must not re-declare its own
+    min_blocks/min_sessions defaults -- PromotionConfig (config/models.py)
+    is the single source of truth for those thresholds, and a second,
+    independently-maintained default here is a duplication that can drift
+    from it silently. Required fields force every caller to source the
+    values explicitly rather than fall back on a stale local copy.
+
+    Constructed via a plain dict + ``**`` unpacking, not literal keyword
+    arguments: a missing required dataclass field is a STATIC mypy error
+    (correctly), but this test's whole point is pinning the RUNTIME
+    TypeError a caller who skips the field would hit -- the dict keeps the
+    omission invisible to the type checker so the runtime check is what
+    actually runs.
+    """
+
+    def test_min_blocks_is_required(self) -> None:
+        kwargs: dict[str, Any] = {"min_sessions": 2}
+        with pytest.raises(TypeError):
+            BlockReport(**kwargs)
+
+    def test_min_sessions_is_required(self) -> None:
+        kwargs: dict[str, Any] = {"min_blocks": 5}
+        with pytest.raises(TypeError):
+            BlockReport(**kwargs)
 
 
 class TestRenderMarkdown:

@@ -237,6 +237,28 @@ class TestTddEnforcementHandler:
         }
         assert handler.matches(hook_input) is False
 
+    def test_matches_relative_test_dir_first_segment_is_widened_zero_config(self, handler):
+        """Task 2.2 (Plan 00295): the facade's segment-based `is_test_path()`,
+        consulted before `strategy.is_test_file()`, is NOT a byte-identical
+        no-op even in zero-config. A bare relative path whose FIRST segment
+        names a built-in test dir (no leading '/') is recognised as a test
+        path by the facade's segment match, where the pre-facade substring
+        check (`is_in_common_test_directory`, which requires a leading '/'
+        immediately before the dir name) was not -- so
+        `strategy.is_production_source()` would have matched this same path
+        on its own `/src/` pattern and required a test file. Pinned
+        deliberately: production `hook_input` file_path values are always
+        absolute (enforced upstream by `R-ABSOLUTE-PATH-REQUIRED`), so this
+        widening only ever reaches a defensive/relative-path edge case, never
+        a real Write call -- and the facade's segment match is the semantics
+        this handler now commits to.
+        """
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "tests/src/foo.py"},
+        }
+        assert handler.matches(hook_input) is False
+
     def test_matches_missing_file_path_returns_false(self, handler):
         """Should NOT match when file_path is missing."""
         hook_input = {"tool_name": "Write", "tool_input": {}}
