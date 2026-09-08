@@ -7,6 +7,7 @@ hence meaningless-without-it) file.
 """
 
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -14,9 +15,13 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
+from claude_code_hooks_daemon.handlers.pre_tool_use import (
+    sensitive_content as sensitive_content_module,
+)
 from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
     SensitiveContentHandler,
 )
@@ -86,8 +91,7 @@ class TestFilePathIsCheckedNotJustContent:
         )
         hook_input = _write_input("/workspace/untracked/report-secretpath-v1.md", "clean body\n")
         with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content."
-            "resolve_project_root",
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
             return_value="/workspace",
         ):
             assert handler.matches(hook_input) is True
@@ -98,8 +102,7 @@ class TestFilePathIsCheckedNotJustContent:
         )
         hook_input = _write_input("/workspace/untracked/secretpath/notes.md", "clean body\n")
         with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content."
-            "resolve_project_root",
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
             return_value="/workspace",
         ):
             assert handler.matches(hook_input) is True
@@ -111,8 +114,7 @@ class TestFilePathIsCheckedNotJustContent:
         )
         hook_input = _write_input("/home/secretpath/project/src/app.py", "clean body\n")
         with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content."
-            "resolve_project_root",
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
             return_value="/home/secretpath/project",
         ):
             assert handler.matches(hook_input) is False
@@ -123,8 +125,7 @@ class TestFilePathIsCheckedNotJustContent:
         handler = _handler_with_secret_file(secret_file)
         hook_input = _write_input("/workspace/untracked/zulu-host-report.md", "clean body\n")
         with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content."
-            "resolve_project_root",
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
             return_value="/workspace",
         ):
             assert handler.matches(hook_input) is True
@@ -135,8 +136,7 @@ class TestFilePathIsCheckedNotJustContent:
         handler = _handler_with_secret_file(secret_file)
         hook_input = _write_input("/workspace/untracked/zulu-host-report.md", "clean body\n")
         with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content."
-            "resolve_project_root",
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
             return_value="/workspace",
         ):
             result = handler.handle(hook_input)
@@ -149,8 +149,7 @@ class TestFilePathIsCheckedNotJustContent:
         )
         hook_input = _write_input("/workspace/untracked/clean-name.md", "clean body\n")
         with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content."
-            "resolve_project_root",
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
             return_value="/workspace",
         ):
             assert handler.matches(hook_input) is False
@@ -539,7 +538,300 @@ class TestGitMetadataSurfaces:
         assert handler.matches(_bash_input("echo 'commit the alpha-term branch tag'")) is False
 
 
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(  # nosec B603 B607 - trusted git binary, fixed argv, test fixture only
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+
+
+@pytest.fixture()
+def repo(tmp_path: Path) -> Path:
+    """A minimal git repo with one commit, ready to stage files into."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "README.md").write_text("# repo\n")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
+    _git(root, "config", "commit.gpgsign", "false")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "initial")
+    return root
+
+
+def _wordlist(tmp_path: Path, *terms: str) -> SensitiveContentHandler:
+    wordlist_file = tmp_path / "wordlist.txt"
+    wordlist_file.write_text("".join(f"{term}\n" for term in terms))
+    return _handler_with_secret_file(wordlist_file)
+
+
+def _commit_input(repo: Path, command: str = 'git commit -m "clean message"') -> dict[str, Any]:
+    return {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(repo)}
+
+
+def _stage(repo: Path, relpath: str, content: str | bytes) -> None:
+    """Put a file in the index by the route no write-time hook sees.
+
+    The bytes land on disk WITHOUT a Write/Edit (the real failure was a
+    ``mv`` of a report into the plan folder), then ``git add`` stages them.
+    """
+    path = repo / relpath
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(content, bytes):
+        path.write_bytes(content)
+    else:
+        path.write_text(content)
+    _git(repo, "add", relpath)
+
+
+class TestStagedContentSurface:
+    """Plan 00252 Phase 3 / Plan 00362 D1: staged blob CONTENT is a leak surface.
+
+    A file that arrives by ``mv``/``cp`` and is then staged never passed a
+    ``Write``/``Edit``, so the content check never saw it. The commit is the
+    gate: the moment content becomes history, and the last moment it can be
+    stopped without a rewrite.
+    """
+
+    def test_staged_file_carrying_a_secret_term_denies_the_commit(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/report.md", "the host is alpha-term in prod\n")
+
+        hook_input = _commit_input(repo)
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_deny_reason_names_the_path_and_index_but_never_the_line(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """Only the staged PATH and the entry index -- never the added line."""
+        handler = _wordlist(tmp_path, "zulu-host", "alpha-term")
+        _stage(repo, "notes/report.md", "the host is alpha-term in prod\n")
+
+        result = handler.handle(_commit_input(repo))
+        serialised = result.model_dump_json()
+        assert "alpha-term" not in serialised
+        assert "the host is" not in serialised
+        assert "in prod" not in serialised
+        assert "entry 2 of 2" in (result.reason or "")
+        assert "notes/report.md" in (result.reason or "")
+
+    def test_staged_public_pattern_is_denied_naming_the_match(self, repo: Path) -> None:
+        handler = _handler_with_public_patterns(
+            [{"name": "vhosts-path", "pattern": "/var/www/vhosts", "description": "d"}]
+        )
+        _stage(repo, "deploy.txt", "target /var/www/vhosts/site\n")
+
+        result = handler.handle(_commit_input(repo))
+        assert result.decision == Decision.DENY
+        assert "vhosts-path" in (result.reason or "")
+        assert "deploy.txt" in (result.reason or "")
+
+    def test_clean_staged_content_is_allowed(self, repo: Path, tmp_path: Path) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/clean.md", "nothing to see\n")
+
+        assert handler.matches(_commit_input(repo)) is False
+
+    def test_only_added_lines_are_inspected(self, repo: Path, tmp_path: Path) -> None:
+        """REMOVING a term must never be blocked -- the commit that cleans a file."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        (repo / "dirty.md").write_text("alpha-term was here\n")
+        _git(repo, "add", "dirty.md")
+        _git(repo, "commit", "-q", "-m", "dirty")
+        (repo / "dirty.md").write_text("cleaned\n")
+        _git(repo, "add", "dirty.md")
+
+        assert handler.matches(_commit_input(repo)) is False
+
+    def test_unstaged_working_tree_content_is_not_inspected(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """Only what the commit would RECORD is judged, not the whole checkout."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        (repo / "unstaged.md").write_text("alpha-term\n")
+
+        assert handler.matches(_commit_input(repo)) is False
+
+    def test_commit_all_flag_inspects_tracked_modifications(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """``git commit -a`` stages tracked changes AT commit time, so the
+        index is not yet the truth -- the working tree is."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        (repo / "README.md").write_text("# repo\nalpha-term\n")
+
+        assert handler.matches(_commit_input(repo, 'git commit -a -m "x"')) is True
+        assert handler.matches(_commit_input(repo, 'git commit -am "x"')) is True
+        assert handler.matches(_commit_input(repo, 'git commit --all -m "x"')) is True
+
+    def test_binary_blob_is_skipped(self, repo: Path, tmp_path: Path) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "blob.bin", b"\x00\x01alpha-term\x00\xff")
+
+        assert handler.matches(_commit_input(repo)) is False
+
+    def test_oversized_file_is_skipped_by_stated_bound(self, repo: Path, tmp_path: Path) -> None:
+        """A file whose added lines exceed the per-file bound is stood down
+        (logged), never scanned partially and never a timeout in the field."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        filler = "x" * 100 + "\n"
+        big = filler * (sensitive_content_module.MAX_STAGED_FILE_BYTES // len(filler) + 2)
+        _stage(repo, "big.txt", big + "alpha-term\n")
+
+        assert handler.matches(_commit_input(repo)) is False
+
+    def test_excluded_path_is_not_inspected(self, repo: Path, tmp_path: Path) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        handler._exclude_paths = ["tests/fixtures/**"]
+        _stage(repo, "tests/fixtures/sample.txt", "alpha-term\n")
+
+        with patch(
+            "claude_code_hooks_daemon.utils.path_exclusion.resolve_project_root",
+            return_value=str(repo),
+        ):
+            assert handler.matches(_commit_input(repo)) is False
+
+    def test_commit_outside_any_repo_is_allowed(self, tmp_path: Path) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        plain = tmp_path / "plain"
+        plain.mkdir()
+
+        assert handler.matches(_commit_input(plain)) is False
+
+    def test_git_push_is_not_a_content_surface(self, repo: Path, tmp_path: Path) -> None:
+        """The commit is the gate. A push carries nothing the commit did not."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/report.md", "alpha-term\n")
+
+        assert handler.matches(_commit_input(repo, "git push origin main")) is False
+
+    def test_matches_and_handle_agree_on_one_diff_read(self, repo: Path, tmp_path: Path) -> None:
+        """``matches()`` and ``handle()`` see the same hook_input; the diff is
+        read ONCE per dispatch, so the two can never disagree."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/report.md", "alpha-term\n")
+        hook_input = _commit_input(repo)
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.run_git",
+            wraps=sensitive_content_module.run_git,
+        ) as spy:
+            assert handler.matches(hook_input) is True
+            assert handler.handle(hook_input).decision == Decision.DENY
+        diff_calls = [c for c in spy.call_args_list if "diff" in c.args]
+        assert len(diff_calls) == 1
+
+
+class TestGhBodySurface:
+    """Plan 00264 Question 7 / Plan 00362 D7: a ``gh`` body is more public than a commit.
+
+    ``gh issue comment``/``gh pr comment``/``create``/``edit`` publish a body
+    to GitHub, where no history rewrite can retract it. Inline bodies
+    (``--body``/``-b``) are on the command line; ``--body-file``/``-F``
+    bodies are read from the named file.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'gh issue comment 12 --body "see alpha-term"',
+            'gh issue comment 12 -b "see alpha-term"',
+            'gh pr comment 12 --body="see alpha-term"',
+            'gh issue create --title t --body "alpha-term"',
+            'gh pr create --title t --body "alpha-term"',
+            'gh issue edit 12 --body "alpha-term"',
+            'gh pr edit 12 --body "alpha-term"',
+        ],
+    )
+    def test_term_in_inline_gh_body_is_denied(self, tmp_path: Path, command: str) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+
+        assert handler.matches(_bash_input(command)) is True
+        result = handler.handle(_bash_input(command))
+        assert result.decision == Decision.DENY
+        assert "alpha-term" not in result.model_dump_json()
+        assert "entry 1 of 1" in (result.reason or "")
+
+    @pytest.mark.parametrize("flag", ["--body-file", "-F"])
+    def test_term_in_gh_body_file_is_denied_naming_only_the_file(
+        self, tmp_path: Path, flag: str
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        body = tmp_path / "body.md"
+        body.write_text("summary\n\nthe host alpha-term is down\n")
+
+        hook_input = _bash_input(f"gh issue comment 12 {flag} {body}")
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert "alpha-term" not in result.model_dump_json()
+        assert "the host" not in (result.reason or "")
+        assert str(body) in (result.reason or "")
+
+    def test_relative_body_file_resolves_against_cwd(self, tmp_path: Path) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tmp_path / "body.md").write_text("alpha-term\n")
+
+        hook_input = _bash_input("gh pr comment 3 --body-file body.md")
+        hook_input["cwd"] = str(tmp_path)
+        assert handler.matches(hook_input) is True
+
+    def test_public_pattern_in_gh_body_is_denied(self) -> None:
+        handler = _handler_with_public_patterns(
+            [{"name": "vhosts-path", "pattern": "/var/www/vhosts", "description": "d"}]
+        )
+        command = 'gh pr comment 3 --body "deployed to /var/www/vhosts/site"'
+        result = handler.handle(_bash_input(command))
+        assert result.decision == Decision.DENY
+        assert "vhosts-path" in (result.reason or "")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "gh issue view 12 --comments",
+            "gh pr view 12 --comments",
+            "gh issue list --search alpha-term",
+            "gh pr checkout 12",
+            'gh issue comment 12 --body "an ordinary comment"',
+            'gh api repos/o/r/issues -f body="alpha-term"',
+        ],
+    )
+    def test_reads_and_clean_bodies_are_allowed(self, tmp_path: Path, command: str) -> None:
+        """Reading GitHub, or posting a clean body, is never blocked. ``gh api``
+        is deliberately outside this surface: ``-F`` means something else
+        there and the body route is a generic field, so it is documented as
+        uncovered rather than half-covered."""
+        handler = _wordlist(tmp_path, "alpha-term")
+
+        assert handler.matches(_bash_input(command)) is False
+
+    def test_missing_body_file_is_allowed(self, tmp_path: Path) -> None:
+        """An unreadable body file cannot be judged; gh itself fails on it."""
+        handler = _wordlist(tmp_path, "alpha-term")
+
+        hook_input = _bash_input(f"gh issue comment 12 --body-file {tmp_path / 'absent.md'}")
+        assert handler.matches(hook_input) is False
+
+    def test_stdin_body_file_is_allowed(self, tmp_path: Path) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+
+        assert handler.matches(_bash_input("gh issue comment 12 --body-file -")) is False
+
+
 class TestGetClaudeMd:
+    def test_guidance_names_the_staged_content_and_gh_body_surfaces(self) -> None:
+        text = SensitiveContentHandler().get_claude_md() or ""
+        assert "staged" in text.lower()
+        assert "gh issue comment" in text
+        assert "--body-file" in text
+
     def test_returns_guidance_mentioning_no_echo(self) -> None:
         handler = SensitiveContentHandler()
         text = handler.get_claude_md()
@@ -552,6 +844,11 @@ class TestAcceptanceTests:
     def test_defines_at_least_two_tests(self) -> None:
         handler = SensitiveContentHandler()
         assert len(handler.get_acceptance_tests()) >= 2
+
+    def test_declares_a_staged_content_and_a_gh_body_probe(self) -> None:
+        titles = [test.title for test in SensitiveContentHandler().get_acceptance_tests()]
+        assert any("staged" in title for title in titles)
+        assert any("gh" in title and "body" in title for title in titles)
 
 
 class TestGetRules:

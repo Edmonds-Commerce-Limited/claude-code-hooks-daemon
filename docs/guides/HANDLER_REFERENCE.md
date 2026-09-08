@@ -1480,6 +1480,27 @@ Two sources, with **deliberately different disclosure rules**:
 A missing, empty or comments-only secret file makes that source silently inert
 by design, so a checkout without the file still works.
 
+**Four surfaces, one guard.** The same two sources judge everything a tool call
+would introduce:
+
+- `Write`/`Edit` — the file's path and its added text.
+- `git` metadata commands — the command line of `git commit` (message),
+  `git tag`, `git branch` / `checkout -b` / `switch -c`, `git config user.*`
+  and `git merge -m`. Reads (`git log --grep`, `git tag -l`, `grep`) are never
+  candidates.
+- `git commit` staged content — the ADDED lines of every file the commit would
+  record (the working tree for `git commit -a`), because a file that arrived
+  by `mv`/`cp` or a shell redirect never passed a `Write`/`Edit`. The deny
+  names only the file path and the pattern name or entry index, never a line.
+  Removing a term is never blocked, binary blobs are skipped, and a file whose
+  added lines exceed 512 KiB (or a commit past 4 MiB in total) is stood down
+  with a log line rather than scanned partially. `git push` is not a surface:
+  it carries nothing a commit did not.
+- `gh` bodies — `gh issue|pr comment|create|edit` with an inline `--body`/`-b`
+  or a `--body-file`/`-F <file>` (read at check time; named by path only). A
+  GitHub comment is more public than a commit and cannot be retracted by a
+  history rewrite. `gh api` and a body piped on stdin are not covered.
+
 **Options:**
 
 | Option                  | Type         | Default                      | Description                                                                                                                 |

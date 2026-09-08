@@ -248,11 +248,16 @@ spelling. Decide whether to accept it as a documented limit (and say so in
 `get_claude_md()`, since undocumented holes teach agents the wrong lesson) or to
 deny an unjudgeable stdin body on a comment-write shape.
 
-**7. Does the secret-term gap belong here?** The DBF section notes a `gh`
-comment body is checked by `sensitive_content` for nothing at all — a blocked
-term can reach a public GitHub comment unexamined. That is arguably a more
-serious defect than size. Decide whether to fix it in this plan, fold it into
-Plan 00252, or file it separately — but do not leave it unrecorded.
+**7. Does the secret-term gap belong here? No — answered and delivered by Plan
+00362 Task 2.4 (commit recorded in that plan's Delivery).** The gap is a
+missing SURFACE of the one existing guard, not a size concern, so it belongs
+to `sensitive_content`: `gh issue|pr comment|create|edit` bodies — inline
+`--body`/`-b` and `--body-file`/`-F <file>` — are now judged by the same two
+sources and the same disclosure rules as a commit message (a body file is
+named by path only). `gh api` and a stdin body (`-F -`) are documented as
+uncovered, which is the same stdin limit Open Question 6 records for size.
+This plan remains about size only; the `gh` body-extraction shapes it will need
+(Task 2.2) now have a worked precedent in `sensitive_content._gh_body_file_haystacks`.
 
 ## Success Criteria
 
@@ -278,3 +283,5 @@ Plan 00252, or file it separately — but do not leave it unrecorded.
 
 - Filed from [FIELD-REPORT.md](FIELD-REPORT.md); the dedupe scout checked 35
   live plans and found no overlap.
+- Open Question 7 answered and its secret-term half delivered in
+  `sensitive_content` by Plan 00362 Task 2.4: `6c9a6f6f`.

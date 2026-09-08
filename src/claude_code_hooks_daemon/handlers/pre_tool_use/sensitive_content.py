@@ -17,11 +17,26 @@ Two independent sources:
 Threat model: a deny ``reason`` is shown to the user, written to the session
 transcript, and may be pasted into a bug report — so it is exactly as public
 as this repo's own source code.
+
+Surfaces, all judged by the same two sources (Plan 00362 Task 2.4 made the
+last two part of this ONE guard rather than a sibling):
+
+- ``Write``/``Edit`` — the path and the added text.
+- ``git`` metadata commands — the command line (messages, refs, identity).
+- ``git commit`` — the ADDED lines of what the commit would record (Plan
+  00252 Phase 3). A file that arrived by ``mv``/``cp`` and was staged never
+  passed a Write/Edit; the commit is the last moment it can be stopped
+  without a history rewrite. Only the path and the entry index are ever
+  reported, never a line.
+- ``gh issue|pr comment|create|edit`` — the body, inline or from
+  ``--body-file``/``-F`` (Plan 00264 Question 7). A GitHub comment is more
+  public than a commit and nothing can retract it.
 """
 
+import logging
 import re
 from pathlib import Path
-from typing import Any, ClassVar, Final
+from typing import Any, ClassVar, Final, NamedTuple
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -32,11 +47,15 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
+from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+
+_LOGGER = logging.getLogger(__name__)
 
 # Two independent rules (Plan 00116, Decision B): the two sources have
 # genuinely different disclosure properties -- a public-pattern match is safe
@@ -61,7 +80,7 @@ _RULE_PUBLIC_PATTERN = Rule(
 _RULE_SECRET_TERM = Rule(
     rule_id=RuleID.SENSITIVE_SECRET_TERM,
     blocked="content matching a configured blocked term",
-    why="A gitignored secret word list term was found in this write",
+    why="A gitignored secret word list term was found in what this call would record",
     fix="Ask the user what the cited entry covers, then remove the matching text",
     verbose=(
         "The term is deliberately not shown, and the word list file "
@@ -114,9 +133,122 @@ _GIT_METADATA_WRITE_SUBCOMMANDS: Final[tuple[str, ...]] = (
 # switched off.
 _GIT_READ_ONLY_FLAGS: Final[tuple[str, ...]] = ("--grep", "--list", "-l", "--get")
 
+_GIT_COMMIT_SUBCOMMAND: Final[str] = "commit"
+
+# `git commit -a`/`--all` stages every tracked modification AT commit time, so
+# the index is not yet what the commit records -- the working tree is. `-am`
+# and similar clusters carry the `a` inside a short-flag run.
+_COMMIT_ALL_LONG_FLAG: Final[str] = "--all"
+_COMMIT_ALL_SHORT_LETTER: Final[str] = "a"
+
+# Staged-content bounds (Plan 00252 Task 3.2: decide the limit here rather
+# than meet it as a timeout in the field). A single file whose ADDED lines
+# exceed the per-file bound is stood down and logged by path; once the
+# running total passes the whole-commit bound, the remaining files are stood
+# down too. Neither is scanned partially: either a file was judged in full
+# or the log says it was not. 512 KiB is far above any prose or source file
+# and well inside what the term matcher handles in milliseconds; a generated
+# artefact or vendored bundle past it is what the bound is for.
+MAX_STAGED_FILE_BYTES: Final[int] = 512 * 1024
+MAX_STAGED_TOTAL_BYTES: Final[int] = 4 * 1024 * 1024
+
+# `git diff --diff-filter=ACM`: Added, Copied, Modified. A deleted or
+# renamed-away path introduces no content. `--unified=0` drops context lines
+# so only the ADDED lines (`+`) are ever read -- removing a term must never
+# be blocked, and unchanged neighbours are not this commit's doing.
+_DIFF_FILTER: Final[str] = "ACM"
+_DIFF_HEADER_PREFIX: Final[str] = "diff --git "
+_DIFF_ADDED_PREFIX: Final[str] = "+"
+_DIFF_FILE_HEADER_PREFIX: Final[str] = "+++ "
+_DIFF_PATH_PREFIX: Final[str] = "b/"
+
+# `gh` subcommands that PUBLISH a body to GitHub. `view`/`list`/`checkout`
+# read; `gh api` is deliberately outside this surface (its `-F` means a
+# field, and a body there is one generic parameter among many), so it is
+# documented as uncovered rather than half-covered.
+_GH_EXECUTABLE: Final[str] = "gh"
+_GH_BODY_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[\s;&|(])gh\s+(?:issue|pr)\s+(?:comment|create|edit)\b"
+)
+# `--body-file <path>` / `--body-file=<path>` / `-F <path>`, bare or quoted.
+_GH_BODY_FILE_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"(?:--body-file|-F)(?:\s+|=)(?:\"([^\"]+)\"|'([^']+)'|(\S+))"
+)
+_STDIN_BODY_FILE: Final[str] = "-"
+# A body file larger than this is skipped rather than read (the same bound
+# `github_auto_close_keywords` applies to its message files).
+_MAX_BODY_FILE_BYTES: Final[int] = 65_536
+_BODY_FILE_ENCODING: Final[str] = "utf-8"
+_BODY_FILE_DECODE_ERRORS: Final[str] = "replace"
+
 _PATTERN_KEY_NAME: Final[str] = "name"
 _PATTERN_KEY_PATTERN: Final[str] = "pattern"
 _PATTERN_KEY_DESCRIPTION: Final[str] = "description"
+
+
+class _Haystack(NamedTuple):
+    """One piece of text a tool call would introduce, and what to call it.
+
+    ``subject`` is what the deny reason names as the offending thing. It is
+    itself redacted before it reaches a secret-term reason (a path or a
+    command line can carry the term), and it is NEVER the text -- for a
+    staged blob or a body file the text stays where it is and only the path
+    is cited.
+    """
+
+    subject: str
+    text: str
+
+
+def _is_git_commit(command: str) -> tuple[bool, bool]:
+    """``(is a git commit, commits the working tree via -a/--all)``.
+
+    The same token walk as :meth:`SensitiveContentHandler._writes_git_metadata`
+    so the two can never disagree about where the subcommand sits.
+    """
+    tokens = command.split()
+    for position, token in enumerate(tokens[:-1]):
+        if token != _GIT_EXECUTABLE and not token.endswith(f"/{_GIT_EXECUTABLE}"):
+            continue
+        subcommand_index = git_subcommand_index(tokens, position)
+        if subcommand_index is None or tokens[subcommand_index] != _GIT_COMMIT_SUBCOMMAND:
+            continue
+        options = tokens[subcommand_index + 1 :]
+        commits_all = any(
+            option == _COMMIT_ALL_LONG_FLAG
+            or (
+                option.startswith("-")
+                and not option.startswith("--")
+                and _COMMIT_ALL_SHORT_LETTER in option[1:]
+            )
+            for option in options
+        )
+        return True, commits_all
+    return False, False
+
+
+def _added_lines_by_path(diff_output: str) -> dict[str, str]:
+    """Map each path in a ``--unified=0`` diff to its ADDED lines only.
+
+    A binary blob prints no ``+`` lines (git says "Binary files differ"), so
+    it maps to an empty string and is never scanned -- the skip is inherent,
+    not a special case.
+    """
+    added: dict[str, str] = {}
+    current: str | None = None
+    for line in diff_output.splitlines():
+        if line.startswith(_DIFF_HEADER_PREFIX):
+            current = None
+            continue
+        if line.startswith(_DIFF_FILE_HEADER_PREFIX):
+            target = line[len(_DIFF_FILE_HEADER_PREFIX) :].strip()
+            current = target.removeprefix(_DIFF_PATH_PREFIX)
+            added.setdefault(current, "")
+            continue
+        if current is not None and line.startswith(_DIFF_ADDED_PREFIX):
+            added[current] += line[len(_DIFF_ADDED_PREFIX) :] + "\n"
+    return added
+
 
 # Compiled-pattern cache: the same handful of client public_patterns are
 # matched on every Write/Edit, so translating + compiling once is worth it.
@@ -178,6 +310,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         self._public_patterns: list[dict[str, str]] = []
         self._secret_word_list_path: str | None = None
         self._exclude_paths: list[str] | None = None
+        # Per-dispatch cache: matches() and handle() see the same hook_input,
+        # so the staged diff is read ONCE and a body file is read ONCE. Keyed
+        # on the hook_input object itself -- a fresh dispatch is a fresh dict.
+        self._cached_input_id: int | None = None
+        self._cached_haystacks: list[_Haystack] = []
 
     def _get_content(self, hook_input: dict[str, Any]) -> str:
         """Content to check: full content for Write, only the ADDED text for Edit.
@@ -247,22 +384,32 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if not haystacks:
             return False
 
-        if any(self._find_public_pattern_match(text) is not None for text in haystacks):
+        if any(self._find_public_pattern_match(hay.text) is not None for hay in haystacks):
             return True
 
         terms = self._secret_terms()
-        return any(sr.find_first_match_index(text, terms) is not None for text in haystacks)
+        return any(sr.find_first_match_index(hay.text, terms) is not None for hay in haystacks)
 
-    def _haystacks_for(self, hook_input: dict[str, Any]) -> list[str]:
+    def _haystacks_for(self, hook_input: dict[str, Any]) -> list[_Haystack]:
         """Every piece of text this tool call would introduce, or ``[]``.
 
         The one place tool dispatch happens, so ``matches()`` and ``handle()``
         can never disagree about what was inspected — a divergence there would
-        deny with a reason derived from text the match was not based on.
+        deny with a reason derived from text the match was not based on. The
+        result is cached per dispatch because two of the surfaces cost a
+        subprocess or a file read.
         """
+        if self._cached_input_id == id(hook_input):
+            return self._cached_haystacks
+        haystacks = self._compute_haystacks(hook_input)
+        self._cached_input_id = id(hook_input)
+        self._cached_haystacks = haystacks
+        return haystacks
+
+    def _compute_haystacks(self, hook_input: dict[str, Any]) -> list[_Haystack]:
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         if tool_name == ToolName.BASH:
-            return self._git_metadata_haystacks(hook_input)
+            return self._bash_haystacks(hook_input)
         if tool_name not in (ToolName.WRITE, ToolName.EDIT):
             return []
 
@@ -274,14 +421,8 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             return []
         return self._haystacks(hook_input, file_path)
 
-    def _git_metadata_haystacks(self, hook_input: dict[str, Any]) -> list[str]:
-        """The command, but ONLY when it writes git metadata.
-
-        Five of the seven surfaces that can carry a term into a repository are
-        git metadata, and none of them is a file write, so nothing else in this
-        handler can see them: one ``git commit -m "<term>"`` re-contaminates a
-        history that was just rewritten clean, and both this handler and the
-        whole-tree QA scanner report all-clear afterwards.
+    def _bash_haystacks(self, hook_input: dict[str, Any]) -> list[_Haystack]:
+        """The Bash surfaces: git metadata, staged content, and ``gh`` bodies.
 
         Deliberately NOT every Bash command. A term legitimately appears on the
         command line when searching for it, reading a file containing it, or
@@ -291,9 +432,107 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         """
         tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
         command = str(tool_input.get(_FIELD_COMMAND, ""))
-        if not command or not self._writes_git_metadata(command):
+        if not command:
             return []
-        return [command]
+        haystacks: list[_Haystack] = []
+        if self._writes_git_metadata(command) or _GH_BODY_PATTERN.search(command):
+            # Git metadata: five of the seven surfaces that can carry a term
+            # into a repository, none of them a file write -- one
+            # `git commit -m "<term>"` re-contaminates a history that was
+            # just rewritten clean. A `gh` body inline on the command line
+            # is judged the same way, as the command itself.
+            haystacks.append(_Haystack(subject=command, text=command))
+        if _GH_BODY_PATTERN.search(command):
+            haystacks.extend(self._gh_body_file_haystacks(command, hook_input))
+        is_commit, commits_all = _is_git_commit(command)
+        if is_commit:
+            haystacks.extend(self._staged_content_haystacks(hook_input, commits_all))
+        return haystacks
+
+    def _gh_body_file_haystacks(self, command: str, hook_input: dict[str, Any]) -> list[_Haystack]:
+        """Content of every readable ``--body-file``/``-F`` named in ``command``.
+
+        A missing, unreadable, stdin (``-``) or oversized file cannot be
+        judged and is skipped: ``gh`` fails on a missing file itself, and a
+        body that big is not a comment a human wrote.
+        """
+        haystacks: list[_Haystack] = []
+        for match in _GH_BODY_FILE_PATTERN.finditer(command):
+            raw = next(group for group in match.groups() if group)
+            if raw == _STDIN_BODY_FILE:
+                continue
+            path = Path(raw)
+            if not path.is_absolute():
+                cwd = hook_input.get(HookInputField.CWD)
+                if isinstance(cwd, str) and cwd:
+                    path = Path(cwd) / path
+            if not path_is_file(path, unreadable_means=False):
+                _LOGGER.debug("sensitive_content: skipping unreadable gh body file %s", path)
+                continue
+            if path.stat().st_size > _MAX_BODY_FILE_BYTES:
+                _LOGGER.info("sensitive_content: gh body file %s exceeds the size bound", path)
+                continue
+            text = path.read_bytes().decode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS)
+            haystacks.append(_Haystack(subject=f"gh body file {path}", text=text))
+        return haystacks
+
+    def _staged_content_haystacks(
+        self, hook_input: dict[str, Any], commits_all: bool
+    ) -> list[_Haystack]:
+        """The ADDED lines of every file this commit would record.
+
+        Run in the repository the command targets (the hook's ``cwd``, else
+        the project root), so a worktree or nested repo judges its own index.
+        No repository, or a git failure, means nothing to judge -- git owns
+        that failure.
+        """
+        repo_root = self._commit_repo_root(hook_input)
+        if repo_root is None:
+            return []
+        diff_args = ["diff", "--no-color", "--unified=0", f"--diff-filter={_DIFF_FILTER}"]
+        diff_args.append("HEAD" if commits_all else "--cached")
+        diff = run_git(repo_root, *diff_args)
+        if diff.returncode != 0:
+            _LOGGER.debug("sensitive_content: staged diff unavailable in %s", repo_root)
+            return []
+
+        haystacks: list[_Haystack] = []
+        total = 0
+        for relpath, added in _added_lines_by_path(diff.stdout).items():
+            if not added:
+                continue
+            abs_path = str(repo_root / relpath)
+            if self._is_excluded(abs_path) or self._is_secret_list_itself(abs_path):
+                continue
+            size = len(added.encode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS))
+            if size > MAX_STAGED_FILE_BYTES:
+                _LOGGER.info(
+                    "sensitive_content: staged %s exceeds the per-file bound; not scanned",
+                    relpath,
+                )
+                continue
+            if total + size > MAX_STAGED_TOTAL_BYTES:
+                _LOGGER.info(
+                    "sensitive_content: staged content past %s exceeds the commit bound; "
+                    "remaining files not scanned",
+                    relpath,
+                )
+                break
+            total += size
+            haystacks.append(_Haystack(subject=f"staged content of {relpath}", text=added))
+        return haystacks
+
+    @staticmethod
+    def _commit_repo_root(hook_input: dict[str, Any]) -> Path | None:
+        cwd = hook_input.get(HookInputField.CWD)
+        start = Path(cwd) if isinstance(cwd, str) and cwd else None
+        if start is None:
+            project_root = resolve_project_root()
+            if project_root is None:
+                return None
+            start = Path(project_root)
+        repo = GitRepo.resolve_for(start)
+        return repo.root if repo is not None else None
 
     @staticmethod
     def _writes_git_metadata(command: str) -> bool:
@@ -328,7 +567,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             return True
         return False
 
-    def _haystacks(self, hook_input: dict[str, Any], file_path: str) -> list[str]:
+    def _haystacks(self, hook_input: dict[str, Any], file_path: str) -> list[_Haystack]:
         """Every piece of text this write would introduce: its PATH and its body.
 
         The path matters independently of the body. This repository's own
@@ -338,7 +577,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         identifier in its name and sail through on a clean body.
         """
         return [
-            text
+            _Haystack(subject=file_path, text=text)
             for text in (self._relative_path_text(file_path), self._get_content(hook_input))
             if text
         ]
@@ -422,40 +661,28 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         haystacks = self._haystacks_for(hook_input)
-        subject = self._subject(hook_input)
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
 
-        for text in haystacks:
-            public_match = self._find_public_pattern_match(text)
+        for hay in haystacks:
+            public_match = self._find_public_pattern_match(hay.text)
             if public_match is not None:
-                return self._deny_public_pattern(transcript_path, subject, public_match)
+                return self._deny_public_pattern(transcript_path, hay.subject, public_match)
 
         terms = self._secret_terms()
-        for text in haystacks:
-            index = sr.find_first_match_index(text, terms)
+        for hay in haystacks:
+            index = sr.find_first_match_index(hay.text, terms)
             if index is not None:
                 # The subject is echoed back in the deny reason, and the
-                # subject is now itself a thing that can MATCH — a file path,
-                # or a whole git command line. Printing it raw would put the
-                # term straight into the message the no-echo contract exists to
-                # keep it out of: moving the leak, not closing it.
+                # subject is itself a thing that can MATCH — a file path, or
+                # a whole git command line. Printing it raw would put the
+                # term straight into the message the no-echo contract exists
+                # to keep it out of: moving the leak, not closing it. The
+                # TEXT is never echoed at all.
                 return self._deny_secret_term(
-                    transcript_path, sr.redact_text(subject, terms), index, len(terms)
+                    transcript_path, sr.redact_text(hay.subject, terms), index, len(terms)
                 )
 
         return GatingResult(decision=Decision.ALLOW)
-
-    @staticmethod
-    def _subject(hook_input: dict[str, Any]) -> str:
-        """What the deny reason names as the offending thing.
-
-        A file path for ``Write``/``Edit``; the command line for ``Bash``,
-        where there is no file — the git metadata never lands in one.
-        """
-        tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
-        if hook_input.get(HookInputField.TOOL_NAME) == ToolName.BASH:
-            return str(tool_input.get(_FIELD_COMMAND, ""))
-        return str(tool_input.get(_FIELD_FILE_PATH, ""))
 
     @staticmethod
     def _deny_public_pattern(
@@ -546,12 +773,26 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             "(names and messages), `git branch` / `checkout -b` / `switch -c` (branch "
             "names), `git config user.name|user.email` (author identity), `git merge -m`. "
             "A match denies the command.\n\n"
-            "**But a Bash command that writes a FILE is NOT checked, and that is the "
-            "gap most likely to bite.** Git metadata is the only Bash surface this "
-            "handler covers, so a term entering through `cat > f <<EOF`, `>`, `>>` or "
-            "`tee` reaches disk unexamined — no block, no advisory, no record. Once "
-            "pushed, removing it needs a history rewrite. Write file content with "
-            "`Write`/`Edit` so this handler can see it.\n\n"
+            "**A `git commit` is also checked for what it would RECORD.** A Bash "
+            "command that writes a FILE (`cat > f <<EOF`, `>`, `>>`, `tee`, `mv`, `cp`) "
+            "reaches disk unexamined — no block, no advisory, no record — so the commit "
+            "is the gate: the ADDED lines of every staged file (the working tree for "
+            "`git commit -a`) are scanned at commit time, and a match denies the "
+            "commit naming only the file path and the pattern name or entry index, "
+            "never the line. Removing a term is never blocked (only added lines "
+            "count), binary blobs are skipped, and a file whose added lines exceed "
+            "512 KiB — or a commit past 4 MiB in total — is stood down with a log "
+            "line rather than scanned partially. `git push` is NOT a surface: it "
+            "carries nothing a commit did not, and a denied commit is never pushed. "
+            "Still prefer `Write`/`Edit` for file content so the block lands before "
+            "the bytes do.\n\n"
+            "**A `gh` body is checked like a commit message.** `gh issue comment`, "
+            "`gh pr comment`, `gh issue|pr create` and `gh issue|pr edit` publish a "
+            "body to GitHub, which no history rewrite can retract, so an inline "
+            "`--body`/`-b` value and the content of a `--body-file`/`-F <file>` are "
+            "both scanned. A body file is named by path only. `gh api` is not "
+            "covered (its `-F` is a field), and a body piped on stdin (`-F -`) cannot "
+            "be judged — write it to a file instead.\n\n"
             "**Reading is never blocked.** Only commands that WRITE metadata are "
             "candidates, so `grep`, `cat`, `git log --grep=`, `git show`, "
             "`git branch --list` and `git tag -l` stay allowed even when the term is "
@@ -692,6 +933,57 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                     "Deny path — no commit is made. Verify the deny reason contains "
                     "neither the term nor the raw command line."
                 ),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="sensitive_content - blocks a secret-list term in staged content",
+                command=(
+                    "Copy a scratch file containing a term from the project's secret "
+                    "word list into the tree with `cp`, `git add` it, then use the Bash "
+                    'tool to run `git commit -m "clean message"`'
+                ),
+                harness_cannot_produce=(
+                    "The staged file would have to CONTAIN a term from the gitignored "
+                    "list, the same boundary as every secret-list probe. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_sensitive_content.py, which "
+                    "stages a throwaway term in a temporary repository and asserts the "
+                    "deny reason carries the path and index but never the line."
+                ),
+                description=(
+                    "A file that arrived by `cp`/`mv` never passed a Write/Edit; the "
+                    "commit is the last gate before a history rewrite is the only "
+                    "remedy. The deny names the staged PATH and an entry index only."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"entry \d+ of \d+", r"staged content of"],
+                safety_notes=(
+                    "Deny path — no commit is made. Verify the deny reason contains "
+                    "neither the term nor any line of the staged file. Unstage and "
+                    "delete the probe file afterwards."
+                ),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="sensitive_content - blocks a public pattern in a gh comment body",
+                command=(
+                    "gh issue comment 1 --body 'deploy target: /var/www/vhosts/example' "
+                    "-- with public_patterns configured to match `/var/www/vhosts`"
+                ),
+                dispatch_as_bash=True,
+                description=(
+                    "A GitHub comment is more public than a commit and cannot be "
+                    "retracted by a rewrite, so a `gh` body is judged like a message."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    rf"BLOCKED \[{RuleID.SENSITIVE_PUBLIC_PATTERN}\]",
+                    r"Pattern:",
+                ],
+                safety_notes="Denied before bash runs, so nothing is posted to GitHub.",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,

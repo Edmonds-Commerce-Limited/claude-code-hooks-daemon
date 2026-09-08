@@ -130,31 +130,43 @@ expensive.
 
 ### Phase 3: Check staged content for secret terms (finding B)
 
-- [ ] ⬜ **Task 3.1**: RED — a `git commit` staging a file whose CONTENT carries a
+Delivered by Plan 00362 Task 2.4 (commit recorded under Delivery below).
+
+- [x] ✅ **Task 3.1**: RED — a `git commit` staging a file whose CONTENT carries a
   secret-list term is currently allowed
-- [ ] ⬜ **Task 3.2**: Extend the commit-time check from "message and metadata"
+  (`TestStagedContentSurface` in `tests/unit/handlers/pre_tool_use/test_sensitive_content.py`)
+- [x] ✅ **Task 3.2**: Extend the commit-time check from "message and metadata"
   to "message, metadata and staged blob contents"
-  - [ ] ⬜ Reuse the existing matcher and word-list loader; a second copy of
+  - [x] ✅ Reuse the existing matcher and word-list loader; a second copy of
     either would be the defect Plan 00251 spent a phase removing elsewhere
-  - [ ] ⬜ Report only an index (`entry N of M`), never the term — in the deny
-    reason, in logs, and in any capture
-  - [ ] ⬜ Bound the work: a commit can stage a lot of content, and this runs
-    inside a hook's budget. Decide and record the limit rather than discovering
-    it as a timeout in the field
-- [ ] ⬜ **Task 3.3**: Verify against the ACTUAL sequence that failed — a file
+    (`sr.find_first_match_index` / `_secret_terms()` — no new matcher)
+  - [x] ✅ Report only an index (`entry N of M`), never the term — in the deny
+    reason, in logs, and in any capture (the deny names the staged PATH and
+    the index; the added line is never echoed, and the log lines name paths only)
+  - [x] ✅ Bound the work: `MAX_STAGED_FILE_BYTES` = 512 KiB of added lines per
+    file and `MAX_STAGED_TOTAL_BYTES` = 4 MiB per commit; past either the file
+    (or the rest of the commit) is stood down with a log line, never scanned
+    partially. `--unified=0` keeps the diff to added lines; binary blobs print
+    no added lines and are skipped inherently
+- [x] ✅ **Task 3.3**: Verify against the ACTUAL sequence that failed — a file
   moved into place with `mv`, then staged, then committed — not only against a
-  synthesised `Write`
-- [ ] ⬜ **Task 3.4**: Confirm the batch checker and the new commit gate agree on
-  what matches, so a commit that passes cannot fail the next QA run
+  synthesised `Write` (the tests write the bytes with no tool call, `git add`,
+  then dispatch `git commit`)
+- [x] ✅ **Task 3.4**: Confirm the batch checker and the new commit gate agree on
+  what matches, so a commit that passes cannot fail the next QA run (both call
+  `secret_redaction.term_matches`, the single matching predicate)
 
 ### Phase 4: Verify
 
 - [ ] ⬜ **Task 4.1**: Full QA green, daemon restart RUNNING
 - [ ] ⬜ **Task 4.2**: Client-mode verification for Phase 3 — it changes a
   blocking Bash handler, and a client repo's word list lives at a different path
-- [ ] ⬜ **Task 4.3**: Record the `sensitive_content` behaviour change in a
-  `config-changes` entry and in the handler's `get_claude_md()`, since a newly
-  denied commit shape needs to be discoverable before it surprises someone
+- [x] ✅ **Task 4.3**: Record the `sensitive_content` behaviour change in the
+  handler's `get_claude_md()` and `docs/guides/HANDLER_REFERENCE.md`, since a
+  newly denied commit shape needs to be discoverable before it surprises
+  someone. No `config-changes` entry: no option was added or changed, so the
+  release-notes callout (`UNRELEASED/release-notes/13-secret-guard-covers-staged-content-and-gh-bodies.md`)
+  is the upgrade-time surface
 
 ## Dependencies
 
@@ -217,3 +229,4 @@ arrive by routes no hook sees at all.
 <!-- Curated milestones + delivery commit hashes. Blow-by-blow log lives in JOURNAL/. -->
 
 - Filed at the commit that adds this plan.
+- Phase 3 and Task 4.3 delivered by Plan 00362 Task 2.4: `6c9a6f6f`.
