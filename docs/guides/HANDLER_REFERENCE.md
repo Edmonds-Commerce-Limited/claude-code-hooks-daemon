@@ -950,6 +950,8 @@ handlers:
 
 **Claude Code's own state directory is allowed** (`$CLAUDE_CONFIG_DIR`, else `~/.claude`) — it is not scratch, and where it is mapped into the bind mount it has the durability this rule protects. Set `allow_claude_home: false` in an environment that does not map it durably. This is independent of `markdown_organization`'s block on `~/.claude/projects/*/memory/*.md`: containment asks whether a path is durable, the memory rule asks whether it is reviewable, and a path can fail the second while passing the first.
 
+**The session scratchpad Claude Code names is allowed** — the per-session directory the harness provisions under the system temp directory and names in every hook payload as `scratchpad_dir`. It is the only place under the temp directory this rule opens, taken from the payload rather than inferred from a path shape, and it is wiped with the session: throwaway files only.
+
 **Sanctioned location:** `untracked/scratch/` — inside the working tree so it survives a container restart, and gitignored so it never reaches review.
 
 **Example trigger:**
