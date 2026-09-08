@@ -1,6 +1,6 @@
 # Plan 00361: supervisor worker crash loop visibility and backoff
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: High
@@ -96,7 +96,7 @@ in-process throughout, and there was no way to tell from the logs.
   the worker error log and a `worker died` line in `decision.log`.
 - [x] A worker dying twice on the same fingerprint is respawned once, logs the
   crash loop once, and is respawned again as soon as the fingerprint changes.
-- [ ] All QA checks passing.
+- [x] All QA checks passing (full QA 26/26 on main after the Plan 00362 merges).
 - [x] Every release-bound consequence is in the pending-release holding area:
   `UNRELEASED/release-notes/09-supervisor-worker-crash-loop-visibility.md`.
 

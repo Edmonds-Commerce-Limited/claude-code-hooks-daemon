@@ -1,6 +1,6 @@
 # Plan 00252: guards for premises no write-time hook sees
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-17
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -174,7 +174,8 @@ Delivered by Plan 00362 Task 2.4 (commit recorded under Delivery below).
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Full QA green, daemon restart RUNNING
+- [x] ✅ **Task 4.1**: Full QA green, daemon restart RUNNING (full QA 26/26 on
+  main after the Plan 00362 merges; daemon RUNNING)
 - [x] ✅ **Task 4.2**: Client-mode verification for Phase 3 — it changes a
   blocking Bash handler, and a client repo's word list lives at a different path
   (verified on a `scripts/dummy-client-repo.sh` install with
@@ -229,11 +230,13 @@ arrive by routes no hook sees at all.
 
 - [x] The whole suite passes with ambient git configuration neutralised, and a
   reverted known instance now fails locally (`772ef675`)
-- [ ] A `git commit` staging content that carries a secret-list term is denied,
+- [x] A `git commit` staging content that carries a secret-list term is denied,
   naming only an index
-- [ ] The original `mv`-then-commit sequence is reproduced and blocked
-- [ ] No secret-list term appears in any deny reason, log or capture
-- [ ] QA green, daemon restart RUNNING, client-mode verified
+- [x] The original `mv`-then-commit sequence is reproduced and blocked
+- [x] No secret-list term appears in any deny reason, log or capture
+- [x] QA green, daemon restart RUNNING, client-mode verified
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/23-secret-guard-covers-staged-content-and-gh-bodies.md`
 
 ## Risks & Mitigations
 
@@ -250,3 +253,5 @@ arrive by routes no hook sees at all.
 
 - Filed at the commit that adds this plan.
 - Phase 3 and Task 4.3 delivered by Plan 00362 Task 2.4: `6c9a6f6f`.
+- Phases 1 and 2 delivered by Plan 00362 Task 2.6 (`772ef675`) and Task 2.3
+  here (`7b94bac3`); verified by the full QA run after the Plan 00362 merges.

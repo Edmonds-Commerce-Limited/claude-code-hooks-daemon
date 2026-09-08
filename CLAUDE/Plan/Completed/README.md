@@ -4,6 +4,14 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00333: no writes outside project root](00333-no-writes-outside-project-root/PLAN.md) - Complete at `bfe6e61a`…`75572df4` + the archiving commit (every path guard treated a failed absolute-to-relative conversion as allow, so `/tmp/notes.md` was silently permitted while `/workspace/notes.md` was denied; adds a deny-by-default containment guard over the Write/Edit and Bash surfaces, `untracked/scratch/` as the sanctioned location, and migrates the acceptance-test corpus off `/tmp`)
+
+- [00332: docs qa vendor truth per project](00332-docs-qa-vendor-truth-per-project/PLAN.md) - Complete at `116207c7` + the archiving commit (a monorepo sub-project's `layout.vendor_dirs` never reached docs QA, which was handed one flat set from the ROOT block; the vendored-path predicate is now resolved per-path against the owning project, longest root winning)
+
+- [00327: hooks contract refresh audit](00327-hooks-contract-refresh-audit/PLAN.md) - Complete at `8246f7f0` + the archiving commit (the vendored hook contract re-audited against Claude Code 2.1.263 with no drifted claim, `META.json` re-pinned, `contract_staleness` proven silent, and the manual refresh steps replaced by a `hooks-daemon contract-status` verb)
+
+- [00319: supervisor release review followups](00319-supervisor-release-review-followups/PLAN.md) - Complete at `5ad0d539` and `1c00aced` + the archiving commit (all ten supervisor findings and six acceptance-run observations closed; the budget detector distinguishes delivered from quoted budget text structurally; every BLOCKING acceptance test carries a structured payload the contract test drives through the real handler)
+
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Complete at `420735b3` + the archiving commit (all 26 v3.57.0 review findings fixed across three tiers: the fail-open lint skip-path and docs QA symlink gaps, transport probe orphan kill, `layout` path matching, `explain-handler --list`, the shared docs QA walk, and the acceptance-playbook drift)
 
 - [00311: v3.59.0 release review followups](00311-v3590-release-review-followups/PLAN.md) - Complete (all five v3.59.0 review findings dispositioned with tests at `a618ccef`, including a real `git rm --cached --pathspec-from-file` disclosure route closed and dispatch_declaration honouring a configured plan directory)

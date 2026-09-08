@@ -1,6 +1,6 @@
 # Plan 00189: worktree create daemon down raw path completion
 
-**Status**: In Progress (Tasks 1.1 to 1.3 done via Plan 00362 Task 2.5; Task 1.4 open)
+**Status**: Complete
 **Created**: 2026-07-24
 **Owner**: joseph
 **Priority**: Medium
@@ -91,15 +91,21 @@ behaviour.
   raw-stdout event inherits the correct daemon-down behaviour (single source of
   truth, not a WorktreeCreate special-case).
   (`constants.events.raw_stdout_bash_keys()`; commit `adb82013`)
-- [ ] ⬜ **Task 1.4**: Full QA green; daemon restart RUNNING; live-dogfood a
+- [x] ✅ **Task 1.4**: Full QA green; daemon restart RUNNING; live-dogfood a
   worktree launch with the daemon forced down (or a unit-level equivalent).
+  (Full QA 26/26 on main after the Plan 00362 merges; daemon RUNNING; the
+  unit-level equivalent is the Task 1.1 test, which runs the generated forwarder
+  with no daemon socket and asserts empty stdout, a stderr diagnostic and a
+  non-zero exit.)
 
 ## Success Criteria
 
-- [ ] Daemon-down `WorktreeCreate` forwarder: exit ≠ 0, empty stdout, stderr
+- [x] Daemon-down `WorktreeCreate` forwarder: exit ≠ 0, empty stdout, stderr
   diagnostic.
-- [ ] Regression test guards it; extends to all `raw_stdout` events.
-- [ ] Full QA passes; daemon restarts RUNNING.
+- [x] Regression test guards it; extends to all `raw_stdout` events.
+- [x] Full QA passes; daemon restarts RUNNING.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/20-worktree-hook-daemon-down-stdout.md`.
 
 ## Delivery & Milestones
 
@@ -109,3 +115,5 @@ behaviour.
 - Captured from the v3.49.0 release Code Review Gate (RELEASING.md "never drop a
   finding"); to be fixed immediately after v3.49.0 ships.
 - Session recovery cron: reuses Plan 00188's `7a4541bc` (one per session).
+- Delivered at `adb82013` (Plan 00362 Task 2.5); verified by the full QA run
+  after the Plan 00362 merges.

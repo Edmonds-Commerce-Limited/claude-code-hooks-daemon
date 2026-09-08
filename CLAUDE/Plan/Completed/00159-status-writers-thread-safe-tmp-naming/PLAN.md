@@ -1,6 +1,6 @@
 # Plan 00159: status writers thread safe tmp naming
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-07-13
 **Owner**: joseph
 **Priority**: Low
@@ -72,8 +72,9 @@ Observation 1, confidence ~72%):
 - [x] ✅ **Task 1.3** (`144d8dbb`; `utils/temp_names.unique_temp_path`, pid + thread ident + random token): Make temp names unique per writer — include
   `threading.get_ident()` in the suffix (or `tempfile.mkstemp(dir=...)`) —
   and get the tests green (GREEN), keeping the four writers uniform.
-- [ ] ⬜ **Task 1.4**: Run QA (`./scripts/qa/llm_qa.py all`), restart the daemon,
-  verify RUNNING.
+- [x] ✅ **Task 1.4**: Run QA (`./scripts/qa/llm_qa.py all`), restart the daemon,
+  verify RUNNING. (Full QA 26/26 on main after the Plan 00362 merges; daemon
+  RUNNING.)
 
 ### Phase 2: Supervisor `supervise()` stdin_fd type narrowing (v3.44.0 review)
 
@@ -93,9 +94,11 @@ Observation 1, confidence ~72%):
 
 ## Success Criteria
 
-- [ ] All four writers use a per-writer-unique temp filename.
-- [ ] New concurrency regression tests pass; existing suite stays green at 95%+.
-- [ ] Daemon restarts RUNNING with the change.
+- [x] All four writers use a per-writer-unique temp filename (all nine found do).
+- [x] New concurrency regression tests pass; existing suite stays green at 95%+.
+- [x] Daemon restarts RUNNING with the change.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/22-statusline-interval-temp-names-and-bug-report-tool.md`.
 
 ## Notes & Updates
 
@@ -115,3 +118,8 @@ Observation 1, confidence ~72%):
   outside the mypy QA gate) — v3.44.0 shipped without it. Fix is a trivial
   non-optional-local rename, deferred as low-priority hardening alongside the
   tmp-naming work.
+
+### 2026-09-08
+
+- Delivered at `144d8dbb` under Plan 00362 Task 2.8 and verified by the full
+  QA run after the Plan 00362 merges; plan closed.
