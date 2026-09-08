@@ -61,17 +61,38 @@ Worked example and evidence in
 **Where the backup actually is** — the answer inverts what you would hope for.
 Of the three routes, the one that repeats is the one with no backup:
 
-| Route                                        | Backup before overwrite  |
-| -------------------------------------------- | ------------------------ |
-| `install_version.sh:385-387` (fresh install) | yes — `.bak-<timestamp>` |
-| `upgrade_version.sh:865` (every upgrade)     | **no** — bare `cp`       |
-| `install.py` without `--force`               | yes — `.bak`             |
-| `install.py --force`                         | **no**                   |
+| Route                                        | Backup before overwrite   |
+| -------------------------------------------- | ------------------------- |
+| `install_version.sh:385-387` (fresh install) | yes — `.bak-<timestamp>`  |
+| `upgrade_version.sh:865` (every upgrade)     | yes — the Step 3 snapshot |
+| `install.py` without `--force`               | yes — `.bak`              |
+| `install.py --force`                         | **no**                    |
 
-So the safety net exists on the one run where there is most often nothing to
-lose, and is absent on the path that repeats. That makes "back it up first" a
-cheap partial mitigation for this plan to ship early, independent of the full
-merge.
+**Correction (verified, and it changes the cheap mitigation).** The upgrade row
+previously read "**no** — bare `cp`", reasoning from the copy alone. The copy
+does take no adjacent backup, but `upgrade_version.sh:544` creates a full state
+snapshot at **Step 3**, long before Step 9, and `install/rollback.sh:162`
+captures `settings.json` in it. `cleanup_old_snapshots "$DAEMON_DIR" 3` at
+`:1192` keeps the three most recent, so the copy survives a *successful*
+upgrade.
+
+So a recoverable copy does exist, and "back it up first" would have added a
+second one. What is actually missing is different, and worse in a quieter way:
+
+- **The snapshot is a rollback artefact, not a preservation mechanism.** It is
+  restored only by `cleanup_on_failure`. On a *successful* upgrade the client's
+  customizations are silently discarded and nothing puts them back.
+- **Nobody is told.** Step 9 prints `Redeployed settings.json` — a success
+  message for an operation that may have just dropped their `statusLine`,
+  their `permissions` block and their `plansDirectory`.
+- **It expires.** Three more upgrades and the last copy is gone.
+- **It is best-effort.** Snapshot creation failure only warns
+  (`:549`) and the upgrade proceeds anyway.
+
+The cheap mitigation is therefore **not** an extra backup but a truthful
+message: when the deployed file differs from the one already there, say so and
+name the snapshot path. Small, independent of the merge design, and it converts
+a silent loss into a recoverable one.
 
 **The two installers already disagree, and one of them is right.** For
 `hooks-daemon.yaml` the shell installer does exactly what this plan wants:
@@ -198,13 +219,26 @@ Open design questions to resolve during refine:
   extra hook survives; custom `statusLine` survives; `permissions` survives;
   stale old-default `refreshInterval` upgrades; deliberate override preserved;
   daemon wired-hook set always complete after merge.
+
 - [ ] ⬜ **Task 2.2**: GREEN — implement the settings-merge core (pure module,
   daemon CLI subcommand) with the key-ownership rules.
+
 - [ ] ⬜ **Task 2.3**: Wire it into `install_version.sh` (Step 5) and both
   `upgrade_version.sh` deploy paths (Step 9), replacing the verbatim `cp` with
   a backup-then-merge; keep shellcheck clean.
+
 - [ ] ⬜ **Task 2.4**: Agent-assisted diff path — on ambiguity/validation
   failure, emit the diff + guidance and preserve the client file (fail safe).
+
+- [ ] ⬜ **Task 2.0** (shippable now, ahead of the merge): make Step 9 tell the
+  truth. When the file it is about to deploy DIFFERS from the one already
+  there, warn instead of printing `Redeployed settings.json`, and name the
+  Step 3 snapshot path holding the pre-upgrade copy. Independent of every
+  design question below, and it converts a silent loss into a recoverable one.
+  Both deploy sites need it (`:307` and `:865`), and the same for
+  `install.py --force`, the one route with no copy at all. Behavioural test in
+  the style of `test_upgrade_sh_daemon_dir_detection.py` — extract the real
+  block and run it — not a source-grep.
 
 ### Phase 3: Rollout, docs, QA
 
