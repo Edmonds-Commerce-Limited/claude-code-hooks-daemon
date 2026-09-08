@@ -74,9 +74,9 @@ class TestAttributeDeny:
         for handler, fragments in FINGERPRINT_TABLE.items():
             for fragment in fragments:
                 wrapped = f"🚫 {fragment} — some trailing detail the handler generated\n\n"
-                assert attribute_deny(wrapped) == handler, (
-                    f"fragment {fragment!r} did not attribute back to {handler}"
-                )
+                assert (
+                    attribute_deny(wrapped) == handler
+                ), f"fragment {fragment!r} did not attribute back to {handler}"
 
     def test_unrelated_text_is_unattributed(self) -> None:
         assert attribute_deny("Error: exit code 2, command not found") is None
@@ -125,12 +125,12 @@ class TestAttributeDenyFromRuleFormattedText:
                 exercised_any_rule = True
                 verbose_text = formatter.verbose(rule)
                 terse_text = formatter.terse(rule)
-                assert attribute_deny(verbose_text) == handler.config_key, (
-                    f"verbose render of {rule.rule_id} did not attribute to {handler.config_key}"
-                )
-                assert attribute_deny(terse_text) == handler.config_key, (
-                    f"terse render of {rule.rule_id} did not attribute to {handler.config_key}"
-                )
+                assert (
+                    attribute_deny(verbose_text) == handler.config_key
+                ), f"verbose render of {rule.rule_id} did not attribute to {handler.config_key}"
+                assert (
+                    attribute_deny(terse_text) == handler.config_key
+                ), f"terse render of {rule.rule_id} did not attribute to {handler.config_key}"
         assert exercised_any_rule, "no handler declared any Rule via get_rules()"
 
 
