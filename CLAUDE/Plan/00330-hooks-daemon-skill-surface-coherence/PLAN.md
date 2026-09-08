@@ -62,20 +62,31 @@ this plan generalises.
 
 ### Phase 1: Establish the true surface
 
-- [ ] ⬜ **Task 1.1**: Inventory every routed subcommand against evidence of
+- [x] ✅ **Task 1.1**: Inventory every routed subcommand against evidence of
   human use. Classify each: routed, documented-only, or retire. Evidence
   before opinion — the owner reports never using several, and which ones is a
-  question for the data.
+  question for the data. **Done in `e5f48101`** —
+  [SURFACE-INVENTORY.md](SURFACE-INVENTORY.md) §1.1: 16 routed subcommands,
+  zero typed `/hooks-daemon` invocations in 25 session transcripts; proposes
+  6 routed, 10 documented-only, none retired.
 
-- [ ] ⬜ **Task 1.2**: Inventory what `optimise` covers against the handler
+- [x] ✅ **Task 1.2**: Inventory what `optimise` covers against the handler
   registry. The headline is 21 of 110, but the fair denominator is smaller:
   status-line components and always-on handlers are not things it should
-  score. Produce the real actionable gap.
+  score. Produce the real actionable gap. **Done in `e5f48101`** —
+  §1.2: 22 of 116 registered handlers named; 96 scorable after excluding 14
+  status-line and 6 daemon-integrity handlers; real gap 74, of which 13 are
+  off-by-default by design (and the checklist already recommends one of
+  them, `lsp_enforcement`).
 
-- [ ] ⬜ **Task 1.3**: Confirm the five scored areas are still the right
+- [x] ✅ **Task 1.3**: Confirm the five scored areas are still the right
   taxonomy for a registry-derived checklist, or replace them. A hardcoded
   list can carry an arbitrary grouping; a derived one needs a rule that
-  assigns any new handler to an area without human judgement.
+  assigns any new handler to an area without human judgement. **Done in
+  `e5f48101`** — §1.3: no registry field names the five areas; a tag
+  precedence rule classifies 63 of 96 and leaves 33 unclassified (11
+  untagged, 22 `workflow`-only), so the areas can only be derived after a
+  tagging pass. Seven owner decisions listed at the end of the document.
 
 - [x] ✅ **Task 1.4**: Decide whether docs QA and plan QA should honour the
   project-wide `daemon.exclude_paths`. **Decided and done in Plan 00362 Task
