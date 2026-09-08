@@ -177,7 +177,7 @@ Delivered by Plan 00362 Task 2.4 (commit recorded under Delivery below).
   handler's `get_claude_md()` and `docs/guides/HANDLER_REFERENCE.md`, since a
   newly denied commit shape needs to be discoverable before it surprises
   someone. No `config-changes` entry: no option was added or changed, so the
-  release-notes callout (`UNRELEASED/release-notes/13-secret-guard-covers-staged-content-and-gh-bodies.md`)
+  release-notes callout (`UNRELEASED/release-notes/23-secret-guard-covers-staged-content-and-gh-bodies.md`)
   is the upgrade-time surface
 
 ## Dependencies
