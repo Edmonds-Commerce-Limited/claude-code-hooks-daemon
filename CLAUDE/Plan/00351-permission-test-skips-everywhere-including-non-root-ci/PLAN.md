@@ -75,7 +75,7 @@ than fixed in passing.
 
 ### Phase 2: Guard the class
 
-- [ ] ⬜ **Task 2.1**: A `skipif` whose reason states something false is worse
+- [x] ✅ **Task 2.1**: A `skipif` whose reason states something false is worse
   than one with no reason, because it answers the question that would otherwise
   be asked. Assert the root-case reason matches the condition that fires it.
 
@@ -85,7 +85,7 @@ than fixed in passing.
   process's own euid. Both the original predicate and its replacement are
   fixtures, so the check is shown to separate them rather than merely to pass.
 
-- [ ] ⬜ **Task 2.2**: Swept — **no other `skipif` guards on a constant**. Ten
+- [x] ✅ **Task 2.2**: Swept — **no other `skipif` guards on a constant**. Ten
   sites: two now on `os.geteuid()`, three on `_RELAY_BINARY.exists()`, two on
   `shutil.which(...)`, two on `_PROJECT_CONFIG.exists()`, one on
   `_uv_available()`. Every one reads something that genuinely varies by

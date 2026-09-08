@@ -4,11 +4,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00351: permission test skips everywhere including non root ci](00351-permission-test-skips-everywhere-including-non-root-ci/PLAN.md) - Not Started (a `skipif` guarded on `Path("/").stat().st_uid == 0`, which asks who owns `/` rather than who is running — constant `True`, so the test has never executed anywhere, including CI where the process is not root)
+- [00352: agent branches outlive their worktrees](00352-agent-branches-outlive-their-worktrees/PLAN.md) - Not Started (`worktree-reap` enumerates from `git worktree list`, so a branch whose worktree has already gone is invisible to it; reaping Plan 00349's 21 left three orphaned `agent-*` branches behind, each 0 commits ahead of `main`)
+
+- [00351: permission test skips everywhere including non root ci](00351-permission-test-skips-everywhere-including-non-root-ci/PLAN.md) - In Progress (a `skipif` guarded on `Path("/").stat().st_uid == 0`, which asks who owns `/` rather than who is running — constant `True`, so the test had never executed anywhere; it now runs on CI and passes)
 
 - [00350: ci builds the relay binary so transport gates run](00350-ci-builds-the-relay-binary-so-transport-gates-run/PLAN.md) - In Progress (14 tests skip in CI because `untracked/bin/hooks-relay` is a gitignored build artefact no runner has; the same wired-in-but-not-load-bearing gate Plan 00250 fixed for the daemon socket, one artefact over — and the path it covers is the relay guard's zero-spawn fail-open)
 
-- [00349: agent worktrees accumulate unreaped](00349-agent-worktrees-accumulate-unreaped/PLAN.md) - Not Started (21 stale `agent-*` worktrees under `.claude/worktrees/`; 6 look alarming at 195–224 commits off `main` but their work already landed under different SHAs, so the hard part is a safety test that can tell "re-applied" from "unmerged")
+- [00349: agent worktrees accumulate unreaped](00349-agent-worktrees-accumulate-unreaped/PLAN.md) - In Progress (21 stale `agent-*` worktrees under `.claude/worktrees/`; 15 reaped with their branches, 6 refused because a rebased commit that already landed is indistinguishable from one that did not — and a real dispatch was observed creating a worktree it never disposed of)
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
