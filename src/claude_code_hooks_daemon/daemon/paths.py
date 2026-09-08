@@ -1785,15 +1785,29 @@ def cleanup_stale_daemon_files(project_dir: Path | str, max_age_days: int = 7) -
 
 
 # Per-session runtime subdirectories under the daemon untracked dir. Each
-# accumulates one file per session id (thread-registry, context-sidecar) or per
-# hook event (payload-capture); the writers never delete their own files
-# (thread_registry/context_sidecar only SKIP stale entries at read time, they
-# do not unlink them), so a dead session's file leaks forever without this
-# sweep. The names mirror the writer modules' own subdir constants
-# (thread_registry._REGISTRY_SUBDIR, context_sidecar._SIDECAR_SUBDIR,
-# payload_capture._DEFAULT_SUBDIR) and are duplicated here as a plain tuple so
+# accumulates one file per session id (thread-registry, context-sidecar,
+# downgrade-indicator) or per hook event (payload-capture); the writers never
+# delete their own files (thread_registry/context_sidecar only SKIP stale
+# entries at read time, they do not unlink them), so a dead session's file
+# leaks forever without this sweep. The names mirror the writer modules' own
+# subdir constants (thread_registry._REGISTRY_SUBDIR,
+# context_sidecar._SIDECAR_SUBDIR, payload_capture._DEFAULT_SUBDIR,
+# downgrade_state._STATE_SUBDIR) and are duplicated here as a plain tuple so
 # this low-level module never imports handler code (avoiding an import cycle).
-_SESSION_RUNTIME_SUBDIRS = ("thread-registry", "context-sidecar", "payload-capture")
+#
+# Plan 00319 F7: downgrade-indicator/ is read through the shared
+# `MtimeCachedFile` gate (mtime_cache.py), which caches one entry per DISTINCT
+# path it has ever been asked to read and never evicts one on its own — so a
+# session's file leaking here doubled as an unbounded in-memory cache entry,
+# not just an on-disk one. Reaping the file here is necessary; `MtimeCachedFile`
+# also self-evicts a cache entry once its file goes missing (mtime_cache.py),
+# so the two together keep BOTH the disk and the cache bounded by live sessions.
+_SESSION_RUNTIME_SUBDIRS = (
+    "thread-registry",
+    "context-sidecar",
+    "payload-capture",
+    "downgrade-indicator",
+)
 
 
 def cleanup_stale_session_dirs(

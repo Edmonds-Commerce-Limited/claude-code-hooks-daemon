@@ -15,8 +15,13 @@ means a bug in it is one fix, not four.
 Follows the concurrency rules in this directory's ``CLAUDE.md``: reads are
 fail-silent (a missing, unreadable or malformed file yields the caller's
 default, never an exception, because a broken status line is worse than a
-missing element), and the cache is per-process with one entry per path so it
-stays bounded in a long-running daemon.
+missing element), and the cache is per-process with one entry per path. A
+FIXED-path caller (settings.json, the account conf) is trivially bounded --
+one entry, forever. A PER-SESSION caller (one file per session id) is bounded
+only in combination with whatever reaps the session's file on disk: a
+``stat()`` failure evicts the corresponding cache entry rather than leaving it
+in place, so once a session's file is gone the cache converges to match --
+see ``daemon/paths.py``'s ``cleanup_stale_session_dirs`` for the reaper side.
 """
 
 import logging
@@ -54,6 +59,16 @@ class MtimeCachedFile(Generic[T]):
             mtime_ns = path.stat().st_mtime_ns
         except OSError:
             logger.debug("mtime_cache: not accessible: %s", path)
+            # Plan 00319 F7: evict rather than leave a stale entry in place. A
+            # single-fixed-path caller (settings.json, the account conf) never
+            # hits this branch for real, but a PER-SESSION caller does the
+            # moment its file is reaped -- and never reads that exact path
+            # again once the session is dead, so a stale entry left here would
+            # sit in memory for the rest of the daemon process's life. Combined
+            # with the per-session subdir reaper (daemon/paths.py), this keeps
+            # the cache bounded by currently-live sessions rather than every
+            # session the daemon has ever rendered a line for.
+            self._cache.pop(str(path), None)
             return self._default
 
         path_key = str(path)

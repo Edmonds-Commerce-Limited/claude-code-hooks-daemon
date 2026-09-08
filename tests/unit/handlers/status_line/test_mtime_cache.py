@@ -131,3 +131,22 @@ class TestCacheIsBounded:
         reader.clear()
 
         assert not reader._cache
+
+    def test_a_deleted_files_entry_is_evicted_on_the_next_read(self, tmp_path: Path) -> None:
+        """Plan 00319 F7: a per-session caller (downgrade_state.py) never
+        re-reads a dead session's path once its file is gone, so a stale
+        stat()-failure branch that left the cache entry in place would leak
+        one entry per session ever seen, for the life of the daemon process.
+        The disk-side reaper (paths.cleanup_stale_session_dirs) deletes the
+        file; THIS is what makes the cache actually shrink to match.
+        """
+        target = tmp_path / "f.conf"
+        target.write_text("alpha")
+        reader = _reader()
+        reader.read(target)
+        assert len(reader._cache) == 1
+
+        target.unlink()
+        assert reader.read(target) == _MISSING
+
+        assert len(reader._cache) == 0
