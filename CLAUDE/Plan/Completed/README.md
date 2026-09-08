@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00318: supervisor audit via status line banner](00318-supervisor-audit-via-status-line-banner/PLAN.md) - Complete at f818727b (the audit trail was an INJECTED chat line costing a model turn and permanent context for a notice only the human needs; it is now a 30s self-counting-down status-line banner that no longer waits for an idle session, with decision.log keeping the full record)
+
 - [00317: supervisor host thin shim](00317-supervisor-host-thin-shim/PLAN.md) - Complete at c3eb83b2 (typed-command recognition moved worker-side via a fail-open RawInputTap; Ctrl+C byte-swallow audited as the one justified host-side stay; hot-reload live-confirmed — a recognition change now ships mid-session via worker reload alone)
 
 - [00316: manual model choice must win](00316-manual-model-choice-must-win/PLAN.md) - Complete at 07871229 (a typed /model opus was fought by the auto-restore because the 120s manual window expired during a busy spell before the sidecar ever reported the switch; the manual note is now a latch consumed by the first matching reading and the daemon marker is written as soon as a session id exists — live-confirmed: no restore, no downgrade flag)

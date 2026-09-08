@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00354: docs qa stale counterpart index](00354-docs-qa-stale-counterpart-index/PLAN.md) - Not Started (the docs-qa EDIT path reuses every COUNTERPART index record without revalidating its `mtime_ns`/`size`, so `duplicate-block` cites spans whose content has moved and misses duplicates against files that changed since the last sweep; `quote-source-stale` shares the shape)
+- [00355: supervisor announces every keystroke it sends](00355-supervisor-announces-every-keystroke-it-sends/PLAN.md) - Not Started (the ccy supervisor arms its status-line audit banner for `/compact`, `/effort` and `/model` only, so the ESC it injects to flush a stalled compaction — 122 of them in this session's log — lands with no notice at all and reads as a random keypress)
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
@@ -174,6 +174,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00354: docs qa stale counterpart index](Completed/00354-docs-qa-stale-counterpart-index/PLAN.md) - Complete at `82bbd550`…`644ba92c` + the merge commit (the EDIT path reused every COUNTERPART index record without revalidating `mtime_ns`/`size`, so `duplicate-block` cited spans whose content had moved or gone and missed duplicates against files changed since the last sweep; `quote-source-stale` shared the shape, because the dividing line is the stage rather than the check)
+
 - [00353: registry option injection clobbers compiled attributes](Completed/00353-registry-option-injection-clobbers-compiled-attributes/PLAN.md) - Complete at `883990ea` + the merge commit (the registry assigns each config option to `self._<key>` AFTER `__init__`, so `pipe_blocker`'s compiled `extra_whitelist` was overwritten with raw YAML strings and every piped command raised out of `matches()` — failing open, which silently disabled the whole handler for as long as the option was set)
 
 - [00352: agent branches outlive their worktrees](Completed/00352-agent-branches-outlive-their-worktrees/PLAN.md) - Complete at `f6f1069c`…`f587a7f0` + the archiving commit (a branch whose worktree had already gone was invisible to `worktree-reap`, which enumerates from `git worktree list`; `--reap-branches` reports and prunes them)
@@ -232,8 +234,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00320: stale goal intent sidecar on retirement](Completed/00320-stale-goal-intent-sidecar-on-retirement/PLAN.md) - Complete (a retired goal outlived its ledger entry and kept challenging session stop; the sidecar is now retracted when the ledger empties, and the trigger is anchored to the project root)
 
-- [00318: supervisor audit via status line banner](Completed/00318-supervisor-audit-via-status-line-banner/PLAN.md) - Complete at f818727b (the audit trail was an INJECTED chat line costing a model turn and permanent context for a notice only the human needs; it is now a 30s self-counting-down status-line banner that no longer waits for an idle session, with decision.log keeping the full record)
-
 ## Blocked / On Hold Plans
 
 - **00032, 00034, 00035** - On hold pending upstream Claude Code delegate mode fix (GitHub #23447, #25037)
@@ -271,36 +271,35 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 354 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 355 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 295 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 296 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 42 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 41 + 295 + 7 = **343 folders**, spanning
-  **340 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 42 + 296 + 7 = **345 folders**, spanning
+  **342 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
-  (`001-`, `002-`, `003-`), so they count as present. That leaves **14** of the
-  354 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
+  355 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
-  sub-agent that then found Plan 00208 already covered the work) — plus 00354,
-  which is CLAIMED and in flight on an unmerged branch rather than abandoned.
-  340 + 14 = 354. ✅
+  sub-agent that then found Plan 00208 already covered the work).
+  342 + 13 = 355. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the merge and archival of Plan 00353 (41 root, 295
-  `Completed/`, 7 `Cancelled/`, 340 distinct numbers against a counter of 354 —
-  343 folders, three of which share a number with another from before the
+- **Last reconciled at**: the merge and archival of Plan 00354 (42 root, 296
+  `Completed/`, 7 `Cancelled/`, 342 distinct numbers against a counter of 355 —
+  345 folders, three of which share a number with another from before the
   counter existed: 00034, 00039, 00041). Every figure above was recounted from
   disk rather than incremented, and the folderless set was recomputed the same
   way. The index carries NO
