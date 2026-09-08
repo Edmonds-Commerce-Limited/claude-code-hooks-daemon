@@ -30,9 +30,10 @@ config_changes:
   renamed: []
   removed: []
   changed:
-    - key: handlers.status_line.daemon_stats
+    - key: handlers.status_line.daemon_stats.enabled
       recommended: true
       recommended_value: false
+      only_if_set: true
       description: >-
         daemon_stats no longer renders the "📦 vX → vY" upgrade arrow -- that
         indicator moved to its own on-by-default upgrade_notifier handler (see
@@ -42,6 +43,9 @@ config_changes:
         v3.40.0). This entry exists to nudge the specific clients who enabled
         daemon_stats purely for the upgrade arrow: that reason is gone, so they
         should turn it back off. Existing configs are not rewritten on upgrade.
+        The key is the enabled flag itself and the entry is only_if_set, so a
+        config that never set daemon_stats (already OFF) or explicitly holds
+        enabled: false gets no nudge -- only a still-enabled override does.
       migration_note: >-
         If you set handlers.status_line.daemon_stats.enabled: true only to see
         the upgrade "📦" arrow, remove that override (or set it to false) now --

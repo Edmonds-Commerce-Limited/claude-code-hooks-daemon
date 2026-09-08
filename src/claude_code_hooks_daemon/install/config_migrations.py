@@ -63,6 +63,7 @@ _FIELD_NEW_KEY = "new_key"
 _FIELD_RECOMMENDED = "recommended"
 _FIELD_DORMANT = "dormant"
 _FIELD_RECOMMENDED_VALUE = "recommended_value"
+_FIELD_ONLY_IF_SET = "only_if_set"
 
 
 class _Unset:
@@ -111,6 +112,11 @@ class ConfigChangeEntry:
             to the UNSET sentinel when not specified. For a ``changed`` entry
             (default flip), the advisory compares the client's current value
             against this and promotes the change when they differ.
+        only_if_set: For a ``changed`` entry, restrict the promotion to a
+            client whose config holds the key EXPLICITLY. Use it when the
+            shipped default already equals ``recommended_value``, so a config
+            that never set the key needs no advice and only an explicit
+            override is worth flagging.
     """
 
     key: str
@@ -120,6 +126,7 @@ class ConfigChangeEntry:
     recommended: bool = False
     dormant: bool = False
     recommended_value: Any = UNSET
+    only_if_set: bool = False
 
 
 def _change_entry_from_dict(e: dict[str, Any]) -> ConfigChangeEntry:
@@ -136,6 +143,7 @@ def _change_entry_from_dict(e: dict[str, Any]) -> ConfigChangeEntry:
         recommended=bool(e.get(_FIELD_RECOMMENDED, False)),
         dormant=bool(e.get(_FIELD_DORMANT, False)),
         recommended_value=e.get(_FIELD_RECOMMENDED_VALUE, UNSET),
+        only_if_set=bool(e.get(_FIELD_ONLY_IF_SET, False)),
     )
 
 
@@ -547,11 +555,15 @@ def generate_migration_advisory(
         # differs from the recommended value. Covers BOTH a client who never set
         # the key (silently inherits the new default) and one who explicitly
         # holds the old value. Entries without a recommended_value are
-        # documentation-only and produce no suggestion.
+        # documentation-only and produce no suggestion. An only_if_set entry
+        # skips the absent-key case: its default already matches, so only an
+        # explicit override is worth a nudge.
         for changed in manifest.config_changes.changed:
             if changed.recommended_value is UNSET:
                 continue
             current_value = _get_value_at_key(changed.key, user_config)
+            if changed.only_if_set and current_value is UNSET:
+                continue
             if current_value != changed.recommended_value:
                 suggestions.append(
                     AdvisorySuggestion(
