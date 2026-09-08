@@ -365,9 +365,10 @@ so this step is not optional and not something to reconstruct by hand.
 
 Run the config-optimisation step (`Skill` tool: `skill=hooks-daemon`,
 `args=optimise`) — this IS the formalised "review new handlers and enable what's relevant" step (Plan 00308).
-It profiles the project, compares the config against
-`CLAUDE/UPGRADES/config-changes/` manifests newer than the last recorded
-review, and produces a scored, per-handler enable/skip recommendation list
+It profiles the project, compares the config against the installed daemon's
+`CLAUDE/UPGRADES/config-changes/` manifests (under `.claude/hooks-daemon/` on
+a client install — the script prints the resolved path) newer than the last
+recorded review, and produces a scored, per-handler enable/skip recommendation list
 with ready-to-apply config snippets. It only applies changes on your explicit
 confirmation ("apply all" / "apply N,M" / "skip"), then restarts and verifies
 the daemon, and records the run so the `config_optimisation_reminder`

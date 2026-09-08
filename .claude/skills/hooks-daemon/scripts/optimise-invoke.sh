@@ -17,15 +17,24 @@ CONFIG="${PROJECT_ROOT}/.claude/hooks-daemon.yaml"
 # Locate the deployed daemon CLI wrapper. There is no interpreter to detect —
 # the wrapper resolves the fingerprint-keyed venv itself. FAIL FAST if absent:
 # a bare "python3" fallback cannot import the package and only defers the error.
+#
+# DAEMON_DIR is the daemon's own checkout. The config-changes manifests and the
+# recorded-run state file live INSIDE it, not at the project root — on a client
+# install that is .claude/hooks-daemon/, and only in self-install mode does it
+# coincide with PROJECT_ROOT. Resolving them here is what lets Step 0 read a
+# path that exists on every layout (Plan 00362).
 if [ -x "${PROJECT_ROOT}/.claude/hooks-daemon/bin/hooks-daemon" ]; then
-    DAEMON_CLI="${PROJECT_ROOT}/.claude/hooks-daemon/bin/hooks-daemon"   # normal install
+    DAEMON_DIR="${PROJECT_ROOT}/.claude/hooks-daemon"                     # normal install
 elif [ -x "${PROJECT_ROOT}/bin/hooks-daemon" ]; then
-    DAEMON_CLI="${PROJECT_ROOT}/bin/hooks-daemon"                        # self-install
+    DAEMON_DIR="${PROJECT_ROOT}"                                          # self-install
 else
     echo "ERROR: bin/hooks-daemon wrapper not found under ${PROJECT_ROOT}." >&2
     echo "       Is the hooks daemon installed in this project?" >&2
     exit 1
 fi
+DAEMON_CLI="${DAEMON_DIR}/bin/hooks-daemon"
+MANIFESTS_DIR="${DAEMON_DIR}/CLAUDE/UPGRADES/config-changes"
+RUN_STATE="${DAEMON_DIR}/untracked/config_optimisation_state.json"
 
 # Print dynamic environment values so Claude sees them before the static instructions
 echo "## Detected Environment"
@@ -33,6 +42,9 @@ echo ""
 echo "- Daemon CLI:   ${DAEMON_CLI}"
 echo "- Config:       ${CONFIG}"
 echo "- Project root: ${PROJECT_ROOT}"
+echo "- Daemon dir:   ${DAEMON_DIR}"
+echo "- Manifests:    ${MANIFESTS_DIR}"
+echo "- Run state:    ${RUN_STATE}"
 echo ""
 
 # The rest of the instructions are static — quoted heredoc suppresses variable expansion
@@ -48,9 +60,10 @@ relevant handlers and ensure optimal configuration for this project" (Plan 00308
 It is the same step whether invoked manually, at the end of `/hooks-daemon upgrade`,
 or from LLM-INSTALL.md/LLM-UPDATE.md's closing step — there is no separate command.
 
-The environment values (daemon CLI path, config path, project root) are printed
-above. Use those exact values throughout these instructions wherever DAEMON_CLI,
-CONFIG, and PROJECT_ROOT are referenced.
+The environment values (daemon CLI path, config path, project root, daemon dir,
+manifests dir, run-state file) are printed above. Use those exact values
+throughout these instructions wherever DAEMON_CLI, CONFIG, PROJECT_ROOT,
+DAEMON_DIR, MANIFESTS_DIR and RUN_STATE are referenced.
 
 ---
 
@@ -59,18 +72,25 @@ CONFIG, and PROJECT_ROOT are referenced.
 Before profiling, check whether this project's config has fallen behind the
 installed daemon version's capabilities:
 
-1. Read the daemon's own version: `PROJECT_ROOT/src/claude_code_hooks_daemon/version.py`
-   in self-install mode, otherwise treat the CLI wrapper as authoritative — running
-   `DAEMON_CLI status` prints it.
-2. Read the last recorded config-optimisation run version, if any:
-   `PROJECT_ROOT/untracked/config_optimisation_state.json` (self-install) or
-   `PROJECT_ROOT/.claude/hooks-daemon/untracked/config_optimisation_state.json`
-   (normal install). Missing file = never reviewed; treat every manifest as new.
-3. List the manifests under `CLAUDE/UPGRADES/config-changes/v*.yaml` whose `version`
-   is greater than the last recorded run version (or all of them, if never reviewed).
-4. For each such manifest, read its `config_changes.added` and `config_changes.changed`
-   entries — each has a `key`, `description`, and `migration_note`. These are NEW
-   capabilities/behaviour this project has not yet been reviewed against.
+1. Read the daemon's own version: `DAEMON_DIR/src/claude_code_hooks_daemon/version.py`,
+   or treat the CLI wrapper as authoritative — running `DAEMON_CLI status` prints it.
+2. Read the last recorded config-optimisation run version, if any, from the
+   RUN_STATE file printed above. Missing file = never reviewed; treat every
+   manifest as new.
+3. Let the daemon compare the range for you — it reads the manifests under
+   MANIFESTS_DIR and already knows the promotion rules:
+
+     DAEMON_CLI check-config-migrations --from <last run version> --to <daemon version> --config CONFIG
+
+   (exit 1 = suggestions present, which is the normal case; 0 = nothing new;
+   2 = error). If never reviewed, use the oldest manifest version listed in
+   MANIFESTS_DIR as `--from`. Its "Recommended" section is a ready-made list;
+   its "New Options Available" section is informational.
+4. For the same range, also read each manifest `MANIFESTS_DIR/v*.yaml` whose
+   `version` is greater than the last recorded run version (or all of them, if
+   never reviewed): its `config_changes.added` and `config_changes.changed`
+   entries each have a `key`, `description`, and `migration_note`. These are
+   NEW capabilities/behaviour this project has not yet been reviewed against.
 5. Fold each `added` entry whose `key` names a `handlers.<event>.<name>` path into the
    Step 5 recommendations list below (even if Step 3's five-area scan does not cover
    that specific handler) — tag it "New since v<manifest version>" so it reads as an
@@ -79,8 +99,10 @@ installed daemon version's capabilities:
    enable/disable recommendations, since they describe existing config, not a new
    disabled-by-default handler.
 
-If `CLAUDE/UPGRADES/config-changes/` does not exist in this project, skip this step
-silently — not every project vendors that manifest tree.
+MANIFESTS_DIR is part of the installed daemon checkout, so it exists on every
+install. If it is missing, the install is incomplete: say so in the report
+(`Step 0 skipped: MANIFESTS_DIR not found — daemon checkout incomplete`) rather
+than passing over it in silence, then continue with Step 1.
 
 ---
 

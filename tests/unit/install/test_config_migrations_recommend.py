@@ -194,3 +194,70 @@ class TestFormatting:
         text = format_advisory_for_llm(advisory)
         assert "Recommended" in text
         assert "allow_untracked_claude_memory" in text
+
+
+# ---------------------------------------------------------------------------
+# Advisory: only_if_set (Plan 00362)
+# ---------------------------------------------------------------------------
+
+# A nudge aimed only at clients holding an explicit override: the default is
+# already the recommended value, so an absent key needs no advice.
+ONLY_IF_SET_YAML = """\
+version: "3.24.0"
+date: "2026-06-22"
+breaking: false
+config_changes:
+  added: []
+  renamed: []
+  removed: []
+  changed:
+    - key: handlers.status_line.some_handler.enabled
+      description: "The reason you enabled this is gone; turn it back off."
+      recommended: true
+      recommended_value: false
+      only_if_set: true
+"""
+
+
+class TestOnlyIfSet:
+    def test_from_dict_parses_only_if_set(self) -> None:
+        manifest = ConfigMigrationManifest.from_dict(yaml.safe_load(ONLY_IF_SET_YAML))
+        assert manifest.config_changes.changed[0].only_if_set is True
+
+    def test_only_if_set_defaults_false(self) -> None:
+        manifest = ConfigMigrationManifest.from_dict(yaml.safe_load(FLIP_MANIFEST_YAML))
+        assert manifest.config_changes.changed[0].only_if_set is False
+        assert ConfigChangeEntry(key="a.b", description="d").only_if_set is False
+
+    def test_absent_key_produces_no_suggestion(self, tmp_path: Path) -> None:
+        manifests_dir = _write(tmp_path, "v3.24.0.yaml", ONLY_IF_SET_YAML)
+        user_cfg = _write_user_config(tmp_path, {"handlers": {"status_line": {}}})
+        advisory = generate_migration_advisory(
+            "3.23.0", "3.24.0", user_cfg, manifests_dir=manifests_dir
+        )
+        assert advisory.suggestions == []
+
+    def test_explicit_old_value_is_still_promoted(self, tmp_path: Path) -> None:
+        manifests_dir = _write(tmp_path, "v3.24.0.yaml", ONLY_IF_SET_YAML)
+        user_cfg = _write_user_config(
+            tmp_path,
+            {"handlers": {"status_line": {"some_handler": {"enabled": True}}}},
+        )
+        advisory = generate_migration_advisory(
+            "3.23.0", "3.24.0", user_cfg, manifests_dir=manifests_dir
+        )
+        assert [s.key for s in advisory.suggestions] == [
+            "handlers.status_line.some_handler.enabled"
+        ]
+        assert advisory.suggestions[0].current_value is True
+
+    def test_explicit_recommended_value_is_quiet(self, tmp_path: Path) -> None:
+        manifests_dir = _write(tmp_path, "v3.24.0.yaml", ONLY_IF_SET_YAML)
+        user_cfg = _write_user_config(
+            tmp_path,
+            {"handlers": {"status_line": {"some_handler": {"enabled": False}}}},
+        )
+        advisory = generate_migration_advisory(
+            "3.23.0", "3.24.0", user_cfg, manifests_dir=manifests_dir
+        )
+        assert advisory.suggestions == []

@@ -6,8 +6,10 @@ step (Plan 00308) — the same step whether run manually, automatically at the e
 
 Analyse the current hooks daemon configuration against the project's profile (languages,
 tests, CI, plans) and produce a scored report across five key areas. Also compares the
-project's config against `CLAUDE/UPGRADES/config-changes/` manifests to surface
-capabilities introduced since the last recorded run, and can apply recommendations
+project's config against the installed daemon's config-changes manifests
+(`.claude/hooks-daemon/CLAUDE/UPGRADES/config-changes/` on a client install; the
+script prints the resolved path) to surface capabilities introduced since the
+last recorded run, and can apply recommendations
 automatically. Every run (report-only or apply) records itself via
 `bin/hooks-daemon record-config-optimisation-run`, which silences the
 `config_optimisation_reminder` SessionStart advisory until the next upgrade.

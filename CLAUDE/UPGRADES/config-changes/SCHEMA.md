@@ -61,6 +61,11 @@ config_changes:
       recommended: true                            # Promote into "Recommended"
       recommended_value: false                     # Advisory fires when client's value differs
       migration_note: "Migrate existing memory into tracked docs first"
+    - key: handlers.status_line.daemon_stats.enabled
+      description: "The reason to enable this moved elsewhere; turn it back off"
+      recommended: true
+      recommended_value: false
+      only_if_set: true                            # Absent key = already at default, no nudge
 ```
 
 ## Promotion Fields (Plan 00133)
@@ -76,6 +81,15 @@ advisory can *recommend enabling* a dormant feature, not just list it:
 
 A `changed` entry **without** `recommended_value` remains documentation-only
 (no suggestion is generated).
+
+A `changed` entry may also carry `only_if_set: true`. It restricts the
+comparison to a config that holds the key EXPLICITLY: an absent key produces
+no suggestion. Use it when the shipped default already equals
+`recommended_value` and the nudge is aimed only at projects carrying an old
+override (the `daemon_stats.enabled` case above) — without it, every project
+that never set the key would be told to change a value it already has.
+Key such an entry on the leaf value (`...daemon_stats.enabled`), not on the
+handler mapping, so the comparison is against a scalar.
 
 ## Key Format
 
@@ -98,7 +112,8 @@ The `check-config-migrations` CLI command:
 4. For **added** keys: suggests if user doesn't have the new key yet (promoted
    into the Recommended section when `recommended: true`)
 5. For **changed** keys with a `recommended_value`: promotes the change when the
-   client's current value differs from `recommended_value` (default-flip path)
+   client's current value differs from `recommended_value` (default-flip path);
+   with `only_if_set: true`, only when the key is present in the client's config
 6. For **removed** keys: warns if user still has the removed key (see note below)
 
 Note: Removed keys generate warnings only if they appear in the `renamed` section.
