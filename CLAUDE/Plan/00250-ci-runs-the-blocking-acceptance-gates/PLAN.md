@@ -47,15 +47,15 @@ runner, so this is a provisioning gap rather than a platform limitation.
 ## The same gap has a louder sibling, and CI is no longer green
 
 **This plan was written from "the first fully green CI run". That premise has
-expired.** `Tests + coverage` is currently RED on `main` and has been for a
-long stretch — 9 failures per interpreter on the latest run, across three
-files, found while regression-testing Plan 00347:
+expired.** `Tests + coverage` is RED on `main` and has been for a long stretch.
+It was 9 failures per interpreter across three files when found (while
+regression-testing Plan 00347), and is **4** after Task 2.4a:
 
 | File                                               | Why it fails on a runner                                                                                                           |
 | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/integration/test_forwarder_socket_stdin.py` | Line 29 is `HOOKS_DIR = Path("/workspace/.claude/hooks")` — this container's absolute path. It also needs a live daemon to answer. |
-| `tests/integration/test_relay_guard_fail_open.py`  | Exercises the `nc` socket-relay rung against a live local socket.                                                                  |
-| `tests/integration/test_deployed_skill_trees.py`   | Asserts `.claude/hooks-daemon` is git-ignored, which depends on the deployed client-install layout.                                |
+| `tests/integration/test_deployed_skill_trees.py`   | Asked git about a directory-only ignore pattern for a path absent on a runner. **Fixed (2.4a).**                                   |
+| `tests/integration/test_forwarder_socket_stdin.py` | Hardcoded `/workspace`, so the forwarders were never found. **Path fixed (2.4a)**; now reaches the daemon and fails there instead. |
+| `tests/integration/test_relay_guard_fail_open.py`  | Exercises the `nc` socket-relay rung against a live local socket. **Still failing (2.4b).**                                        |
 
 These are the **same missing dependency** as the 11 skips above, showing up as
 hard failures instead. That difference matters in both directions: a failure is
@@ -119,6 +119,11 @@ have reopened a plan whose success criteria were satisfied.
 - [ ] ⬜ **Task 2.1**: Start a daemon in the CI QA job before the acceptance
   step, reusing whatever the `Daemon load` job already does rather than inventing
   a second way to start one
+  - [ ] ⬜ **The blocker is now named**, from a CI run after Task 2.4a made the
+    forwarders reachable: `ensure_daemon` REFUSES to auto-start here, with
+    `hooks_daemon_repo_detected — This is the hooks-daemon repository. To install for development, run: python install.py --self-install`. So the QA
+    job does not merely lack a running daemon, it lacks the SELF-INSTALL step —
+    and starting a daemon cannot work until that runs first.
 - [ ] ⬜ **Task 2.2**: Confirm all 11 tests EXECUTE on all three interpreters
   - [ ] ⬜ Expect first-run failures and treat them as long-standing, not as
     regressions — the LESSONS.md entry on waking skipped tests applies directly
