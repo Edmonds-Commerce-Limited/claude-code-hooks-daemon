@@ -335,3 +335,91 @@ class TestSocketHygiene:
         await server_task
 
         assert not events_dir.exists()
+
+    @pytest.mark.anyio
+    async def test_refuses_to_bind_when_events_dir_is_pre_existing_symlink(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        """Task 2.6 (Plan 00295): a predictable events-dir path that is
+        ALREADY a symlink when the daemon starts must never be followed --
+        it could have been pre-planted by another user on a shared
+        AF_UNIX-overflow fallback root (e.g. `/tmp`), redirecting where
+        per-event sockets get bound. The daemon refuses the whole rung
+        rather than mkdir/bind through the symlink, and leaves it
+        untouched for an operator to investigate."""
+        from claude_code_hooks_daemon.daemon.server import get_memory_logs
+
+        events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
+        events_dir.parent.mkdir(parents=True, exist_ok=True)
+        attacker_target = isolated_untracked_dir / "attacker-controlled"
+        attacker_target.mkdir()
+        events_dir.symlink_to(attacker_target)
+
+        config = _make_config(isolated_untracked_dir, relay_enabled=True)
+        daemon = HooksDaemon(config=config, controller=front_controller)
+        server_task = asyncio.create_task(daemon.start())
+        await asyncio.sleep(0.1)
+
+        assert daemon._event_servers == {}
+        assert events_dir.is_symlink()
+        assert events_dir.resolve() == attacker_target.resolve()
+        assert list(attacker_target.iterdir()) == []
+        logs = "\n".join(get_memory_logs())
+        assert "symlink" in logs.lower()
+
+        await daemon.shutdown()
+        await server_task
+
+    @pytest.mark.anyio
+    async def test_bind_time_rmtree_failure_is_logged_not_swallowed(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        """Task 2.6 (Plan 00295): a stale events dir that fails to remove
+        (e.g. a permission error) must be reported, not silently discarded
+        via `ignore_errors=True` -- and binding still proceeds best-effort,
+        matching every other per-socket failure in this method."""
+        from claude_code_hooks_daemon.daemon.server import get_memory_logs
+
+        events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
+        events_dir.mkdir(parents=True)
+        (events_dir / "leftover.sock").write_text("")
+
+        config = _make_config(isolated_untracked_dir, relay_enabled=True)
+        daemon = HooksDaemon(config=config, controller=front_controller)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.server.shutil.rmtree",
+            side_effect=OSError("permission denied"),
+        ):
+            server_task = asyncio.create_task(daemon.start())
+            await asyncio.sleep(0.1)
+
+        assert len(daemon._event_servers) > 0, "bind must still proceed best-effort"
+        logs = "\n".join(get_memory_logs())
+        assert "permission denied" in logs
+
+        await daemon.shutdown()
+        await server_task
+
+    @pytest.mark.anyio
+    async def test_shutdown_rmtree_failure_is_logged_not_swallowed(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        """Task 2.6 (Plan 00295): the shutdown-path removal must also report
+        a failure rather than discard it via `ignore_errors=True`."""
+        from claude_code_hooks_daemon.daemon.server import get_memory_logs
+
+        config = _make_config(isolated_untracked_dir, relay_enabled=True)
+        daemon = HooksDaemon(config=config, controller=front_controller)
+        server_task = asyncio.create_task(daemon.start())
+        await asyncio.sleep(0.1)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.server.shutil.rmtree",
+            side_effect=OSError("permission denied"),
+        ):
+            await daemon.shutdown()
+        await server_task
+
+        logs = "\n".join(get_memory_logs())
+        assert "permission denied" in logs

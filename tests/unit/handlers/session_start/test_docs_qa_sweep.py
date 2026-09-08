@@ -108,6 +108,21 @@ class TestClaudeMdAndAcceptanceTests:
         assert content is not None
         assert "docs_qa_sweep" in content
 
+    def test_get_claude_md_source_tree_markdown_text_matches_check_semantics(self) -> None:
+        """Task 2.1 (Plan 00295): the injected guidance previously claimed
+        source-tree-markdown 'stays silent when no `layout:` source/test
+        dirs are declared', but `test_dirs` always has a built-in
+        cross-language fallback (`ProjectLayout`'s `_BUILTIN_TEST_DIRS`), so
+        TEST-dir findings can fire in zero-config -- only SOURCE-dir
+        findings stay dormant undeclared. The injected text must match the
+        check module's own (accurate) docstring, not contradict it.
+        """
+        content = DocsQaSweepHandler().get_claude_md()
+        assert content is not None
+        assert "stays silent when no `layout:` source/test dirs are declared" not in content
+        assert "SOURCE-dir findings stay" in content
+        assert "TEST-dir\nfindings can fire" in content
+
     def test_get_acceptance_tests_returns_list(self) -> None:
         tests = DocsQaSweepHandler().get_acceptance_tests()
         assert len(tests) >= 1

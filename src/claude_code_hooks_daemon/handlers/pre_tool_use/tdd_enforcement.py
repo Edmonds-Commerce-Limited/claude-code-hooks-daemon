@@ -305,13 +305,25 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         # Declared layout dirs (Plan 00288 Task 4.4/C6) are consulted FIRST:
         # a project stating "this dir is a test dir" or "this dir is source"
         # is a FACT that outranks per-language inference, the same priority
-        # test_path_map already has over inferred candidate paths. In
-        # zero-config this changes nothing — the facade's built-in test_dirs
-        # is exactly the same COMMON_TEST_DIRECTORIES set every strategy's
-        # is_test_file() already checks, and source_dirs has no built-in (see
-        # core/project_layout.py), so is_source_path() never fires and
-        # resolution falls through to strategy.is_production_source() exactly
-        # as before.
+        # test_path_map already has over inferred candidate paths.
+        #
+        # Zero-config is NOT a byte-identical no-op for test_dirs (Plan 00295
+        # Task 2.2, corrected here): the facade's built-in test_dirs names the
+        # same directories every strategy's is_test_file() already checks via
+        # is_in_common_test_directory(), but the two use different matching
+        # algorithms. is_in_common_test_directory() is a substring test that
+        # requires a leading '/' immediately before the dir name;
+        # layout.is_test_path() splits on '/' and matches a whole segment
+        # regardless of position. They agree for every well-formed absolute
+        # path (the shape every real Write/Edit file_path takes, enforced by
+        # R-ABSOLUTE-PATH-REQUIRED), but a bare relative path whose FIRST
+        # segment names a test dir -- no leading '/' -- is now recognised as
+        # a test path where it previously was not (pinned by
+        # test_matches_relative_test_dir_first_segment_is_widened_zero_config
+        # in tests/unit/handlers/test_tdd_enforcement.py). source_dirs has no
+        # built-in (see core/project_layout.py), so is_source_path() never
+        # fires in zero-config and resolution falls through to
+        # strategy.is_production_source() exactly as before.
         #
         # Per-project layout (Plan 00300): resolved via the file's OWNING
         # declared project, not blindly the root project's `_project_layout`

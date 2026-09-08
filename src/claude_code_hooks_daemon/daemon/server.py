@@ -873,8 +873,31 @@ class HooksDaemon:
         )
 
         events_dir = get_event_socket_dir_from_untracked(legacy_socket_path.parent)
+        # Plan 00295 Task 2.6: a predictable path (the AF_UNIX-overflow
+        # fallback root can be a shared /tmp) that is ALREADY a symlink when
+        # we get here could have been pre-planted by another user to
+        # redirect where per-event sockets get bound. Refuse the whole rung
+        # rather than mkdir/bind through it -- checked BEFORE any rmtree or
+        # mkdir call touches the path at all.
+        if events_dir.is_symlink():
+            logger.error(
+                "Refusing to bind per-event sockets: %s is a pre-existing symlink "
+                "(possible symlink attack on a predictable path) — served only via "
+                "the legacy socket",
+                events_dir,
+            )
+            return
         if events_dir.exists():
-            shutil.rmtree(events_dir, ignore_errors=True)
+            try:
+                shutil.rmtree(events_dir)
+            except OSError as e:
+                # Not fatal to the rung: the per-socket bind loop below
+                # already reports (and gracefully skips) an individual
+                # OSError, so a stale directory that fails to clear does not
+                # need a separate abort path — it just risks the same
+                # per-socket "address already in use" a stale leftover
+                # socket file would raise, which that loop already handles.
+                logger.error("Failed to remove stale per-event socket dir %s: %s", events_dir, e)
         events_dir.mkdir(parents=True, mode=0o750, exist_ok=True)
 
         bound: dict[str, asyncio.Server] = {}
@@ -1120,8 +1143,11 @@ class HooksDaemon:
 
             events_dir = get_event_socket_dir_from_untracked(socket_path.parent)
             if events_dir.exists():
-                shutil.rmtree(events_dir, ignore_errors=True)
-                logger.debug("Removed per-event socket dir: %s", events_dir)
+                try:
+                    shutil.rmtree(events_dir)
+                    logger.debug("Removed per-event socket dir: %s", events_dir)
+                except OSError as e:
+                    logger.error("Failed to remove per-event socket dir %s: %s", events_dir, e)
 
         # Cleanup socket file
         if socket_path and socket_path.exists():

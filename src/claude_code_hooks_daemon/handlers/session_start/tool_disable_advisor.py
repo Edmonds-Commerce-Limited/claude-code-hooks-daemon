@@ -57,19 +57,28 @@ class ToolDisableAdvisorHandler(SessionStartHandlerBase):
         root = getattr(self, "_workspace_root", None)
         return Path(root) if root is not None else ProjectContext.project_root()
 
-    def _tool_policy(self) -> ToolPolicyConfig:
-        """The project's tool policy; empty (never fires) on an unloadable config.
+    def _load_config(self) -> Config:
+        """The project's daemon config; defaults on an unloadable file.
 
-        ``matches()`` runs on every SessionStart, so a client config the daemon
-        itself already reports as invalid must degrade this advisory to silent
-        rather than raise out of the chain.
+        Single source of truth for BOTH ``_tool_policy()`` and
+        ``_blocker_source_disable_on()`` (Plan 00295 Task 2.11) -- a client
+        config the daemon itself already reports as invalid must degrade
+        every consumer here to silent, not raise out of the SessionStart
+        chain, and the two must not diverge in how they handle that
+        failure. Also closes the redundant reload ``handle()`` used to incur
+        by re-deriving this same config via a ``self.matches(hook_input)``
+        call on top of its own lookup.
         """
         config_path = self._project_root() / ".claude" / "hooks-daemon.yaml"
         try:
-            return Config.load_or_default(config_path).tool_policy
+            return Config.load_or_default(config_path)
         except (ValidationError, OSError, ValueError) as exc:
             logger.debug("tool_disable_advisor: cannot load %s: %s", config_path, exc)
-            return ToolPolicyConfig()
+            return Config()
+
+    def _tool_policy(self) -> ToolPolicyConfig:
+        """The project's tool policy; empty (never fires) on an unloadable config."""
+        return self._load_config().tool_policy
 
     def _load_settings(self) -> dict[str, Any]:
         """The project's settings.json as a dict; empty on any problem."""
@@ -94,8 +103,7 @@ class ToolDisableAdvisorHandler(SessionStartHandlerBase):
 
     def _blocker_source_disable_on(self) -> bool:
         """Is artifact_publish_blocker's own enforcement option enabled?"""
-        config_path = self._project_root() / ".claude" / "hooks-daemon.yaml"
-        handler_config = Config.load_or_default(config_path).handlers.pre_tool_use.get(
+        handler_config = self._load_config().handlers.pre_tool_use.get(
             "artifact_publish_blocker", {}
         )
         # The parsed value is a HandlerConfig in a validated config, but a raw
@@ -110,14 +118,25 @@ class ToolDisableAdvisorHandler(SessionStartHandlerBase):
         return bool(self._tool_policy().never_want)
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
-        """Compare each declaration against project settings and advise."""
-        if not self.matches(hook_input):
+        """Compare each declaration against project settings and advise.
+
+        Loads ``tool_policy`` exactly once (Plan 00295 Task 2.11): the
+        framework only ever calls ``handle()`` after its own separate
+        ``matches()`` call already returned True, so re-deriving the same
+        config here via ``self.matches(hook_input)`` on top of this
+        method's own lookup was a genuinely redundant second disk
+        read+parse+validate for the same event. A direct unit-test call to
+        ``handle()`` with no declarations still degrades safely to the same
+        empty-context ALLOW below.
+        """
+        tool_policy = self._tool_policy()
+        if not tool_policy.never_want:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         settings = self._load_settings()
         missing: list[str] = []
         satisfied: list[str] = []
-        for entry in self._tool_policy().never_want:
+        for entry in tool_policy.never_want:
             reason = f" ({entry.reason})" if entry.reason else ""
             if self._is_disabled(entry.tool, settings):
                 satisfied.append(f"  • {entry.tool}: source disable in place{reason}")

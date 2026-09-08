@@ -295,6 +295,61 @@ class TestSourceDisable:
         assert guidance is not None
         assert "source_disable" in guidance
 
+    def test_transient_write_failure_allows_retry_on_next_event(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Task 2.9 (Plan 00295): a transient failure (e.g. a momentary
+        permission error) partway through the write must not permanently
+        latch the once-per-process guard -- otherwise the daemon never
+        retries for the rest of its process lifetime, even though the next
+        PreToolUse event is a perfectly good retry opportunity."""
+        import shutil
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(json.dumps({"plansDirectory": "CLAUDE/Plan"}))
+        handler = _handler_with_source_disable(tmp_path)
+
+        call_count = {"n": 0}
+        real_copymode = shutil.copymode
+
+        def _flaky_copymode(src: Any, dst: Any) -> None:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise OSError("simulated transient failure")
+            real_copymode(src, dst)
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.pre_tool_use."
+            "artifact_publish_blocker.shutil.copymode",
+            _flaky_copymode,
+        )
+
+        handler.matches(_non_artifact_event())
+        assert json.loads(settings_path.read_text()).get("enableArtifact") is None
+
+        handler.matches(_non_artifact_event())
+        assert json.loads(settings_path.read_text())["enableArtifact"] is False
+
+    def test_temp_file_is_cleaned_up_on_write_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Task 2.9 (Plan 00295): a failure during the atomic stage-then-rename
+        must not leave the staged temp file behind -- an accumulating leak
+        across every transient failure otherwise."""
+        handler = _handler_with_source_disable(tmp_path)
+        tmp_leftover = tmp_path / ".claude" / "settings.json.tmp.artifact-source-disable"
+
+        def _failing_replace(self: Path, target: Any) -> Path:
+            raise OSError("simulated rename failure")
+
+        monkeypatch.setattr(Path, "replace", _failing_replace)
+
+        handler.matches(_non_artifact_event())
+
+        assert not tmp_leftover.exists()
+
 
 class TestGuidanceAndAcceptanceTests:
     """Coverage obligations every blocking handler carries."""

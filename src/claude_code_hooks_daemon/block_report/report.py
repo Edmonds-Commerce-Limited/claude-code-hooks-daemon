@@ -39,15 +39,23 @@ class BlockReportRow:
 
 @dataclass(frozen=True)
 class BlockReport:
-    """The full report: ranked rows plus scan provenance."""
+    """The full report: ranked rows plus scan provenance.
 
+    ``min_blocks``/``min_sessions`` are REQUIRED, not defaulted here (Plan
+    00295 Task 2.7): :class:`~claude_code_hooks_daemon.config.models.PromotionConfig`
+    owns the real defaults (5/2) for these thresholds, and a second,
+    independently-maintained default on this dataclass could silently drift
+    from it. Every caller must source the values explicitly from the
+    resolved config (as :func:`build_report` already does).
+    """
+
+    min_blocks: int
+    min_sessions: int
     rows: list[BlockReportRow] = field(default_factory=list)
     transcripts_scanned: int = 0
     sessions_scanned: int = 0
     malformed_lines: int = 0
     unattributed_denies: int = 0
-    min_blocks: int = 5
-    min_sessions: int = 2
 
 
 def _drift_for(*, currently_promoted: bool, recommended_promote: bool) -> Drift | None:

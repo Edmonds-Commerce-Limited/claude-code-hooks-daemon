@@ -1,13 +1,20 @@
 """Tests for the ``ProjectLayout`` facade (Plan 00288, Task 2.2)."""
 
 import dataclasses
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 from claude_code_hooks_daemon.config.models import Config, LayoutConfig
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.core.project_layout import ProjectLayout, main_repo_code_dirs
-from claude_code_hooks_daemon.docs_qa.corpus import COMMON_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.strategies.tdd.common import COMMON_TEST_DIRECTORIES
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_SRC_DIR = _REPO_ROOT / "src"
 
 
 class TestZeroConfigCompositionEqualsBuiltins:
@@ -28,7 +35,7 @@ class TestZeroConfigCompositionEqualsBuiltins:
 
     def test_vendor_dirs_equal_canonical_constant(self) -> None:
         layout = ProjectLayout.from_config(Config())
-        assert layout.vendor_dirs == frozenset(COMMON_VENDORED_BUILD_DIR_NAMES)
+        assert layout.vendor_dirs == frozenset(CORE_VENDORED_BUILD_DIR_NAMES)
 
     def test_agent_and_human_docs_dirs_use_documentation_trees_defaults(self) -> None:
         layout = ProjectLayout.from_config(Config())
@@ -64,7 +71,7 @@ class TestAdditiveMode:
     def test_declared_vendor_dirs_extend_canonical_set(self) -> None:
         config = Config.model_validate({"layout": {"vendor_dirs": ["deps"]}})
         layout = ProjectLayout.from_config(config)
-        assert layout.vendor_dirs == frozenset(COMMON_VENDORED_BUILD_DIR_NAMES) | {"deps"}
+        assert layout.vendor_dirs == frozenset(CORE_VENDORED_BUILD_DIR_NAMES) | {"deps"}
 
     def test_duplicate_declared_dir_is_not_repeated(self) -> None:
         config = Config.model_validate({"layout": {"config_dirs": ["config"]}})
@@ -323,3 +330,47 @@ class TestMainRepoCodeDirs:
         layout = ProjectLayout.from_config(Config())
         result = main_repo_code_dirs(layout)
         assert len(result) == len(set(result))
+
+
+def _run_python(code: str) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    pythonpath_parts = [str(_SRC_DIR)]
+    if existing := env.get("PYTHONPATH"):
+        pythonpath_parts.append(existing)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+
+class TestImportTimeBoundary:
+    """Task 2.10 (Plan 00295): core/project_layout.py must not pull docs_qa
+    (and transitively plan_qa) into core import time.
+
+    Subprocess-isolated (matching test_paths_import_under_310.py's own
+    rationale): sys.modules is process-global, and by the time this test
+    module runs, plenty of other test modules in the same pytest session
+    have already imported docs_qa/plan_qa for their own reasons -- an
+    in-process ``sys.modules`` check here would pass regardless of whether
+    THIS import chain is the one that pulled them in.
+    """
+
+    def test_importing_project_layout_does_not_load_docs_qa_or_plan_qa(self) -> None:
+        result = _run_python(
+            "import sys\n"
+            "import claude_code_hooks_daemon.core.project_layout\n"
+            "leaked = sorted(\n"
+            "    m for m in sys.modules\n"
+            "    if m.startswith('claude_code_hooks_daemon.docs_qa')\n"
+            "    or m.startswith('claude_code_hooks_daemon.plan_qa')\n"
+            ")\n"
+            "print('LEAKED:' + ','.join(leaked))\n"
+        )
+        assert result.returncode == 0, result.stderr
+        assert (
+            result.stdout.strip() == "LEAKED:"
+        ), f"docs_qa/plan_qa modules leaked into core import time: {result.stdout!r}"

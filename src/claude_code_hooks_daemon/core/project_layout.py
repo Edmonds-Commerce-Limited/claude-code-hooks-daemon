@@ -17,7 +17,9 @@ Zero-config behaviour is byte-identical to today (pinned by tests in
 
 - ``config_dirs`` and ``vendor_dirs`` fall back to built-in constants that
   already exist project-wide (``config``; the canonical vendored/build set
-  in ``docs_qa.corpus``).
+  in ``constants.layout`` -- imported directly, not via ``docs_qa.corpus``'s
+  re-export, so this module never pulls docs_qa/plan_qa into core import
+  time (Plan 00295 Task 2.10)).
 - ``test_dirs`` falls back to :data:`COMMON_TEST_DIRECTORIES`
   (``strategies/tdd/common.py``) — the one cross-language test-dir
   convention that already exists.
@@ -41,7 +43,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatch
 from typing import TYPE_CHECKING, Final
 
-from claude_code_hooks_daemon.docs_qa.corpus import COMMON_VENDORED_BUILD_DIR_NAMES
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.strategies.tdd.common import COMMON_TEST_DIRECTORIES
 from claude_code_hooks_daemon.utils import vendor_paths
 
@@ -65,7 +67,7 @@ _BUILTIN_TEST_DIRS: Final[tuple[str, ...]] = tuple(
 # today, so there is nothing to fall back on here.
 _BUILTIN_SOURCE_DIRS: Final[tuple[str, ...]] = ()
 
-_BUILTIN_VENDOR_DIRS: Final[tuple[str, ...]] = tuple(COMMON_VENDORED_BUILD_DIR_NAMES)
+_BUILTIN_VENDOR_DIRS: Final[tuple[str, ...]] = tuple(CORE_VENDORED_BUILD_DIR_NAMES)
 
 # Doc/plan axes fallbacks (Plan 00300), matching Config's own field defaults
 # (DocumentationTreesConfig.agent/human, PlanWorkflowConfig.directory,

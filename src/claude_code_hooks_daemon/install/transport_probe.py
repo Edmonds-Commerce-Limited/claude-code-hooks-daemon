@@ -30,7 +30,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir
-from claude_code_hooks_daemon.install.relay_deploy import check_musl_toolchain, read_deployed_route
+from claude_code_hooks_daemon.install.relay_deploy import (
+    check_musl_toolchain,
+    read_deployed_digest,
+    read_deployed_route,
+)
 
 #: Timeout for the cheap `nc -h` capability probe (subprocess, not a socket).
 _NC_HELP_TIMEOUT_SECONDS = 5
@@ -59,27 +63,49 @@ class TransportProbeResult:
         return asdict(self)
 
 
-def _verify_digest(binary: Path, sha256sums_path: Path) -> bool | None:
-    """Check ``binary``'s sha256 against a ``sha256sum``-format manifest.
-
-    Returns:
-        True/False if the manifest exists and names this binary; None if no
-        manifest is available (nothing to verify against — not a failure).
-    """
-    if not sha256sums_path.is_file() or not binary.is_file():
-        return None
-    try:
-        digest = hashlib.sha256(binary.read_bytes()).hexdigest()
-    except OSError:
+def _expected_digest_from_manifest(binary_name: str, sha256sums_path: Path) -> str | None:
+    """The digest ``sha256sums_path`` (a ``sha256sum``-format manifest) records
+    for ``binary_name``, or None if the manifest is absent or has no entry."""
+    if not sha256sums_path.is_file():
         return None
     for line in sha256sums_path.read_text().splitlines():
         parts = line.split(None, 1)
         if len(parts) != 2:
             continue
         recorded_digest, recorded_name = parts
-        if recorded_name.strip().lstrip("*") == binary.name:
-            return recorded_digest.strip().lower() == digest.lower()
+        if recorded_name.strip().lstrip("*") == binary_name:
+            return recorded_digest.strip().lower()
     return None
+
+
+def _verify_digest(binary: Path, sha256sums_path: Path) -> bool | None:
+    """Check ``binary``'s sha256 against its known-good digest.
+
+    The known-good digest is resolved in priority order (Plan 00295 Task
+    2.4): the deploy-time marker :func:`~.relay_deploy.read_deployed_digest`
+    records (populated by ``deploy_relay_from_download`` after it already
+    verified against the release manifest — this is what actually reports
+    "verified" in practice, since nothing in the release pipeline populates
+    a shipped ``relay/SHA256SUMS.released`` today), falling back to
+    ``sha256sums_path`` for a binary that predates the marker or was
+    deployed by the build route.
+
+    Returns:
+        True/False once a known-good digest is found; None if neither
+        source has one (nothing to verify against — not a failure).
+    """
+    if not binary.is_file():
+        return None
+    expected = read_deployed_digest(binary) or _expected_digest_from_manifest(
+        binary.name, sha256sums_path
+    )
+    if expected is None:
+        return None
+    try:
+        digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+    except OSError:
+        return None
+    return expected.lower() == digest.lower()
 
 
 def _probe_nc() -> tuple[bool, bool]:

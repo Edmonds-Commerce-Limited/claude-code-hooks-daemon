@@ -10,6 +10,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
@@ -131,6 +134,63 @@ class TestAdvice:
         (root / ".claude" / "settings.json").write_text("{broken")
         result = _handler(root).handle(_SESSION_START)
         assert result.decision == Decision.ALLOW
+
+
+class TestConfigReloadHygiene:
+    """Task 2.11 (Plan 00295): handle() previously re-derived tool_policy via
+    a redundant self.matches(hook_input) call on top of its own lookup,
+    re-parsing+re-validating hooks-daemon.yaml from disk a second time for
+    the exact same event -- up to three loads per event once matches() (the
+    framework's own separate call) is counted."""
+
+    def test_handle_loads_config_at_most_once_for_tool_policy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A `handle()` call that only needs tool_policy (the 'missing
+        disable' path, which never reaches the separate
+        _blocker_source_disable_on() load) must load config exactly once,
+        not twice."""
+        root = _project(tmp_path, config_yaml=_NEVER_WANT_YAML, settings={})
+        handler = _handler(root)
+
+        calls = {"n": 0}
+        real_load = Config.load_or_default
+
+        def _counting_load(*args: Any, **kwargs: Any) -> Config:
+            calls["n"] += 1
+            return real_load(*args, **kwargs)
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.session_start."
+            "tool_disable_advisor.Config.load_or_default",
+            _counting_load,
+        )
+
+        result = handler.handle(_SESSION_START)
+
+        assert result.decision == Decision.ALLOW
+        assert calls["n"] == 1
+
+    def test_blocker_source_disable_on_survives_unloadable_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_blocker_source_disable_on() must degrade to False rather than
+        raise when the config it loads is invalid -- the SAME resilience
+        contract _tool_policy() already provides, so a crash here does not
+        take down the SessionStart chain."""
+        root = _project(tmp_path, config_yaml=_NEVER_WANT_YAML, settings={"enableArtifact": False})
+        handler = _handler(root)
+
+        def _raise(*args: Any, **kwargs: Any) -> Config:
+            raise ValueError("simulated malformed config")
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.session_start."
+            "tool_disable_advisor.Config.load_or_default",
+            _raise,
+        )
+
+        assert handler._blocker_source_disable_on() is False
 
 
 class TestGuidance:

@@ -296,6 +296,20 @@ def _declares_human_blocked(text: str) -> bool:
     return False
 
 
+# Plan 00295 Task 2.8: single prose source for the goal-ledger mechanism.
+# STOP_GOAL_LEDGER's Rule.verbose below (the static rule-table teaching text)
+# and _GOAL_LEDGER_CHALLENGE_TEMPLATE (the dynamic per-invocation challenge
+# naming the live plan numbers) previously hand-authored this explanation
+# twice, independently -- a real duplication that could drift apart. Both
+# now build from this ONE sentence.
+_GOAL_LEDGER_MECHANISM_NOTE = (
+    "The /goal slot holds ONE condition (last writer wins), so the daemon "
+    "keeps a ledger of every emitted goal, and an unexplained stop is "
+    "challenged on behalf of EVERY ledgered plan still In Progress -- not "
+    "only the newest /goal condition. Entries retire when their plan "
+    "reaches a terminal status or is archived."
+)
+
 # SINGLE SOURCE OF TRUTH for get_rules() / the disclosure ladder (Plan 00116,
 # Phase 3): one Rule per DENY-branch CONCEPT, not per historical reason
 # constant naming quirk. Each rule's ``verbose`` is the corresponding
@@ -304,7 +318,12 @@ def _declares_human_blocked(text: str) -> bool:
 # to the pre-migration always-on message. Only a REPEAT fire of the SAME
 # rule for the SAME agent goes terse; the terse ``fix`` field is written so
 # the agent still knows the operative next action (continue, or prefix
-# STOPPING BECAUSE:) without the full teaching prose.
+# STOPPING BECAUSE:) without the full teaching prose. STOP_GOAL_LEDGER is the
+# one exception to "rendered via _render_branch_message": its verbose text is
+# reachable only through RuleFormatter.verbose() directly (e.g. explain-rule)
+# because the live challenge is ALWAYS rendered via _goal_ledger_challenge()/
+# _GOAL_LEDGER_CHALLENGE_TEMPLATE instead -- fully present every fire, never
+# governed by the disclosure ladder (see _goal_ledger_challenge's docstring).
 _RULE_DEFINITIONS: tuple[tuple[str, str, str, str, str], ...] = (
     (
         RuleID.STOP_QA_FAILURE,
@@ -348,24 +367,18 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str, str], ...] = (
         "not only the newest /goal condition",
         "Continue the listed plan(s), or stop with STOPPING BECAUSE: naming "
         "why each cannot proceed",
-        "The /goal slot holds ONE condition (last writer wins), so the daemon "
-        "keeps a ledger of every emitted goal. An unexplained stop is "
-        "challenged on behalf of EVERY ledgered plan still In Progress. The "
-        "challenge always names the live plan numbers at fire time; entries "
-        "retire when their plan reaches a terminal status or is archived.",
+        _GOAL_LEDGER_MECHANISM_NOTE
+        + " The challenge always names the live plan numbers at fire time.",
     ),
 )
 
-# Plan 00276: goal-ledger Stop defence. Claude Code's /goal slot holds ONE
-# condition (last writer wins); the daemon-side goal ledger remembers every
-# emitted goal, so an unexplained stop is challenged on behalf of EVERY
-# ledgered plan still In Progress — not only the newest.
+# Plan 00276: goal-ledger Stop defence (mechanism explanation shared with
+# STOP_GOAL_LEDGER's Rule.verbose above via _GOAL_LEDGER_MECHANISM_NOTE,
+# Plan 00295 Task 2.8).
 _GOAL_LEDGER_CHALLENGE_TEMPLATE = (
-    f"[{RuleID.STOP_GOAL_LEDGER}] GOAL LEDGER (daemon-side): the following "
-    "ledgered plan(s) are still In Progress and their goals remain owed, "
-    "even if the /goal condition now shows only the newest one: Plan(s) "
-    "{plans}. Continue that work, or stop with STOPPING BECAUSE: naming why "
-    "each listed plan cannot proceed."
+    f"[{RuleID.STOP_GOAL_LEDGER}] GOAL LEDGER (daemon-side): {_GOAL_LEDGER_MECHANISM_NOTE} "
+    "Currently owed: Plan(s) {plans}. Continue that work, or stop with "
+    "STOPPING BECAUSE: naming why each listed plan cannot proceed."
 )
 
 # Verb group shared by the rhetorical-continue confirmation patterns. These are
@@ -747,7 +760,15 @@ class AutoContinueStopHandler(StopHandlerBase):
         return result
 
     def _render_branch_message(self, rule_id: str, hook_input: dict[str, Any]) -> str:
-        """Verbose-first/terse-after DENY message for one of the five branch rules.
+        """Verbose-first/terse-after DENY message for one of the branch rules.
+
+        Callers pass one of the FIVE control-flow-branch rule IDs (QA
+        failure, tautological question, tool-error recovery, confirmation
+        question, no-reason-given) -- never STOP_GOAL_LEDGER, the sixth of
+        the six ``_RULE_DEFINITIONS`` entries: its challenge is always fully
+        present via ``_goal_ledger_challenge()``/``_GOAL_LEDGER_CHALLENGE_TEMPLATE``
+        instead, appended onto Branch 4's message rather than replacing it,
+        and deliberately never governed by this disclosure ladder.
 
         Verbosity is decided per (transcript_path, rule_id) via the shared
         DisclosureTracker (Plan 00116, Decision G): the first fire of a rule

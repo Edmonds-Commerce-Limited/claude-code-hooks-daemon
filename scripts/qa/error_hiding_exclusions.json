@@ -1067,6 +1067,24 @@
       "function": "_close_session",
       "rule": "log-and-continue",
       "reason": "Plan 00335 I4: this is cleanup running in a `finally`, so the ONLY alternative to logging is masking. Raising here replaces whatever the fetch raised, and the triggering shape makes both fail together -- a missing or renamed agent-browser binary fails the read AND the close, so the operator would be shown the reap failure instead of the cause. Suppressing the primary error to report a cleanup error is strictly worse than the pattern this rule exists to catch, and it is why the same principle is built into contextlib's own cleanup contract. Nothing is concealed: the binary name and the underlying exception are both logged at WARNING, and the exception is caught by type (TimeoutExpired, FileNotFoundError, OSError) rather than bare. The leaked session self-reaps on the browser's idle timeout, so continuing is safe. Reversal: if a close failure ever needs to be fatal, it must be raised OUTSIDE the finally, after the primary error has been allowed to propagate -- not by deleting this entry."
+    },
+    {
+      "file": "daemon/server.py",
+      "function": "_bind_event_sockets",
+      "rule": "log-and-continue",
+      "reason": "Plan 00295 Task 2.6: a stale per-event socket dir that fails to remove (disk-full, a momentary permission hiccup) is not a reason to abort the whole rung -- the per-socket bind loop immediately below already reports (and gracefully skips) an individual bind OSError, including the 'address already in use' a leftover socket file would raise, so a partially-cleared directory degrades exactly the same way a stale one does today. The failure is logged at ERROR, so nothing is concealed, and continuing lets binding proceed best-effort rather than silently disabling the relay/nc rungs for the rest of the daemon process over a cleanup hiccup."
+    },
+    {
+      "file": "daemon/server.py",
+      "function": "shutdown",
+      "rule": "log-and-continue",
+      "reason": "Plan 00295 Task 2.6: shutdown must never abort partway through cleanup over one directory removal failing -- the legacy socket unlink and PID file removal immediately below still need to run. The failure is logged at ERROR (previously silently discarded via `ignore_errors=True`), so nothing is concealed; a directory that fails to remove here is harmless leftover state cleared on the next daemon start's own removal attempt in _bind_event_sockets."
+    },
+    {
+      "file": "handlers/pre_tool_use/artifact_publish_blocker.py",
+      "function": "_ensure_source_disable",
+      "rule": "log-and-continue",
+      "reason": "Plan 00295 Task 2.9: this is best-effort cleanup of a staged temp file after the atomic write it belongs to has already failed and is itself about to be logged and abandoned (the outer except's own log+return follows immediately after). Raising here would replace the outer failure's own error with a secondary cleanup error, hiding the actual cause -- the same principle documented for remote_docs/fetchers.py._close_session above. Nothing is concealed: the cleanup failure is logged at WARNING alongside the file it could not remove, and a leaked temp file (the only consequence) is silently overwritten by write_text on the next retry attempt, never accumulating unboundedly."
     }
   ]
 }
