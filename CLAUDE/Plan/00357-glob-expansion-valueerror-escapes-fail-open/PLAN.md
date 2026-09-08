@@ -1,6 +1,6 @@
 # Plan 00357: a ValueError escapes glob expansion and fails a security guard open
 
-**Status**: Not Started
+**Status**: In Progress (reach established — one guard, `quarantine_artefact_read_guard`; the fix itself is not started)
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: High
@@ -34,9 +34,15 @@ raised ON ITERATION -> Invalid pattern: '**' can only be an entire path componen
 ```
 
 So a glob-shaped token containing a malformed recursive wildcard raises out of
-`_expand_glob_token`, out of `find_protected_mention`, and into the calling
-handler's `matches()`/`handle()`. The daemon's fail-open design then skips that
-handler — meaning **a security guard silently does not run for that tool call**.
+`_expand_glob_token`, out of `find_protected_mention_strict`, and into the
+calling handler's `matches()`/`handle()`. The daemon's fail-open design then
+skips that handler — meaning **a security guard silently does not run for that
+tool call**.
+
+An earlier draft of this plan said `find_protected_mention`, and listed eight
+dependants as the blast radius. That was a misread of pre-merge line numbers:
+post-Plan-00356, `_expand_glob_token` has exactly ONE call site, inside the
+`_strict` variant, and the reach is established below rather than assumed.
 
 Found by the sub-agent working Plan 00356 and recorded there as a follow-up;
 confirmed independently here before filing.
@@ -68,36 +74,50 @@ confirmed independently here before filing.
 | 00311 | v3.59.0 release review followups | Not Started | Carries the glob-heuristic maintenance-surface item |
 | 00272 | secret guard live-probe gap      | Complete    | Added the stem-overlap heuristics this sits beside  |
 
-**Blast radius — eight dependants of `secret_file_matching`**, and this is the
-reason for the priority:
+**Reach — established by reading each dependant's entry point, post-merge.**
+`_expand_glob_token` has one call site: line ~832, inside
+`find_protected_mention_strict`. Of the eight modules that import
+`secret_file_matching`:
 
-- `pre_tool_use/secret_file_guard.py` — security guard
-- `pre_tool_use/quarantine_artefact_read_guard.py` — security guard
-- `pre_tool_use/flaggable_content_channel_guard.py` — security guard
-- `daemon/payload_capture.py` — redaction path
-- `daemon/server.py` — redaction path
-- `post_tool_use/lint_on_edit.py`
-- `pre_tool_use/staged_lint_gate.py`
-- `session_start/secret_file_hygiene_checker.py`
+| Dependant                                         | Entry point used                   | Reaches the expander? |
+| ------------------------------------------------- | ---------------------------------- | --------------------- |
+| `pre_tool_use/quarantine_artefact_read_guard.py`  | `find_protected_mention_strict`    | **YES**               |
+| `pre_tool_use/secret_file_guard.py`               | `find_protected_mention_detail`    | no                    |
+| `pre_tool_use/flaggable_content_channel_guard.py` | `find_protected_mention`           | no                    |
+| `daemon/payload_capture.py`                       | `find_protected_mention`           | no                    |
+| `daemon/server.py`                                | `resolve_configured_patterns` only | no                    |
+| `post_tool_use/lint_on_edit.py`                   | `path_is_protected`                | no                    |
+| `pre_tool_use/staged_lint_gate.py`                | `path_is_protected`                | no                    |
+| `session_start/secret_file_hygiene_checker.py`    | `path_is_protected`                | no                    |
 
-Not every dependant reaches `_expand_glob_token` — only callers going through
-`find_protected_mention` with a glob-shaped token do. **Establishing which
-actually do is Task 1.1**, and the list above is candidates, not a finding.
+`find_protected_mention` (and its `_detail` form) uses the stem-overlap
+heuristics and never expands against the filesystem; `path_is_protected` is a
+literal match. The only `.glob(` in the module is the one inside
+`_expand_glob_token`. So the redaction paths (`payload_capture`, `server`)
+**cannot** raise here — the worst case named in Task 1.2 does not arise.
+
+**The reach is therefore one guard**, `quarantine_artefact_read_guard`, which
+is exactly what the sub-agent that found it said. That guard protects the
+reading of quarantined security-DETAIL artefacts, and a Bash command carrying a
+malformed recursive wildcard bypasses it. One security guard failing open on
+attacker-influenceable input is still High; it is not the broader fail-open an
+earlier draft of this plan described.
 
 ## Tasks
 
 ### Phase 1: Establish the true reach
 
-- [ ] ⬜ **Task 1.1**: For each of the eight dependants, determine whether a
-  realistic input reaches `_expand_glob_token`. Record the ones that do and the
-  ones that cannot, with the reason. A guard that cannot be reached this way is
-  as important to record as one that can — it bounds the fix's urgency and
-  stops the next reader re-deriving it.
+- [x] ✅ **Task 1.1**: Done — the table in Context & Background. Each of the
+  eight dependants is recorded as reaching the expander or not, with the entry
+  point that decides it. One reaches it: `quarantine_artefact_read_guard`, via
+  `find_protected_mention_strict`, the expander's sole call site.
 
-- [ ] ⬜ **Task 1.2**: Decide whether the redaction paths (`payload_capture`,
-  `server`) can raise here. These are the worst case: a redaction step that
-  throws may write an UNREDACTED capture, which is a different and larger
-  failure than a skipped guard. If they cannot be reached, say so explicitly.
+- [x] ✅ **Task 1.2**: The redaction paths **cannot** raise here. `server.py`
+  imports only `resolve_configured_patterns`; `payload_capture.py` uses
+  `find_protected_mention`, which post-Plan-00356 never expands against the
+  filesystem — the only `.glob(` in the module is inside `_expand_glob_token`,
+  reachable solely through `_strict`. So the unredacted-capture worst case does
+  not arise, and the fix's urgency is bounded to one guard.
 
 ### Phase 2: Fix
 

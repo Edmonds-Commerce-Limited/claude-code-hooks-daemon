@@ -8,7 +8,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00358: a worktree venv can silently test the WRONG source tree](00358-worktree-venv-tests-wrong-source-tree/PLAN.md) - Not Started (a sub-agent's correct fix appeared to fail, because the worktree's venv symlinks to main's, whose editable install points at `/workspace/src` — so GREEN can never pass and a green QA run is not evidence about the branch)
 
-- [00357: a ValueError escapes glob expansion and fails a security guard open](00357-glob-expansion-valueerror-escapes-fail-open/PLAN.md) - Not Started (`Path.glob` is a generator, so the `ValueError` fires on iteration OUTSIDE the `try` that means to catch it; the exception escapes into the handler and the fail-open design then skips a security guard)
+- [00357: a ValueError escapes glob expansion and fails a security guard open](00357-glob-expansion-valueerror-escapes-fail-open/PLAN.md) - In Progress, reach established and the fix not started (`Path.glob` is a generator, so the `ValueError` fires on iteration OUTSIDE the `try`; the sole reachable caller is `quarantine_artefact_read_guard`, which the fail-open design then skips — the redaction paths cannot reach it)
 
 - [00356: secret guard bracket glob false positive](00356-secret-guard-bracket-glob-false-positive/PLAN.md) - In Progress; the reported defect is fixed and shipped, and the plan stays open for one unrelated fail-open found while working on it (a bracket expression at a token's edge was read as an open wildcard, so an ordinary jq array subscript was denied)
 
