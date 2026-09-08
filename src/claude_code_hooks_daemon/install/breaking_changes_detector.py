@@ -19,6 +19,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.install.version_parse import parse_version_tuple, strip_tag_prefix
+
 _VERSION_SEPARATOR = "."
 _UPGRADES_RELATIVE_DIR = "CLAUDE/UPGRADES"
 _FIRST_MINOR = 0
@@ -51,14 +53,13 @@ def parse_version(version: str) -> tuple[int, int, int]:
     Raises:
         ValueError: If the version string is not ``MAJOR.MINOR.PATCH``.
     """
-    normalised = version.removeprefix("v").removeprefix("V")
-    parts = normalised.split(_VERSION_SEPARATOR)
+    parts = strip_tag_prefix(version).split(_VERSION_SEPARATOR)
     if len(parts) != 3:
         raise ValueError(
             f"Invalid version string {version!r}: expected MAJOR.MINOR.PATCH (three components)"
         )
     try:
-        major, minor, patch = (int(part) for part in parts)
+        major, minor, patch = parse_version_tuple(version)
     except ValueError as exc:
         raise ValueError(
             f"Invalid version string {version!r}: components must be integers"

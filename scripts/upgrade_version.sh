@@ -563,8 +563,16 @@ UPGRADE_STARTED=true
 # ============================================================
 
 log_step "4" "Stopping daemon"
-stop_daemon_safe "$VENV_PYTHON"
-sleep 1
+# A fresh-clone client (config and forwarders present, no venv yet) has no
+# daemon to stop. VENV_PYTHON is deliberately empty there, and
+# stop_daemon_safe treats an empty argument as a caller error (exit 1), which
+# under set -e is a rollback — so the stop is skipped explicitly, out loud.
+if [ -n "$VENV_PYTHON" ]; then
+    stop_daemon_safe "$VENV_PYTHON"
+    sleep 1
+else
+    print_info "No existing venv, so no daemon to stop — skipping daemon stop"
+fi
 
 # ============================================================
 # Step 5: Backup and extract config customizations

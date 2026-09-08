@@ -21,6 +21,8 @@ from typing import Any
 
 import yaml
 
+from claude_code_hooks_daemon.install.version_parse import parse_version_tuple
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -329,7 +331,7 @@ def _parse_version(version: str) -> tuple[int, ...]:
     """Parse a version string into a sortable tuple.
 
     Args:
-        version: Version string like '2.10.1'
+        version: Version string like '2.10.1' or 'v2.10.1'
 
     Returns:
         Tuple of ints like (2, 10, 1) for numeric comparison
@@ -337,10 +339,7 @@ def _parse_version(version: str) -> tuple[int, ...]:
     Raises:
         ValueError: If version string is not parseable
     """
-    try:
-        return tuple(int(x) for x in version.split(_KEY_SEPARATOR))
-    except (ValueError, AttributeError) as exc:
-        raise ValueError(f"Invalid version string: {version!r}") from exc
+    return parse_version_tuple(version)
 
 
 # ---------------------------------------------------------------------------

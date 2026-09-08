@@ -65,11 +65,13 @@ agent thread, as the final confirmation step AFTER a release ships.
 
 ### Phase 1: Fix the fresh-clone upgrade failure (canary finding 1, HIGH)
 
-- [ ] ⬜ **Task 1.1**: TDD reproduction of `upgrade_version.sh` hard-failing
+- [x] ✅ **Task 1.1**: TDD reproduction of `upgrade_version.sh` hard-failing
   when the client has config/forwarders but no venv and no daemon checkout
   (`stop_daemon_safe: venv_python parameter required` → rollback), then fix:
   a missing venv means there is no daemon to stop — skip the stop step
-  cleanly rather than failing it.
+  cleanly rather than failing it. Delivered under Plan 00362 Task 2.2:
+  `tests/integration/test_upgrade_fresh_clone_stop_step.py` runs the real
+  Step 4 block under `set -euo pipefail` with an empty `VENV_PYTHON`.
 - [ ] ⬜ **Task 1.2**: Decide and document the `upgrade_version.sh` vs
   `install_version.sh` boundary for an EXISTING-config/fresh-clone client
   (the canary had to guess); LLM-UPDATE.md gets one unambiguous instruction.
@@ -78,12 +80,21 @@ agent thread, as the final confirmation step AFTER a release ships.
 
 ### Phase 2: Migration visibility (canary findings 3–4)
 
-- [ ] ⬜ **Task 2.1**: `check-config-migrations`/`check-truth-changes` (and
+- [x] ✅ **Task 2.1**: `check-config-migrations`/`check-truth-changes` (and
   the install/upgrade steps that drive them) accept version arguments both
-  with and without the `v` prefix; tests cover both spellings.
-- [ ] ⬜ **Task 2.2**: Surface the config-migration advisory when
+  with and without the `v` prefix; tests cover both spellings. Delivered
+  under Plan 00362 Task 2.2: one shared parser
+  (`install/version_parse.py`) behind the truth-changes, config-migrations,
+  release-notes and breaking-changes loaders;
+  `tests/unit/install/test_version_parse.py`.
+- [x] ✅ **Task 2.2**: Surface the config-migration advisory when
   `install_version.sh` retains an old-format config, instead of keeping it
   silently — the advisory already exists and works; wire it into this path.
+  Delivered under Plan 00362 Task 2.2: reproduced by running the real Step 7
+  block against a pre-v3.40 config (only "keeping existing configuration"
+  printed); Step 7 now runs the advisory from the earliest known manifest,
+  says which baseline it assumed, and never aborts the install.
+  `tests/integration/test_install_version_retained_config_advisory.py`.
 - [ ] ⬜ **Task 2.3**: Branch installs read `CLAUDE/UPGRADES/UNRELEASED/`
   manifests as pending migrations (they are the migrations a branch install
   is ahead on); released-tag installs are unaffected.
@@ -129,4 +140,6 @@ agent thread, as the final confirmation step AFTER a release ships.
 
 ## Delivery & Milestones
 
-- <!-- milestone or delivery commit hash -->
+- `a0ac90f5` — Tasks 1.1, 2.1 and 2.2 delivered under Plan 00362 Task 2.2
+  (fresh-clone stop step, shared v-tolerant version parser, retained-config
+  migration advisory).

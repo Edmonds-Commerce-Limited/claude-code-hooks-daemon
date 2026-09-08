@@ -436,6 +436,60 @@ TARGET_CONFIG="$PROJECT_ROOT/.claude/hooks-daemon.yaml"
 
 if [ -f "$TARGET_CONFIG" ]; then
     print_info "Config already exists, keeping existing configuration"
+    # The retained config may have been written for a version many releases
+    # behind the one being installed, and the installer has no record of
+    # which (a fresh clone carries no venv stamp). Run the config-migration
+    # advisory from the EARLIEST known manifest so a renamed key still
+    # present, or a recommended default the config does not hold, is
+    # reported whichever release introduced it. Informational only: the
+    # advisory never rewrites the config and never aborts the install.
+    ADVISORY_ISSUES_STATUS=1
+    ADVISORY_EXIT=0
+    "$VENV_PYTHON" - "$TARGET_CONFIG" "$INSTALLED_VERSION" "$ADVISORY_ISSUES_STATUS" \
+        <<'RETAINED_CONFIG_ADVISORY_PY' || ADVISORY_EXIT=$?
+import sys
+from pathlib import Path
+
+from claude_code_hooks_daemon.install.config_cli import (
+    list_known_versions,
+    run_check_config_migrations,
+)
+
+config_path = Path(sys.argv[1])
+installed_version = sys.argv[2]
+issues_status = int(sys.argv[3])
+
+known = list_known_versions()
+if not known:
+    sys.exit(0)
+baseline = known[0]
+
+result = run_check_config_migrations(
+    from_version=baseline,
+    to_version=installed_version,
+    user_config_path=config_path,
+    output_format="text",
+)
+if not (result["has_warnings"] or result["has_suggestions"]):
+    sys.exit(0)
+
+print("", file=sys.stderr)
+print(
+    f"The retained config predates migrations up to {installed_version}. No record "
+    f"of the version it was written for exists, so every manifest since v{baseline} "
+    "(the earliest known) was checked:",
+    file=sys.stderr,
+)
+print("", file=sys.stderr)
+print(result["text"], file=sys.stderr)
+sys.exit(issues_status)
+RETAINED_CONFIG_ADVISORY_PY
+    if [ "$ADVISORY_EXIT" -eq "$ADVISORY_ISSUES_STATUS" ]; then
+        print_warning "Retained config has pending migrations (see above). Re-run any time with:"
+        print_info "  $DAEMON_DIR/bin/hooks-daemon check-config-migrations --from <your previous version> --to $INSTALLED_VERSION"
+    elif [ "$ADVISORY_EXIT" -ne 0 ]; then
+        print_warning "Config migration advisory could not run (exit $ADVISORY_EXIT) - continuing; review $TARGET_CONFIG after the install"
+    fi
 else
     if [ -f "$EXAMPLE_CONFIG" ]; then
         cp "$EXAMPLE_CONFIG" "$TARGET_CONFIG"
