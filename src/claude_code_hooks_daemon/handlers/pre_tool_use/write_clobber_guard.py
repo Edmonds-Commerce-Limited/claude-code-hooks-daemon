@@ -24,7 +24,6 @@ the mode agents run unattended in. This handler restores the documented
 contract rather than inventing a new rule.
 """
 
-from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HookInputField
@@ -36,6 +35,7 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 _RULE = Rule(
     rule_id=RuleID.WRITE_CLOBBER,
@@ -152,7 +152,17 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
             return False
 
         # Creating a new file destroys nothing.
-        if not Path(path).is_file():
+        #
+        # `unreadable_means=True` is the opposite of pathlib's own convention,
+        # and deliberately so. A raw `is_file()` raises EACCES when an ancestor
+        # lacks `+x`, and mirroring pathlib ("could not look" -> "not a file")
+        # would read as principled while INVERTING this guard: `not False` ->
+        # "treat as new" -> no fire, so the one file the agent knows least
+        # about is the one write that is never checked. `_count_lines` below
+        # already reaches the right conclusion for the same case -- "a file
+        # that cannot be read is still worth blocking" -- and this line was
+        # standing the write down before that reasoning was ever consulted.
+        if not path_is_file(path, unreadable_means=True):
             return False
 
         return not self._is_known(hook_input, path)
