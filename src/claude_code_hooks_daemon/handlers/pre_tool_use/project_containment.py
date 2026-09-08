@@ -88,6 +88,17 @@ SCRATCH_DIR = ProjectPath.SCRATCH_DIR
 _CLAUDE_CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 _DEFAULT_CLAUDE_HOME = ".claude"
 
+#: The harness's per-session scratchpad is allowed too, but on a different
+#: footing from the Claude home: it IS ephemeral, and it is allowed anyway
+#: because Claude Code's own system prompt instructs the agent to use it for
+#: temporary files, so denying it made the two instructions contradict each
+#: other on every session (Plan 00362 Task 1.4). The allowance is exactly the
+#: directory the harness names in the hook payload (``scratchpad_dir``), never
+#: a path SHAPE: a payload that carries no such field grants nothing, so the
+#: rest of the temp directory stays closed and nothing is inferred. Durable
+#: work still belongs in ``untracked/scratch/`` and the guidance says so.
+_SCRATCHPAD_NAME = "scratchpad"
+
 logger = logging.getLogger(__name__)
 
 #: Commands whose ``-o``-style flag genuinely names an OUTPUT FILE, keyed by
@@ -153,8 +164,10 @@ _RULE = Rule(
         "  - inside the working tree, so it survives container restarts\n"
         "  - gitignored, so it never reaches review\n"
         "  - the same convention the daemon's own runtime files already use\n\n"
-        "Scratch is not a reason to leave the repository. There is no throwaway\n"
-        "location, so nothing is lost by writing it somewhere durable.\n\n"
+        "Scratch is not a reason to leave the repository. The only throwaway\n"
+        "location this rule opens is the session scratchpad Claude Code names in\n"
+        "its system prompt, and that is wiped with the session -- so nothing is\n"
+        "lost by writing it somewhere durable.\n\n"
         "Reading an out-of-repo path is NOT blocked, and neither is a temp file a\n"
         "program creates for itself at runtime — only a path your command names."
     ),
@@ -213,15 +226,32 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             the reader back for a second denial.
         """
         root = self._resolved_root()
+        scratchpad = self._harness_scratchpad(hook_input)
         offending: list[str] = []
 
         for candidate in self._named_targets(hook_input):
             if candidate in offending:
                 continue
-            if self._is_outside(candidate, root) and not self._is_permitted(candidate):
+            if self._is_outside(candidate, root) and not self._is_permitted(candidate, scratchpad):
                 offending.append(candidate)
 
         return offending
+
+    @staticmethod
+    def _harness_scratchpad(hook_input: dict[str, Any]) -> Path | None:
+        """The per-session scratchpad Claude Code named in this payload, if any.
+
+        Only an absolute path counts. An empty or relative value is treated
+        as "no scratchpad": joining it against anything would fabricate an
+        allowance the harness never granted.
+        """
+        named = hook_input.get(HookInputField.SCRATCHPAD_DIR)
+        if not isinstance(named, str) or not named:
+            return None
+        candidate = Path(named)
+        if not candidate.is_absolute():
+            return None
+        return candidate
 
     def _named_targets(self, hook_input: dict[str, Any]) -> list[str]:
         """Paths this tool call plainly names as a write target."""
@@ -440,9 +470,11 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             return False
         return not self._is_within(candidate, root)
 
-    def _is_permitted(self, candidate: str) -> bool:
+    def _is_permitted(self, candidate: str, scratchpad: Path | None) -> bool:
         """Is this out-of-root path covered by an allowance?"""
         if self._allow_claude_home and self._is_within(candidate, self._claude_home().resolve()):
+            return True
+        if scratchpad is not None and self._is_within(candidate, scratchpad.resolve()):
             return True
         return any(
             self._is_within(candidate, Path(allowed).resolve())
@@ -481,6 +513,13 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             f"\n\nREPOSITORY ROOT: {self._resolved_root()}"
             f"\nWRITE IT HERE INSTEAD: {self._resolved_root() / SCRATCH_DIR}/"
         )
+        scratchpad = self._harness_scratchpad(hook_input)
+        if scratchpad is not None:
+            message += (
+                f"\nTHROWAWAY ONLY: {scratchpad}/ (the session's own scratchpad -- "
+                "allowed, but wiped with the session; anything durable goes in "
+                f"{SCRATCH_DIR}/)"
+            )
 
         return GatingResult(decision=Decision.DENY, reason=message, context=[], guidance=None)
 
@@ -523,6 +562,14 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             "different premise — this rule asks whether a path is DURABLE, that one "
             "asks whether it is REVIEWABLE, and memory fails the second test while "
             "passing the first.\n\n"
+            "**The session scratchpad Claude Code names in its system prompt is "
+            f"allowed** (`.../claude-<uid>/<project>/<session>/{_SCRATCHPAD_NAME}/`). "
+            "It is the one place under the system temp directory this rule opens, "
+            "and only because the harness itself tells you to use it for temporary "
+            "files — the daemon takes the directory from the hook payload, so a path "
+            "that merely LOOKS like a scratchpad is still denied. It is wiped with the "
+            "session: use it for genuinely throwaway files, and keep anything you or "
+            f"a teammate might need again in `{SCRATCH_DIR}/`, which is durable.\n\n"
             "**Exemptions** are declarable via "
             "`handlers.pre_tool_use.project_containment.options.allowed_external_paths`, "
             "and the list is empty by default — a declared exemption is a decision, an "

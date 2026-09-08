@@ -46,6 +46,10 @@ class HookInputField:
     TRANSCRIPT_PATH = "transcript_path"
     CWD = "cwd"
     PERMISSION_MODE = "permission_mode"
+    # The per-session scratchpad Claude Code provisions under the system temp
+    # directory and tells the agent to use for temporary files. Absent when
+    # the harness provisioned none (a background session, an older client).
+    SCRATCHPAD_DIR = "scratchpad_dir"
 
     # Tool-related fields (PreToolUse, PostToolUse)
     TOOL_NAME = "tool_name"

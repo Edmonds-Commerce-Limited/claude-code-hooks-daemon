@@ -234,9 +234,9 @@ class TestRelativeDestinationsResolveAgainstCwd:
     def test_a_relative_destination_escaping_the_root_matches(
         self, handler: ProjectContainmentHandler, label: str, command: str
     ) -> None:
-        assert (
-            handler.matches(_bash(command, cwd="/repo/sub")) is True
-        ), f"{label} reached out-of-root unjudged"
+        assert handler.matches(_bash(command, cwd="/repo/sub")) is True, (
+            f"{label} reached out-of-root unjudged"
+        )
 
     @pytest.mark.parametrize(
         ("label", "command"),
@@ -284,9 +284,9 @@ class TestUnexpandableTokensAreDeclinedNotFabricated:
     def test_an_unexpandable_token_is_declined_not_fabricated(
         self, handler: ProjectContainmentHandler, label: str, command: str
     ) -> None:
-        assert (
-            handler.matches(_bash(command, cwd="/tmp/work")) is False
-        ), f"{label} was fabricated into a path instead of declined"
+        assert handler.matches(_bash(command, cwd="/tmp/work")) is False, (
+            f"{label} was fabricated into a path instead of declined"
+        )
 
     def test_an_ordinary_relative_token_is_still_resolved_and_denied(
         self, handler: ProjectContainmentHandler
@@ -508,9 +508,107 @@ class TestTheClaudeHomeDirectoryIsAllowed:
             assert handler.matches(_write("/tmp/notes.md")) is True
 
 
+_SCRATCHPAD = "/tmp/claude-0/-workspace/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/scratchpad"
+
+
+def _with_scratchpad(
+    hook_input: dict[str, Any], scratchpad: str | None = _SCRATCHPAD
+) -> dict[str, Any]:
+    """The hook payload as Claude Code sends it: ``scratchpad_dir`` alongside
+    ``session_id`` and ``cwd`` when the harness provisioned one."""
+    if scratchpad is not None:
+        hook_input["scratchpad_dir"] = scratchpad
+    return hook_input
+
+
+class TestTheHarnessScratchpadIsAllowed:
+    """Claude Code's system prompt tells the agent to put temp files in a
+    per-session scratchpad under the system temp directory, and names that
+    directory in every hook payload as ``scratchpad_dir``. Denying it made the
+    harness and this guard contradict each other on every session (Plan 00362
+    Task 1.4). The allowance is exactly the directory the harness names --
+    taken from the payload, never inferred from a path shape -- so nothing
+    else under the temp directory is re-opened.
+    """
+
+    def test_a_write_into_the_scratchpad_is_permitted(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        assert handler.matches(_with_scratchpad(_write(f"{_SCRATCHPAD}/notes.md"))) is False
+
+    def test_a_nested_path_under_it_is_permitted(self, handler: ProjectContainmentHandler) -> None:
+        assert handler.matches(_with_scratchpad(_write(f"{_SCRATCHPAD}/a/b/notes.md"))) is False
+
+    def test_a_bash_redirect_into_it_is_permitted(self, handler: ProjectContainmentHandler) -> None:
+        assert handler.matches(_with_scratchpad(_bash(f"echo hi > {_SCRATCHPAD}/out.txt"))) is False
+
+    def test_the_session_directory_beside_it_is_still_denied(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """The harness names the scratchpad, not its parent: a sibling such as
+        the session's ``tasks/`` directory is the harness's own, not ours."""
+        session_dir = str(Path(_SCRATCHPAD).parent)
+
+        assert handler.matches(_with_scratchpad(_write(f"{session_dir}/tasks/x.json"))) is True
+
+    def test_another_sessions_scratchpad_is_still_denied(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        other = "/tmp/claude-0/-workspace/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/scratchpad/x.md"
+
+        assert handler.matches(_with_scratchpad(_write(other))) is True
+
+    def test_a_sibling_that_merely_shares_the_prefix_is_still_denied(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        assert handler.matches(_with_scratchpad(_write(f"{_SCRATCHPAD}-backup/x.md"))) is True
+
+    def test_without_the_payload_field_nothing_is_inferred(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """A path that merely LOOKS like a scratchpad is not one. The harness
+        names the directory or it does not; the guard never guesses."""
+        assert handler.matches(_write(f"{_SCRATCHPAD}/notes.md")) is True
+
+    @pytest.mark.parametrize("scratchpad", ["", "relative/scratchpad"])
+    def test_a_malformed_field_grants_nothing(
+        self, handler: ProjectContainmentHandler, scratchpad: str
+    ) -> None:
+        assert handler.matches(_with_scratchpad(_write("/tmp/notes.md"), scratchpad)) is True
+
+    def test_unrelated_out_of_root_paths_are_unaffected(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """Control: the allowance must not become a general amnesty for /tmp."""
+        assert handler.matches(_with_scratchpad(_write("/tmp/notes.md"))) is True
+
+    def test_the_denial_names_the_scratchpad_when_one_exists(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """A denied write elsewhere under /tmp is told BOTH sanctioned places,
+        and which one is durable."""
+        result = handler.handle(_with_scratchpad(_write("/tmp/notes.md")))
+
+        assert result.reason is not None
+        assert _SCRATCHPAD in result.reason
+        assert "untracked/scratch" in result.reason
+
+
 class TestClaudeMdGuidance:
     def test_it_publishes_resident_guidance(self, handler: ProjectContainmentHandler) -> None:
         guidance = handler.get_claude_md()
 
         assert guidance is not None
         assert "untracked/scratch" in guidance
+
+    def test_it_says_the_harness_scratchpad_is_allowed(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """The guidance must not contradict the harness's own system prompt:
+        it says the scratchpad is allowed, and that durable work still
+        belongs in the repository."""
+        guidance = handler.get_claude_md()
+
+        assert guidance is not None
+        assert "scratchpad" in guidance
+        assert "durable" in guidance
