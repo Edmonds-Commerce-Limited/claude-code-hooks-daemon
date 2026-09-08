@@ -174,26 +174,44 @@ reaper has to be designed against those constraints, not around them.
   `cmd_worktree_reap` has no uncovered line — the empty-repository branch was
   the last one, and it was reached by a test rather than by an exclusion.
 
-- [ ] ⬜ **Task 3.2**: A dispatch that creates a worktree and a session end that
-  disposes of it, observed rather than asserted. **Needs a real subagent
-  dispatch**, which the session that built this was not permitted to make — so
-  the create-and-dispose round trip is still asserted rather than observed, and
-  saying otherwise would be exactly the substitution this task exists to
-  prevent.
+- [x] ✅ **Task 3.2**: Observed, with a real `isolation: "worktree"` dispatch —
+  and **it creates but does not dispose**, which is the accumulation mechanism
+  caught in the act rather than inferred.
 
-- [ ] ⬜ **Task 3.3**: Reap the 21 that are here now. **Left for a human on
-  purpose.** Task 2.1 decided report-and-offer, and the offer is not the
-  agent's to accept: `--reap` would remove 15 worktrees and 15 branches, which
-  no amount of measurement makes an agent's call to take unprompted. The
-  command reports them and stops. Run `bin/hooks-daemon worktree-reap` to see
-  the list, then add `--reap`.
+  The agent ran in `.claude/worktrees/agent-a1d18f9e…` on a branch of the same
+  name, caught live in `git worktree list` mid-run. It was told to write
+  nothing, and wrote nothing. After it finished, the directory, the
+  `git worktree list` entry and the branch were all **still there** — despite
+  the documented behaviour being auto-clean when unchanged. `git status` inside
+  it is clean, it is 0 commits ahead, and `worktree-reap` classifies it
+  reapable.
 
-- [ ] ⬜ **Task 3.4**: Observe `reap_worktree` removing a real worktree and its
-  real branch. The unit tests drive a fake git, so every assertion about
-  `worktree remove` and `branch -d` is an assertion about the argv this code
-  builds — not about git accepting it. Method: `git worktree add` a throwaway,
-  confirm the predicate clears it, reap **that one only**, and check both the
-  worktree and the branch are gone.
+  This falsifies the task's own premise. It was written expecting to watch a
+  session end dispose of a worktree; there was no disposal to watch. Task 2.1
+  reasoned that the accumulation came from sessions ending *without firing the
+  event* — the truth is simpler and worse, because one dispatch that completed
+  normally still left its worktree behind. A sweep is the right design for a
+  stronger reason than the one originally given.
+
+- [x] ✅ **Task 3.3**: Reaped on the owner's explicit instruction ("you can reap
+  worktrees you are the only one driving them") — the authorisation Task 2.1
+  said the offer needed, given rather than assumed. **15 removed with their 15
+  branches, 6 refused, no failures.** `git worktree list` went from 22 lines to
+  7\.
+
+  The 6 that remain are the batch Task 1.1 characterised and Task 1.2
+  deliberately refuses. They stay until someone reads them, which is the
+  designed outcome and not a residue to clear by loosening the predicate.
+
+- [x] ✅ **Task 3.4**: Observed on a real worktree, and it behaved as the fake
+  git said it would: the throwaway was created, the predicate cleared it, the
+  dry-run changed nothing, `--only` reaped that one, and the directory, the
+  `git worktree list` entry and the branch were all gone afterwards — with the
+  other 21 untouched.
+
+  The unit tests drive a fake git, so every assertion about `worktree remove`
+  and `branch -d` was an assertion about the argv this code builds. This is the
+  one that shows git accepting it.
 
   This is a better use of Phase 3 than Task 3.2, which verifies Plan 00188's
   handler rather than anything built here — and it does not add a 22nd
@@ -207,10 +225,24 @@ reaper has to be designed against those constraints, not around them.
 
 ## Success Criteria
 
-- [ ] `git worktree list` shows only live worktrees plus the repository
-- [ ] The reapable predicate has tests covering clean, diverged-but-landed, and
+- [ ] `git worktree list` shows only live worktrees plus the repository — **22
+  lines down to 7, but not met and deliberately so.** None of the 6 remaining
+  is live; they are the batch the predicate refuses. Meeting this literally
+  would mean either a human reading them or a looser predicate, and the second
+  is what this plan exists to avoid.
+- [x] The reapable predicate has tests covering clean, diverged-but-landed, and
   genuinely-unmerged worktrees, and declines the last of those
-- [ ] No worktree holding unmerged work is ever removed automatically
+- [x] No worktree holding unmerged work is ever removed automatically —
+  reinforced by asking git to disagree twice (`worktree remove` without
+  `--force`, `branch -d` not `-D`), and a git refusal is reported, never
+  retried with force
+
+**Found while verifying Task 3.3: three `agent-*` branches have no worktree at
+all** (`a4ff553e…`, `a88580…`, `a919dc…`), all 0 commits ahead of `main`. They
+predate this reap — none appears in its output. The reaper walks `git worktree list`, so a branch whose worktree was already removed is invisible to it and
+survives forever. Left alone here: this plan's Non-Goals rule out a general
+branch-pruning policy, and the authorisation received was for worktrees. Filed
+as [Plan 00352](../00352-agent-branches-outlive-their-worktrees/PLAN.md).
 
 ## Delivery & Milestones
 

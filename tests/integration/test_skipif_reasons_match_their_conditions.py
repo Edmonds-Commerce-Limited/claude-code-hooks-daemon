@@ -75,25 +75,25 @@ def asks_the_running_process(condition: str) -> bool:
     return any(call in condition for call in _ASKS_THE_PROCESS)
 
 
-_THE_DEFECT = '''
+_THE_DEFECT = """
 import pytest
 @pytest.mark.skipif(
     Path("/").stat().st_uid == 0, reason="Running as root - permission test not applicable"
 )
 def test_thing(): ...
-'''
+"""
 
-_THE_FIX = '''
+_THE_FIX = """
 import pytest
 @pytest.mark.skipif(os.geteuid() == 0, reason="running as root, which ignores the mode")
 def test_thing(): ...
-'''
+"""
 
-_UNRELATED = '''
+_UNRELATED = """
 import pytest
 @pytest.mark.skipif(shutil.which("rustc") is None, reason="rustc not installed")
 def test_thing(): ...
-'''
+"""
 
 
 class TestRecognisingTheClaim:

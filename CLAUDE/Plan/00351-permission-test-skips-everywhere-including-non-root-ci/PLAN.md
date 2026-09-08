@@ -58,9 +58,20 @@ than fixed in passing.
   on an otherwise clean tree so a CI failure is unambiguous about its cause.
   Locally it still skips — this container is root — which is correct behaviour
   and also why the change is **not verified here**. CI is the verification.
-- [ ] ⬜ **Task 1.2**: Read what CI then reports. Treat a failure as the
-  expected outcome rather than a surprise: the assertion has never been
-  exercised, and `deploy_skills` has changed since it was written.
+
+- [x] ✅ **Task 1.2**: **It runs, and it passes.** Run 34201199621: skips fell
+  from 3 to 2 on all three interpreters, and the two that remain are unrelated
+  (a config-changes manifest, a design test). The permission test appears in no
+  failure list.
+
+  The expected failure did not happen — the assertion had never been exercised,
+  but `deploy_skills` had not outgrown it. Worth stating plainly rather than
+  quietly ticking, because the task was written expecting the opposite and the
+  prediction being wrong is the finding.
+
+  That run did fail, on `test_worktree_collection.py` — a Plan 00349 test
+  asserting this repository HAS worktrees, true on this machine and false on a
+  fresh checkout. Unrelated to this plan, and fixed there.
 
 ### Phase 2: Guard the class
 

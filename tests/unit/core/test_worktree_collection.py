@@ -130,12 +130,74 @@ class TestAFailedGitCallIsNeverReadAsClean:
         assert UNKNOWN_COUNT < 0
 
 
+def _git(cwd: Path, *args: str) -> None:
+    """Drive a real git, failing loudly — these calls build the fixture."""
+    subprocess.run(  # nosec B603 B607 - git, list form, no shell
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    )
+
+
+class TestAgainstARealGitRepository:
+    """A real git, because the fake only ever confirms the argv this builds.
+
+    This used to read THIS repository's own worktrees and assert it found some.
+    It passed here, where 21 had accumulated, and failed on a fresh CI checkout
+    that has none — a test whose subject is whatever the machine happens to
+    contain reports the machine, not the code. So it builds its own repository
+    and its own worktree, and is non-vacuous everywhere for that reason rather
+    than by luck.
+    """
+
+    @staticmethod
+    def _repo_with_one_worktree(tmp_path: Path) -> Path:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _git(repo, "init", "-b", "main")
+        _git(repo, "config", "user.email", "test@example.com")
+        _git(repo, "config", "user.name", "Test")
+        (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
+        _git(repo, "add", "seed.txt")
+        _git(repo, "commit", "-m", "seed")
+        _git(repo, "worktree", "add", ".claude/worktrees/agent-probe-1", "-b", "agent-probe-1")
+        return repo
+
+    def test_it_finds_the_worktree_and_nothing_else(self, tmp_path: Path) -> None:
+        states = collect_worktree_states(self._repo_with_one_worktree(tmp_path), "main")
+        assert [state.name for state in states] == ["agent-probe-1"]
+
+    def test_a_worktree_at_the_base_is_reapable(self, tmp_path: Path) -> None:
+        """Real git output, not a fixture string, feeding the real predicate."""
+        states = collect_worktree_states(self._repo_with_one_worktree(tmp_path), "main")
+        assert is_reapable(states[0])
+
+    def test_an_uncommitted_file_makes_it_refuse(self, tmp_path: Path) -> None:
+        repo = self._repo_with_one_worktree(tmp_path)
+        (repo / ".claude/worktrees/agent-probe-1/new.txt").write_text("x\n", encoding="utf-8")
+        states = collect_worktree_states(repo, "main")
+        assert not is_reapable(states[0])
+
+    def test_a_commit_ahead_of_the_base_makes_it_refuse(self, tmp_path: Path) -> None:
+        repo = self._repo_with_one_worktree(tmp_path)
+        worktree = repo / ".claude/worktrees/agent-probe-1"
+        (worktree / "new.txt").write_text("x\n", encoding="utf-8")
+        _git(worktree, "add", "new.txt")
+        _git(worktree, "commit", "-m", "work that exists nowhere else")
+        states = collect_worktree_states(repo, "main")
+        assert not is_reapable(states[0])
+
+
 class TestAgainstThisRepository:
-    """A real run, reading only — this repo carries the worktrees in question."""
+    """A read-only run against whatever this checkout has, asserting no count.
+
+    Worth keeping separately from the built fixture above: it is the only place
+    the collector meets a repository it did not construct. It must therefore
+    assert nothing about how many worktrees exist — that number is a property of
+    the machine, and depending on it is what broke the previous version.
+    """
 
     def test_it_classifies_without_removing_anything(self) -> None:
         repo_root = Path(__file__).resolve().parents[3]
-        states = collect_worktree_states(repo_root, "main")
-        assert states, "no worktrees found; this test is vacuous if that is wrong"
-        assert all(state.name.startswith("agent-") for state in states)
         assert repo_root.is_dir()
+        for state in collect_worktree_states(repo_root, "main"):
+            assert state.name
+            assert isinstance(state.uncommitted_paths, tuple)
