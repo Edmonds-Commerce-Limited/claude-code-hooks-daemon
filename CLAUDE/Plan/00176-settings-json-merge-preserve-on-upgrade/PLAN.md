@@ -73,6 +73,32 @@ lose, and is absent on the path that repeats. That makes "back it up first" a
 cheap partial mitigation for this plan to ship early, independent of the full
 merge.
 
+**The two installers already disagree, and one of them is right.** For
+`hooks-daemon.yaml` the shell installer does exactly what this plan wants:
+
+```bash
+# install_version.sh:434
+if [ -f "$TARGET_CONFIG" ]; then
+    print_info "Config already exists, keeping existing configuration"
+else
+    # deploy .claude/hooks-daemon.yaml.example
+fi
+```
+
+Existing config is **kept**, and the tracked `.yaml.example` is deployed only
+when there is none. `install.py` embeds its own template instead and replaces
+the config every time. So the smallest useful fix for the third route is not new
+merge machinery at all — it is making `install.py` behave like
+`install_version.sh` already does: preserve an existing config, and deploy the
+tracked example rather than a hand-maintained copy that drifts.
+
+That drift was not hypothetical. `install.py`'s embedded template still
+configured `yolo_container_detection`, removed in Plan 00237, and shipped two
+handler sections that YAML parsed as `None` — so it generated a config the
+daemon refused to load. Fixed, with a round-trip test through the real
+validator, and the shipped `.yaml.example` is now guarded the same way. A single
+source for the default config would have made both impossible.
+
 This plan designs and builds a **structured merge** for `settings.json` that
 mirrors what already exists for `hooks-daemon.yaml`: the daemon keeps ownership
 of the authoritative wired-hook forwarder set (Plan 00170) and ships recommended
