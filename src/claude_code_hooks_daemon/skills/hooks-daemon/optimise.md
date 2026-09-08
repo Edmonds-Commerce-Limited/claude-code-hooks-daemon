@@ -5,7 +5,8 @@ step (Plan 00308) — the same step whether run manually, automatically at the e
 `/hooks-daemon upgrade`, or as the closing step of LLM-INSTALL.md/LLM-UPDATE.md.
 
 Analyse the current hooks daemon configuration against the project's profile (languages,
-tests, CI, plans) and produce a scored report across five key areas. Also compares the
+tests, CI, plans) and produce a scored report across six areas, derived from the
+handler registry rather than a hand-kept list (Plan 00330). Also compares the
 project's config against the installed daemon's config-changes manifests
 (`.claude/hooks-daemon/CLAUDE/UPGRADES/config-changes/` on a client install; the
 script prints the resolved path) to surface capabilities introduced since the
@@ -46,13 +47,28 @@ step from the summary alone (Plan 00322).
 
 ## What It Checks
 
-The skill analyses five areas, scoring each PASS / WARN / FAIL:
+**Every registered handler**, no exceptions. The checklist is produced by
+`bin/hooks-daemon optimise-checklist`, which walks the handler registry, so a
+handler cannot ship without being scored. Each handler declares its own
+RELEVANCE (`Handler.get_relevance()`): most apply everywhere; a few need
+something the project may lack (`lsp_enforcement` an LSP, the npm handlers a
+`package.json`, the ccy handlers an armed supervisor, the flaggable-content
+trio a deployed quarantine agent). The optimal state of a relevant handler is
+enabled, whatever its default; an irrelevant one is reported as "not
+applicable here", never as a shortfall.
 
-1. **Safety** — Critical blocking handlers (destructive_git, sed_blocker, security_antipattern, etc.)
-2. **Stop Quality** — Handlers that prevent poor stopping behaviour (auto_continue_stop, plus the nitpick.hedging_language and nitpick.dismissive_language detectors)
-3. **Plan Workflow** — Plan tracking handlers and whether the workflow is actively being used
-4. **Code Quality** — TDD, QA suppression, lint-on-edit, LSP enforcement, daemon restart verification
-5. **Daemon Settings** — Session-start advisories, version checks, git context injection
+Handlers are grouped into six areas computed from their event and tags,
+each scored PASS / WARN / FAIL:
+
+1. **Safety**
+2. **Agent behaviour & message quality** — Stop, SubagentStop and the nitpick detectors
+3. **Plan & documentation workflow**
+4. **Code & content quality**
+5. **Session, environment & daemon** — SessionStart advisories and status-line components
+6. **Other guards** — everything the rules above do not claim
+
+The top-level `plan_workflow` config section and "plans in use" are checked
+alongside, since no handler owns them.
 
 ## What It Outputs
 
@@ -67,12 +83,26 @@ Project Profile:
   CI config: .github/workflows/ ✓
   Plan directory: CLAUDE/Plan/ (5 active, 12 completed)
 
-━━━ Area 1: Safety ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ PASS (7/7)
+━━━ Safety ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ PASS (21/21)
+    all 21 relevant handlers enabled
+━━━ Code & content quality ━━━━━━━━━━━━━━━━━━━━━━ WARN (8/9)
+    8 relevant handlers enabled; 1 to enable:
+    ✗ handlers.pre_tool_use.tdd_enforcement
+        Enforce test-first development
+    not applicable here (1):
+    ○ handlers.post_tool_use.validate_eslint_on_write
+        no JavaScript/TypeScript toolchain (package.json/tsconfig.json) detected
 ...
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Overall Score: 28/35 (80%)
-Recommendations: ...
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Overall: 109/110 relevant handlers enabled (99%) · 6 not applicable here
+
+Recommendations (1 improvements available):
+  [1] Code & content quality: enable handlers.pre_tool_use.tdd_enforcement — ...
 ```
+
+An area whose relevant handlers are all enabled collapses to a single line;
+only shortfalls and not-applicable handlers are listed, so the report stays
+readable however many handlers the daemon ships.
 
 ## Apply Recommendations
 

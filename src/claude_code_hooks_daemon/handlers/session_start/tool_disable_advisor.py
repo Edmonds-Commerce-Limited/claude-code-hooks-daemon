@@ -31,7 +31,9 @@ from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.tool_report.costs import disable_route_for
+from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,10 @@ class ToolDisableAdvisorHandler(SessionStartHandlerBase):
     def get_default_enabled(self) -> bool:
         """Opt-in: the advisory is off until the project turns it on."""
         return False
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only under an armed ccy supervisor (Plan 00330)."""
+        return supervisor_relevance(context)
 
     def _project_root(self) -> Path:
         root = getattr(self, "_workspace_root", None)

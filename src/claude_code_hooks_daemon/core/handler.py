@@ -11,6 +11,8 @@ from abc import ABC, abstractmethod
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from claude_code_hooks_daemon.core.relevance import Relevance
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -18,6 +20,7 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
     from claude_code_hooks_daemon.core.hook_result import HookResult
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+    from claude_code_hooks_daemon.core.relevance import RelevanceContext
     from claude_code_hooks_daemon.core.rule import Rule
     from claude_code_hooks_daemon.core.workspace import ProjectRegistry
 
@@ -363,3 +366,30 @@ class Handler(ABC):
             ``True`` if the handler should be enabled by default, else ``False``.
         """
         return True
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Whether this handler is a fit for the project under review.
+
+        Plan 00330, Decision 1. The config-optimisation review
+        (``/hooks-daemon optimise``) scores EVERY registered handler and
+        recommends enabling each one that is relevant, whatever its default.
+        There is no opt-out: a handler that is not worth enabling somewhere
+        says WHY here, and the review reports it as "not applicable here"
+        instead of a shortfall. Independent of :meth:`get_default_enabled`,
+        which answers "safe without knowing the project"; this answers
+        "worth it, knowing the project".
+
+        Concrete with a universal default: most handlers apply everywhere.
+        Override only when the handler needs something the project may lack
+        (an LSP, a ``package.json``, an armed ccy supervisor, a deployed
+        quarantine agent), and decide from ``context`` — cheap existence
+        checks, no subprocesses, no directory walks — because every
+        registered handler is asked in one pass.
+
+        Args:
+            context: Pre-computed view of the project (root, languages).
+
+        Returns:
+            The verdict and a one-line reason shown in the report.
+        """
+        return Relevance.always()

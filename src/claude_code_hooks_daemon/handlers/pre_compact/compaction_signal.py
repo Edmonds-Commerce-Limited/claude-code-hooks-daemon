@@ -24,6 +24,8 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PreCompactHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
+from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,10 @@ class CompactionSignalHandler(PreCompactHandlerBase):
     def get_default_enabled(self) -> bool:
         """Opt-in: only useful when a PTY supervisor is watching."""
         return False
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only under an armed ccy supervisor (Plan 00330)."""
+        return supervisor_relevance(context)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Signal on every compaction."""

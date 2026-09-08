@@ -8,6 +8,8 @@ import importlib
 import inspect
 import logging
 import pkgutil
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeGuard
 
@@ -153,6 +155,54 @@ def _vendor_scopes_for_policy(
             vendor_exceptions=project_layout.vendor_exceptions,
         ),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class BuiltinHandlerRef:
+    """One built-in handler as ``register_all`` would address it.
+
+    ``event_dir`` and ``config_key`` together form the ``handlers.<event>.<key>``
+    config path, which is the name every reporting surface must use.
+    """
+
+    event_dir: str
+    config_key: str
+    handler_cls: type[Handler]
+
+
+def iter_builtin_handler_classes() -> Iterator[BuiltinHandlerRef]:
+    """Every built-in handler class, keyed the way ``register_all`` keys it.
+
+    Plan 00330: the config-optimisation checklist is derived from this
+    walk, so it enumerates exactly what registration enumerates — the same
+    event directories, the same ``*.py`` glob, the same discoverability
+    test and the same config-key derivation. A handler visible to one and
+    not the other would be a handler that can be registered but never
+    reviewed, which is the gap the derivation exists to close.
+
+    Imports fail fast, as they do in ``register_all``: a production handler
+    that cannot import is a defect to surface, not to skip.
+    """
+    handlers_dir = Path(__file__).parent
+    for dir_name in EVENT_TYPE_MAPPING:
+        event_dir = handlers_dir / dir_name
+        # eacces-safe-exempt: the daemon's OWN installed source tree.
+        if not event_dir.is_dir():
+            continue
+        for py_file in sorted(event_dir.glob("*.py")):
+            if py_file.name.startswith("_"):
+                continue
+            module = importlib.import_module(
+                f"claude_code_hooks_daemon.handlers.{dir_name}.{py_file.stem}"
+            )
+            for attr_name in dir(module):
+                attr = getattr(module, attr_name)
+                if is_discoverable_handler(attr):
+                    yield BuiltinHandlerRef(
+                        event_dir=dir_name,
+                        config_key=_get_config_key(attr.__name__),
+                        handler_cls=attr,
+                    )
 
 
 class HandlerRegistry:

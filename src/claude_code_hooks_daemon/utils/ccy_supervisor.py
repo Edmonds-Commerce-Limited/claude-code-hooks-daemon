@@ -22,6 +22,8 @@ import os
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
+
 logger = logging.getLogger(__name__)
 
 _CCY_DIR_PARTS: Final[tuple[str, str]] = (".claude", "ccy")
@@ -70,6 +72,22 @@ def is_armed(ccy_env: Path) -> bool:
         if _WRAPPER_EXPORT_KEY in stripped and _SUPERVISOR_SCRIPT_NAME in stripped:
             return True
     return False
+
+
+def supervisor_relevance(context: RelevanceContext) -> Relevance:
+    """Relevance verdict shared by every handler that only serves the supervisor.
+
+    Plan 00330: ``goal_injection``, ``compaction_signal``,
+    ``model_fallback_detector`` and ``tool_disable_advisor`` are actuated by
+    the ccy PTY supervisor, so the config-optimisation review recommends
+    them only where one is ARMED (``ccy.env`` exports the wrapper). One
+    predicate here rather than four copies that could disagree.
+    """
+    return Relevance.when(
+        is_armed(ccy_dir(context.project_root) / _CCY_ENV_NAME),
+        present="the ccy supervisor is armed in .claude/ccy/ccy.env",
+        absent="no armed ccy supervisor (.claude/ccy/ccy.env does not export the wrapper)",
+    )
 
 
 def daemon_untracked_dir(project_root: Path) -> Path:

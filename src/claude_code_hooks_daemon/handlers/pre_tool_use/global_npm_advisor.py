@@ -12,6 +12,7 @@ from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 
@@ -38,6 +39,14 @@ class GlobalNpmAdvisorHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.GLOBAL_NPM_ADVISOR,
             priority=Priority.GLOBAL_NPM_ADVISOR,
             terminal=False,  # Non-blocking
+        )
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only to an npm project (Plan 00330)."""
+        return Relevance.when(
+            context.has_file("package.json"),
+            present="package.json found, so npm is in use",
+            absent="no package.json at the project root, so there is no npm to advise on",
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

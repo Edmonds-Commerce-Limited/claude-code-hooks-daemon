@@ -40,7 +40,9 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_relevance
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +122,10 @@ class FlaggableWorkAdvisorHandler(PreToolUseHandlerBase):
     def get_default_enabled(self) -> bool:
         """Opt-in: the flaggable boundary is project-specific (Plan 00278)."""
         return False
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only where the quarantine agent is deployed (Plan 00330)."""
+        return quarantine_agent_relevance(context)
 
     # ── Effective config (mode: additive | replace) ─────────────────────────
 
