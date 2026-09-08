@@ -187,22 +187,35 @@ have reopened a plan whose success criteria were satisfied.
 
 ### Phase 2: Make the gates run
 
-- [ ] ⬜ **Task 2.1**: Start a daemon in the CI QA job before the acceptance
+- [x] ✅ **Task 2.1**: Start a daemon in the CI QA job before the acceptance
   step. ~~reusing whatever the `Daemon load` job already does rather than
   inventing a second way to start one~~ — **there is nothing to reuse**, per the
-  struck-through claim above. What remains is one decision: where a CI install
-  goes — a step in the `qa` job, or its own job the gates move into.
+  struck-through claim above. **Decided and implemented**: two steps in the
+  existing `qa` job, after `mypy` and before `Tests + coverage`, so the gates run
+  on all three interpreters without a second job to keep in sync. Awaiting its
+  first CI run — every mechanism is read from source, none observed end-to-end,
+  because the install cannot be rehearsed inside this repo.
   - [x] ✅ Constraints measured — see
     [RESEARCH-ci-install.md](RESEARCH-ci-install.md). In short: the regenerated
     tracked files are a non-issue; the install **must not pass `--force`**; and
     it cannot be rehearsed locally, because `validate_installation_target`
     refuses inside any parent holding `.claude/hooks-daemon` (true of every
     worktree here, false on a runner — so not a CI blocker).
-  - [ ] ⬜ **The blocker is now named**, from a CI run after Task 2.4a made the
-    forwarders reachable: `ensure_daemon` REFUSES to auto-start here, with
-    `hooks_daemon_repo_detected — This is the hooks-daemon repository. To install for development, run: python install.py --self-install`. So the QA
-    job does not merely lack a running daemon, it lacks the SELF-INSTALL step —
-    and starting a daemon cannot work until that runs first.
+  - [x] ✅ **The blocker was named and is now addressed.** From a CI run after
+    Task 2.4a made the forwarders reachable, `ensure_daemon` REFUSED to
+    auto-start with `hooks_daemon_repo_detected`. The guard (`init.sh:246-264`)
+    passes on `HOOKS_DAEMON_ROOT_DIR == PROJECT_PATH` **or** the mere existence
+    of `.claude/hooks-daemon.env` — gitignored, so absent from a fresh checkout,
+    and written by the install. Two further mechanisms make the no-`--force`
+    install sufficient: `self_install_mode: true` is already tracked
+    (`.claude/hooks-daemon.yaml:7`), and `HOOKS_DAEMON_VENV_PATH` is honoured
+    ahead of the fingerprint glob (`resolve_venv.sh:113-121`) so the daemon uses
+    the `.venv` that `uv sync` already built.
+  - [x] ✅ The gates need a **running** daemon, not an installed one — the skip
+    is keyed on a live socket under `untracked/`, which the tests open directly.
+    So `init.sh`'s CI passthrough mode (documented in `test_ci_passthrough.py`,
+    active under `GITHUB_ACTIONS=true`) governs the forwarder path only and does
+    not interfere with them.
 - [ ] ⬜ **Task 2.2**: Confirm all 11 tests EXECUTE on all three interpreters
   - [ ] ⬜ Expect first-run failures and treat them as long-standing, not as
     regressions — the LESSONS.md entry on waking skipped tests applies directly

@@ -114,3 +114,64 @@ plus one env file. There is no `expanduser`, no `Path.home()`, no `~/.claude`.
 Its `subprocess` calls are all `cwd`-scoped to the project root and read-only
 except `git update-index --chmod=+x`, which touches the git index and is
 reached only when `core.fileMode` is `false`.
+
+## What the gates actually need: a *running* daemon, not an installed one
+
+The skip is keyed on a live socket, not on installation
+(`tests/acceptance/test_absolute_path_socket_deny.py:118`):
+
+```python
+sock_path = _discover_socket()
+if sock_path is None:
+    pytest.skip("Daemon not running — no live socket found under untracked/. ...")
+```
+
+The tests open that socket **directly**, not through a hook forwarder. That
+matters because `init.sh` has a documented CI passthrough mode
+(`tests/unit/test_ci_passthrough.py`): under `GITHUB_ACTIONS=true` the
+forwarders deliberately no-op on the grounds that "the daemon is simply not
+installed in this pipeline". Passthrough governs the forwarder path only, so it
+does not interfere with tests that speak to the socket themselves.
+
+## The three mechanisms that make it work
+
+Each read out of the source rather than inferred:
+
+1. **The repo guard** (`init.sh:246-264`) refuses to start a daemon in this
+   repository unless `HOOKS_DAEMON_ROOT_DIR == PROJECT_PATH` **or**
+   `.claude/hooks-daemon.env` merely *exists*. That file is gitignored
+   (`.claude/.gitignore:16`), so a fresh checkout has neither — which is why CI
+   reports `hooks_daemon_repo_detected`. `install.py` writes it
+   (`create_daemon_env`, `install.py:1493`).
+
+2. **`self_install_mode` is already tracked.** `.claude/hooks-daemon.yaml:7`
+   carries `self_install_mode: true`, so a checkout already has it and the
+   install does not need `--force` to set it. This is what makes the no-`--force`
+   install sufficient rather than merely safe.
+
+3. **The venv override.** `resolve_venv.sh:113-121` checks
+   `$HOOKS_DAEMON_VENV_PATH/bin/python` *before* its
+   `untracked/venv-*/bin/python` fingerprint glob. CI's `uv sync` builds `.venv`
+   at the repo root, which that glob cannot see, so the override points the
+   daemon at the toolchain CI already has instead of building a second one.
+
+Which gives the workflow steps now in `qa.yml`:
+
+```yaml
+- name: Install daemon (for the acceptance gates)
+  run: python install.py --self-install       # NO --force
+
+- name: Start daemon
+  env:
+    HOOKS_DAEMON_VENV_PATH: ${{ github.workspace }}/.venv
+  run: |
+    ./bin/hooks-daemon restart
+    ./bin/hooks-daemon status
+```
+
+**Unverified until a runner executes it.** Every mechanism above is read from
+source; none of it has been observed end-to-end, because the install cannot be
+rehearsed inside this repo (see above). Two consequences to expect rather than
+be surprised by: coverage moves when 16 skipped tests start running, and tests
+that have only ever run *without* a daemon may fail — Plan 00250 Task 2.2 treats
+those as long-standing, not as regressions from the workflow edit.
