@@ -28,6 +28,10 @@ import json
 import re
 from pathlib import Path
 
+from claude_code_hooks_daemon.handlers.session_start.suggest_statusline import (
+    RECOMMENDED_REFRESH_INTERVAL_S,
+)
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "install_version.sh"
 
@@ -69,6 +73,21 @@ def test_every_fallback_command_is_bash_invoked() -> None:
     bare = {name: cmd for name, cmd in commands.items() if not cmd.startswith("bash ")}
 
     assert not bare, f"fallback commands must be `bash`-invoked — bare: {bare!r}"
+
+
+def test_fallback_refresh_interval_matches_the_shipped_default() -> None:
+    """The fallback ships the same ``refreshInterval`` as the template and the
+    suggestion handler (Plan 00175 Task 1.2; Plan 00362 D14).
+
+    The heredoc is bash, so it cannot import the Python constant; this test is
+    what binds it. A fallback with no interval at all leaves the clock frozen
+    while the session is idle, which is the defect Plan 00175 closed.
+    """
+    fallback = _fallback_settings()["statusLine"]
+    shipped = json.loads((_REPO_ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+
+    assert fallback.get("refreshInterval") == RECOMMENDED_REFRESH_INTERVAL_S
+    assert shipped["statusLine"]["refreshInterval"] == RECOMMENDED_REFRESH_INTERVAL_S
 
 
 def test_every_fallback_command_is_anchored_to_the_project_dir() -> None:

@@ -28,11 +28,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
+
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +210,7 @@ def write_downgrade_signal(
         return None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = path.parent / f".{path.name}.{os.getpid()}.tmp"
+        tmp_path = unique_temp_path(path)
         tmp_path.write_text(json.dumps(payload), encoding="utf-8")
         tmp_path.replace(path)
     except OSError as exc:

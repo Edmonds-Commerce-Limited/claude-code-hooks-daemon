@@ -19,6 +19,7 @@ process / runtime-file / venv diagnostics when init.sh detection fails.
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -60,7 +61,7 @@ def test_detects_client_project_root_not_daemon_clone(
     gen = debug_info_module.DebugInfoGenerator(output_file=str(tmp_path / "out.md"))
 
     assert gen.project_root == project, (
-        f"project root must be the client project ({project}), " f"not {gen.project_root}"
+        f"project root must be the client project ({project}), not {gen.project_root}"
     )
 
 
@@ -124,3 +125,40 @@ def test_blank_python_cmd_is_reported_not_executed(debug_info_module, tmp_path: 
 
     assert "Permission denied" not in report, "a blank interpreter must never be executed"
     assert "Python venv not found" in report, "the report must name the real problem"
+
+
+def test_daemon_status_and_installed_handlers_sections_run_without_an_error_line(
+    debug_info_module, tmp_path: Path
+) -> None:
+    """Plan 00362 D21: the two sections that shell out to the interpreter appear
+    in the report and carry no ``[Errno ...]`` line.
+
+    The client field report showed ``[Errno 13] Permission denied: ''`` under
+    BOTH "Daemon Status" and "Installed Handlers" in every generated report.
+    The blank-interpreter test above pins the guard; this one pins the happy
+    path the reporter never saw: a resolvable interpreter yields both sections
+    with real content.
+    """
+    project = _make_client_project(tmp_path)
+    untracked = project / ".claude" / "hooks-daemon" / "untracked"
+    untracked.mkdir(parents=True)
+    (project / ".claude" / "init.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        f'PROJECT_PATH="{project}"\n'
+        f'HOOKS_DAEMON_ROOT_DIR="{REPO_ROOT}"\n'
+        f'PYTHON_CMD="{sys.executable}"\n'
+        f'SOCKET_PATH="{untracked / "daemon-test.sock"}"\n'
+        f'PID_PATH="{untracked / "daemon-test.pid"}"\n'
+    )
+
+    gen = debug_info_module.DebugInfoGenerator(
+        output_file=str(tmp_path / "out.md"), project_root=project
+    )
+    gen.generate()
+    report = "\n".join(gen.output_lines)
+
+    assert "## Daemon Status" in report
+    assert "## Installed Handlers" in report
+    assert "Errno" not in report, "no section may report a failed command launch"
+    assert "Permission denied" not in report
+    assert "Discovered" in report, "the handlers section must list what it found"

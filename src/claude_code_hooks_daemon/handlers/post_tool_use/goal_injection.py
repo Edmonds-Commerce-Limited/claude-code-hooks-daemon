@@ -45,7 +45,6 @@ Opt-in (``get_default_enabled() -> False``); never blocks.
 
 import json
 import logging
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -61,6 +60,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger, LivePlanRef
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
 
@@ -429,7 +429,7 @@ def write_goal_signal(
         stem = _UNSAFE_SESSION_CHARS.sub("_", session_id) if session_id else _SESSION_ID_FALLBACK
         (target_dir / f"{stem}{_CLEAR_SUFFIX}").unlink(missing_ok=True)
         final_path = target_dir / f"{stem}{_SIGNAL_SUFFIX}"
-        tmp_path = target_dir / f".{stem}.{os.getpid()}.tmp"
+        tmp_path = unique_temp_path(final_path)
         payload = {
             _FIELD_TS: time.time(),
             _FIELD_SESSION_ID: session_id,
@@ -474,7 +474,7 @@ def clear_goal_signal(session_id: str) -> bool:
         (target_dir / f"{stem}{_SIGNAL_SUFFIX}").unlink(missing_ok=True)
         target_dir.mkdir(parents=True, exist_ok=True)
         clear_path = target_dir / f"{stem}{_CLEAR_SUFFIX}"
-        tmp_path = target_dir / f".{stem}.clear.{os.getpid()}.tmp"
+        tmp_path = unique_temp_path(clear_path)
         tmp_path.write_text(
             json.dumps({_FIELD_TS: time.time(), _FIELD_SESSION_ID: session_id}),
             encoding="utf-8",

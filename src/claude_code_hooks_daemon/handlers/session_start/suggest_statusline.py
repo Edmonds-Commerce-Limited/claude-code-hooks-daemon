@@ -16,14 +16,18 @@ from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
 
-# Recommended statusLine.refreshInterval (seconds). Claude Code re-runs the
-# status command on this timer in ADDITION to event-driven updates. The status
-# line goes quiet when the session is idle — e.g. while a coordinator waits on a
-# background agent — so without a timer the clock freezes and the multithread
-# indicator (🧵 Y/X) under-counts idle sibling threads whose heartbeats have gone
-# stale. 10s keeps both live at negligible cost (a cached daemon socket call).
+# Recommended statusLine.refreshInterval (seconds) — the ONE constant the
+# suggestion text, the repo's own .claude/settings.json and the install
+# script's fallback heredoc all agree with (a test pins the last two to it).
+# Claude Code re-runs the status command on this timer in ADDITION to
+# event-driven updates. The status line goes quiet when the session is idle —
+# e.g. while a coordinator waits on a background agent, or while suspended
+# with Ctrl+Z — so without a timer the clock freezes and the multithread
+# indicator (🧵 Y/X) under-counts idle sibling threads whose heartbeats have
+# gone stale. Plan 00175 measured a cached render at ~39 ms, so the documented
+# minimum of 1 costs nothing and keeps every indicator current.
 # Docs: https://code.claude.com/docs/en/statusline (minimum is 1).
-_RECOMMENDED_REFRESH_INTERVAL_S = 10
+RECOMMENDED_REFRESH_INTERVAL_S = 1
 
 # How many unheeded showings before the pitch goes quiet (Plan 00234/00236).
 #
@@ -162,7 +166,7 @@ class SuggestStatusLineHandler(SessionStartHandlerBase):
                 '  "statusLine": {',
                 '    "type": "command",',
                 '    "command": "bash \\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/status-line",',
-                f'    "refreshInterval": {_RECOMMENDED_REFRESH_INTERVAL_S}',
+                f'    "refreshInterval": {RECOMMENDED_REFRESH_INTERVAL_S}',
                 "  }",
                 "}",
                 "```",
@@ -170,7 +174,7 @@ class SuggestStatusLineHandler(SessionStartHandlerBase):
                 "The status line shows: model name, context usage %, git branch, and daemon health.",
                 "",
                 (
-                    f"`refreshInterval` ({_RECOMMENDED_REFRESH_INTERVAL_S}s) re-runs the status "
+                    f"`refreshInterval` ({RECOMMENDED_REFRESH_INTERVAL_S}s) re-runs the status "
                     "line on a timer as well as on events, so the clock stays current and the "
                     "multithread indicator (🧵 Y/X) keeps counting live threads even while the "
                     "session is idle waiting on a background agent."

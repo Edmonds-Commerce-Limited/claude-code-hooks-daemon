@@ -107,7 +107,8 @@ generate_settings_json() {
 {
   "statusLine": {
     "type": "command",
-    "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/status-line"
+    "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/status-line",
+    "refreshInterval": 1
   },
   "hooks": {
     "PreToolUse": [
