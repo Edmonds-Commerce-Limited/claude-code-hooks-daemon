@@ -34,15 +34,40 @@ truth_changes:
       The replacement truth. The LLM updates the project's docs to say this.
   - was: "Some retired concept the docs should no longer mention."
     now: ~                   # null/empty => remove all reference; no replacement
+  - id: plan-creation        # optional: names the TRUTH, so later revisions collapse
+    was: "How a plan is created, as the docs asserted it before this release."
+    now: "How a plan is created from this release on."
 ```
 
-Two keys per entry. That is the whole schema:
+Two keys per entry, plus one optional key:
 
 - **`was`** — what the docs used to assert, in plain language. The LLM finds docs
   that assert this and reconciles them. No `detect:` shell probes — the LLM is the
   matcher.
 - **`now`** — the replacement truth, **or `~`/empty** to mean "this is no longer
   true; remove all reference to it, there is no replacement."
+- **`id`** (optional) — a stable kebab-case slug naming the **truth**, not the
+  release. Give an entry the same `id` as an earlier release's entry when it
+  revises that same truth again (its `was` is roughly the earlier entry's `now`).
+  Omit it for a truth that stands alone. A blank `id`, or the same `id` twice in
+  one file, is a load error.
+
+### Supersession: one truth, surfaced once
+
+A truth that changed in several releases (the plan-creation truth changed in
+v3.23.0, v3.25.0 and v3.26.0) must not be replayed once per change — an agent
+following the report literally would assert the v3.23.0 claim into the project's
+docs and then contradict it twice. So entries sharing an `id` across the loaded
+range form a chain, and the report surfaces **only the highest-version link**,
+marked `(v3.26.0, revised in v3.23.0, v3.25.0) [plan-creation]`, with an
+instruction to reconcile any earlier form of the statement to the same `now`.
+The full history stays on disk; only what is surfaced changes.
+
+Un-keyed entries are never collapsed — not even two with identical text — and an
+un-keyed entry never interferes with its keyed neighbours. When you add an entry
+that revises a truth already in the corpus, key BOTH: the new entry and the
+existing one it supersedes (back-filling an `id` into an older file is expected
+and harmless).
 
 ## How it is consumed
 

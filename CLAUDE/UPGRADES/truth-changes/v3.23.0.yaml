@@ -1,6 +1,7 @@
 version: "3.23.0"
 truth_changes:
-  - was: >
+  - id: plan-creation
+    was: >
       To create a new plan, read the authoritative git counter
       `hooksdaemon.latestPlanNumber` and add 1 (zero-padded to 5 digits), then
       create the `NNNNN-name/` folder and `PLAN.md` yourself. There is no

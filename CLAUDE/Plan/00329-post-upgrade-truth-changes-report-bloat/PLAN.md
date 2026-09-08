@@ -89,14 +89,18 @@ upgrade rather than assuming this plan's first measurement found all of it.
 
 ### Phase 1: Decide the collapsing mechanism
 
-- [ ] ⬜ **Task 1.1**: Determine how a superseding chain is identified.
+- [x] ✅ **Task 1.1** (162efcc6, via Plan 00362 Task 2.7 — an explicit
+  `id:` slug per entry; decision and rejected options in
+  `JOURNAL/00329-Journal-26-09-08.md`): Determine how a superseding chain is identified.
   Semantic matching is not required if the schema can carry the answer — an
   optional `topic:` key with keep-latest-per-topic is deterministic and
   cheap. Record the decision and why the rejected options were rejected.
-- [ ] ⬜ **Task 1.2**: Settle what happens to existing entries that carry no
+- [x] ✅ **Task 1.2** (162efcc6 — un-keyed entries pass through untouched and
+  never affect a keyed neighbour): Settle what happens to existing entries that carry no
   topic key. An un-keyed entry must not be dropped, and must not silently
   defeat collapsing for its neighbours.
-- [ ] ⬜ **Task 1.3**: Measure how much of the current 74-entry corpus
+- [x] ✅ **Task 1.3** (162efcc6 — 74 → 71 entries, 89,580 → 87,497 bytes:
+  small, so Phase 2 bounding stays the primary size fix): Measure how much of the current 74-entry corpus
   actually collapses. If the answer is small, bounding (Phase 2) is the
   primary fix and this phase is secondary — record that rather than assuming
   the reverse.
@@ -134,7 +138,9 @@ upgrade rather than assuming this plan's first measurement found all of it.
 - [ ] ⬜ **Task 4.1**: A test pinning that the full-span report stays under
   the chosen bound as the corpus grows — the regression that lets this
   defect return is a new release quietly adding entries.
-- [ ] ⬜ **Task 4.2**: A test over the three known superseding chains
+- [x] ✅ **Task 4.2** (162efcc6 — `TestRealManifestCorpus` in
+  `tests/unit/install/test_truth_changes.py`; the v3.40.0/v3.49.1 pair was
+  judged two truths, not a chain, see the journal): A test over the three known superseding chains
   (plan-creation across v3.23.0/v3.25.0/v3.26.0; Notes & Updates across
   v3.40.0/v3.49.1) asserting only the current truth is surfaced.
 
@@ -142,9 +148,11 @@ upgrade rather than assuming this plan's first measurement found all of it.
 
 - [ ] The full-span report is bounded, and the bound holds when a new
   truth-change file is added.
-- [ ] The plan-creation truth is surfaced once, as the v3.26.0 value.
-- [ ] No reconciliation report contains an entry whose `now` is contradicted
-  by another entry in the same report.
+- [x] The plan-creation truth is surfaced once, as the v3.26.0 value (162efcc6).
+- [x] No reconciliation report contains an entry whose `now` is contradicted
+  by another entry in the same report (162efcc6 — for keyed truths; a chain
+  the corpus has not keyed is an authoring gap, which the schema README now
+  tells manifest authors to close by back-filling `id`).
 
 ## Delivery & Milestones
 

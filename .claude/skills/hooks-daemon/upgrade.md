@@ -52,6 +52,9 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
      before removing the whole section.
    - If a doc does not assert the `was` truth, there is nothing to do for it
      (the step is idempotent — re-running is a no-op).
+   - An entry marked `revised in vX, vY` is the CURRENT form of a truth that
+     also changed in those earlier releases; their entries are deliberately
+     not shown. Reconcile any earlier form of the statement to the same `now`.
 
    Stage and commit any project-doc edits **separately** from the daemon
    upgrade commit below (they touch project files, not daemon-owned paths). You
