@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00350: ci builds the relay binary so transport gates run](00350-ci-builds-the-relay-binary-so-transport-gates-run/PLAN.md) - Not Started (14 tests skip in CI because `untracked/bin/hooks-relay` is a gitignored build artefact no runner has; the same wired-in-but-not-load-bearing gate Plan 00250 fixed for the daemon socket, one artefact over — and the path it covers is the relay guard's zero-spawn fail-open)
+- [00350: ci builds the relay binary so transport gates run](00350-ci-builds-the-relay-binary-so-transport-gates-run/PLAN.md) - In Progress (14 tests skip in CI because `untracked/bin/hooks-relay` is a gitignored build artefact no runner has; the same wired-in-but-not-load-bearing gate Plan 00250 fixed for the daemon socket, one artefact over — and the path it covers is the relay guard's zero-spawn fail-open)
 
 - [00349: agent worktrees accumulate unreaped](00349-agent-worktrees-accumulate-unreaped/PLAN.md) - Not Started (21 stale `agent-*` worktrees under `.claude/worktrees/`; 6 look alarming at 195–224 commits off `main` but their work already landed under different SHAs, so the hard part is a safety test that can tell "re-applied" from "unmerged")
 
