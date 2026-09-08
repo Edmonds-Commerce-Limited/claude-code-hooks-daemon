@@ -220,8 +220,8 @@ Safety handlers protect against destructive or dangerous operations. Most are bl
 - `git checkout -- <file>` -- discards local changes to specific files
 - `git restore <file>` -- discards working tree changes (allows `--staged`)
 - `git stash drop` / `git stash clear` -- permanently destroys stashed changes
-- `git push --force` -- overwrites remote history
-- `git branch -D` -- force-deletes a branch without checking it is merged (lowercase `-d` is allowed)
+- `git push --force` / `git push <remote> +<refspec>` -- overwrites remote history (a leading `+` on a refspec forces the update exactly like `--force`)
+- `git branch -D` / `git update-ref -d refs/heads/<name>` -- force-deletes a branch without checking it is merged (lowercase `-d` is allowed; `update-ref` is the plumbing equivalent, scoped to `refs/heads/` targets)
 - `git commit --amend` -- rewrites the previous commit; create a new commit instead
 
 **To delete a branch, always try `git branch -d` first (v3.52.0).** It is

@@ -50,11 +50,14 @@ class TestDestructiveGitHandler:
     def test_init_creates_destructive_patterns_list(self, handler):
         """Handler exposes compiled destructive patterns derived from the single mapping.
 
-        The mapping is now the single source of truth and lists stash drop and stash
-        clear as separate entries, so there are 10 patterns.
+        The mapping is the single source of truth. Plan 00205 added one new pattern
+        entry (git update-ref -d refs/heads/<name>, sharing GIT_BRANCH_FORCE_DELETE's
+        rule_id) on top of the 10 pre-existing entries, so there are 11 patterns.
+        The +refspec push-force widening reuses the EXISTING push-force pattern slot
+        (Task 2.1: "Extend _GIT_PUSH_FORCE_PATTERN"), so it adds no new entry.
         """
         assert hasattr(handler, "destructive_patterns")
-        assert len(handler.destructive_patterns) == 10
+        assert len(handler.destructive_patterns) == 11
 
     def test_match_reason_and_matches_agree_for_each_command(self, handler):
         """matches() and _match_reason() (used by handle()) must agree on every command.
@@ -836,5 +839,186 @@ class TestDestructiveGitTagForceNotBlocked:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "git push --force origin main"},
+        }
+        assert handler.matches(hook_input) is True
+
+
+class TestDestructiveGitPushForceRefspec:
+    """Plan 00205 Task 2.1: `+refspec` is an exact `git push --force` equivalent.
+
+    A refspec argument prefixed with `+` forces the update exactly like
+    `--force` — it is ordinary, appears in CI/deploy scripts, and was
+    confirmed unguarded against v3.52.0 source (`_GIT_PUSH_FORCE_PATTERN`
+    matched only `--force`/`--force-with-lease`/`-f`).
+    """
+
+    @pytest.fixture
+    def handler(self):
+        return DestructiveGitHandler()
+
+    def test_plus_refspec_short_form_blocked(self, handler):
+        """`git push origin +main:main` must be denied."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push origin +main:main"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_plus_refspec_full_ref_form_blocked(self, handler):
+        """`git push origin +refs/heads/main:refs/heads/main` must be denied."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push origin +refs/heads/main:refs/heads/main"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_plus_refspec_without_colon_blocked(self, handler):
+        """`git push origin +main` (no explicit destination) is still a force push."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push origin +main"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_handle_plus_refspec_leads_with_push_force_rule_id(self, handler):
+        """handle() classifies the +refspec form under the existing GIT_PUSH_FORCE rule."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "git push origin +main:main",
+                "transcript_path": "/tmp/agent/transcript.jsonl",
+            },
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == "deny"
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_PUSH_FORCE}]")
+
+    def test_plain_refspec_no_plus_stays_allowed(self, handler):
+        """`git push origin main:main` (no +) must stay ALLOWED."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push origin main:main"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_head_to_refs_for_refspec_no_plus_stays_allowed(self, handler):
+        """`git push origin HEAD:refs/for/main` (a Gerrit-style push, no +) stays ALLOWED."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push origin HEAD:refs/for/main"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_plus_inside_a_branch_name_stays_allowed(self, handler):
+        """A `+` that is part of a branch name, not a leading refspec marker, is safe.
+
+        `+` is a legal git ref-name character. Only a `+` at the START of the
+        refspec token forces the update; one in the middle of a name is just a
+        name. This is the false-positive test written BEFORE the pattern, per
+        the `sudo_pip` near-miss lesson (PLAN.md Risks & Mitigations).
+        """
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push origin feature+fix"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_plus_inside_a_branch_name_with_destination_stays_allowed(self, handler):
+        """Same false-positive, with an explicit (non-forcing) destination refspec."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push origin feature+fix:feature+fix"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_bare_push_stays_allowed(self, handler):
+        """Sanity: an ordinary push with no refspec at all stays ALLOWED."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git push origin main"}}
+        assert handler.matches(hook_input) is False
+
+
+class TestDestructiveGitUpdateRefBranchDelete:
+    """Plan 00205 Task 2.2: `git update-ref -d refs/heads/<name>` is an exact
+    `git branch -D` equivalent — it force-deletes a branch ref with no merge
+    check. Confirmed unguarded against v3.52.0 source (`update-ref` appeared
+    nowhere under `src/claude_code_hooks_daemon/`).
+
+    Scoped to `-d` with a `refs/heads/` target (PLAN.md Risks & Mitigations):
+    every other `update-ref` use — creating/moving a ref, or deleting a
+    non-branch ref — stays untouched.
+    """
+
+    @pytest.fixture
+    def handler(self):
+        return DestructiveGitHandler()
+
+    def test_update_ref_delete_branch_blocked(self, handler):
+        """`git update-ref -d refs/heads/<name>` must be denied."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git update-ref -d refs/heads/feature"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_update_ref_delete_branch_with_old_value_blocked(self, handler):
+        """The compare-and-swap form (`-d <ref> <old-value>`) must also be denied."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git update-ref -d refs/heads/feature abc123def456"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_handle_update_ref_leads_with_branch_force_delete_rule_id(self, handler):
+        """handle() classifies update-ref -d under the existing GIT_BRANCH_FORCE_DELETE rule."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "git update-ref -d refs/heads/feature",
+                "transcript_path": "/tmp/agent/transcript.jsonl",
+            },
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == "deny"
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_BRANCH_FORCE_DELETE}]")
+
+    def test_update_ref_without_delete_flag_stays_allowed(self, handler):
+        """`git update-ref refs/heads/<name> <sha>` (create/move, no -d) stays ALLOWED.
+
+        This is the same scope decision the porcelain rule already makes:
+        `git branch -f` (force-move a branch pointer) is not blocked either —
+        only DELETION without a merge check is in scope for this rule.
+        """
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git update-ref refs/heads/feature abc123def456"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_update_ref_delete_non_branch_ref_stays_allowed(self, handler):
+        """Deleting a non-branch ref (e.g. a remote-tracking ref) is out of scope.
+
+        Only `refs/heads/` is the `git branch -D` equivalent; every other
+        `update-ref -d` target is left untouched, per PLAN.md's scoping
+        decision.
+        """
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git update-ref -d refs/remotes/origin/feature"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_update_ref_query_stays_allowed(self, handler):
+        """A read-only `update-ref` query (no -d) stays ALLOWED."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git update-ref --stdin < /dev/null"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_update_ref_delete_branch_with_global_option_still_blocked(self, handler):
+        """Global options before the subcommand must not defeat this rule either."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git -C /srv/project update-ref -d refs/heads/feature"},
         }
         assert handler.matches(hook_input) is True
