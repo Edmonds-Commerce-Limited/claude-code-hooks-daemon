@@ -32,6 +32,16 @@ SOURCE_SKILLS_ROOT = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "skills"
 DEPLOYED_SKILLS_ROOT = REPO_ROOT / ".claude" / "skills"
 GIT = shutil.which("git") or "git"
 
+# The path git is asked about when checking the daemon-clone exclusion.
+#
+# A path INSIDE the directory, deliberately. The pattern is `/hooks-daemon/`,
+# and a trailing slash makes it DIRECTORY-ONLY: git will not match it against a
+# path it cannot tell is a directory, which means any checkout where the clone
+# is absent answers "not ignored". Naming the bare directory therefore tested
+# the container rather than the pattern -- it passed here, where a deployed
+# install exists, and failed on every CI runner.
+_DAEMON_CLONE_PROBE = Path(".claude") / "hooks-daemon" / "README.md"
+
 
 def _deployed_skill_trees() -> list[Path]:
     return sorted(path for path in DEPLOYED_SKILLS_ROOT.iterdir() if path.is_dir())
@@ -98,10 +108,42 @@ class TestEveryDeployedSkillTreeIsVisibleToGit:
         client install. Anchoring the pattern must not stop excluding it —
         that is the exclusion the comment is actually about.
         """
-        assert _is_ignored(REPO_ROOT / ".claude" / "hooks-daemon"), (
+        assert _is_ignored(REPO_ROOT / _DAEMON_CLONE_PROBE), (
             "The daemon clone directory is no longer ignored. Anchoring the "
             "pattern went too far — `/hooks-daemon/` still has to match "
             ".claude/hooks-daemon/."
+        )
+
+    def test_the_exclusion_holds_where_the_clone_is_absent(self, tmp_path: Path) -> None:
+        """The same guard, asked somewhere the directory does NOT exist.
+
+        This is the CI condition, and it is why the assertion above must not
+        name the bare directory. ``/hooks-daemon/`` carries a trailing slash,
+        which makes it DIRECTORY-ONLY, and git cannot know that a path which is
+        not on disk is a directory — so `check-ignore` answers "not ignored"
+        on any checkout without a deployed client install. In this container
+        the directory exists, the pattern matches, and the test passed while CI
+        failed on the identical assertion.
+        """
+        (tmp_path / ".claude").mkdir(parents=True)
+        subprocess.run([GIT, "init", "-q", str(tmp_path)], check=True)
+        (tmp_path / ".claude" / ".gitignore").write_text(
+            (REPO_ROOT / ".claude" / ".gitignore").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [GIT, "-C", str(tmp_path), "check-ignore", "-q", str(tmp_path / _DAEMON_CLONE_PROBE)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, (
+            "The daemon-clone exclusion does not hold on a checkout without a "
+            "deployed install, so this guard only ever tested the container it "
+            "ran in. Ask git about a path INSIDE the directory — that answer "
+            "does not depend on the directory being present."
         )
 
 

@@ -26,7 +26,8 @@ from pathlib import Path
 
 import pytest
 
-HOOKS_DIR = Path("/workspace/.claude/hooks")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+HOOKS_DIR = REPO_ROOT / ".claude" / "hooks"
 _EXIT_OK = 0
 _EXIT_HARD_BLOCK = 2
 # Generous ceiling for one forwarder round-trip (daemon answer is sub-second;
@@ -47,7 +48,7 @@ _POST_TOOL_USE_PAYLOAD = (
 )
 _STATUS_PAYLOAD = (
     b'{"session_id":"socket-stdin-test","model":{"display_name":"Test"},'
-    b'"workspace":{"current_dir":"/workspace"}}'
+    b'"workspace":{"current_dir":"' + str(REPO_ROOT).encode() + b'"}}'
 )
 
 
@@ -70,6 +71,19 @@ def _run_forwarder_with_socket_stdin(
         return proc.returncode, out, err
     finally:
         parent.close()
+
+
+def test_the_forwarders_are_located_relative_to_this_checkout() -> None:
+    """These paths were hardcoded to ``/workspace``, this dev container's root.
+
+    The forwarders are tracked and not gitignored, so they exist on any
+    checkout — just not at ``/workspace``. Every test in this file therefore
+    passed here and failed on every CI runner with "deployed forwarder
+    missing", which is a report about the test, not about the transport it
+    claims to cover.
+    """
+    assert HOOKS_DIR == REPO_ROOT / ".claude" / "hooks"
+    assert HOOKS_DIR.is_dir(), f"no deployed forwarder directory at {HOOKS_DIR}"
 
 
 @pytest.mark.parametrize(

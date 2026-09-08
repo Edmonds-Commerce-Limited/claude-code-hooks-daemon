@@ -1,6 +1,6 @@
 # Plan 00250: CI must actually run the acceptance gates it calls blocking
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-17
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -124,12 +124,27 @@ have reopened a plan whose success criteria were satisfied.
     regressions — the LESSONS.md entry on waking skipped tests applies directly
 - [ ] ⬜ **Task 2.3**: Verify the CI daemon cannot collide with anything (its own
   `HOSTNAME`-derived socket, per the hostname-isolation design)
-- [ ] ⬜ **Task 2.4**: The three currently-FAILING integration files above.
-  `test_forwarder_socket_stdin.py:29`'s hardcoded `/workspace` path is a plain
-  defect and can be fixed on its own; the daemon-dependence is this plan's
-  Decision 1 applied again. Do NOT resolve it by adding a silent skip — that
-  converts a red gate into an invisible one, which is the defect this plan
-  exists to remove. Phase 3's guard must cover them.
+- [x] ✅ **Task 2.4a**: The two failures that were plain defects rather than
+  provisioning gaps, both fixed with a test that reproduces the CI condition
+  locally — the point being that neither needed a daemon at all:
+  - `test_deployed_skill_trees.py` asked git whether `.claude/hooks-daemon` is
+    ignored. The pattern is `/hooks-daemon/`, and a trailing slash makes it
+    **directory-only**: git will not match it against a path it cannot tell is
+    a directory, so any checkout without a deployed install answers "not
+    ignored". The guard was testing the container, not the pattern. It now
+    asks about a path INSIDE the directory, which is existence-independent.
+  - `test_forwarder_socket_stdin.py` hardcoded `Path("/workspace/.claude/hooks")`.
+    The forwarders are tracked and not ignored, so they exist on any checkout —
+    just not there. Now derived from the checkout, with a test pinning that.
+- [ ] ⬜ **Task 2.4b**: `test_relay_guard_fail_open.py:443`, which is a real
+  provisioning gap and this plan's Decision 1 again. It sets
+  `HOOKS_DAEMON_NC_UNIX_CAPABLE=1`, overriding the daemon's own capability
+  detection, then asserts the `nc` rung reached a Unix socket — so it requires
+  an `nc` with `-U` support (`netcat-openbsd`) on the runner. **Unverified
+  hypothesis**: the runner's `nc` lacks it. Confirm on a runner before fixing.
+  Do NOT resolve it by adding a silent skip — that converts a red gate into an
+  invisible one, which is the defect this plan exists to remove. Phase 3's
+  guard must cover it.
 
 ### Phase 3: Guard the class
 
