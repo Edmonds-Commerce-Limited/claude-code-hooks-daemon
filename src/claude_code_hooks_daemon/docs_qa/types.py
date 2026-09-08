@@ -72,6 +72,12 @@ class CheckContext:
     # load) by a check that needs reverse-index lookups.
     corpus: "DocCorpus | None" = None
 
+    # SWEEP: every on-disk markdown path, built ONCE by sweep_context() via
+    # docs_qa.corpus.iter_markdown_paths -- the single shared walk that
+    # module-doc-budget and source-tree-markdown both consume, instead of
+    # each running its own os.walk of the whole project root (Plan 00295).
+    markdown_paths: tuple[str, ...] | None = None
+
     # STAGED stage (Task 3.1e): every staged Added/Copied/Modified/Renamed
     # (new-side) ``.md`` file's STAGED content, keyed by repo-relative path.
     # A deleted path carries no content and is never a key here.

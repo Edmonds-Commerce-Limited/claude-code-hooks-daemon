@@ -1,13 +1,23 @@
 """Tests for ``docs_qa.context`` builders (Plan 00284, Tasks 3.1a + 3.1e)."""
 
+import os
 import subprocess
+from collections.abc import Callable, Generator
 from pathlib import Path
+
+import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+from claude_code_hooks_daemon.docs_qa import corpus as corpus_module
 from claude_code_hooks_daemon.docs_qa.context import edit_context, staged_context, sweep_context
 from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus
-from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
+from claude_code_hooks_daemon.docs_qa.policy import (
+    DocumentationPolicy,
+    DocumentationQaPolicy,
+)
+from claude_code_hooks_daemon.docs_qa.runner import run_stage
+from claude_code_hooks_daemon.docs_qa.types import CheckStage
 
 
 def _git(root: Path, *args: str) -> None:
@@ -79,6 +89,74 @@ class TestSweepContext:
         assert context.corpus is corpus
         assert context.file_path is None
         assert context.file_content is None
+
+    def test_markdown_paths_is_populated_from_one_walk(self, tmp_path: Path) -> None:
+        """The single shared walk module-doc-budget and source-tree-markdown
+        both consume (Plan 00295 Task 3.3), built once here rather than once
+        per check."""
+        (tmp_path / "src" / "pkg").mkdir(parents=True)
+        (tmp_path / "src" / "pkg" / "NOTES.md").write_text("notes")
+        (tmp_path / "CLAUDE.md").write_text("root")
+        (tmp_path / "src" / "pkg" / "module.py").write_text("x = 1\n")
+        corpus = DocCorpus(project_root=tmp_path, documents={})
+        context = sweep_context(project_root=tmp_path, policy=DocumentationPolicy(), corpus=corpus)
+        assert context.markdown_paths == ("CLAUDE.md", "src/pkg/NOTES.md")
+
+    def test_markdown_paths_honours_configured_scope_exclusions(self, tmp_path: Path) -> None:
+        (tmp_path / "infra" / "roles").mkdir(parents=True)
+        (tmp_path / "infra" / "roles" / "NOTES.md").write_text("excluded")
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "NOTES.md").write_text("real")
+        policy = DocumentationPolicy(
+            qa=DocumentationQaPolicy(scope_exclude_globs=("infra/roles/**",))
+        )
+        corpus = DocCorpus(project_root=tmp_path, documents={})
+        context = sweep_context(project_root=tmp_path, policy=policy, corpus=corpus)
+        assert context.markdown_paths == ("src/NOTES.md",)
+
+    def test_module_doc_budget_and_source_tree_markdown_share_one_walk(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The point of Task 3.3: a sweep that runs BOTH checks performs the
+        markdown-path ``os.walk`` exactly once, not once per check."""
+        (tmp_path / "src" / "pkg").mkdir(parents=True)
+        (tmp_path / "src" / "pkg" / "NOTES.md").write_text("notes")
+        (tmp_path / "CLAUDE.md").write_text("root doc")
+
+        layout = ProjectLayout(
+            source_dirs=("src",),
+            test_dirs=(),
+            config_dirs=(),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed", "Cancelled"),
+        )
+        corpus = DocCorpus(project_root=tmp_path, documents={})
+
+        walk_calls = 0
+        real_walk = os.walk
+
+        def _counting_walk(
+            top: str,
+            topdown: bool = True,
+            onerror: Callable[[OSError], object] | None = None,
+            followlinks: bool = False,
+        ) -> Generator[tuple[str, list[str], list[str]], None, None]:
+            nonlocal walk_calls
+            walk_calls += 1
+            yield from real_walk(top, topdown=topdown, onerror=onerror, followlinks=followlinks)
+
+        monkeypatch.setattr(corpus_module.os, "walk", _counting_walk)
+
+        context = sweep_context(
+            project_root=tmp_path, policy=DocumentationPolicy(), corpus=corpus, layout=layout
+        )
+        findings = run_stage(CheckStage.SWEEP, context)
+
+        assert walk_calls == 1
+        assert {finding.path for finding in findings} == {"src/pkg/NOTES.md"}
 
 
 class TestStagedContext:
