@@ -369,6 +369,39 @@ class TestStaleCounterpartIndex:
         assert any("CLAUDE/Partner.md" in item for item in result.context)
 
 
+class TestSymlinkedFilePathResolution:
+    """Plan 00295 Task 1.2: EDIT-stage checks called ``relative_to`` on the
+    RAW ``file_path``/``project_root`` while the scope decision
+    (``matches()``, via ``is_lintable_path``) resolves both first. A
+    ``file_path`` reached through a symlinked intermediate directory is a
+    lexical child of neither the raw ``project_root`` string nor vice versa
+    even though the two agree once resolved -- the raw ``relative_to`` call
+    then raises ``ValueError`` uncaught inside ``handle()``.
+    """
+
+    def test_symlinked_intermediate_directory_does_not_raise(self, tmp_path: Path) -> None:
+        real_root = tmp_path / "real_root"
+        (real_root / "CLAUDE").mkdir(parents=True)
+        link_root = tmp_path / "link_root"
+        link_root.symlink_to(real_root)
+        target = link_root / "CLAUDE" / "X.md"
+        with _patched_root(real_root):
+            result = _handler().handle(_write_input(target, "# clean\n"))
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_symlinked_intermediate_directory_still_finds_findings(self, tmp_path: Path) -> None:
+        real_root = tmp_path / "real_root"
+        (real_root / "CLAUDE").mkdir(parents=True)
+        link_root = tmp_path / "link_root"
+        link_root.symlink_to(real_root)
+        target = link_root / "CLAUDE" / "X.md"
+        with _patched_root(real_root):
+            result = _handler().handle(_write_input(target, "See [x](Nope.md).\n"))
+        assert result.decision == Decision.ALLOW
+        assert any("Nope.md" in item for item in result.context)
+
+
 class TestClaudeMdAndAcceptanceTests:
     def test_get_claude_md_returns_content(self) -> None:
         content = DocsQaEditHandler().get_claude_md()

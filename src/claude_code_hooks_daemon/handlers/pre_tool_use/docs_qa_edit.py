@@ -131,9 +131,18 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
         return is_lintable_path(rel_path, file_path, project_root, policy)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        project_root = ProjectContext.project_root()
+        # Resolved ONCE, here, and threaded through everything below --
+        # `matches()` already scope-gated on the RESOLVED identity (see
+        # `_rel_path`). A raw (unresolved) `file_path` reached through a
+        # symlinked intermediate directory is a lexical child of neither the
+        # raw `project_root` string nor vice versa even when the two agree
+        # once resolved, so every downstream `relative_to` call -- in
+        # `load_edit_corpus`/`refresh_own_record` and in each EDIT-stage
+        # check -- must see paths that are ALREADY consistent, not
+        # re-resolve (or fail to) independently (Plan 00295 Task 1.2).
+        project_root = ProjectContext.project_root().resolve()
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
-        file_path = Path(tool_input.get(_FIELD_FILE_PATH, ""))
+        file_path = Path(tool_input.get(_FIELD_FILE_PATH, "")).resolve()
         # Tri-state, matching plan_qa_edit: `CheckContext` types this field
         # `bool | None` because "I could not stat it" is a third answer, not a
         # flavour of False. Claiming True would send the read below into a
