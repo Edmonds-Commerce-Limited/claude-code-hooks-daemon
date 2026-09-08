@@ -106,6 +106,7 @@ from .init_config import generate_config
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from claude_code_hooks_daemon.core.worktree_reaping import RunGit
     from claude_code_hooks_daemon.daemon.branch_safety import BranchClassification
     from claude_code_hooks_daemon.daemon.controller import DaemonController
     from claude_code_hooks_daemon.daemon.project_handler_health import (
@@ -5176,6 +5177,58 @@ def cmd_find_comment_blocks(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
+def cmd_worktree_reap(args: argparse.Namespace, *, run_fn: "RunGit | None" = None) -> int:
+    """Report stale agent worktrees, and remove them only when asked.
+
+    Plan 00349 Task 2.1 decided report-and-offer over automatic reaping: the
+    failure modes are asymmetric (accumulation costs disk and legibility;
+    over-eager reaping destroys work that exists nowhere else), and the
+    conservative predicate provably cannot clear every worktree, so a sweep
+    would leave a residue needing a human anyway.
+
+    **Doing nothing is the default.** Acting needs ``--reap``, so running this
+    out of curiosity shows the situation and changes nothing.
+
+    A refused worktree is printed WITH its reason rather than omitted — one
+    that silently vanishes from the report looks handled.
+
+    Returns:
+        0 when every worktree was reapable (or there are none), 1 when at least
+        one needs a human. The refusals are the actionable output.
+    """
+    from claude_code_hooks_daemon.core.worktree_reaping import (
+        collect_worktree_states,
+        is_reapable,
+        reap_refusal_reason,
+        reap_worktree,
+    )
+
+    repo_root = Path(getattr(args, "project_root", None) or get_project_path(None))
+    base_branch = getattr(args, "base_branch", None) or "main"
+    reap = bool(getattr(args, "reap", False))
+
+    collect_kwargs = {"run_fn": run_fn} if run_fn is not None else {}
+    states = collect_worktree_states(repo_root, base_branch, **collect_kwargs)
+    if not states:
+        print("No agent worktrees found.")
+        return 0
+
+    refused = 0
+    for state in states:
+        path = repo_root / ".claude" / "worktrees" / state.name
+        if not is_reapable(state):
+            refused += 1
+            print(f"KEEP    {reap_refusal_reason(state)}")
+            continue
+        outcome = reap_worktree(repo_root, state, path, dry_run=not reap, **collect_kwargs)
+        print(f"{'REAPED ' if outcome.removed else 'DRY-RUN'} {outcome.detail}")
+
+    if not reap:
+        print(f"\n{len(states) - refused} reapable, {refused} need a human. Nothing was changed.")
+        print("Re-run with --reap to remove the reapable ones and their branches.")
+    return 1 if refused else 0
+
+
 def cmd_skill_scan(args: argparse.Namespace) -> int:
     """Run the skill-opportunity scan pipeline (Plan 00274).
 
@@ -6665,6 +6718,30 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_skill_scan.set_defaults(func=cmd_skill_scan)
+
+    # worktree-reap command (Plan 00349) — report by default, act only on --reap
+    parser_worktree_reap = subparsers.add_parser(
+        "worktree-reap",
+        help="Report stale agent worktrees; removes nothing unless --reap is given",
+    )
+    parser_worktree_reap.add_argument(
+        "--project-root",
+        dest="project_root",
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_worktree_reap.add_argument(
+        "--base-branch",
+        dest="base_branch",
+        default="main",
+        help="Branch a worktree's commits must already be on (default: main)",
+    )
+    parser_worktree_reap.add_argument(
+        "--reap",
+        action="store_true",
+        help="Actually remove the worktrees the predicate cleared, and their branches",
+    )
+    parser_worktree_reap.set_defaults(func=cmd_worktree_reap)
 
     # harvest-background command (Plan 00142, Layer B) — detect & surface, never kill
     parser_harvest = subparsers.add_parser(

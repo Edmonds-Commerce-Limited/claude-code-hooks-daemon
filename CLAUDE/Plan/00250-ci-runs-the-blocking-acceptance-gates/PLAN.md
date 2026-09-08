@@ -201,8 +201,9 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
   interpreter in each of two runs. I excluded a timeout on bad grounds: that
   branch does emit an advisory, but `verdict` **discarded** the observed text
   here. It now quotes it, so the next CI run names the cause rather than
-  needing a Swift toolchain locally. See
-  [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
+  needing a Swift toolchain locally. **Did not recur** in run 34197901092 (all
+  three green) — absence of the flake is not a diagnosis, so this stays open.
+  See [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 - [x] ✅ **Task 2.4a**: The two failures that were plain defects rather than
   provisioning gaps — neither needed a daemon at all, and both were fixed with a
   test reproducing the CI condition locally. `test_deployed_skill_trees.py`
@@ -236,13 +237,11 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 
 - [x] ✅ **Task 4.1**: Local `llm_qa.py all` **26/26 PASSED**; daemon restarted
   and verified RUNNING.
-- [ ] ⬜ **Task 4.2**: **Met on two interpreters of three, so not yet ticked.**
-  Run 34196664936 has 3.11 and 3.13 at **18719 passed, 0 failed, 17 skipped** —
-  zero skips among the six declared-blocking files and no failures at all, the
-  first fully green QA job this plan has produced. 3.12 was still running when
-  a push superseded the run, so ticking needs one complete run. All 17
-  remaining skips are accounted for: 14 are Plan 00350's relay gates, 3 are
-  unrelated environment skips.
+- [x] ✅ **Task 4.2**: Run **34197901092 is green on all three interpreters**,
+  identically: `18750 passed, 0 failed, 3 skipped`. Zero skips among the six
+  declared-blocking files, and no failures at all. The three remaining skips
+  are unrelated environment skips — the 14 relay gates that made up the rest
+  now run too, courtesy of Plan 00350.
 
 ## Dependencies
 

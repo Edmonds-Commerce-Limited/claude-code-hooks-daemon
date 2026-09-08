@@ -106,9 +106,24 @@ where a regression is both easy and expensive.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Full QA green, daemon restart RUNNING.
-- [ ] ⬜ **Task 4.2**: A green CI run in which the 14 tests report as PASSED
-  rather than absent.
+- [ ] ⬜ **Task 4.1**: Full QA green, daemon restart RUNNING. Daemon restarted
+  and verified RUNNING; a QA run covering the final state is outstanding.
+
+- [x] ✅ **Task 4.2**: Run **34197901092 is green on all three interpreters**,
+  identically: `18750 passed, 0 failed, 3 skipped`. **Skips 17 → 3** — every
+  one of the 14 relay gates executed, on every interpreter. The three that
+  remain are unrelated environment skips that were always there.
+
+  The build step cost **~13s wall including `rustup target add`** (07:10:10 →
+  07:10:24), against ~1s locally for the compile alone; the target download is
+  most of it, and still far below anything worth caching.
+
+  One scoping correction, recorded before anyone relies on the wider claim: the
+  binary is **not** byte-identical across machines. Same 570056 bytes, different
+  sha256 (`f6484c23…` locally, `79bc27ac…` on the runner) — rustc embeds
+  absolute paths and the build directory differs. Nothing depends on the hash
+  today, which is exactly why it is written down: a future "cache the relay by
+  content hash" step would otherwise find it the expensive way.
 
 ## Success Criteria
 

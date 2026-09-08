@@ -144,7 +144,8 @@ reaper has to be designed against those constraints, not around them.
   explaining each refusal, and an **explicit command** to act — dry-run by
   default.
 
-- [ ] ⬜ **Task 2.2**: `reap_worktree` is written and tested — dry-run by
+- [x] ✅ **Task 2.2**: `reap_worktree` plus the `worktree-reap` CLI command that
+  makes it usable — dry-run by
   default at the call site, no git command at all for a worktree the predicate
   refused, and **git asked to disagree twice**: `git worktree remove` runs
   without `--force`, so git refuses a worktree with modified or untracked
@@ -154,9 +155,13 @@ reaper has to be designed against those constraints, not around them.
   reap path whose only safety is the predicate has one bug between it and a
   deletion.
 
-  **Still open: nothing calls it yet.** Task 2.1's report-and-offer needs a
-  surface — a session-start advisory and an explicit command — before a human
-  can use any of this.
+  `bin/hooks-daemon worktree-reap` is the surface. **Doing nothing is the
+  default** — it reports and exits; acting needs `--reap`. A refused worktree is
+  printed *with* its reason rather than omitted, because one that silently
+  vanishes from the report looks handled. Exit 1 when any need a human, so the
+  actionable case is visible to a script.
+
+  Run against this repository: `15 reapable, 6 need a human. Nothing was changed.`
 
 - [x] ✅ **Task 2.3**: The branch is deleted after the worktree, in the same
   call. A failed branch delete still reports the worktree as removed (the
