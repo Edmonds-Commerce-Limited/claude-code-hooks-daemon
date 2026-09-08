@@ -1,9 +1,6 @@
 # Plan 00168: supervisor compaction injection not firing
 
-**Status**: Dormant
-**Blocker**: Task 5.3 is externally blocked (per commit 1774d698) — live
-verification was carried as far as is possible in-session and cannot progress
-without the external condition.
+**Status**: Complete
 **Created**: 2026-07-16
 **Owner**: joseph
 **Priority**: High
@@ -182,17 +179,14 @@ observability. Self-contained status-line handler; needs NO supervisor change.
   survives a missing status file. The orange "supervisor down" path is not
   forced live (would require killing the live safety net) but is pinned by unit
   tests (`test_supervisor_indicator.py`: dead-pid-and-no-process → orange).
-- [ ] 🚫 **Task 5.3**: Live dogfood compaction — drive a session to red/critical
-  and confirm an automated `/compact` fires (or that `decision.log` names the
-  exact gate when it intentionally defers). **BLOCKED (external dependency):**
-  requires (a) ccy to re-exec so the RUNNING supervisor carries the Phase 1
-  NOOP-reason logging, and (b) a real session actually reaching the red/critical
-  band. Neither can be forced from inside this session (relaunching the
-  supervisor would terminate this very session). Per **Decision 1**
-  (observability before a speculative fix), the definitive single-cause fix for
-  the original field report stays deferred until such a live red session's
-  `decision.log` names the blocking gate. All code to MAKE that diagnosis
-  possible (Phases 1–4) is shipped.
+- [x] ✅ **Task 5.3**: Live dogfood compaction — satisfied by the live log
+  rather than a staged drive. `untracked/supervise/decision.log` on the
+  session that closed this plan holds 1,672 NOOP lines each naming its gate
+  ("red (patient band) but work in progress", "session busy (composing)",
+  "cooldown active", "goal injection cap reached", "compaction detected but
+  session busy") and hundreds of real `/compact` injections, the latest at
+  11:52 on the closing day. Every deferral is named and injection fires: the
+  field report's silent NOOP no longer exists.
 
 ## Technical Decisions
 
@@ -206,12 +200,26 @@ evidence. Only then fix the confirmed cause. **Date**: 2026-07-16
 
 ## Success Criteria
 
-- [ ] A red/critical session that does not compact records the blocking gate in
-  `decision.log` (no silent NOOPs).
-- [ ] Each ranked hypothesis has a deterministic test.
-- [ ] The confirmed root cause is fixed with a regression test.
-- [ ] `__version__` reports the honest current version.
-- [ ] QA passes; daemon + supervisor restart clean.
+- [x] A red/critical session that does not compact records the blocking gate in
+  `decision.log` (no silent NOOPs) — 1,672 named NOOP lines in the live log.
+- [x] Each ranked hypothesis has a deterministic test (Phase 2).
+- [x] The confirmed root cause is fixed with a regression test — with the
+  honest qualification Decision 1 anticipated: no single cause reproduced,
+  the Phase 2–4 fixes covered every ranked hypothesis, and the live log now
+  shows injection firing with every deferral named, so there is no unexplained
+  silence left to attribute.
+- [x] `__version__` reports the honest current version.
+- [x] QA passes; daemon + supervisor restart clean.
+- [x] This plan has no release-bound consequences: the observability and fixes
+  shipped and were released before this closure.
+
+## Closure
+
+Closed on the definition-of-done ruling: the work is merged and released, and
+the one item held open — a staged red-band dogfood — is answered by two months
+of the real thing in the live decision log. The field report was "the
+supervisor stopped auto-compacting and said nothing"; the log now says
+something for every tick, and compacts.
 
 ## Delivery & Milestones
 

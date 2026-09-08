@@ -20,8 +20,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 
-- [00293: tool inventory disable and token savings](00293-tool-inventory-disable-and-token-savings/PLAN.md) - In Progress, 13 of 14 tasks done and the remainder human-gated (`source_disable`, the transcript analyser, `tool-report` and the advisory all shipped and are dogfooded here; Task 4.1 needs a `/context` spot check in a fresh interactive session, which an agent cannot perform)
-
 - [00291: upgrade path hardening and guarded branch install](00291-upgrade-path-hardening-and-guarded-branch-install/PLAN.md) - Not Started (php-qa-ci canary findings: fresh-clone `upgrade_version.sh` hard-fail, UNRELEASED-manifest visibility, silent old-config retention, `v`-prefix handling — plus the owner-ruled guarded, non-obvious, loudly-warned first-party-only branch-install mechanism)
 
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
@@ -58,8 +56,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00159: Status Writers Thread-Safe Tmp Naming](00159-status-writers-thread-safe-tmp-naming/PLAN.md) - Not Started (v3.39.0 code-review follow-up: the four `.{stem}.{pid}.tmp` atomic writers key on PID not thread — harmless today, hardening only)
 
-- [00168: Supervisor Compaction Injection Not Firing](00168-supervisor-compaction-injection-not-firing/PLAN.md) - Dormant, Task 5.3 externally blocked (high-value: user reports the ccy supervisor stopped auto-`/compact`-ing at COMPACT NOW; live diagnostic verified the supervisor armed+running, not stale, session-isolation working single-session …)
-
 ### Plan Workflow / QA
 
 - Root cause: agents conflate `PLAN.md` with `JOURNAL/` and append narrative progress into the plan. Measured churn proves it — `del/add` ratio 0.00–0.18 across large plans (00104: 885 lines added, **zero** deleted), so plans grow monotonically (57 KB locally, 100 KB+ reported in client projects)
@@ -81,8 +77,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Config under `plan_workflow.qa`; grandfathering for legacy plans; spec provenance: `untracked/hooks-daemon-plan-verify-qa.md` (31-sin audit catalogue)
 
 ### Self-Driving / Automation
-
-- [00166: Supervisor Multi-Terminal Session Isolation](00166-supervisor-multi-terminal-session-isolation/PLAN.md) - Dormant, implementation shipped and awaiting live two-terminal closure verification (root cause confirmed by code review + live `/proc` topology: the PTY supervisor reads the ONE shared per-repo `context-sidecar/` dir and matches compaction signals / sidecars by freshness / …)
 
 - [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design**
 
@@ -117,13 +111,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00117: Enable ask_user_question_blocker (dogfood → default-on)](00117-ask-user-question-blocker-default-on/PLAN.md) - Dormant (remaining: flip shipped default + regression test; awaiting scheduling)
 
   - Dogfooding alert: agent stalled twice asking tautological questions ("Should I push?"); the prefix-positive `ask_user_question_blocker` (Plan 00108 / v3.14.0) was shipped `enabled: false` so it never fired
+
   - Phase 1 DONE: enabled in this project's config, daemon restarted, live probe confirms unprefixed AskUserQuestion is denied with `ASKING BECAUSE:` guidance
+
   - Remaining: flip the shipped install/upgrade default to enabled (G2), regression test pinning the default (G4), upgrade-guide/changelog note (G5)
 
-- [00108: Nuanced AskUserQuestion Blocker](00108-question-blocker-nuanced/PLAN.md) - Not Started
-
   - Replace always-deny `ask_user_question_blocker` with prefix-positive `ASKING BECAUSE:` policy mirroring the Stop handler's `STOPPING BECAUSE:` convention
+
   - DENY path instructs agent to state assumed-correct answer and proceed (audit log for the watching user)
+
   - Ships `enabled: false`; flip to default-on in follow-up after dogfooding
 
 ### Stop-Quality Stack (dependency chain)
@@ -151,13 +147,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00293: tool inventory disable and token savings](Completed/00293-tool-inventory-disable-and-token-savings/PLAN.md) - Complete (`source_disable`, the transcript analyser, `tool-report` and the advisory shipped in v3.57.0 and are dogfooded here; the one open item, a `/context` spot check in a fresh interactive session, is a one-off handed to the owner)
+
+- [00168: Supervisor Compaction Injection Not Firing](Completed/00168-supervisor-compaction-injection-not-firing/PLAN.md) - Complete (NOOP-reason logging, the ranked-hypothesis fixes and the supervisor indicator shipped; the staged red-band dogfood is answered by the live decision log, which names every deferral gate and shows `/compact` firing)
+
+- [00166: Supervisor Multi-Terminal Session Isolation](Completed/00166-supervisor-multi-terminal-session-isolation/PLAN.md) - Complete (session-scoped signal load/consume fixed the cross-terminal `continue`, released in v3.42.0; the owner's two-terminal witness is recorded at `26e4a71f`, and Plan 00160's Phase 3 was delivered here)
+
 - [00358: a worktree venv can silently test the WRONG source tree](Completed/00358-worktree-venv-tests-wrong-source-tree/PLAN.md) - Complete (a test session now refuses to start when the package resolves outside the invoking checkout, naming both paths and the setup script; the `worktree_create` guidance says a fresh worktree has no venv)
 
 - [00356: secret guard bracket glob false positive](Completed/00356-secret-guard-bracket-glob-false-positive/PLAN.md) - Complete (a bracket expression at a token's edge was read as an open wildcard, so an ordinary jq array subscript was denied; fixed and merged by a worktree sub-agent, whose incidental finding shipped as Plan 00357)
-
-- [00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy](Completed/00110-python-discovery-dry-consolidation/PLAN.md) - Complete (interpreter discovery consolidated into one helper with a latest-always policy; the `UNRELEASED/` post-upgrade task carries the operator-facing change. Closed on the ruling that a release is never part of a plan's definition of done)
-
-- [00250: CI must actually run the acceptance gates it calls blocking](Completed/00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Complete at the warm-up commit + the archiving commit (CI now runs the blocking acceptance gates; the last flake, probe #144, was a Swift toolchain cold-start exceeding the lint budget, fixed by warming `swiftc` before the tests rather than widening the budget, and confirmed green on all three interpreters)
 
 - [00359: the release pipeline checks the slate is clean before it starts](Completed/00359-release-slate-clean-gate/PLAN.md) - Complete at `7f0f6f40`…`268dab5b` + the archiving commit (`release-slate-check` runs as Stage 0 of `/release`: HEAD's exact sha must be CI-green, mid-work plans and unlanded branches stop for a human, and `accept-wip` is the only way to proceed over them)
 
@@ -209,8 +207,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00332: docs qa vendor truth per project](Completed/00332-docs-qa-vendor-truth-per-project/PLAN.md) - Complete at `116207c7` + the archiving commit (a monorepo sub-project's `layout.vendor_dirs` never reached docs QA, which was handed one flat set from the ROOT block; the vendored-path predicate is now resolved per-path against the owning project, longest root winning)
 
-- [00331: vendor dirs config is inert](Completed/00331-vendor-dirs-config-is-inert/PLAN.md) - Complete at `6b4fa867`…`ba7269d5` + the archiving commit (`layout.vendor_dirs` was a facade with zero production consumers, so declaring one did nothing; every reader now routes through it, resolved from the file's owning project)
-
 ## Blocked / On Hold Plans
 
 - None. (00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
@@ -222,6 +218,8 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 - [00034: Model-Aware Agent Team Advisor](Cancelled/00034-model-aware-agent-team-advisor/PLAN.md) - Cancelled, won't do (depended on 00032)
 
 - [00035: StatusLine Data Cache + Model-Aware Advisor](Cancelled/00035-statusline-data-cache-model-advisor/PLAN.md) - Cancelled, won't do (depended on 00032)
+
+- [00108: Nuanced AskUserQuestion Blocker](Cancelled/00108-question-blocker-nuanced/PLAN.md) - Superseded by Plan 00117, which shipped this exact design in v3.14.0 (`ASKING BECAUSE:` prefix, strict/advisory modes, guidance, rule id); the status header had simply never moved
 
 - [00131: Block Untracked Claude Memory + Tracked-Docs Progressive Disclosure](Cancelled/00131-disable-auto-memory-tracked-docs-system/PLAN.md) - Cancelled, won't do the residue (Phases 1–5 shipped in v3.23.0 and Plan 00284 delivered the dogfood migration; the last item, a scaffolding skill held "until a client asks", is declined)
 
@@ -258,15 +256,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 360 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 305 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 308 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 34 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 30 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
-- **Cancelled/Abandoned**: 11 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
+- **Cancelled/Abandoned**: 12 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 34 + 305 + 11 = **350 folders**, spanning
+- **Folder-to-number reconciliation**: 30 + 308 + 12 = **350 folders**, spanning
   **347 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -282,8 +280,8 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the completion of Plan 00358 (34 root, 305
-  `Completed/`, 11 `Cancelled/`, 347 distinct numbers against a counter of 360 —
+- **Last reconciled at**: the closure of Plans 00108, 00166, 00168 and 00293
+  on the definition-of-done ruling (30 root, 308 `Completed/`, 12 `Cancelled/`, 347 distinct numbers against a counter of 360 —
   350 folders, three of which share a number with another from before the
   counter existed: 00034, 00039, 00041). Every figure above was recounted from
   disk rather than incremented, and the folderless set was recomputed the same

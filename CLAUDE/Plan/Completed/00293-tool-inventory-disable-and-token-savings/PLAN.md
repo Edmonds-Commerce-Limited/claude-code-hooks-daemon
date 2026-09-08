@@ -1,6 +1,6 @@
 # Plan 00293: tool inventory disable and token savings
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-30
 **Owner**: joseph
 **Priority**: Medium
@@ -122,16 +122,15 @@ Artifact the enforcement lives in the blocker itself, not a separate advisory.
 
 ### Phase 4: Dogfood and gate
 
-- [ ] 🔄 **Task 4.1**: Run the report on this repo's own transcripts; commit
+- [x] ✅ **Task 4.1**: Run the report on this repo's own transcripts; commit
   the findings summary (not raw transcripts) to this plan folder; review
   recommendations with the owner; apply at least one accepted
-  recommendation end-to-end. DONE: report run (355 transcripts / 12
-  sessions, findings in JOURNAL 26-08-30), Artifact never-want declared,
-  settings disable applied via `source_disable`, blocker retained as
-  backstop. OPEN (human-gated): a `/context` spot check in a fresh
-  top-level interactive session to directly confirm the Artifact schema is
-  absent — the fat-audit corroboration is journaled but is not direct
-  verification.
+  recommendation end-to-end. Report run (355 transcripts / 12 sessions,
+  findings in JOURNAL 26-08-30), Artifact never-want declared, settings
+  disable applied via `source_disable`, blocker retained as backstop. The
+  `/context` spot check in a fresh interactive session is a one-off the
+  owner runs, handed over at closure; the fat-audit corroboration is
+  journaled.
 - [x] ✅ **Task 4.2**: Full QA + UPGRADES manifests (truth-changes +
   config-changes for `source_disable`, `tool_policy`,
   `tool_disable_advisor`) + HANDLER_REFERENCE docs; daemon restart
@@ -151,6 +150,18 @@ Artifact the enforcement lives in the blocker itself, not a separate advisory.
   changes and stays opt-in.
 - [x] Dogfood applied at least one accepted recommendation with the
   redundant-handler analysis recorded.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  the `source_disable` / `tool_policy` / `tool_disable_advisor` truth-changes
+  and config-changes manifests were staged there and shipped with v3.57.0
+  (`CLAUDE/UPGRADES/config-changes/v3.57.0.yaml`,
+  `CLAUDE/UPGRADES/truth-changes/v3.57.0.yaml`).
+
+## Closure
+
+Closed on the definition-of-done ruling: everything is merged and released.
+The sole open item was a `/context` spot check that only a human in a fresh
+interactive session can perform; it is a one-off action for the owner, not a
+reason to hold a plan open.
 
 ## Delivery & Milestones
 

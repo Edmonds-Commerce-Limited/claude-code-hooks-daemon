@@ -4,6 +4,12 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00331: vendor dirs config is inert](00331-vendor-dirs-config-is-inert/PLAN.md) - Complete at `6b4fa867`…`ba7269d5` + the archiving commit (`layout.vendor_dirs` was a facade with zero production consumers, so declaring one did nothing; every reader now routes through it, resolved from the file's owning project)
+
+- [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Complete at the warm-up commit + the archiving commit (CI now runs the blocking acceptance gates; the last flake, probe #144, was a Swift toolchain cold-start exceeding the lint budget, fixed by warming `swiftc` before the tests rather than widening the budget, and confirmed green on all three interpreters)
+
+- [00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy](00110-python-discovery-dry-consolidation/PLAN.md) - Complete (interpreter discovery consolidated into one helper with a latest-always policy; the `UNRELEASED/` post-upgrade task carries the operator-facing change. Closed on the ruling that a release is never part of a plan's definition of done)
+
 - [00102: Hook Executable-Bit Defense](00102-hook-exec-bit-defense/PLAN.md) - Complete (multi-tier defence against hooks losing their executable bit, every criterion verified against its named test; closed on the ruling that a release-time acceptance gate is not a plan criterion — the probes are on main)
 
 - [00328: human model choice cannot be read from keystrokes](00328-human-model-choice-cannot-be-read-from-keystrokes/PLAN.md) - Complete at `c4e22ac0`…`dd7f43f3` + the archiving commit (the picker types no text a parser can read, so the restore now arms only on Claude Code's OWN downgrade record and the keystroke-recognition channel is deleted)

@@ -1,6 +1,6 @@
 # Plan 00108: Nuanced AskUserQuestion Blocker
 
-**Status**: Not Started
+**Status**: Superseded (by Plan 00117, which shipped this design in v3.14.0)
 **Created**: 2026-05-15
 **Owner**: TBD
 **Priority**: Medium
@@ -247,6 +247,18 @@ This is a single-handler change with one test file and one config touch.
 Expected effort: 1–2 hours including QA + daemon restart verification. No
 phase-level time estimates — see project rule "no time estimates in plan
 documents".
+
+## Closure
+
+Superseded, not cancelled: everything this plan asked for exists, delivered
+under Plan 00117 and released in v3.14.0. The shipped handler
+(`handlers/pre_tool_use/ask_user_question_blocker.py`) has the strict and
+advisory modes, the `ASKING BECAUSE:` required prefix with a `required_prefix`
+override, a `get_claude_md()` that states the assume-and-proceed rule, a
+registered rule id, and the near-miss acceptance tests; it is enabled by
+default, which is stronger than this plan's cautious Task 6.1 asked. This
+plan's status header simply never moved. The tasks below are left as drafted
+so the design record reads as it was written; the delivered form is 00117's.
 
 ## Notes & Updates
 

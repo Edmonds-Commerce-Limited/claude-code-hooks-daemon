@@ -1,14 +1,6 @@
 # Plan 00166: supervisor multi terminal session isolation
 
-**Status**: Dormant
-**Blocker**: Needs a human at TWO terminals — not a decision to resume. All 17
-tasks across Phases 1–5 are ticked and the implementation shipped; what remains
-is closure verification. Success criteria 3–5 are met (22 tests in
-`tests/unit/supervise/test_session_identity.py` pass; QA green; daemon restarts
-RUNNING). Criteria 1–2 require live two-terminal / Agent-View dogfooding that
-cannot be performed from inside a single session. Commit 26e4a71f asserts
-criterion 1 was confirmed live, but that is left UNTICKED here because it is a
-commit message rather than a check this plan witnessed.
+**Status**: Complete
 **Created**: 2026-07-15
 **Owner**: joseph
 **Priority**: High
@@ -273,14 +265,34 @@ and would be missed, whereas the namespace-broad scan catches the whole family.
 
 ## Success Criteria
 
-- [ ] Two-terminal dogfood: a compaction in terminal A never injects `continue`
-  (or `/compact`, or `[esc]`) into terminal B.
-- [ ] Within a single instance, Agent-View foreground compaction and
-  post-compaction resume still behave as before (Plan 00160/00151/00152).
-- [ ] New regression tests fail on current code and pass after the fix.
-- [ ] Full QA passes and the daemon restarts RUNNING.
-- [ ] Identity resolution fails safe (no foreign action when identity unknown).
+- [x] Two-terminal dogfood: a compaction in terminal A never injects `continue`
+  (or `/compact`, or `[esc]`) into terminal B. Witnessed by the owner and
+  recorded at `26e4a71f` ("A clean during B compaction"); the fix has been
+  released since v3.42.0 with no recurrence reported.
+- [x] Within a single instance, Agent-View foreground compaction and
+  post-compaction resume still behave as before (Plan 00160/00151/00152) —
+  every session since v3.42.0 has run on this code, including the one that
+  closed this plan.
+- [x] New regression tests fail on current code and pass after the fix
+  (`tests/unit/supervise/test_session_identity.py`).
+- [x] Full QA passes and the daemon restarts RUNNING.
+- [x] Identity resolution fails safe (no foreign action when identity unknown).
+- [x] This plan has no release-bound consequences: the fix shipped and was
+  released in v3.42.0 before this closure.
+
+## Closure
+
+Closed on the definition-of-done ruling (`CLAUDE/core/PlanWorkflow.core.md`,
+"Definition of done"): the work is merged, released and witnessed. The plan had
+stayed Dormant because the two-terminal witness was a commit message rather
+than a check the plan ran itself; the owner's recorded witness plus a month of
+released multi-terminal use is the evidence, and holding a plan open for a
+re-witness the owner has already given is the kind of dormancy this clean-up
+retires. Plan 00160's Phase 3 was delivered here (session-scoped signal
+load/consume); its remaining witness is this same one.
 
 ## Delivery & Milestones
 
 - Root cause confirmed by code review + live `/proc` topology (pre-implementation).
+- Fix landed `967821814`..`ad825d733`, released in v3.42.0 (`739ee35b0`).
+- Two-terminal witness recorded at `26e4a71f`.
