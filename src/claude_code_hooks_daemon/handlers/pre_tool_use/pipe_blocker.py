@@ -29,6 +29,11 @@ from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.pipe_blocker.common import UNIVERSAL_WHITELIST_PATTERNS
 from claude_code_hooks_daemon.strategies.pipe_blocker.registry import PipeBlockerStrategyRegistry
+from claude_code_hooks_daemon.utils.cli_command import (
+    ECHD_CAPTURE_NAME,
+    echd_capture_path,
+    echd_capture_path_for_docs,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted,
     strip_quoted_heredoc_bodies,
@@ -79,10 +84,9 @@ def _matches_any_configured(patterns: list[str], source_segment: str) -> bool:
 
 # Default preview line count suggested in the echd-capture recommendation.
 _ECHD_CAPTURE_DEFAULT_LINES = 20
-# Name of the deployed capture helper (Plan 00164 Phase 6) and its location
-# relative to the daemon dir (parent of the untracked runtime dir).
-_ECHD_CAPTURE_NAME = "echd-capture"
-_ECHD_CAPTURE_REL_PARTS = ("scripts", _ECHD_CAPTURE_NAME)
+# Name of the deployed capture helper (Plan 00164 Phase 6). Its location is
+# owned by utils.cli_command (echd_capture_path), beside the CLI wrapper.
+_ECHD_CAPTURE_NAME = ECHD_CAPTURE_NAME
 
 # Redaction placeholder substituted for a -m/-F message VALUE before pipe
 # detection. Deliberately contains no "|" so it can never itself trigger a
@@ -744,35 +748,30 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
     def _resolve_echd_capture_path(self) -> Path | None:
         """Resolve the deployed ``echd-capture`` helper to an absolute path.
 
-        Looks under the daemon dir (the parent of the untracked runtime dir),
-        which resolves correctly for BOTH install modes:
-          - Self-install (dogfooding): {project_root}/scripts/echd-capture
-          - Normal client install: {project_root}/.claude/hooks-daemon/scripts/echd-capture
+        The helper is deployed beside the CLI wrapper (Plan 00362 Task 1.3),
+        so :func:`cli_command.echd_capture_path` is the one place that knows
+        where it lives in either install mode:
+          - Self-install (dogfooding): {project_root}/bin/echd-capture
+          - Normal client install: {project_root}/.claude/hooks-daemon/bin/echd-capture
 
         If the helper exists but lost its executable bit (e.g. a client
         checkout with ``git core.fileMode=false``), self-heal by chmod'ing it —
-        this is the daemon's own vendored script, so fixing its permissions in
+        this is the daemon's own deployed script, so fixing its permissions in
         place is safe and expected.
 
         Returns:
             Absolute path to a present AND executable helper, or ``None`` if
             it cannot be found/made executable anywhere plausible.
         """
-        from claude_code_hooks_daemon.core.project_context import ProjectContext
-
-        daemon_dir: Path | None
         try:
-            daemon_dir = ProjectContext.daemon_untracked_dir().parent
+            helper = echd_capture_path()
         except RuntimeError:
             # ProjectContext not initialised (default-config / standalone
             # entry point / unit tests). This is an expected branch, not an
             # error: the caller falls back to the temp-file guidance whenever
             # no helper path can be resolved.
-            daemon_dir = None
-        if daemon_dir is None:
             return None
 
-        helper = daemon_dir.joinpath(*_ECHD_CAPTURE_REL_PARTS)
         # eacces-safe-exempt: the daemon's own deployed helper script, under
         # its own install directory.
         if not helper.is_file():
@@ -1120,6 +1119,46 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         """Return the 2 Rule objects backing this handler's blocking behaviour."""
         return list(self._rules)
 
+    def _capture_guidance(self) -> str:
+        """The "what to do instead" paragraphs of the CLAUDE.md guidance.
+
+        Two branches, chosen at render time (Plan 00362 Task 1.3, client
+        report §3). The helper is named ONLY when its deployed path exists on
+        this install, and then by the project-root-relative path that is true
+        in every clone — never an absolute path (Plan 00244: this text is
+        written into a tracked file) and never a bare ``echd-capture`` (it is
+        on nobody's ``PATH``, so a bare name is ``command not found``). When
+        the helper does not resolve, the redirect recipe is the primary path
+        and the helper is not mentioned at all.
+        """
+        redirect = (
+            f"`pytest tests/ > {ProjectPath.SCRATCH_DIR}/out.txt 2>&1` then read the "
+            "file selectively. Keep the capture IN-REPO — `project_containment` "
+            "denies a redirect to a path outside the repository, and a capture "
+            "written outside it is gone on the next container restart.\n\n"
+        )
+        if self._resolve_echd_capture_path() is None:
+            return f"**Redirect to a file, then read a bounded slice** (no pipe): {redirect}"
+
+        helper = echd_capture_path_for_docs()
+        return (
+            f"**Preferred — the deployed `{helper}` helper**: capture the FULL output, "
+            "see only a preview. Run it by the path below from the project root (the block "
+            "message prints the absolute form); it is not on `PATH`, so never type the "
+            "bare name.\n\n"
+            "```bash\n"
+            "# WRONG — blocked (and truncates):\n"
+            "pytest tests/ 2>&1 | tail -20\n\n"
+            "# RIGHT — full capture, bounded preview + path to the rest:\n"
+            "set -o pipefail\n"
+            f"pytest tests/ 2>&1 | {helper} {_ECHD_CAPTURE_DEFAULT_LINES}\n"
+            f"# prints the last {_ECHD_CAPTURE_DEFAULT_LINES} lines + "
+            "'(full output: /…/command-output-….txt)'.\n"
+            "# Use --head N for the first N lines. pipefail keeps pytest's exit code visible.\n"
+            "```\n\n"
+            f"**Always-works alternative** (no helper, no pipe): {redirect}"
+        )
+
     def get_claude_md(self) -> str | None:
         """Return CLAUDE.md guidance about the pipe blocker."""
         return (
@@ -1128,26 +1167,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             "and causes information loss.\n\n"
             "**Do NOT do the theatre** of capturing output to a file and then echoing the "
             "WHOLE file to stdout — that defeats the point and just bloats tokens.\n\n"
-            "**Preferred — `echd-capture`**: capture the FULL output, see only a preview. "
-            "When the block fires it prints the exact invocation to use — an ABSOLUTE path "
-            "to the deployed helper, not a bare name — so copy the path from the block "
-            "message (the helper is not guaranteed to be on `PATH`). If no helper path can "
-            "be resolved, the block recommends the temp-file redirect below instead.\n\n"
-            "```bash\n"
-            "# WRONG — blocked (and truncates):\n"
-            "pytest tests/ 2>&1 | tail -20\n\n"
-            "# RIGHT — full capture, bounded preview + path to the rest. Use the ABSOLUTE\n"
-            "# echd-capture path from the block message (shown here as /…/scripts/echd-capture):\n"
-            "set -o pipefail\n"
-            "pytest tests/ 2>&1 | /…/scripts/echd-capture 20\n"
-            "# prints the last 20 lines + '(full output: /…/command-output-….txt)'.\n"
-            "# Use --head N for the first N lines. pipefail keeps pytest's exit code visible.\n"
-            "```\n\n"
-            "**Always-works alternative** (no helper, no pipe): "
-            f"`pytest tests/ > {ProjectPath.SCRATCH_DIR}/out.txt 2>&1` then read the "
-            "file selectively. Keep the capture IN-REPO — `project_containment` "
-            "denies a redirect to a path outside the repository, and a capture "
-            "written outside it is gone on the next container restart.\n\n"
+            f"{self._capture_guidance()}"
             "**Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, "
             "`git log`, `git tag`, `git branch`, and other cheap filtering commands.\n\n"
             "**EVERY pipe in the command is judged, on its own producer.** A cheap "

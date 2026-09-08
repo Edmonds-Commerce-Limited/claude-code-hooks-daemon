@@ -290,7 +290,7 @@ def test_does_not_flag_an_absolute_path_in_a_shell_fence(tmp_path: Path) -> None
         tmp_path,
         "## Commands\n\n"
         "```bash\n"
-        "/workspace/scripts/echd-capture 20\n"
+        "/workspace/bin/echd-capture 20\n"
         "/usr/bin/env python3 -c 'print(1)'\n"
         "/tmp/upgrade.sh --project-root /workspace\n"
         "```\n",
