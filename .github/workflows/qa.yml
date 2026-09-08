@@ -160,6 +160,37 @@ jobs:
           ./bin/hooks-daemon restart
           ./bin/hooks-daemon status
 
+      # Plan 00350: fourteen transport gates skipped on every runner for want
+      # of a compiled binary — 11 in test_transport_toggle_cycle.py and 3 in
+      # test_relay_guard_fail_open.py. Same defect as the daemon socket above,
+      # one artefact over, and the same answer: provision it.
+      #
+      # TWO paths, and building without deploying fixes only 3 of the 14.
+      # relay/build.sh writes untracked/relay-build/hooks-relay-<target>, which
+      # is what the three fail-open tests open directly; the eleven
+      # toggle-cycle tests resolve the DEPLOYED untracked/bin/hooks-relay. The
+      # copy below is what relay_deploy.deploy_relay_from_build does after the
+      # build, reduced to the two steps CI needs (no route marker: that records
+      # how an INSTALL obtained the binary, and this is not an install).
+      #
+      # Cost measured, not estimated: ~1s for the whole build. It is a single
+      # crate-less source file compiled by plain rustc — no cargo, no
+      # dependency graph — so there is nothing a cache would save, and a cache
+      # that missed and skipped would reproduce the very skip being removed.
+      #
+      # `rustup target add` is the only provisioning needed. A runner's
+      # preinstalled rustc carries the host target only. musl-gcc is NOT
+      # required: rustc's self-contained linking handles it, verified by
+      # building with a deliberately poisoned musl-gcc first on PATH.
+      - name: Build the relay (for the transport gates)
+        if: ${{ !cancelled() }}
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          bash relay/build.sh
+          install -D -m 755 \
+            untracked/relay-build/hooks-relay-x86_64-unknown-linux-musl \
+            untracked/bin/hooks-relay
+
       # 95% is the threshold CLAUDE.md and CONTRIBUTING.md both state, so CI
       # enforces it rather than merely reporting it — an unenforced claim is
       # the gap this workflow exists to close. Measured at 95.59% on a clean

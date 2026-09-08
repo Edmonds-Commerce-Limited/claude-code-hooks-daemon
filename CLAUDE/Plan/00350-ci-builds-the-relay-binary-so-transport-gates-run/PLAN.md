@@ -1,6 +1,6 @@
 # Plan 00350: ci builds the relay binary so transport gates run
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Medium
@@ -54,28 +54,55 @@ where a regression is both easy and expensive.
 
 ### Phase 1: Measure
 
-- [ ] ⬜ **Task 1.1**: Confirm the skip count and its distribution against a
-  runner condition reproduced locally (a `git worktree`, whose `untracked/` is
-  empty — the method Plan 00250 used), rather than against a CI log.
-- [ ] ⬜ **Task 1.2**: Establish what building `hooks-relay` costs: toolchain
-  required, build time cold and warm, and whether the CI cache already carries
-  what it needs.
+- [x] ✅ **Task 1.1**: **14 confirmed, 11 + 3**, by moving both relay artefacts
+  aside and re-running the two files: 8 passed, 14 skipped. The same 14 appear
+  in CI. Reproducing it locally also found what a CI log alone would not have:
+  **the two files look at DIFFERENT paths**. `test_relay_guard_fail_open.py`
+  opens the build output
+  (`untracked/relay-build/hooks-relay-x86_64-unknown-linux-musl`), the 11
+  toggle-cycle tests the deployed `untracked/bin/hooks-relay`. Building without
+  deploying fixes 3 of 14 and leaves 11 skipping — which looks enough like
+  success to stop there.
+- [x] ✅ **Task 1.2**: Build cost is **~1 second**, and the plan's caching risk
+  does not apply. It is one crate-less source file compiled by plain `rustc` —
+  no cargo, no dependency graph — so a cache would save nothing and a cache
+  miss that skipped would reproduce the very skip being removed. Only
+  provisioning needed is `rustup target add x86_64-unknown-linux-musl`; a
+  runner's preinstalled `rustc` carries the host target only. **`musl-gcc` is
+  NOT required** — verified by building with a deliberately poisoned `musl-gcc`
+  first on PATH, which succeeded, so rustc's self-contained linking covers it.
+  The CI step reproduces the deployed binary **byte-for-byte** (same sha256).
 
 ### Phase 2: Provision
 
-- [ ] ⬜ **Task 2.1**: Build the relay in the CI QA job before `Tests + coverage`, on all three interpreters, without a second job to keep in sync —
-  the shape Plan 00250 Task 2.1 settled on for the daemon.
-- [ ] ⬜ **Task 2.2**: Fix whatever the 14 tests then report. Assume at least
-  one will not have run correctly since it was written; that is what happened
-  with the daemon gates.
+- [x] ✅ **Task 2.1**: A `Build the relay (for the transport gates)` step in the
+  QA job, before `Tests + coverage`, on all three interpreters, no second job.
+  It adds the musl target, runs `relay/build.sh`, and `install -D -m 755`s the
+  output to `untracked/bin/hooks-relay` — both paths, per Task 1.1.
+  `test_ci_provisions_the_relay.py` guards the step's existence, the deploy,
+  the target, the ordering, and that it cannot fail quietly.
+- [x] ✅ **Task 2.2**: Nothing to fix — **22 passed, 0 skipped** against the
+  artefact the CI step produces. The task assumed at least one gate would not
+  have run correctly since it was written, as happened with the daemon gates.
+  That did not hold here, which is worth recording as a result rather than
+  quietly dropping: these tests were only ever skipped, not wrong.
 
 ### Phase 3: Guard the class
 
-- [ ] ⬜ **Task 3.1**: A skip of a relay-dependent gate fails the run. Prefer
-  extending the existing declaration-driven guard
-  (`tests/acceptance/blocking_gate_guard.py`) over writing a second one — it
-  reads its blocking set from `RELEASING.md` Step 12.0, so the cheapest correct
-  answer may be to add these files to that declaration.
+- [x] ✅ **Task 3.1**: `tests/relay_gate_guard.py` turns a relay-provisioning
+  skip into a failure **in CI only**, registered from `tests/conftest.py`
+  because the gates straddle `acceptance/` and `integration/`. Proven by nested
+  pytest runs in both directions: with `CI=true` the relay skip fails and an
+  unrelated skip in the same file does not; without it, both still skip.
+
+  Two deliberate departures from the task as written. It keys on the **skip
+  reason**, not a file list — the two files spell their skip differently and
+  sit in different directories, and what they share is the artefact, not a
+  path. And it does **not** extend `RELEASING.md` Step 12.0: adding files there
+  makes them release-blocking, which is a decision about release scope rather
+  than CI visibility, and is the owner's — the same line Plan 00250 Task 1.2
+  drew. Scoping to CI is what makes that unnecessary: a developer with no Rust
+  toolchain genuinely cannot run these and is not the defect.
 
 ### Phase 4: Verify
 
@@ -97,12 +124,16 @@ where a regression is both easy and expensive.
 
 ## Risks & Mitigations
 
-- **The relay build may need a toolchain CI does not have.** Measure in Task 1.2
-  before designing Phase 2; if the cost is real, "provision it" is still the
-  precedent (Plan 00245 Decision 3) but the shape of the answer changes.
-- **Building on every run may be too slow.** Cache keyed on the relay source, and
-  treat a cache miss as a build rather than a skip — a skipped build reproduces
-  exactly the defect this plan exists to remove.
+- ~~**The relay build may need a toolchain CI does not have.**~~ Measured in
+  Task 1.2: `rustup target add` and nothing else. `musl-gcc` is not needed.
+- ~~**Building on every run may be too slow.**~~ Measured at ~1s. No cache, and
+  deliberately so: there is nothing for one to save, and a cache miss that
+  skipped would reproduce the defect this plan removes.
+- **The CI step and the gates are coupled only by two hardcoded path
+  literals.** Nothing derives one from the other, so a rename on either side
+  silently returns the gates to skipping. `test_ci_provisions_the_relay.py`
+  asserts the workflow names both paths; the CI-scoped skip guard catches it if
+  that ever stops being enough.
 
 ## Delivery & Milestones
 

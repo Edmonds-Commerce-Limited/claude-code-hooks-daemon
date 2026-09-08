@@ -22,6 +22,14 @@ from claude_code_hooks_daemon.core.response_schemas import (
 )
 from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegistry
 
+# Re-exported so pytest collects it as a hook implementation from this
+# conftest. It sits at `tests/` root rather than in a subdirectory because the
+# relay-dependent gates it covers straddle `acceptance/` and `integration/`.
+# Outside CI it does nothing at all — see the module docstring.
+from tests.relay_gate_guard import pytest_runtest_makereport
+
+__all__ = ["pytest_runtest_makereport"]
+
 
 @pytest.fixture
 def response_validator():
