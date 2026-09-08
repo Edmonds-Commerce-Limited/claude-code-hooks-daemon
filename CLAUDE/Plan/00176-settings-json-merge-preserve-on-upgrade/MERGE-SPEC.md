@@ -181,6 +181,41 @@ opposite: Step 9 runs after Step 3's snapshot, while the fast path `exit 0`s
 before Step 3 ever runs and used to copy silently. That correction is recorded
 in `PLAN.md` Task 2.0.
 
+## Q4b — Absence is not an override
+
+The audit's second critical finding, verified: the daemon's shipped
+`settings.json` has five top-level keys — `hooks`, `statusLine`, `permissions`,
+`enableArtifact`, `plansDirectory`. Under the ownership table's
+"client-owned: preserved verbatim, always", a client whose file lacks
+`permissions` would **never receive it**, because preserving a client key
+includes preserving its absence. Today's verbatim copy delivers it.
+
+**Two of the three are security controls**, which makes this worse than the
+preference regression it looks like:
+
+| Key              | Shipped value                                                  | What silence costs         |
+| ---------------- | -------------------------------------------------------------- | -------------------------- |
+| `permissions`    | `deny: Edit(//tmp/**), Edit(//var/tmp/**), Edit(//dev/shm/**)` | write guards never applied |
+| `enableArtifact` | `false`                                                        | publishing stays enabled   |
+| `plansDirectory` | `./CLAUDE/Plan`                                                | plan workflow misroutes    |
+
+So the rule is: **you can only override something you have expressed an opinion
+about.** Presence is merged three-way exactly as value is —
+
+- key absent from the client file **and** absent from the old default → it is
+  NEW this version; deliver it.
+- key absent from the client file **but present in the old default** → the
+  client removed it deliberately; preserve the absence.
+- key present → the client's; preserve their value.
+
+**Where the "preserve, don't destroy" tiebreak does NOT apply.** That tiebreak
+is about the client's DATA. Declining to deliver a deny rule destroys nothing,
+but it does silently withhold a protection the client would have got from the
+copy this merge replaces. With no baseline available (Q2b), a security-relevant
+default should therefore be **delivered and reported**, not skipped — the
+opposite of the degradation the preference class takes, and the reason the two
+must not share one code path.
+
 ## Q5 — Interaction with Plan 00175's validator
 
 **Moot: `statusline_refresh_checker` does not exist.** The only statusline

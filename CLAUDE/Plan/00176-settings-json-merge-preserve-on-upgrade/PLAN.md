@@ -224,22 +224,22 @@ should build on the `src/` pair, since it runs inside the daemon and
   `/.claude/hooks/` substring failing in both directions — including a false
   NEGATIVE on the relative legacy shape the rule existed to repair.
 
-- [ ] ⬜ **Task 1.4**: Audit findings still shaping Phase 2. Detail and evidence
-  in the report.
+- [ ] ⬜ **Task 1.4**: Audit findings shaping Phase 2; evidence in the report.
 
-  **Resolved — the missing baseline** ([MERGE-SPEC.md](MERGE-SPEC.md) Q2b).
-  Verified: there is no `settings.json.example`, so the three-way rule had no
-  old default to compare against. The daemon's own `.claude/settings.json` IS
-  its shipped default, so Layer 1 copying that pre-checkout and exporting it
-  gives the baseline — an extension of the handover `config_preserve.sh` already
-  uses for YAML. With no baseline available the class degrades to *preserve
-  every client value, upgrade none*, and must never guess one.
+  **Resolved, both verified against the tree and written up in
+  [MERGE-SPEC.md](MERGE-SPEC.md):** the missing old-default baseline (Q2b — the
+  daemon's own `settings.json` IS its shipped default, so Layer 1 can hand it
+  over pre-checkout, exactly as it already does for YAML), and *absence is not
+  an override* (Q4b — two of the three keys a client could silently stop
+  receiving are security controls, so presence must be merged three-way just
+  like value).
 
-  **Still open**: preserving client-owned keys preserves their ABSENCE, which
-  would stop an existing project receiving new recommended defaults it gets
-  today; the headless abort has no rollback on the fast path; and four
+  **Still open**: the headless abort has no rollback on the fast path; and four
   unsynchronised writers with no lock, one of which (`install.py`) rewrites the
-  whole document and would undo a merge.
+  whole document and would undo a merge. Note `hook_command_migration.py:258`
+  writes in place **deliberately** — it preserves the mode of a git-tracked
+  file, which `Path.replace()` rewrites — so the fix there is
+  atomic-plus-`copymode`, as `settings_repair.py` does, not a swap.
 
 ### Phase 2: TDD implementation
 
