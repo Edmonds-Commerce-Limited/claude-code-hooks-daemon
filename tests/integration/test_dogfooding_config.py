@@ -133,7 +133,6 @@ class TestDogfoodingConfiguration:
         opt_in_handlers = frozenset(
             {
                 "validate_instruction_content",  # False positives on this project's own CLAUDE.md/README.md
-                "ask_user_question_blocker",  # Optional unattended mode — disabled by default
                 # Opt-in transcript mining (Plan 00274); dogfood enablement is a
                 # deliberate main-thread act after merge, not a default.
                 "skill_opportunity_detector",
