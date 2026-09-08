@@ -186,13 +186,37 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for the dispatch declaration handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.constants.tools import ToolName
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        undeclared_probe = ToolPayload(
+            tool_name=ToolName.AGENT,
+            tool_input={
+                "description": "summarise findings",
+                "prompt": "Read the three files under src/ and summarise what they do.",
+            },
+        )
+        declared_probe = ToolPayload(
+            tool_name=ToolName.AGENT,
+            tool_input={
+                "description": "summarise findings",
+                "prompt": (
+                    "Write your report into CLAUDE/Plan/00345-harness-payloads-for-"
+                    "shell-and-call-syntax-tests/ and summarise what you found."
+                ),
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Task dispatch without a file-handoff declaration",
-                command="Use the Agent tool to dispatch a subagent with a prompt that names "
-                "neither a plan folder nor a non-plan-work destination",
+                command=undeclared_probe.as_instruction(),
+                tool_payload=undeclared_probe,
                 description=(
                     "Injects the file-handoff contract as additionalContext "
                     "(advisory default) when the dispatch prompt declares neither "
@@ -213,6 +237,15 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
                     "tool to dispatch a subagent with a prompt naming neither a "
                     "plan folder nor a non-plan-work destination"
                 ),
+                harness_cannot_produce=(
+                    "Strict mode is off in this checkout's configuration, and a "
+                    "payload cannot turn it on: the harness varies the EVENT, not "
+                    "the daemon's config. Converting this needs a per-probe config "
+                    "override the harness does not have, and inventing one would "
+                    "mean a probe that reconfigures the daemon other probes are "
+                    "sharing. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_dispatch_declaration.py."
+                ),
                 description="Denies the dispatch until a declaration is present (opt-in strict mode)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"DISPATCH DECLARATION", r"subagent-reports"],
@@ -224,7 +257,8 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Task dispatch naming a plan folder (near-miss allow)",
-                command="Use the Agent tool with a prompt naming a CLAUDE/Plan/NNNNN-name/ folder",
+                command=declared_probe.as_instruction(),
+                tool_payload=declared_probe,
                 description="Stays silent when the plan folder is already declared",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

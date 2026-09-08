@@ -249,7 +249,23 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests: a DENY case and an ALLOW case."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        new_file_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": (
+                    "$CLAUDE_PROJECT_DIR/untracked/scratch/"
+                    "acceptance-test-write-clobber/brand-new.txt"
+                ),
+                "content": "probe\n",
+            },
+        )
 
         return [
             AcceptanceTest(
@@ -257,6 +273,16 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
                 command=(
                     "Use the Write tool on a file that already exists and that you "
                     "have NOT read in this session (for example a tracked source file)."
+                ),
+                harness_cannot_produce=(
+                    "The automated harness DELETES the file a PreToolUse probe names "
+                    "before dispatching, because a probe whose path already exists "
+                    "describes a clobber and this very handler denies it — three "
+                    "unrelated ALLOW probes failed that way on residue from an "
+                    "earlier run. This deny case needs the one precondition that "
+                    "rule exists to prevent, so it is a genuine boundary rather "
+                    "than unfinished conversion. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_write_clobber_guard.py."
                 ),
                 description="Blocks a Write that would destroy unread file contents",
                 expected_decision=Decision.DENY,
@@ -272,7 +298,8 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Write to a brand-new path is allowed",
-                command=("Use the Write tool to create a file at a path that does not exist yet."),
+                command=new_file_probe.as_instruction(),
+                tool_payload=new_file_probe,
                 description=(
                     "Creating a new file is NOT blocked - proves the matcher is not "
                     "over-broad, which a deny-only suite cannot show"

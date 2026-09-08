@@ -299,15 +299,25 @@ is the backstop until the current session ends."""
             tool_name=ToolName.ARTIFACT,
             tool_input={"action": "list", "limit": 1},
         )
+        # Publishing is the ABSENCE of an action, so this payload carries none.
+        # That makes it the one case where the rendered sentence cannot show
+        # what is being tested — the meaning is in a key that is not there —
+        # so the description below says it instead.
+        publish_probe = ToolPayload(
+            tool_name=ToolName.ARTIFACT,
+            tool_input={"title": "probe", "content": "<html><body>probe</body></html>"},
+        )
 
         return [
             AcceptanceTest(
                 title="Artifact publish is denied",
-                command=(
-                    "Use the Artifact tool to publish any local .html file "
-                    "(no action parameter, which means publish)."
+                command=publish_probe.as_instruction(),
+                tool_payload=publish_probe,
+                description=(
+                    "Blocks artefact publishing (disclosure outside the project). "
+                    "No `action` key is present, and that absence IS the publish "
+                    "call — the tool defaults to publishing"
                 ),
-                description="Blocks artefact publishing (disclosure outside the project)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
                     r"BLOCKED \[R-ARTIFACT-PUBLISH\]",

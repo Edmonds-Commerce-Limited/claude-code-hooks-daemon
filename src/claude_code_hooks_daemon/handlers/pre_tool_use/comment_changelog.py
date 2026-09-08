@@ -445,10 +445,25 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests: per-language DENY cases plus a near-miss ALLOW case."""
+        from claude_code_hooks_daemon.constants.tools import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        rationale_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": scratch_path(_FIXTURE_DIR, "example.py"),
+                "content": (
+                    "# History (Plan 00047 -- do NOT re-add DISABLE_MOUSE without\n"
+                    "# reading this): fullscreen draws on the terminal alt-screen...\n"
+                    "def draw() -> None:\n"
+                    "    return None\n"
+                ),
+            },
         )
 
         tests: list[Any] = []
@@ -463,13 +478,8 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
         tests.append(
             AcceptanceTest(
                 title="comment_changelog: plan-number-keyed rationale is allowed",
-                command=(
-                    "Use the Write tool to create "
-                    f"{scratch_path(_FIXTURE_DIR, 'example.py')} whose content has a "
-                    "'#' comment reading "
-                    "'History (Plan 00047 -- do NOT re-add DISABLE_MOUSE without "
-                    "reading this): fullscreen draws on the terminal alt-screen...'"
-                ),
+                command=rationale_probe.as_instruction(),
+                tool_payload=rationale_probe,
                 description=(
                     "A rationale comment keyed by a plan/failure-mode reference "
                     "(not a release number) must be ALLOWED even though it "

@@ -424,16 +424,35 @@ class CommentSizeHandler(PreToolUseHandlerBase):
             AcceptanceTest,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        # Built rather than typed out, so the property under test -- one comment
+        # line past the 400-character limit -- is visible as arithmetic instead
+        # of being something a reader has to count.
+        over_long_comment = "# " + ("far too long for one comment line " * 12)
+        oversize_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": scratch_path(_FIXTURE_DIR, "example.py"),
+                "content": f"def example() -> None:\n    return None\n\n{over_long_comment}\n",
+            },
+        )
+        ordinary_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": scratch_path(_FIXTURE_DIR_OK, "example.py"),
+                "content": (
+                    "# Return nothing; the caller only wants the side effect.\ndef example() -> None:\n    return None\n"
+                ),
+            },
         )
 
         return [
             AcceptanceTest(
                 title="comment_size: over-long trailing comment on a new file is blocked",
-                command=(
-                    "Use the Write tool to create "
-                    f"{scratch_path(_FIXTURE_DIR, 'example.py')} whose "
-                    "content has a trailing '#' comment on one line longer than 400 characters"
-                ),
+                command=oversize_probe.as_instruction(),
+                tool_payload=oversize_probe,
                 description=(
                     "Blocks creation of a file whose comment already exceeds the "
                     "size limit (a brand-new file has no 'before', so it always "
@@ -457,12 +476,8 @@ class CommentSizeHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="comment_size: a normal, reasonably-sized comment is allowed",
-                command=(
-                    "Use the Write tool to create "
-                    f"{scratch_path(_FIXTURE_DIR_OK, 'example.py')} whose "
-                    "content has an ordinary short '#' comment (well under 400 chars, "
-                    "well under 40 lines) explaining a single function"
-                ),
+                command=ordinary_probe.as_instruction(),
+                tool_payload=ordinary_probe,
                 description=(
                     "Near-miss ALLOW case: an ordinary explanatory comment is never "
                     "blocked -- only comments that actually exceed the size limit are"

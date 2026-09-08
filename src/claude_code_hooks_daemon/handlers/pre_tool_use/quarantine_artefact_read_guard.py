@@ -321,16 +321,32 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        # The seed globs key on the FILENAME (`*-opus-security-DETAIL*`), not on
+        # where the file sits, so the probe can name the sanctioned scratch
+        # directory and still exercise the guard. Neither file is created: the
+        # decision is made from the path.
+        scratch = "$CLAUDE_PROJECT_DIR/untracked/scratch/acceptance-test-quarantine"
+        detail_probe = ToolPayload(
+            tool_name=ToolName.READ,
+            tool_input={"file_path": f"{scratch}/topic-opus-security-DETAIL.md"},
+        )
+        summary_probe = ToolPayload(
+            tool_name=ToolName.READ,
+            tool_input={"file_path": f"{scratch}/topic-opus-security-SUMMARY.md"},
+        )
 
         return [
             AcceptanceTest(
                 title="quarantine_artefact_read_guard - blocks Read of a DETAIL artefact",
-                command=(
-                    "Use the Read tool on a dummy fixture file named "
-                    "`/tmp/topic-opus-security-DETAIL.md` (create nothing — "
-                    "the deny fires on the path alone)"
-                ),
+                command=detail_probe.as_instruction(),
+                tool_payload=detail_probe,
                 description="Read of a path matching the DETAIL seed glob is denied.",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -356,10 +372,8 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="quarantine_artefact_read_guard - allows Read of the SUMMARY artefact",
-                command=(
-                    "Use the Read tool on a dummy fixture file named "
-                    "`/tmp/topic-opus-security-SUMMARY.md`"
-                ),
+                command=summary_probe.as_instruction(),
+                tool_payload=summary_probe,
                 description="The paired SUMMARY artefact is always readable.",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

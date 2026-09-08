@@ -144,11 +144,35 @@ class AgentIsolationAdvisorHandler(PreToolUseHandlerBase):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for the agent isolation advisor."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.constants.tools import ToolName
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+            ToolPayload,
+        )
+
+        isolated_probe = ToolPayload(
+            tool_name=ToolName.AGENT,
+            tool_input={
+                "description": "review a module",
+                "prompt": "Review src/ and report what you find.",
+                "isolation": "worktree",
+            },
+        )
 
         return [
             AcceptanceTest(
                 title="Agent spawned without isolation while peers are live",
+                harness_cannot_produce=(
+                    "The advisory fires only above two REGISTERED interactive "
+                    "threads, and the registry counts statusline-emitting sessions "
+                    "rather than spawned sub-agents — so the precondition is a "
+                    "second attended human session, which no payload can create. "
+                    "Its near-miss sibling below IS dispatched, which is what keeps "
+                    "an over-broad regression visible. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_agent_isolation_advisor.py."
+                ),
                 command=(
                     "With TWO OR MORE interactive Claude Code sessions open on "
                     "this checkout (the thread registry counts statusline-emitting "
@@ -175,7 +199,8 @@ class AgentIsolationAdvisorHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Agent spawned WITH worktree isolation (near-miss allow)",
-                command='Use the Agent tool with isolation: "worktree"',
+                command=isolated_probe.as_instruction(),
+                tool_payload=isolated_probe,
                 description="Stays silent when isolation was already requested",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
