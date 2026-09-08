@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00356: secret guard bracket glob false positive](00356-secret-guard-bracket-glob-false-positive/PLAN.md) - Not Started (`secret_file_guard` treats a bracket expression at a token's edge as an open wildcard, so the jq path `.foo.v[0]` is denied as a `*.vault-password` reference; fixed by expanding finite bracket expressions instead of dropping them, plus naming the matched token in the deny message)
+
 - [00355: supervisor announces every keystroke it sends](00355-supervisor-announces-every-keystroke-it-sends/PLAN.md) - Not Started (the ccy supervisor arms its status-line audit banner for `/compact`, `/effort` and `/model` only, so the ESC it injects to flush a stalled compaction — 122 of them in this session's log — lands with no notice at all and reads as a random keypress)
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)

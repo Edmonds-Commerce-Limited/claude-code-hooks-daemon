@@ -357,6 +357,102 @@ def _pattern_literal_stems(patterns: tuple[str, ...]) -> list[tuple[str, str]]:
 # the expression as ending one character early.
 _BRACKET_EXPRESSION_RE: Final[re.Pattern[str]] = re.compile(r"\[!?\]?[^\]]*\]")
 
+# A finite bracket expression denotes a CHARACTER SET, not an open run
+# (Plan 00356). The edge predicates below answer "could an arbitrary run
+# follow/precede this?" and a complete bracket expression at an edge made
+# them answer yes -- so an array subscript like `.foo.v[0]` was read as
+# ".foo.v then anything", whose 2-char `.v` edge overlaps the
+# `.vault-password` stem, and an ordinary jq path was denied. Expanding the
+# set to its concrete members instead fixes the INPUT the existing gates see,
+# rather than adding another gate to them.
+#
+# The cap bounds the combinatorial product across a token's expressions.
+# Beyond it -- and for every class that is not a finite list -- the token is
+# left UNEXPANDED and judged exactly as it was before, so the fallback fails
+# CLOSED.
+_MAX_BRACKET_EXPANSIONS: Final[int] = 64
+
+# `[[:alpha:]]`-style named classes are not character LISTS; expanding the raw
+# body would build a wrong and too-NARROW set, which is the one error
+# direction this guard cannot take.
+_POSIX_NAMED_CLASS_MARKER: Final[str] = "[:"
+
+# Bash reads BOTH spellings as negation. Python's `fnmatch` honours only `!`
+# (it treats `^` as a literal member), but these tokens are SHELL words, so
+# the shell's reading decides what the token can name. A negated class is the
+# complement of a set -- not finitely enumerable in any useful sense -- so
+# neither spelling is expanded.
+_BRACKET_NEGATION_CHARS: Final[tuple[str, ...]] = ("!", "^")
+
+
+def _bracket_expression_members(expression: str) -> tuple[str, ...] | None:
+    """Characters ``expression`` can match, or ``None`` when not enumerable.
+
+    ``expression`` is a COMPLETE bracket expression including its delimiters
+    (``[0]``, ``[a-f]``, ``[]]``). ``None`` means "leave this token alone",
+    i.e. keep the pre-Plan-00356 conservative treatment.
+    """
+    body = expression[1:-1]
+    if body[:1] in _BRACKET_NEGATION_CHARS:
+        return None
+    if _POSIX_NAMED_CLASS_MARKER in body:
+        return None
+    members: list[str] = []
+    if body[:1] == "]":
+        # POSIX: a `]` immediately after `[` is a MEMBER, not the closer.
+        members.append("]")
+        body = body[1:]
+    index = 0
+    while index < len(body):
+        if index + 2 < len(body) and body[index + 1] == "-":
+            start, end = body[index], body[index + 2]
+            if ord(end) < ord(start):
+                return None
+            members.extend(chr(point) for point in range(ord(start), ord(end) + 1))
+            index += 3
+            continue
+        members.append(body[index])
+        index += 1
+    return tuple(dict.fromkeys(members)) or None
+
+
+def _expand_bracket_expressions(token: str) -> list[str]:
+    """Concrete spellings of ``token``, one per member of each finite class.
+
+    ``.foo.v[0]`` -> ``['.foo.v0']``; ``dummy.vault-[pq]*`` ->
+    ``['dummy.vault-p*', 'dummy.vault-q*']`` (a real ``*`` survives expansion
+    and each spelling is still analysed as a glob).
+
+    A token with no complete bracket expression, one carrying a class that is
+    not a finite list, or one whose expansion would exceed
+    ``_MAX_BRACKET_EXPANSIONS`` is returned UNCHANGED as a single-element
+    list — the caller can compare against ``[token]`` to detect that.
+    """
+    matches = list(_BRACKET_EXPRESSION_RE.finditer(token))
+    if not matches:
+        return [token]
+
+    member_sets: list[tuple[str, ...]] = []
+    combinations = 1
+    for match in matches:
+        members = _bracket_expression_members(match.group(0))
+        if members is None:
+            return [token]
+        combinations *= len(members)
+        if combinations > _MAX_BRACKET_EXPANSIONS:
+            return [token]
+        member_sets.append(members)
+
+    spellings = [""]
+    cursor = 0
+    for match, members in zip(matches, member_sets, strict=True):
+        literal = token[cursor : match.start()]
+        spellings = [prefix + literal + member for prefix in spellings for member in members]
+        cursor = match.end()
+    tail = token[cursor:]
+    return [spelling + tail for spelling in spellings]
+
+
 # Plan 00272 live-probe gap (class-(c) glob truncation, G2): the minimum
 # character overlap required at the boundary between a glob token's literal
 # residue and a LEADING-WILDCARD protected pattern's literal stem before the
@@ -575,17 +671,47 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
     normalisation and realpath resolution), or a glob-shaped word whose
     expansion could include a protected name. Prose containing the bare word
     ``secret`` never matches — only path-shaped tokens do.
+
+    Thin wrapper over :func:`find_protected_mention_detail`, which also
+    reports WHICH token matched. Kept as the primary entry point so the
+    callers that only need the glob are unaffected.
+    """
+    detail = find_protected_mention_detail(command, patterns)
+    return None if detail is None else detail[0]
+
+
+def find_protected_mention_detail(
+    command: str, patterns: tuple[str, ...]
+) -> tuple[str, str] | None:
+    """``(pattern, token)`` for the first protected mention, else ``None``.
+
+    The TOKEN is reported so a deny message can name the span it objected to
+    (Plan 00356). Without it the only route to a diagnosis is bisecting the
+    input across repeated denied writes — the glob alone does not say which
+    of a file's many words tripped it. Echoing it discloses nothing: it is
+    text the caller just supplied, never content read from a protected file.
     """
     if not command or not patterns:
         return None
     project_root = resolve_project_root()
     stem_pairs = _pattern_literal_stems(patterns)
     for token in _tokenise(_without_import_module_paths(command)):
-        for form in _normalised_token_forms(token):
-            for pattern in patterns:
-                if path_matches_globs(form, (pattern,), project_root=project_root):
-                    return pattern
-            if _is_glob_shaped(form):
+        for raw_form in _normalised_token_forms(token):
+            # A token whose bracket expressions are all finite denotes exactly
+            # the set of its expansions, so that set -- not the bracketed
+            # spelling -- is what the glob heuristics must judge (Plan 00356).
+            expansions = _expand_bracket_expressions(raw_form)
+            # The UNEXPANDED spelling still faces the LITERAL check: a shell
+            # passes an unmatched glob through verbatim, so a file literally
+            # named `x[0].secret` is reachable under that exact name.
+            literal_forms = [raw_form] if expansions == [raw_form] else [raw_form, *expansions]
+            for form in literal_forms:
+                for pattern in patterns:
+                    if path_matches_globs(form, (pattern,), project_root=project_root):
+                        return (pattern, token)
+            for form in expansions:
+                if not _is_glob_shaped(form):
+                    continue
                 basename = form.rsplit("/", maxsplit=1)[-1]
                 residue = _token_literal_residue(basename)
                 if not residue:
@@ -642,7 +768,7 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
                         )
                         and fnmatch.fnmatch(stem_basename, basename)
                     ):
-                        return pattern
+                        return (pattern, token)
                     # Plan 00272 gap fix (G2), GATED to leading-wildcard
                     # patterns only (over-blocking regression fix, same
                     # plan): a trailing-wildcard TRUNCATION of a real
@@ -667,12 +793,12 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
                         leading_wildcard=has_leading_wildcard,
                         trailing_wildcard=has_trailing_wildcard,
                     ):
-                        return pattern
+                        return (pattern, token)
         real = _realpath_if_resolvable(token)
         if real is not None:
             for pattern in patterns:
                 if path_matches_globs(real, (pattern,), project_root=project_root):
-                    return pattern
+                    return (pattern, token)
     return None
 
 
