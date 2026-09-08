@@ -877,19 +877,15 @@ handlers:
       priority: 60
 
   # PostToolUse handlers (run after tool execution)
-  post_tool_use:
-    # validate_eslint_on_write:  # Runs ESLint after file writes
-    #   enabled: false            # Optional - enable for automatic ESLint validation
-    #   priority: 10
+  # Example — note the `options:` nesting, which the validator requires; only
+  # `enabled`, `priority` and `options` are valid directly under a handler:
+  #   validate_eslint_on_write:  # Runs ESLint after file writes
+  #     enabled: false
+  #     priority: 10
+  post_tool_use: {}
 
   # SessionStart handlers (run when session starts)
-  session_start:
-    yolo_container_detection:     # Detects YOLO container environments (enabled by default)
-      enabled: true                # Set to false to disable YOLO detection
-      priority: 40                 # Workflow range priority
-      min_confidence_score: 3      # Minimum score to trigger detection (0-12 range)
-      show_detailed_indicators: true   # Show detected indicators in context
-      show_workflow_tips: true     # Show container workflow implications
+  session_start: {}
 
   # PreCompact handlers (run before conversation compaction)
   pre_compact: {}
@@ -898,10 +894,11 @@ handlers:
   session_end: {}
 
   # SubagentStop handlers (run when subagent completes)
-  subagent_stop:
-    # remind_prompt_library:  # Reminds about prompt library after agent work
-    #   enabled: false         # Optional - enable for prompt library reminders
-    #   priority: 20
+  # Example:
+  #   remind_prompt_library:
+  #     enabled: false
+  #     priority: 20
+  subagent_stop: {}
 
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit: {}
