@@ -503,21 +503,9 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
 
-<!-- handler: background-process-tracker -->
-
-- background_process_tracker — backgrounded processes are tracked
-
 <!-- handler: command-hints -->
 
 - command_hints — advisory reminders after specific commands
-
-<!-- handler: git-hooks-executable-fixer -->
-
-- git_hooks_executable_fixer — auto-fixes non-executable git hooks
-
-<!-- handler: markdown-table-formatter -->
-
-- markdown_table_formatter — markdown tables are auto-aligned
 
 <!-- handler: recovery-cron-advisor -->
 
@@ -534,6 +522,18 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: model-downgrade-recorder -->
 
 - model_downgrade_recorder — the automatic model downgrade is written down
+
+<!-- handler: markdown-table-formatter -->
+
+- markdown_table_formatter — markdown tables are auto-aligned
+
+<!-- handler: background-process-tracker -->
+
+- background_process_tracker — backgrounded processes are tracked
+
+<!-- handler: git-hooks-executable-fixer -->
+
+- git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
 <!-- handler: ccy-supervisor-integrity -->
 
