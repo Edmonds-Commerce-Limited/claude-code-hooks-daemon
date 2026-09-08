@@ -125,11 +125,28 @@ reaper has to be designed against those constraints, not around them.
 
 ### Phase 2: Reap or surface
 
-- [ ] ⬜ **Task 2.1**: Decide the mechanism — automatic cleanup at dispatch end,
-  a TTL reaper in the idle-housekeeping path (Plan 00161), or a session-start
-  advisory that reports the count and names the reapable ones
+- [x] ✅ **Task 2.1**: **Report and offer, do not reap automatically.**
+
+  *Cleanup at dispatch end already exists and is not enough.* The
+  `WorktreeRemove` handler (Plan 00188) already prunes on that event and
+  force-removes a named path. All 21 accumulated anyway, so the gap is not a
+  missing reaction — it is worktrees whose creating session ended without ever
+  firing the event. That needs a sweep, not a better reaction.
+
+  *Automatic reaping is the wrong trade here, twice over.* The failure modes
+  are asymmetric: accumulation costs disk and legibility, over-eager reaping
+  destroys work that exists nowhere else. And Task 1.3 measured that the
+  conservative predicate cannot clear 6 of 21 — so an automatic reaper would
+  leave a permanent residue and still need a human path. Better to build the
+  human path properly than to build both.
+
+  So: a **collector** that classifies, a **report** naming the reapable ones and
+  explaining each refusal, and an **explicit command** to act — dry-run by
+  default.
+
 - [ ] ⬜ **Task 2.2**: Implement it, respecting `R-GIT-BRANCH-FORCE-DELETE` and
   never using `--force` on a worktree the predicate did not clear
+
 - [ ] ⬜ **Task 2.3**: Handle the branch as well as the worktree — a removed
   worktree that leaves its branch behind has only moved the clutter
 
