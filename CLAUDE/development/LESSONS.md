@@ -711,3 +711,32 @@ Two corollaries, both paid for here:
   tripped on the same wording, so this was a documentation defect, not
   carelessness. Both pages now name the self-install exception. If a warning
   applies only in one deployment mode, the other mode belongs in the warning.
+
+## A fast push cadence plus `cancel-in-progress` yields zero CI feedback
+
+This project asks for a commit AND push after each logical unit, which is right:
+a local-only commit is not backed up. But `.github/workflows/qa.yml` sets
+`concurrency: cancel-in-progress: true`, so **every push cancels the run the
+previous push started**. Follow the cadence during a working session and the
+result is a wall of `cancelled` runs and no test results at all.
+
+Measured during Plan 00250: **eight consecutive runs cancelled**, discovered
+only when a failure needed diagnosing and the log turned out not to exist. A
+ninth was lost afterwards to a journal-only commit that could have been batched.
+
+Neither setting is wrong. `cancel-in-progress` is correct — superseded runs
+should not burn runner minutes — and the push cadence is correct. They simply
+interact, and nothing announces it.
+
+The resolution that works:
+
+- **When a run's result is the thing you are waiting for, commit locally and
+  hold the push** until it reports. Minutes, not milestones — this is not the
+  "batch pushes behind long-running checks" the cadence warns against, because
+  pushing actively destroys the evidence you are about to read.
+- **Batch the trailing paperwork.** A journal entry or plan update that
+  accompanies work already pushed should go in the SAME push, not a follow-up
+  one that costs a run.
+- **A cancelled run is not a neutral outcome.** `gh run list` showing
+  `cancelled` looks tidy; it means the same as no run at all. Check for it
+  before concluding anything from CI history.
