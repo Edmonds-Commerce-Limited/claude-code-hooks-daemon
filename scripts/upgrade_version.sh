@@ -54,6 +54,8 @@ source "$INSTALL_LIB_DIR/validation.sh"
 source "$INSTALL_LIB_DIR/daemon_control.sh"
 # shellcheck source=install/rollback.sh
 source "$INSTALL_LIB_DIR/rollback.sh"
+# shellcheck source=install/settings_deploy.sh
+source "$INSTALL_LIB_DIR/settings_deploy.sh"
 # shellcheck source=install/config_preserve.sh
 source "$INSTALL_LIB_DIR/config_preserve.sh"
 # shellcheck source=install/upgrade_transition.sh
@@ -303,9 +305,12 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ]; then
 
     deploy_all_hooks "$PROJECT_ROOT" "$DAEMON_DIR" "normal" "$VENV_PYTHON"
 
-    if [ -f "$SETTINGS_JSON_SOURCE" ]; then
-        cp "$SETTINGS_JSON_SOURCE" "$PROJECT_ROOT/.claude/settings.json"
-    fi
+    # No snapshot exists on this branch — it exits before Step 3 — so the
+    # helper takes its own backup. Previously this copy was silent AND
+    # uncovered, on the path the comment above calls the effective single
+    # deployment path for every client upgrade (Plan 00176 Task 2.0).
+    deploy_settings_json "$SETTINGS_JSON_SOURCE" "$PROJECT_ROOT/.claude/settings.json" "" \
+        || fail_fast "Could not preserve the existing settings.json"
 
     setup_all_gitignores "$PROJECT_ROOT" "$DAEMON_DIR" "normal" || print_warning ".gitignore setup had warnings (non-fatal)"
 
@@ -862,12 +867,17 @@ log_step "9" "Redeploying settings.json"
 
 TARGET_SETTINGS="$PROJECT_ROOT/.claude/settings.json"
 
-if [ -f "$SETTINGS_JSON_SOURCE" ]; then
-    cp "$SETTINGS_JSON_SOURCE" "$TARGET_SETTINGS"
-    print_success "Redeployed settings.json"
+# Step 3's snapshot already holds a pre-upgrade copy, so pass its path rather
+# than making a second one. If Step 3 could not snapshot (it is best-effort and
+# only warns), SNAPSHOT_ID is empty and the helper takes its own backup.
+if [ -n "${SNAPSHOT_ID:-}" ]; then
+    SETTINGS_SNAPSHOT_COPY="$(get_snapshot_dir "$DAEMON_DIR")/$SNAPSHOT_ID/files/config/settings.json"
 else
-    print_verbose "No settings.json in daemon repo (using existing)"
+    SETTINGS_SNAPSHOT_COPY=""
 fi
+
+deploy_settings_json "$SETTINGS_JSON_SOURCE" "$TARGET_SETTINGS" "$SETTINGS_SNAPSHOT_COPY" \
+    || fail_fast "Could not preserve the existing settings.json"
 
 # ============================================================
 # Step 10: Config preservation (merge customizations onto new default)
