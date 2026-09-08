@@ -374,6 +374,96 @@ class TestQuoteSourceStale:
         assert cmd_docs_qa(_args(root, lint=source)) == 0
 
 
+class TestStaleCounterpartIndex:
+    """Plan 00354: ``--lint`` refreshes the record for the file it is
+    linting, but every COUNTERPART record came straight from the cache with
+    no ``mtime_ns``/``size`` revalidation — so a single-file lint compared
+    against content that had since changed on disk.
+
+    Both directions run the real CLI end to end: sweep to build a genuine
+    ``untracked/docs-qa/index.json``, mutate a counterpart on disk, then
+    lint. Nothing here hand-builds a cache entry.
+    """
+
+    _FENCE = (
+        "```bash\n"
+        + "\n".join(f"echo 'line {n} of a block comfortably over the floor'" for n in range(6))
+        + "\n```\n"
+    )
+
+    def test_a_counterpart_that_lost_the_block_is_not_cited(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The false positive: the finding named a line range that no longer
+        held the block, sending the reader to unrelated content."""
+        root = _scaffold(tmp_path)
+        (root / "CLAUDE" / "Bar.md").write_text(f"# Bar\n\n{self._FENCE}")
+        assert cmd_docs_qa(_args(root, sweep=True)) == 0
+        capsys.readouterr()
+
+        # Extract the block into a sibling and remove it from Bar.md --
+        # exactly the "move content to its canonical home" edit.
+        evidence = root / "CLAUDE" / "Evidence.md"
+        evidence.write_text(f"# Evidence\n\n{self._FENCE}")
+        (root / "CLAUDE" / "Bar.md").write_text("# Bar\n\nProse only, the block has moved.\n")
+
+        exit_code = cmd_docs_qa(_args(root, lint=evidence))
+        out = capsys.readouterr().out
+        assert "duplicate-block" not in out
+        assert exit_code == 0
+
+    def test_a_counterpart_that_gained_the_block_is_reported(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The false negative, and the quieter half: nothing draws attention
+        to a genuine duplicate that the stale cache hid."""
+        root = _scaffold(tmp_path)
+        assert cmd_docs_qa(_args(root, sweep=True)) == 0
+        capsys.readouterr()
+
+        # Both files gain the SAME block after the index was built.
+        (root / "CLAUDE" / "Bar.md").write_text(f"# Bar\n\n{self._FENCE}")
+        (root / "CLAUDE" / "Foo.md").write_text(f"# Foo\n\n{self._FENCE}")
+
+        exit_code = cmd_docs_qa(_args(root, lint=root / "CLAUDE" / "Foo.md"))
+        out = capsys.readouterr().out
+        assert "duplicate-block" in out
+        assert "CLAUDE/Bar.md" in out
+        assert exit_code == 1
+
+    def test_a_deleted_counterpart_is_not_cited(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        (root / "CLAUDE" / "Bar.md").write_text(f"# Bar\n\n{self._FENCE}")
+        assert cmd_docs_qa(_args(root, sweep=True)) == 0
+        capsys.readouterr()
+
+        evidence = root / "CLAUDE" / "Evidence.md"
+        evidence.write_text(f"# Evidence\n\n{self._FENCE}")
+        (root / "CLAUDE" / "Bar.md").unlink()
+
+        assert cmd_docs_qa(_args(root, lint=evidence)) == 0
+        assert "duplicate-block" not in capsys.readouterr().out
+
+    def test_an_unchanged_counterpart_is_still_reported(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Revalidation must not silence the case the check exists for."""
+        root = _scaffold(tmp_path)
+        (root / "CLAUDE" / "Bar.md").write_text(f"# Bar\n\n{self._FENCE}")
+        assert cmd_docs_qa(_args(root, sweep=True)) == 0
+        capsys.readouterr()
+
+        evidence = root / "CLAUDE" / "Evidence.md"
+        evidence.write_text(f"# Evidence\n\n{self._FENCE}")
+
+        assert cmd_docs_qa(_args(root, lint=evidence)) == 1
+        out = capsys.readouterr().out
+        assert "duplicate-block" in out
+        assert "CLAUDE/Bar.md" in out
+
+
 class TestCheckStagedHelpText:
     """``--check-staged`` is fully implemented; its help must not deny that.
 

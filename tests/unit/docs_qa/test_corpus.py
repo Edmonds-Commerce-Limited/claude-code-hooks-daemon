@@ -18,8 +18,10 @@ from claude_code_hooks_daemon.docs_qa.corpus import (
     is_module_doc_path,
     iter_corpus_paths,
     load_cached_corpus,
+    load_edit_corpus,
     load_or_cold_corpus,
     refresh_own_record,
+    revalidate_corpus,
     walk_into,
 )
 from claude_code_hooks_daemon.docs_qa.policy import (
@@ -888,6 +890,149 @@ class TestRefreshOwnRecord:
             corpus, tmp_path, tmp_path / "CLAUDE" / "X.md", f"# X\n\n{long_block}"
         )
         assert len(refreshed.documents["CLAUDE/X.md"].block_hashes) == 1
+
+
+_STALENESS_FENCE = (
+    "```bash\n"
+    + "\n".join(f"echo 'line {n} of a block comfortably over the floor'" for n in range(6))
+    + "\n```\n"
+)
+
+
+def _staleness_scaffold(root: Path, own_text: str, partner_text: str) -> Path:
+    """Two in-scope docs plus a REAL on-disk index built from them.
+
+    Deliberately goes through ``build_and_save_corpus`` rather than
+    hand-building a ``DocRecord``: the defect these tests cover is that the
+    EDIT path trusts what the real cache last wrote, so a hand-built stale
+    entry could pass while the real load path stayed broken.
+    """
+    (root / "CLAUDE").mkdir(parents=True, exist_ok=True)
+    (root / "CLAUDE" / "Own.md").write_text(own_text)
+    (root / "CLAUDE" / "Partner.md").write_text(partner_text)
+    index_path = root / "untracked" / "docs-qa" / "index.json"
+    build_and_save_corpus(root, DocumentationPolicy(), index_path)
+    return index_path
+
+
+class TestRevalidateCorpus:
+    """Plan 00354: ``load_or_cold_corpus`` returns the cache verbatim, so a
+    COUNTERPART record can describe content that is no longer on disk.
+
+    ``build_and_save_corpus`` already stats every file before reusing its
+    entry; these tests pin the same guarantee for the EDIT-stage load, which
+    is the path that had none.
+    """
+
+    def test_a_counterpart_that_lost_a_block_is_reparsed(self, tmp_path: Path) -> None:
+        index_path = _staleness_scaffold(tmp_path, "# Own\n", f"# Partner\n\n{_STALENESS_FENCE}")
+        (tmp_path / "CLAUDE" / "Partner.md").write_text("# Partner\n\nJust prose now, no block.\n")
+
+        cached = load_or_cold_corpus(tmp_path, index_path)
+        assert cached.documents["CLAUDE/Partner.md"].block_hashes  # the stale truth
+
+        revalidated = revalidate_corpus(cached, tmp_path)
+        assert revalidated.documents["CLAUDE/Partner.md"].block_hashes == ()
+        assert revalidated.documents["CLAUDE/Partner.md"].block_locations == ()
+
+    def test_a_counterpart_that_gained_a_block_is_reparsed(self, tmp_path: Path) -> None:
+        index_path = _staleness_scaffold(tmp_path, "# Own\n", "# Partner\n\nProse only.\n")
+        (tmp_path / "CLAUDE" / "Partner.md").write_text(f"# Partner\n\n{_STALENESS_FENCE}")
+
+        cached = load_or_cold_corpus(tmp_path, index_path)
+        assert cached.documents["CLAUDE/Partner.md"].block_hashes == ()  # the stale truth
+
+        revalidated = revalidate_corpus(cached, tmp_path)
+        assert len(revalidated.documents["CLAUDE/Partner.md"].block_hashes) == 1
+
+    def test_a_deleted_counterpart_is_dropped(self, tmp_path: Path) -> None:
+        index_path = _staleness_scaffold(tmp_path, "# Own\n", f"# Partner\n\n{_STALENESS_FENCE}")
+        (tmp_path / "CLAUDE" / "Partner.md").unlink()
+
+        revalidated = revalidate_corpus(load_or_cold_corpus(tmp_path, index_path), tmp_path)
+        assert "CLAUDE/Partner.md" not in revalidated.documents
+        assert "CLAUDE/Own.md" in revalidated.documents
+
+    def test_an_unchanged_record_is_reused_not_reparsed(self, tmp_path: Path) -> None:
+        """The cost guarantee: an untouched entry is passed through by
+        identity, so a steady-state revalidation costs one ``stat`` per
+        document and re-parses nothing."""
+        index_path = _staleness_scaffold(tmp_path, "# Own\n", f"# Partner\n\n{_STALENESS_FENCE}")
+        cached = load_or_cold_corpus(tmp_path, index_path)
+        revalidated = revalidate_corpus(cached, tmp_path)
+        for rel_path, record in cached.documents.items():
+            assert revalidated.documents[rel_path] is record
+
+    def test_a_changed_counterpart_also_refreshes_links_and_quotes(self, tmp_path: Path) -> None:
+        """Every derived field is re-derived, not just the block hashes --
+        ``quote-source-stale`` reads ``quotes`` from the same records."""
+        index_path = _staleness_scaffold(tmp_path, "# Own\n", "# Partner\n\n[old](Old.md)\n")
+        (tmp_path / "CLAUDE" / "Partner.md").write_text(
+            "# Partner\n\n[new](New.md)\n\n"
+            "<!-- ssot-quote: CLAUDE/Own.md#anchor -->\nbody\n<!-- /ssot-quote -->\n"
+        )
+
+        revalidated = revalidate_corpus(load_or_cold_corpus(tmp_path, index_path), tmp_path)
+        partner = revalidated.documents["CLAUDE/Partner.md"]
+        assert partner.links == ("New.md",)
+        assert partner.quotes == (QuoteRef(source_path="CLAUDE/Own.md", anchor="anchor"),)
+
+    def test_an_undecodable_counterpart_keeps_its_identity_without_derived_fields(
+        self, tmp_path: Path
+    ) -> None:
+        """Mirrors ``build_and_save_corpus``'s own UnicodeDecodeError arm, so
+        a file that becomes undecodable between sweeps is recorded the same
+        way on both paths instead of the two disagreeing."""
+        index_path = _staleness_scaffold(tmp_path, "# Own\n", f"# Partner\n\n{_STALENESS_FENCE}")
+        (tmp_path / "CLAUDE" / "Partner.md").write_bytes(b"\xff\xfe not valid utf-8 \xff")
+
+        revalidated = revalidate_corpus(load_or_cold_corpus(tmp_path, index_path), tmp_path)
+        partner = revalidated.documents["CLAUDE/Partner.md"]
+        assert partner.block_hashes == ()
+        assert partner.links == ()
+        assert partner.quotes == ()
+
+    def test_a_cold_corpus_is_returned_unchanged(self, tmp_path: Path) -> None:
+        cold = DocCorpus(project_root=tmp_path, documents={}, cold=True)
+        assert revalidate_corpus(cold, tmp_path) is cold
+
+
+class TestLoadEditCorpus:
+    """The composed EDIT-stage entry point. The ORDER it fixes is
+    load-bearing: revalidating AFTER ``refresh_own_record`` would re-read
+    the edited file from disk and throw away the would-be content the EDIT
+    stage exists to judge."""
+
+    def test_counterparts_are_revalidated(self, tmp_path: Path) -> None:
+        index_path = _staleness_scaffold(tmp_path, "# Own\n", f"# Partner\n\n{_STALENESS_FENCE}")
+        (tmp_path / "CLAUDE" / "Partner.md").write_text("# Partner\n\nProse only now.\n")
+
+        corpus = load_edit_corpus(tmp_path, index_path, tmp_path / "CLAUDE" / "Own.md", "# Own\n")
+        assert corpus.documents["CLAUDE/Partner.md"].block_hashes == ()
+
+    def test_own_record_reflects_the_would_be_content_not_disk(self, tmp_path: Path) -> None:
+        """A ``Write``/``Edit`` is judged BEFORE it lands, so the file on
+        disk still holds the old content. Revalidation must not overwrite
+        the pending content with it."""
+        index_path = _staleness_scaffold(tmp_path, "# Own\n", "# Partner\n\nProse.\n")
+        would_be = f"# Own\n\n{_STALENESS_FENCE}"
+
+        corpus = load_edit_corpus(tmp_path, index_path, tmp_path / "CLAUDE" / "Own.md", would_be)
+        assert len(corpus.documents["CLAUDE/Own.md"].block_hashes) == 1
+        assert (tmp_path / "CLAUDE" / "Own.md").read_text() == "# Own\n"
+
+    def test_a_missing_index_still_yields_a_cold_corpus_with_the_own_record(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        corpus = load_edit_corpus(
+            tmp_path,
+            tmp_path / "untracked" / "docs-qa" / "index.json",
+            tmp_path / "CLAUDE" / "New.md",
+            "# New\n\n[a](b.md)\n",
+        )
+        assert corpus.cold is True
+        assert corpus.documents["CLAUDE/New.md"].links == ("b.md",)
 
 
 class TestWalkInto:

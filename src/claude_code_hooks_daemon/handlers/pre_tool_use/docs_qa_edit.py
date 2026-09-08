@@ -25,14 +25,14 @@ only retrospectively at the next SWEEP.
 
 Deliberately hot-path cheap: the primary checks (``pointer-resolves``,
 ``generated-doc-hand-edit``, ``rules-file-shape``, ``quote-drift``) need no
-corpus and no git subprocess — single-file invariants only. One check,
-``quote-source-stale``, DOES need the corpus's reverse quote index, so this
-handler loads (never BUILDS) the cached corpus via
-:func:`docs_qa.corpus.load_or_cold_corpus` — one cheap JSON read, not a
-filesystem scan (the cold-index rule: building is SessionStart/CLI-only).
-If no cache exists yet (a session before the sweep has run), the corpus is
-``cold`` and ``quote-source-stale`` degrades to silence — never a false
-positive, never a crash. Not yet covering a Bash-authored ``.md`` write
+corpus and no git subprocess — single-file invariants only. Two checks,
+``quote-source-stale`` and ``duplicate-block``, DO need cross-document state,
+so this handler loads (never BUILDS) the cached corpus via
+:func:`docs_qa.corpus.load_edit_corpus` — one cheap JSON read plus a ``stat``
+per indexed document to revalidate it, not a filesystem scan (the cold-index
+rule: building is SessionStart/CLI-only). If no cache exists yet (a session
+before the sweep has run), the corpus is ``cold`` and both checks degrade to
+silence — never a false positive, never a crash. Not yet covering a Bash-authored ``.md`` write
 (the same detection ``lint_on_edit`` uses) — deferred; Write/Edit is the
 primary surface for this slice.
 """
@@ -48,11 +48,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.docs_qa.context import edit_context
-from claude_code_hooks_daemon.docs_qa.corpus import (
-    is_lintable_path,
-    load_or_cold_corpus,
-    refresh_own_record,
-)
+from claude_code_hooks_daemon.docs_qa.corpus import is_lintable_path, load_edit_corpus
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.report import format_advisory, format_block_reason
 from claude_code_hooks_daemon.docs_qa.runner import run_stage
@@ -155,11 +151,7 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
 
         content_before = file_path.read_text(encoding="utf-8") if exists_before is True else None
         index_path = ProjectContext.daemon_untracked_dir() / _INDEX_DIR_NAME / _INDEX_FILE_NAME
-        corpus = load_or_cold_corpus(project_root, index_path)
-        # Task 3.5: the cache read above performs NO staleness check, so
-        # without this the edited file's own record can lag the WOULD-BE
-        # content -- refresh it in place before any cross-document check runs.
-        corpus = refresh_own_record(corpus, project_root, file_path, content)
+        corpus = load_edit_corpus(project_root, index_path, file_path, content)
         context = edit_context(
             project_root=project_root,
             policy=policy,
