@@ -372,6 +372,17 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
                     "Use the Write tool to create a new PLAN.md under the plan "
                     "directory whose content has a title but NO `**Status**:` line"
                 ),
+                harness_cannot_produce=(
+                    "The lint is scoped to the configured plan directory, so no "
+                    "path under `untracked/scratch/` reaches it, and "
+                    "`test_every_declared_write_targets_the_scratch_directory` "
+                    "forbids aiming a payload at the real tree. The cost here is "
+                    "higher than a stray file: a regressed handler would let the "
+                    "probe create a plan folder, and the plan index, the QA sweep "
+                    "and the plan-number counter would then all report drift that "
+                    "is not real. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_plan_qa_edit.py."
+                ),
                 description=(
                     "Writing a new plan document without a parseable status header "
                     "must be denied with the status-line-present remediation."
@@ -389,6 +400,11 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
                     "Use the Write tool to create a PLAN.md under the plan directory "
                     "with a valid `**Status**: Not Started` header and template tasks"
                 ),
+                harness_cannot_produce=(
+                    "Same scope boundary as its deny sibling above, plus the same "
+                    "vacuity problem every near-miss has without a reachable deny "
+                    "to disagree with."
+                ),
                 description="A well-formed plan document passes the edit lint silently.",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
@@ -403,6 +419,15 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
                     "Use the Write tool to write to an existing plan's "
                     "`JOURNAL/NNNNN-Journal-YY-MM-DD.md` day-file whose date is "
                     "YESTERDAY (or any other non-today date), not today's"
+                ),
+                harness_cannot_produce=(
+                    "Needs an EXISTING plan's journal directory, so the probe "
+                    "would have to name a real plan and a real stale day-file — "
+                    "writing into another plan's append-only journal, which is the "
+                    "one thing journalling forbids. A scratch copy would not be "
+                    "under the plan directory and so would not reach the lint at "
+                    "all. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_plan_qa_edit.py."
                 ),
                 description=(
                     "A journal day-file edit dated anything other than today must be "
@@ -421,6 +446,10 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
                 command=(
                     "Use the Write tool to append to (or create) a plan's "
                     "`JOURNAL/NNNNN-Journal-YY-MM-DD.md` day-file dated TODAY"
+                ),
+                harness_cannot_produce=(
+                    "Same boundary as its stale-dated sibling above: reaching the "
+                    "recency check means writing into a real plan's journal."
                 ),
                 description="A today-dated journal day-file edit passes the recency check.",
                 expected_decision=Decision.ALLOW,

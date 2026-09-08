@@ -218,6 +218,16 @@ class DocsQaCommitGateHandler(PreToolUseHandlerBase):
                     "markdown link to a file that does not exist, then run "
                     "`git commit` on it"
                 ),
+                harness_cannot_produce=(
+                    "The gate reads the REAL staged tree, so the precondition is a "
+                    "staged documentation change rather than anything the event "
+                    "carries, and the harness's fixture allowlist has no `git "
+                    "add`. Staging a deliberately dead link into the live docs "
+                    "tree would also leave the docs QA sweep reporting a finding "
+                    "that is not real. Convertible only by giving the harness a "
+                    "disposable git repository to stage into. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_docs_qa_commit_gate.py."
+                ),
                 description=(
                     "In warn mode the commit proceeds but the PostToolUse context "
                     "contains a pointer-resolves finding naming the dead link."

@@ -182,12 +182,39 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
             AcceptanceTest,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        # The near-miss only has to be OUTSIDE the vendored tree, which the
+        # scratch directory already is -- so unlike its deny sibling it needs no
+        # exemption from the scratch rule.
+        outside_tree_probe = ToolPayload(
+            tool_name=ToolName.WRITE,
+            tool_input={
+                "file_path": (
+                    "$CLAUDE_PROJECT_DIR/untracked/scratch/" "acceptance-test-remote-docs/notes.md"
+                ),
+                "content": "# Notes\n\nOrdinary documentation, carrying no provenance.\n",
+            },
         )
 
         return [
             AcceptanceTest(
                 title="remote-docs provenance gate",
                 command="Write remote-docs/example.com/page.md with no frontmatter",
+                harness_cannot_produce=(
+                    "`matches` requires the project-relative path to START with "
+                    "the remote-docs directory, so no path under "
+                    "`untracked/scratch/` can reach this gate — and "
+                    "`test_every_declared_write_targets_the_scratch_directory` "
+                    "forbids a payload aimed anywhere else, because a regressed "
+                    "handler would then let the probe write into the working tree. "
+                    "Convertible only by adding this handler to that test's "
+                    "`_OUTSIDE_SCRATCH_BY_CONTRACT` list, which is a deliberate "
+                    "weakening of a safety invariant and belongs to a human. Its "
+                    "near-miss sibling below IS dispatched. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_remote_docs_provenance.py."
+                ),
                 description=(
                     "A markdown write into the remote-docs tree without valid "
                     "provenance frontmatter is denied, naming every missing "
@@ -202,10 +229,8 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="remote-docs provenance near-miss",
-                command=(
-                    "Write a markdown file OUTSIDE the remote-docs tree, e.g. "
-                    "`docs/guides/notes.md`, with no frontmatter at all"
-                ),
+                command=outside_tree_probe.as_instruction(),
+                tool_payload=outside_tree_probe,
                 description=(
                     "The gate is scoped to the vendored tree. Ordinary "
                     "documentation carries no provenance and must stay writable"

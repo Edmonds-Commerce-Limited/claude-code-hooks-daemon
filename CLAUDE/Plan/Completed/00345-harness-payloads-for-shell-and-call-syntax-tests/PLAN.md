@@ -1,6 +1,6 @@
 # Plan 00345: harness payloads for shell and call syntax tests
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-07
 **Owner**: joseph
 **Priority**: Medium
@@ -216,20 +216,27 @@ handler is gated by project configuration this checkout does not have.
 
 ### Phase 5: The blocks that are not Bash tests
 
-- [ ] ⬜ **Task 5.1**: #217 `RemoteDocsRouting` and #245 `DispatchDeclaration`
-  have shell-shaped commands but are English prose driving another tool
-  (WebFetch, Agent). They need that tool's payload or a documented skip
-- [ ] ⬜ **Task 5.2**: #115 `ValidateEslintOnWrite` is unreachable in THIS
-  checkout by its own documented precondition — the handler only runs ESLint
-  when the project has a tracked `package.json` declaring `llm:` scripts, and
-  the daemon's own repo has none. Needs a precondition-aware skip; neither
-  `harness_cannot_produce` (about input rewriting) nor `required_tools` (about
-  PATH executables) says this
+- [x] ✅ **Task 5.1**: #245 `DispatchDeclaration` needs the daemon
+  reconfigured rather than a different event, so it carries that reason; its
+  two siblings (#244, #246) are dispatched as `Agent` payloads. #217/#218
+  `RemoteDocsRouting` both carry a reason instead — this checkout has no
+  vendored tree, so the deny is unreachable and the near-miss would pass
+  whether or not the handler ran
+- [x] ✅ **Task 5.2**: #115 `ValidateEslintOnWrite` carries a reason naming the
+  environmental precondition. `harness_cannot_produce` turned out to be the
+  right field after all: this task assumed it meant "the input cannot be
+  rewritten", but `plan_probe` reads it as the general "do not dispatch, here
+  is why", and a second concept would have split one question across two fields
+- [x] ✅ **Task 5.3**: Every remaining prose block carries a SPECIFIC reason —
+  the generic "declares no tool payload" family is empty. It resolved into four
+  boundary shapes, recorded in the journal: guarded material, a contract path
+  the scratch rule forbids aiming at, the real staged tree, and assertions
+  about a side-effect FILE rather than about the hook's answer
 
 ## Success Criteria
 
-- [x] The harness dispatches 187 of 228 dispatchable blocks, up from 94
-- [ ] Every remaining skip still carries a reason, and each reason is either a
+- [x] The harness dispatches 199 of 228 dispatchable blocks, up from 94
+- [x] Every remaining skip still carries a reason, and each reason is either a
   permanent boundary or names what would make it convertible
 - [x] Two consecutive harness runs are green on a clean tree
 - [x] A Bash payload cannot disagree with the command a human is shown

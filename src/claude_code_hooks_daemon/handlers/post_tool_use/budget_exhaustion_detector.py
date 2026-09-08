@@ -404,6 +404,16 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
                     "'Web search was not performed: this session has used its web "
                     "search budget (200 of 200 WebSearch calls).'"
                 ),
+                harness_cannot_produce=(
+                    "This handler reads `tool_response`, and the whole input under "
+                    "test IS that response — but a declared payload states only "
+                    "`tool_name` and `tool_input`, and the harness fills "
+                    '`tool_response` with a fixed `{"success": true}` because no '
+                    "dispatchable handler had ever read it. Convertible by letting "
+                    "a payload carry a `tool_response`, which is a harness "
+                    "capability rather than a per-block fix. Covered by "
+                    "tests/unit/handlers/post_tool_use/test_budget_exhaustion_detector.py."
+                ),
                 description=(
                     "The pinned field-confirmed web-search budget refusal shape "
                     "triggers an advisory instructing the agent to report the "
@@ -426,6 +436,10 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
                 command=(
                     "Simulate a Bash tool response containing the text 'Updated the "
                     "project budget planning spreadsheet.'"
+                ),
+                harness_cannot_produce=(
+                    "Same `tool_response` gap as its sibling above, and convertible "
+                    "with the same harness capability."
                 ),
                 description=(
                     "Near-miss: the word 'budget' appears with no exhaustion/quota "

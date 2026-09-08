@@ -629,6 +629,18 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                     "Use the Write tool to write content containing a term from "
                     "`.claude/block-words.secret` to a scratch file"
                 ),
+                harness_cannot_produce=(
+                    "A dispatchable payload would have to CONTAIN a term from the "
+                    "project's gitignored secret word list, which would then live "
+                    "in this handler's own tracked source — the disclosure the "
+                    "feature exists to prevent. The list is read-protected, so "
+                    "nothing automated can obtain a term to embed; the attempt to "
+                    "write this very reason was itself refused, for naming the "
+                    "list's path. A permanent boundary, and a correct one. Covered "
+                    "by tests/unit/handlers/pre_tool_use/test_sensitive_content.py, "
+                    "which points the handler at a temporary list holding a "
+                    "throwaway term."
+                ),
                 description=(
                     "Content matching a secret-list term is denied with a reason "
                     "naming only an entry index — never the term itself."
@@ -656,6 +668,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                     'Use the Bash tool to run `git commit -m "<term>"` where <term> '
                     "comes from `.claude/block-words.secret`"
                 ),
+                harness_cannot_produce=(
+                    "Same boundary as the Write case above: the command a payload "
+                    "would dispatch has to carry the term itself. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_sensitive_content.py."
+                ),
                 description=(
                     "Git METADATA is a leak surface no file write can reach. A term in "
                     "a commit message is denied with an entry index only, never the term."
@@ -675,6 +692,13 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 command=(
                     "Use the Bash tool to run `git log --grep=<term>` where <term> "
                     "comes from `.claude/block-words.secret`"
+                ),
+                harness_cannot_produce=(
+                    "Same boundary as its two deny siblings — the command carries "
+                    "the term — and worse as an automated probe: with no term in "
+                    "it, an ALLOW would pass whether or not the handler ran, which "
+                    "is the vacuous-pass shape this plan exists to remove. Covered "
+                    "by tests/unit/handlers/pre_tool_use/test_sensitive_content.py."
                 ),
                 description=(
                     "Searching for a term must stay allowed — a guard that blocks its "

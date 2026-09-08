@@ -196,6 +196,15 @@ class ModelDowngradeRecorderHandler(PostToolUseHandlerBase):
                     "'<daemon untracked dir>/context-sidecar/' and verify no "
                     "'<session>.model-downgrade' file was created."
                 ),
+                harness_cannot_produce=(
+                    "The assertion is the ABSENCE of a sidecar file, not the "
+                    "hook's answer, and the harness compares decisions and message "
+                    "patterns only — so a dispatch would report a pass without "
+                    "ever looking at the thing under test. Convertible by letting "
+                    "a block declare a post-dispatch filesystem assertion, the "
+                    "same capability goal_injection's blocks need. Covered by "
+                    "tests/unit/handlers/post_tool_use/test_model_downgrade_recorder.py."
+                ),
                 description=(
                     "The recorder writes only when the transcript actually holds an "
                     "automatic model-downgrade record, so an undowngraded session "

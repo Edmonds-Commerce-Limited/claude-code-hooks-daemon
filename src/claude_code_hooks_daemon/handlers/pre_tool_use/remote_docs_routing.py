@@ -291,6 +291,16 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="remote-docs fetch routing",
                 command="WebFetch a URL that is already vendored and fresh",
+                harness_cannot_produce=(
+                    "The deny needs a URL this checkout has ALREADY vendored and "
+                    "still considers fresh, and there is no remote-docs tree here "
+                    "at all — so no such URL exists. Establishing one means "
+                    "capturing a real upstream document, which is a network fetch "
+                    "the harness must not make, and pinning the test to whichever "
+                    "document a future checkout happens to hold. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_remote_docs_routing.py, "
+                    "which builds the tree in a tmp_path."
+                ),
                 description=(
                     "The fetch is denied and the local path is named, along "
                     "with the refresh command for genuinely newer content"
@@ -305,6 +315,16 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="remote-docs routing near-miss",
                 command="WebFetch a URL that is NOT vendored",
+                harness_cannot_produce=(
+                    "Dispatchable as a WebFetch payload, but it would prove "
+                    "nothing here: with no vendored tree in this checkout the deny "
+                    "branch is unreachable, so this ALLOW would pass whether or "
+                    "not the handler ran. A near-miss earns its place by "
+                    "DISAGREEING with a reachable deny sibling; without one it is "
+                    "the vacuous-pass shape this plan exists to remove. Convertible "
+                    "as soon as a vendored fixture makes its sibling above "
+                    "dispatchable."
+                ),
                 description=(
                     "An unvendored URL is allowed through; only a capture "
                     "hint is added, never a block"

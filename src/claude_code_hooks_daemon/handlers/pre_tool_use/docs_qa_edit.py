@@ -312,6 +312,17 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
                     "Use the Write tool to create a NEW file under .claude/rules/ "
                     "whose body contains a fenced code block (```...```)"
                 ),
+                harness_cannot_produce=(
+                    "The rules-file shape check is scoped to `.claude/rules/`, so "
+                    "no path under `untracked/scratch/` reaches it, and "
+                    "`test_every_declared_write_targets_the_scratch_directory` "
+                    "forbids a payload aimed anywhere else — a regressed handler "
+                    "would otherwise drop a stray rules file into the tree. "
+                    "Convertible by adding this handler to that test's "
+                    "`_OUTSIDE_SCRATCH_BY_CONTRACT` list, which weakens a safety "
+                    "invariant and is a human's call. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_docs_qa_edit.py."
+                ),
                 description=(
                     "A brand-new .claude/rules/*.md file with a forbidden fenced "
                     "code block is worse than absent, so it is deny-eligible under "
@@ -329,6 +340,13 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
                 command=(
                     "Use the Write tool to create a new .md file under CLAUDE/ "
                     "with no broken links and no forbidden rules-file elements"
+                ),
+                harness_cannot_produce=(
+                    "Same scope boundary as its deny sibling: the lint only "
+                    "examines the documentation tree, so a scratch path would not "
+                    "exercise it and an ALLOW from outside that tree would pass "
+                    "whether or not the handler ran. Convertible alongside the "
+                    "sibling above."
                 ),
                 description="A well-formed documentation write passes the edit lint silently.",
                 expected_decision=Decision.ALLOW,

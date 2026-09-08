@@ -176,6 +176,17 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
                     "Write remote-docs/example.com/p.md via a Bash heredoc, "
                     "git add it, then git commit"
                 ),
+                harness_cannot_produce=(
+                    "The gate reads the REAL git index, so the precondition is a "
+                    "staged file rather than anything the event carries — and the "
+                    "harness's fixture allowlist translates each declared command "
+                    "into a plain filesystem operation, with no `git add` among "
+                    "them. Staging into the checkout under test would also mean a "
+                    "probe mutating state its neighbours and the running session "
+                    "share. Convertible only by giving the harness a disposable "
+                    "git repository to stage into. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_remote_docs_commit_gate.py."
+                ),
                 description=(
                     "The commit is denied, naming the file and the capture "
                     "command — closing the Bash-write route around the "

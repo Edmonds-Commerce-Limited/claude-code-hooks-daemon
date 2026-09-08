@@ -347,20 +347,32 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
+        from claude_code_hooks_daemon.constants.tools import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             RecommendedModel,
             TestType,
+            ToolPayload,
+        )
+
+        # The default globs match on BASENAME, so the probe can sit in the
+        # sanctioned scratch directory and still trip `*.vault-password`. No
+        # file is created: the deny is decided from the path.
+        protected_read_probe = ToolPayload(
+            tool_name=ToolName.READ,
+            tool_input={
+                "file_path": (
+                    "$CLAUDE_PROJECT_DIR/untracked/scratch/"
+                    "acceptance-test-secret-guard/fixture.vault-password"
+                )
+            },
         )
 
         return [
             AcceptanceTest(
                 title="secret_file_guard - blocks Read of a protected path",
-                command=(
-                    "Use the Read tool on a dummy fixture file named "
-                    "`/tmp/fixture.vault-password` (create nothing — the deny "
-                    "fires on the path alone)"
-                ),
+                command=protected_read_probe.as_instruction(),
+                tool_payload=protected_read_probe,
                 description="Read of a path matching a protected glob is denied.",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED \[R-SECRET-READ\]", r"secret-meta"],

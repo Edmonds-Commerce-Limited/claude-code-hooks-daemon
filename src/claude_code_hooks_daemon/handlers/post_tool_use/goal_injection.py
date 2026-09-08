@@ -821,6 +821,16 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
                     "'<session>.goal-intent' file appeared in the "
                     "context-sidecar untracked directory."
                 ),
+                harness_cannot_produce=(
+                    "The assertion is not about the hook's answer — this handler "
+                    "always ALLOWs — but about a FILE it writes as a side effect, "
+                    "and the harness compares decisions and message patterns only. "
+                    "Dispatching the payload would report a meaningless pass while "
+                    "checking nothing, which is worse than a skip. Convertible by "
+                    "letting a block declare a post-dispatch filesystem assertion. "
+                    "Covered by "
+                    "tests/unit/handlers/post_tool_use/test_goal_injection.py."
+                ),
                 description=(
                     "With goal_injection enabled, an active PLAN.md write whose "
                     "resulting status reads In Progress produces exactly one "
@@ -843,6 +853,15 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
                     "session, use the Edit tool to flip a SECOND scratch plan's "
                     "PLAN.md '**Status**:' line to 'In Progress', then verify a "
                     "system-reminder advisory names the first plan as displaced."
+                ),
+                harness_cannot_produce=(
+                    "Needs TWO ordered dispatches sharing one session: the "
+                    "displacement advisory only exists because an earlier flip was "
+                    "ledgered. The harness gives every probe its own session id — "
+                    "deliberately, so one probe cannot mute another's disclosure "
+                    "ladder — so the precondition is the very thing that isolation "
+                    "prevents. Covered by "
+                    "tests/unit/handlers/post_tool_use/test_goal_injection.py."
                 ),
                 description=(
                     "Plan 00276: emitting a goal while another ledgered plan is "

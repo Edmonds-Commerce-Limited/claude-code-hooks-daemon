@@ -240,6 +240,16 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
                     "Stage a PLAN.md change flipping a root plan's status to Complete "
                     "(without git mv or README changes), then run `git commit` on it"
                 ),
+                harness_cannot_produce=(
+                    "The gate reads the REAL staged tree, so the precondition is a "
+                    "staged plan change and not anything the event carries. The "
+                    "harness's fixture allowlist has no `git add`, and staging a "
+                    "fake terminal-status flip into the live plan tree would leave "
+                    "the plan index and the QA sweep reporting drift that is not "
+                    "there. Convertible only by giving the harness a disposable "
+                    "git repository to stage into. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_plan_qa_commit_gate.py."
+                ),
                 description=(
                     "In warn mode the commit proceeds but the PostToolUse context "
                     "contains a terminal-state-atomic finding listing the missing "

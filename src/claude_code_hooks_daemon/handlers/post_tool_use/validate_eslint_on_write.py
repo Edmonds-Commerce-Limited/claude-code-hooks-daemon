@@ -465,6 +465,15 @@ is not evidence that a `.ts` file is clean."""
                     "checkout) never reaches ESLint, so a runner records a valid SKIP rather "
                     "than a failure."
                 ),
+                harness_cannot_produce=(
+                    "The precondition named in the description is environmental, "
+                    "not event-shaped: this handler only runs ESLint when the "
+                    "project has a tracked package.json declaring `llm:` scripts, "
+                    "and this daemon's own checkout has none — so a dispatch here "
+                    "would report an ALLOW and read as a broken guard. Convertible "
+                    "only in a checkout that has such a package.json, which is a "
+                    "property of the repository rather than of this block."
+                ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"broken\.ts"],
                 safety_notes=(
