@@ -99,6 +99,23 @@ deferred: N1, N2, N5.
     wrong, in a second place, and no gate added to `find_protected_mention`
     will reach it.
 
+  **The sixth incident has since happened, as predicted**, and is fixed under
+  [Plan 00356](../00356-secret-guard-bracket-glob-false-positive/PLAN.md): a
+  complete bracket expression at a token's edge made the edge predicates
+  report an open wildcard, so the jq path `.foo.v[0]` was denied as a
+  `*.vault-password` reference. Two things about it are evidence for this
+  task rather than against it:
+
+  - The Bash-surface residual described above is still live and was hit
+    while diagnosing 00356 — `python -c "import ...utils.secret_file_matching"`
+    is denied, because the dotted module path is not an `import` STATEMENT
+    and so misses the fifth gate's positional exemption.
+  - 00356 deliberately did NOT add a seventh gate. It corrects the INPUT the
+    four existing gates see (expanding a finite character set to its members)
+    rather than adding another special case to them, which is the closest an
+    incremental fix can get to this task's intent without doing the
+    re-derivation. The re-derivation is still worth doing.
+
 - [ ] ⬜ **Task 1.4 (R5, incremental re-review)**:
   `src/claude_code_hooks_daemon/utils/secret_file_matching.py::_is_git_rm_cached`
   special-cases `words[1] == "-C"` (jumping the subcommand index to 3)

@@ -384,6 +384,144 @@ class TestBashMentionsProtectedPath:
         assert matched in self.PATTERNS
 
 
+class TestFiniteBracketExpressionsAreNotWildcards:
+    """Plan 00356: a bracket expression denotes a FINITE character set.
+
+    A complete bracket expression sitting at a token's edge made
+    ``_has_trailing_wildcard``/``_has_leading_wildcard`` report that edge as
+    open to an arbitrary run, and ``_token_literal_residue`` dropped the
+    bracket's own character entirely. Together those turned the jq path
+    ``.foo.v[0]`` into the assertion "starts with ``.foo.v``, then anything",
+    whose 2-character ``.v`` edge overlaps the ``.vault-password`` stem — so
+    an ordinary array subscript was denied as a protected-path reference.
+
+    ``[0]`` matches exactly one character. It opens nothing.
+    """
+
+    PATTERNS = sfm.DEFAULT_PROTECTED_PATTERNS
+
+    def _match(self, command: str) -> str | None:
+        return sfm.find_protected_mention(command, self.PATTERNS)
+
+    def test_jq_subscript_after_a_v_field_is_not_matched(self) -> None:
+        """The reported shape: field ``v``, element ``0``. Denied as
+        ``*.vault-password`` because ``.foo.v`` + "anything" was thought to
+        reach ``.foo.vault-password``."""
+        assert self._match("x=$(jq -r '.foo.v[0]' data.json)") is None
+
+    def test_decisive_single_letter_class_is_not_matched(self) -> None:
+        """The decisive case from the report. Under POSIX ``[z]`` matches
+        exactly ``z``, so this token can only ever denote the literal
+        ``.foo.vz`` — which cannot be a ``*.vault-password`` file under any
+        expansion. It was denied anyway."""
+        assert self._match("x=$(jq -r '.foo.v[z]' data.json)") is None
+
+    def test_realistic_repeated_field_read_is_not_matched(self) -> None:
+        assert self._match("p=$(jq -r '.records[] | .values.v[0]' data.json)") is None
+
+    def test_bracket_quoted_workaround_spelling_stays_allowed(self) -> None:
+        """The workaround the reporter had to adopt must keep working — this
+        is the control showing the two spellings now agree."""
+        assert self._match("x=$(jq -r '.values[\"v\"][0]' data.json)") is None
+
+    def test_sibling_subscripts_that_already_passed_still_pass(self) -> None:
+        """Negative controls from the report's table that were already
+        allowed — the fix must not disturb them."""
+        assert self._match("x=$(jq -r '.foo.v' data.json)") is None
+        assert self._match("x=$(jq -r '.foo[0]' data.json)") is None
+        assert self._match("x=$(jq -r '.foo.x[0]' data.json)") is None
+
+    def test_character_range_subscript_is_not_matched(self) -> None:
+        """``[a-f]`` is a finite set too, not a wildcard."""
+        assert self._match("cat .foo.v[a-f]") is None
+
+    def test_python_dict_index_at_token_end_is_not_matched(self) -> None:
+        """The same defect in any language that subscripts with brackets."""
+        assert self._match("value = record['v'][0]") is None
+
+    # ── Security direction: the fix must not over-correct into a fail-open ──
+
+    def test_bracket_expression_naming_a_protected_file_is_still_matched(self) -> None:
+        """A bracket expression whose expansion IS a protected name must stay
+        denied — expanding the set is what makes this provable rather than
+        heuristic."""
+        assert self._match("cat [Vv]ault_pass") is not None
+
+    def test_bracket_expression_expanding_onto_a_protected_name_is_matched(self) -> None:
+        """Every concrete spelling is checked, so a protected name reachable
+        through ANY member of the set denies."""
+        assert self._match("cat dummy.vault-passwor[cde]") is not None
+
+    def test_negated_bracket_stays_conservative(self) -> None:
+        """``[!...]``/``[^...]`` is the complement of a set, not a finite one.
+        Bash reads both as negation, so neither is expanded and both keep the
+        pre-fix conservative treatment."""
+        assert self._match("cat dummy.v[!x]") is not None
+        assert self._match("cat dummy.v[^x]") is not None
+
+    def test_real_wildcards_are_untouched_by_the_bracket_fix(self) -> None:
+        """The generous glob-intersection behaviour this guard depends on is
+        unchanged for genuine wildcards — these are the cases the shipped
+        guidance promises are caught."""
+        assert self._match("cat .vault-p*") is not None
+        assert self._match('find .claude -name "*secret*"') is not None
+        assert self._match("cat dummy.vault-p*") is not None
+        assert self._match("cat dummy.v*") is not None
+
+    def test_bracket_combined_with_a_real_wildcard_still_matched(self) -> None:
+        """A token carrying BOTH a finite bracket and a real ``*`` keeps its
+        wildcard: each expansion is still analysed as a glob."""
+        assert self._match("cat dummy.vault-[pq]*") is not None
+
+    def test_oversized_expansion_falls_back_to_conservative_treatment(self) -> None:
+        """Beyond the expansion cap the token is left unexpanded, so it is
+        judged exactly as it was before this fix — failing closed."""
+        token = "dummy.v" + "[a-z]" * 4
+        assert self._match(f"cat {token}") is not None
+
+
+class TestBracketExpansionPrimitives:
+    """Unit coverage for the expansion helpers themselves."""
+
+    def test_single_member_class_expands_to_one_spelling(self) -> None:
+        assert sfm._expand_bracket_expressions(".foo.v[0]") == [".foo.v0"]
+
+    def test_range_expands_to_every_member(self) -> None:
+        assert sfm._expand_bracket_expressions("x[a-c]") == ["xa", "xb", "xc"]
+
+    def test_multiple_classes_expand_combinatorially(self) -> None:
+        assert sfm._expand_bracket_expressions("[ab]-[cd]") == ["a-c", "a-d", "b-c", "b-d"]
+
+    def test_literal_leading_bracket_member_is_honoured(self) -> None:
+        """POSIX: a ``]`` immediately after ``[`` is a MEMBER of the class."""
+        assert sfm._expand_bracket_expressions("x[]]") == ["x]"]
+
+    def test_negated_class_is_not_expanded(self) -> None:
+        assert sfm._expand_bracket_expressions("x[!a]") == ["x[!a]"]
+        assert sfm._expand_bracket_expressions("x[^a]") == ["x[^a]"]
+
+    def test_posix_named_class_is_not_expanded(self) -> None:
+        """``[[:alpha:]]`` is not a character list — expanding its raw body
+        would produce a WRONG, too-narrow set, so it stays conservative."""
+        assert sfm._expand_bracket_expressions("x[[:alpha:]]") == ["x[[:alpha:]]"]
+
+    def test_token_without_a_complete_bracket_is_returned_unchanged(self) -> None:
+        assert sfm._expand_bracket_expressions("[pass_result") == ["[pass_result"]
+        assert sfm._expand_bracket_expressions("plain.txt") == ["plain.txt"]
+
+    def test_expansion_is_capped(self) -> None:
+        token = "x" + "[a-z]" * 4
+        assert sfm._expand_bracket_expressions(token) == [token]
+
+    def test_edge_predicates_are_left_untouched(self) -> None:
+        """The fix deliberately does NOT redefine the edge predicates — the
+        Plan 00306 contract that a complete bracket expression IS glob syntax
+        still holds; expansion changes the INPUT they are applied to."""
+        assert sfm._is_glob_shaped("x[]]") is True
+        assert sfm._has_trailing_wildcard("x[]]") is True
+        assert sfm._is_glob_shaped("x[!]]") is True
+
+
 class TestPythonImportStatements:
     """A dotted Python MODULE path is not a filesystem path.
 

@@ -60,7 +60,16 @@ _VERBOSE: Final[str] = (
     "There is NO escape hatch and no self-declared-intent override. "
     "Only a human may lift this, by editing "
     "`handlers.pre_tool_use.secret_file_guard` in `.claude/hooks-daemon.yaml`. "
-    "Ask the user; do not hunt for another way to read the file."
+    "Ask the user; do not hunt for another way to read the file.\n\n"
+    # The config file is the wrong place to send a reader (Plan 00356): a
+    # project on the shipped defaults has no `protected_paths` key at all, so
+    # the globs it is being asked about are not in there. `explain-handler`
+    # prints the EFFECTIVE list, and needs no protected glob on the command
+    # line -- repeating one of those in Bash is itself denied.
+    "To see which globs are actually in force, run "
+    "`bin/hooks-daemon explain-handler secret_file_guard` — it prints the "
+    "effective list. Do NOT grep for the glob above: repeating it in a Bash "
+    "command is itself a mention, and is denied."
 )
 
 _RULES_BY_ROUTE: Final[dict[str, Rule]] = {
@@ -86,6 +95,14 @@ _RULES_BY_ROUTE: Final[dict[str, Rule]] = {
         verbose=_VERBOSE,
     ),
 }
+
+# Routes whose deny message names the matched token (Plan 00356). Both scan a
+# HAYSTACK the caller supplied -- a whole command line, a whole authored file
+# -- so the offending word is not otherwise identifiable. The `read` route is
+# excluded: its token is the caller's single path argument (nothing to
+# locate), and a directory-rooted Grep reaches it carrying a protected
+# filename the walk DISCOVERED rather than one the caller typed.
+_TOKEN_ECHO_ROUTES: Final[frozenset[str]] = frozenset({"bash", "script"})
 
 _FIELD_FILE_PATH: Final[str] = "file_path"
 _FIELD_NOTEBOOK_PATH: Final[str] = "notebook_path"
@@ -168,8 +185,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         matched = self._matched_pattern_and_route(hook_input)
         return None if matched is None else matched[0]
 
-    def _matched_pattern_and_route(self, hook_input: dict[str, Any]) -> tuple[str, str] | None:
-        """``(pattern, route)`` for this tool call, or ``None``.
+    def _matched_pattern_and_route(self, hook_input: dict[str, Any]) -> tuple[str, str, str] | None:
+        """``(pattern, token, route)`` for this tool call, or ``None``.
 
         The single dispatch point shared by ``matches()`` and ``handle()`` so
         the two can never disagree about what was inspected. ``route`` is one
@@ -178,6 +195,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         (a Bash command mentioning a protected path) or ``"script"`` (a
         Write/Edit authoring a script whose content references one) — the
         three Decision B rule granularities (Plan 00116).
+
+        ``token`` is the specific span that matched, so the deny message can
+        name it (Plan 00356). For the ``read`` routes it is the path argument
+        itself; for ``bash``/``script`` it is the offending word out of a
+        command or a whole file, which is the case that actually needed it.
         """
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
@@ -185,7 +207,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
 
         if tool_name == ToolName.BASH:
             command = str(tool_input.get(_FIELD_COMMAND, ""))
-            mention = sfm.find_protected_mention(command, patterns)
+            mention = sfm.find_protected_mention_detail(command, patterns)
             if mention is None:
                 return None
             # The EFFECTIVE patterns are passed through (review finding 1):
@@ -194,7 +216,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # project-configured pattern — all of them under mode: replace.
             if sfm.is_exempt_invocation(command, self._consumers(), patterns):
                 return None
-            return (mention, "bash")
+            return (mention[0], mention[1], "bash")
 
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
         if path_field is None:
@@ -202,7 +224,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         path = str(tool_input.get(path_field, ""))
         for pattern in patterns:
             if sfm.path_is_protected(path, (pattern,)):
-                return (pattern, "read")
+                return (pattern, path, "read")
 
         if tool_name == ToolName.GREP and path:
             # Partial enforcement for directory-rooted content search
@@ -211,16 +233,20 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # walk — a tree over the cap is NOT fully checked, which the
             # guidance names as a residual limit.
             directory_mention = sfm.directory_contains_protected(path, patterns)
-            return None if directory_mention is None else (directory_mention, "read")
+            if directory_mention is None:
+                return None
+            return (directory_mention, path, "read")
 
         if tool_name in (ToolName.WRITE, ToolName.EDIT):
             script_mention = self._script_content_mention(path, tool_input, patterns)
-            return None if script_mention is None else (script_mention, "script")
+            if script_mention is None:
+                return None
+            return (script_mention[0], script_mention[1], "script")
         return None
 
     def _script_content_mention(
         self, path: str, tool_input: dict[str, Any], patterns: tuple[str, ...]
-    ) -> str | None:
+    ) -> tuple[str, str] | None:
         """Protected mention inside authored SCRIPT content (Task 4.3), or None.
 
         Closes the write-then-execute route: a script that references a
@@ -241,7 +267,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         ):
             return None
         content = str(tool_input.get(_FIELD_CONTENT, "") or tool_input.get(_FIELD_NEW_STRING, ""))
-        return sfm.find_protected_mention(content, patterns)
+        return sfm.find_protected_mention_detail(content, patterns)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return self._matched_pattern(hook_input) is not None
@@ -261,7 +287,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         matched = self._matched_pattern_and_route(hook_input)
         if matched is None:
             return GatingResult(decision=Decision.ALLOW)
-        pattern, route = matched
+        pattern, token, route = matched
         rule = _RULES_BY_ROUTE[route]
 
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
@@ -276,6 +302,17 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             message = formatter.verbose(rule)
 
         message += f"\n\nMatched protected glob: `{pattern}`"
+        # Naming the TOKEN turns a bisection hunt into a read (Plan 00356):
+        # the glob alone does not say which of a command's -- or a whole
+        # file's -- many words tripped it.
+        #
+        # Scoped to the routes that SEARCH a haystack the caller supplied. On
+        # the `read` route the path is the caller's single argument, already
+        # in hand, so naming it teaches nothing -- and the directory-rooted
+        # Grep case reaches that route having DISCOVERED a protected filename
+        # by walking a tree, which the caller never typed and must not learn.
+        if route in _TOKEN_ECHO_ROUTES and token and token != pattern:
+            message += f"\nMatched on this token from your input: `{token}`"
 
         return GatingResult(decision=Decision.DENY, reason=message)
 

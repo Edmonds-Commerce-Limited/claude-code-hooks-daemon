@@ -217,6 +217,78 @@ class TestDenyReason:
         assert "MUST_" not in result.reason
         assert "human" in result.reason.lower()
 
+    def test_reason_names_the_offending_token_in_a_bash_command(self) -> None:
+        """Plan 00356: the glob alone does not say WHICH word tripped it, so
+        diagnosing a long command meant bisecting it across repeated denials.
+        The token is the caller's own input, never file content."""
+        handler = _handler()
+        result = handler.handle(
+            _hook_input("Bash", {"command": "tar -cf out.tar README.md .vault-pass extra.txt"})
+        )
+        assert result.reason is not None
+        assert ".vault-pass" in result.reason
+        assert "README.md" not in result.reason
+
+    def test_reason_names_the_offending_token_in_authored_script_content(self) -> None:
+        """The case that actually needed it: a whole FILE was scanned, and
+        nothing said which of its lines was the problem."""
+        handler = _handler()
+        result = handler.handle(
+            _hook_input(
+                "Write",
+                {
+                    "file_path": "/proj/deploy.sh",
+                    "content": "#!/usr/bin/env bash\nset -e\ncat .vault-pass\necho done\n",
+                },
+            )
+        )
+        assert result.reason is not None
+        assert "token" in result.reason.lower()
+        assert ".vault-pass" in result.reason
+
+    def test_read_route_still_does_not_echo_the_path(self) -> None:
+        """The token echo is deliberately NOT extended to the read route: a
+        directory-rooted Grep reaches it carrying a protected filename the
+        bounded walk DISCOVERED, which the caller never typed."""
+        handler = _handler()
+        result = handler.handle(_hook_input("Read", {"file_path": "/proj/other.vault-password"}))
+        assert result.reason is not None
+        assert "other.vault-password" not in result.reason
+
+    def test_grep_of_directory_does_not_echo_the_discovered_filename(self, tmp_path: Any) -> None:
+        """The disclosure case the scoping exists for: the walk finds a
+        protected file the caller did not name, and must not reveal it."""
+        (tmp_path / "found-by-the-walk.vault-password").write_text("x\n")
+        handler = _handler()
+        result = handler.handle(_hook_input("Grep", {"pattern": "x", "path": str(tmp_path)}))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "found-by-the-walk" not in result.reason
+
+    def test_remediation_points_at_explain_handler_not_the_config_file(self) -> None:
+        """Plan 00356: a project on shipped defaults has no `protected_paths`
+        key, so the config file cannot answer which globs are in force —
+        `explain-handler` prints the effective list."""
+        handler = _handler()
+        result = handler.handle(_hook_input("Read", {"file_path": "/proj/.vault-pass"}))
+        assert result.reason is not None
+        assert "explain-handler secret_file_guard" in result.reason
+
+    def test_jq_subscript_in_authored_script_is_no_longer_denied(self) -> None:
+        """End-to-end regression for the reported defect: an array subscript
+        after a one-letter field is an ordinary jq path, not a protected-path
+        reference."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {
+                "file_path": "/proj/bin/collect.sh",
+                "content": "#!/usr/bin/env bash\nx=$(jq -r '.foo.v[0]' data.json)\n",
+            },
+        )
+        assert handler.matches(hook_input) is False
+        assert handler.handle(hook_input).decision == Decision.ALLOW
+
 
 class TestConfigModes:
     def test_project_patterns_are_additive_by_default(self) -> None:
