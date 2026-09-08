@@ -50,45 +50,24 @@ CI does not know that. It reports the run green.
 
 The tests exist, they are correct, and they are wired into the workflow. What is
 missing is any mechanism by which their absence is noticed — the exact shape of
-`CLAUDE.md` Core Standard 15 (DBF), and the second instance of it inside Plan
-00245 alone. That plan's Decision 3 already settled the general question for the
-`uv` case: **prefer providing the dependency in CI to skipping**. This applies
-the same decision to the daemon.
+`CLAUDE.md` Core Standard 15 (DBF). Plan 00245's Decision 3 already settled the
+general question for the `uv` case: **prefer providing the dependency in CI to
+skipping**. This applies the same decision to the daemon.
 
-~~The `Daemon load` job in the same workflow starts a daemon successfully on the
-runner, so this is a provisioning gap rather than a platform limitation.~~
+**There is no install to reuse, and no daemon has ever run here.** The
+`Daemon load` job only imports every handler module; it starts nothing. But a
+checkout already has the config, the forwarders and the package — the one
+missing piece is the gitignored `.claude/hooks-daemon.env`, which the repo guard
+accepts on mere existence. CI writes that and starts the daemon, touching no
+tracked file. Running the installer was tried first and the runner rejected it;
+mechanism and misreading in [RESEARCH-ci-install.md](RESEARCH-ci-install.md).
 
-**That sentence is false, and Task 2.1 was written on it.** The `daemon-load`
-job checks out, installs from the lockfile, and imports every handler module.
-It starts no daemon, and says why in its own comment: *"A real `hooks-daemon restart` needs an installed daemon, so asserting every handler module imports
-is the CI-safe equivalent."* Nothing in this workflow has ever installed or
-started one.
-
-The conclusion survives — it IS a provisioning gap — but the cheap route to it
-does not: there was nothing to reuse.
-
-**The answer turned out to be that there is no install** — see
-[RESEARCH-ci-install.md](RESEARCH-ci-install.md). A checkout already has the
-config, the forwarders and the package; the only missing piece is the gitignored
-`.claude/hooks-daemon.env`, which the repo guard accepts on mere existence. CI
-writes that and starts the daemon, touching no tracked file.
-
-Running the installer was tried first and the runner rejected it; the mechanism
-and the misreading behind it are in Task 2.1's first sub-bullet.
-
-## The same gap has a louder sibling, and CI is no longer green
-
-**This plan was written from "the first fully green CI run". That premise has
-expired.** `Tests + coverage` was RED on `main` for a long stretch — 9 failures
-per interpreter across three files when found. All three are fixed; two were
-NOT this plan's subject, being plain defects that would fail on any machine
-without a deployed install, found by reproducing the runner condition locally
-rather than reading a CI log. See
+**The plan's "first fully green CI run" premise expired**: `Tests + coverage`
+was red on `main` for a long stretch, 9 failures per interpreter across three
+files. All fixed; two were not this plan's subject. So Task 4.2 needed those
+fixed whatever happened to the skips — **16** of them per Task 1.1, the "11"
+this plan was written with already being stale. See
 [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
-
-**Consequence**: Task 4.2 ("a green CI run") needs those fixed whatever happens
-to the skips — **16** of them, per Task 1.1; the "11" this plan was written with
-was already stale.
 
 ## Goals
 
@@ -194,13 +173,12 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
   suffix — see [RESEARCH-ci-install.md](RESEARCH-ci-install.md). Borne out by
   three matrix jobs each starting a daemon successfully.
 - [x] ✅ **Task 2.4d**: The three failures the newly-running gate *found* — the
-  point of the plan, not fallout from it. Two are real handler defects that
-  deny valid code on any machine with the real linter installed (Rust's
-  `clippy-driver` framed the file as a binary crate; Kotlin's command used
-  `-script` on `.kt` and carried a `2>&1` no shell was ever going to expand),
-  and one is a harness budget equal to the handler's own, so `lint_on_edit`'s
-  fail-open could never be reached and one slow lint killed all 201 probes.
-  Each fixed with a class-level guard. See
+  point of the plan, not fallout from it. Two deny valid code on any machine
+  with the real linter installed (Rust's `clippy-driver` framed the file as a
+  binary crate; Kotlin's command used `-script` on `.kt` and a `2>&1` no shell
+  would expand); the third is a harness budget equal to the handler's own, so
+  `lint_on_edit`'s fail-open was unreachable and one slow lint killed all 201
+  probes. Each fixed with a class-level guard. See
   [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 - [x] ✅ **Task 2.4c**: `test_dogfooding_hook_scripts.py::test_hook_scripts_match_installer`.
   The comparison now generates for the root the deployed forwarders **record**
@@ -256,11 +234,15 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Full QA green, daemon restart RUNNING
-- [ ] ⬜ **Task 4.2**: A green CI run in which the 16 tests are reported as
-  PASSED rather than absent — which now also requires the three failing files
-  in Task 2.4, since `main` is currently red and no amount of skip-fixing
-  turns it green on its own
+- [x] ✅ **Task 4.1**: Local `llm_qa.py all` **26/26 PASSED**; daemon restarted
+  and verified RUNNING.
+- [ ] ⬜ **Task 4.2**: **Met on two interpreters of three, so not yet ticked.**
+  Run 34196664936 has 3.11 and 3.13 at **18719 passed, 0 failed, 17 skipped** —
+  zero skips among the six declared-blocking files and no failures at all, the
+  first fully green QA job this plan has produced. 3.12 was still running when
+  a push superseded the run, so ticking needs one complete run. All 17
+  remaining skips are accounted for: 14 are Plan 00350's relay gates, 3 are
+  unrelated environment skips.
 
 ## Dependencies
 
