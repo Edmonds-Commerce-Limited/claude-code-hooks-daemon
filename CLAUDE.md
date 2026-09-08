@@ -95,7 +95,9 @@ A `Write`/`Edit` whose content matches a configured public pattern or a gitignor
 
 **Git metadata is checked too.** File contents and file PATHS are only two of the seven places a term can enter a repository — the other five are git metadata, and none of them is a file write. So a `Bash` command that records metadata is also checked: `git commit` (messages), `git tag` (names and messages), `git branch` / `checkout -b` / `switch -c` (branch names), `git config user.name|user.email` (author identity), `git merge -m`. A match denies the command.
 
-**But a Bash command that writes a FILE is NOT checked, and that is the gap most likely to bite.** Git metadata is the only Bash surface this handler covers, so a term entering through `cat > f <<EOF`, `>`, `>>` or `tee` reaches disk unexamined — no block, no advisory, no record. Once pushed, removing it needs a history rewrite. Write file content with `Write`/`Edit` so this handler can see it.
+**A `git commit` is also checked for what it would RECORD.** A Bash command that writes a FILE (`cat > f <<EOF`, `>`, `>>`, `tee`, `mv`, `cp`) reaches disk unexamined — no block, no advisory, no record — so the commit is the gate: the ADDED lines of every staged file (the working tree for `git commit -a`) are scanned at commit time, and a match denies the commit naming only the file path and the pattern name or entry index, never the line. Removing a term is never blocked (only added lines count), binary blobs are skipped, and a file whose added lines exceed 512 KiB — or a commit past 4 MiB in total — is stood down with a log line rather than scanned partially. `git push` is NOT a surface: it carries nothing a commit did not, and a denied commit is never pushed. Still prefer `Write`/`Edit` for file content so the block lands before the bytes do.
+
+**A `gh` body is checked like a commit message.** `gh issue comment`, `gh pr comment`, `gh issue|pr create` and `gh issue|pr edit` publish a body to GitHub, which no history rewrite can retract, so an inline `--body`/`-b` value and the content of a `--body-file`/`-F <file>` are both scanned. A body file is named by path only. `gh api` is not covered (its `-F` is a field), and a body piped on stdin (`-F -`) cannot be judged — write it to a file instead.
 
 **Reading is never blocked.** Only commands that WRITE metadata are candidates, so `grep`, `cat`, `git log --grep=`, `git show`, `git branch --list` and `git tag -l` stay allowed even when the term is right there on the command line — searching for a term and removing it are exactly the work of cleaning a repository.
 
@@ -507,45 +509,41 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
 
-<!-- handler: background-process-tracker -->
-
-- background_process_tracker — backgrounded processes are tracked
-
-<!-- handler: budget-exhaustion-detector -->
-
-- budget_exhaustion_detector — hidden agent budgets are surfaced
-
 <!-- handler: command-hints -->
 
 - command_hints — advisory reminders after specific commands
-
-<!-- handler: git-hooks-executable-fixer -->
-
-- git_hooks_executable_fixer — auto-fixes non-executable git hooks
-
-<!-- handler: goal-injection -->
-
-- goal_injection — plan-start goal signal for the ccy supervisor
-
-<!-- handler: markdown-table-formatter -->
-
-- markdown_table_formatter — markdown tables are auto-aligned
-
-<!-- handler: model-downgrade-recorder -->
-
-- model_downgrade_recorder — the automatic model downgrade is written down
 
 <!-- handler: recovery-cron-advisor -->
 
 - recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
+<!-- handler: model-downgrade-recorder -->
+
+- model_downgrade_recorder — the automatic model downgrade is written down
+
+<!-- handler: markdown-table-formatter -->
+
+- markdown_table_formatter — markdown tables are auto-aligned
+
+<!-- handler: background-process-tracker -->
+
+- background_process_tracker — backgrounded processes are tracked
+
+<!-- handler: git-hooks-executable-fixer -->
+
+- git_hooks_executable_fixer — auto-fixes non-executable git hooks
+
+<!-- handler: budget-exhaustion-detector -->
+
+- budget_exhaustion_detector — hidden agent budgets are surfaced
+
+<!-- handler: goal-injection -->
+
+- goal_injection — plan-start goal signal for the ccy supervisor
+
 <!-- handler: ccy-supervisor-integrity -->
 
 - ccy_supervisor_integrity — keep the ccy supervisor properly set up
-
-<!-- handler: docs-qa-sweep -->
-
-- docs_qa_sweep — documentation drift report at session start
 
 <!-- handler: git-upstream-checker -->
 
@@ -554,14 +552,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: hook-registration-checker -->
 
 - hook_registration_checker — hooks configuration policy
-
-<!-- handler: model-fallback-detector -->
-
-- model_fallback_detector — silent model substitution is surfaced
-
-<!-- handler: plan-qa-sweep -->
-
-- plan_qa_sweep — plan-tree drift report at session start
 
 <!-- handler: plan-workflow-asset-checker -->
 
@@ -578,6 +568,18 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: tool-disable-advisor -->
 
 - tool_disable_advisor — declared never-want tools are checked at session start
+
+<!-- handler: model-fallback-detector -->
+
+- model_fallback_detector — silent model substitution is surfaced
+
+<!-- handler: docs-qa-sweep -->
+
+- docs_qa_sweep — documentation drift report at session start
+
+<!-- handler: plan-qa-sweep -->
+
+- plan_qa_sweep — plan-tree drift report at session start
 
 <!-- handler: idle-housekeeping-advisory -->
 
