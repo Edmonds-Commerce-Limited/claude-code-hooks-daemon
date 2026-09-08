@@ -116,15 +116,28 @@ this plan generalises.
 
 ### Phase 2: Make optimise registry-derived
 
-- [ ] ⬜ **Task 2.1**: Drive the checklist from the registry, so a new handler
-  appears without anyone remembering to add it.
-- [ ] ⬜ **Task 2.2**: Decide how a handler declares it is NOT optimise's
+- [x] ✅ **Task 2.1**: Drive the checklist from the registry, so a new handler
+  appears without anyone remembering to add it. **Done in `bf5da1f5`** —
+  `config_optimisation/checklist.py` builds one item per handler from
+  `registry.iter_builtin_handler_classes()` plus the pseudo-event registry;
+  the new `hooks-daemon optimise-checklist` verb renders it and
+  `optimise-invoke.sh` Steps 3–5 run the verb instead of naming handlers
+  (116 scored here, was 22).
+- [x] ✅ **Task 2.2**: Decide how a handler declares it is NOT optimise's
   business. A derived list needs an opt-out at the handler, not a subtraction
   list in the skill — the subtraction list would rot exactly like the
-  hardcoded list it replaces.
-- [ ] ⬜ **Task 2.3**: Keep the output readable as coverage grows. A review a
+  hardcoded list it replaces. **Done in `bf5da1f5`** per Decision 1: no
+  opt-out; `Handler.get_relevance(context) -> Relevance` (default always
+  relevant) overridden on `lsp_enforcement`, the two npm handlers,
+  `validate_eslint_on_write`, the four ccy handlers and the flaggable trio.
+  No standalone PHP guard exists in the registry (PHP is a strategy inside
+  multi-language handlers), so nothing to override there.
+- [x] ✅ **Task 2.3**: Keep the output readable as coverage grows. A review a
   human abandons because it is too long fails the same way Plan 00329's report
-  does.
+  does. **Done in `bf5da1f5`** — six computed areas
+  (`config_optimisation/areas.py`, Decision 3); a fully-enabled area
+  collapses to one line; only shortfalls and not-applicable handlers (with
+  reason) are listed; totals and the numbered recommendations are computed.
 
 ### Phase 3: One housekeeping command
 
@@ -141,14 +154,24 @@ this plan generalises.
 
 ### Phase 4: The release-time guarantee
 
-- [ ] ⬜ **Task 4.1**: A QA gate failing when a configurable handler is
+- [x] ✅ **Task 4.1**: A QA gate failing when a configurable handler is
   invisible to `optimise`, generalising the dispatchability test from
-  `8bbd5bec`.
-- [ ] ⬜ **Task 4.2**: Extend it to the rest of the surface: a documented CLI
+  `8bbd5bec`. **Done in `bf5da1f5`** —
+  `tests/integration/test_skill_surface_coherence.py::TestOptimiseCoverage`:
+  checklist paths equal the registry, the procedure runs
+  `optimise-checklist`, and names no handler by hand.
+- [x] ✅ **Task 4.2**: Extend it to the rest of the surface: a documented CLI
   command that does not exist, a skill doc naming a removed capability, a
-  config key the skill references that the schema does not define.
-- [ ] ⬜ **Task 4.3**: Wire the gate into the release pipeline's blocking QA
-  step so a drifted skill surface cannot ship.
+  config key the skill references that the schema does not define. **Done in
+  `bf5da1f5`** — same module: documented verbs (wrapper, `DAEMON_CLI`
+  command lines, passthrough arms) against cli.py subparsers and aliases;
+  retired handlers in code context on lines that do not call them retired;
+  dotted config keys walked through the pydantic `Config` schema with
+  handler names under `handlers.<event>` checked against `HandlerID`.
+- [x] ✅ **Task 4.3**: Wire the gate into the release pipeline's blocking QA
+  step so a drifted skill surface cannot ship. **Done in `bf5da1f5`** — the
+  gate lives under `tests/`, so `llm_qa.py all`'s `tests` check (RELEASING.md
+  Step 8, BLOCKING) already runs it; Step 8 now says so.
 
 ## Technical Decisions
 
@@ -208,9 +231,11 @@ the opt-in idle trigger for the same pass.
 
 ## Success Criteria
 
-- [ ] Adding a handler with no skill change fails the gate.
-- [ ] `optimise`'s covered set is derived, and a handler's relevance is
-  declared at the handler rather than listed in the skill.
+- [x] Adding a handler with no skill change fails the gate. (`bf5da1f5` —
+  it cannot: the checklist is derived, and the gate fails if the derivation
+  and the registry ever disagree.)
+- [x] `optimise`'s covered set is derived, and a handler's relevance is
+  declared at the handler rather than listed in the skill. (`bf5da1f5`)
 - [ ] One invocation runs the full housekeeping pass and reports what it did.
 - [ ] Every routed subcommand is one a human invokes; the rest are documented
   capabilities.
@@ -223,6 +248,7 @@ the opt-in idle trigger for the same pass.
 
 - Milestone A — the real surface and the real coverage gap are measured.
 - Milestone B — `optimise` is registry-derived and cannot silently omit a
-  handler.
+  handler. Delivered in `bf5da1f5`.
 - Milestone C — a single housekeeping invocation exists.
-- Milestone D — the release gate blocks a drifted skill surface.
+- Milestone D — the release gate blocks a drifted skill surface. Delivered in
+  `bf5da1f5`.
