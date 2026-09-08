@@ -694,8 +694,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         # overall start is a clean exit 0 with exactly one daemon. We did NOT own
         # the daemon, so we must NOT delete the incumbent's discovery file.
         print(
-            f"Daemon already running on {daemon_config.socket_path}; "
-            f"reusing existing instance: {e}"
+            f"Daemon already running on {daemon_config.socket_path}; reusing existing instance: {e}"
         )
         sys.exit(0)
     except Exception as e:
@@ -5197,8 +5196,10 @@ def cmd_worktree_reap(args: argparse.Namespace, *, run_fn: "RunGit | None" = Non
         one needs a human. The refusals are the actionable output.
     """
     from claude_code_hooks_daemon.core.worktree_reaping import (
+        collect_orphaned_branches,
         collect_worktree_states,
         is_reapable,
+        prune_branch,
         reap_refusal_reason,
         reap_worktree,
     )
@@ -5206,11 +5207,17 @@ def cmd_worktree_reap(args: argparse.Namespace, *, run_fn: "RunGit | None" = Non
     repo_root = Path(getattr(args, "project_root", None) or get_project_path(None))
     base_branch = getattr(args, "base_branch", None) or "main"
     reap = bool(getattr(args, "reap", False))
+    reap_branches = bool(getattr(args, "reap_branches", False))
     only = getattr(args, "only", None)
 
     collect_kwargs = {"run_fn": run_fn} if run_fn is not None else {}
     states = collect_worktree_states(repo_root, base_branch, **collect_kwargs)
-    if not states:
+    # Plan 00352: a branch whose worktree has already gone is invisible to the
+    # worktree collector, so it is reported here — the moment a human needs to
+    # know is the moment they finish reaping its siblings. `--only` names a
+    # WORKTREE, so the branch report is suppressed rather than filtered.
+    orphans = () if only else collect_orphaned_branches(repo_root, base_branch, **collect_kwargs)
+    if not states and not orphans:
         print("No agent worktrees found.")
         return 0
 
@@ -5233,10 +5240,28 @@ def cmd_worktree_reap(args: argparse.Namespace, *, run_fn: "RunGit | None" = Non
         outcome = reap_worktree(repo_root, state, path, dry_run=not reap, **collect_kwargs)
         print(f"{'REAPED ' if outcome.removed else 'DRY-RUN'} {outcome.detail}")
 
+    unmerged = 0
+    for branch in orphans:
+        # `--reap-branches` is deliberately NOT folded into `--reap`: someone
+        # with `--reap` in a script agreed to remove worktrees and the branches
+        # attached to them, and must not start deleting standalone branches
+        # because this command learned a new trick.
+        branch_outcome = prune_branch(
+            repo_root, branch, dry_run=not reap_branches, **collect_kwargs
+        )
+        print(f"{'PRUNED ' if branch_outcome.deleted else 'ORPHAN '} {branch_outcome.detail}")
+        if not branch_outcome.deleted and not branch.merged_into_base:
+            unmerged += 1
+
     if not reap:
         print(f"\n{len(states) - refused} reapable, {refused} need a human. Nothing was changed.")
         print("Re-run with --reap to remove the reapable ones and their branches.")
-    return 1 if refused else 0
+    if orphans and not reap_branches:
+        print(
+            f"{len(orphans)} branch(es) have no worktree at all. "
+            "Re-run with --reap-branches to delete the merged ones."
+        )
+    return 1 if refused or unmerged else 0
 
 
 def cmd_skill_scan(args: argparse.Namespace) -> int:
@@ -6181,7 +6206,7 @@ def main() -> int:
     parser_write_venv_metadata.add_argument(
         "--fingerprint",
         required=True,
-        help="Fingerprint embedded in the venv directory name " "(e.g. 'workspace-py311-2fa8b3c1')",
+        help="Fingerprint embedded in the venv directory name (e.g. 'workspace-py311-2fa8b3c1')",
     )
     parser_write_venv_metadata.add_argument(
         "--daemon-version",
@@ -6757,6 +6782,16 @@ def main() -> int:
         default=None,
         help="Act on this worktree alone (still subject to the same safety checks)",
     )
+    # Separate from --reap on purpose (Plan 00352): someone with --reap in a
+    # script agreed to remove worktrees and their attached branches, and must
+    # not start deleting standalone branches because the command learned a new
+    # trick. A new flag cannot surprise an existing caller.
+    parser_worktree_reap.add_argument(
+        "--reap-branches",
+        dest="reap_branches",
+        action="store_true",
+        help="Also delete agent branches that have no worktree, if fully merged",
+    )
     parser_worktree_reap.set_defaults(func=cmd_worktree_reap)
 
     # harvest-background command (Plan 00142, Layer B) — detect & surface, never kill
@@ -6894,8 +6929,7 @@ def main() -> int:
         "--bundle",
         default="untracked/deleted-branches.bundle",
         metavar="PATH",
-        help="Recovery bundle written before deletion "
-        "(default: untracked/deleted-branches.bundle)",
+        help="Recovery bundle written before deletion (default: untracked/deleted-branches.bundle)",
     )
     parser_delete_branch.add_argument(
         "--no-bundle",

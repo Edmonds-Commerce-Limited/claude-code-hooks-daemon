@@ -95,30 +95,12 @@ name the snapshot path. Small, independent of the merge design, and it converts
 a silent loss into a recoverable one.
 
 **The two installers already disagree, and one of them is right.** For
-`hooks-daemon.yaml` the shell installer does exactly what this plan wants:
-
-```bash
-# install_version.sh:434
-if [ -f "$TARGET_CONFIG" ]; then
-    print_info "Config already exists, keeping existing configuration"
-else
-    # deploy .claude/hooks-daemon.yaml.example
-fi
-```
-
-Existing config is **kept**, and the tracked `.yaml.example` is deployed only
-when there is none. `install.py` embeds its own template instead and replaces
-the config every time. So the smallest useful fix for the third route is not new
-merge machinery at all — it is making `install.py` behave like
-`install_version.sh` already does: preserve an existing config, and deploy the
-tracked example rather than a hand-maintained copy that drifts.
-
-That drift was not hypothetical. `install.py`'s embedded template still
-configured `yolo_container_detection`, removed in Plan 00237, and shipped two
-handler sections that YAML parsed as `None` — so it generated a config the
-daemon refused to load. Fixed, with a round-trip test through the real
-validator, and the shipped `.yaml.example` is now guarded the same way. A single
-source for the default config would have made both impossible.
+`hooks-daemon.yaml`, `install_version.sh:434` KEEPS an existing config and
+deploys the tracked `.yaml.example` only when there is none — exactly what this
+plan wants. `install.py` embedded its own template and replaced the config every
+time, and that copy had drifted far enough to generate a config the daemon
+refused to load. Fixed, with a round-trip test through the real validator. A
+single source for the default config would have made it impossible.
 
 This plan designs and builds a **structured merge** for `settings.json` that
 mirrors what already exists for `hooks-daemon.yaml`: the daemon keeps ownership
@@ -225,9 +207,32 @@ should build on the `src/` pair, since it runs inside the daemon and
   Headless fallback is **change nothing and say so**: keep the client file,
   write the proposed merge beside it, exit non-zero naming both.
 
-- [ ] ⬜ **Task 1.3**: Adversarial audit/refine pass (mirror Plan 00174's looped
-  review) focused on data-loss safety and the shared-daemon / headless-install
-  edge cases.
+- [x] ✅ **Task 1.3**: Adversarial audit run against the spec:
+  **[report](subagent-reports/260908-merge-spec-audit-opus.md)**, verdict
+  *request changes*, 7 critical. It did its job — it falsified the spec's
+  central mechanism rather than confirming it.
+
+  **Three were defects in SHIPPED code, verified here and fixed:**
+  `settings_deploy.sh`'s final `cp` ran unchecked, so a failed deploy reported
+  success and made the caller's `|| fail_fast` unreachable; there were **three**
+  copy sites, not two, and `install_version.sh:390` kept its own unchecked pair
+  (the pinning test was scoped to the file being fixed, which is how the third
+  stayed invisible); and `settings.json.bak-<timestamp>` was not gitignored, so
+  every upgrade left the client's settings in an untracked file.
+
+  **Q2's discriminator was wrong and is rewritten.** A runnable probe showed the
+  `/.claude/hooks/` substring failing in both directions — including a false
+  NEGATIVE on the relative legacy shape the rule existed to repair.
+
+- [ ] ⬜ **Task 1.4**: Four audit findings remain open, all design-level and all
+  shaping Phase 2 rather than any shipped code. Detail and evidence in the
+  report; the headlines are: **no old-default baseline exists** for
+  `settings.json`, so "did the user change this?" is unanswerable as stated;
+  **preserving client-owned keys preserves their ABSENCE**, which would stop an
+  existing project receiving new recommended defaults it gets today; **the
+  headless abort has no rollback on the fast path**; and **four unsynchronised
+  writers with no lock**, one of which (`install.py`) rewrites the whole
+  document and would undo a merge.
 
 ### Phase 2: TDD implementation
 
@@ -254,26 +259,21 @@ should build on the `src/` pair, since it runs inside the daemon and
   was simply inverted, and the branch was untested: every existing test passed
   `force=True` into an empty directory, so no test ever reached the backup.
 
-  The flag is **removed**, not corrected. The daemon owns this file and rewrites
-  it on every invocation, so forcing never changed what was written — its sole
-  effect was to skip the safety step. `--force` still means something for
-  `create_daemon_config`, which is the one caller that reads it. A test asserts
-  the parameter is absent, so it cannot come back quietly.
-
-  Backup naming is collision-proof too: the timestamp has one-second
-  resolution, so two installs in the same second used to resolve to one name
-  and the second rename destroyed the first backup — the copy holding the
-  client's original file.
+  The flag is **removed**, not corrected: the daemon rewrites this file every
+  invocation, so forcing never changed what was written — its sole effect was to
+  skip the safety step. `--force` still drives `create_daemon_config`. A test
+  asserts the parameter is absent so it cannot come back quietly. Backup naming
+  is collision-proof too, since a second-resolution timestamp let two installs
+  in one second resolve to a single name.
 
 - [x] ✅ **Task 2.0** (shipped ahead of the merge):
   `scripts/install/settings_deploy.sh`, called from both `upgrade_version.sh`
   sites.
 
   **Filed against Step 9; Step 9 was the safer site.** The idempotent fast path
-  at `:307` copies and prints *nothing*, and `exit 0`s at `:439` — **before**
-  Step 3's snapshot at `:539` — so no copy stands behind it at all, while Step 9
-  runs after the snapshot. The unprotected, silent copy is the one that runs
-  most often, and this plan's table pointed at the other one.
+  at `:307` copies silently and `exit 0`s at `:439` — before Step 3's snapshot
+  at `:539` — so nothing stands behind it, while Step 9 runs after it. The
+  unprotected copy is the one that runs most often.
 
   One function now serves both, because two sites doing one job differently is
   what produced the gap. Behaviour and tests: [MERGE-SPEC.md](MERGE-SPEC.md) Q4.

@@ -49,10 +49,18 @@ class _FakeGit:
 
     @property
     def mutations(self) -> list[tuple[str, ...]]:
+        """Only the git calls that CHANGE something.
+
+        `branch` alone is too broad: the orphaned-branch report (Plan 00352)
+        reads `branch --list` and `branch --merged`, which remove nothing. A
+        predicate that counted those would fail on a command that had done
+        exactly what it promised.
+        """
         return [
             call
             for call in self.calls
-            if call[0] == "branch" or (call[0] == "worktree" and call[1] == "remove")
+            if (call[0] == "branch" and ("-d" in call or "-D" in call))
+            or (call[0] == "worktree" and call[1] == "remove")
         ]
 
 
@@ -124,7 +132,12 @@ class TestARepositoryWithNoAgentWorktrees:
     def _no_worktrees(cwd: Path, *args: str, **_: object) -> subprocess.CompletedProcess[str]:
         if args[0] == "worktree":
             return subprocess.CompletedProcess([], 0, "worktree /repo\nHEAD aaa\n", "")
-        raise AssertionError(f"nothing else should be asked: {args}")
+        # The orphaned-branch listing (Plan 00352) is asked for even here,
+        # because a repository can hold branches after its worktrees are gone —
+        # that IS the case that plan exists for. Empty means none.
+        if args[0] == "branch" and "-d" not in args and "-D" not in args:
+            return subprocess.CompletedProcess([], 0, "", "")
+        raise AssertionError(f"nothing that changes state should be asked: {args}")
 
     def test_it_says_so_and_succeeds(self, capsys: pytest.CaptureFixture[str]) -> None:
         exit_code = cmd_worktree_reap(_args(), run_fn=self._no_worktrees)

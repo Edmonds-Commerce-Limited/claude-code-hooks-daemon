@@ -267,7 +267,7 @@ def reap_worktree(
             removed=True,
             branch_removed=False,
             detail=(
-                f"removed {path}, but git kept the branch {state.name}: " f"{branch.stderr.strip()}"
+                f"removed {path}, but git kept the branch {state.name}: {branch.stderr.strip()}"
             ),
         )
 
@@ -277,3 +277,140 @@ def reap_worktree(
         branch_removed=True,
         detail=f"removed {path} and its branch {state.name}",
     )
+
+
+#: The naming shape agent dispatch uses (`agent-<hex>-<hex>`). Scoped to it on
+#: purpose: Plan 00349 and Plan 00048 both declined a general branch-pruning
+#: policy, and Plan 00352 inherits that boundary rather than widening it.
+AGENT_BRANCH_GLOB = "agent-*"
+
+_BRANCH_LINE_PREFIX = "branch refs/heads/"
+_BRANCH_FORMAT = "--format=%(refname:short)"
+
+
+@dataclass(frozen=True)
+class OrphanedBranch:
+    """An `agent-*` branch that no worktree points at.
+
+    Attributes:
+        name: The branch name.
+        merged_into_base: Whether `git branch --merged <base>` lists it. False
+            also covers "git could not tell us", because a branch we cannot
+            classify must not be deleted.
+    """
+
+    name: str
+    merged_into_base: bool
+
+
+def _branch_names(result: GitResult) -> list[str] | None:
+    """Branch names from a `--format=%(refname:short)` listing, or None on failure."""
+    if result.returncode != 0:
+        return None
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _attached_branches(listing: str) -> set[str]:
+    """Branches that `git worktree list --porcelain` reports a worktree for."""
+    return {
+        line[len(_BRANCH_LINE_PREFIX) :].strip()
+        for line in listing.splitlines()
+        if line.startswith(_BRANCH_LINE_PREFIX)
+    }
+
+
+def collect_orphaned_branches(
+    repo_root: Path, base_branch: str, *, run_fn: RunGit = run_git
+) -> tuple[OrphanedBranch, ...]:
+    """Agent branches with no worktree, each tagged with its merge status.
+
+    Read-only. Orphaned is defined as the agent branches git lists MINUS the
+    branches a worktree points at — which is why this belongs beside the
+    worktree collector rather than in a command of its own: the second set is
+    exactly what `git worktree list` already had to be read for.
+
+    Returns an empty tuple when either listing fails. Without the worktree
+    listing every branch would look orphaned, and without the branch listing
+    there is nothing to classify; in both cases no candidates is the safe answer
+    rather than a guess.
+    """
+    listing = run_fn(repo_root, "worktree", "list", "--porcelain")
+    if listing.returncode != 0:
+        return ()
+
+    all_names = _branch_names(
+        run_fn(repo_root, "branch", "--list", AGENT_BRANCH_GLOB, _BRANCH_FORMAT)
+    )
+    if all_names is None:
+        return ()
+
+    merged_names = _branch_names(
+        run_fn(
+            repo_root,
+            "branch",
+            "--merged",
+            base_branch,
+            "--list",
+            AGENT_BRANCH_GLOB,
+            _BRANCH_FORMAT,
+        )
+    )
+    # An unreadable --merged listing means the merge status is UNKNOWN. Treating
+    # unknown as merged would turn a git failure into a deletion, so every
+    # branch is marked unmerged and `prune_branch` refuses the lot.
+    merged = set(merged_names) if merged_names is not None else set()
+
+    attached = _attached_branches(listing.stdout)
+    return tuple(
+        OrphanedBranch(name=name, merged_into_base=name in merged)
+        for name in all_names
+        if name not in attached
+    )
+
+
+@dataclass(frozen=True)
+class PruneOutcome:
+    """What happened to one branch, in terms a report can print directly."""
+
+    name: str
+    deleted: bool
+    detail: str
+
+
+def prune_branch(
+    repo_root: Path,
+    branch: OrphanedBranch,
+    *,
+    run_fn: RunGit = run_git,
+    dry_run: bool = False,
+) -> PruneOutcome:
+    """Delete one orphaned branch, if it is fully merged into the base.
+
+    **Git is asked to disagree**, exactly as :func:`reap_worktree` does: the
+    delete is `-d`, never `-D`, so git independently refuses a branch that is
+    not fully merged even if the check above was wrong. A git refusal is
+    REPORTED, never retried with force — that is the whole value of asking, and
+    `-D` is a blocked operation in this project for the same reason.
+    """
+    if not branch.merged_into_base:
+        return PruneOutcome(
+            branch.name,
+            deleted=False,
+            detail=(
+                f"{branch.name} is not fully merged into the base branch, or git "
+                "could not say. Inspect it and delete it by hand if the work is "
+                "accounted for."
+            ),
+        )
+
+    if dry_run:
+        return PruneOutcome(branch.name, deleted=False, detail=f"would delete branch {branch.name}")
+
+    result = run_fn(repo_root, "branch", "-d", branch.name)
+    if result.returncode != 0:
+        return PruneOutcome(
+            branch.name,
+            deleted=False,
+            detail=f"git kept the branch {branch.name}: {result.stderr.strip()}",
+        )
+    return PruneOutcome(branch.name, deleted=True, detail=f"deleted branch {branch.name}")

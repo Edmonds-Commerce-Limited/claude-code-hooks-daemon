@@ -75,7 +75,14 @@ deploy_settings_json() {
         print_warning "  Re-apply any customizations from it (Plan 00176 will merge them automatically)."
     fi
 
-    cp "$source" "$target"
+    # Checked, like the backup above. Reporting success without reading this
+    # exit status made the caller's `|| fail_fast` unreachable: a failed copy
+    # printed "Redeployed settings.json" and returned 0, so an upgrade carried
+    # on over a settings.json that had never been written.
+    if ! cp "$source" "$target"; then
+        print_error "Could not deploy settings.json to $target - aborting"
+        return 1
+    fi
     print_success "Redeployed settings.json"
     return 0
 }

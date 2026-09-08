@@ -1,6 +1,6 @@
 # Plan 00352: agent branches outlive their worktrees
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Low
@@ -75,24 +75,70 @@ can still misreport as unlanded after a rebase (Plan 00349 Task 1.2).
 
 ### Phase 1: See them
 
-- [ ] ⬜ **Task 1.1**: Enumerate `agent-*` branches with no worktree, and record
-  for each whether it is fully merged into the base branch. Report only.
+- [x] ✅ **Task 1.1**: Three orphans, and **all three are fully merged into
+  `main`** — 0 commits ahead, and each is listed by `git branch --merged main`:
 
-- [ ] ⬜ **Task 1.2**: Decide the surface: a flag on `worktree-reap` (they are
-  the same lifecycle and a human clearing up wants one command) versus a
-  separate command (the predicates and risk profiles genuinely differ). Record
-  the reason, not just the choice.
+  | Branch                             | Ahead of `main` | Merged |
+  | ---------------------------------- | --------------- | ------ |
+  | `agent-a4ff553e443d90fc7-0b00a249` | 0               | yes    |
+  | `agent-a88580597e044ef36-d1a957af` | 0               | yes    |
+  | `agent-a919dc7e0a2315615-f3d60e5a` | 0               | yes    |
+
+  The set is computed as `git branch --list 'agent-*'` minus the branches
+  `git worktree list --porcelain` reports — that difference IS the definition of
+  orphaned, so no separate detection is needed.
+
+  Note what this does **not** establish: that three is the steady state. It is a
+  snapshot after one reap, and the population grows with every dispatch whose
+  worktree is removed without its branch. Plan 00349 Task 3.2 showed a completed
+  dispatch leaving both behind, so the ordinary route here is a later worktree
+  removal, not a rare failure.
+
+- [x] ✅ **Task 1.2**: **Reported by `worktree-reap`, acted on by a second flag
+  of its own — `--reap-branches`, never by widening `--reap`.**
+
+  *Why one command reports both.* The orphan set is DEFINED as the branch list
+  minus the branches `collect_worktree_states` already reports, so a separate
+  command would re-derive exactly the data `worktree-reap` has in hand. And the
+  moment a human needs to know is the moment they finish reaping: three branches
+  going quiet is invisible unless the thing that just removed their siblings
+  says so.
+
+  *Why a separate flag rather than widening `--reap`.* Someone with `--reap` in
+  a script agreed to remove worktrees and their attached branches. Making that
+  same invocation start deleting standalone branches changes what an existing
+  command does without anyone re-reading it — the one property Plan 00349 Task
+  2.1 was most careful about. A new flag cannot surprise an old caller.
+
+  *What this does not do.* It stays scoped to the `agent-*` naming shape, so it
+  is not the general branch-pruning policy Plan 00349 and Plan 00048 both
+  declined.
 
 ### Phase 2: Offer them
 
-- [ ] ⬜ **Task 2.1**: Prune on explicit opt-in only, `git branch -d` never
-  `-D`, with a git refusal reported and never retried with force. Dry-run by
-  default, matching Plan 00349.
+- [x] ✅ **Task 2.1**: `collect_orphaned_branches` + `prune_branch`, wired to
+  `worktree-reap --reap-branches`. Dry-run by default; `git branch -d`, never
+  `-D`; a git refusal reported and never retried with force.
 
-- [ ] ⬜ **Task 2.2**: Observe it against a real throwaway branch — created,
-  cleared, pruned, gone — rather than only against a fake git. Plan 00349 Task
-  3.4 found this worth doing separately from the unit tests, which only ever
-  assert the argv the code builds.
+  **Unknown merge status counts as unmerged.** If `git branch --merged` cannot
+  be read, every branch is marked unmerged rather than defaulting to safe —
+  otherwise a git failure would become a deletion, the same rule Plan 00349
+  Task 1.2 settled for counts.
+
+- [x] ✅ **Task 2.2**: Observed against real branches, including the case the
+  three real orphans could not exercise. Two throwaways with no worktree — one
+  at `main`, one carrying a commit that exists nowhere else — were classified
+  correctly: `would delete branch agent-probe-merged`, and the unmerged one
+  refused by name with its reason.
+
+  `--reap-branches` then deleted the four merged branches (the three real
+  orphans and the probe) and left the unmerged one. The six `agent-*` branches
+  that still have worktrees were untouched throughout.
+
+  **The refused probe is still here, and that is the design working.** `-D` is
+  blocked by project policy and this plan's Non-Goals, so a branch git declines
+  to delete needs a human — even when the agent that made it knows it is
+  worthless. Left for the owner: `git branch -D agent-probe-unmerged`.
 
 ### Phase 3: Verify
 
@@ -100,10 +146,12 @@ can still misreport as unlanded after a rebase (Plan 00349 Task 1.2).
 
 ## Success Criteria
 
-- [ ] The three orphans identified above are either pruned or reported with a
-  stated reason for keeping them
-- [ ] A branch that is not fully merged is never deleted
-- [ ] Pruning never happens without an explicit opt-in flag
+- [x] The three orphans identified above are either pruned or reported with a
+  stated reason for keeping them — all three pruned
+- [x] A branch that is not fully merged is never deleted — refused by the
+  predicate, and `git branch -d` refuses again behind it
+- [x] Pruning never happens without an explicit opt-in flag — `--reap-branches`,
+  separate from `--reap` so no existing caller changes behaviour
 
 ## Delivery & Milestones
 

@@ -52,6 +52,8 @@ source "$INSTALL_LIB_DIR/validation.sh"
 source "$INSTALL_LIB_DIR/daemon_control.sh"
 # shellcheck source=install/transport_env.sh
 source "$INSTALL_LIB_DIR/transport_env.sh"
+# shellcheck source=install/settings_deploy.sh
+source "$INSTALL_LIB_DIR/settings_deploy.sh"
 
 # ============================================================
 # Helper functions
@@ -380,15 +382,12 @@ log_step "5" "Deploying settings.json"
 TARGET_SETTINGS="$PROJECT_ROOT/.claude/settings.json"
 
 if [ -f "$SETTINGS_JSON_SOURCE" ]; then
-    # Backup existing settings.json if present
-    if [ -f "$TARGET_SETTINGS" ]; then
-        backup_timestamp=$(date +%Y%m%d-%H%M%S)
-        cp "$TARGET_SETTINGS" "${TARGET_SETTINGS}.bak-${backup_timestamp}"
-        print_verbose "Backed up existing settings.json"
-    fi
-
-    cp "$SETTINGS_JSON_SOURCE" "$TARGET_SETTINGS"
-    print_success "Deployed settings.json"
+    # The same helper both upgrade paths use. This was the THIRD site copying
+    # settings.json its own way, and its two `cp`s went unchecked: a failed
+    # backup or a failed deploy both reported success. There is no rollback
+    # snapshot on the install path, so the empty third argument is accurate.
+    deploy_settings_json "$SETTINGS_JSON_SOURCE" "$TARGET_SETTINGS" "" ||
+        fail_fast "Could not preserve the existing settings.json"
 else
     # Generate settings.json if template not available (older daemon versions)
     print_warning "settings.json not found in daemon repo, generating..."

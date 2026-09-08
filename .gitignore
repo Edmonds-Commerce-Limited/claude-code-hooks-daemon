@@ -128,6 +128,12 @@ venv.bak/
 # and would otherwise be swept in by a `git add -A`.
 *.bak
 *.bak.*
+# The HYPHEN form is a third shape and neither pattern above matches it:
+# settings_deploy.sh and install.py write `settings.json.bak-20260908-120000`
+# on every upgrade that replaces a differing file. Left unignored it turns up
+# untracked in a client's tree, and it holds their settings — including
+# anything under `env` — so an accidental `git add -A` is a real disclosure.
+*.bak-*
 *.orig
 *.rej
 *~

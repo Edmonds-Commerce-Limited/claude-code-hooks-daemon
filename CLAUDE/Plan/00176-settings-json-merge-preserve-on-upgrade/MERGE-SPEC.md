@@ -64,15 +64,37 @@ relative path), because the event key is present and presence is all that is
 checked. That is exactly "an upgrade must never leave a client with a stale or
 incomplete `hooks` block" failing.
 
-The discriminator needed for a safe replace is **already in the same module**:
-`_DAEMON_WRAPPER_FRAGMENT = "/.claude/hooks/"`, which `detect_legacy_hook_commands`
-uses to tell a daemon forwarder from a client's own inline hook. An inner hook
-whose `command` contains that fragment is ours and may be rebuilt from
-`HOOK_COMMAND_TEMPLATE`; one that does not is the client's and is never touched.
-This is why per-hook matching beats whole-block replace — a client hook sitting
-in the same event array as a daemon forwarder survives, and the plan's
-Context table already commits to that ("a client cannot drop or break a
-forwarder, but MAY add sibling hooks").
+### The discriminator: NOT the `/.claude/hooks/` substring
+
+This spec first proposed testing `_DAEMON_WRAPPER_FRAGMENT = "/.claude/hooks/"`
+against the `command` string. **That is wrong in both directions**, and the
+adversarial audit proved it with a runnable probe
+([`probe_fragment.py`](subagent-reports/probe_fragment.py), run against the real
+constants):
+
+| Command                                                                       | Substring says | Truth                                                              |
+| ----------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------ |
+| `.claude/hooks/pre-tool-use`                                                  | not ours       | **ours** — the relative legacy shape this section exists to repair |
+| `bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/my-secret-scan`                     | ours           | **client's** — would be rewritten into a duplicate forwarder       |
+| `bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/pre-tool-use && ./ci/extra-gate.sh` | ours           | **client's chained gate** — rebuilding drops `./ci/extra-gate.sh`  |
+| `bash "$HOME"/dotfiles/.claude/hooks/lint`                                    | ours           | **client's**, not even in this repo                                |
+
+The false NEGATIVE is the worst of them: the relative form is precisely the
+"stale entry" row above, so a substring test would leave broken exactly the case
+it was added to fix.
+
+**Use `hook_command_migration.legacy_command_bash_key` instead**, which already
+solves this and is anchored to the WHOLE command rather than searching inside
+it. An inner hook is daemon-owned when either:
+
+1. it equals `canonical_hook_command(key)` for a `key` in the wired set, or
+2. `legacy_command_bash_key(command)` returns a `key` in the wired set.
+
+Membership of the **wired set** is what rejects `my-secret-scan`; anchoring is
+what rejects the chained command and the dotfiles path. Everything else is the
+client's and is never touched. This is also why per-hook matching beats
+whole-block replace — a client hook sitting in the same event array as a daemon
+forwarder survives, as the plan's ownership table commits to.
 
 `HOOK_COMMAND_TEMPLATE` is public precisely so several places render a
 byte-identical command; the merge becomes a fourth caller, so a rebuilt entry is
