@@ -57,7 +57,8 @@ while the detectors silently do not run.
   `pseudo_events.nitpick.handlers`), and the upgrade migrates those two
   automatically. Reconcile the reference config with the handler registry so
   every live handler is listed.
-- [ ] ⬜ **Task 1.3** (report §3, MEDIUM): `echd-capture` is provisioned into
+- [x] ✅ **Task 1.3** (report §3, MEDIUM; merged at `473707c6`, the helper is
+  a deployed template, `bin/echd-capture` here): `echd-capture` is provisioned into
   client installs alongside the other deployed scripts, and the pipe_blocker
   guidance names its deployed absolute path only when it resolves, falling
   back to the redirect recipe otherwise.
