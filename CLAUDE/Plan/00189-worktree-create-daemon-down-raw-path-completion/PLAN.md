@@ -1,6 +1,6 @@
 # Plan 00189: worktree create daemon down raw path completion
 
-**Status**: Not Started
+**Status**: In Progress (Tasks 1.1 to 1.3 done via Plan 00362 Task 2.5; Task 1.4 open)
 **Created**: 2026-07-24
 **Owner**: joseph
 **Priority**: Medium
@@ -75,17 +75,22 @@ behaviour.
 
 ### Phase 1: Complete the raw-path contract on the daemon-down branch
 
-- [ ] ⬜ **Task 1.1**: RED — a test (forwarder-level or `init.sh`-level) that
+- [x] ✅ **Task 1.1**: RED — a test (forwarder-level or `init.sh`-level) that
   drives the `WorktreeCreate` forwarder with the daemon unstartable and asserts
   exit code ≠ 0 AND empty stdout (nothing parseable as a path).
-- [ ] ⬜ **Task 1.2**: GREEN — teach `create_forwarder_script` (and/or a
+  (`tests/unit/install/test_forwarder_generator_raw_stdout.py`, commit `adb82013`,
+  via Plan 00362 Task 2.5)
+- [x] ✅ **Task 1.2**: GREEN — teach `create_forwarder_script` (and/or a
   `worktree`-mode-aware branch in `init.sh`) to route the raw-stdout events'
   `ensure_daemon`-failure and socket-error paths to a stderr diagnostic + non-zero
   exit, instead of the shared `emit_hook_error` stdout-JSON stanza. Regenerate the
   deployed `.claude/hooks/worktree-create`.
-- [ ] ⬜ **Task 1.3**: Generalise via the `raw_stdout` event flag so any future
+  (`forwarder_generator.apply_raw_stdout_daemon_down`; tracked `worktree-create`
+  and `status-line` regenerated; commit `adb82013`)
+- [x] ✅ **Task 1.3**: Generalise via the `raw_stdout` event flag so any future
   raw-stdout event inherits the correct daemon-down behaviour (single source of
   truth, not a WorktreeCreate special-case).
+  (`constants.events.raw_stdout_bash_keys()`; commit `adb82013`)
 - [ ] ⬜ **Task 1.4**: Full QA green; daemon restart RUNNING; live-dogfood a
   worktree launch with the daemon forced down (or a unit-level equivalent).
 

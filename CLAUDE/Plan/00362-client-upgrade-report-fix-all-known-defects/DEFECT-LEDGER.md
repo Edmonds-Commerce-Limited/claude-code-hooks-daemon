@@ -105,7 +105,8 @@ hook's stdout as the created worktree's absolute path, so a daemon that cannot
 start yields the literal path `/<cwd>/{...json...}`. The `raw_stdout` event flag
 now exists (`constants/events.py:146`, set `True` at `:299` and `:470`), so Task
 1.3's generalisation substrate has arrived since filing.
-**Status**: Not Started. · **W**
+**Status**: Fixed in commit `adb82013` (Task 2.5): the generator rewrites the
+daemon-down stanza of every `raw_stdout` event to stderr + exit 1. · **W**
 
 ### D9 · Plan 00172 Finding 2 (Tasks 1.2, 2.2) · a plugin targeting a worktree event is rejected at validation
 

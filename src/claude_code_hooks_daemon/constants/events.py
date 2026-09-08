@@ -134,6 +134,14 @@ class EventIDMeta:
             exactly ``forward_stop_event``'s ``decision=block`` ->
             exit-code-2 hard re-entry translation for Stop/SubagentStop
             (Plan 00101 Phase 9). False for every other event.
+        daemon_down_stdout: What a ``raw_stdout`` forwarder may print to
+            stdout when the daemon cannot be started (Plan 00189). Empty for
+            an event whose raw stdout is parsed as a VALUE (WorktreeCreate: a
+            JSON error there becomes the literal path ``/<cwd>/{...}``), so
+            the daemon-down branch prints nothing; a visible marker for an
+            event whose raw stdout is a DISPLAY line (StatusLine), where
+            silence would hide the outage. Either way the diagnostic goes to
+            stderr and the exit is non-zero. Ignored for JSON-decision events.
     """
 
     enum_value: str
@@ -145,6 +153,7 @@ class EventIDMeta:
     wired: bool = True
     raw_stdout: bool = False
     requires_client_translation: bool = False
+    daemon_down_stdout: str = ""
 
     @property
     def relay_eligible(self) -> bool:
@@ -297,6 +306,8 @@ class EventID:
         # The status line is raw text on stdout — the daemon ships status_line
         # handlers that render it (never a bare {} passthrough).
         raw_stdout=True,
+        # A DISPLAY line, not a parsed value: keep the outage visible.
+        daemon_down_stdout="⚠️ DAEMON FAILED",
     )
 
     # -----------------------------------------------------------------------
@@ -574,6 +585,21 @@ def relay_ineligible_bash_keys() -> frozenset[str]:
     ``requires_client_translation`` event) can never silently drift from it.
     """
     return frozenset(m.bash_key for m in wired_event_metas() if not m.relay_eligible)
+
+
+def raw_stdout_bash_keys() -> frozenset[str]:
+    """``bash_key`` of every WIRED event whose stdout Claude Code reads RAW.
+
+    Single typed source for :mod:`install.forwarder_generator`'s daemon-down
+    stanza (Plan 00189): a forwarder for one of these events must never put
+    JSON on stdout, even when the daemon cannot start, because that stdout is
+    parsed as a path (``WorktreeCreate``) or shown as status text
+    (``StatusLine``). What it MAY print instead is the event's
+    :attr:`EventIDMeta.daemon_down_stdout`. Derived from
+    :attr:`EventIDMeta.raw_stdout` so a future raw-stdout event inherits the
+    correct branch without a hand-maintained list.
+    """
+    return frozenset(m.bash_key for m in wired_event_metas() if m.raw_stdout)
 
 
 # Type-safe event key literal (for mypy/type checking).
