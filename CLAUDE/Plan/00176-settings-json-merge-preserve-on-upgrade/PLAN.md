@@ -179,12 +179,19 @@ The five open design questions this plan was filed with — reuse-vs-new,
 00175 validator — are answered in **[MERGE-SPEC.md](MERGE-SPEC.md)**, which also
 carries the decided key-ownership table Phase 2 builds against.
 
-One correction worth keeping here, because it was wrong in this document and
-the wrong version is the one a reader would otherwise trust: the SSoT for "which
-hook entries are ours" is **not** `_DAEMON_FORWARDER_HOOKS` — no such symbol
-exists. It is `HOOK_EVENTS_IN_SETTINGS` for the wired event set, and
-`_DAEMON_WRAPPER_FRAGMENT` for telling a daemon forwarder from a client's own
-hook, both in `utils/hook_registration.py`.
+One thing worth keeping here, because "which hook entries are ours" has **two**
+answers in the tree and the merge has to pick one:
+
+- `_DAEMON_FORWARDER_HOOKS` (`install.py:321`) — used by the fresh-install path
+  to emit the `hooks` block.
+- `HOOK_EVENTS_IN_SETTINGS` (`utils/hook_registration.py`) — derived from
+  `EventID` where `wired=True`, used by the daemon's own reconcile/validate
+  paths. `_DAEMON_WRAPPER_FRAGMENT` in the same module is what tells a daemon
+  forwarder from a client's own hook.
+
+They are kept in step by a drift test rather than by being one object. The merge
+should build on the `src/` pair, since it runs inside the daemon and
+`install.py` is a standalone bootstrap script that cannot import it.
 
 ## Tasks
 
@@ -239,31 +246,39 @@ hook, both in `utils/hook_registration.py`.
 - [ ] ⬜ **Task 2.4**: Agent-assisted diff path — on ambiguity/validation
   failure, emit the diff + guidance and preserve the client file (fail safe).
 
+- [x] ✅ **Task 2.0b** (the same defect on the third route, found while wiring
+  Task 2.3): `install.py`'s `create_settings_json` backed up under
+  `if settings_file.exists() and not force` — so **`--force` overwrote an
+  existing settings.json with no copy and no warning**, and a fresh install,
+  where there is usually nothing to lose, got the backup instead. The condition
+  was simply inverted, and the branch was untested: every existing test passed
+  `force=True` into an empty directory, so no test ever reached the backup.
+
+  The flag is **removed**, not corrected. The daemon owns this file and rewrites
+  it on every invocation, so forcing never changed what was written — its sole
+  effect was to skip the safety step. `--force` still means something for
+  `create_daemon_config`, which is the one caller that reads it. A test asserts
+  the parameter is absent, so it cannot come back quietly.
+
+  Backup naming is collision-proof too: the timestamp has one-second
+  resolution, so two installs in the same second used to resolve to one name
+  and the second rename destroyed the first backup — the copy holding the
+  client's original file.
+
 - [x] ✅ **Task 2.0** (shipped ahead of the merge):
   `scripts/install/settings_deploy.sh`, called from both `upgrade_version.sh`
   sites.
 
   **Filed against Step 9; Step 9 was the safer site.** The idempotent fast path
   at `:307` copies and prints *nothing*, and `exit 0`s at `:439` — **before**
-  Step 3's snapshot at `:539` — so no copy stands behind it at all. The
-  script's own comment calls that branch "the effective single deployment path
-  for every client upgrade". So the unprotected, silent copy is the one that
-  runs most often, and this plan's table pointed at the other one.
+  Step 3's snapshot at `:539` — so no copy stands behind it at all, while Step 9
+  runs after the snapshot. The unprotected, silent copy is the one that runs
+  most often, and this plan's table pointed at the other one.
 
   One function now serves both, because two sites doing one job differently is
-  what produced the gap. It acts only when the file actually **differs**
-  (warning on every upgrade trains people to ignore it, and a `.bak-` per
-  upgrade of an identical file is litter); it takes a timestamped backup when
-  no snapshot covers the copy and points at the snapshot when one does — one
-  copy, never two; and it **aborts** if the backup cannot be written, leaving
-  the client file untouched, because losing it is the one outcome worth failing
-  a deploy for.
+  what produced the gap. Behaviour and tests: [MERGE-SPEC.md](MERGE-SPEC.md) Q4.
 
-  Tested by sourcing the real library and calling it, plus assertions that both
-  sites go through it and no raw `cp "$SETTINGS_JSON_SOURCE"` survives — a
-  helper only helps if the sites that had the bug use it.
-
-  **Still to do here**: `install.py --force`, the one route with no copy at all.
+  The third route, `install.py`, is Task 2.0b above — all three now take a copy.
 
 ### Phase 3: Rollout, docs, QA
 

@@ -682,19 +682,40 @@ def create_all_hooks(hooks_dir: Path) -> list[Path]:
     return hook_files
 
 
-def create_settings_json(project_root: Path, force: bool = False) -> None:
-    """Create .claude/settings.json registering all hooks."""
+def _free_backup_path(preferred: Path) -> Path:
+    """A backup path that does not already hold someone else's copy.
+
+    The timestamp has one-second resolution, so two installs inside the same
+    second would otherwise resolve to the same name and the second rename would
+    destroy the first backup — which is the copy holding the client's ORIGINAL
+    file, the one worth keeping.
+    """
+    if not preferred.exists():
+        return preferred
+    stamped = preferred.with_name(f"{preferred.name}.{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    candidate = stamped
+    suffix = 1
+    while candidate.exists():
+        candidate = stamped.with_name(f"{stamped.name}-{suffix}")
+        suffix += 1
+    return candidate
+
+
+def create_settings_json(project_root: Path) -> None:
+    """Create .claude/settings.json registering all hooks.
+
+    Takes no `force` flag: the daemon owns this file and rewrites it on every
+    invocation, so forcing changed nothing about what gets written — it only
+    ever skipped the backup.
+    """
     settings_file = project_root / ".claude" / "settings.json"
 
-    # Backup existing settings.json if it exists
-    if settings_file.exists() and not force:
-        backup_file = project_root / ".claude" / "settings.json.bak"
-
-        # If backup already exists, add timestamp
-        if backup_file.exists():
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_file = project_root / ".claude" / f"settings.json.bak.{timestamp}"
-
+    # Back up an existing settings.json, INCLUDING under --force. Backing up
+    # only when NOT forcing had it exactly backwards: --force reinstalls over an
+    # existing install, so it is the invocation most likely to be overwriting a
+    # customised file, and it was the one that overwrote with no copy at all.
+    if settings_file.exists():
+        backup_file = _free_backup_path(project_root / ".claude" / "settings.json.bak")
         settings_file.rename(backup_file)
         print(f"✅ Backed up existing settings.json to {backup_file.relative_to(project_root)}")
 
@@ -1482,7 +1503,7 @@ def main() -> int:
 
     # Create configuration files
     print("\n📝 Creating configuration files...")
-    create_settings_json(project_root, force=args.force)
+    create_settings_json(project_root)
     create_daemon_config(project_root, force=args.force, self_install=self_install)
 
     # Create daemon environment file for self-installation

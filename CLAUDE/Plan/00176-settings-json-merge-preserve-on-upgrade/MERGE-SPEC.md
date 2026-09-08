@@ -39,9 +39,14 @@ missing is precisely the gap the plan's Goals name.
 `utils/hook_registration.py` has `reconcile_settings_hooks`, whose docstring is
 explicit that it is **additive only**: *"Present events — including any
 client-added custom entries — are left untouched."* It walks
-`HOOK_EVENTS_IN_SETTINGS` (the wired-event SSoT, built from `EventID` with
-`wired=True`, StatusLine excluded because it registers top-level) and adds any
-event key that is absent.
+`HOOK_EVENTS_IN_SETTINGS` (built from `EventID` with `wired=True`, StatusLine
+excluded because it registers top-level) and adds any event key that is absent.
+
+There are **two** statements of the wired set: this one, and
+`_DAEMON_FORWARDER_HOOKS` at `install.py:321`, which the standalone bootstrap
+script uses because it cannot import the daemon. A drift test holds them in
+step. The merge runs inside the daemon, so it builds on the `src/` pair — but
+anyone changing the wired set has to touch both.
 
 So today:
 
@@ -100,11 +105,25 @@ with nobody watching.
 **Already shipped, by Task 2.0 — nothing further is owed here.**
 
 `scripts/install/settings_deploy.sh` is the single deploy path for both the
-idempotent fast path and Step 9. It acts only when the files differ, takes a
-timestamped `.bak-` when no rollback snapshot covers the copy, points at the
-snapshot when one does, and — the property that matters — **returns non-zero
-without overwriting if the backup itself fails**. The merge should call it
-rather than re-implement backup handling.
+idempotent fast path and Step 9. The merge should call it rather than
+re-implement backup handling. Its rules, each with a reason:
+
+- **Acts only when the files actually differ.** A warning on every upgrade
+  trains people to ignore it, and a `.bak-` per upgrade of an identical file is
+  litter.
+- **One copy, never two.** Timestamped `.bak-` when no rollback snapshot covers
+  it; a pointer at the snapshot when one does.
+- **Aborts without overwriting if the backup cannot be written.** Losing the
+  client file is the one outcome worth failing a deploy for.
+
+Tested by sourcing the real library and calling it, plus assertions that both
+sites go through it and no raw `cp "$SETTINGS_JSON_SOURCE"` survives — a helper
+only helps if the sites that had the bug use it.
+
+The third route, `install.py`, had the same defect in a different shape and is
+fixed under Task 2.0b: its backup was conditioned on `not force`, so `--force`
+— the invocation that reinstalls over an existing install — was the one that
+took no copy. All three routes now copy before they overwrite.
 
 The original question assumed Step 9 was the unprotected site. It is the
 opposite: Step 9 runs after Step 3's snapshot, while the fast path `exit 0`s

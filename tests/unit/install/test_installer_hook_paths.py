@@ -25,7 +25,7 @@ def test_create_settings_json_uses_project_dir_variable(tmp_path):
     project_root = tmp_path
     (project_root / ".claude").mkdir()
 
-    create_settings_json(project_root, force=True)
+    create_settings_json(project_root)
 
     # Read generated settings.json
     settings_file = project_root / ".claude" / "settings.json"
@@ -70,7 +70,7 @@ def test_create_settings_json_invokes_hooks_via_bash(tmp_path):
 
     project_root = tmp_path
     (project_root / ".claude").mkdir()
-    create_settings_json(project_root, force=True)
+    create_settings_json(project_root)
 
     with open(project_root / ".claude" / "settings.json") as f:
         settings = json.load(f)
@@ -115,7 +115,7 @@ def test_create_settings_json_invokes_status_line_via_bash(tmp_path):
 
     project_root = tmp_path
     (project_root / ".claude").mkdir()
-    create_settings_json(project_root, force=True)
+    create_settings_json(project_root)
 
     with open(project_root / ".claude" / "settings.json") as f:
         settings = json.load(f)
@@ -145,7 +145,7 @@ def test_status_line_command_matches_the_hook_command_template(tmp_path):
 
     project_root = tmp_path
     (project_root / ".claude").mkdir()
-    create_settings_json(project_root, force=True)
+    create_settings_json(project_root)
 
     with open(project_root / ".claude" / "settings.json") as f:
         settings = json.load(f)
