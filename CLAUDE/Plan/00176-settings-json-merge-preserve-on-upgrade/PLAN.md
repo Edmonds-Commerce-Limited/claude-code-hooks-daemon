@@ -1,6 +1,6 @@
 # Plan 00176: settings.json merge — preserve client customizations on upgrade
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-07-17
 **Owner**: joseph
 **Priority**: Medium
@@ -230,15 +230,31 @@ Open design questions to resolve during refine:
 - [ ] ⬜ **Task 2.4**: Agent-assisted diff path — on ambiguity/validation
   failure, emit the diff + guidance and preserve the client file (fail safe).
 
-- [ ] ⬜ **Task 2.0** (shippable now, ahead of the merge): make Step 9 tell the
-  truth. When the file it is about to deploy DIFFERS from the one already
-  there, warn instead of printing `Redeployed settings.json`, and name the
-  Step 3 snapshot path holding the pre-upgrade copy. Independent of every
-  design question below, and it converts a silent loss into a recoverable one.
-  Both deploy sites need it (`:307` and `:865`), and the same for
-  `install.py --force`, the one route with no copy at all. Behavioural test in
-  the style of `test_upgrade_sh_daemon_dir_detection.py` — extract the real
-  block and run it — not a source-grep.
+- [x] ✅ **Task 2.0** (shipped ahead of the merge):
+  `scripts/install/settings_deploy.sh`, called from both `upgrade_version.sh`
+  sites.
+
+  **Filed against Step 9; Step 9 was the safer site.** The idempotent fast path
+  at `:307` copies and prints *nothing*, and `exit 0`s at `:439` — **before**
+  Step 3's snapshot at `:539` — so no copy stands behind it at all. The
+  script's own comment calls that branch "the effective single deployment path
+  for every client upgrade". So the unprotected, silent copy is the one that
+  runs most often, and this plan's table pointed at the other one.
+
+  One function now serves both, because two sites doing one job differently is
+  what produced the gap. It acts only when the file actually **differs**
+  (warning on every upgrade trains people to ignore it, and a `.bak-` per
+  upgrade of an identical file is litter); it takes a timestamped backup when
+  no snapshot covers the copy and points at the snapshot when one does — one
+  copy, never two; and it **aborts** if the backup cannot be written, leaving
+  the client file untouched, because losing it is the one outcome worth failing
+  a deploy for.
+
+  Tested by sourcing the real library and calling it, plus assertions that both
+  sites go through it and no raw `cp "$SETTINGS_JSON_SOURCE"` survives — a
+  helper only helps if the sites that had the bug use it.
+
+  **Still to do here**: `install.py --force`, the one route with no copy at all.
 
 ### Phase 3: Rollout, docs, QA
 
