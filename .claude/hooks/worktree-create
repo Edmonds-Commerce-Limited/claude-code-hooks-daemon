@@ -9,7 +9,9 @@
 #
 # Forwards WorktreeCreate hook calls to daemon via Unix socket.
 # CRITICAL: Pipes JSON directly - NEVER store in shell variables.
-# CRITICAL: All errors output valid JSON to stdout for agent visibility.
+# CRITICAL: Claude Code parses this hook's stdout as the created worktree's
+# absolute PATH (raw_stdout event), so NO error may ever reach stdout — a
+# failure is stderr + non-zero exit, never a JSON object.
 #
 
 set -euo pipefail
@@ -17,11 +19,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../init.sh"
 
-# Try to start daemon - if it fails, output proper JSON error to stdout
+# Try to start daemon - if it fails, say so on stderr and exit non-zero
 if ! ensure_daemon; then
-    emit_hook_error "WorktreeCreate" "daemon_startup_failed" \
-        "Failed to start hooks daemon. Use the hooks-daemon skill to check logs (Skill tool: skill=hooks-daemon, args=logs)"
-    exit 0  # Exit 0 so Claude processes the JSON response
+    # raw_stdout event (generated; Plan 00189): Claude Code parses this
+    # hook's stdout as a RAW value, so a JSON error here would be read as
+    # one. Nothing on stdout; diagnostic on stderr; non-zero = not handled.
+    echo "HOOKS DAEMON ERROR [daemon_startup_failed]: WorktreeCreate hook: failed to start hooks daemon. Use the hooks-daemon skill to check logs (Skill tool: skill=hooks-daemon, args=logs)" >&2
+    exit 1
 fi
 
 # Plan 00188: "worktree" response mode. Claude Code parses this hook's stdout as

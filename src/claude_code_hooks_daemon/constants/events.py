@@ -576,6 +576,19 @@ def relay_ineligible_bash_keys() -> frozenset[str]:
     return frozenset(m.bash_key for m in wired_event_metas() if not m.relay_eligible)
 
 
+def raw_stdout_bash_keys() -> frozenset[str]:
+    """``bash_key`` of every WIRED event whose stdout Claude Code reads RAW.
+
+    Single typed source for :mod:`install.forwarder_generator`'s daemon-down
+    stanza (Plan 00189): a forwarder for one of these events must never put
+    JSON on stdout, even when the daemon cannot start, because that stdout is
+    parsed as a path (``WorktreeCreate``) or as status text (``StatusLine``).
+    Derived from :attr:`EventIDMeta.raw_stdout` so a future raw-stdout event
+    inherits the correct branch without a hand-maintained list.
+    """
+    return frozenset(m.bash_key for m in wired_event_metas() if m.raw_stdout)
+
+
 # Type-safe event key literal (for mypy/type checking).
 #
 # This MUST list the ``config_key`` of every event in the ``EventID`` catalogue

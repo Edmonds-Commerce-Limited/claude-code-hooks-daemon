@@ -28,7 +28,11 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config, TransportConfig
-from claude_code_hooks_daemon.constants.events import relay_ineligible_bash_keys
+from claude_code_hooks_daemon.constants.events import (
+    raw_stdout_bash_keys,
+    relay_ineligible_bash_keys,
+    wired_event_metas,
+)
 from claude_code_hooks_daemon.daemon.paths import (
     event_socket_dir_is_fallback,
     get_event_socket_dir_from_untracked,
@@ -57,7 +61,62 @@ _GUARD_FOOTER = "# --- end relay hot path ---\n"
 #: it silently. See DESIGN-socket-relay.md §1.1.
 RELAY_EXCLUDED_EVENT_FILE_NAMES: frozenset[str] = relay_ineligible_bash_keys()
 
+#: Events whose stdout Claude Code reads as a RAW value (a worktree path, the
+#: status text) rather than as a JSON decision — derived from
+#: :attr:`EventIDMeta.raw_stdout` via :func:`constants.events.raw_stdout_bash_keys`.
+#: Their daemon-down branch is rewritten by :func:`apply_raw_stdout_daemon_down`.
+RAW_STDOUT_EVENT_FILE_NAMES: frozenset[str] = raw_stdout_bash_keys()
+
 logger = logging.getLogger(__name__)
+
+#: The daemon-down stanza every forwarder opens with. Matches the whole
+#: ``if ! ensure_daemon; then ... fi`` block (its body is whatever the source
+#: carries — the legacy ``emit_hook_error ...; exit 0`` stanza, or an earlier
+#: rendering of the raw-stdout branch) so the rewrite is idempotent.
+_ENSURE_DAEMON_BLOCK_PATTERN = re.compile(
+    r"^if ! ensure_daemon; then\n(?:(?!^fi\n).*\n)*?^fi\n", re.MULTILINE
+)
+
+
+def _render_raw_stdout_daemon_down_block(event_file_name: str) -> str:
+    """The daemon-down branch a ``raw_stdout`` forwarder must carry.
+
+    Claude Code parses this hook's stdout as a raw value, so the branch writes
+    NOTHING to stdout: the diagnostic goes to stderr (the same ``HOOKS DAEMON
+    ERROR [type]`` line ``emit_hook_error`` logs) and the exit is non-zero, so
+    the hook is "not handled" rather than answered with a JSON object that
+    would be read as a path.
+    """
+    metas_by_bash_key = {m.bash_key: m for m in wired_event_metas()}
+    event_name = metas_by_bash_key[event_file_name].json_key
+    return (
+        "if ! ensure_daemon; then\n"
+        "    # raw_stdout event (generated; Plan 00189): Claude Code parses this\n"
+        "    # hook's stdout as a RAW value, so a JSON error here would be read as\n"
+        "    # one. Nothing on stdout; diagnostic on stderr; non-zero = not handled.\n"
+        f'    echo "HOOKS DAEMON ERROR [daemon_startup_failed]: {event_name} hook: '
+        "failed to start hooks daemon. Use the hooks-daemon skill to check logs "
+        '(Skill tool: skill=hooks-daemon, args=logs)" >&2\n'
+        "    exit 1\n"
+        "fi\n"
+    )
+
+
+def apply_raw_stdout_daemon_down(source_content: str, event_file_name: str) -> str:
+    """Rewrite the daemon-down stanza of a ``raw_stdout`` forwarder (Plan 00189).
+
+    For an event in :data:`RAW_STDOUT_EVENT_FILE_NAMES` the first
+    ``if ! ensure_daemon; then ... fi`` block is replaced with
+    :func:`_render_raw_stdout_daemon_down_block`; every other event, and a
+    source with no such block, is returned unchanged. Idempotent, and applied
+    at every config (it is a correctness property of the event, not a
+    transport option), so a stale deployed forwarder is corrected on the next
+    regeneration and the tracked source stays in generated form.
+    """
+    if event_file_name not in RAW_STDOUT_EVENT_FILE_NAMES:
+        return source_content
+    rendered = _render_raw_stdout_daemon_down_block(event_file_name)
+    return _ENSURE_DAEMON_BLOCK_PATTERN.sub(lambda _m: rendered, source_content, count=1)
 
 
 def _default_relay_binary_path(untracked_dir: Path) -> str:
@@ -415,8 +474,13 @@ def generate_forwarder_content(
     changes the transport beneath ``send_request_stdin``, so
     ``forward_stop_event``'s own decision=block parsing still runs
     afterward regardless of which rung served the request.
+
+    Also independently of config, a ``raw_stdout`` event's daemon-down
+    stanza is rewritten by :func:`apply_raw_stdout_daemon_down` (Plan
+    00189) so it never puts JSON on a stdout Claude Code reads as a raw
+    value.
     """
-    result = strip_relay_guard_block(source_content)
+    result = apply_raw_stdout_daemon_down(strip_relay_guard_block(source_content), event_file_name)
     if (
         transport.relay_enabled
         and event_file_name not in RELAY_EXCLUDED_EVENT_FILE_NAMES
