@@ -1,6 +1,6 @@
 # Plan 00351: permission test skips everywhere including non root ci
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Low
@@ -54,10 +54,10 @@ than fixed in passing.
 
 ### Phase 1: Fix and see what it says
 
-- [ ] ⬜ **Task 1.1**: Replace the predicate with `os.geteuid() == 0`. **Cannot
-  be verified in this container**, which runs as root — the test is only
-  observable executing on a non-root machine, so CI is the verification, not a
-  local run. Land it alone so a failure is unambiguous about its cause.
+- [x] ✅ **Task 1.1**: Predicate replaced with `os.geteuid() == 0`, landed alone
+  on an otherwise clean tree so a CI failure is unambiguous about its cause.
+  Locally it still skips — this container is root — which is correct behaviour
+  and also why the change is **not verified here**. CI is the verification.
 - [ ] ⬜ **Task 1.2**: Read what CI then reports. Treat a failure as the
   expected outcome rather than a surprise: the assertion has never been
   exercised, and `deploy_skills` has changed since it was written.

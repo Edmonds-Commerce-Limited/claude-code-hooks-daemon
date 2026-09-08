@@ -1,5 +1,6 @@
 """Tests for skill deployment system."""
 
+import os
 import shutil
 from collections.abc import Generator
 from pathlib import Path
@@ -137,8 +138,12 @@ class TestDeploySkills:
         with pytest.raises(FileNotFoundError, match="Skills directory not found"):
             deploy_skills(bad_source, temp_project)
 
+    # Plan 00351: this asked who owns `/` — uid 0 on every normal Linux system,
+    # whoever is running — so it was a constant `True` and the test never ran
+    # anywhere. CI's own skip list showed it skipping on a runner, where the
+    # process is the unprivileged `runner` user and the stated reason is false.
     @pytest.mark.skipif(
-        Path("/").stat().st_uid == 0, reason="Running as root - permission test not applicable"
+        os.geteuid() == 0, reason="Running as root - permission test not applicable"
     )
     def test_deploy_skills_raises_if_target_not_writable(
         self, daemon_source: Path, tmp_path: Path
