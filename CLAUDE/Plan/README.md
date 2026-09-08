@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00360: pending release notes holding area](00360-pending-release-notes-holding-area/PLAN.md) - Not Started (a plan closes by writing its release-note callout into `UNRELEASED/release-notes/`, and the release folds the notes in mechanically — the fourth shape the holding area was missing once a release stopped being part of any plan's definition of done)
+
 - [00358: a worktree venv can silently test the WRONG source tree](00358-worktree-venv-tests-wrong-source-tree/PLAN.md) - Not Started (a sub-agent's correct fix appeared to fail, because the worktree's venv symlinks to main's, whose editable install points at `/workspace/src` — so GREEN can never pass and a green QA run is not evidence about the branch)
 
 - [00356: secret guard bracket glob false positive](00356-secret-guard-bracket-glob-false-positive/PLAN.md) - In Progress; the reported defect is fixed and shipped, and the plan stays open for one unrelated fail-open found while working on it (a bracket expression at a token's edge was read as an open wildcard, so an ordinary jq array subscript was denied)
@@ -110,13 +112,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Infrastructure / Bootstrap
 
-- [00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy](00110-python-discovery-dry-consolidation/PLAN.md) - In Progress, and only Phase 7 remains (Phases 1-6 had all shipped while the boxes said 8 of 60 — verified against disk and 107 green tests. Phase 7 is `/release`, which is human-gated, so this plan cannot be closed by an agent)
-
-  - Field report from host `host-a` (`untracked/hooks-daemon-upgrade-python-version.md`): skill `install.sh` aborted on default `python3` (3.9.21) and suggested hardcoded `python3.11` despite `python3.13`/`python3.14` being on PATH
-  - Consolidates four WET Python-discovery implementations (`scripts/upgrade.sh`, `scripts/install/prerequisites.sh`, skill `install.sh`, `daemon/paths.py`) into one canonical bash helper + one canonical python helper
-  - Replaces hardcoded `(3.13, 3.12, 3.11)` candidate lists with glob `python3.[1-9][0-9]` + numeric sort — Python 3.14+ works the day it ships, no daemon release required
-  - Error messages must name interpreters **actually observed during the glob**, never hardcoded ones
-  - Adds Task 5.1 host-a replay to RELEASING.md Step 12.0 H-1 gate (count 19 → 20)
+- Field report from host `host-a` (`untracked/hooks-daemon-upgrade-python-version.md`): skill `install.sh` aborted on default `python3` (3.9.21) and suggested hardcoded `python3.11` despite `python3.13`/`python3.14` being on PATH
+- Consolidates four WET Python-discovery implementations (`scripts/upgrade.sh`, `scripts/install/prerequisites.sh`, skill `install.sh`, `daemon/paths.py`) into one canonical bash helper + one canonical python helper
+- Replaces hardcoded `(3.13, 3.12, 3.11)` candidate lists with glob `python3.[1-9][0-9]` + numeric sort — Python 3.14+ works the day it ships, no daemon release required
+- Error messages must name interpreters **actually observed during the glob**, never hardcoded ones
+- Adds Task 5.1 host-a replay to RELEASING.md Step 12.0 H-1 gate (count 19 → 20)
 
 ### Handler UX Adjustments
 
@@ -144,11 +144,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00100 (v3): Venv SSOT Consolidation](00100-venv-ssot-consolidation/PLAN.md) - Dormant (residue scope awaits a dedicated release)
 
   - Phases 0–3.9 **shipped** in v3.9.0 / v3.10.0 / v3.11.0 (canonical SSOT resolver, `.daemon-metadata.json` writers, dead-code removal, path slug, eager upgrade cleanup, H-1 gate coverage)
+
   - **Residue deferred from v3.12.0** (Plan 00107 Wave 4): Phase 3.5.2–3.5.7 (bootstrap-fallback wiring), Phase 4 (flock concurrency), Phase 5 (parameterised upgrade-cycle test), Phase 6 (docs) …
 
-- [00102: Hook Executable-Bit Defense](00102-hook-exec-bit-defense/PLAN.md) - In Progress, blocked SOLELY on a human running `/release` (every task and every success criterion is done and verified against its named test — 70 green across the seven criterion suites; only Task 5.3, the release-time acceptance gate, remains, and `/release` is the sole authorisation for it so no agent can close this)
-
   - Phases 1–4 complete (`bash <path>` invocation, auto-migration, self-heal, filemode checker)
+
   - **Task 5.3 pending**: acceptance gate at v3.12.0 release time (folded into meta plan 00107 Wave 6 `/release` execution)
 
 ### On Hold (upstream-blocked)
@@ -171,6 +171,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Completed Plans
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
+
+- [00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy](Completed/00110-python-discovery-dry-consolidation/PLAN.md) - Complete (interpreter discovery consolidated into one helper with a latest-always policy; the `UNRELEASED/` post-upgrade task carries the operator-facing change. Closed on the ruling that a release is never part of a plan's definition of done)
+
+- [00102: Hook Executable-Bit Defense](Completed/00102-hook-exec-bit-defense/PLAN.md) - Complete (multi-tier defence against hooks losing their executable bit, every criterion verified against its named test; closed on the ruling that a release-time acceptance gate is not a plan criterion — the probes are on main)
 
 - [00250: CI must actually run the acceptance gates it calls blocking](Completed/00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Complete at the warm-up commit + the archiving commit (CI now runs the blocking acceptance gates; the last flake, probe #144, was a Swift toolchain cold-start exceeding the lint budget, fixed by warming `swiftc` before the tests rather than widening the budget, and confirmed green on all three interpreters)
 
@@ -228,10 +232,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00331: vendor dirs config is inert](Completed/00331-vendor-dirs-config-is-inert/PLAN.md) - Complete at `6b4fa867`…`ba7269d5` + the archiving commit (`layout.vendor_dirs` was a facade with zero production consumers, so declaring one did nothing; every reader now routes through it, resolved from the file's owning project)
 
-- [00326: remote docs vendoring and staleness](Completed/00326-remote-docs-vendoring-and-staleness/PLAN.md) - Complete at `43cf91a0` through `ef342df4` (upstream docs vendored as markdown carrying provenance frontmatter, with a `fidelity` field that separates a citable corpus from a cache; four handlers gate writes and commits, route `WebFetch` to the local copy, and report staleness)
-
-- [00324: skill invoke scripts never referenced](Completed/00324-skill-invoke-scripts-never-referenced/PLAN.md) - Complete (four skills kept 52-317 lines of procedure in an `invoke.sh` their SKILL.md never named, so every invocation ran on the summary and two of them discarded the caller's arguments)
-
 ## Blocked / On Hold Plans
 
 - **00032, 00034, 00035** - On hold pending upstream Claude Code delegate mode fix (GitHub #23447, #25037)
@@ -250,7 +250,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00091: Hook Executable Permissions](Cancelled/00091-hook-executable-permissions/PLAN.md) - Cancelled
 
-  - Superseded by [00102](00102-hook-exec-bit-defense/PLAN.md).
+  - Superseded by [00102](Completed/00102-hook-exec-bit-defense/PLAN.md).
 
 - [00081: Pseudo-Events & Nitpick Handler](Cancelled/00081-pseudo-events-nitpick-handler/PLAN.md) - Cancelled
 
@@ -269,35 +269,36 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 359 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 360 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 301 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 303 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 41 + 301 + 7 = **349 folders**, spanning
-  **346 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 40 + 303 + 7 = **350 folders**, spanning
+  **347 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  359 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  360 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  346 + 13 = 359. ✅
+  347 + 13 = 360. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the archiving of Plan 00250 (41 root, 301
-  `Completed/`, 7 `Cancelled/`, 346 distinct numbers against a counter of 359 —
-  349 folders, three of which share a number with another from before the
+- **Last reconciled at**: the archiving of Plans 00102 and 00110 and the filing
+  of Plan 00360 (40 root, 303
+  `Completed/`, 7 `Cancelled/`, 347 distinct numbers against a counter of 360 —
+  350 folders, three of which share a number with another from before the
   counter existed: 00034, 00039, 00041). Every figure above was recounted from
   disk rather than incremented, and the folderless set was recomputed the same
   way. The index carries NO

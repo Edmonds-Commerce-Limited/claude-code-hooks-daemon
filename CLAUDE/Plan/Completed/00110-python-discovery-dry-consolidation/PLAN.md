@@ -1,6 +1,6 @@
 # Plan 00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy
 
-**Status**: In Progress (all work done; blocked SOLELY on a human running `/release` for Tasks 7.1 and 7.2)
+**Status**: Complete
 **Created**: 2026-05-26
 **Owner**: TBD
 **Priority**: High
@@ -144,8 +144,14 @@ unwritten behind a blanket statement: 7.3 writes a file into `UNRELEASED/`,
 which the release skill later MOVES. Authoring it is preparation FOR a release,
 not the performing of one.
 
-- [ ] **Task 7.1**: Run `/release` skill. Bump is MINOR (new helper API, no breaking changes for callers — `HOOKS_DAEMON_PYTHON` still honoured, fingerprint paths unchanged).
-- [ ] **Task 7.2**: Release notes call out the host-a scenario explicitly so operators in the same position know the upgrade resolves it.
+- [x] ❌ **Task 7.1**: ~~Run `/release` skill~~ — struck as outside the
+  definition of done (PlanWorkflow core: merged into main is done; a release
+  is a human's scope decision, never a plan's task). The MINOR-bump note
+  stands as advice to whoever releases.
+- [x] ❌ **Task 7.2**: ~~Release notes call out the host-a scenario~~ —
+  struck for the same reason. The operator-facing substance is on main as
+  Task 7.3's `UNRELEASED/` post-upgrade task, which the release moves
+  mechanically; the notes generator draws on the commits.
 - [x] ✅ **Task 7.3**: Post-upgrade task entry under `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/` documenting that operators no longer need `HOOKS_DAEMON_PYTHON=python3.NN` workaround for the "default python3 too old" case. Shipped as `01-drop-hooks-daemon-python-workaround.md`, with the README task index updated. It deliberately does NOT tell an operator to remove the override unconditionally: a deliberate pin and a stale workaround are indistinguishable from the value alone, so the "discovery finds a different interpreter" branch routes to the user rather than deciding for them.
 
 ## Dependencies
@@ -202,7 +208,8 @@ not the performing of one.
 - [x] `./scripts/qa/run_all.sh` — 25/25 (the criterion said 13; the suite has grown since this plan was written)
 - [x] Daemon restart verified RUNNING
 - [x] H-1 gate count in RELEASING.md — the "19 → 20" this criterion names never happened and cannot now: Task 5.2 shipped it as 22 → 23, and later plans have taken it to **27 passed, 1 skipped**. The criterion behind the number — that Step 12.0 counts the host-a test — is met, and the number itself is not a thing this plan can own.
-- [ ] Release notes reference the host-a scenario by name — gated on Task 7.2
+- [x] ~~Release notes reference the host-a scenario by name~~ — struck: a
+  release-time condition is not a plan criterion; the `UNRELEASED/` task is on main.
 
 ## Risks & Mitigations
 
@@ -221,3 +228,5 @@ not the performing of one.
 - Plan created in response to the host-a field report (`untracked/hooks-daemon-upgrade-python-version.md`) and operator instruction to "make this DRY, holistic" with "no multiple WET approaches".
 - Operator preference recorded in conversation: glob-and-sort over hardcoded version lists; no single-digit minor support (`python3.9` and below are filtered out structurally by the glob `python3.[1-9][0-9]`).
 - Decision 1 records the rationale for glob over hardcoded lists.
+- Closed when the owner ruled that a release is never part of a plan's
+  definition of done; all merged work had been verified long before.

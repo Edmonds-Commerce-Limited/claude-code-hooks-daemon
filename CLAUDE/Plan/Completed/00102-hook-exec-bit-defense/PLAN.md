@@ -1,6 +1,6 @@
 # Plan 00102: Hook Executable-Bit Defense (Multi-Tier Safety Net)
 
-**Status**: In Progress (all work done and all criteria verified; blocked SOLELY on Task 5.3, which needs a human to run `/release`)
+**Status**: Complete
 **Created**: 2026-04-29
 **Priority**: High
 **Recommended Executor**: Sonnet
@@ -105,7 +105,11 @@ See `TRIAGE.md` for the analysis and rationale. Decisions made:
 
 - [x] ✅ **Task 5.1**: Daemon restart verified RUNNING (PID 71299, socket exists, fingerprint-keyed venv).
 - [x] ✅ **Task 5.2**: `generate-docs` regenerated `.claude/HOOKS-DAEMON.md`. New `git_filemode_checker` row visible at priority 53 in the SessionStart table.
-- [ ] ⬜ **Task 5.3**: Acceptance-test the full flow at release time — covered by `/release` skill's mandatory acceptance gate.
+- [x] ❌ **Task 5.3**: ~~Acceptance-test the full flow at release time~~ —
+  struck as outside the definition of done (PlanWorkflow core: a plan is done
+  when merged into main; a release is never part of it). The substance is
+  already in the repository: the checker's acceptance probes ship in its
+  `get_acceptance_tests()` and run in the release's own gate mechanically.
 - [x] ✅ **Task 5.4**: Plan 00091 marked Cancelled (superseded by 00102), moved to `Completed/`, README's Cancelled Plans section updated with cross-reference.
 
 ### Phase 6 — Tier 1 was never finished: statusLine and the fallback installer
@@ -189,4 +193,5 @@ for any event.
 - [x] Full QA passes (the pipeline has grown from the 10 checks this criterion was written against to 26; all 26 green, 19962 passed, coverage 95.2%).
 - [x] Daemon restarts cleanly with new code.
 - [x] Plan 00091 is closed as superseded — `CLAUDE/Plan/Cancelled/00091-hook-executable-permissions/`.
-- [ ] **Task 5.3 only**: the full flow acceptance-tested at release time. Human-gated — `/release` is the sole authorisation, so an agent cannot close this.
+- [x] ~~The full flow acceptance-tested at release time~~ — struck: a
+  release-time condition is not a plan criterion. The probes are on main.

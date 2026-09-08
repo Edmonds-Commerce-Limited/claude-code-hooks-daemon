@@ -4,6 +4,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00326: remote docs vendoring and staleness](00326-remote-docs-vendoring-and-staleness/PLAN.md) - Complete at `43cf91a0` through `ef342df4` (upstream docs vendored as markdown carrying provenance frontmatter, with a `fidelity` field that separates a citable corpus from a cache; four handlers gate writes and commits, route `WebFetch` to the local copy, and report staleness)
+
+- [00324: skill invoke scripts never referenced](00324-skill-invoke-scripts-never-referenced/PLAN.md) - Complete (four skills kept 52-317 lines of procedure in an `invoke.sh` their SKILL.md never named, so every invocation ran on the summary and two of them discarded the caller's arguments)
+
 - [00323: optimise checklist names retired handlers](00323-optimise-checklist-names-retired-handlers/PLAN.md) - Complete (the config-optimisation checklist scored four handlers Plan 00237 deleted, so a fully-configured project could never exceed 25/29 and was told to enable handlers that do not exist)
 
 - [00322: post upgrade optimise deferral and client noise](00322-post-upgrade-optimise-deferral-and-client-noise/PLAN.md) - Complete (the mandatory post-upgrade config-optimisation review deferred itself to "your NEXT Claude Code session" and was duly filed as optional; it now claims the current session and lives at `/hooks-daemon optimise`)
