@@ -1,0 +1,22 @@
+version: "3.63.0"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.tdd_enforcement.options.test_path_map[].mirror
+      recommended: false
+      dormant: true
+      description: >-
+        NEW optional boolean on each `test_path_map` entry (Plan 00362,
+        default false). When true the source's directory path after the
+        glob's literal root (`src` for `src/**`) is reproduced under
+        `test_dir`, so `src/A/Foo.php` is expected at
+        `<test_dir>/A/FooTest.php` instead of flat in `test_dir`. Every
+        declared root is searched and listed in a deny. An entry without
+        the key keeps the flat contract byte-for-byte.
+      migration_note: >-
+        No action needed. A project that disabled `tdd_enforcement` because
+        its tests live in a nested mirror layout (`tests/Small/<mirror>`,
+        `tests/Large/<mirror>`) can re-enable it and declare one mirror entry
+        per root -- or list the same directories in `layout.test_dirs`, which
+        now doubles as a mirror-root declaration for sources under `src/`.

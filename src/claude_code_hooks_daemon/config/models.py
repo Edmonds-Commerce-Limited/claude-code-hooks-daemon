@@ -1071,7 +1071,11 @@ class LayoutConfig(BaseModel):
 
     Attributes:
         source_dirs: Extra source directory names/globs, e.g. ``["backend/src"]``
-        test_dirs: Extra test directory names/globs, e.g. ``["e2e"]``
+        test_dirs: Extra test directory names/globs, e.g. ``["e2e"]``. A NESTED
+            literal entry (``"tests/Small"``) is also a mirror root for
+            ``tdd_enforcement``: a source under ``src/`` (or a declared
+            ``source_dirs`` name) is expected at
+            ``tests/Small/<mirror>/<TestName>`` with no ``test_path_map`` entry
         config_dirs: Extra config directory names, extending the built-in ``config``
         vendor_dirs: Extra vendored/build directory names, extending the
             canonical vendored/build set
@@ -1086,7 +1090,11 @@ class LayoutConfig(BaseModel):
         default_factory=list, description="Extra source directory names/globs"
     )
     test_dirs: list[str] = Field(
-        default_factory=list, description="Extra test directory names/globs"
+        default_factory=list,
+        description=(
+            "Extra test directory names/globs; a nested literal entry such as "
+            "'tests/Small' is also a tdd_enforcement mirror root"
+        ),
     )
     config_dirs: list[str] = Field(
         default_factory=list,

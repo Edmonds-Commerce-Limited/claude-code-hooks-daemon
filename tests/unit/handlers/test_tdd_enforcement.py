@@ -614,9 +614,9 @@ class TestTddEnforcementHandler:
         result = handler.handle(hook_input)
 
         # Should ALLOW because test exists
-        assert (
-            result.decision == "allow"
-        ), f"Should allow when test exists, but got: {result.reason}"
+        assert result.decision == "allow", (
+            f"Should allow when test exists, but got: {result.reason}"
+        )
 
     def test_get_test_file_path_handles_utils_structure(self, handler):
         """Test: _get_test_file_path() should handle utils/ structure.
@@ -1177,7 +1177,7 @@ class TestTddEnforcementHandler:
         # EXPECTED: Should ALLOW (test exists in mirror structure)
         # ACTUAL (before fix): Will DENY (handler only checks stripped path, gets False)
         assert result.decision == "allow", (
-            f"Should ALLOW when test exists in mirror structure. " f"Got decision={result.decision}"
+            f"Should ALLOW when test exists in mirror structure. Got decision={result.decision}"
         )
 
     def test_bug_current_structure_still_works(self, handler):
@@ -1218,9 +1218,9 @@ class TestTddEnforcementHandler:
             result = handler.handle(hook_input)
 
         assert result.decision == "deny", "Should DENY when test missing in all locations"
-        assert (
-            "Searched locations:" in result.reason
-        ), "Error message should show all searched locations"
+        assert "Searched locations:" in result.reason, (
+            "Error message should show all searched locations"
+        )
 
     def test_php_psr4_mirror_structure(self, handler):
         """PHP PSR-4 should work with mirror structure (real-world scenario).
@@ -1244,9 +1244,9 @@ class TestTddEnforcementHandler:
         with patch.object(Path, "exists", path_exists_side_effect):
             result = handler.handle(hook_input)
 
-        assert (
-            result.decision == "allow"
-        ), "Should ALLOW PHP file when test exists in PSR-4 mirror structure"
+        assert result.decision == "allow", (
+            "Should ALLOW PHP file when test exists in PSR-4 mirror structure"
+        )
 
     # ================================================================
     # Collocated Test Location Support (Plan 00076)
@@ -1461,9 +1461,9 @@ class TestTddEnforcementHandler:
         with patch.object(Path, "exists", path_exists_side_effect):
             result = handler.handle(hook_input)
 
-        assert (
-            result.decision == "allow"
-        ), "Should ALLOW Go file when collocated test (handler_test.go) exists"
+        assert result.decision == "allow", (
+            "Should ALLOW Go file when collocated test (handler_test.go) exists"
+        )
 
     def test_handle_allows_when_collocated_test_exists_js(self):
         """handle() should ALLOW when collocated JS test exists (e.g., helpers.test.ts)."""
@@ -1482,9 +1482,9 @@ class TestTddEnforcementHandler:
         with patch.object(Path, "exists", path_exists_side_effect):
             result = handler.handle(hook_input)
 
-        assert (
-            result.decision == "allow"
-        ), "Should ALLOW TS file when collocated test (helpers.test.ts) exists"
+        assert result.decision == "allow", (
+            "Should ALLOW TS file when collocated test (helpers.test.ts) exists"
+        )
 
     def test_handle_allows_when_tests_subdir_test_exists(self):
         """handle() should ALLOW when __tests__/ subdirectory test exists."""
@@ -1673,9 +1673,9 @@ class TestDeclaredTestPathMap:
         handler._test_path_map = self._mapped()
         rule = self._rule(tmp_path)
 
-        assert handler.matches(
-            self._write(rule)
-        ), "the gate must still fire — this is not an escape"
+        assert handler.matches(self._write(rule)), (
+            "the gate must still fire — this is not an escape"
+        )
         assert handler.handle(self._write(rule)).decision == "allow"
 
     def test_a_missing_declared_test_still_denies_and_names_the_right_path(
@@ -2140,3 +2140,273 @@ class TestPerProjectLayoutRouting:
 
         rule = tmp_path / "root-src" / "my_module.py"
         assert handler.matches(self._write(rule)) is True
+
+
+def _php_write(file_path: Path) -> dict:
+    return {
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": str(file_path),
+            "content": "<?php\n\nclass OptimiseProbe {}\n",
+        },
+    }
+
+
+def _anchor_project_root(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
+    """Make `resolve_project_root()` report `root` (same shape as TestDeclaredTestPathMap)."""
+    import claude_code_hooks_daemon.core.project_context as pc
+
+    monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+    monkeypatch.setattr(
+        pc.ProjectContext, "project_root", classmethod(lambda cls: root), raising=False
+    )
+
+
+def _place_test(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("<?php\n\nclass OptimiseProbeTest {}\n")
+    return path
+
+
+class TestMirrorTestPathMap:
+    """A `test_path_map` entry may declare a MIRROR root (Plan 00362 Task 1.6).
+
+    The field layout: `tests/Small/<mirror of src>/FooTest.php` and
+    `tests/Large/<mirror>/FooTest.php` (the PHP size-suite convention). The flat
+    contract cannot express it, the built-in mirror resolver hardcodes
+    `tests/<mirror>`, so the only remaining option was disabling the gate.
+    `mirror: true` places the test at
+    `<test_dir>/<source path relative to the glob's literal root>/<TestName>`.
+    """
+
+    _SOURCE_REL = ("src", "PackageType", "OptimiseProbe.php")
+    _SMALL_REL = ("tests", "Small", "PackageType", "OptimiseProbeTest.php")
+    _LARGE_REL = ("tests", "Large", "PackageType", "OptimiseProbeTest.php")
+
+    @staticmethod
+    def _mirror(test_dir: str) -> dict[str, object]:
+        return {"source_glob": "src/**", "test_dir": test_dir, "mirror": True}
+
+    def _candidates(self, handler: TddEnforcementHandler, source: Path) -> list[Path]:
+        strategy = handler._registry.get_strategy(str(source))
+        assert strategy is not None
+        return handler._get_test_file_paths(str(source), strategy)
+
+    def test_declared_test_dir_mirror_defaults_to_false(self) -> None:
+        """The flat contract is the default: an existing config parses unchanged."""
+        assert DeclaredTestDir(source_glob="a/**", test_dir="t").mirror is False
+
+    def test_mirror_entry_places_the_test_under_the_mirrored_subpath(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [self._mirror("tests/Small")]
+
+        candidates = self._candidates(handler, tmp_path.joinpath(*self._SOURCE_REL))
+        assert candidates[0] == tmp_path.joinpath(*self._SMALL_REL)
+
+    def test_mirror_entry_satisfies_the_gate_when_the_test_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _anchor_project_root(monkeypatch, tmp_path)
+        _place_test(tmp_path.joinpath(*self._SMALL_REL))
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [self._mirror("tests/Small")]
+        source = tmp_path.joinpath(*self._SOURCE_REL)
+
+        assert handler.matches(_php_write(source)), "the gate must still fire"
+        assert handler.handle(_php_write(source)).decision == "allow"
+
+    def test_every_declared_mirror_root_is_checked_and_listed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Both size suites are declared; a test in EITHER satisfies, and a
+        deny names BOTH so the author can pick the suite."""
+        _anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [self._mirror("tests/Small"), self._mirror("tests/Large")]
+        source = tmp_path.joinpath(*self._SOURCE_REL)
+
+        denied = handler.handle(_php_write(source))
+        assert denied.decision == "deny"
+        assert str(tmp_path.joinpath(*self._SMALL_REL)) in (denied.reason or "")
+        assert str(tmp_path.joinpath(*self._LARGE_REL)) in (denied.reason or "")
+
+        _place_test(tmp_path.joinpath(*self._LARGE_REL))
+        assert handler.handle(_php_write(source)).decision == "allow"
+
+    def test_a_flat_entry_is_byte_identical_to_before(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`mirror` absent or false keeps the FLAT contract exactly."""
+        _anchor_project_root(monkeypatch, tmp_path)
+        source = tmp_path.joinpath(*self._SOURCE_REL)
+        for entry in (
+            {"source_glob": "src/**", "test_dir": "tests/Small"},
+            {"source_glob": "src/**", "test_dir": "tests/Small", "mirror": False},
+        ):
+            handler = TddEnforcementHandler()
+            handler._test_path_map = [entry]
+            assert self._candidates(handler, source)[0] == (
+                tmp_path / "tests" / "Small" / "OptimiseProbeTest.php"
+            )
+
+    def test_deeper_source_subpaths_are_mirrored_in_full(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [self._mirror("tests/Small")]
+        source = tmp_path / "src" / "A" / "B" / "Thing.php"
+
+        assert self._candidates(handler, source)[0] == (
+            tmp_path / "tests" / "Small" / "A" / "B" / "ThingTest.php"
+        )
+
+    def test_a_glob_with_no_literal_root_mirrors_from_the_workspace_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`**/Rules/**` names no directory to strip, so the whole workspace-
+        relative source path is mirrored under `test_dir`."""
+        _anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [
+            {"source_glob": "**/Rules/**", "test_dir": "tests/Small", "mirror": True}
+        ]
+        source = tmp_path / "apps" / "app" / "Rules" / "Policy.php"
+
+        assert self._candidates(handler, source)[0] == (
+            tmp_path / "tests" / "Small" / "apps" / "app" / "Rules" / "PolicyTest.php"
+        )
+
+    def test_a_literal_root_deeper_than_one_segment_is_stripped_whole(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [
+            {"source_glob": "apps/app/src/**", "test_dir": "apps/app/tests/Small", "mirror": True}
+        ]
+        source = tmp_path / "apps" / "app" / "src" / "Entity" / "Company.php"
+
+        assert self._candidates(handler, source)[0] == (
+            tmp_path / "apps" / "app" / "tests" / "Small" / "Entity" / "CompanyTest.php"
+        )
+
+    def test_a_non_boolean_mirror_is_skipped_with_a_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Malformed degrades like every other bad `test_path_map` line."""
+        _anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [
+            {"source_glob": "src/**", "test_dir": "tests/Small", "mirror": "yes"}
+        ]
+        source = tmp_path.joinpath(*self._SOURCE_REL)
+
+        with caplog.at_level("WARNING"):
+            candidates = self._candidates(handler, source)
+
+        assert tmp_path / "tests" / "Small" not in [c.parent.parent for c in candidates]
+        assert any("mirror" in record.message for record in caplog.records)
+
+
+class TestLayoutTestDirsAsMirrorRoots:
+    """A NESTED `layout.test_dirs` entry is a mirror root with no extra option.
+
+    `layout.test_dirs: ["tests/Small", "tests/Large"]` already classifies
+    those paths as tests; declaring them a second time in `test_path_map`
+    would be the same fact twice. A nested entry (contains `/`, no wildcard)
+    is therefore also searched as `<entry>/<mirror after src/>/<TestName>`,
+    anchored exactly as the built-in `tests/<mirror>` resolver is.
+    """
+
+    _SOURCE_REL = ("src", "PackageType", "OptimiseProbe.php")
+    _SMALL_REL = ("tests", "Small", "PackageType", "OptimiseProbeTest.php")
+    _LARGE_REL = ("tests", "Large", "PackageType", "OptimiseProbeTest.php")
+
+    @staticmethod
+    def _layout(test_dirs: tuple[str, ...], source_dirs: tuple[str, ...] = ()):
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        return ProjectLayout(
+            source_dirs=source_dirs,
+            test_dirs=test_dirs,
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+
+    def _candidates(self, handler: TddEnforcementHandler, source: Path) -> list[Path]:
+        strategy = handler._registry.get_strategy(str(source))
+        assert strategy is not None
+        return handler._get_test_file_paths(str(source), strategy)
+
+    def test_the_field_layout_is_found_with_no_extra_option(self, tmp_path: Path) -> None:
+        """`src/PackageType/OptimiseProbe.php` -> `tests/Small/PackageType/OptimiseProbeTest.php`."""
+        handler = TddEnforcementHandler()
+        handler._project_layout = self._layout(("tests", "tests/Small", "tests/Large"))
+        source = tmp_path.joinpath(*self._SOURCE_REL)
+
+        candidates = self._candidates(handler, source)
+        assert tmp_path.joinpath(*self._SMALL_REL) in candidates
+        assert tmp_path.joinpath(*self._LARGE_REL) in candidates
+
+        denied = handler.handle(_php_write(source))
+        assert denied.decision == "deny"
+        assert str(tmp_path.joinpath(*self._SMALL_REL)) in (denied.reason or "")
+        assert str(tmp_path.joinpath(*self._LARGE_REL)) in (denied.reason or "")
+
+        _place_test(tmp_path.joinpath(*self._SMALL_REL))
+        assert handler.matches(_php_write(source)), "the gate must still fire"
+        assert handler.handle(_php_write(source)).decision == "allow"
+
+    def test_bare_name_entries_add_no_mirror_root(self, tmp_path: Path) -> None:
+        """Zero-config is byte-identical: `tests`, `test`, `e2e` are names, not roots."""
+        handler = TddEnforcementHandler()
+        source = tmp_path.joinpath(*self._SOURCE_REL)
+        baseline = self._candidates(handler, source)
+
+        handler._project_layout = self._layout(("tests", "test", "e2e"))
+        assert self._candidates(handler, source) == baseline
+
+    def test_a_wildcard_entry_is_not_a_mirror_root(self, tmp_path: Path) -> None:
+        handler = TddEnforcementHandler()
+        source = tmp_path.joinpath(*self._SOURCE_REL)
+        baseline = self._candidates(handler, source)
+
+        handler._project_layout = self._layout(("tests", "tests/*"))
+        assert self._candidates(handler, source) == baseline
+
+    def test_a_declared_source_dir_is_the_mirror_origin(self, tmp_path: Path) -> None:
+        """No `src/` segment: the declared `layout.source_dirs` name is stripped instead."""
+        handler = TddEnforcementHandler()
+        handler._project_layout = self._layout(("tests", "tests/Small"), source_dirs=("lib",))
+        source = tmp_path / "lib" / "PackageType" / "OptimiseProbe.php"
+
+        assert tmp_path.joinpath(*self._SMALL_REL) in self._candidates(handler, source)
+
+    def test_no_source_dir_segment_means_no_layout_mirror_candidate(self, tmp_path: Path) -> None:
+        handler = TddEnforcementHandler()
+        handler._project_layout = self._layout(("tests", "tests/Small"))
+        source = tmp_path / "app" / "OptimiseProbe.php"
+
+        assert not any("Small" in c.parts for c in self._candidates(handler, source))
+
+    def test_layout_mirror_roots_rank_after_declared_map_before_inference(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._project_layout = self._layout(("tests", "tests/Small"))
+        handler._test_path_map = [{"source_glob": "src/**", "test_dir": "tests/Flat"}]
+        source = tmp_path.joinpath(*self._SOURCE_REL)
+
+        candidates = self._candidates(handler, source)
+        assert candidates[0] == tmp_path / "tests" / "Flat" / "OptimiseProbeTest.php"
+        assert candidates[1] == tmp_path.joinpath(*self._SMALL_REL)
+        assert candidates[2] == tmp_path / "tests" / "PackageType" / "OptimiseProbeTest.php"
