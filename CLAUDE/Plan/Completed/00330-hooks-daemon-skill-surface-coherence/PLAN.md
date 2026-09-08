@@ -1,6 +1,6 @@
 # Plan 00330: hooks daemon skill surface coherence
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-04
 **Owner**: joseph
 **Priority**: High
@@ -250,7 +250,7 @@ the opt-in idle trigger for the same pass.
   (`59b11a0a`, `f458057e`).
 - [x] Every routed subcommand is one a human invokes; the rest are documented
   capabilities (`f458057e`).
-- [ ] All QA checks passing on the merged tree; daemon RUNNING.
+- [x] All QA checks passing on the merged tree (26/26, 20971 tests); daemon RUNNING.
 - [x] Every release-bound consequence is in the pending-release holding area:
   `UNRELEASED/release-notes/28-optimise-is-registry-derived.md` and
   `UNRELEASED/release-notes/29-one-housekeeping-command-and-a-smaller-skill-surface.md`.
