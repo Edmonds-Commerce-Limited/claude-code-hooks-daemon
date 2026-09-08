@@ -41,8 +41,21 @@ missing is any mechanism by which their absence is noticed — the exact shape o
 `uv` case: **prefer providing the dependency in CI to skipping**. This applies
 the same decision to the daemon.
 
-The `Daemon load` job in the same workflow starts a daemon successfully on the
-runner, so this is a provisioning gap rather than a platform limitation.
+~~The `Daemon load` job in the same workflow starts a daemon successfully on the
+runner, so this is a provisioning gap rather than a platform limitation.~~
+
+**That sentence is false, and Task 2.1 was written on it.** The `daemon-load`
+job checks out, installs from the lockfile, and imports every handler module.
+It starts no daemon, and says why in its own comment: *"A real `hooks-daemon restart` needs an installed daemon, so asserting every handler module imports
+is the CI-safe equivalent."* Nothing in this workflow has ever installed or
+started one.
+
+The conclusion survives — it IS a provisioning gap — but the cheap route to it
+does not. There is nothing to reuse, so Phase 2 has to decide what a CI install
+looks like, and that is a real design question rather than a copied step: a
+self-install regenerates `.claude/HOOKS-DAEMON.md` and the `CLAUDE.md`
+`<hooksdaemon>` block, which would leave the tree dirty inside a job that also
+lints it.
 
 ## The same gap has a louder sibling, and CI is no longer green
 
@@ -117,8 +130,12 @@ have reopened a plan whose success criteria were satisfied.
 ### Phase 2: Make the gates run
 
 - [ ] ⬜ **Task 2.1**: Start a daemon in the CI QA job before the acceptance
-  step, reusing whatever the `Daemon load` job already does rather than inventing
-  a second way to start one
+  step. ~~reusing whatever the `Daemon load` job already does rather than
+  inventing a second way to start one~~ — **there is nothing to reuse**, per the
+  struck-through claim above. Decide where a CI install goes (a step in the `qa`
+  job, or its own job the gates move into) and settle what to do about the
+  tracked files a self-install regenerates, since `black`/`ruff` and the docs
+  checks run over the same tree.
   - [ ] ⬜ **The blocker is now named**, from a CI run after Task 2.4a made the
     forwarders reachable: `ensure_daemon` REFUSES to auto-start here, with
     `hooks_daemon_repo_detected — This is the hooks-daemon repository. To install for development, run: python install.py --self-install`. So the QA
