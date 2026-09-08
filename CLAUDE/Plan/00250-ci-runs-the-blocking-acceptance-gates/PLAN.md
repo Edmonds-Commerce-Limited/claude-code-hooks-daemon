@@ -79,22 +79,16 @@ and the misreading behind it are in Task 2.1's first sub-bullet.
 ## The same gap has a louder sibling, and CI is no longer green
 
 **This plan was written from "the first fully green CI run". That premise has
-expired.** `Tests + coverage` is RED on `main` and has been for a long stretch.
-It was 9 failures per interpreter across three files when found (while
-regression-testing Plan 00347), and is **4** after Task 2.4a:
+expired.** `Tests + coverage` was RED on `main` for a long stretch — 9 failures
+per interpreter across three files when found. All three are fixed; two were
+NOT this plan's subject, being plain defects that would fail on any machine
+without a deployed install, found by reproducing the runner condition locally
+rather than reading a CI log. See
+[RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 
-All three are now fixed — see
-[RESEARCH-ci-failures.md](RESEARCH-ci-failures.md) for what each one was.
-
-Two of the three turned out NOT to be this plan's subject: plain defects that
-would fail on any machine without a deployed install, found by reproducing the
-runner condition locally rather than reading a CI log (`git worktree`;
-`env -u HOSTNAME`). Only `test_forwarder_socket_stdin.py`'s remaining failure
-genuinely needs a daemon, which Task 2.1 provisions.
-
-**Consequence for this plan**: Task 4.2 ("a green CI run") needs all three
-fixed, whatever happens to the skips — **16** of them, per Task 1.1's
-measurement; the "11" this plan was written with was already stale.
+**Consequence**: Task 4.2 ("a green CI run") needs those fixed whatever happens
+to the skips — **16** of them, per Task 1.1; the "11" this plan was written with
+was already stale.
 
 ## Goals
 
@@ -208,16 +202,16 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
   fail-open could never be reached and one slow lint killed all 201 probes.
   Each fixed with a class-level guard rather than a one-off. Detail and the
   reproduction in [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
-- [ ] ⬜ **Task 2.4c**: `test_dogfooding_hook_scripts.py::test_hook_scripts_match_installer`
-  — pre-existing, NOT caused by the daemon. The tracked `.claude/hooks/*` bake
-  an absolute path at generation time, so a fresh generation elsewhere differs.
-  Root-normalisation and a surviving-path guard have landed; **they are not
-  sufficient** — a runner-length checkout crosses the AF_UNIX limit and takes a
-  different generator branch, so the artefacts differ in shape. **The prior
-  question is now answered**: `hooks_deploy.sh` copies the tracked forwarders
-  into client projects and hard-fails without them, so they must stay tracked.
-  Remaining work is the measured candidate — regenerate at the root the tracked
-  file records — see [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
+- [x] ✅ **Task 2.4c**: `test_dogfooding_hook_scripts.py::test_hook_scripts_match_installer`.
+  The comparison now generates for the root the deployed forwarders **record**
+  (`recorded_untracked_dir` reads `_rl_dir="…"` back out), not for the current
+  checkout's — so it is byte-exact on any machine, and refuses to guess when two
+  forwarders disagree. Root-normalisation was the first attempt and was **not
+  sufficient**: a runner-length checkout crosses the AF_UNIX limit and takes a
+  different generator branch. The prior question is settled — `hooks_deploy.sh`
+  copies the tracked forwarders into client projects and hard-fails without
+  them, so they must stay tracked. Hostname headroom measured at 54 characters
+  and pinned. See [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 - [ ] ⬜ **Task 2.4e**: Playbook probe **#144** (Swift lint — invalid code
   blocked) reports "no decision at all" on Python 3.11 while passing on 3.12 and
   3.13, same runner image. Not a timeout (that branch returns an advisory, so it

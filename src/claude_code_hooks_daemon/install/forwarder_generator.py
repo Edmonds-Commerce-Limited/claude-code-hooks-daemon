@@ -220,6 +220,52 @@ def normalise_project_root(content: str, project_root: str) -> str:
     return content.replace(project_root.rstrip("/"), PROJECT_ROOT_PLACEHOLDER)
 
 
+#: The `_rl_dir="..."` assignment every relay guard opens with, which records
+#: the untracked directory the forwarder was generated for.
+_RECORDED_UNTRACKED_DIR = re.compile(r'^\s*_rl_dir="([^"]+)"', re.MULTILINE)
+
+
+def recorded_untracked_dir(hook_contents: dict[str, str]) -> Path | None:
+    """The untracked dir the deployed forwarders say they were generated for.
+
+    Comparing a tracked forwarder against a regeneration is only meaningful if
+    both are generated for the SAME root — otherwise the comparison asserts that
+    this checkout sits where the committed file's did, which no caller wants and
+    which is false on every machine but one.
+
+    Reading the root back out of the artefact lets the comparison stay exact and
+    machine-independent. Safe because the recorded root is short: it keeps the
+    generator on its dynamic events branch anywhere, with 54 characters of
+    hostname headroom against a 64-character OS cap.
+
+    Returns ``None`` when no forwarder carries a guard (relay disabled), so the
+    caller falls back to the live project. Files without a guard —
+    ``status-line``, ``stop``, ``subagent-stop``, ``worktree-create`` — are
+    ignored rather than treated as disagreement.
+
+    Raises:
+        AssertionError: if two forwarders record DIFFERENT roots. That means one
+            was hand-edited, and regenerating to match either would launder the
+            edit the comparison exists to catch.
+    """
+    found: dict[str, str] = {}
+    for name, content in hook_contents.items():
+        match = _RECORDED_UNTRACKED_DIR.search(content)
+        if match:
+            found[name] = match.group(1)
+    if not found:
+        return None
+
+    distinct = sorted(set(found.values()))
+    if len(distinct) > 1:
+        raise AssertionError(
+            f"the deployed forwarders disagree about the untracked directory "
+            f"they were generated for: {distinct}. One has been hand-edited — "
+            f"regenerate them all rather than reconciling by hand.\n{found}"
+        )
+    return Path(distinct[0])
+
+
 def surviving_absolute_paths(content: str) -> list[str]:
     """Machine-specific absolute paths left after normalisation, if any.
 

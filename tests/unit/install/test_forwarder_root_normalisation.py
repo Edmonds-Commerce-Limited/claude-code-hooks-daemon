@@ -11,26 +11,35 @@ absolute path as the machine that generated the committed file", which is false
 everywhere but one box — so the test passed here and failed on every CI runner
 (Plan 00250 Task 2.4c).
 
-Measured before choosing a fix: of 1342 lines across the 31 tracked hook files,
-**54 carry the generating machine's root, and they are 2 distinct lines** in 27
-files. A surface that small can be normalised without blunting the comparison —
-every other byte is still compared exactly, and `surviving_absolute_paths`
-asserts no OTHER machine-specific absolute path survives it.
+The first attempt normalised the root on both sides. Measured, that looked
+sufficient: of 1342 lines across the 31 tracked hook files, 54 carry the
+generating machine's root and they are 2 distinct lines in 27 files.
 
-**That is necessary and not sufficient, and the guard is what proved it.** See
+**It was necessary and not sufficient, and `surviving_absolute_paths` — added
+only as a "don't let this hide a second path" guard — is what proved it.** See
 `TestALongRootChangesTheGuardsSHAPE`: a runner-length checkout crosses the
-AF_UNIX 108-byte limit and takes a different branch of the generator, so its
-forwarders differ from these in shape rather than in a literal. The measurement
-above was taken on the one machine that cannot exhibit that branch.
+AF_UNIX 108-byte limit and takes a *different branch* of the generator, so its
+forwarders differ in shape, not in a literal. The measurement had been taken on
+the one machine that cannot exhibit that branch.
+
+**The fix is `recorded_untracked_dir`**: regenerate for the root the deployed
+forwarders themselves record, so the comparison is byte-exact everywhere and
+normalisation is not needed for it at all. The remaining variable is the
+hostname, which the branch decision also consults —
+`TestTheRecordedRootIsHostnameIndependentInPractice` measures that rather than
+assuming it.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
 from claude_code_hooks_daemon.install.forwarder_generator import (
     PROJECT_ROOT_PLACEHOLDER,
     normalise_project_root,
+    recorded_untracked_dir,
     surviving_absolute_paths,
 )
 
@@ -179,3 +188,104 @@ class TestALongRootChangesTheGuardsSHAPE:
         """States the cause, so a future reader need not rediscover it."""
         assert "$_rl_dir/events" in self._guard_at(_ROOT)
         assert "$_rl_dir/events" not in self._guard_at(_OTHER_ROOT)
+
+
+class TestReadingTheRootTheTrackedFilesRecord:
+    """The fix Task 2.4c actually needs: regenerate at the RECORDED root.
+
+    Each generated forwarder states the untracked dir it was built for, in
+    `_rl_dir="..."`. Regenerating at THAT root rather than at the current
+    checkout's makes the comparison exact on any machine, with no normalisation
+    — and tests all three of the comparison's stated purposes, none of which is
+    about where this checkout happens to live.
+
+    Safe because the short recorded root keeps the generator on its dynamic
+    branch anywhere: 54 characters of hostname-suffix headroom against a 64-char
+    OS cap (see RESEARCH-ci-failures.md).
+    """
+
+    def test_it_reads_the_dir_out_of_a_guard_block(self) -> None:
+        assert recorded_untracked_dir({"pre-tool-use": _GUARD.format(root=_ROOT)}) == Path(
+            "/workspace/untracked"
+        )
+
+    def test_files_without_a_guard_are_ignored_not_fatal(self) -> None:
+        """`status-line`, `stop`, `subagent-stop`, `worktree-create` carry none."""
+        contents = {
+            "pre-tool-use": _GUARD.format(root=_ROOT),
+            "stop": "#!/bin/bash\nexec thing\n",
+        }
+        assert recorded_untracked_dir(contents) == Path("/workspace/untracked")
+
+    def test_no_guard_anywhere_returns_none(self) -> None:
+        """Relay disabled: there is no recorded root, so the caller falls back."""
+        assert recorded_untracked_dir({"stop": "#!/bin/bash\n"}) is None
+
+    def test_disagreeing_files_are_an_error(self) -> None:
+        """Closes the hole: a hand-edited `_rl_dir` must not be regenerated to match."""
+        contents = {
+            "pre-tool-use": _GUARD.format(root=_ROOT),
+            "post-tool-use": _GUARD.format(root=_OTHER_ROOT),
+        }
+        with pytest.raises(AssertionError, match="disagree"):
+            recorded_untracked_dir(contents)
+
+    def test_the_real_tracked_forwarders_agree_on_one_root(self) -> None:
+        """Over the actual repository, not a fixture."""
+        hooks_dir = Path(__file__).resolve().parents[3] / ".claude" / "hooks"
+        contents = {
+            path.name: path.read_text(encoding="utf-8")
+            for path in hooks_dir.iterdir()
+            if path.is_file() and not path.name.endswith(".bak")
+        }
+        recorded = recorded_untracked_dir(contents)
+        assert recorded is not None
+        assert recorded.name == "untracked"
+
+
+class TestTheRecordedRootIsHostnameIndependentInPractice:
+    """The runner condition, reproduced rather than reasoned about.
+
+    Generating for the recorded root removes the checkout path as a variable,
+    but the branch decision also consults the HOSTNAME — so "machine-independent"
+    had to be measured, not asserted. It holds to a hostname of about 40
+    characters and breaks at 53, which matches the arithmetic: 54 characters of
+    headroom against the AF_UNIX limit.
+
+    A GitHub runner hostname (`fv-az1234-567`, 13 characters) is nowhere near it.
+    """
+
+    _RECORDED = Path("/workspace/untracked")
+
+    def _guard(self) -> str:
+        from claude_code_hooks_daemon.config.models import TransportConfig
+        from claude_code_hooks_daemon.install.forwarder_generator import (
+            build_relay_guard_block,
+        )
+
+        return build_relay_guard_block("user-prompt-expansion", TransportConfig(), self._RECORDED)
+
+    @pytest.mark.parametrize(
+        ("hostname", "label"),
+        [("a", "minimal"), ("fv-az1234-567", "a GitHub runner"), ("x" * 40, "40 chars")],
+    )
+    def test_the_output_does_not_change_with_the_hostname(
+        self, monkeypatch: pytest.MonkeyPatch, hostname: str, label: str
+    ) -> None:
+        monkeypatch.setenv("HOSTNAME", "reference-host")
+        reference = self._guard()
+        monkeypatch.setenv("HOSTNAME", hostname)
+        assert self._guard() == reference, f"output changed for {label}"
+
+    def test_the_breaking_point_is_where_the_arithmetic_says(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Vacuity, and a warning: this is not hostname-proof, just proof enough.
+
+        `user-prompt-expansion` is the longest wired event name and so sets the
+        budget. Adding a longer one eats the same headroom.
+        """
+        monkeypatch.setenv("HOSTNAME", "reference-host")
+        reference = self._guard()
+        monkeypatch.setenv("HOSTNAME", "y" * 53)
+        assert self._guard() != reference

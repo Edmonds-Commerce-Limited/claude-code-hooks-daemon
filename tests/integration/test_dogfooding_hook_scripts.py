@@ -19,6 +19,7 @@ import pytest
 
 from claude_code_hooks_daemon.install.forwarder_generator import (
     normalise_project_root,
+    recorded_untracked_dir,
     surviving_absolute_paths,
 )
 
@@ -73,7 +74,13 @@ def generate_fresh_hook_scripts() -> dict[str, str]:
 
     project_root = get_project_root()
     transport = load_transport_config(project_root)
-    untracked_dir = get_event_socket_dir(project_root).parent
+    # Generate for the root the DEPLOYED forwarders record, not this checkout's.
+    # Comparing against a regeneration at the current root additionally asserts
+    # "this checkout sits where the committed file's did" — false on every
+    # machine but the one that generated them (Plan 00250 Task 2.4c).
+    untracked_dir = recorded_untracked_dir(get_installed_hook_scripts()) or (
+        get_event_socket_dir(project_root).parent
+    )
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_hooks_dir = Path(tmpdir) / "hooks"
@@ -125,24 +132,18 @@ class TestDogfoodingHookScripts:
         - No manual edits have drifted from installer
         - Script updates are propagated to installer code
 
-        The comparison normalises the project root first, and ONLY the project
-        root. The forwarders bake it as a literal on purpose — the relay guard
-        is a zero-spawn hot path that must not compute a path at hook-run time
-        — so a verbatim comparison additionally asserted "this checkout sits at
-        the same absolute path as the machine that generated the committed
-        file". True on one box, false on every CI runner, and none of the three
-        properties above. `test_no_other_machine_specific_path_survives` keeps
-        the normalisation from becoming a blind spot (Plan 00250 Task 2.4c).
+        The comparison is EXACT, and stays exact by generating for the root the
+        deployed forwarders record rather than for this checkout's. The
+        forwarders bake that root as a literal on purpose — the relay guard is a
+        zero-spawn hot path that must not compute a path at hook-run time — so
+        comparing against a regeneration at the CURRENT root additionally
+        asserted "this checkout sits where the committed file's did". True on
+        one box, false on every CI runner, and none of the three properties
+        above (Plan 00250 Task 2.4c). See `recorded_untracked_dir`, which
+        refuses to pick a root when the forwarders disagree about it.
         """
-        root = str(get_project_root())
-        installed = {
-            name: normalise_project_root(content, root)
-            for name, content in get_installed_hook_scripts().items()
-        }
-        fresh = {
-            name: normalise_project_root(content, root)
-            for name, content in generate_fresh_hook_scripts().items()
-        }
+        installed = get_installed_hook_scripts()
+        fresh = generate_fresh_hook_scripts()
 
         # Check for missing or extra scripts
         installed_names = set(installed.keys())
