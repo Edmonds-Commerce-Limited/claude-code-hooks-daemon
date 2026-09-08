@@ -573,6 +573,61 @@ class TestPythonImportStatements:
         assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
 
 
+class TestPythonDashCImportStatements:
+    """Plan 00311 Task 1.2 (N2) residual: `python -c "import <module>"` puts
+    the import statement on the SAME line as the interpreter invocation, so
+    ``_IMPORT_MODULE_RE``'s line-start anchor never reaches it even though
+    the equivalent multi-line `from`/`import` STATEMENT case
+    (``TestPythonImportStatements`` above) is exempt. Diagnosed live while
+    investigating Plan 00356 -- naming the dotted module path this way was
+    denied on the Bash surface (this module's own dotted path,
+    ``...utils.secret_file_matching``, substring-matches the shipped
+    ``*.secret*`` default) even after the Write/Edit surface was fixed for
+    the identical name.
+    """
+
+    PROTECTED = ("*.secret*",)
+
+    def test_python_dash_c_import_of_this_modules_own_path_is_not_a_mention(self) -> None:
+        command = 'python -c "import claude_code_hooks_daemon.utils.secret_file_matching"'
+        assert sfm.find_protected_mention(command, self.PROTECTED) is None
+
+    def test_python3_dash_c_single_quoted_import_is_not_a_mention(self) -> None:
+        command = "python3 -c 'import claude_code_hooks_daemon.utils.secret_file_matching'"
+        assert sfm.find_protected_mention(command, self.PROTECTED) is None
+
+    def test_dash_c_from_import_form_is_not_a_mention(self) -> None:
+        command = (
+            'python -c "from claude_code_hooks_daemon.utils.secret_file_matching '
+            'import find_protected_mention"'
+        )
+        assert sfm.find_protected_mention(command, self.PROTECTED) is None
+
+    def test_a_real_protected_path_alongside_a_dash_c_import_is_still_caught(self) -> None:
+        """The exemption must not become a carrier on the inline surface
+        either: a genuine path elsewhere in the same command is still a
+        mention."""
+        command = (
+            'python -c "import claude_code_hooks_daemon.utils.secret_file_matching" '
+            "&& cat .claude/block-words.secret"
+        )
+        assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
+
+    def test_a_quoted_import_without_the_dash_c_flag_is_still_a_mention(self) -> None:
+        """Scoped to the ``-c`` shape specifically, not to any quoted text
+        starting with the word "import" -- proves the exemption did not
+        widen into a general quote-anchored amnesty."""
+        command = 'echo "import mykeys.secret"'
+        assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
+
+    def test_a_dash_c_import_does_not_hide_a_separate_real_argument(self) -> None:
+        """The same laundering check as ``TestTheImportExemptionCannotLaunderAMention``,
+        for the inline surface: an EXACT-filename pattern's own bare mention
+        elsewhere in the command is still caught."""
+        command = 'python -c "import id_rsa" && cat id_rsa'
+        assert sfm.find_protected_mention(command, ("id_rsa",)) == "id_rsa"
+
+
 class TestTheImportExemptionCannotLaunderAMention:
     """A fake import must not blind the matcher to the SAME token elsewhere.
 
@@ -696,6 +751,46 @@ class TestExemptions:
         cmd = "git rm --cached .claude/block-words.secret && cat .claude/block-words.secret"
         assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
 
+    def test_git_rm_dry_run_cached_is_exempt(self) -> None:
+        """Plan 00311 Task 1.3 (N5) second look: ``--cached`` matching
+        ANYWHERE after the subcommand means an interleaved ``--dry-run`` is
+        also exempt. Verified correct -- ``--dry-run`` reports what WOULD be
+        removed without touching the index or reading any content, so this
+        stays exempt on purpose."""
+        cmd = "git rm --dry-run --cached .claude/block-words.secret"
+        assert sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_git_rm_recursive_cached_is_exempt(self) -> None:
+        """Same second look, for ``-r``: recursive untracking still reads no
+        file content, only index entries -- verified correct, stays exempt."""
+        cmd = "git rm -r --cached .claude/block-words.secret"
+        assert sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_git_rm_cached_pathspec_from_file_is_never_exempt(self) -> None:
+        """Plan 00311 Task 1.3 (N5) second-look FINDING (not a false alarm):
+        ``--pathspec-from-file=<file>`` makes ``git rm`` READ ``<file>`` and
+        treat each line as a pathspec. Empirically verified (untracked scratch
+        repo, this session): a non-matching pathspec is echoed VERBATIM into
+        git's own stderr (``fatal: pathspec '<line content>' did not match any
+        files``) -- so this shape discloses the named file's content even
+        though the command still "only" untracks. Must stay denied."""
+        cmd = "git rm --cached --pathspec-from-file=.claude/block-words.secret"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_git_rm_cached_pathspec_from_file_space_form_is_never_exempt(self) -> None:
+        """Same finding, ``--flag value`` form (git accepts both)."""
+        cmd = "git rm --cached --pathspec-from-file .claude/block-words.secret"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_git_rm_cached_pathspec_from_file_naming_something_else_is_never_exempt(
+        self,
+    ) -> None:
+        """The flag voids the exemption outright, regardless of what it
+        names -- the broken invariant is "rm reads a file", not "rm reads
+        THIS file"."""
+        cmd = "git rm --cached --pathspec-from-file=list.txt .claude/block-words.secret"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
     def test_git_dash_c_rm_cached_is_exempt(self) -> None:
         """N4 code-review fix (Plan 00311 follow-up): ``git -C <path> rm
         --cached <protected-path>`` is exactly the shape an agent working
@@ -708,6 +803,34 @@ class TestExemptions:
     def test_git_dash_c_rm_without_cached_is_never_exempt(self) -> None:
         cmd = "git -C /repo rm .claude/block-words.secret"
         assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_git_dash_c_rm_recursive_cached_is_exempt(self) -> None:
+        """Plan 00311 Task 1.4 regression pin: an intervening ``-r`` between
+        the subcommand and ``--cached`` must not upset the generic skipper
+        that replaced the ``-C``-only special case."""
+        cmd = "git -C /repo rm -r --cached .claude/block-words.secret"
+        assert sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_git_dash_c_rm_cached_equals_form_is_never_exempt(self) -> None:
+        """``--cached=x`` is not the real ``--cached`` flag -- the exact-match
+        check must not be loosened by the generic global-option skipper."""
+        cmd = "git -C /repo rm --cached=x .claude/block-words.secret"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_git_dash_lowercase_c_config_rm_cached_is_exempt(self) -> None:
+        """Plan 00311 Task 1.4 (R5): the generic leading-global-flag skipper
+        must see past ANY value-taking global option, not just ``-C`` -- a
+        real hygiene-recommended invocation carrying an unrelated ``-c
+        <key>=<value>`` global was failing CLOSED (the same usability gap N4
+        described, one layer out)."""
+        cmd = "git -c core.pager=cat rm --cached .claude/block-words.secret"
+        assert sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_git_dash_c_no_pager_rm_cached_is_exempt(self) -> None:
+        """Same as above, for a run of TWO leading global options -- one
+        value-taking (``-C``), one valueless (``--no-pager``)."""
+        cmd = "git -C /repo --no-pager rm --cached .claude/block-words.secret"
+        assert sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
 
     def test_cat_of_protected_path_stays_denied_alongside_git_rm_exemption(self) -> None:
         assert not sfm.is_exempt_invocation(

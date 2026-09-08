@@ -23,6 +23,7 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
+from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
 
 # Task 1.1's reproduction measured harmful truncation at a ~24k-token
 # (roughly 96k-character) final message. A subagent's final message should be
@@ -102,7 +103,8 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         return f"{self._fallback_report_dir}{yymmdd}-{agent_name}-{_MODEL_PLACEHOLDER}.md"
 
     def _threshold(self) -> int:
-        """Coerced ``threshold_chars`` option.
+        """Coerced ``threshold_chars`` option, via the shared
+        :func:`coerce_int_option` (Plan 00311 Task 1.5).
 
         Options arrive by blind ``setattr`` from YAML, so the type is not
         trusted: a YAML author writing ``threshold_chars: "4000"`` (a string)
@@ -110,21 +112,8 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         comparison inside a TERMINAL SubagentStop handler -- fail-fast
         elsewhere, but not here, where an unhandled exception in the
         dispatch hot path is worse than falling back to the shipped default.
-        A real positive ``int`` (excluding ``bool``, itself an ``int``
-        subclass) is used as-is; a numeric string is parsed; anything else
-        degrades to ``_DEFAULT_THRESHOLD_CHARS``.
         """
-        value = self._threshold_chars
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return value
-        if isinstance(value, str):
-            try:
-                parsed = int(value.strip())
-            except ValueError:
-                return _DEFAULT_THRESHOLD_CHARS
-            if parsed > 0:
-                return parsed
-        return _DEFAULT_THRESHOLD_CHARS
+        return coerce_int_option(self._threshold_chars, default=_DEFAULT_THRESHOLD_CHARS)
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """DENY when ``last_assistant_message`` exceeds the threshold, else ALLOW."""

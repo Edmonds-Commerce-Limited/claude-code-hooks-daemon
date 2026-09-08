@@ -25,7 +25,7 @@ the default) or the dispatch is denied (strict mode, opt-in via
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import (
     SUBAGENT_DISPATCH_TOOL_NAMES,
@@ -36,16 +36,17 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.utils.option_coercion import coerce_bool_option
 
 # Fallback location for dispatches that are genuinely plan-less. Configurable
 # via dispatch_declaration.options.fallback_report_dir.
 _DEFAULT_FALLBACK_REPORT_DIR = "untracked/agent-reports/"
 
-# A plan-folder path: the configured plan directory (default CLAUDE/Plan)
-# followed by a 5-digit plan number and a dash. Matched loosely (no anchors)
-# so it fires whether the prompt writes an absolute path, a relative one, or
-# wraps it in punctuation/backticks.
-_PLAN_PATH_PATTERN = re.compile(r"CLAUDE/Plan/\d{5}-", re.IGNORECASE)
+# Fallback plan directory, used only when no ProjectLayout facade was
+# injected (e.g. a handler constructed directly in a unit test). Mirrors
+# PlanWorkflowConfig.directory's default exactly -- same idiom as
+# plan_workflow.py's `_FALLBACK_PLAN_DIR`.
+_FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 
 # "Not plan work" declaration — deliberately narrow phrasing, not a bare
 # "not a plan" substring, so it does not false-fire on unrelated prose.
@@ -91,12 +92,39 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         # config setter surfaces as a normal attribute (fail-fast).
         # `Any`, not `bool`: options arrive by blind setattr from YAML, so a
         # string value is a real runtime possibility `_is_strict()` guards
-        # against (peer precedent: bash_safe_mode's `_min_statements: Any`
-        # for the identical reason, and subagent_report_size_blocker's
-        # `_threshold_chars: Any`, added for the same mypy redundant-expr
-        # concern).
+        # against via the shared `coerce_bool_option` helper (peer callers:
+        # bash_safe_mode's `_min_statements: Any` and
+        # subagent_report_size_blocker's `_threshold_chars: Any`, both
+        # coerced through that same module's `coerce_int_option`, for the
+        # identical mypy redundant-expr concern).
         self._strict: Any = False
         self._fallback_report_dir: str = _DEFAULT_FALLBACK_REPORT_DIR
+
+    def _plan_dir(self) -> str:
+        """Configured plan directory (facade, or the matching default).
+
+        ``_project_layout`` is injected onto every handler instance
+        unconditionally (registry.py), unlike ``_track_plans_in_project``
+        which the registry only injects into PLANNING-tagged handlers. This
+        handler is tagged WORKFLOW/ADVISORY/BLOCKING, not PLANNING, so the
+        facade -- already the general-purpose home for this exact question,
+        precedented in ``plan_workflow.py``'s identically-named method -- is
+        the route that needs no tag change. Same idiom as
+        ``markdown_organization.py`` and ``recovery_cron_advisor.py``.
+        """
+        layout = self._project_layout
+        return layout.plan_dir if layout is not None else _FALLBACK_PLAN_DIR
+
+    def _plan_path_pattern(self) -> re.Pattern[str]:
+        """A plan-folder path built from the configured plan directory.
+
+        The configured directory followed by a 5-digit plan number and a
+        dash. Matched loosely (no anchors) so it fires whether the prompt
+        writes an absolute path, a relative one, or wraps it in
+        punctuation/backticks. ``re.escape`` guards against a configured
+        directory that happens to contain regex metacharacters.
+        """
+        return re.compile(rf"{re.escape(self._plan_dir())}/\d{{5}}-", re.IGNORECASE)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True for a subagent dispatch (Task/Agent) carrying a non-empty prompt."""
@@ -111,7 +139,7 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
 
     def _has_declaration(self, prompt: str) -> bool:
         """True if the prompt names a plan folder OR a non-plan-work destination."""
-        if _PLAN_PATH_PATTERN.search(prompt):
+        if self._plan_path_pattern().search(prompt):
             return True
         return bool(_NOT_PLAN_WORK_PATTERN.search(prompt) and _DESTINATION_PATTERN.search(prompt))
 
@@ -139,17 +167,14 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         Options arrive by blind ``setattr`` from YAML, so the type is not
         trusted: a YAML author writing ``strict: "false"`` (a string) would
         otherwise be silently treated as truthy Python and get an unwanted
-        DENY. A real ``bool`` is used as-is; a string is matched
+        DENY. Delegates to the shared :func:`coerce_bool_option` (Plan 00311
+        Task 1.5): a real ``bool`` is used as-is; a string is matched
         case-insensitively against ``"true"``/``"false"``; anything else
         (including a genuinely malformed value) degrades to the advisory
-        default rather than surprising the caller with strict enforcement.
+        default (``False``) rather than surprising the caller with strict
+        enforcement.
         """
-        value = self._strict
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            return value.strip().lower() == "true"
-        return False
+        return coerce_bool_option(self._strict, default=False)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Silent when declared; otherwise advise (default) or deny (strict)."""

@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.utils.bash_flags import (
     detect_safe_mode_flags,
     split_statements,
 )
+from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
 
 _MODE_WARN: Final = "warn"
 _MODE_BLOCK: Final = "block"
@@ -276,10 +277,9 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         return validated or _DEFAULT_REQUIRE
 
     def _threshold(self) -> int:
-        value = self._min_statements
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return value
-        return _DEFAULT_MIN_STATEMENTS
+        """Coerced ``min_statements`` option, via the shared
+        :func:`coerce_int_option` (Plan 00311 Task 1.5)."""
+        return coerce_int_option(self._min_statements, default=_DEFAULT_MIN_STATEMENTS)
 
     def _matches_exempt_pattern(self, command: str) -> bool:
         return any(pattern.search(command) for pattern in self._exempt_patterns)
