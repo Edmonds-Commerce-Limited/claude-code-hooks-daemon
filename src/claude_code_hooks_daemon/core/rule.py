@@ -21,16 +21,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from claude_code_hooks_daemon.constants.skill_commands import SkillCommand
+from claude_code_hooks_daemon.constants.skill_commands import CliCommand
 
 # Pointer suffix injected into terse reminders so agents can fetch full detail.
-# Phrased without slash-command syntax: a literal "/hooks-daemon ..." in an
-# agent-facing string is interpreted by Claude as a bash command (skill_refs QA).
-# The subcommand name comes from SkillCommand (NO MAGIC / single source of truth).
-_EXPLAIN_SUFFIX = (
-    f"Full detail: run the hooks-daemon skill with args "
-    f"'{SkillCommand.RULE_EXPLAIN} {{rule_id}}'"
-)
+# It names the CLI verb (Plan 00330: `rule-explain` is a documented capability,
+# not a routed skill subcommand), and never slash-command syntax, which Claude
+# reads as a bash command (skill_refs QA). The verb comes from CliCommand.
+_EXPLAIN_SUFFIX = f"Full detail: bin/hooks-daemon {CliCommand.EXPLAIN_RULE} {{rule_id}}"
 
 
 @dataclass(frozen=True, slots=True)

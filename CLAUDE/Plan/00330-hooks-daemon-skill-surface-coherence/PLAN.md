@@ -128,16 +128,26 @@ this plan generalises.
 
 ### Phase 3: One housekeeping command
 
-- [ ] ⬜ **Task 3.1**: Define what "full housekeeping" runs, and in what
+- [x] ✅ **Task 3.1**: Define what "full housekeeping" runs, and in what
   order. Some steps mutate (`optimise` edits config; the format check
-  auto-fixes), so ordering and re-entrancy are load-bearing.
-- [ ] ⬜ **Task 3.2**: Decide which steps are report-only and which may act
+  auto-fixes), so ordering and re-entrancy are load-bearing. **Done in
+  `59b11a0a`** — `daemon/housekeeping.py` holds the 20-step list (12
+  report-only, then 8 mutating, `optimise` last per Decision 5); tests pin
+  the order and that every CLI-backed step names a verb the parser accepts.
+- [x] ✅ **Task 3.2**: Decide which steps are report-only and which may act
   without confirmation. The safe default is report-everything, act-on-request;
   a single command that silently changes many things is worse than several
-  explicit ones.
-- [ ] ⬜ **Task 3.3**: Orchestrate independent steps as subagents, each
+  explicit ones. **Done in `59b11a0a`** — Decision 6 as code: only
+  `format-markdown` and `regenerate-docs` are RUN unconfirmed; the other six
+  mutating steps are HELD until named on `--apply <step>`.
+- [x] ✅ **Task 3.3**: Orchestrate independent steps as subagents, each
   returning what it CHANGED rather than what it read, so the coordinator's
-  context does not accumulate every step's full output.
+  context does not accumulate every step's full output. **Done in
+  `59b11a0a` / `f458057e`** — the `housekeeping` CLI verb prints the pass as
+  a one-sub-agent-per-step procedure with a five-line reply contract; the
+  skill routes `housekeeping` to it and `idle_housekeeping_advisory` derives
+  its candidate audits from the same step list (Decision 7). The Decision 4
+  surface trim (route 8, document 10) shipped in `f458057e`.
 
 ### Phase 4: The release-time guarantee
 
@@ -211,9 +221,10 @@ the opt-in idle trigger for the same pass.
 - [ ] Adding a handler with no skill change fails the gate.
 - [ ] `optimise`'s covered set is derived, and a handler's relevance is
   declared at the handler rather than listed in the skill.
-- [ ] One invocation runs the full housekeeping pass and reports what it did.
-- [ ] Every routed subcommand is one a human invokes; the rest are documented
-  capabilities.
+- [x] One invocation runs the full housekeeping pass and reports what it did
+  (`59b11a0a`, `f458057e`).
+- [x] Every routed subcommand is one a human invokes; the rest are documented
+  capabilities (`f458057e`).
 
 ## Delivery & Milestones
 

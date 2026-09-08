@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptMessage, TranscriptReader
+from claude_code_hooks_daemon.daemon.housekeeping import report_only_steps
 
 logger = logging.getLogger(__name__)
 
@@ -217,26 +218,30 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         return text or None
 
     def _default_guidance(self) -> str:
-        """The built-in housekeeping-mode guidance."""
+        """The built-in housekeeping-mode guidance.
+
+        The audits are the report-only steps of the shared housekeeping pass
+        (Plan 00330 Decision 7): this advisory is the idle TRIGGER for the same
+        pass the ``housekeeping`` CLI verb prints in full, so the list is
+        derived, not restated.
+        """
+        audits = ", ".join(f"`{' '.join(step.cli_argv)}`" for step in report_only_steps())
         return (
             "🧹 HOUSEKEEPING MODE (idle detected — repeated no-op recovery ticks).\n"
             "The session is caught up: clean tree, nothing to resume, several "
             "consecutive no-op failsafe-recovery ticks. Rather than re-stopping, "
             "spend this idle time on useful, LOW-priority, REPORT-ONLY housekeeping.\n\n"
             "HOW (protect main-thread context — do NOT run the audits inline):\n"
-            "  • Dispatch one or more specialist housekeeping SUB-AGENTS. Each "
-            "runs a scoped, read-only audit and writes a detailed **markdown "
-            f"report file** under `{self._reports_dir}/` (e.g. "
-            "`YYYY-MM-DD-<topic>.md`). Markdown files have no size limit — include "
-            "transcripts, logs, and code snippets so the report is genuinely useful.\n"
-            "  • Candidate audits (pick what fits): plan-tree sweep "
-            "(`plan-qa --sweep`), QA baseline (`llm_qa.py all`), daemon "
-            "log/health scan, stale-artifact/venv/background reaping report, doc/"
-            "truth-drift & dead-link scan, TODO/FIXME inventory, `get_claude_md()` "
-            "completeness audit, coverage-gap report.\n"
-            "  • This is REPORT-ONLY (beta): surface issues/suggestions in the "
-            "report. Do NOT auto-fix, auto-commit, or make decisions that are the "
-            "user's to make.\n\n"
+            "  • Run `bin/hooks-daemon housekeeping` (under `.claude/hooks-daemon/` "
+            "on a client install) and follow the procedure it prints: one "
+            "SUB-AGENT per step, each writing a detailed **markdown report "
+            f"file** under `{self._reports_dir}/` (e.g. `YYYY-MM-DD-<step>.md`) "
+            "and replying with only its verdict, report path and what it "
+            "CHANGED — never the audit's output.\n"
+            f"  • The report-only steps, in order: {audits}.\n"
+            "  • This is REPORT-ONLY (beta): the pass's mutating steps stay HELD "
+            "here. Do NOT pass `--apply`, auto-fix, auto-commit, or make "
+            "decisions that are the user's to make.\n\n"
             "SHARE the report via: agent-to-agent hand-off, Slack/colleague, or a "
             "GitHub issue. See docs/guides/CREATING_REPORTS.md for the format and "
             "sharing channels.\n\n"
@@ -253,7 +258,10 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
             "When the session is idle and caught up (repeated no-op failsafe-recovery "
             "ticks), this advisory suggests a bounded HOUSEKEEPING MODE: dispatch "
             "specialist housekeeping sub-agents that run read-only audits and write "
-            "shareable **markdown report files** (default `untracked/reports/`). It is "
+            "shareable **markdown report files** (default `untracked/reports/`). The "
+            "audits are the report-only steps of the housekeeping pass that "
+            "`bin/hooks-daemon housekeeping` prints in full (the same pass the "
+            "hooks-daemon skill runs on `housekeeping`). It is "
             "REPORT-ONLY — never auto-fix or auto-commit — and strictly lower priority "
             "than real work (a real user prompt aborts it). Off by default; enable via "
             "`handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true`. "

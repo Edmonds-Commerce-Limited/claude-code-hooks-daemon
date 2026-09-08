@@ -163,7 +163,7 @@ class TestSkillTextRoutesOnlyKnownVerbs:
     def test_skill_case_arms_were_found(self) -> None:
         """Guard against the regexes silently matching nothing."""
         verbs = _verbs_routed_by_skill_text()
-        assert {"status", "restart", "config-validate", "explain-rule"} <= verbs
+        assert {"restart", "bug-report", "housekeeping"} <= verbs
 
     def test_every_skill_routed_verb_is_accepted_by_the_parser(self) -> None:
         rejected = sorted(
@@ -171,9 +171,17 @@ class TestSkillTextRoutesOnlyKnownVerbs:
         )
         assert rejected == [], f"SKILL.md routes verbs the CLI rejects: {rejected}"
 
-    def test_skill_routes_the_validate_config_alias(self) -> None:
-        """The spelling the client typed must reach the CLI, not the help text."""
-        assert "validate-config" in _verbs_routed_by_skill_text()
+    def test_skill_documents_the_validate_config_alias(self) -> None:
+        """The spelling the client typed must still be answered.
+
+        Plan 00330 moved `config-validate` off the routed surface into the
+        skill's capabilities list, so the alias is now taught there and the
+        CLI keeps accepting it (see `TestValidateConfigAlias`).
+        """
+        text = _SKILL_MD.read_text()
+        assert "config-validate" in text
+        assert "validate-config" in text
+        assert _parser_accepts("validate-config")
 
     def test_every_wrapper_example_verb_is_accepted_by_the_parser(self) -> None:
         examples = _verbs_in_wrapper_examples()

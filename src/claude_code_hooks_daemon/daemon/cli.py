@@ -5682,6 +5682,53 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_housekeeping(args: argparse.Namespace) -> int:
+    """Print the full housekeeping pass as a procedure (Plan 00330 Phase 3).
+
+    The routed ``housekeeping`` skill subcommand lands here. Nothing runs in
+    this process: the procedure names every step in pass order with the
+    command that runs it and its disposition (RUN or HELD), and the agent
+    dispatches one sub-agent per step. A HELD step -- every mutating step
+    except the idempotent formatters -- is released only by naming it on
+    ``--apply``.
+
+    Returns:
+        0 when the procedure (or ``--list``) was printed, 2 when ``--apply``
+        names an unknown step or the project root is not a directory.
+    """
+    from claude_code_hooks_daemon.daemon.housekeeping import (
+        HOUSEKEEPING_STEPS,
+        UnknownStepError,
+        plan_pass,
+        render_procedure,
+    )
+
+    project_root = resolve_tree_root(args)
+    if project_root is None:
+        return 2
+
+    if bool(getattr(args, "list_steps", False)):
+        for step in HOUSEKEEPING_STEPS:
+            kind = "mutating" if step.mutates else "report-only"
+            gate = ", confirmation required" if step.confirmation_required else ""
+            print(f"{step.name:<24} {kind}{gate}: {step.purpose}")
+        return 0
+
+    try:
+        planned = plan_pass(apply=list(getattr(args, "apply", None) or []))
+    except UnknownStepError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    # The wrapper the procedure prints in front of each verb: a client
+    # install carries it under the daemon clone, self-install at the root.
+    client_wrapper = project_root / ".claude" / "hooks-daemon" / "bin" / "hooks-daemon"
+    cli = client_wrapper if client_wrapper.is_file() else project_root / "bin" / "hooks-daemon"
+    reports_dir = str(getattr(args, "reports_dir", None) or "untracked/reports")
+    print(render_procedure(planned, cli=str(cli), reports_dir=reports_dir))
+    return 0
+
+
 def cmd_tool_report(args: argparse.Namespace) -> int:
     """Produce the tools-vs-tokens usage report (Plan 00293).
 
@@ -7162,6 +7209,39 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_skill_scan.set_defaults(func=cmd_skill_scan)
+
+    # housekeeping command (Plan 00330) — the full pass as a procedure, no step runs here
+    parser_housekeeping = subparsers.add_parser(
+        "housekeeping",
+        help="Print the full housekeeping pass: report-only steps, then mutating, optimise last",
+    )
+    parser_housekeeping.add_argument(
+        "--apply",
+        action="append",
+        metavar="STEP",
+        default=None,
+        help="Release a confirmation-gated mutating step to act (repeatable; see --list)",
+    )
+    parser_housekeeping.add_argument(
+        "--list",
+        dest="list_steps",
+        action="store_true",
+        help="List the steps in pass order with their disposition, and exit",
+    )
+    parser_housekeeping.add_argument(
+        "--reports-dir",
+        dest="reports_dir",
+        default=None,
+        help="Where each step's report file goes (default: untracked/reports)",
+    )
+    parser_housekeeping.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_housekeeping.set_defaults(func=cmd_housekeeping)
 
     # worktree-reap command (Plan 00349) — report by default, act only on --reap
     parser_worktree_reap = subparsers.add_parser(
