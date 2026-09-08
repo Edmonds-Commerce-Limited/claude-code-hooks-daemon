@@ -461,6 +461,11 @@ class PlaybookGenerator:
                         if test.tool_payload is not None
                         else None
                     ),
+                    # The RAW hook-input dict for a test `tool_payload` cannot
+                    # describe -- an event with no tool call at all (Plan
+                    # 00319 Task 4.6). Emitted verbatim; unlike `tool_payload`
+                    # there is no envelope to rebuild here.
+                    "hook_input": test.hook_input,
                 }
                 result.append(test_dict)
                 test_number += 1
@@ -479,6 +484,7 @@ class PlaybookGenerator:
                 "setup_commands": cli_test.setup_commands,
                 "cleanup_commands": cli_test.cleanup_commands,
                 "safety_notes": cli_test.safety_notes,
+                "requires_main_thread": cli_test.requires_main_thread,
             }
             result.append(cli_dict)
             test_number += 1
@@ -869,6 +875,9 @@ class PlaybookGenerator:
                 lines.append("")
                 lines.append("**Type**: CLI Feature")
                 lines.append(f"**Expected Exit Code**: {cli_test.expected_exit_code}")
+                lines.append(
+                    f"**Requires Main Thread**: {'yes' if cli_test.requires_main_thread else 'no'}"
+                )
                 lines.append("")
                 lines.append(f"**Description**: {cli_test.description}")
                 lines.append("")

@@ -215,3 +215,36 @@ class TestFailOpen:
         # matches() must not raise on a hook_input missing expected keys; the
         # fail-open decision is made in handle(), not by silently skipping.
         assert handler.matches({}) is True
+
+
+class TestDeclaredAcceptanceTestsAreProducible:
+    """Plan 00319 Task 4.6: every declared `hook_input` really drives the
+
+    handler to its declared decision, and every declared pattern really
+    appears in the reason produced. `SubagentStop` has no tool call for a
+    `ToolPayload` to describe, which is exactly why these two tests declare
+    `hook_input` directly rather than `tool_payload`.
+    """
+
+    def test_every_blocking_test_hook_input_produces_its_declared_decision_and_patterns(
+        self, handler: SubagentReportSizeBlockerHandler
+    ) -> None:
+        import re
+
+        from claude_code_hooks_daemon.core import TestType
+
+        tests = [t for t in handler.get_acceptance_tests() if t.test_type == TestType.BLOCKING]
+        assert tests, "fixture handler declared no BLOCKING tests"
+
+        for test in tests:
+            assert (
+                test.hook_input is not None
+            ), f"{test.title!r} declares no hook_input to drive it with"
+            result = handler.handle(test.hook_input)
+            assert (
+                result.decision == test.expected_decision
+            ), f"{test.title!r}: expected {test.expected_decision}, got {result.decision}"
+            for pattern in test.expected_message_patterns:
+                assert re.search(
+                    pattern, result.reason or ""
+                ), f"{test.title!r}: pattern {pattern!r} not found in: {result.reason}"

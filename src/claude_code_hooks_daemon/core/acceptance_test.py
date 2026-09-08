@@ -202,6 +202,18 @@ class AcceptanceTest:
             sentences that begin ``WebFetch``/``With``). A block whose command
             merely LOOKS like shell but drives another tool must say so with
             an explicit ``tool_payload``, which is why declaring both raises.
+        hook_input: The RAW hook-input dict a CI-time contract test hands
+            straight to ``handler.handle()`` (Plan 00319 Task 4.6). This is
+            the general escape hatch ``tool_payload`` cannot be: a
+            ``ToolPayload`` can only describe a TOOL CALL (``tool_name`` +
+            ``tool_input``), so it cannot represent an event with no tool
+            call at all -- ``SubagentStop``'s ``last_assistant_message``,
+            for one. Use ``tool_payload`` whenever the test really is a tool
+            call; reach for ``hook_input`` only when it is not. Mutually
+            exclusive with ``tool_payload``, ``dispatch_as_bash`` and
+            ``harness_cannot_produce`` for the same reason those three are
+            mutually exclusive with each other: exactly one declaration may
+            say how to drive a given test.
     """
 
     title: str
@@ -219,6 +231,7 @@ class AcceptanceTest:
     requires_main_thread: bool = False
     harness_cannot_produce: str | None = None
     tool_payload: ToolPayload | None = None
+    hook_input: dict[str, Any] | None = None
     #: An `InitVar`, not a field: it is consumed at construction to produce
     #: `tool_payload` and nothing reads it afterwards. A stored field would
     #: also have to be serialised -- `test_playbook_generator_json_field_
@@ -246,6 +259,17 @@ class AcceptanceTest:
                 "harness_cannot_produce and tool_payload are mutually exclusive: "
                 "a test whose input cannot be produced has no payload to declare"
             )
+        if self.hook_input is not None:
+            if self.tool_payload is not None:
+                raise ValueError(
+                    "hook_input and tool_payload are mutually exclusive: two "
+                    "declared inputs for one probe, and nothing says which wins"
+                )
+            if self.harness_cannot_produce:
+                raise ValueError(
+                    "hook_input and harness_cannot_produce are mutually exclusive: "
+                    "a test whose input cannot be produced has no input to drive it with"
+                )
 
     def _derive_bash_payload(self) -> None:
         """Build the Bash payload from `command`, refusing any rival claim."""

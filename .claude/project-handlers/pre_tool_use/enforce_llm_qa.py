@@ -164,6 +164,7 @@ class EnforceLlmQaHandler(Handler):
                 expected_message_patterns=[r"llm_qa\.py", r"run_all\.sh"],
                 safety_notes="Uses echo - safe to execute",
                 test_type=TestType.BLOCKING,
+                dispatch_as_bash=True,
             ),
             AcceptanceTest(
                 title="Allow inspecting run_all.sh with cat (not an execution)",
@@ -177,5 +178,6 @@ class EnforceLlmQaHandler(Handler):
                 expected_message_patterns=[],
                 safety_notes="Read-only inspection of a tracked file",
                 test_type=TestType.BLOCKING,
+                dispatch_as_bash=True,
             ),
         ]

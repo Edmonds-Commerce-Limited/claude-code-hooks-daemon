@@ -61,12 +61,16 @@ class TestAWriteThatCompletesAPlan:
     def test_allowed_when_the_criterion_names_an_artefact(
         self, handler: PlanDoneRequiresHoldingAreaHandler, write_hook_input: Any
     ) -> None:
-        assert handler.matches(write_hook_input(_ACTIVE, _plan("Complete", _CRITERIA_WITH))) is False
+        assert (
+            handler.matches(write_hook_input(_ACTIVE, _plan("Complete", _CRITERIA_WITH))) is False
+        )
 
     def test_allowed_when_the_plan_declares_no_consequences(
         self, handler: PlanDoneRequiresHoldingAreaHandler, write_hook_input: Any
     ) -> None:
-        assert handler.matches(write_hook_input(_ACTIVE, _plan("Complete", _CRITERIA_NONE))) is False
+        assert (
+            handler.matches(write_hook_input(_ACTIVE, _plan("Complete", _CRITERIA_NONE))) is False
+        )
 
     def test_a_non_terminal_status_is_never_judged(
         self, handler: PlanDoneRequiresHoldingAreaHandler, write_hook_input: Any
@@ -118,7 +122,9 @@ class TestScope:
     def test_tools_other_than_write_and_edit_are_ignored(
         self, handler: PlanDoneRequiresHoldingAreaHandler, bash_hook_input: Any
     ) -> None:
-        assert handler.matches(bash_hook_input("git mv CLAUDE/Plan/x CLAUDE/Plan/Completed/")) is False
+        assert (
+            handler.matches(bash_hook_input("git mv CLAUDE/Plan/x CLAUDE/Plan/Completed/")) is False
+        )
 
 
 class TestAnEditThatCompletesAPlan:
@@ -183,3 +189,35 @@ class TestAnEditThatCompletesAPlan:
         monkeypatch.chdir(tmp_path)
         payload = edit_hook_input(_ACTIVE, "**Status**: In Progress", "**Status**: Complete")
         assert handler.matches(payload) is False
+
+
+class TestDeclaredAcceptanceTestsAreProducible:
+    """Plan 00319 Task 4.6: the declared acceptance test must carry a
+
+    `tool_payload` (the `command` here is prose, not literal bash), and
+    driving the handler with it must really produce the declared verdict.
+    """
+
+    def test_the_acceptance_test_declares_a_tool_payload(
+        self, handler: PlanDoneRequiresHoldingAreaHandler
+    ) -> None:
+        tests = handler.get_acceptance_tests()
+        assert tests, "fixture handler declared no acceptance tests"
+        assert all(t.tool_payload is not None for t in tests)
+
+    def test_the_declared_payload_produces_its_declared_verdict(
+        self, handler: PlanDoneRequiresHoldingAreaHandler
+    ) -> None:
+        import re
+
+        for test in handler.get_acceptance_tests():
+            assert test.tool_payload is not None
+            hook_input = {
+                "tool_name": test.tool_payload.tool_name,
+                "tool_input": test.tool_payload.tool_input,
+            }
+            assert handler.matches(hook_input) is True
+            result = handler.handle(hook_input)
+            assert result.decision == test.expected_decision, test.title
+            for pattern in test.expected_message_patterns:
+                assert re.search(pattern, result.reason or ""), (test.title, pattern)

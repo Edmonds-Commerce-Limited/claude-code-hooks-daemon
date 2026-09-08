@@ -208,6 +208,18 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
                 requires_event="SubagentStop",
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
+                # SubagentStop carries no tool call, so a ToolPayload cannot
+                # describe it (Plan 00319 Task 4.6) -- hook_input drives the
+                # CI-time contract test directly. One character over the
+                # SHIPPED default threshold, not `self._threshold()`: a
+                # payload built from the handler's OWN (possibly
+                # option-overridden) threshold would still pass after a
+                # regression that silently stopped reading the option.
+                hook_input={
+                    "hook_event_name": "SubagentStop",
+                    "last_assistant_message": "x" * (_DEFAULT_THRESHOLD_CHARS + 1),
+                    "stop_hook_active": False,
+                },
             ),
             AcceptanceTest(
                 title="Subagent stops with a short summary + path (near-miss allow)",
@@ -220,5 +232,10 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
                 requires_event="SubagentStop",
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
+                hook_input={
+                    "hook_event_name": "SubagentStop",
+                    "last_assistant_message": "Done -- wrote the full report to disk; see path above.",
+                    "stop_hook_active": False,
+                },
             ),
         ]

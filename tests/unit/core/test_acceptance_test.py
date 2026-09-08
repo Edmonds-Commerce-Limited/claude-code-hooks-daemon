@@ -521,6 +521,79 @@ class TestPayloadRendersItsOwnInstruction:
         assert "\n" not in payload.as_instruction()
 
 
+class TestHookInputField:
+    """Test the structured `hook_input` field (Plan 00319 Task 4.6).
+
+    `tool_payload` carries only `tool_name`/`tool_input` — the shape of a
+    TOOL CALL — so it cannot represent an event with no tool call at all
+    (SubagentStop's `last_assistant_message`, SessionStart's empty input,
+    etc.). `hook_input` is the general escape hatch: the RAW dict a CI-time
+    contract test hands straight to `handler.handle()`, for exactly the
+    tests a `ToolPayload` cannot describe.
+    """
+
+    def test_defaults_to_none(self):
+        """A test carries no raw hook_input unless it needs one."""
+        test = AcceptanceTest(
+            title="Test",
+            command='echo "test"',
+            description="Test description",
+            expected_decision=Decision.DENY,
+            expected_message_patterns=[],
+        )
+        assert test.hook_input is None
+
+    def test_carries_the_dict_verbatim(self):
+        raw = {"last_assistant_message": "x" * 5000, "stop_hook_active": False}
+        test = AcceptanceTest(
+            title="Oversized subagent report",
+            command="Dispatch a subagent that returns an oversized final message",
+            description="Blocks the stop",
+            expected_decision=Decision.DENY,
+            expected_message_patterns=[r"REPORT TOO LARGE"],
+            hook_input=raw,
+        )
+        assert test.hook_input == raw
+
+    def test_a_hook_input_and_a_skip_reason_are_mutually_exclusive(self):
+        """A test the harness cannot produce has no input to drive it with."""
+        with pytest.raises(ValueError):
+            AcceptanceTest(
+                title="Contradiction",
+                command="Dispatch a subagent",
+                description="Cannot be both",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[],
+                harness_cannot_produce="Claude Code rewrites the input",
+                hook_input={"last_assistant_message": "x"},
+            )
+
+    def test_a_hook_input_and_a_tool_payload_are_mutually_exclusive(self):
+        """Two declared inputs for one probe, and nothing says which wins."""
+        with pytest.raises(ValueError):
+            AcceptanceTest(
+                title="Contradiction",
+                command="Dispatch a subagent",
+                description="Cannot be both",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[],
+                hook_input={"last_assistant_message": "x"},
+                tool_payload=ToolPayload(tool_name=ToolName.WRITE, tool_input={"file_path": "/a"}),
+            )
+
+    def test_a_hook_input_and_dispatch_as_bash_are_mutually_exclusive(self):
+        with pytest.raises(ValueError):
+            AcceptanceTest(
+                title="Contradiction",
+                command='echo "x"',
+                description="Cannot be both",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[],
+                hook_input={"last_assistant_message": "x"},
+                dispatch_as_bash=True,
+            )
+
+
 class TestAcceptanceTestValidation:
     """Test validation of AcceptanceTest fields."""
 
