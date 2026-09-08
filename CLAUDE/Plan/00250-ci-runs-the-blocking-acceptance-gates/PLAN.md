@@ -23,6 +23,12 @@ All three files need a live daemon socket and skip cleanly without one. CI never
 starts a daemon in the QA job, so all 11 have skipped on every run since they
 were written.
 
+**That count is now 16 across FOUR files** — Task 1.1 measured it directly, and
+`test_playbook_harness.py` (5 skips, added later by Plan 00243) joined the set
+without anyone noticing. The table above is left as the plan found it, because
+the growth is the point: a class of invisible skip does not stay the size you
+first counted.
+
 `CLAUDE/development/RELEASING.md` Step 12.0 names ~~all three~~ **two** of the
 three as BLOCKING acceptance gates — `test_stop_hook_hard_block.py` and
 `test_tool_use_error_recovery.py`. **`test_absolute_path_socket_deny.py`, which
@@ -126,11 +132,29 @@ have reopened a plan whose success criteria were satisfied.
 
 ### Phase 1: Establish the gap as a test, not a claim
 
-- [ ] ⬜ **Task 1.1**: Pin the current behaviour — a run with no daemon skips
-  exactly these 11 tests, and nothing reports it
+- [x] ✅ **Task 1.1**: Observed, and **the count in this plan's overview is
+  wrong**. Reproduced without stopping the live daemon by running the suite in
+  a `git worktree`, whose own `untracked/` holds no socket — the same condition
+  a runner is in, at no cost to the session:
 
-  - [ ] ⬜ Reproduce locally with the daemon stopped, so the count and the skip
-    reasons are observed rather than read off a CI log
+  | File                                | Daemon skips |
+  | ----------------------------------- | ------------ |
+  | `test_absolute_path_socket_deny.py` | 6            |
+  | `test_playbook_harness.py`          | **5**        |
+  | `test_stop_hook_hard_block.py`      | 3            |
+  | `test_tool_use_error_recovery.py`   | 2            |
+
+  **16 across four files, not 11 across three.** `test_playbook_harness.py`
+  post-dates this plan (Plan 00243), is IN Step 12.0's blocking set, and
+  RELEASING.md says of it: *"A skip here means no daemon was running, which
+  under H-1 is itself an abort condition."* It has been skipping in CI,
+  uncounted, ever since — this plan's own thesis reproducing itself while the
+  plan sat unstarted.
+
+  Also found, and NOT daemon-related: **11 further skips in
+  `test_transport_toggle_cycle.py`**, all "relay binary not built:
+  `untracked/bin/hooks-relay`". A second provisioning gap of the same shape,
+  out of scope here but recorded so the next count is not surprised by it.
 
 - [x] ✅ **Task 1.2**: The blocking set is declared as **one hardcoded `pytest`
   invocation inside a fenced bash block** at `RELEASING.md` Step 12.0, naming
