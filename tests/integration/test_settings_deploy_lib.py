@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LIB = REPO_ROOT / "scripts" / "install" / "settings_deploy.sh"
 
@@ -58,7 +60,11 @@ def _run(
         deploy_settings_json "{source}" "{target}" "{snapshot}"
     """)
     result = subprocess.run(  # nosec B603 B607 - bash, list form, no shell
-        ["bash", "-c", script], capture_output=True, text=True, check=False, timeout=30
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=Timeout.VALIDATION_CHECK,
     )
     assert result.returncode == 0, f"exited {result.returncode}:\n{result.stderr}"
     return result.stdout, target
@@ -90,7 +96,11 @@ class TestItStillDeploys:
             deploy_settings_json "{tmp_path}/absent.json" "{tmp_path}/t.json" ""
         """)
         result = subprocess.run(  # nosec B603 B607 - bash, list form, no shell
-            ["bash", "-c", script], capture_output=True, text=True, check=False, timeout=30
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=Timeout.VALIDATION_CHECK,
         )
         assert result.returncode == 0
         assert "VERBOSE" in result.stdout
@@ -161,7 +171,11 @@ class TestWhenNothingElseIsKeepingACopy:
                 deploy_settings_json "{source}" "{target}" ""
             """)
             result = subprocess.run(  # nosec B603 B607 - bash, list form, no shell
-                ["bash", "-c", script], capture_output=True, text=True, check=False, timeout=30
+                ["bash", "-c", script],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=Timeout.VALIDATION_CHECK,
             )
             assert result.returncode != 0
             assert target.read_text() == _CLIENT_JSON, "the client file must survive"

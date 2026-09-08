@@ -117,6 +117,21 @@ class TestActingRequiresTheFlag:
         assert any(call[0] == "branch" and "-d" in call for call in git.mutations)
 
 
+class TestARepositoryWithNoAgentWorktrees:
+    """The ordinary case for anyone who has never dispatched one."""
+
+    @staticmethod
+    def _no_worktrees(cwd: Path, *args: str, **_: object) -> subprocess.CompletedProcess[str]:
+        if args[0] == "worktree":
+            return subprocess.CompletedProcess([], 0, "worktree /repo\nHEAD aaa\n", "")
+        raise AssertionError(f"nothing else should be asked: {args}")
+
+    def test_it_says_so_and_succeeds(self, capsys: pytest.CaptureFixture[str]) -> None:
+        exit_code = cmd_worktree_reap(_args(), run_fn=self._no_worktrees)
+        assert exit_code == 0
+        assert "No agent worktrees found" in capsys.readouterr().out
+
+
 class TestActingOnOneWorktree:
     """Without this, a human wanting rid of ONE must take all fifteen."""
 
