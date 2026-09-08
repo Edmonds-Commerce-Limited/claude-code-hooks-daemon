@@ -47,6 +47,14 @@ else
     echo "   Install uv to run the lockfile freshness gate locally."
 fi
 
+# Plan 00346 Task 2.1: the gate above proves the LOCK agrees with
+# pyproject.toml. This proves the INSTALLED packages agree with the LOCK —
+# two different claims, and only the first one was ever checked. A fresh,
+# CI-gated lockfile sat beside a venv running mypy a whole major version
+# ahead of it, and every QA gate stayed green.
+echo "Checking the venv matches uv.lock..."
+assert_venv_matches_lock || exit 1
+
 echo "Running deptry dependency checker..."
 
 # Run deptry on src/ only, capture output

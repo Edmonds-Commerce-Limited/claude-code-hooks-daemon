@@ -40,11 +40,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
+      # uv is needed twice over, and the second reason predates the first.
+      #
       # tests/integration/test_ensure_venv.py drives the REAL bootstrap
       # (`ensure_venv` -> `create_venv_at_path` -> `uv sync`), which is the code
       # path behind two field incidents (the v3.9.x ModuleNotFoundError class and
@@ -53,8 +50,37 @@ jobs:
       # bootstrap test on all three interpreters is exactly the blindness this
       # workflow exists to remove. The whole file measures ~15s including four
       # real venv builds, so it is not worth trading that coverage for.
-      - name: Install uv (needed by the venv-bootstrap integration tests)
-        run: pip install uv
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+
+      # Provision from uv.lock, NOT by resolving pyproject.toml (Plan 00346).
+      #
+      # `pip install -e ".[dev]"` never reads the lockfile — it resolves the
+      # lower bounds against PyPI — so this job's toolchain was whatever was
+      # newest that morning, on three interpreters drifting independently,
+      # while `run_dependency_check.sh` certified the lockfile's freshness with
+      # `uv lock --check` and nothing installed from it. A gate that runs an
+      # unpinned toolchain answers a different question every day.
+      #
+      # `--frozen` is the load-bearing flag: a bare `uv sync` UPDATES the lock
+      # to satisfy pyproject when the two disagree, re-resolving against PyPI
+      # and restoring the drift. The lock is universal (`requires-python
+      # = ">=3.11"`), so one lockfile serves the whole matrix.
+      #
+      # `--python` takes the resolved PATH of the interpreter setup-python
+      # installed, not the bare version string, so uv pins the matrix entry
+      # rather than downloading a managed interpreter that merely matches it.
+      #
+      # Adding .venv/bin to GITHUB_PATH is what carries the locked toolchain
+      # into every later step: they invoke black/ruff/mypy/pytest/bandit/deptry
+      # directly (see the note below), so PATH is the only thing that decides
+      # which copy of each they get.
+      - name: Install
+        run: |
+          uv sync --frozen --all-extras --python "$(command -v python)"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       # The tools are invoked directly rather than through scripts/qa/run_all.sh.
       # That script resolves its interpreter via the daemon's fingerprint-keyed
@@ -173,10 +199,16 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # Same lockfile provisioning as the qa job (Plan 00346). This job asserts
+      # that every handler module IMPORTS, so the dependency versions it imports
+      # against are the whole point — resolving them from PyPI would let it pass
+      # against a package set no other environment has.
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install uv
+          uv sync --frozen --all-extras --python "$(command -v python)"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       # CLAUDE/CodeLifecycle/*.md name daemon-load as the check unit tests
       # cannot substitute for: it is what catches import errors, circular

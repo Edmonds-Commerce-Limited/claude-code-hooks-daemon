@@ -97,15 +97,18 @@ Two aggravating details:
 
 ### Phase 2: Make the drift visible if it returns
 
-- [ ] ⬜ **Task 2.1**: Add a check that the venv running QA matches the lock.
+- [x] ✅ **Task 2.1**: Add a check that the venv running QA matches the lock.
   `uv lock --check` proves the lock agrees with `pyproject.toml`; nothing
   proves the INSTALLED tools agree with the lock, which is the gap that let
   this run for as long as it has.
-- [ ] ⬜ **Task 2.2**: `.github/workflows/qa.yml:46` and `:179` provision CI
-  with `pip install -e ".[dev]"`, so the workflow gating merges is off-lock on
-  every run across three interpreters. Land this WITH Task 2.1: the new gate
-  fails CI on its first run otherwise, because CI's venv is off-lock by
-  construction.
+- [x] ✅ **Task 2.2**: `.github/workflows/qa.yml` provisioned CI with
+  `pip install -e ".[dev]"`, so the workflow gating merges was off-lock on
+  every run across three interpreters. (This task was first written claiming
+  the Task 2.1 gate would fail CI and so had to land alongside it. That was
+  wrong: CI invokes `black`/`ruff`/`mypy`/`pytest`/`bandit`/`deptry` directly
+  and never runs a `scripts/qa/*.sh` wrapper, so the gate does not execute
+  there at all. The real relationship is worse than a coupling — CI both
+  provisions off-lock AND bypasses the only place a gate could catch it.)
 - [ ] ⬜ **Task 2.3**: `create_venv_at_path` in `scripts/install/venv.sh` runs
   `uv sync` without `--frozen`, so a checkout whose `pyproject.toml` and
   `uv.lock` disagree gets its lockfile rewritten and re-resolved against PyPI
@@ -133,6 +136,9 @@ Two aggravating details:
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00346-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
+- **Phase 2 (T2.1, T2.2)** — `assert_venv_matches_lock` gates every QA run on
+  the INSTALLED packages matching the lock, and CI provisions with
+  `uv sync --frozen --all-extras` instead of resolving `pyproject.toml`.
 - **Phase 1 complete** — `2de920a3` (`install_deps` syncs from `uv.lock`,
   `--frozen`, loud failure absent `uv`) and `0de54287` (an empty `VENV_DIR`
   built a venv in the caller's cwd and reported success; found while writing

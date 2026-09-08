@@ -204,6 +204,58 @@ install_deps() {
 }
 
 #
+# Verify the installed packages match uv.lock (Plan 00346 Task 2.1)
+#
+# `uv lock --check` in run_dependency_check.sh proves the LOCK agrees with
+# pyproject.toml. Nothing proved the INSTALLED packages agree with the lock,
+# and that gap is the whole reason this plan exists: the lock was fresh and
+# CI-gated while the venv running the tests was off-lock by a major version of
+# mypy, with every gate green. install_deps no longer builds such a venv, but a
+# hand-run `pip install`, a venv predating the fix, or an unaudited future
+# provisioning path all still can.
+#
+assert_venv_matches_lock() {
+    ensure_venv || return 1
+
+    # The opt-out that lets install_deps build an off-lock venv on purpose has
+    # to excuse it here too. Rejecting it would make the escape hatch useless:
+    # it would produce an environment QA then refuses to run in.
+    if [[ "${HOOKS_DAEMON_ALLOW_UNLOCKED_VENV:-}" == "1" ]]; then
+        echo -e "${YELLOW}⚠${NC}  HOOKS_DAEMON_ALLOW_UNLOCKED_VENV=1 — not checking this venv against uv.lock." >&2
+        echo "    It was provisioned from pyproject.toml bounds, so it is not" >&2
+        echo "    expected to match the lockfile." >&2
+        return 0
+    fi
+
+    # Without uv the comparison cannot be made at all, so this skips — loudly,
+    # and matching the neighbouring `uv lock --check` gate. A silent skip is
+    # the shape that let the original bypass survive.
+    if ! command -v uv > /dev/null; then
+        echo -e "${YELLOW}⚠${NC}  uv not on PATH — cannot check this venv against uv.lock." >&2
+        echo "    Install uv (https://docs.astral.sh/uv/) to verify the" >&2
+        echo "    installed toolchain matches the lockfile." >&2
+        return 0
+    fi
+
+    local check_output
+    if check_output="$(UV_PROJECT_ENVIRONMENT="${VENV_DIR}" uv sync --frozen --all-extras --check \
+            --project "${PROJECT_ROOT}" 2>&1)"; then
+        echo -e "${GREEN}✓${NC} venv matches uv.lock" >&2
+        return 0
+    fi
+
+    # uv names each package and both versions. Passing that through is the
+    # difference between a report someone can act on and "something is wrong".
+    echo -e "${RED}✗${NC} The venv running QA does not match uv.lock: ${VENV_DIR}" >&2
+    echo "${check_output}" >&2
+    echo "    Fix: uv sync --frozen --all-extras" >&2
+    echo "    A toolchain that drifts from the lockfile decides QA verdicts" >&2
+    echo "    that nobody else can reproduce — a formatter one minor ahead" >&2
+    echo "    rewrites the tree and still reports success." >&2
+    return 1
+}
+
+#
 # Run command in venv (like "composer run")
 #
 venv_run() {
