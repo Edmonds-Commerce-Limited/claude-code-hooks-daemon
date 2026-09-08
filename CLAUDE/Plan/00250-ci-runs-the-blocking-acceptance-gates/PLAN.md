@@ -68,12 +68,19 @@ The conclusion survives — it IS a provisioning gap — but the cheap route to 
 does not. There is nothing to reuse, so Phase 2 has to decide what a CI install
 looks like rather than copy a step.
 
-What that install has to look like is now **measured rather than guessed** —
-see [RESEARCH-ci-install.md](RESEARCH-ci-install.md) for the evidence. The two
-results Phase 2 turns on: the tracked files a self-install regenerates are a
-non-issue (one inert date line), and the install **must not pass `--force`**,
-which would replace this project's 1188-line handler config with a default
-template and let the gates go green against a configuration nobody uses.
+**The answer turned out to be that there is no install** — see
+[RESEARCH-ci-install.md](RESEARCH-ci-install.md). A checkout already has the
+config, the forwarders and the package; the only missing piece is the gitignored
+`.claude/hooks-daemon.env`, which the repo guard accepts on mere existence. CI
+writes that and starts the daemon, touching no tracked file.
+
+Running the installer was tried first and the runner rejected it. Both
+`create_settings_json` and `create_daemon_config` **rename** an existing file to
+`.bak` and write a default template over it — `force` only decides whether the
+backup happens — so every invocation replaces this project's 1188-line handler
+config. The daemon then refused to start at all, because that template is
+invalid against the current schema, and the run went from 4 failures per
+interpreter to 31 failures plus 7 errors.
 
 ## The same gap has a louder sibling, and CI is no longer green
 
@@ -185,24 +192,23 @@ have reopened a plan whose success criteria were satisfied.
 - [x] ✅ **Task 2.1**: Start a daemon in the CI QA job before the acceptance
   step. ~~reusing whatever the `Daemon load` job already does rather than
   inventing a second way to start one~~ — **there is nothing to reuse**, per the
-  struck-through claim above. **Decided and implemented**: two steps in the
-  existing `qa` job, after `mypy` and before `Tests + coverage`, so the gates run
-  on all three interpreters without a second job to keep in sync. Awaiting its
-  first CI run — every mechanism is read from source, none observed end-to-end,
-  because the install cannot be rehearsed inside this repo.
-  - [x] ✅ Constraints measured — see
-    [RESEARCH-ci-install.md](RESEARCH-ci-install.md). In short: the regenerated
-    tracked files are a non-issue; the install **must not pass `--force`**; and
-    it cannot be rehearsed locally, because `validate_installation_target`
-    refuses inside any parent holding `.claude/hooks-daemon` (true of every
-    worktree here, false on a runner — so not a CI blocker).
-  - [x] ✅ **The blocker was named and is now addressed.** From a CI run after
-    Task 2.4a made the forwarders reachable, `ensure_daemon` REFUSED to
-    auto-start with `hooks_daemon_repo_detected`. The guard (`init.sh:246-264`)
-    passes on `HOOKS_DAEMON_ROOT_DIR == PROJECT_PATH` **or** the mere existence
-    of `.claude/hooks-daemon.env` — gitignored, so absent from a fresh checkout,
-    and written by the install. Two further mechanisms make the no-`--force`
-    install sufficient: `self_install_mode: true` is already tracked
+  struck-through claim above. **Implemented as ONE step** in the existing `qa`
+  job, after `mypy` and before `Tests + coverage`, so the gates run on all three
+  interpreters without a second job to keep in sync. Re-run pending.
+  - [x] ✅ **First attempt ran `install.py --self-install` and the runner
+    rejected it** — recorded because the reasoning that produced it was wrong,
+    not just the outcome. I read `if <file>.exists() and not force:` in both
+    config writers and took it for an early return; it is a **rename-to-`.bak`
+    followed by an unconditional template write**, so `force` only decides
+    whether a backup happens and every invocation replaces the config. The
+    daemon then refused to start because that template is invalid against the
+    current schema, and the run went 4 → **31 failures + 7 errors**.
+    Full evidence in [RESEARCH-ci-install.md](RESEARCH-ci-install.md).
+  - [x] ✅ **Nothing needs installing.** A checkout already carries the config,
+    the forwarders and the package. The only missing piece is
+    `.claude/hooks-daemon.env`, which the repo guard (`init.sh:246-264`) accepts
+    on mere existence and which is gitignored — so CI writes it and the tree
+    stays clean. `self_install_mode: true` is already tracked
     (`.claude/hooks-daemon.yaml:7`), and `HOOKS_DAEMON_VENV_PATH` is honoured
     ahead of the fingerprint glob (`resolve_venv.sh:113-121`) so the daemon uses
     the `.venv` that `uv sync` already built.

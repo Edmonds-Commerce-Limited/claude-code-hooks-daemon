@@ -61,22 +61,35 @@ The differing line is inert:
 If that ever changes, the remedy is a one-line exclusion, not a different CI
 structure.
 
-## The one hard constraint: do not pass `--force`
+## The hard constraint: do not run the installer at all
 
-`--force` is the flag an unattended workflow step invites you to add. It is the
-wrong one.
-
-`create_settings_json` (`install.py:690`) and `create_daemon_config`
-(`install.py:768`) both open with:
+**This section previously said the constraint was "do not pass `--force`", on
+the reading that both writers skip an existing file unless forced. That was
+wrong — I matched the `if <file>.exists() and not force:` condition without
+reading its body — and the runner proved it wrong.** What both functions
+actually do:
 
 ```python
 if <file>.exists() and not force:
-    return
+    backup_file = ...            # NOT a return
+    <file>.rename(backup_file)   # move the real config aside
+# ... then write the default template unconditionally
 ```
 
-The existence check is the *only* protection, and `--force` removes it. Both
-files are tracked here, and both carry far more than the installer's template
-writes:
+`create_settings_json` (`install.py:690`) and `create_daemon_config`
+(`install.py:768`) are identical in shape. So **`force` only controls whether a
+backup is taken — both paths overwrite.** There is no invocation of the
+installer that preserves an existing config.
+
+Observed on the runner, not inferred:
+
+```
+✅ Backed up existing hooks-daemon.yaml to .claude/hooks-daemon.yaml.bak
+✅ Created .claude/hooks-daemon.yaml
+```
+
+Both files are tracked here, and both carry far more than the installer's
+template writes:
 
 | File                        | Template writes        | Tracked file also carries                                                                                                                                                   |
 | --------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -84,14 +97,42 @@ writes:
 | `.claude/hooks-daemon.yaml` | small default template | 1188 lines, 128 `enabled: true` handlers                                                                                                                                    |
 
 **Why this lands on the plan's own thesis.** Plan 00250 exists to stop blocking
-acceptance gates passing invisibly without a daemon. An install step carrying
-`--force` would give them a daemon — running a *different handler set* from the
-one the project ships. The gates would go green against a configuration nobody
-uses. That is worse than the skip this plan is fixing, because a skip at least
-leaves a trace in the output.
+acceptance gates passing invisibly without a daemon. An install step gives them
+a daemon running a *different handler set* from the one the project ships — the
+gates would go green against a configuration nobody uses, which is worse than
+the skip, because a skip at least leaves a trace.
 
-Without `--force`, both files already exist in a CI checkout, both writes are
-skipped, and the tree stays clean.
+In the event it did not even get that far: the template `create_daemon_config`
+writes is **invalid against the current schema**, so the daemon refused to
+start —
+
+```
+Config Error: Configuration validation failed.
+  Unknown field 'min_confidence_score' at: handlers.session_start.min_confidence_score
+  Valid fields: enabled, options, priority
+```
+
+— and the run went from 4 failures per interpreter to **31 failures + 7 errors**,
+because every test that reads configuration was now reading the template. That
+is a daemon defect in its own right, not merely a CI problem: `python install.py` writes a config the daemon cannot load, and the three offending keys
+belong to `yolo_container_detection`, which no longer has a handler module at
+all (`install.py:890-892`).
+
+## What CI actually needs: no installer
+
+A checkout already has the config, the forwarders and the package. The only
+missing piece is `.claude/hooks-daemon.env`, which the repo guard accepts on
+mere existence, and which is gitignored — so writing it leaves the tree clean:
+
+```yaml
+- name: Start daemon (for the acceptance gates)
+  env:
+    HOOKS_DAEMON_VENV_PATH: ${{ github.workspace }}/.venv
+  run: |
+    printf 'HOOKS_DAEMON_ROOT_DIR="%s"\n' "$GITHUB_WORKSPACE" > .claude/hooks-daemon.env
+    ./bin/hooks-daemon restart
+    ./bin/hooks-daemon status
+```
 
 ## The install cannot be rehearsed from inside this repo
 

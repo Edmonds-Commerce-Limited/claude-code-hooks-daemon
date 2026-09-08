@@ -29,30 +29,44 @@ that default rolls out *because* we overwrite, but the same mechanism means a
 client can never keep a value of their own.
 
 **A third clobber route, found by Plan 00250 and not in the two scripts above:**
-`install.py --force`. `create_settings_json` (`install.py:690`) and
-`create_daemon_config` (`install.py:768`) both open with
-`if <file>.exists() and not force: return` — the existence check is the *entire*
-protection, and `--force` removes it for **both** `settings.json` and
-`hooks-daemon.yaml`, with no warning, no diff and no backup. The
-`/hooks-daemon install` skill documents the flag only as "Force reinstall over
-existing", which does not read as "discards your configuration".
+`install.py`, on **every** invocation. `create_settings_json`
+(`install.py:690`) and `create_daemon_config` (`install.py:768`) both open with
+`if <file>.exists() and not force:` — but that is **not** an early return. The
+body renames the existing file to `.bak` and then writes the default template
+unconditionally:
 
-Measured against this repository, `--force` would drop `plansDirectory` (whose
-absence trips `R-MARKDOWN-PLAN-SYNC`), a `permissions.deny` block guarding
-`/tmp`, `/var/tmp` and `/dev/shm`, `enableArtifact: false`, and the statusLine
-`refreshInterval` — then replace 1188 lines of `hooks-daemon.yaml` carrying 128
-enabled handlers with the default template. Worked example and evidence in
+```python
+if <file>.exists() and not force:
+    backup_file = ...
+    <file>.rename(backup_file)
+# ... default template written here regardless
+```
+
+So `force` only decides whether a **backup is taken**. There is no invocation
+that preserves an existing config. Confirmed on a GitHub runner, which printed
+`✅ Backed up existing hooks-daemon.yaml…` / `✅ Created .claude/hooks-daemon.yaml`
+from a plain `install.py --self-install` with no flag. The `/hooks-daemon install` skill documents `--force` only as "Force reinstall over existing",
+which reads as though omitting it is safe.
+
+Measured against this repository, that drops `plansDirectory` (whose absence
+trips `R-MARKDOWN-PLAN-SYNC`), a `permissions.deny` block guarding `/tmp`,
+`/var/tmp` and `/dev/shm`, `enableArtifact: false`, and the statusLine
+`refreshInterval` — then replaces 1188 lines of `hooks-daemon.yaml` carrying 128
+enabled handlers. **And the replacement does not work**: the daemon refused to
+start on that config with `Unknown field 'min_confidence_score' at: handlers.session_start.min_confidence_score`, because the template still
+configures `yolo_container_detection`, a handler with no module left in `src/`.
+Worked example and evidence in
 [Plan 00250's RESEARCH-ci-install.md](../00250-ci-runs-the-blocking-acceptance-gates/RESEARCH-ci-install.md).
 
-**Where the backup actually is, checked while adding the above** — the answer
-inverts what you would hope for. Of the three routes, only the *fresh install*
-takes one:
+**Where the backup actually is** — the answer inverts what you would hope for.
+Of the three routes, the one that repeats is the one with no backup:
 
 | Route                                        | Backup before overwrite  |
 | -------------------------------------------- | ------------------------ |
 | `install_version.sh:385-387` (fresh install) | yes — `.bak-<timestamp>` |
 | `upgrade_version.sh:865` (every upgrade)     | **no** — bare `cp`       |
-| `install.py --force` (both files)            | **no**                   |
+| `install.py` without `--force`               | yes — `.bak`             |
+| `install.py --force`                         | **no**                   |
 
 So the safety net exists on the one run where there is most often nothing to
 lose, and is absent on the path that repeats. That makes "back it up first" a
@@ -90,9 +104,9 @@ merge cannot resolve safely.
 - **Not** changing `hooks-daemon.yaml` preservation — that already merges; this
   plan brings `settings.json` up to parity, reusing the pattern where possible.
   **Caveat found later (Plan 00250):** "already merges" is true of the shell
-  upgrade path only. `install.py --force` clobbers `hooks-daemon.yaml` too, so
-  this Non-Goal holds for `preserve_config_for_upgrade` but not for the third
-  route below.
+  upgrade path only. `install.py` clobbers `hooks-daemon.yaml` on every
+  invocation, flag or no flag, so this Non-Goal holds for
+  `preserve_config_for_upgrade` but not for the third route below.
 - **Not** owning the client's Claude Code settings policy — the daemon owns only
   the wired-hook forwarder set and its recommended defaults; everything else is
   the client's.

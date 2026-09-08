@@ -117,29 +117,37 @@ jobs:
       # remove. 16 of them across four files, measured in a worktree that
       # reproduces the runner's no-daemon condition.
       #
-      # NO `--force`. The flag looks right for an unattended step and is the
-      # one thing that must not be here: create_settings_json and
-      # create_daemon_config are guarded only by `if <file>.exists() and not
-      # force`, so --force replaces this repo's tracked settings.json and its
-      # 1188-line hooks-daemon.yaml with default templates — and the gates
-      # would then go green against a handler set the project does not ship,
-      # which is worse than the skip. Both files exist in a checkout, so
-      # without the flag both writes are skipped and the tree stays clean.
-      # Full evidence: CLAUDE/Plan/00250-*/RESEARCH-ci-install.md
-      - name: Install daemon (for the acceptance gates)
-        if: ${{ !cancelled() }}
-        run: python install.py --self-install
-
+      # DO NOT add `python install.py --self-install` here. It was tried, and
+      # the runner proved it destructive: `create_daemon_config` and
+      # `create_settings_json` do NOT skip an existing file — they RENAME it to
+      # `.bak` and write a default template over it. The `force` flag only
+      # controls whether that backup is taken, so BOTH paths overwrite. On the
+      # runner it replaced this repo's 1188-line hooks-daemon.yaml, and the
+      # daemon then refused to start because the template it wrote is invalid
+      # against the current schema (`Unknown field 'min_confidence_score' at:
+      # handlers.session_start.min_confidence_score`).
+      #
+      # Nothing needs installing. A checkout already has the config, the
+      # forwarders and the package; the ONLY missing piece is
+      # `.claude/hooks-daemon.env`, which `init.sh`'s repo guard
+      # (init.sh:246-264) accepts on mere existence. It is gitignored
+      # (.claude/.gitignore:16), so writing it leaves the tree clean.
+      #
       # HOOKS_DAEMON_VENV_PATH is checked by resolve_venv.sh BEFORE its
       # untracked/venv-*/ fingerprint glob. `uv sync` above builds .venv at the
-      # repo root, which that glob cannot see, so the override is what points
-      # the daemon at the toolchain CI already installed rather than making it
-      # build a second one.
-      - name: Start daemon
+      # repo root, which that glob cannot see, so the override points the daemon
+      # at the toolchain CI already installed rather than building a second one.
+      # Scoped to this step: setting it job-wide would change the behaviour of
+      # the tests that assert on venv resolution.
+      #
+      # Full evidence: CLAUDE/Plan/00250-*/RESEARCH-ci-install.md
+      - name: Start daemon (for the acceptance gates)
         if: ${{ !cancelled() }}
         env:
           HOOKS_DAEMON_VENV_PATH: ${{ github.workspace }}/.venv
         run: |
+          printf 'HOOKS_DAEMON_ROOT_DIR="%s"\n' "$GITHUB_WORKSPACE" \
+            > .claude/hooks-daemon.env
           ./bin/hooks-daemon restart
           ./bin/hooks-daemon status
 
