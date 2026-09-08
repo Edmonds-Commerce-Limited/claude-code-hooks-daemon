@@ -26,6 +26,15 @@ Key design choices (Decision G):
   different agents use different transcript_path keys so there is no shared
   mutable state.  If true thread safety is needed in future, a ``threading.Lock``
   can be added without changing the public API.
+- **No eviction**: ``_state`` grows one key per DISTINCT transcript_path ever
+  seen, for the daemon PROCESS's lifetime (``DaemonDataLayer`` holds it as a
+  singleton, not reset between sessions) -- ``reset()`` only clears an EXISTING
+  key's rule set, it does not remove the key or bound the dict's size. A
+  finished sub-agent's transcript path never fires PreCompact/clear against
+  itself, so its entry (one dict key, a handful of rule-id strings) is never
+  reclaimed. Bounded in practice by how many distinct transcripts a daemon
+  process ever sees before its next restart -- a few KB even over weeks of
+  heavy sub-agent use, not worth an eviction policy's complexity.
 """
 
 from __future__ import annotations
