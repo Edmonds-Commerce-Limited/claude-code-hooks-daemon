@@ -12,8 +12,10 @@
 The installer and upgrader deploy the daemon's own `.claude/settings.json` into
 client projects by **verbatim copy**, never a merge. On a fresh install the
 client's existing file is backed up then overwritten
-(`scripts/install_version.sh:357-363`); on **every upgrade** it is overwritten
-again (`scripts/upgrade_version.sh:663-665`, Step 9 "Redeploying settings.json").
+(`scripts/install_version.sh:383-391`); on **every upgrade** it is overwritten
+again (`scripts/upgrade_version.sh:864-867`, Step 9 "Redeploying settings.json").
+(Both citations re-checked and updated — the originals, `:357-363` and
+`:663-665`, had drifted onto unrelated code.)
 The config-preservation machinery that survives client customizations
 (`scripts/install/config_preserve.sh` → `preserve_config_for_upgrade`) operates
 **only on `hooks-daemon.yaml`** — `settings.json` gets no merge at all.
@@ -25,6 +27,37 @@ block, a deliberately-chosen `refreshInterval`, or any additional key — is
 the footgun surfaced while shipping Plan 00175's `refreshInterval: 1` default:
 that default rolls out *because* we overwrite, but the same mechanism means a
 client can never keep a value of their own.
+
+**A third clobber route, found by Plan 00250 and not in the two scripts above:**
+`install.py --force`. `create_settings_json` (`install.py:690`) and
+`create_daemon_config` (`install.py:768`) both open with
+`if <file>.exists() and not force: return` — the existence check is the *entire*
+protection, and `--force` removes it for **both** `settings.json` and
+`hooks-daemon.yaml`, with no warning, no diff and no backup. The
+`/hooks-daemon install` skill documents the flag only as "Force reinstall over
+existing", which does not read as "discards your configuration".
+
+Measured against this repository, `--force` would drop `plansDirectory` (whose
+absence trips `R-MARKDOWN-PLAN-SYNC`), a `permissions.deny` block guarding
+`/tmp`, `/var/tmp` and `/dev/shm`, `enableArtifact: false`, and the statusLine
+`refreshInterval` — then replace 1188 lines of `hooks-daemon.yaml` carrying 128
+enabled handlers with the default template. Worked example and evidence in
+[Plan 00250's RESEARCH-ci-install.md](../00250-ci-runs-the-blocking-acceptance-gates/RESEARCH-ci-install.md).
+
+**Where the backup actually is, checked while adding the above** — the answer
+inverts what you would hope for. Of the three routes, only the *fresh install*
+takes one:
+
+| Route                                        | Backup before overwrite  |
+| -------------------------------------------- | ------------------------ |
+| `install_version.sh:385-387` (fresh install) | yes — `.bak-<timestamp>` |
+| `upgrade_version.sh:865` (every upgrade)     | **no** — bare `cp`       |
+| `install.py --force` (both files)            | **no**                   |
+
+So the safety net exists on the one run where there is most often nothing to
+lose, and is absent on the path that repeats. That makes "back it up first" a
+cheap partial mitigation for this plan to ship early, independent of the full
+merge.
 
 This plan designs and builds a **structured merge** for `settings.json` that
 mirrors what already exists for `hooks-daemon.yaml`: the daemon keeps ownership
@@ -56,6 +89,10 @@ merge cannot resolve safely.
   example of a client-overridable default.
 - **Not** changing `hooks-daemon.yaml` preservation — that already merges; this
   plan brings `settings.json` up to parity, reusing the pattern where possible.
+  **Caveat found later (Plan 00250):** "already merges" is true of the shell
+  upgrade path only. `install.py --force` clobbers `hooks-daemon.yaml` too, so
+  this Non-Goal holds for `preserve_config_for_upgrade` but not for the third
+  route below.
 - **Not** owning the client's Claude Code settings policy — the daemon owns only
   the wired-hook forwarder set and its recommended defaults; everything else is
   the client's.
