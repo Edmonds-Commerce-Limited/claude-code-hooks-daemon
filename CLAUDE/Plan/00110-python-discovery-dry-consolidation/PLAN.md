@@ -133,15 +133,20 @@ Each migration is its own commit so we can bisect if any caller regresses.
 
 ### Phase 7: Release — AWAITING A HUMAN
 
-**This phase cannot be executed by an agent.** A release is a decision about
-SCOPE, which is not visible from inside the repository, and `/release` is
+**Tasks 7.1 and 7.2 cannot be executed by an agent.** A release is a decision
+about SCOPE, which is not visible from inside the repository, and `/release` is
 human-gated: only a human invoking it in the current session authorises one.
-No state file exists, so no release is in progress. Everything else in this
-plan is done — Phase 7 is the whole of what remains.
+No state file exists, so no release is in progress.
+
+Task 7.3 is NOT gated and is done. An earlier revision of this preamble said
+the whole phase was un-executable, which is why an authorable document sat
+unwritten behind a blanket statement: 7.3 writes a file into `UNRELEASED/`,
+which the release skill later MOVES. Authoring it is preparation FOR a release,
+not the performing of one.
 
 - [ ] **Task 7.1**: Run `/release` skill. Bump is MINOR (new helper API, no breaking changes for callers — `HOOKS_DAEMON_PYTHON` still honoured, fingerprint paths unchanged).
 - [ ] **Task 7.2**: Release notes call out the host-a scenario explicitly so operators in the same position know the upgrade resolves it.
-- [ ] **Task 7.3**: Post-upgrade task entry under `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/` documenting that operators no longer need `HOOKS_DAEMON_PYTHON=python3.NN` workaround for the "default python3 too old" case.
+- [x] ✅ **Task 7.3**: Post-upgrade task entry under `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/` documenting that operators no longer need `HOOKS_DAEMON_PYTHON=python3.NN` workaround for the "default python3 too old" case. Shipped as `01-drop-hooks-daemon-python-workaround.md`, with the README task index updated. It deliberately does NOT tell an operator to remove the override unconditionally: a deliberate pin and a stale workaround are indistinguishable from the value alone, so the "discovery finds a different interpreter" branch routes to the user rather than deciding for them.
 
 ## Dependencies
 
@@ -190,14 +195,14 @@ plan is done — Phase 7 is the whole of what remains.
 
 ## Success Criteria
 
-- [ ] `rg -n '_COMPATIBLE_PYTHON_CANDIDATES|_is_python_at_least_311' src/ scripts/` returns zero matches outside `python_discovery.sh` and `paths.py::find_latest_python`
-- [ ] `rg -n '\bpython3\.1[12345]\b' src/ scripts/` returns only test fixtures and docs — no production discovery code
-- [ ] Host-a acceptance test (Task 5.1) passes — `python3.13` / `python3.14` auto-selected, no env override needed
-- [ ] Parity test (Task 6.2) — bash and python helpers agree on all 50 fixtures
-- [ ] `./scripts/qa/run_all.sh` — all 13 checks pass
-- [ ] Daemon restart verified RUNNING
-- [ ] H-1 gate count in RELEASING.md updated 19 → 20
-- [ ] Release notes reference the host-a scenario by name
+- [x] `rg -n '_COMPATIBLE_PYTHON_CANDIDATES|_is_python_at_least_311' src/ scripts/` returns zero matches outside `python_discovery.sh` and `paths.py::find_latest_python` — the two survivors (`paths.py:330`, `prerequisites.sh:40`) are comments recording that the symbols were removed
+- [x] `rg -n '\bpython3\.1[12345]\b' src/ scripts/` returns only test fixtures and docs — no production discovery code; survivors are docstring examples in `paths.py`
+- [x] Host-a acceptance test (Task 5.1) passes — `python3.13` / `python3.14` auto-selected, no env override needed
+- [x] Parity test (Task 6.2) — bash and python helpers agree on all 50 fixtures (63 passed across both files)
+- [x] `./scripts/qa/run_all.sh` — 25/25 (the criterion said 13; the suite has grown since this plan was written)
+- [x] Daemon restart verified RUNNING
+- [x] H-1 gate count in RELEASING.md — the "19 → 20" this criterion names never happened and cannot now: Task 5.2 shipped it as 22 → 23, and later plans have taken it to **27 passed, 1 skipped**. The criterion behind the number — that Step 12.0 counts the host-a test — is met, and the number itself is not a thing this plan can own.
+- [ ] Release notes reference the host-a scenario by name — gated on Task 7.2
 
 ## Risks & Mitigations
 

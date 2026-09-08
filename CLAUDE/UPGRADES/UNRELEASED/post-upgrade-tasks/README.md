@@ -85,9 +85,9 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-| File                          | Type | Severity | Applies to | One-line summary |
-| ----------------------------- | ---- | -------- | ---------- | ---------------- |
-| _(no tasks currently staged)_ |      |          |            |                  |
+| File                                        | Type             | Severity | Applies to | One-line summary                                                                                                                           |
+| ------------------------------------------- | ---------------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `01-drop-hooks-daemon-python-workaround.md` | config-migration | optional | all        | Discovery now finds the newest `python3.NN` itself, so a `HOOKS_DAEMON_PYTHON` set to escape the old hardcoded candidate list is redundant |
 
 <!-- END TASK INDEX -->
 
