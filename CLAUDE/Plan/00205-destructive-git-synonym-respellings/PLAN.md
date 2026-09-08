@@ -203,5 +203,4 @@ finding in the same release. The claim was corrected; the gap is tracked here.
 - Both confirmed gaps closed (`+refspec` push, `git update-ref -d refs/heads/<name>`), the porcelain-to-synonym enumeration for
   `destructive_git` plus the four Task 1.2 siblings recorded, and the
   synonym-axis completeness gate added, scoped to the handlers actually
-  swept. Delivered on branch `agent-ad51d578783570fa0-e770e7cb`; see
-  `JOURNAL/00205-Journal-26-09-08.md` for the commit(s).
+  swept. Delivered at `60cff2b3` on branch `agent-ad51d578783570fa0-e770e7cb`.
