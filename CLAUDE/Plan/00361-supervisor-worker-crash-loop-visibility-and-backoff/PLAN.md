@@ -84,18 +84,20 @@ in-process throughout, and there was no way to tell from the logs.
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: Supervisor unit suite green; QA on the touched files;
+- [x] ✅ **Task 3.1**: Supervisor unit suite green; QA on the touched files;
   live worker pid changed after the edit (Task 2.1 is live at once; Tasks
   2.2 to 2.4 are host-side and take effect at the next ccy session start).
+  Verified live in the ccy session started after `da5b7258`: one deliberate
+  worker kill produced `worker died (exit -15, source 894adfae14bd) -> respawned` in `decision.log` and a new worker pid.
 
 ## Success Criteria
 
-- [ ] A deliberately crashing worker produces a dated, fingerprinted entry in
+- [x] A deliberately crashing worker produces a dated, fingerprinted entry in
   the worker error log and a `worker died` line in `decision.log`.
-- [ ] A worker dying twice on the same fingerprint is respawned once, logs the
+- [x] A worker dying twice on the same fingerprint is respawned once, logs the
   crash loop once, and is respawned again as soon as the fingerprint changes.
 - [ ] All QA checks passing.
-- [ ] Every release-bound consequence is in the pending-release holding area:
+- [x] Every release-bound consequence is in the pending-release holding area:
   `UNRELEASED/release-notes/09-supervisor-worker-crash-loop-visibility.md`.
 
 ## Delivery & Milestones
