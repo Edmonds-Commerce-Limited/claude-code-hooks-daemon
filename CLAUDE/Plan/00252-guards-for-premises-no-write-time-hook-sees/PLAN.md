@@ -175,8 +175,12 @@ Delivered by Plan 00362 Task 2.4 (commit recorded under Delivery below).
 ### Phase 4: Verify
 
 - [ ] ⬜ **Task 4.1**: Full QA green, daemon restart RUNNING
-- [ ] ⬜ **Task 4.2**: Client-mode verification for Phase 3 — it changes a
+- [x] ✅ **Task 4.2**: Client-mode verification for Phase 3 — it changes a
   blocking Bash handler, and a client repo's word list lives at a different path
+  (verified on a `scripts/dummy-client-repo.sh` install with
+  `secret_word_list_path: .claude/smoke-words.txt`: a file moved in with `mv`,
+  staged and committed through the deployed `pre-tool-use` hook is denied
+  naming only the path and `entry 1 of 1`; a clean commit returns `{}`)
 - [x] ✅ **Task 4.3**: Record the `sensitive_content` behaviour change in the
   handler's `get_claude_md()` and `docs/guides/HANDLER_REFERENCE.md`, since a
   newly denied commit shape needs to be discoverable before it surprises
