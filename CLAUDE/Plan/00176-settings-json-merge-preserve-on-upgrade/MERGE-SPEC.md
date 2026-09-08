@@ -237,6 +237,41 @@ default should therefore be **delivered and reported**, not skipped — the
 opposite of the degradation the preference class takes, and the reason the two
 must not share one code path.
 
+## Q6 — Four writers, and only one of them is a real problem
+
+The audit's last critical finding is that four things write `settings.json` with
+no lock between them. Verified, but the four do not share a failure mode and
+lumping them together points at the wrong fix:
+
+| Writer                              | Write style              | Runs from       |
+| ----------------------------------- | ------------------------ | --------------- |
+| `settings_repair.py`                | atomic (temp + replace)  | daemon, session |
+| `hook_command_migration.py:258`     | in place, **deliberate** | daemon, session |
+| `settings_deploy.sh`                | `cp`, now checked        | upgrade shell   |
+| `install.py` `create_settings_json` | whole-document rewrite   | install shell   |
+
+**The in-place write is not an oversight.** `settings_repair.py:106-111` records
+why: `Path.replace()` makes the file inherit the TEMP file's mode, silently
+rewriting the permissions of a git-tracked file, so that writer calls
+`shutil.copymode` to compensate and its sibling avoids the problem by writing in
+place. The fix there, if wanted, is atomic **plus** `copymode` — matching
+`settings_repair.py` — never a bare swap to `replace()`.
+
+**A lock is not the first fix, because the failure mode is a lost update rather
+than corruption.** Every whole-file writer either is atomic or can be made so,
+and with atomic writes a reader sees one complete version or the other. The
+narrow, cheap mitigation is for the merge to re-read immediately before it
+writes. A lock is worth adding when a lost update is actually observed, not in
+anticipation — this is a file written a handful of times per install, not a hot
+path.
+
+**`install.py` is the genuine conflict, and it is not a race at all.** It emits a
+fresh document from `_DAEMON_FORWARDER_HOOKS` rather than merging, so running it
+against a project whose settings have been merged discards the merge
+deterministically, with no concurrency involved. That makes it Task 2.3's
+problem: the install route has to go through the same merge as the upgrade
+routes, exactly as it now goes through the same backup helper.
+
 ## Q5 — Interaction with Plan 00175's validator
 
 **Moot: `statusline_refresh_checker` does not exist.** The only statusline

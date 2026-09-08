@@ -224,18 +224,22 @@ should build on the `src/` pair, since it runs inside the daemon and
   `/.claude/hooks/` substring failing in both directions — including a false
   NEGATIVE on the relative legacy shape the rule existed to repair.
 
-- [ ] ⬜ **Task 1.4**: Audit findings shaping Phase 2; evidence in the report.
+- [x] ✅ **Task 1.4**: All four remaining audit findings resolved; evidence in
+  the report, decisions in the spec.
 
   **Resolved**, each verified against the tree and written up in
   [MERGE-SPEC.md](MERGE-SPEC.md): the missing old-default baseline (**Q2b**),
   *absence is not an override* (**Q4b**), and the headless path having to FINISH
   rather than abort (**Q3**).
 
-  **Still open**: four unsynchronised writers with no lock, one of which
-  (`install.py`) rewrites the whole document and would undo a merge. Note
-  `hook_command_migration.py:258` writes in place **deliberately** — it
-  preserves the mode of a git-tracked file, which `Path.replace()` rewrites —
-  so the fix there is atomic-plus-`copymode`, as `settings_repair.py` does.
+  The fourth — four unsynchronised writers — is **Q6**, where checking it
+  changed the conclusion: the four do not share a failure mode, and a lock is
+  not the first fix. With atomic writes the risk is a lost update, not
+  corruption. The genuine conflict is `install.py`, which is not a race at all:
+  it emits a fresh document rather than merging, so it discards a merge
+  deterministically. That makes it Task 2.3's problem — the install route must
+  go through the same merge as the upgrade routes, exactly as it now goes
+  through the same backup helper.
 
 ### Phase 2: TDD implementation
 
