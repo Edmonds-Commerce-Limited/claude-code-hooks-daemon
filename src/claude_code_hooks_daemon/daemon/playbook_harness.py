@@ -24,6 +24,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
+
+#: How long a probe dispatch may take before the harness gives up on the hook.
+#: It must outlast the SLOWEST thing a handler may legitimately do, or the
+#: harness kills the hook before the handler's own fail-open can answer — and
+#: one slow lint then reports as a dead gate rather than as a probe verdict.
+#: DERIVED rather than pinned: the previous value borrowed a constant named for
+#: restart verification, which happened to equal `LINT_CHECK` exactly, and
+#: nothing would have caught the two drifting back into agreement.
+PROBE_DISPATCH_TIMEOUT_SECONDS = 2 * max(Timeout.LINT_CHECK, Timeout.ESLINT_CHECK)
+
 #: One rendered playbook entry, as `generate_json` emits it. Named rather than
 #: spelled `dict[str, Any]` at each use: it is the input format this whole
 #: module is written against, and a reader should be able to see that.

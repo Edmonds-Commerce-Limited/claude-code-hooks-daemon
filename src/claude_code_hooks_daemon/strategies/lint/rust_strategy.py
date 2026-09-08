@@ -10,11 +10,18 @@ _LANGUAGE_NAME = "Rust"
 _EXTENSIONS: tuple[str, ...] = (".rs",)
 #: Acceptance-test fixture directory, below the sanctioned scratch root.
 _FIXTURE_DIR = "acceptance-test-lint-rust"
-_DEFAULT_LINT_COMMAND = (
-    "rustc --edition 2021 --crate-type lib --emit=metadata "
-    "--out-dir /tmp/claude-hooks-daemon-rust-lint {file}"
+#: Both commands share this framing. `clippy-driver` is a rustc wrapper, so it
+#: defaults to a BINARY crate and rejects any library-shaped file with E0601
+#: "main function not found" — including this strategy's own "valid code
+#: passes" probe. Only a machine with the clippy component genuinely installed
+#: ever sees it, which is why a rustup-shim box (and so this project's CI until
+#: Plan 00250 gave it a daemon) reported the command working.
+_CRATE_FRAMING = (
+    "--edition 2021 --crate-type lib --emit=metadata "
+    "--out-dir /tmp/claude-hooks-daemon-rust-lint"
 )
-_EXTENDED_LINT_COMMAND = "clippy-driver {file}"
+_DEFAULT_LINT_COMMAND = f"rustc {_CRATE_FRAMING} {{file}}"
+_EXTENDED_LINT_COMMAND = f"clippy-driver {_CRATE_FRAMING} {{file}}"
 # rustup ships a `clippy-driver` SHIM on PATH even when the `clippy` component
 # is not installed. The shim resolves and runs (so it never raises
 # FileNotFoundError, the handler's usual "tool absent" signal) but exits

@@ -24,7 +24,9 @@ class TestProperties:
         assert strategy.extensions == (".kt",)
 
     def test_default_lint_command(self, strategy: KotlinLintStrategy) -> None:
-        assert strategy.default_lint_command == "kotlinc -script {file} 2>&1"
+        assert strategy.default_lint_command == (
+            "kotlinc -nowarn -d /tmp/claude-hooks-daemon-kotlin-lint {file}"
+        )
 
     def test_extended_lint_command(self, strategy: KotlinLintStrategy) -> None:
         assert strategy.extended_lint_command == "ktlint {file}"

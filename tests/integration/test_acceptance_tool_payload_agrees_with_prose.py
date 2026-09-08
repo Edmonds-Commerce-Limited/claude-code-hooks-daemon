@@ -29,6 +29,7 @@ off.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -44,6 +45,35 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # conditionals, subshells. A `set -euo pipefail` prelude or a bare
 # `VAR=value cmd` is a real command with an unexecutable-looking head.
 _SHELL_CONSTRUCTS = ("$(", "&&", "||", ">>", "<<", "|", ";", "=", "[[", "\n")
+
+# The SHAPE of an executable name, used when the box does not happen to have
+# the tool installed. `shutil.which` alone made this check machine-dependent:
+# `rg` and `agent-browser` are perfectly good commands that a CI runner does not
+# carry, so the guard failed there for a reason that had nothing to do with the
+# playbook. Every prose opener this test was written to catch (`With`,
+# `Simulate`, `Run any`, `Stage`, `WebFetch`) is CAPITALISED, so requiring a
+# lowercase command-name shape keeps all of them rejected without asking what is
+# installed.
+_COMMAND_NAME_SHAPE = re.compile(r"^[a-z0-9][a-z0-9._+-]*$")
+
+
+def _looks_like_a_command(command: str) -> bool:
+    """Is this string a shell command rather than a sentence about one?
+
+    Asked as a WHITELIST, unlike the classifier that failed in Plan 00345: a
+    string is a command when something positive says so, and an unrecognised
+    shape is reported for a human rather than assumed fine.
+    """
+    tokens = command.split()
+    if not tokens:
+        return True
+    head = tokens[0].lstrip("!\\").split("/")[-1]
+    if shutil.which(head) or (REPO_ROOT / tokens[0]).exists():
+        return True
+    if any(marker in command for marker in _SHELL_CONSTRUCTS):
+        return True
+    return bool(_COMMAND_NAME_SHAPE.match(head))
+
 
 # Generous next to the 120s its neighbours here allow a QA checker: this
 # subprocess imports every handler module and walks all ~280 test blocks, so
@@ -196,10 +226,8 @@ class TestDeclaredPayloadsAgreeWithTheirProse:
         loudly and were held back — so a dry run only exposes prose when the
         test expects a refusal, and the allow half slips through in silence.
 
-        Asked as a WHITELIST, unlike the classifier that failed: the first
-        token must be something executable, or the command must carry a shell
-        construct that makes it unambiguously a command. An unrecognised shape
-        is reported for a human rather than assumed to be fine.
+        See `_looks_like_a_command` for how the question is asked, and why it
+        must not depend on what happens to be installed.
         """
         prose = []
         for block in playbook:
@@ -207,17 +235,12 @@ class TestDeclaredPayloadsAgreeWithTheirProse:
             if (payload.get("tool_name") or "") != "Bash":
                 continue
             command = (block.get("command") or "").strip()
-            tokens = command.split()
-            if not tokens:
-                continue
-            head = tokens[0].lstrip("!\\").split("/")[-1]
-            if shutil.which(head) or (REPO_ROOT / tokens[0]).exists():
-                continue
-            if any(marker in command for marker in _SHELL_CONSTRUCTS):
+            if _looks_like_a_command(command):
                 continue
             prose.append(
                 f"#{block.get('test_number')} {block.get('handler_name')}: "
-                f"{command[:100]!r} starts with {tokens[0]!r}, which is not executable"
+                f"{command[:100]!r} starts with {command.split()[0]!r}, which "
+                f"does not read as a command"
             )
 
         assert not prose, (
@@ -350,3 +373,48 @@ class TestDeclaredPayloadsAgreeWithTheirProse:
         assert (
             not contradictory
         ), f"blocks declaring both tool_payload and harness_cannot_produce: {contradictory}"
+
+
+class TestTheCommandClassifierDoesNotAskWhatIsInstalled:
+    """The guard must give the same verdict on a runner as on a dev box.
+
+    It did not. `rg` and `agent-browser` are real commands this project's probes
+    use, absent from a GitHub runner — so the check reported them as prose and
+    failed CI for a reason with nothing to do with the playbook (Plan 00250).
+    """
+
+    @staticmethod
+    def _with_nothing_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(shutil, "which", lambda _name: None)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'rg "def get_bash_command" src/',
+            "agent-browser --version",
+            "kubectl get pods",
+        ],
+    )
+    def test_a_real_command_is_not_prose_just_because_it_is_absent(
+        self, monkeypatch: pytest.MonkeyPatch, command: str
+    ) -> None:
+        self._with_nothing_installed(monkeypatch)
+        assert _looks_like_a_command(command)
+
+    @pytest.mark.parametrize("opener", ["With", "Simulate", "Run any", "Stage", "WebFetch"])
+    def test_every_prose_opener_this_guard_was_written_for_is_still_rejected(
+        self, monkeypatch: pytest.MonkeyPatch, opener: str
+    ) -> None:
+        """The eight real ones from Plan 00345, by their documented openers."""
+        self._with_nothing_installed(monkeypatch)
+        assert not _looks_like_a_command(f"{opener} the scenario a human performs")
+
+    def test_a_shell_construct_still_rescues_an_odd_looking_head(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._with_nothing_installed(monkeypatch)
+        assert _looks_like_a_command("VAR=value some-tool")
+
+    def test_the_installed_check_still_counts(self) -> None:
+        """A capitalised head that IS on PATH must not be called prose."""
+        assert _looks_like_a_command("git status")

@@ -36,6 +36,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.playbook_harness import (
+    PROBE_DISPATCH_TIMEOUT_SECONDS,
     ExecutableProbe,
     FixtureAction,
     SkippedProbe,
@@ -165,7 +166,7 @@ def _dispatch(probe: ExecutableProbe) -> tuple[str, str, str | None]:
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
-        timeout=Timeout.DAEMON_RESTART_VERIFY_TIMEOUT_SEC,
+        timeout=PROBE_DISPATCH_TIMEOUT_SECONDS,
         check=False,
     )
     raw = (result.stdout or "").strip()

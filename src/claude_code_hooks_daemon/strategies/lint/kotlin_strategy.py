@@ -8,7 +8,15 @@ from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 # Language-specific constants
 _LANGUAGE_NAME = "Kotlin"
 _EXTENSIONS: tuple[str, ...] = (".kt",)
-_DEFAULT_LINT_COMMAND = "kotlinc -script {file} 2>&1"
+#: `-script` accepts a `.kts` script file, and this strategy is registered for
+#: `.kt` only — so the previous command rejected every file it was ever given.
+#: The trailing `2>&1` it also carried was never a redirect: `lint_on_edit`
+#: splits with `shlex` and runs in list form with NO shell, so kotlinc received
+#: it as a literal argument. Both defects were invisible on a box without
+#: `kotlinc`, where the absent tool produced the ALLOW the command could not.
+#: `-d` keeps the emitted classes out of the user's directory, as the Rust
+#: strategy does with `--out-dir`.
+_DEFAULT_LINT_COMMAND = "kotlinc -nowarn -d /tmp/claude-hooks-daemon-kotlin-lint {file}"
 _EXTENDED_LINT_COMMAND = "ktlint {file}"
 #: Acceptance-test fixture directory, below the sanctioned scratch root.
 _FIXTURE_DIR = "acceptance-test-lint-kotlin"

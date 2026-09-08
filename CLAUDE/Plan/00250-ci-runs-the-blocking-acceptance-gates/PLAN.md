@@ -203,17 +203,23 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 - [x] ✅ **Task 2.3**: No collision, and for a stronger reason than the hostname
   suffix — see [RESEARCH-ci-install.md](RESEARCH-ci-install.md). Borne out by
   three matrix jobs each starting a daemon successfully.
+- [x] ✅ **Task 2.4d**: The three failures the newly-running gate *found* — the
+  point of the plan, not fallout from it. Two are real handler defects that
+  deny valid code on any machine with the real linter installed (Rust's
+  `clippy-driver` framed the file as a binary crate; Kotlin's command used
+  `-script` on `.kt` and carried a `2>&1` no shell was ever going to expand),
+  and one is a harness budget equal to the handler's own, so `lint_on_edit`'s
+  fail-open could never be reached and one slow lint killed all 201 probes.
+  Each fixed with a class-level guard rather than a one-off. Detail and the
+  reproduction in [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 - [ ] ⬜ **Task 2.4c**: `test_dogfooding_hook_scripts.py::test_hook_scripts_match_installer`
-  — the 4th pre-existing CI failure, present in the baseline run and NOT caused
-  by the daemon. Every forwarder mismatches because the tracked
-  `.claude/hooks/*` bake an absolute path at generation time
-  (`_rl_dir="/workspace/untracked"`, `_rl_bin=".../hooks-relay"`), so a fresh
-  generation anywhere else differs. Same `/workspace` family as Task 2.4a, but
-  structural rather than a stray literal: a **tracked** artefact carrying the
-  path of the machine that generated it. Passes locally for exactly that reason.
-  **"Derive it at runtime" is NOT available** — the baking is deliberate and
-  documented (zero-spawn hot path). Three candidate fixes, none free, plus the
-  prior question of whether `.claude/hooks/*` should be tracked at all:
+  — pre-existing, present in the baseline run, NOT caused by the daemon. The
+  tracked `.claude/hooks/*` bake an absolute path at generation time
+  (`_rl_dir="/workspace/untracked"`), so a fresh generation anywhere else
+  differs, and it passes locally for exactly that reason. **"Derive it at
+  runtime" is NOT available** — the baking is deliberate and documented
+  (zero-spawn hot path). Three candidate fixes, none free, plus the prior
+  question of whether `.claude/hooks/*` should be tracked at all:
   [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 - [x] ✅ **Task 2.4a**: The two failures that were plain defects rather than
   provisioning gaps — neither needed a daemon at all, and both were fixed with a

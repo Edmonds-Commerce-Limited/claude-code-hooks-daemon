@@ -126,7 +126,9 @@ needing a runner to confirm.
 ## Task 2.4c: the forwarders bake the generating machine's path
 
 `test_dogfooding_hook_scripts::test_hook_scripts_match_installer` fails on a
-runner because all 23 tracked forwarders carry a literal absolute path:
+runner because 27 of the 31 tracked hook files carry a literal absolute path
+(the four without it — `status-line`, `stop`, `subagent-stop`,
+`worktree-create` — carry no relay guard at all):
 
 ```bash
 _rl_dir="/workspace/untracked"
@@ -158,3 +160,150 @@ This runs on **every hook invocation**. Any fix must preserve zero-spawn.
 given they embed a path valid only on the machine that generated them. That is
 the real decision and it is larger than this plan; the options above are only
 worth weighing once it is answered.
+
+## Task 2.4d: what the gate found once it could run
+
+These are not fallout from provisioning the daemon. They are what the gate was
+always going to report, and could not while it skipped. All three were found in
+CI run 34189706909 — the first run in which `test_playbook_harness.py` executed.
+
+### Absent tooling had been standing in for correct commands
+
+`lint_on_edit` splits a command with `shlex` and runs it through
+`subprocess.run` in **list form with no shell**. Two declared commands were
+wrong in ways only a machine with the real tool installed can notice:
+
+| Language | Declared command              | What a real tool does with it                                                                |
+| -------- | ----------------------------- | -------------------------------------------------------------------------------------------- |
+| Rust     | `clippy-driver {file}`        | `clippy-driver` is a rustc wrapper, so it defaults to a **binary** crate and rejects any     |
+|          |                               | library-shaped file with `E0601: main function not found` — including the strategy's own     |
+|          |                               | "valid code passes" probe, `pub fn hello() {}`                                               |
+| Kotlin   | `kotlinc -script {file} 2>&1` | `-script` accepts a `.kts` script and this strategy is registered for `.kt` **only**, so the |
+|          |                               | command rejects every file it is ever given; the `2>&1` was never a redirect, and reached    |
+|          |                               | kotlinc as a literal argument                                                                |
+
+Both were invisible here because this box has the rustup `clippy-driver` **shim**
+(which reports "not installed", a case the strategy already special-cases into an
+ALLOW) and no `kotlinc` at all. A GitHub runner has both tools for real.
+
+**Reproduced locally without installing anything**, since `clippy-driver` is a
+rustc wrapper and shares its CLI:
+
+```
+$ rustc untracked/scratch/rustprobe/valid.rs -o /tmp/out
+error[E0601]: `main` function not found in crate `valid`
+```
+
+Fixed by giving the extended command the same crate framing the default already
+carried, and by replacing the Kotlin command with one that compiles a `.kt` file
+to a scratch output directory.
+
+There is no `kotlinc` and no JVM on this machine — which is the whole reason the
+defect survived — so the Kotlin command is verified against Kotlin's own
+[compiler reference](https://kotlinlang.org/docs/compiler-reference.html) rather
+than by execution:
+
+| Token     | Documented as                                                                              |
+| --------- | ------------------------------------------------------------------------------------------ |
+| `-script` | *"executes the first Kotlin script (`*.kts`) file among the given arguments"* — the defect |
+| `-d path` | *"Place the generated class files into the specified location."*                           |
+| `-nowarn` | *"Suppress all warnings during compilation."*                                              |
+
+So the bug and the fix are both documented facts. What execution would still add
+is whether kotlinc's JVM startup fits the handler's 15s `LINT_CHECK` budget on a
+cold runner; if it does not, `lint_on_edit` fail-opens (an ALLOW) and probe #142
+— "Kotlin lint - invalid code blocked" — will report as the one failure. The
+remedy for that is already built: `options.timeouts.Kotlin` (Plan 00309).
+
+Guarded as a class rather than per-language, in
+`tests/unit/strategies/lint/test_lint_commands_are_runnable_as_declared.py`: no
+declared lint command may contain a shell metacharacter, since none is run
+through a shell. Kotlin was the only offender of 18 commands.
+
+### The harness could not observe the handler's fail-open
+
+The probe dispatch used `Timeout.DAEMON_RESTART_VERIFY_TIMEOUT_SEC` — 15s, a
+constant named for restart verification — while `lint_on_edit` allows a single
+lint `LINT_CHECK` = 15s and `validate_eslint_on_write` allows `ESLINT_CHECK` =
+30s. The two budgets were **equal by accident**, with these consequences:
+
+- `lint_on_edit` catches `TimeoutExpired` and ALLOWs, but only *after* its 15s
+  elapse — by which point the harness has already killed the hook. The fail-open
+  was unreachable from the harness.
+- `TimeoutExpired` propagates out of `_run_probe`, so one slow lint ends the
+  whole gate: 201 probes report as a crash rather than one failure. That is why
+  Python 3.12 and 3.13 reported only a timeout while 3.11 got far enough to name
+  the two Rust/Kotlin mismatches.
+
+`PROBE_DISPATCH_TIMEOUT_SECONDS` now lives beside the harness logic and is
+**derived** (`2 * max(LINT_CHECK, ESLINT_CHECK)`), so raising a lint budget
+cannot silently restore the collision — the failure the pinned constant allowed.
+
+### A guard that asked what was installed rather than what was written
+
+`test_acceptance_tool_payload_agrees_with_prose.py` classified a Bash payload as
+prose when `shutil.which(head)` found nothing. `rg` and `agent-browser` are real
+commands this project's probes use and a runner does not carry, so the guard
+failed there for a reason having nothing to do with the playbook.
+
+The classifier now also accepts a lowercase command-name **shape**, which is
+machine-independent. Every prose opener it was written to catch (`With`,
+`Simulate`, `Run any`, `Stage`, `WebFetch` — Plan 00345's eight real ones) is
+capitalised, so all of them stay rejected; each is pinned in a test that stubs
+`shutil.which` to return nothing, so the guard is now exercised in the runner's
+condition rather than only in this container's.
+
+## Task 2.4c, measured: the machine-specific surface is two lines
+
+The three options above were recorded before anyone counted. Counted, the
+picture changes enough to add a fourth that is better than all of them.
+
+Across the 31 tracked hook files — 1342 lines in total — **54 lines contain the
+generating machine's root, and they are only 2 distinct lines** (27 files × 2;
+the other 4 files carry no relay guard):
+
+```bash
+_rl_dir="/workspace/untracked"
+_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/workspace/untracked/bin/hooks-relay}"
+```
+
+Everything else is byte-identical template. So the comparison in
+`test_hook_scripts_match_installer` is failing on 4% of its lines, and on a
+property nobody wants asserted.
+
+### What the test actually wants to prove
+
+Its own docstring names three purposes — the installer creates correct scripts,
+no manual edit has drifted from the installer, and script updates reach the
+installer code. **The absolute project root is an INPUT to the generator, not
+part of the template any of those three is about.** Comparing it byte-for-byte
+additionally asserts "this checkout sits at the same absolute path as the
+machine that generated the committed file", which is not a property worth
+having and is false on every machine but one.
+
+### The fourth option, and why it is not "treating the symptom"
+
+Normalise the project root on BOTH sides, then compare **exactly**. That was
+dismissed earlier as symptom-treatment; the count is what changes the verdict:
+
+- The normalisation is a **closed, two-line surface**, not a fuzzy match. Every
+  other byte is still compared exactly, so a drifted template still fails.
+- It needs no change to `render_relay_guard`, so the zero-spawn hot path and the
+  AF_UNIX 108-byte headroom are both untouched — the constraint that ruled out
+  the two runtime-derivation options.
+- It leaves the prior question (should `.claude/hooks/*` be tracked at all?) open
+  rather than pre-empting it, because it does not change what is tracked.
+
+**Pair it with a second guard**, or the normalisation becomes a blind spot: after
+substituting the project root, assert that NO other absolute path from the
+generating machine survives. That turns the measurement above into a standing
+invariant instead of a one-off observation — if a third machine-specific line
+ever appears, it fails loudly rather than being silently normalised away.
+
+### A smaller defect, worth fixing in the same pass
+
+The mismatch report names the file and then says only *"Installed version
+differs from installer output"*. No diff, no line number. A dogfooding failure
+that cannot be diagnosed from its own message is one more reason to regenerate
+blindly rather than investigate — which is precisely the drift the test exists
+to prevent.

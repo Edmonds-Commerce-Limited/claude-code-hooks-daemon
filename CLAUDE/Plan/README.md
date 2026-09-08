@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00350: ci builds the relay binary so transport gates run](00350-ci-builds-the-relay-binary-so-transport-gates-run/PLAN.md) - Not Started (14 tests skip in CI because `untracked/bin/hooks-relay` is a gitignored build artefact no runner has; the same wired-in-but-not-load-bearing gate Plan 00250 fixed for the daemon socket, one artefact over — and the path it covers is the relay guard's zero-spawn fail-open)
+
 - [00349: agent worktrees accumulate unreaped](00349-agent-worktrees-accumulate-unreaped/PLAN.md) - Not Started (21 stale `agent-*` worktrees under `.claude/worktrees/`; 6 look alarming at 195–224 commits off `main` but their work already landed under different SHAs, so the hard part is a safety test that can tell "re-applied" from "unmerged")
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
@@ -275,7 +277,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Completed**: 290 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 42 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 43 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
@@ -297,8 +299,8 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00349 filing (42 root, 290 `Completed/`,
-  7 `Cancelled/`, 336 distinct numbers against a counter of 349). Every figure
+- **Last reconciled at**: the Plan 00350 filing (43 root, 290 `Completed/`,
+  7 `Cancelled/`, 337 distinct numbers against a counter of 350). Every figure
   above was recounted from disk rather than incremented. The index carries NO
   reconciliation history — it states current truth only; every earlier recount
   is in git, and per-plan narrative belongs in that plan's `JOURNAL/`.

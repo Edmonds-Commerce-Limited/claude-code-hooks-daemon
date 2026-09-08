@@ -50,7 +50,10 @@ class TestProperties:
         assert "-Z" not in strategy.default_lint_command
 
     def test_extended_lint_command(self, strategy: RustLintStrategy) -> None:
-        assert strategy.extended_lint_command == "clippy-driver {file}"
+        assert strategy.extended_lint_command == (
+            "clippy-driver --edition 2021 --crate-type lib --emit=metadata "
+            "--out-dir /tmp/claude-hooks-daemon-rust-lint {file}"
+        )
 
     def test_skip_paths_contains_target(self, strategy: RustLintStrategy) -> None:
         assert any("target" in p for p in strategy.skip_paths)
