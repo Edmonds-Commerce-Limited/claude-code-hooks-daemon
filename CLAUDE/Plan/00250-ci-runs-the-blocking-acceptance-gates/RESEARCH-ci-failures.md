@@ -122,3 +122,39 @@ differs from this container, and reproducing just that:
 Seconds each, no CI round trip. Both beat waiting ~11 minutes for a shared
 pipeline, and the second one disproved a hypothesis the plan had recorded as
 needing a runner to confirm.
+
+## Task 2.4c: the forwarders bake the generating machine's path
+
+`test_dogfooding_hook_scripts::test_hook_scripts_match_installer` fails on a
+runner because all 23 tracked forwarders carry a literal absolute path:
+
+```bash
+_rl_dir="/workspace/untracked"
+_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/workspace/untracked/bin/hooks-relay}"
+```
+
+A fresh generation anywhere else produces `/home/runner/work/...`, so every
+script differs. It passes locally for exactly the reason it cannot pass
+elsewhere.
+
+**"Just derive it at runtime" is not available**, which is worth stating before
+anyone proposes it. `render_relay_guard`'s docstring makes the baking
+deliberate:
+
+> Pure bash builtins only — zero subshells, zero external spawns — so the guard
+> costs microseconds when the relay binary/socket are absent
+>
+> …baked in as a literal absolute path, never computed at hook-run time.
+
+This runs on **every hook invocation**. Any fix must preserve zero-spawn.
+
+| Option                                     | Zero-spawn?                    | Cost                                                                                                              |
+| ------------------------------------------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `${BASH_SOURCE[0]%/*}/../../untracked`     | yes — pure parameter expansion | adds `..` segments to a socket path the same docstring already flags as at risk of the **AF_UNIX 108-byte limit** |
+| `${CLAUDE_PROJECT_DIR}/untracked`          | yes                            | that variable is set by Claude Code and absent in CI and in tests — precisely the contexts this must work in      |
+| normalise inside the dogfooding comparison | n/a                            | fixes CI, leaves the tracked artefact machine-specific — treats the symptom                                       |
+
+**The prior question** is whether `.claude/hooks/*` should be tracked at all,
+given they embed a path valid only on the machine that generated them. That is
+the real decision and it is larger than this plan; the options above are only
+worth weighing once it is answered.

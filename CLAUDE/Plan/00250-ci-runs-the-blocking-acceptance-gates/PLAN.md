@@ -219,8 +219,10 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
   generation anywhere else differs. Same `/workspace` family as Task 2.4a, but
   structural rather than a stray literal: a **tracked** artefact carrying the
   path of the machine that generated it. Passes locally for exactly that reason.
-  Fixing it means deriving the relay dir at runtime rather than baking it —
-  which touches forwarder generation, so scope it before starting.
+  **"Derive it at runtime" is NOT available** — the baking is deliberate and
+  documented (zero-spawn hot path). Three candidate fixes, none free, plus the
+  prior question of whether `.claude/hooks/*` should be tracked at all:
+  [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 - [x] ✅ **Task 2.4a**: The two failures that were plain defects rather than
   provisioning gaps — neither needed a daemon at all, and both were fixed with a
   test reproducing the CI condition locally. `test_deployed_skill_trees.py`
