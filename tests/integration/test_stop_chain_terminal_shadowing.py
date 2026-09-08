@@ -1,21 +1,25 @@
-"""What actually runs on a Stop event (Plan 00236, DBF guard).
+"""What actually runs on a Stop event (Plan 00236, DBF guard; Plan 00242).
 
 ``auto_continue_stop`` sits at priority 10, is ``terminal=True``, and its
 ``matches()`` returns True for every Stop event except two narrow cases
-(confirmed re-entry, and an AskUserQuestion turn). ``HandlerChain`` breaks the
-moment a terminal handler matches, **regardless of the decision it returns** —
-so an ordinary ALLOW shadows the rest of the chain just as completely as a
-deny. EVERY Stop handler registered above priority 10 is therefore dead on the
-ordinary stop and runs only in that minority.
+(confirmed re-entry, and an AskUserQuestion turn). Before Plan 00242,
+``HandlerChain`` broke the moment a terminal handler matched **regardless of
+the decision it returned**, so an ordinary ALLOW shadowed the rest of the chain
+just as completely as a deny, and EVERY Stop handler above priority 10 was dead
+on the ordinary stop.
 
-That is not obvious from the config, where the handlers under ``stop:`` all
-look equally live, and it is invisible to unit tests, which call each handler
-directly. It cost a whole audit cohort a wrong verdict: Plan 00234 reported
+That cost a whole audit cohort a wrong verdict: Plan 00234 reported
 ``dismissive_language``/``hedging_language`` as "double-firing" with their Stop
 twins, when a live chain trace showed only the ``nitpick`` pseudo-event leg
-running and the Stop twins never executing at all. The prescribed fix — drop
-the ``stop:1/1`` nitpick trigger — would have deleted the copy that works and
-kept the copy that does not. Plan 00237 deleted the Stop twins instead.
+running and the Stop twins never executing at all. Plan 00237 deleted the Stop
+twins.
+
+Plan 00242 made terminality a property of the DECISION: an ALLOW never ends
+the chain, a DENY from a terminal handler still may. So on the Stop chain the
+shadow now exists only when ``auto_continue_stop`` BLOCKS the stop (no
+``STOPPING BECAUSE:`` explanation) — which is the legitimate short-circuit,
+since nothing later could un-block it — and a Stop handler above priority 10
+DOES run on an allowed stop. This module pins both halves.
 
 **This guard uses a synthetic probe, on purpose.** It was first written around
 the two real shadowed handlers, which made it die with them: removing the dead
@@ -25,11 +29,6 @@ CHAIN, not of any handler, and it outlives every particular occupant — so the
 probe is defined here, owned here, and cannot be deleted by tidying ``stop:``.
 Do not "simplify" this file by pointing it at whatever real handlers happen to
 be registered.
-
-If you are adding a Stop handler and expecting it to fire, read
-``test_a_probe_below_the_terminal_handler_does_run`` first: below priority 10
-is the only place a Stop handler is reachable, and per-turn message auditing
-belongs on the ``nitpick`` pseudo-event rather than here at all.
 """
 
 from __future__ import annotations
@@ -44,9 +43,12 @@ from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.controller import DaemonController
 
-# A valid stop explanation, so auto_continue_stop ALLOWS. The point of the
-# guard is that a benign ALLOW terminates the chain exactly as a deny does.
-_TRANSCRIPT_TEXT = "STOPPING BECAUSE: work complete."
+# A valid stop explanation, so auto_continue_stop ALLOWS — and since Plan
+# 00242 an ALLOW never ends the chain.
+_ALLOWED_STOP_TEXT = "STOPPING BECAUSE: work complete."
+# No explanation, so auto_continue_stop DENIES (blocks the stop) — the one
+# decision that may still short-circuit the chain.
+_BLOCKED_STOP_TEXT = "Done, I think."
 
 # Unique enough that it cannot collide with any real handler's output, so
 # finding it in the response means the probe ran and nothing else can.
@@ -58,9 +60,9 @@ _PROBE_SENTINEL = "STOP-CHAIN-PROBE-DID-RUN-9d41f7"
 # the docs generator and the guidance-coverage table would all treat it as real.
 _PROBE_NAME = "stop-chain-probe"
 
-# Above auto_continue_stop's 10 — the shadowed region.
+# Above auto_continue_stop's 10 — shadowed only when the stop is BLOCKED.
 _SHADOWED_PRIORITY = 30
-# Below it — the only reachable region for a Stop handler.
+# Below it — reachable whatever auto_continue_stop decides.
 _REACHABLE_PRIORITY = 5
 
 
@@ -106,7 +108,7 @@ def _make_workspace(tmp_path: Path) -> Path:
     return workspace
 
 
-def _make_transcript(tmp_path: Path) -> Path:
+def _make_transcript(tmp_path: Path, text: str) -> Path:
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text(
         json.dumps(
@@ -114,7 +116,7 @@ def _make_transcript(tmp_path: Path) -> Path:
                 "type": "message",
                 "message": {
                     "role": "assistant",
-                    "content": [{"type": "text", "text": _TRANSCRIPT_TEXT}],
+                    "content": [{"type": "text", "text": text}],
                 },
             }
         )
@@ -137,7 +139,7 @@ def _mock_git_subprocess() -> Any:
 
 
 class TestStopChainTerminalShadowing:
-    """A Stop handler above priority 10 does not run. One below it does."""
+    """A Stop handler above priority 10 runs on an allowed stop, not a blocked one."""
 
     def teardown_method(self) -> None:
         ProjectContext.reset()
@@ -148,10 +150,11 @@ class TestStopChainTerminalShadowing:
         *,
         probe_priority: int,
         terminal_enabled: bool = True,
+        transcript_text: str = _BLOCKED_STOP_TEXT,
     ) -> dict[str, Any]:
         """Dispatch a real Stop event through the real chain, plus the probe."""
         workspace = _make_workspace(tmp_path)
-        transcript = _make_transcript(tmp_path)
+        transcript = _make_transcript(tmp_path, transcript_text)
 
         controller = DaemonController()
         with _mock_git_subprocess():
@@ -182,25 +185,43 @@ class TestStopChainTerminalShadowing:
             }
         )
 
-    def test_a_stop_handler_above_priority_10_is_shadowed(self, tmp_path: Path) -> None:
-        """Enabled, matching unconditionally, and still silent."""
+    def test_a_stop_handler_above_priority_10_runs_on_an_allowed_stop(self, tmp_path: Path) -> None:
+        """Plan 00242: auto_continue_stop's ALLOW no longer ends the chain."""
+        response = self._dispatch(
+            tmp_path, probe_priority=_SHADOWED_PRIORITY, transcript_text=_ALLOWED_STOP_TEXT
+        )
+
+        rendered = json.dumps(response)
+        assert "block" not in rendered, f"The stop was not allowed: {rendered[:400]}"
+        assert _PROBE_SENTINEL in rendered, (
+            f"A non-terminal Stop handler at priority {_SHADOWED_PRIORITY} did not reach "
+            "the response on an ALLOWED stop, so auto_continue_stop's ALLOW is ending the "
+            "chain again — the Plan 00241 defect class, which Plan 00242's invariant "
+            f"(an ALLOW never ends the chain) forbids. Response: {rendered[:400]}"
+        )
+
+    def test_a_stop_handler_above_priority_10_is_shadowed_by_a_blocked_stop(
+        self, tmp_path: Path
+    ) -> None:
+        """A DENY from the terminal handler still short-circuits — deliberately."""
         response = self._dispatch(tmp_path, probe_priority=_SHADOWED_PRIORITY)
 
         rendered = json.dumps(response)
+        assert response.get("decision") == "block", f"The stop was not blocked: {rendered[:400]}"
         assert _PROBE_SENTINEL not in rendered, (
             f"A non-terminal Stop handler at priority {_SHADOWED_PRIORITY} reached the "
-            "response, so the chain no longer breaks at auto_continue_stop. If that is "
-            "intended, every handler moved off the Stop event on the strength of this "
-            "shadowing (Plan 00237) can come back — read this module's docstring first."
+            "response on a BLOCKED stop, so a terminal deny no longer ends the chain. "
+            "That is collect-all behaviour (daemon.chain.collect_all_violations), which "
+            "must stay opt-in — read this module's docstring first."
         )
 
     def test_the_probe_does_run_once_the_shadow_is_removed(self, tmp_path: Path) -> None:
-        """Proves the test above fails for the right reason.
+        """Proves the blocked-stop test fails for the right reason.
 
         An absence assertion is worthless if the fixture could never produce
         the thing it asserts is absent — a broken dispatch or a probe that
         never registered would pass it just as happily. Same probe, same
-        priority, terminal handler disabled.
+        priority, same blocked stop, terminal handler disabled.
         """
         response = self._dispatch(
             tmp_path, probe_priority=_SHADOWED_PRIORITY, terminal_enabled=False
@@ -215,11 +236,12 @@ class TestStopChainTerminalShadowing:
     def test_a_probe_below_the_terminal_handler_does_run(self, tmp_path: Path) -> None:
         """The shadow is about ORDERING, not about Stop handlers being broken.
 
-        Same probe, same enabled terminal handler, priority 5 instead of 30.
-        It runs, and its context survives into the response — so a Stop handler
-        genuinely can work, and the boundary is exactly priority 10. Without
-        this, the other two tests are consistent with 'Stop dispatch is simply
-        broken', which would send the next reader hunting the wrong bug.
+        Same probe, same enabled terminal handler, same blocked stop, priority
+        5 instead of 30. It runs, and its context survives into the blocking
+        response — so a Stop handler genuinely can work ahead of the deny, and
+        the boundary is exactly priority 10. Without this, the blocked-stop
+        test is consistent with 'Stop dispatch is simply broken', which would
+        send the next reader hunting the wrong bug.
         """
         response = self._dispatch(tmp_path, probe_priority=_REACHABLE_PRIORITY)
 
@@ -227,7 +249,7 @@ class TestStopChainTerminalShadowing:
         assert _PROBE_SENTINEL in rendered, (
             f"A Stop handler at priority {_REACHABLE_PRIORITY} — BELOW the terminal "
             "auto_continue_stop — did not reach the response. Its context should survive "
-            f"the terminal handler's result. Response: {rendered[:400]}"
+            f"the terminal handler's deny. Response: {rendered[:400]}"
         )
 
 
@@ -235,8 +257,10 @@ class TestThisProjectHasNotFallenIntoTheTrap:
     """Proving the hazard exists is not the same as checking the floor.
 
     The probe tests above establish that a Stop handler above priority 10 is
-    unreachable. They say nothing about whether THIS repository has one — and
-    it did. `ReleaseBlockerHandler`, a project handler whose job is to block
+    unreachable whenever the stop is BLOCKED — which is every stop that lacks
+    a ``STOPPING BECAUSE:`` line, so a handler there still runs only on a
+    minority of stops. They say nothing about whether THIS repository has one
+    — and it did. `ReleaseBlockerHandler`, a project handler whose job is to block
     the Stop event during a release until acceptance testing is done, was
     registered at priority 12 and had never fired.
 
@@ -370,9 +394,10 @@ class TestThisProjectHasNotFallenIntoTheTrap:
         assert not after, (
             f"These Stop handlers are registered AFTER {breaker.name!r} (priority "
             f"{breaker.priority}), which is terminal and matches an ordinary stop, so "
-            f"they can never run: {sorted(after)}.\n\n"
-            "A handler in this state is silently disabled and indistinguishable from "
-            "one that simply did not match — no error, no log, nothing. Either give it "
+            f"they never run on a BLOCKED stop: {sorted(after)}.\n\n"
+            "A handler in this state is silently disabled on every stop that lacks a "
+            "STOPPING BECAUSE: line, and indistinguishable from one that simply did "
+            "not match — no error, no log, nothing. Either give it "
             "a priority below the breaking handler, or move its work to the `nitpick` "
             "pseudo-event, which fires per turn and is not shadowed.\n\n"
             "If a PROJECT handler is involved, check its priority against the value "

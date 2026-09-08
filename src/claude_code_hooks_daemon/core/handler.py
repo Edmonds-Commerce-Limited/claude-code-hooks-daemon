@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
     from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
-    from claude_code_hooks_daemon.core.hook_result import HookResult
+    from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.core.relevance import RelevanceContext
     from claude_code_hooks_daemon.core.rule import Rule
@@ -51,15 +51,18 @@ class Handler(ABC):
     """Abstract base class for all hook handlers.
 
     Handlers implement pattern matching and execution logic for specific
-    hook scenarios. They can be terminal (stop dispatch) or non-terminal
-    (allow fall-through).
+    hook scenarios. Terminality belongs to the DECISION (Plan 00242): an
+    ALLOW never ends the dispatch chain, whatever ``terminal`` says.
 
     Attributes:
         handler_id: Unique handler identifier (use HandlerID constants)
         name: Display name (set from handler_id)
         priority: Execution order (lower = earlier, default 50)
-        terminal: If True, stops dispatch after execution (default True).
-                  If False, allows subsequent handlers to run (fall-through).
+        terminal: If True (default), a DENY/ASK/DEFER from this handler ends
+                  dispatch — an optimisation for the blocked path that
+                  cannot change the chain's decision. An ALLOW continues to
+                  the next handler either way. If False, dispatch always
+                  continues; a DENY still denies (most-restrictive-wins).
         tags: List of tags for categorizing and filtering handlers (default []).
               Tags enable language-specific, function-specific, or project-specific
               handler groups. Example tags: python, safety, tdd, qa-enforcement.
@@ -119,7 +122,8 @@ class Handler(ABC):
                 Use HandlerID constants for production handlers.
             name: Deprecated alias for handler_id (backward compatibility for tests).
             priority: Execution order (lower = earlier)
-            terminal: Whether to stop dispatch after execution
+            terminal: Whether a restrictive decision from this handler ends
+                dispatch (an ALLOW never does)
             tags: List of tags for categorizing/filtering (default [])
             shares_options_with: Parent handler name to inherit options from (default None)
             depends_on: List of required handler names (default None)
@@ -292,6 +296,30 @@ class Handler(ABC):
                 ]
         """
         ...
+
+    def commit_side_effects(self, hook_input: dict[str, Any], chain_decision: Decision) -> None:
+        """Hear the chain's FINAL decision for the call ``handle()`` just judged.
+
+        Plan 00242, Phase 2. ``handle()`` runs before the chain has decided,
+        so a handler that spends a cooldown or advances a counter in
+        ``handle()`` (a rate limiter, a once-per-plan advisory) does so for a
+        tool call that may then be denied by another handler — burning the
+        cooldown on a call that never ran. The chain calls this once per
+        EXECUTED handler after the merged decision is settled, in every mode,
+        so such a handler can keep the mutation when the call went ahead and
+        roll it back when it did not (``core/side_effect_journal.py``).
+
+        Concrete no-op by default: the overwhelming majority of handlers keep
+        no per-call state and never need to override this. A handler that
+        does must not make a NEW decision here — the decision is final.
+
+        Args:
+            hook_input: The same hook input ``handle()`` received.
+            chain_decision: The chain's merged decision for that call. A
+                restrictive value (deny/ask/defer) means the tool call did
+                not run.
+        """
+        return None
 
     def get_rules(self) -> list[Rule]:
         """Return the Rule objects that define this handler's blocking behaviour.
