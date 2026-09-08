@@ -1,6 +1,6 @@
 # Plan 00357: a ValueError escapes glob expansion and fails a security guard open
 
-**Status**: In Progress (reach established — one guard, `quarantine_artefact_read_guard`; the fix itself is not started)
+**Status**: In Progress (fix landed with RED-then-GREEN tests; awaiting full QA and the end-to-end observation)
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: High
@@ -121,19 +121,24 @@ earlier draft of this plan described.
 
 ### Phase 2: Fix
 
-- [ ] ⬜ **Task 2.1**: RED — a test that reproduces the escape on today's code.
-  It must fail before the fix for the RIGHT reason (a `ValueError` propagating
-  out), not merely assert that a token is allowed.
+- [x] ✅ **Task 2.1**: RED — two guard-level tests in
+  `tests/unit/handlers/pre_tool_use/test_quarantine_artefact_read_guard.py`:
+  a `docs/a**b.md` token beside a real DETAIL file must be judged (not raise),
+  and a malformed glob EARLIER in a command must not hide a literal DETAIL
+  token after it. Both failed pre-fix with `ValueError: Invalid pattern: '**' can only be an entire path component` propagating out of `matches()` — the
+  right reason, observed.
 
-- [ ] ⬜ **Task 2.2**: GREEN — bring the iteration inside the guard. The
-  obvious shape is materialising the generator under the `try`, but that
-  changes the memory profile of a large expansion; whichever is chosen, record
-  why.
+- [x] ✅ **Task 2.2**: GREEN — the `try` now wraps the consuming `for` loop,
+  still iterating the generator lazily. Materialising under the `try` was
+  rejected because it changes the memory profile of a wide expansion for no
+  gain: the loop returns on the first protected match anyway. The exclusions
+  registry entry for `_expand_glob_token` was reworded to say the exception
+  fires on iteration, since it had recorded the misconception this plan fixes.
 
-- [ ] ⬜ **Task 2.3**: Audit the module for the same shape elsewhere — any
-  other `try` wrapping the CONSTRUCTION of a lazy iterator rather than its
-  consumption. The bug class is "guarding a generator's creation", and it is
-  worth one sweep while the context is loaded.
+- [x] ✅ **Task 2.3**: Swept — the module has one other lazy iterator, the
+  `os.walk` in the hygiene walker, which is not wrapped and cannot raise
+  (`os.walk` swallows listing errors unless `onerror` is given). No other
+  guarded-construction remains.
 
 ### Phase 3: Verify
 
@@ -146,7 +151,7 @@ earlier draft of this plan described.
 ## Success Criteria
 
 - [ ] A malformed recursive-wildcard token cannot raise out of
-  `find_protected_mention`
+  `find_protected_mention_strict`
 - [ ] The regression test fails on the pre-fix code
 - [ ] Every dependant is recorded as reachable or not, with its reason
 - [ ] No other guarded-generator-construction remains in the module

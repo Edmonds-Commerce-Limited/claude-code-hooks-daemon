@@ -289,6 +289,38 @@ class TestBashGlobTokenExpansion:
         payload = _hook_input("Bash", {"command": "grep -c pattern *.md"})
         assert handler.matches(payload) is False
 
+    def test_a_malformed_recursive_wildcard_is_judged_rather_than_raising(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Plan 00357: `Path.glob` is lazy, so a pattern it rejects raises on
+        the FIRST ITERATION, not at the call. A guard around the call alone
+        lets the ValueError escape `matches()`, and the daemon's fail-open
+        policy then skips this guard for the whole tool call. The malformed
+        token must be judged like any other glob that expands to nothing."""
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (docs / "topic-opus-security-DETAIL.md").write_text("raw")
+        monkeypatch.chdir(tmp_path)
+        payload = _hook_input("Bash", {"command": "grep -c pattern docs/a**b.md"})
+        assert handler.matches(payload) is False
+
+    def test_a_malformed_wildcard_does_not_hide_a_literal_detail_token(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The escape's real cost: a malformed glob EARLIER in the command
+        aborted matching before a literal protected token was ever reached."""
+        monkeypatch.chdir(tmp_path)
+        payload = _hook_input(
+            "Bash", {"command": "cat docs/a**b.md topic-opus-security-DETAIL.md"}
+        )
+        assert handler.matches(payload) is True
+
     def test_literal_detail_artefact_token_still_matches_without_filesystem(
         self, handler: QuarantineArtefactReadGuardHandler
     ) -> None:

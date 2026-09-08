@@ -872,15 +872,23 @@ def _expand_glob_token(
         if key in seen:
             continue
         seen.add(key)
+        # `Path.glob` is a generator function: the call itself never raises.
+        # A pattern it rejects (`a**b`) raises ValueError on the FIRST
+        # ITERATION, and an unreadable directory raises OSError mid-walk, so
+        # the guard must wrap the consumption, not the construction (Plan
+        # 00357 — a guard around the call alone let the exception escape and
+        # fail the calling security handler open). Consumed lazily, still.
         try:
-            matches = base.glob(pattern_str)
+            for match in base.glob(pattern_str):
+                match_str = str(match)
+                for pattern in patterns:
+                    if path_matches_globs(match_str, (pattern,), project_root=project_root):
+                        return pattern
         except (OSError, ValueError):
+            # A token the filesystem cannot expand names nothing on disk, which
+            # is exactly the "expands to nothing" case: no mention. Registered
+            # in error_hiding_exclusions.json.
             continue
-        for match in matches:
-            match_str = str(match)
-            for pattern in patterns:
-                if path_matches_globs(match_str, (pattern,), project_root=project_root):
-                    return pattern
     return None
 
 
