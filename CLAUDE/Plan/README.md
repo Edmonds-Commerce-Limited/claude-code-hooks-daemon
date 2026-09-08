@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00346: pin qa toolchain versions](00346-pin-qa-toolchain-versions/PLAN.md) - Not Started (every QA tool is declared with a lower bound only and all have drifted past a major; the formatter is the sharp case because its QA step AUTO-FIXES, so a black release rewrites the tree and reports success rather than failing — the same shape ruff 0.14 already produced, answered then with ignores rather than a pin)
+- [00346: the QA venv ignores uv.lock](00346-pin-qa-toolchain-versions/PLAN.md) - Not Started (`uv.lock` is committed and CI-gated, but `run_tests.sh` provisions its venv with `pip install -e ".[dev]"`, which never reads it — so the toolchain deciding whether QA passes is off-lock, mypy by a whole major, and `.pre-commit-config.yaml` already documents this exact second-source drift as two years of silent rot)
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 

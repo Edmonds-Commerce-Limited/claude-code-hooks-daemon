@@ -1,4 +1,4 @@
-# Plan 00346: pin qa toolchain versions
+# Plan 00346: the QA venv ignores uv.lock
 
 **Status**: Not Started
 **Created**: 2026-09-08
@@ -9,81 +9,109 @@
 
 ## Overview
 
-Every QA tool in `pyproject.toml`'s `[dev]` extra is declared with a lower
-bound and no upper bound, and every one of them has since drifted past a major
-version. A fresh `pip install -e '.[dev]'` on another machine therefore
-installs a toolchain nobody has run this repository against, and the result is
-not a clear failure — it is a silent change in what QA means.
+This repository already solved dependency reproducibility: `uv.lock` is
+committed, CI-gates itself via `uv lock --check` in
+`scripts/qa/run_dependency_check.sh`, and `CONTRIBUTING.md` describes it as one
+of the files "the same ones `scripts/qa/` uses".
 
-The formatter is the sharpest case, because `scripts/qa/run_format_check.sh`
-**auto-fixes**. A black release that rewraps differently does not fail the
-build; it rewrites the tree and reports success, so the change arrives as
-hundreds of unrelated modified files in someone's next diff. The same shape
-already happened to a linter here: `pyproject.toml:192` records ruff 0.14
-newly enforcing TC002/TC003 across 30 findings in 24 files, answered by adding
-ignores rather than by pinning.
+`scripts/qa/` does not use it. `scripts/qa/run_tests.sh` sources
+`scripts/venv-include.bash`, calls `ensure_venv`, then runs `venv_tool pytest`;
+`install_deps` provisions that venv with `pip install -e ".[dev]"`, which never
+consults the lockfile and resolves `pyproject.toml`'s lower bounds to whatever
+is newest on PyPI that day. So the toolchain that decides whether this project
+passes is not the toolchain the lockfile records.
 
-This plan does not choose a pinning policy in advance. It establishes what each
-tool's floor should be, whether an upper bound belongs on tools whose output is
-a contract (black) versus tools whose output is a report (bandit, deptry), and
-records the decision where the next person will find it.
+The consequence is measured, not predicted: two venvs coexist in this checkout
+with two different toolchains, and the one that runs the tests is the one that
+is off-lock — by a whole major version in mypy's case.
+
+This is not a new class of bug here. `.pre-commit-config.yaml`'s header
+documents the identical failure: pinning tools in pre-commit mirror repos gave
+the project "a SECOND version source that drifts from `uv.lock`", it drifted
+for "two years of silent rot", and the fix was to delete the second source
+rather than to keep it in sync. That fix was applied to pre-commit. The QA venv
+path still has the second source.
+
+The formatter is the sharpest instance, because `scripts/qa/run_format_check.sh`
+**auto-fixes**. A black release that wraps differently does not fail the build;
+it rewrites the tree and reports success, so it arrives as hundreds of unrelated
+modified files in someone's next diff.
 
 ## Goals
 
-- Every QA tool in `[project.optional-dependencies].dev` carries a bound that
-  reflects a version this repository has actually been run against.
-- Tools whose output is auto-applied to the tree cannot change that output
-  without a deliberate, reviewable dependency change.
-- The rationale for each bound is recorded next to the bound.
+- The tools that decide whether QA passes are the versions `uv.lock` records.
+- One version source, not two — matching the resolution `.pre-commit-config.yaml`
+  already reached and documented.
+- `CONTRIBUTING.md`'s claim about what `scripts/qa/` uses becomes true.
 
 ## Non-Goals
 
-- Upgrading or downgrading any tool. The installed versions pass QA today;
-  this plan is about declaring them, not changing them.
-- Pinning runtime dependencies. The `[dev]` extra is not shipped to client
-  projects — `scripts/install/venv.sh` installs without it.
-- Introducing a lockfile or changing the packaging toolchain.
+- Upgrading or downgrading any tool. Both toolchains pass QA today; this is
+  about which one is authoritative, not about moving versions.
+- Pinning runtime dependencies, or changing `pyproject.toml`'s bounds for their
+  own sake. Bounds express compatibility; the lockfile expresses reproducibility,
+  and it is the lockfile that is being bypassed.
+- Changing the client install path. `scripts/install/venv.sh` runs
+  `uv pip install -e <dir>` with no `[dev]` extra, so no client project receives
+  these tools.
 
 ## Evidence
 
-Declared floor versus what is installed and passing QA today:
+`uv.lock` versus the two venvs in this checkout. `.venv` matches the lock
+exactly; the workspace venv — the one `venv_tool` selects and therefore the one
+that ran the 25/25 QA pass — does not.
 
-| Tool        | Declared  | Installed | Majors adrift |
-| ----------- | --------- | --------- | ------------- |
-| pytest      | `>=7.0`   | 9.1.1     | 2             |
-| pytest-cov  | `>=4.0`   | 7.1.0     | 3             |
-| pytest-mock | `>=3.11`  | 3.15.1    | 0             |
-| black       | `>=23.0`  | 26.5.1    | 3             |
-| ruff        | `>=0.1.0` | 0.15.22   | pre-1.0       |
-| mypy        | `>=1.0`   | 2.3.0     | 1             |
-| bandit      | `>=1.7`   | 1.9.4     | 0             |
-| semgrep     | `>=1.100` | 1.172.0   | 0             |
+| Tool    | `uv.lock` | `.venv` | workspace venv (runs QA) |
+| ------- | --------- | ------- | ------------------------ |
+| black   | 26.3.1    | 26.3.1  | **26.5.1**               |
+| mypy    | 1.20.2    | 1.20.2  | **2.3.0**                |
+| pytest  | 9.0.3     | 9.0.3   | **9.1.1**                |
+| ruff    | 0.15.11   | 0.15.11 | **0.15.22**              |
+| bandit  | 1.9.4     | 1.9.4   | 1.9.4                    |
+| semgrep | 1.172.0   | 1.172.0 | 1.172.0                  |
+
+Two aggravating details:
+
+- `run_tests.sh:25` auto-provisions on a missing `pytest`, so the off-lock
+  toolchain installs itself silently, without anyone choosing it.
+- `pyproject.toml:192` records ruff 0.14 newly enforcing TC002/TC003 across 30
+  findings in 24 files — a toolchain change that arrived unbidden and was
+  answered with ignores. That is what a bypassed lock costs when it bites.
 
 ## Tasks
 
-### Phase 1: Decide the policy
+### Phase 1: Make the QA venv obey the lock
 
-- [ ] ⬜ **Task 1.1**: Separate the tools by what their output IS — a change
-  applied to the tree (black), a gate that fails (ruff, mypy, pytest), or a
-  report that is read (bandit, semgrep, deptry, safety). The three want
-  different bounds and the plan should say which and why.
-- [ ] ⬜ **Task 1.2**: Decide whether the repository wants upper bounds, a
-  lockfile for dev, or floors raised to the installed versions. Record the
-  decision and the rejected alternatives.
+- [ ] ⬜ **Task 1.1**: Change `install_deps` in `scripts/venv-include.bash` to
+  install from `uv.lock` rather than resolving `pyproject.toml`. Establish
+  what happens when `uv` is absent — degrade loudly, never silently back to
+  `pip install -e ".[dev]"`, because a silent fallback reinstates exactly
+  the drift this removes.
+- [ ] ⬜ **Task 1.2**: Decide what happens to the existing off-lock workspace
+  venv. It cannot simply be left: it is what `venv_tool` selects today, so
+  until it is rebuilt or invalidated the change has no effect.
 
-### Phase 2: Apply and verify
+### Phase 2: Make the drift visible if it returns
 
-- [ ] ⬜ **Task 2.1**: Update `pyproject.toml` per the decision, with a comment
-  per bound giving its reason (the file already uses this style — see the
-  semgrep and pre-commit entries).
-- [ ] ⬜ **Task 2.2**: Verify a clean install of the declared set reproduces a
-  green QA run, so the declaration is measured rather than asserted.
+- [ ] ⬜ **Task 2.1**: Add a check that the venv running QA matches the lock.
+  `uv lock --check` proves the lock agrees with `pyproject.toml`; nothing
+  proves the INSTALLED tools agree with the lock, which is the gap that let
+  this run for as long as it has.
+
+### Phase 3: Correct the documentation
+
+- [ ] ⬜ **Task 3.1**: `CONTRIBUTING.md:73` states that `uv.lock` and
+  `pyproject.toml` are "the same ones `scripts/qa/` uses". Make it true, or
+  make it accurate — but not before Phase 1, so the doc describes the fixed
+  behaviour rather than a second aspiration.
 
 ## Success Criteria
 
-- [ ] No QA tool is installable at a version this repository has never run.
-- [ ] The formatter cannot silently rewrite the tree after a routine install.
-- [ ] Each bound carries a reason a later reader can evaluate.
+- [ ] The tools that run QA are the versions `uv.lock` records, verified by
+  comparing an actual venv against the lock rather than by assertion.
+- [ ] A toolchain that drifts from the lock fails a check instead of passing
+  quietly.
+- [ ] No provisioning path installs QA tools without consulting the lock.
 
 ## Delivery & Milestones
 
