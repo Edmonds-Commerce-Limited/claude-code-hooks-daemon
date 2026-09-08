@@ -65,10 +65,6 @@ _DAEMON_ERROR_MARKER = b"HOOKS DAEMON ERROR"
 
 _EXIT_HARD_BLOCK = 2
 
-#: Marker text present in every generated relay guard block (the header
-#: comment ``forwarder_generator`` emits verbatim).
-_GUARD_MARKER = "relay hot path"
-
 _PROBE_SESSION_ID = "transport-toggle-probe"
 
 

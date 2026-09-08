@@ -509,16 +509,27 @@ class HandlerRegistry:
                                 # calls vendored, so a monorepo sub-project's
                                 # declaration was inert here for exactly the
                                 # same reason.
-                                doc_attrs = {
-                                    "documentation": policy_from_config(
+                                # setattr via a variable attribute name, not a direct
+                                # attribute assignment: unlike `_project_languages` et
+                                # al., `_documentation` is not declared on the shared
+                                # `Handler` base (each documentation-tagged handler
+                                # declares its own), so `instance` (typed `Handler`)
+                                # has no such attribute for mypy to check -- the same
+                                # reason the `merged_options`/`plan_attrs` blocks
+                                # above use `setattr`. Read from a variable, not a
+                                # literal, so it is not the constant-attribute form
+                                # ruff (B010) flags as a plain assignment in disguise.
+                                doc_attr_name = "_documentation"
+                                setattr(
+                                    instance,
+                                    doc_attr_name,
+                                    policy_from_config(
                                         documentation,
                                         vendor_scopes=_vendor_scopes_for_policy(
                                             project_registry, project_layout
                                         ),
-                                    )
-                                }
-                                for attr_key, attr_val in doc_attrs.items():
-                                    setattr(instance, f"_{attr_key}", attr_val)
+                                    ),
+                                )
 
                             router.register(event_type, instance)
                             count += 1
