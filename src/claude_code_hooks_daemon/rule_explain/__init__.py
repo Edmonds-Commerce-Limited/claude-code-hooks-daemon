@@ -1,5 +1,5 @@
 """On-demand rule/handler lookup for the ``explain-rule``/``explain-handler``
-CLI commands and the ``/hooks-daemon rule-explain`` skill (Plan 00116 Phase 6,
+CLI commands, documented as a capability of the hooks-daemon skill (Plan 00116 Phase 6,
 Decision F).
 
 Enumeration walks the ``handlers`` package the same way

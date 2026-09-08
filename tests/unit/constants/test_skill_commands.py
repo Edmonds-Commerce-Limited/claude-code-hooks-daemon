@@ -1,27 +1,40 @@
-"""Tests for SkillCommand constants.
+"""Tests for the skill / CLI subcommand name constants.
 
-Plan 00116: skill/CLI subcommand names are a public contract reused across the
-rule-explain pointer (core/rule.py) and the Phase 6 CLI + skill. They must be
-named constants (NO MAGIC / single source of truth), not scattered literals.
+Plan 00116: subcommand names are a public contract reused across the
+rule-explain pointer (core/rule.py) and the CLI + skill. They must be named
+constants (NO MAGIC / single source of truth), not scattered literals.
+
+Plan 00330: the pointer names the CLI verb (`explain-rule`), because
+`rule-explain` is a documented capability rather than a routed subcommand.
 """
 
 from __future__ import annotations
 
-from claude_code_hooks_daemon.constants.skill_commands import SkillCommand
+from claude_code_hooks_daemon.constants.skill_commands import CliCommand, SkillCommand
 from claude_code_hooks_daemon.core.rule import _EXPLAIN_SUFFIX
 
 
+class TestCliCommand:
+    def test_explain_rule_value(self) -> None:
+        assert CliCommand.EXPLAIN_RULE == "explain-rule"
+
+    def test_housekeeping_is_the_same_verb_the_skill_routes(self) -> None:
+        assert CliCommand.HOUSEKEEPING == SkillCommand.HOUSEKEEPING == "housekeeping"
+
+    def test_explain_suffix_uses_the_cli_verb(self) -> None:
+        """core/rule.py's pointer is built from the constant, not a literal, and
+        names the CLI form a human can paste."""
+        assert CliCommand.EXPLAIN_RULE in _EXPLAIN_SUFFIX
+        assert "rule-explain" not in _EXPLAIN_SUFFIX
+        # Slash-command syntax reads as a bash command to Claude (skill_refs QA).
+        assert " /hooks-daemon" not in _EXPLAIN_SUFFIX
+        assert "bin/hooks-daemon" in _EXPLAIN_SUFFIX
+
+
 class TestSkillCommand:
-    """SkillCommand exposes the canonical skill/CLI subcommand names."""
+    def test_optimise_value(self) -> None:
+        assert SkillCommand.OPTIMISE == "optimise"
 
-    def test_rule_explain_value(self) -> None:
-        """RULE_EXPLAIN is the documented `rule-explain` subcommand (Decision F)."""
-        assert SkillCommand.RULE_EXPLAIN == "rule-explain"
-
-    def test_rule_explain_is_str(self) -> None:
-        """The constant is a plain string usable directly in f-strings."""
-        assert isinstance(SkillCommand.RULE_EXPLAIN, str)
-
-    def test_explain_suffix_uses_the_constant(self) -> None:
-        """core/rule.py's pointer suffix is built from the constant, not a literal."""
-        assert SkillCommand.RULE_EXPLAIN in _EXPLAIN_SUFFIX
+    def test_no_constant_names_a_documented_only_capability(self) -> None:
+        """Only routed subcommands belong on SkillCommand."""
+        assert not hasattr(SkillCommand, "RULE_EXPLAIN")
