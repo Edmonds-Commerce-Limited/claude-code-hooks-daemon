@@ -283,3 +283,5 @@ This plan remains about size only; the `gh` body-extraction shapes it will need
 
 - Filed from [FIELD-REPORT.md](FIELD-REPORT.md); the dedupe scout checked 35
   live plans and found no overlap.
+- Open Question 7 answered and its secret-term half delivered in
+  `sensitive_content` by Plan 00362 Task 2.4: `6c9a6f6f`.

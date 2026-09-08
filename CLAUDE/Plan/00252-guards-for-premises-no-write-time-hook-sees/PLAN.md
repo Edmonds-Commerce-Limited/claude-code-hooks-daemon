@@ -229,3 +229,4 @@ arrive by routes no hook sees at all.
 <!-- Curated milestones + delivery commit hashes. Blow-by-blow log lives in JOURNAL/. -->
 
 - Filed at the commit that adds this plan.
+- Phase 3 and Task 4.3 delivered by Plan 00362 Task 2.4: `6c9a6f6f`.
