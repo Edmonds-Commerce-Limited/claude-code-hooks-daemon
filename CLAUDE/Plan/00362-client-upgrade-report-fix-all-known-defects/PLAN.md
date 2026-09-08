@@ -100,9 +100,9 @@ while the detectors silently do not run.
   HIGH): staged content is never inspected for secret-list terms, and a `gh`
   issue/PR comment body is not a candidate at all. Decision: both belong to
   `sensitive_content`, as two more surfaces of the one guard.
-- [ ] ⬜ **Task 2.5** (D8 — Plan 00189 Tasks 1.1 to 1.3, MEDIUM): a daemon-down
+- [x] ✅ **Task 2.5** (D8 — Plan 00189 Tasks 1.1 to 1.3, MEDIUM): a daemon-down
   `WorktreeCreate` hook writes JSON to a stdout Claude Code reads as a path;
-  generalise over the `raw_stdout` event flag.
+  generalise over the `raw_stdout` event flag. (commit `adb82013`)
 - [ ] ⬜ **Task 2.6** (D10 — Plan 00252 Phases 1 and 2, MEDIUM): the test suite
   neutralises ambient git identity and config so a fresh runner and a local
   run agree.
