@@ -36,7 +36,7 @@ def edit_context(
     policy: DocumentationPolicy,
     file_path: Path,
     file_content: str,
-    file_exists_before: bool,
+    file_exists_before: bool | None,
     file_content_before: str | None = None,
     corpus: DocCorpus | None = None,
     layout: "ProjectLayout | None" = None,

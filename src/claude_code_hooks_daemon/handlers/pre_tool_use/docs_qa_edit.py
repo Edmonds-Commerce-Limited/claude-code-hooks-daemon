@@ -58,6 +58,7 @@ from claude_code_hooks_daemon.docs_qa.report import format_advisory, format_bloc
 from claude_code_hooks_daemon.docs_qa.runner import run_stage
 from claude_code_hooks_daemon.docs_qa.types import CheckStage, Finding, Severity
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 _MODE_BLOCK: Final[str] = "block"
 
@@ -137,7 +138,11 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
         project_root = ProjectContext.project_root()
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         file_path = Path(tool_input.get(_FIELD_FILE_PATH, ""))
-        exists_before = file_path.is_file()
+        # Tri-state, matching plan_qa_edit: `CheckContext` types this field
+        # `bool | None` because "I could not stat it" is a third answer, not a
+        # flavour of False. Claiming True would send the read below into a
+        # PermissionError on a path that cannot be read.
+        exists_before = path_is_file(file_path, unreadable_means=None)
 
         content = self._would_be_content(hook_input, file_path, exists_before)
         if content is None:
@@ -148,7 +153,7 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
         policy = self._documentation
         assert policy is not None  # matches() only returns True when this is set
 
-        content_before = file_path.read_text(encoding="utf-8") if exists_before else None
+        content_before = file_path.read_text(encoding="utf-8") if exists_before is True else None
         index_path = ProjectContext.daemon_untracked_dir() / _INDEX_DIR_NAME / _INDEX_FILE_NAME
         corpus = load_or_cold_corpus(project_root, index_path)
         # Task 3.5: the cache read above performs NO staleness check, so
@@ -218,9 +223,14 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
         self,
         hook_input: dict[str, Any],
         file_path: Path,
-        exists_before: bool,
+        exists_before: bool | None,
     ) -> str | None:
-        """Content the file WOULD have after the tool call, or None to skip."""
+        """Content the file WOULD have after the tool call, or None to skip.
+
+        ``exists_before`` is ``None`` when the file could not be stat'ed. An
+        Edit then skips: applying ``old_string`` needs the current text, which
+        by definition cannot be read, so there is nothing to lint.
+        """
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         if hook_input.get(HookInputField.TOOL_NAME) == ToolName.WRITE:
             raw: Any = tool_input.get(_FIELD_CONTENT, "")

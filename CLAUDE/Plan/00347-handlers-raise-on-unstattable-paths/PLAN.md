@@ -126,20 +126,33 @@ them would be a louder lie than the one this fixes.
 
 ### Phase 2: Convert the sites that judge caller-supplied paths
 
-- [ ] ⬜ **Task 2.1**: Convert the 14 caller-supplied sites Task 2.2 identified.
-  Each needs its own RED first: the correct fallback VALUE differs by site, and
-  a wrong fallback on a DENY handler is a bypass rather than a crash. Three
-  shapes to expect, all evidenced in the report:
-  - **Inverted** — `write_clobber_guard.py:155` needs `True`; `False` exempts
-    the clobber guard.
-  - **Naive-safe** — `comment_size.py:226` is fine with `False`, because its
-    consumer reads "no prior content" as growth and so biases toward the DENY.
-  - **No single safe boolean** — `plan_qa_edit.py:165` and `docs_qa_edit.py:140`
-    feed `file_exists_before` to three different consumers. One of them,
-    `plan_qa/checks/archive_immutability.py:30`, tests `is not True`, so both
-    `False` and `None` silently disable it. (It is `Level.ADVISE`, so the cost
-    there is a lost advisory rather than a lost block — but the shape is the
-    warning: a value consumed by several checks cannot be defaulted once.)
+- [x] ✅ **Task 2.1**: All 14 caller-supplied sites converted, each RED first.
+  The three shapes the report predicted all appeared, and the split was
+  **11 / 1 / 2**:
+  - **Inverted** — `write_clobber_guard.py:155` takes `True`; `False` exempts
+    the clobber guard. The handler already held the answer one method away:
+    `_count_lines` degrades to `0` on an unreadable file because "a file that
+    cannot be read is still worth blocking". Line 155 was standing the write
+    down before that reasoning was reached.
+  - **Naive-safe** — the other 11 take `False`, each for its own consumer's
+    reason rather than by rule. `comment_size.py:226` is the one where `False`
+    is right *positively*: its consumer reads "no prior content" as growth, so
+    the naive fallback biases toward the DENY.
+  - **No single safe boolean** — `plan_qa_edit.py:165` / `docs_qa_edit.py:140`
+    take `None`. `CheckContext` already types `file_exists_before` as
+    `bool | None`, and its three consumers disagree about `False`
+    (`archive_immutability` tests `is not True`, `task_grammar` `is False`,
+    `template_metadata` `is not False`).
+
+**The report recommended `True` for that last pair, and it is wrong.**
+`archive_immutability` tests `is not True`, so its author already decided that
+uncertainty should not raise the advisory — forcing `True` from the producer
+overrides a choice the consumer made deliberately, and sends `read_text()`
+into the same `PermissionError` one line later. Passing `None` also changed a
+branch that was safe while the value was boolean: `if not exists_before` is
+true for `None`, which would have recorded a plan-number allocation for a file
+that may well exist. Narrowed to `is False`.
+
 - [x] ✅ **Task 2.2**: Classify every predicate in `handlers/` as
   caller-supplied or daemon-controlled. **74 predicate calls across 73 sites:
   14 caller-supplied, 59 daemon-controlled, none left uncertain.** Full trace

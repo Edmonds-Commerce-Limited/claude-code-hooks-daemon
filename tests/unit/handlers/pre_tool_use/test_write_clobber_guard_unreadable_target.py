@@ -127,9 +127,7 @@ class TestAnUnstattableTargetIsStillGuarded:
             "knows least about what it is destroying"
         )
 
-    def test_handle_survives_counting_lines_it_cannot_read(
-        self, stat_always_denied: None
-    ) -> None:
+    def test_handle_survives_counting_lines_it_cannot_read(self, stat_always_denied: None) -> None:
         """Deciding to fire sends control into ``_count_lines``, which opens the
         file. Assuming a path exists is only safe if everything downstream of
         that assumption also tolerates being wrong."""

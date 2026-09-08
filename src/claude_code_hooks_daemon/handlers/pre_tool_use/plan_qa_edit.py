@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.plan_qa.report import format_advisory, format_bloc
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
 from claude_code_hooks_daemon.plan_qa.types import Finding, Level, Stage
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 # Single source of truth for the one rule this handler's DENY path enforces
 # (Plan 00116, gate-level granularity: one Rule per GATE, not one per plan QA
@@ -162,7 +163,18 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         file_path = Path(tool_input.get(_FIELD_FILE_PATH, ""))
-        exists_before = file_path.is_file()
+        # Tri-state on purpose, and `None` rather than a boolean. This value is
+        # threaded to three checks that read it three different ways --
+        # archive_immutability fires on `is not True`, task_grammar on
+        # `is False`, template_metadata on `is not False` -- so no boolean
+        # leaves all three doing what they were written to do. `CheckContext`
+        # already types the field `bool | None` for exactly this reason.
+        #
+        # Claiming True to keep archive_immutability firing would override a
+        # decision its author already made (`is not True` means "do not advise
+        # on uncertainty"), and would send the read below straight into a
+        # PermissionError on a path that cannot be read.
+        exists_before = path_is_file(file_path, unreadable_means=None)
 
         content = self._would_be_content(hook_input, file_path, exists_before)
         if content is None:
@@ -170,10 +182,13 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
             # itself will fail with its own error — nothing to lint.
             return GatingResult(decision=Decision.ALLOW, context=[])
 
-        if not exists_before:
+        # `is False`, not `not exists_before`: a path the daemon could not read
+        # is not a file it knows to be new, and recording an allocation for it
+        # would claim a plan number on the strength of a failed stat.
+        if exists_before is False:
             self._record_allocation(file_path)
 
-        content_before = file_path.read_text(encoding="utf-8") if exists_before else None
+        content_before = file_path.read_text(encoding="utf-8") if exists_before is True else None
         context = edit_context(
             project_root=ProjectContext.project_root(),
             plan_dir_rel=str(self._track_plans_in_project),
@@ -253,9 +268,14 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
         self,
         hook_input: dict[str, Any],
         file_path: Path,
-        exists_before: bool,
+        exists_before: bool | None,
     ) -> str | None:
-        """Content the file WOULD have after the tool call, or None to skip."""
+        """Content the file WOULD have after the tool call, or None to skip.
+
+        ``exists_before`` is ``None`` when the file could not be stat'ed. An
+        Edit then skips: applying ``old_string`` needs the current text, which
+        by definition cannot be read, so there is nothing to lint.
+        """
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         if hook_input.get(HookInputField.TOOL_NAME) == ToolName.WRITE:
             raw: Any = tool_input.get(_FIELD_CONTENT, "")
