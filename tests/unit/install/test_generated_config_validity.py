@@ -20,6 +20,7 @@ however the template is later edited.
 
 from __future__ import annotations
 
+import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -73,6 +74,34 @@ def test_the_generated_config_passes_the_daemons_own_validator(
     assert errors == [], (
         "install.py generated a config the daemon would refuse to start on. "
         "A fresh install is broken until these are fixed:\n  " + "\n  ".join(errors)
+    )
+
+
+def test_the_shipped_example_config_passes_the_same_validator(tmp_path: Path) -> None:
+    """`.claude/hooks-daemon.yaml.example` is what a CLIENT install deploys.
+
+    The shell installer copies this file to `hooks-daemon.yaml` on a fresh
+    install (`install_version.sh:438`), so it is the config most clients
+    actually run — yet nothing validated it against the schema. It is checked
+    here because it is the same defect class as the generated template above,
+    just on the other installer, and a silently invalid example would strand a
+    client with a daemon that will not start.
+
+    Copied to a `.yaml` name first because the loader dispatches on extension
+    and rejects `.example` outright — which is exactly what the installer does
+    with it.
+    """
+    source = _REPO_ROOT / ".claude" / "hooks-daemon.yaml.example"
+    assert source.is_file(), f"the installer's example config is missing: {source}"
+
+    deployed = tmp_path / "hooks-daemon.yaml"
+    shutil.copy(source, deployed)
+
+    errors = ConfigValidator.validate(ConfigLoader.load(deployed))
+
+    assert errors == [], (
+        "the example config a client install deploys is invalid; a fresh client "
+        "would get a daemon that refuses to start:\n  " + "\n  ".join(errors)
     )
 
 
