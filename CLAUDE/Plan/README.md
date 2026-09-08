@@ -14,8 +14,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00329: post upgrade truth changes report bloat](00329-post-upgrade-truth-changes-report-bloat/PLAN.md) - Not Started (the upgrade flow's truth-changes reconciliation hands the agent up to 89KB / 74 entries with no bound and no supersession collapsing, so superseded truths are replayed and the step is skimmed rather than performed)
 
-- [00327: hooks contract refresh audit](00327-hooks-contract-refresh-audit/PLAN.md) - Not Started (upstream's hooks documentation has changed since the 2.1.252 audit — `e2462deb…` vs META's `d514bf57…` — so the vendored contract needs its verified section-by-section extraction audit, and the mechanisable half of the refresh procedure folded into a `contract-status` command)
-
 - [00291: upgrade path hardening and guarded branch install](00291-upgrade-path-hardening-and-guarded-branch-install/PLAN.md) - Not Started (php-qa-ci canary findings: fresh-clone `upgrade_version.sh` hard-fail, UNRELEASED-manifest visibility, silent old-config retention, `v`-prefix handling — plus the owner-ruled guarded, non-obvious, loudly-warned first-party-only branch-install mechanism)
 
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
@@ -139,11 +137,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00327: hooks contract refresh audit](Completed/00327-hooks-contract-refresh-audit/PLAN.md) - Complete at `8246f7f0` + the archiving commit (the vendored hook contract re-audited against Claude Code 2.1.263 with no drifted claim, `META.json` re-pinned, `contract_staleness` proven silent, and the manual refresh steps replaced by a `hooks-daemon contract-status` verb)
+
 - [00360: pending release notes holding area](Completed/00360-pending-release-notes-holding-area/PLAN.md) - Complete (a plan closes by leaving its callout in `UNRELEASED/release-notes/`, the project-only gate denies a Complete flip without the holding-area criterion, the release folds the callouts in and moves them with an ABORT if any remain, and `release-slate-check` lists them without changing its verdict)
 
 - [00319: supervisor release review followups](Completed/00319-supervisor-release-review-followups/PLAN.md) - Complete at `5ad0d539` and `1c00aced` + the archiving commit (all ten supervisor findings and six acceptance-run observations closed; the budget detector distinguishes delivered from quoted budget text structurally; every BLOCKING acceptance test carries a structured payload the contract test drives through the real handler)
-
-- [00295: v3.57.0 release review followups](Completed/00295-v3570-release-review-followups/PLAN.md) - Complete at `420735b3` + the archiving commit (all 26 v3.57.0 review findings fixed across three tiers: the fail-open lint skip-path and docs QA symlink gaps, transport probe orphan kill, `layout` path matching, `explain-handler --list`, the shared docs QA walk, and the acceptance-playbook drift)
 
 - [00358: a worktree venv can silently test the WRONG source tree](Completed/00358-worktree-venv-tests-wrong-source-tree/PLAN.md) - Complete (a test session now refuses to start when the package resolves outside the invoking checkout, naming both paths and the setup script; the `worktree_create` guidance says a fresh worktree has no venv)
 
@@ -248,15 +246,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 362 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 314 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 315 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 26 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 25 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 12 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 26 + 314 + 12 = **352 folders**, spanning
+- **Folder-to-number reconciliation**: 25 + 315 + 12 = **352 folders**, spanning
   **349 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

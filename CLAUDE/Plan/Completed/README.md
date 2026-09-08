@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Complete at `420735b3` + the archiving commit (all 26 v3.57.0 review findings fixed across three tiers: the fail-open lint skip-path and docs QA symlink gaps, transport probe orphan kill, `layout` path matching, `explain-handler --list`, the shared docs QA walk, and the acceptance-playbook drift)
+
 - [00311: v3.59.0 release review followups](00311-v3590-release-review-followups/PLAN.md) - Complete (all five v3.59.0 review findings dispositioned with tests at `a618ccef`, including a real `git rm --cached --pathspec-from-file` disclosure route closed and dispatch_declaration honouring a configured plan directory)
 
 - [00293: tool inventory disable and token savings](00293-tool-inventory-disable-and-token-savings/PLAN.md) - Complete (`source_disable`, the transcript analyser, `tool-report` and the advisory shipped in v3.57.0 and are dogfooded here; the one open item, a `/context` spot check in a fresh interactive session, is a one-off handed to the owner)
