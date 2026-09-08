@@ -104,15 +104,25 @@ A single canonical fallback is therefore not merely unhelpful, it is dangerous:
 it looks principled while inverting the guard at some sites. The helper must
 make the decision explicit at the call site instead of supplying a default.
 
-- [ ] ⬜ **Task 1.1**: Add EACCES-safe path predicates whose signature REQUIRES
-  the caller to state the value an unstattable path yields — no default. The
-  parameter name should carry the reasoning (what this site means by "I could
-  not look"), so review sees the choice rather than an omission.
-- [ ] ⬜ **Task 1.2**: Every predicate LOGS on the EACCES path. A silent
-  fallback fails `audit_error_hiding.py` — correctly, because "the guard
-  decided" and "the guard could not look" are otherwise indistinguishable to
-  whoever asks why a policy did not fire. `f17fabcd` was rejected by that
-  auditor on its first draft for exactly this.
+- [x] ✅ **Task 1.1**: `utils/path_predicates.py` — `path_exists`,
+  `path_is_file`, `path_is_dir`. The fallback is a **keyword-only argument with
+  no default**, named `unreadable_means`, so the value is always read together
+  with what it means at that site: `path_is_file(p, unreadable_means=True)`
+  states the answer, where a positional `True` would state nothing. The return
+  type is `bool | _Fallback`, not `bool` — `None` has to survive as itself for
+  the tri-state `file_exists_before` consumers.
+- [x] ✅ **Task 1.2**: The EACCES path logs a warning naming the path, the
+  predicate, the errno and the substituted answer. A silent fallback fails
+  `audit_error_hiding.py` — correctly, because "the guard decided" and "the
+  guard could not look" are otherwise indistinguishable to whoever asks why a
+  policy did not fire. `f17fabcd` was rejected by that auditor on its first
+  draft for exactly this. A successful stat logs nothing: the warning marks an
+  abstention, and noise is how a real one gets missed.
+
+The fallback covers **only** the failures pathlib itself raises on. A missing
+path still answers `False` through the normal return, never through the
+fallback — "not there" and "could not look" are different facts, and conflating
+them would be a louder lie than the one this fixes.
 
 ### Phase 2: Convert the sites that judge caller-supplied paths
 
