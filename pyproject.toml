@@ -78,8 +78,9 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-# Bundle the plan-scaffolding script so wheel installs can deploy it.
-"claude_code_hooks_daemon.install" = ["templates/*.bash"]
+# Bundle the plan-scaffolding script, the CLI wrapper and the echd-capture
+# helper so wheel installs can deploy them (the latter two are extensionless).
+"claude_code_hooks_daemon.install" = ["templates/*.bash", "templates/hooks-daemon", "templates/echd-capture"]
 # PEP 561 marker. This package is checked under `mypy --strict`, but without
 # this file no consumer can see that: every `from claude_code_hooks_daemon...`
 # import resolves to Any and silently loses type checking. The repo's own

@@ -178,7 +178,7 @@ class TestEnsureEchdCaptureExecutable:
     """
 
     def _seed_helper(self, daemon_dir: Path, executable: bool) -> Path:
-        helper_dir = daemon_dir / "scripts"
+        helper_dir = daemon_dir / "bin"
         helper_dir.mkdir(parents=True, exist_ok=True)
         helper = helper_dir / "echd-capture"
         helper.write_text("#!/bin/bash\necho fake\n")

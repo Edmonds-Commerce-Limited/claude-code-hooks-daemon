@@ -271,3 +271,54 @@ class TestWrapperNameConstant:
 
     def test_bin_dir_name_is_exported(self) -> None:
         assert cli_command.BIN_DIR_NAME == "bin"
+
+
+class TestEchdCapturePath:
+    """The ``echd-capture`` helper lives beside the wrapper (Plan 00362 Task 1.3).
+
+    A client report (v3.62.1) hit ``echd-capture: command not found``: the
+    guidance named the helper by its bare name, and nothing deployed it to a
+    stable path. It now ships to ``{daemon_root}/bin/echd-capture`` — the same
+    directory as the wrapper — and the two path builders here are the single
+    source the deployer and the guidance both read.
+    """
+
+    def test_helper_name_is_exported(self) -> None:
+        assert cli_command.ECHD_CAPTURE_NAME == "echd-capture"
+
+    def test_runtime_path_is_absolute_in_client_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _set_mode(monkeypatch, root=_CLIENT_ROOT, self_install=False)
+        assert cli_command.echd_capture_path() == (
+            _CLIENT_ROOT / ".claude" / "hooks-daemon" / "bin" / "echd-capture"
+        )
+
+    def test_runtime_path_is_absolute_in_self_install_mode(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _set_mode(monkeypatch, root=_SELF_INSTALL_ROOT, self_install=True)
+        assert cli_command.echd_capture_path() == _SELF_INSTALL_ROOT / "bin" / "echd-capture"
+
+    def test_docs_path_is_relative_in_client_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _set_mode(monkeypatch, root=_CLIENT_ROOT, self_install=False)
+        assert cli_command.echd_capture_path_for_docs() == ".claude/hooks-daemon/bin/echd-capture"
+
+    def test_docs_path_is_relative_in_self_install_mode(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _set_mode(monkeypatch, root=_SELF_INSTALL_ROOT, self_install=True)
+        assert cli_command.echd_capture_path_for_docs() == "bin/echd-capture"
+
+    def test_docs_path_degrades_to_client_form_when_uninitialised(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", False, raising=False)
+        monkeypatch.setattr(pc.ProjectContext, "_instance", None, raising=False)
+        assert cli_command.echd_capture_path_for_docs() == ".claude/hooks-daemon/bin/echd-capture"
+
+    def test_docs_form_is_a_suffix_of_the_runtime_form(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _set_mode(monkeypatch, root=_CLIENT_ROOT, self_install=False)
+        assert str(cli_command.echd_capture_path()).endswith(
+            cli_command.echd_capture_path_for_docs()
+        )

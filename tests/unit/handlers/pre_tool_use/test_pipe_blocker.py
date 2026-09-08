@@ -55,17 +55,44 @@ def _with_transcript(hook_input: dict, transcript_path: str) -> dict:
     return {**hook_input, "transcript_path": transcript_path}
 
 
-# ── echd-capture recommendation (Plan 00164 Phase 6) ─────────────────────────
+# ── echd-capture recommendation (Plan 00164 Phase 6, Plan 00362 Task 1.3) ──
 
 
 def _deploy_fake_helper(daemon_dir: Path, executable: bool = True) -> Path:
-    """Create a fake ``scripts/echd-capture`` under ``daemon_dir``."""
-    helper_dir = daemon_dir / "scripts"
+    """Create a fake deployed ``bin/echd-capture`` under ``daemon_dir``."""
+    helper_dir = daemon_dir / "bin"
     helper_dir.mkdir(parents=True, exist_ok=True)
     helper = helper_dir / "echd-capture"
     helper.write_text("#!/bin/bash\necho fake\n")
     helper.chmod(0o755 if executable else 0o644)
     return helper
+
+
+def _pinned_to(daemon_dir: Path):
+    """Patch ProjectContext so ``daemon_dir`` IS the daemon root (self-install)."""
+    return _PinnedContext(daemon_dir)
+
+
+class _PinnedContext:
+    def __init__(self, daemon_dir: Path) -> None:
+        self._root = patch(f"{_PROJECT_CONTEXT_PATH}.project_root", return_value=daemon_dir)
+        self._mode = patch(f"{_PROJECT_CONTEXT_PATH}.self_install_mode", return_value=True)
+
+    def __enter__(self) -> None:
+        self._root.start()
+        self._mode.start()
+
+    def __exit__(self, *exc: object) -> None:
+        self._mode.stop()
+        self._root.stop()
+
+
+def _uninitialised():
+    """Patch ProjectContext so every accessor raises, as before initialise()."""
+    return patch(
+        f"{_PROJECT_CONTEXT_PATH}.project_root",
+        side_effect=RuntimeError("not initialised"),
+    )
 
 
 class TestEchdCaptureRecommendation:
@@ -83,16 +110,12 @@ class TestEchdCaptureRecommendation:
     ) -> str:
         hook_input = _with_transcript(hook_input, transcript_path)
         if daemon_dir is not None:
-            with patch(f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir") as mock_dut:
-                mock_dut.return_value = daemon_dir / "untracked"
+            with _pinned_to(daemon_dir):
                 reason = handler.handle(hook_input).reason
         else:
-            # No ProjectContext deployment mocked — simulates the helper
-            # being unresolvable (not initialised / not found anywhere).
-            with patch(
-                f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir",
-                side_effect=RuntimeError("not initialised"),
-            ):
+            # No ProjectContext — simulates the helper being unresolvable
+            # (not initialised / not found anywhere).
+            with _uninitialised():
                 reason = handler.handle(hook_input).reason
         assert reason is not None
         return reason
@@ -105,7 +128,7 @@ class TestEchdCaptureRecommendation:
             handler, blacklisted_input, "/tmp/agent-a/transcript.jsonl", daemon_dir=tmp_path
         )
         assert "echd-capture" in reason
-        assert str(tmp_path / "scripts" / "echd-capture") in reason
+        assert str(tmp_path / "bin" / "echd-capture") in reason
         assert "pipefail" in reason
 
     def test_terse_blacklisted_recommends_echd_capture(
@@ -136,11 +159,70 @@ class TestEchdCaptureRecommendation:
         reason = self._handle(handler, unknown_input, transcript_path, daemon_dir=tmp_path)
         assert "echd-capture" in reason
 
-    def test_claude_md_documents_echd_capture(self, handler: PipeBlockerHandler) -> None:
-        guidance = handler.get_claude_md()
+
+class TestClaudeMdNamesTheHelperOnlyWhenDeployed:
+    """Plan 00362 Task 1.3 (client report §3): the injected CLAUDE.md guidance
+    told agents to prefer ``echd-capture`` by bare name, on installs where
+    nothing had deployed it — ``echd-capture: command not found``. The guidance
+    now names the helper ONLY when its deployed path exists at render time,
+    by a path that is true in every clone of that project (Plan 00244 forbids
+    an absolute path in a tracked file); otherwise the redirect recipe is the
+    primary path and the helper is not mentioned at all."""
+
+    def test_names_the_deployed_relative_path_when_present(
+        self, handler: PipeBlockerHandler, tmp_path: Path
+    ) -> None:
+        _deploy_fake_helper(tmp_path)
+        with _pinned_to(tmp_path):
+            guidance = handler.get_claude_md()
         assert guidance is not None
-        assert "echd-capture" in guidance
+        assert "bin/echd-capture 20" in guidance
         assert "pipefail" in guidance
+        assert str(tmp_path) not in guidance, "tracked guidance must not embed the machine root"
+
+    def test_client_install_names_the_client_relative_path(
+        self, handler: PipeBlockerHandler, tmp_path: Path
+    ) -> None:
+        project_root = tmp_path / "client-project"
+        _deploy_fake_helper(project_root / ".claude" / "hooks-daemon")
+        with (
+            patch(f"{_PROJECT_CONTEXT_PATH}.project_root", return_value=project_root),
+            patch(f"{_PROJECT_CONTEXT_PATH}.self_install_mode", return_value=False),
+        ):
+            guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert ".claude/hooks-daemon/bin/echd-capture 20" in guidance
+        assert str(project_root) not in guidance
+
+    def test_omits_the_helper_entirely_when_not_deployed(
+        self, handler: PipeBlockerHandler, tmp_path: Path
+    ) -> None:
+        with _pinned_to(tmp_path):
+            guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "echd-capture" not in guidance
+        assert "untracked/scratch" in guidance, "the redirect recipe is the primary path"
+        assert "**Preferred" not in guidance or "redirect" in guidance.split("**Preferred")[1]
+
+    def test_omits_the_helper_when_context_is_uninitialised(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        with _uninitialised():
+            guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "echd-capture" not in guidance
+
+    def test_never_names_the_helper_by_bare_name(
+        self, handler: PipeBlockerHandler, tmp_path: Path
+    ) -> None:
+        """Every mention is a runnable path, so nothing invites a bare invocation."""
+        _deploy_fake_helper(tmp_path)
+        with _pinned_to(tmp_path):
+            guidance = handler.get_claude_md()
+        assert guidance is not None
+        for line in guidance.splitlines():
+            if "| echd-capture" in line:
+                raise AssertionError(f"bare helper invocation in guidance: {line!r}")
 
 
 class TestEchdCaptureResolution:
@@ -151,13 +233,15 @@ class TestEchdCaptureResolution:
     def test_resolves_absolute_path_in_simulated_client_install(
         self, handler: PipeBlockerHandler, tmp_path: Path
     ) -> None:
-        """Simulated client-install layout: {project}/.claude/hooks-daemon/scripts/echd-capture."""
+        """Simulated client-install layout: {project}/.claude/hooks-daemon/bin/echd-capture."""
         project_root = tmp_path / "client-project"
         daemon_dir = project_root / ".claude" / "hooks-daemon"
         helper = _deploy_fake_helper(daemon_dir)
 
-        with patch(f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir") as mock_dut:
-            mock_dut.return_value = daemon_dir / "untracked"
+        with (
+            patch(f"{_PROJECT_CONTEXT_PATH}.project_root", return_value=project_root),
+            patch(f"{_PROJECT_CONTEXT_PATH}.self_install_mode", return_value=False),
+        ):
             resolved = handler._capture_helper_invocation()
 
         assert resolved == str(helper)
@@ -170,8 +254,7 @@ class TestEchdCaptureResolution:
         helper = _deploy_fake_helper(tmp_path, executable=False)
         assert not os.access(helper, os.X_OK)
 
-        with patch(f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir") as mock_dut:
-            mock_dut.return_value = tmp_path / "untracked"
+        with _pinned_to(tmp_path):
             resolved = handler._capture_helper_invocation()
 
         assert resolved == str(helper)
@@ -180,18 +263,14 @@ class TestEchdCaptureResolution:
     def test_returns_none_when_project_context_not_initialised(
         self, handler: PipeBlockerHandler
     ) -> None:
-        with patch(
-            f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir",
-            side_effect=RuntimeError("not initialised"),
-        ):
+        with _uninitialised():
             assert handler._capture_helper_invocation() is None
 
     def test_returns_none_when_helper_missing_everywhere(
         self, handler: PipeBlockerHandler, tmp_path: Path
     ) -> None:
-        """Helper genuinely absent (no scripts/echd-capture deployed at all)."""
-        with patch(f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir") as mock_dut:
-            mock_dut.return_value = tmp_path / "untracked"
+        """Helper genuinely absent (no bin/echd-capture deployed at all)."""
+        with _pinned_to(tmp_path):
             assert handler._capture_helper_invocation() is None
 
     def test_never_recommends_bare_echd_capture_token_when_unresolved(
@@ -200,10 +279,7 @@ class TestEchdCaptureResolution:
         """When the helper cannot be resolved anywhere, the block message must
         fall back to the temp-file redirect and must NOT present a bare
         `echd-capture` as a runnable command."""
-        with patch(
-            f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir",
-            side_effect=RuntimeError("not initialised"),
-        ):
+        with _uninitialised():
             reason = handler.handle(
                 _with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl")
             ).reason

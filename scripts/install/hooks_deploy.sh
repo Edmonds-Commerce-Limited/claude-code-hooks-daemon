@@ -60,11 +60,12 @@ _DAEMON_HOOK_BASENAMES=(
     message-display
 )
 
-# Relative path (within the daemon dir — the git clone/checkout, NOT the
-# project's own .claude/) to the echd-capture output-capture helper the
-# pipe_blocker handler recommends. Single source of truth mirrored by
-# _ECHD_CAPTURE_REL_PARTS in pipe_blocker.py.
-_ECHD_CAPTURE_REL_PATH="scripts/echd-capture"
+# Relative path (within the daemon dir — NOT the project's own .claude/) to
+# the deployed echd-capture output-capture helper the pipe_blocker handler
+# recommends. Deployed beside the CLI wrapper by
+# install.bin_wrapper.deploy_echd_capture (Plan 00362 Task 1.3); mirrors
+# utils.cli_command.echd_capture_path.
+_ECHD_CAPTURE_REL_PATH="bin/echd-capture"
 
 # Mode for every executable this script deploys. Stated EXPLICITLY, never as
 # `chmod +x`: a `+x` with no "who" clause is masked by the caller's umask, so
@@ -344,15 +345,14 @@ set_hook_permissions() {
 #
 # ensure_echd_capture_executable() - Ensure the echd-capture helper is executable
 #
-# The pipe_blocker handler recommends `daemon_dir/scripts/echd-capture` (an
+# The pipe_blocker handler recommends `daemon_dir/bin/echd-capture` (an
 # ABSOLUTE path resolved by PipeBlockerHandler._resolve_echd_capture_path) as
-# the alternative to piping expensive commands into tail/head. The script is
-# vendored inside the daemon's own git checkout, so it is already present at
-# `daemon_dir/scripts/echd-capture` after any clone/checkout — but the exec
-# bit tracked by git can be lost the same way hook wrappers can (e.g. client
-# repo/checkout with `core.fileMode=false`). Explicitly chmod it here,
-# mirroring set_hook_permissions, so the recommended command always works
-# regardless of how the exec bit travelled.
+# the alternative to piping expensive commands into tail/head. The Python
+# deployer applies 0755 itself; this bash step is the belt-and-braces for a
+# copy whose exec bit was lost afterwards, the same way hook wrappers can
+# lose theirs (e.g. a checkout with `core.fileMode=false`). Explicitly chmod
+# it here, mirroring set_hook_permissions, so the recommended command always
+# works regardless of how the exec bit travelled.
 #
 # Args:
 #   $1 - daemon_dir: Path to daemon installation directory

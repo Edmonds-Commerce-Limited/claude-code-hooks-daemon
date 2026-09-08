@@ -866,3 +866,73 @@ class TestValidateDaemonCanStartVenvResolution:
         assert result.passed is False
         legacy = daemon_dir / "untracked" / "venv" / "bin" / "python"
         assert any(str(legacy) in err for err in result.errors)
+
+
+class TestVerifyEchdCaptureDeployed:
+    """Plan 00362 Task 1.3: the post-install checks cover the deployed helper.
+
+    ``echd-capture`` is the command pipe_blocker's guidance names, so an
+    install that ends without it (or with it non-executable) is the client
+    report's ``command not found`` waiting to happen. A missing helper is a
+    warning, not an error: the guidance degrades to the redirect recipe, so
+    the install still works.
+    """
+
+    def _daemon_dir(self, tmp_path):
+        project_root = tmp_path / "project"
+        daemon_dir = project_root / ".claude" / "hooks-daemon"
+        daemon_dir.mkdir(parents=True)
+        return project_root, daemon_dir
+
+    def test_executable_helper_passes_clean(self, tmp_path):
+        project_root, daemon_dir = self._daemon_dir(tmp_path)
+        helper = daemon_dir / "bin" / "echd-capture"
+        helper.parent.mkdir()
+        helper.write_text("#!/bin/bash\n")
+        helper.chmod(0o755)
+
+        result = ClientInstallValidator._verify_echd_capture_deployed(project_root)
+
+        assert result.passed is True
+        assert result.warnings == []
+
+    def test_missing_helper_is_a_warning_naming_the_path(self, tmp_path):
+        project_root, daemon_dir = self._daemon_dir(tmp_path)
+
+        result = ClientInstallValidator._verify_echd_capture_deployed(project_root)
+
+        assert result.passed is True
+        assert len(result.warnings) == 1
+        assert str(daemon_dir / "bin" / "echd-capture") in result.warnings[0]
+
+    def test_non_executable_helper_is_a_warning(self, tmp_path):
+        project_root, daemon_dir = self._daemon_dir(tmp_path)
+        helper = daemon_dir / "bin" / "echd-capture"
+        helper.parent.mkdir()
+        helper.write_text("#!/bin/bash\n")
+        helper.chmod(0o644)
+
+        result = ClientInstallValidator._verify_echd_capture_deployed(project_root)
+
+        assert result.passed is True
+        assert len(result.warnings) == 1
+        assert "executable" in result.warnings[0]
+
+    def test_post_install_runs_the_check(self, tmp_path, monkeypatch):
+        """validate_post_install must include it — a check nobody calls checks nothing."""
+        project_root, _daemon_dir = self._daemon_dir(tmp_path)
+        seen: list = []
+        monkeypatch.setattr(
+            ClientInstallValidator,
+            "_verify_echd_capture_deployed",
+            staticmethod(lambda root: seen.append(root) or ValidationResult(True, [], [])),
+        )
+        monkeypatch.setattr(
+            ClientInstallValidator,
+            "validate_daemon_can_start",
+            staticmethod(lambda root, venv_python=None: ValidationResult(True, [], [])),
+        )
+
+        ClientInstallValidator.validate_post_install(project_root)
+
+        assert seen == [project_root]

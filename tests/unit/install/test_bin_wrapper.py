@@ -153,3 +153,90 @@ class TestDeployAndGuidanceAgreeOnTheSamePath:
         deployed = bin_wrapper.deploy_bin_wrapper(tmp_path)
         advertised = tmp_path / cli_command.BIN_DIR_NAME / cli_command.WRAPPER_NAME
         assert deployed == advertised
+
+
+class TestDeployEchdCapture:
+    """``echd-capture`` is deployed exactly like the wrapper (Plan 00362 Task 1.3).
+
+    Before this, the helper existed only as ``scripts/echd-capture`` inside the
+    daemon checkout and the guidance named it by bare name, so a client agent
+    got ``echd-capture: command not found``. It is now bundled as a template
+    and deployed, executable, beside the wrapper on every install and upgrade.
+    """
+
+    def test_template_path_exists(self) -> None:
+        assert bin_wrapper.echd_capture_template_path().is_file()
+
+    def test_template_is_the_capture_helper(self) -> None:
+        body = bin_wrapper.echd_capture_template_path().read_text(encoding="utf-8")
+        assert "command-output-" in body
+        assert "ECHD_CAPTURE_DIR" in body
+
+    def test_deploys_beside_the_wrapper(self, tmp_path: Path) -> None:
+        target = bin_wrapper.deploy_echd_capture(tmp_path)
+        assert target == tmp_path / "bin" / "echd-capture"
+        assert target.is_file()
+
+    def test_helper_is_executable_and_not_world_writable(self, tmp_path: Path) -> None:
+        target = bin_wrapper.deploy_echd_capture(tmp_path)
+        mode = target.stat().st_mode
+        assert mode & stat.S_IXUSR
+        assert mode & stat.S_IXGRP
+        assert mode & stat.S_IXOTH
+        assert not mode & stat.S_IWOTH
+
+    def test_content_matches_the_bundled_template(self, tmp_path: Path) -> None:
+        target = bin_wrapper.deploy_echd_capture(tmp_path)
+        expected = bin_wrapper.echd_capture_template_path().read_text(encoding="utf-8")
+        assert target.read_text(encoding="utf-8") == expected
+
+    def test_overwrites_a_stale_non_executable_copy(self, tmp_path: Path) -> None:
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        stale = bin_dir / "echd-capture"
+        stale.write_text("#!/bin/bash\necho stale\n", encoding="utf-8")
+        stale.chmod(0o644)
+
+        target = bin_wrapper.deploy_echd_capture(tmp_path)
+
+        assert "echo stale" not in target.read_text(encoding="utf-8")
+        assert os.access(target, os.X_OK)
+
+    def test_deployed_location_is_the_advertised_location(self, tmp_path: Path) -> None:
+        """The deployer and the guidance builder must agree on one file."""
+        deployed = bin_wrapper.deploy_echd_capture(tmp_path)
+        advertised = tmp_path / cli_command.BIN_DIR_NAME / cli_command.ECHD_CAPTURE_NAME
+        assert deployed == advertised
+        assert bin_wrapper.ECHD_CAPTURE_NAME == cli_command.ECHD_CAPTURE_NAME
+
+    def test_repo_helper_matches_the_bundled_template(self) -> None:
+        """Self-install: this repo's own bin/echd-capture is a deployed artifact."""
+        repo_root = Path(__file__).resolve().parents[3]
+        deployed = repo_root / "bin" / "echd-capture"
+        if not deployed.is_file():
+            return
+        template_body = bin_wrapper.echd_capture_template_path().read_text(encoding="utf-8")
+        assert deployed.read_text(encoding="utf-8") == template_body, (
+            "bin/echd-capture has drifted from install/templates/echd-capture. "
+            "Edit the TEMPLATE and redeploy; never hand-edit the deployed copy."
+        )
+        assert os.access(deployed, os.X_OK)
+
+
+class TestInstallAndUpgradeDeployTheHelper:
+    """The scripts that deliver the wrapper must deliver the helper too.
+
+    A deployer nobody calls provisions nothing; this pins the two call sites
+    (fresh install, upgrade) so the helper cannot silently drop out of either.
+    """
+
+    @staticmethod
+    def _script(name: str) -> str:
+        repo_root = Path(__file__).resolve().parents[3]
+        return (repo_root / "scripts" / name).read_text(encoding="utf-8")
+
+    def test_install_script_deploys_echd_capture(self) -> None:
+        assert "deploy_echd_capture" in self._script("install_version.sh")
+
+    def test_upgrade_script_deploys_echd_capture(self) -> None:
+        assert "deploy_echd_capture" in self._script("upgrade_version.sh")

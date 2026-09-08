@@ -15,7 +15,7 @@ while the repository is usually a bind mount, so anything written there is lost
 on restart, invisible to git and outside review. The project already held this
 position in three places before it was ever a rule -- ``daemon/paths.py`` keeps
 runtime files in ``untracked/`` *"not /tmp, to prevent security
-vulnerabilities"*, ``scripts/echd-capture`` prefers ``untracked/captures`` and
+vulnerabilities"*, the ``echd-capture`` helper prefers ``untracked/captures`` and
 calls the temp directory a *"last resort"*, and ``worktree_seed_suggestions``
 calls ``untracked/`` *"this daemon's own scratch convention"*. The tools obeyed
 it; the agent, for whom it was never a rule, did not.

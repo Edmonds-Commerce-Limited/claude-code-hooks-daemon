@@ -967,17 +967,21 @@ SLOWPATH_SKILLS_PY
 # "$PYTHON -m ..." guidance forever. DAEMON_DIR is the daemon root in both
 # install modes.
 
-log_step "13b" "Redeploying hooks-daemon CLI wrapper"
+log_step "13b" "Redeploying hooks-daemon CLI wrapper and echd-capture helper"
 
 "$VENV_PYTHON" - "$DAEMON_DIR" <<'REDEPLOY_BIN_WRAPPER_PY'
 import sys
 from pathlib import Path
 
-from claude_code_hooks_daemon.install.bin_wrapper import deploy_bin_wrapper
+from claude_code_hooks_daemon.install.bin_wrapper import deploy_bin_wrapper, deploy_echd_capture
 
 try:
     target = deploy_bin_wrapper(Path(sys.argv[1]))
     print(f"✓ CLI wrapper redeployed to {target}")
+    # Plan 00362 Task 1.3: this step is what delivers the helper to installs
+    # that predate it, so pipe_blocker's guidance names a path that exists.
+    helper = deploy_echd_capture(Path(sys.argv[1]))
+    print(f"✓ echd-capture helper redeployed to {helper}")
 except Exception as e:
     print(f"✗ CLI wrapper redeployment failed: {e}")
     sys.exit(1)

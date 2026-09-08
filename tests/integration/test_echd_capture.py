@@ -6,8 +6,10 @@ of "capture full, read a slice" is exactly what a helper should make trivial.
 
 `echd-capture` reads stdin, tees the FULL stream to a capture file, and prints
 only a bounded preview (tail by default, or head) followed by the absolute path
-to the full capture for follow-up. These tests exercise the deployed script
-directly via a bash pipeline.
+to the full capture for follow-up. These tests exercise the bundled template
+(the file ``install.bin_wrapper.deploy_echd_capture`` copies to
+``{daemon_root}/bin/echd-capture``, Plan 00362 Task 1.3) directly via a bash
+pipeline.
 """
 
 from __future__ import annotations
@@ -16,7 +18,9 @@ import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ECHD_CAPTURE = REPO_ROOT / "scripts" / "echd-capture"
+ECHD_CAPTURE = (
+    REPO_ROOT / "src" / "claude_code_hooks_daemon" / "install" / "templates" / "echd-capture"
+)
 
 
 def _run_pipe(
@@ -101,7 +105,7 @@ def test_preserves_upstream_failure_with_pipefail(tmp_path: Path) -> None:
     producer = "printf 'partial\\n'; exit 7"
     result = _run_pipe(producer, "5", tmp_path)
     assert result.returncode == 7, (
-        "pipefail pipeline must surface the producer's non-zero exit; " f"got {result.returncode}"
+        f"pipefail pipeline must surface the producer's non-zero exit; got {result.returncode}"
     )
     # Output was still captured despite the failure.
     capture = _capture_file_from_output(result.stdout)

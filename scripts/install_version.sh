@@ -586,17 +586,21 @@ DEPLOY_SKILLS_PY
 # yet. DAEMON_DIR is the daemon root in BOTH install modes (it equals
 # PROJECT_ROOT in self-install), so one argument serves both.
 
-log_step "10b" "Deploying hooks-daemon CLI wrapper"
+log_step "10b" "Deploying hooks-daemon CLI wrapper and echd-capture helper"
 
 "$VENV_PYTHON" - "$DAEMON_DIR" <<'DEPLOY_BIN_WRAPPER_PY'
 import sys
 from pathlib import Path
 
-from claude_code_hooks_daemon.install.bin_wrapper import deploy_bin_wrapper
+from claude_code_hooks_daemon.install.bin_wrapper import deploy_bin_wrapper, deploy_echd_capture
 
 try:
     target = deploy_bin_wrapper(Path(sys.argv[1]))
     print(f"✓ CLI wrapper deployed to {target}")
+    # Plan 00362 Task 1.3: the helper pipe_blocker's guidance names must exist
+    # before the daemon renders that guidance in Step 13.
+    helper = deploy_echd_capture(Path(sys.argv[1]))
+    print(f"✓ echd-capture helper deployed to {helper}")
 except Exception as e:
     print(f"✗ CLI wrapper deployment failed: {e}")
     sys.exit(1)

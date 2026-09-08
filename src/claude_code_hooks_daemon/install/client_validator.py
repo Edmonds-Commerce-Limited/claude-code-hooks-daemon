@@ -31,8 +31,7 @@ logger = logging.getLogger(__name__)
 # because it lacks permission to signal that process. Without this, the
 # installer would proceed over a live daemon with no visible signal.
 _DAEMON_STOP_PERMISSION_WARNING = (
-    "Could not stop daemon PID {pid}: insufficient permission; "
-    "stop it manually before installing"
+    "Could not stop daemon PID {pid}: insufficient permission; stop it manually before installing"
 )
 
 
@@ -152,11 +151,40 @@ class ClientInstallValidator:
         errors.extend(result.errors)
         warnings.extend(result.warnings)
 
+        # Check 6: The echd-capture helper pipe_blocker's guidance names landed
+        result = ClientInstallValidator._verify_echd_capture_deployed(project_root)
+        errors.extend(result.errors)
+        warnings.extend(result.warnings)
+
         return ValidationResult(
             passed=len(errors) == 0,
             errors=errors,
             warnings=warnings,
         )
+
+    @staticmethod
+    def _verify_echd_capture_deployed(project_root: Path) -> ValidationResult:
+        """Warn when the deployed ``echd-capture`` helper is missing or not executable.
+
+        Plan 00362 Task 1.3: the helper is the command ``pipe_blocker`` names
+        instead of ``| tail``. A warning, not an error — the guidance degrades
+        to the redirect recipe when the helper does not resolve, so the
+        install still works; but an operator should know the preferred path
+        is absent.
+        """
+        warnings: list[str] = []
+        helper = project_root / ".claude" / "hooks-daemon" / "bin" / "echd-capture"
+        if not helper.is_file():
+            warnings.append(
+                f"echd-capture helper not deployed: {helper}\n"
+                f"pipe_blocker guidance will offer the redirect-to-file recipe only."
+            )
+        elif not os.access(helper, os.X_OK):
+            warnings.append(
+                f"echd-capture helper is not executable: {helper}\n"
+                f"Re-run the installer, or chmod 755 the file."
+            )
+        return ValidationResult(passed=True, errors=[], warnings=warnings)
 
     @staticmethod
     def _check_not_daemon_repo(project_root: Path) -> ValidationResult:

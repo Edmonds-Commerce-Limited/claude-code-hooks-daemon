@@ -66,6 +66,13 @@ WRAPPER_NAME: Final[str] = "hooks-daemon"
 #: Directory (relative to the daemon root) the wrapper is deployed into.
 BIN_DIR_NAME: Final[str] = "bin"
 
+#: Name of the deployed output-capture helper ``pipe_blocker`` recommends. It
+#: is deployed beside the wrapper (Plan 00362 Task 1.3) — a client report hit
+#: ``echd-capture: command not found`` when guidance named it by bare name and
+#: nothing had put it on a stable path. Kept in lockstep with
+#: ``install.bin_wrapper.ECHD_CAPTURE_NAME``, which deploys it.
+ECHD_CAPTURE_NAME: Final[str] = "echd-capture"
+
 #: Path segments from a CLIENT project root to the daemon clone. In client
 #: installs the daemon lives here; in self-install mode the daemon root IS the
 #: project root.
@@ -96,6 +103,26 @@ def daemon_root() -> Path:
 def daemon_bin_path() -> Path:
     """Return the absolute path to the deployed daemon-CLI wrapper."""
     return daemon_root() / BIN_DIR_NAME / WRAPPER_NAME
+
+
+def echd_capture_path() -> Path:
+    """Return the absolute path to the deployed ``echd-capture`` helper.
+
+    Runtime form, for block reasons: runnable from any cwd. Existence is the
+    CALLER's check — this only says where the helper lives if deployed.
+    """
+    return daemon_root() / BIN_DIR_NAME / ECHD_CAPTURE_NAME
+
+
+def echd_capture_path_for_docs() -> str:
+    """Return the ``echd-capture`` path safe to write into a TRACKED file.
+
+    Same contract as :func:`daemon_cli_command_for_docs`: project-root
+    relative, true in every clone, never the rendering machine's root.
+    Degrades to the client form when :class:`ProjectContext` is not
+    initialised.
+    """
+    return "/".join((*_docs_daemon_segments(), BIN_DIR_NAME, ECHD_CAPTURE_NAME))
 
 
 def _relative_wrapper_path(daemon_segments: tuple[str, ...]) -> str:
