@@ -1,6 +1,6 @@
 # Plan 00349: agent worktrees accumulate unreaped
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Medium
@@ -79,13 +79,49 @@ reaper has to be designed against those constraints, not around them.
 
 ### Phase 1: Establish the safety test
 
-- [ ] ⬜ **Task 1.1**: Characterise the 21 present worktrees — clean vs dirty,
-  merged vs diverged, and for each diverged one whether its commits exist on
-  `main` under different SHAs
-- [ ] ⬜ **Task 1.2**: Decide the reapable predicate and write it as a tested
-  function. Conservative by construction: unknown ⇒ not reapable
-- [ ] ⬜ **Task 1.3**: Confirm the predicate against all 21 without deleting
-  anything, and record any it declines to classify
+- [x] ✅ **Task 1.1**: Characterised, and the picture is cleaner than the
+  Overview's spot-check suggested. **All 21 are stale**, in two groups:
+
+  - **15 are clean and strictly behind `main`** — 0 ahead, 0 uncommitted, 249
+    to 768 commits behind. Nothing to lose.
+  - **6 carry one unlanded commit and one staged file, and both are accounted
+    for.** All six are the same dispatch batch: the identical commit
+    `1d49da27` ("Plan 00284: Task 3.2 slice E") and the identical staged
+    `.claude/ccy/CLAUDE.md`. `git cherry` reports **1** unlanded patch each —
+    not the 195–224 their `main..HEAD` count implies, so the bulk landed under
+    different SHAs exactly as the Overview says.
+
+  **Both remainders are already on `main` or deliberately untracked.** Every
+  file `1d49da27` touched is in its landed state: Plan 00284 sits in
+  `Completed/`, its `26-08-28` journal day-file is present,
+  `ccy-supervisor-dogfooding.md` is thinned to the 17-line pointer the commit's
+  own subject describes, and `DOC-CONVENTIONS.md` exists. And
+  `.claude/ccy/CLAUDE.md` is **gitignored** (`.claude/ccy/.gitignore`), present
+  on disk in the main checkout, and the live copy is NEWER than the staged one
+  (4300 bytes vs 3050) — a superseded draft of an untracked file, not work at
+  risk.
+
+- [x] ✅ **Task 1.2**: `core/worktree_reaping.py` — `WorktreeState` (plain data,
+  so the decision is testable without a git repo) plus `is_reapable` and
+  `reap_refusal_reason`. Reapable means **no uncommitted paths, no commits
+  ahead of the base, and no unlanded patches**; anything else refuses, and
+  reports *every* applicable problem rather than the first.
+
+  **It refuses the 6 that Task 1.1 proved safe, deliberately.** What made them
+  safe was reading a commit subject, locating a plan folder and comparing byte
+  counts — judgements this function cannot make and must not fake. A rebased
+  commit that already landed is indistinguishable here from one that did not.
+  Teaching it that gitignored files or already-landed patches do not count
+  would have cleared those six correctly and been wrong the first time an agent
+  staged something that mattered. A reaper that is occasionally too cautious
+  wastes disk; one that is occasionally too eager destroys work that exists
+  nowhere else. A negative count is refused too — that means the collector
+  failed, and reading it as "zero ahead" would turn a collection failure into a
+  deletion.
+
+- [x] ✅ **Task 1.3**: Run against all 21, **deleting nothing**: `total=21 reapable=15 refused=6`, splitting exactly as the hand characterisation did.
+  All 6 refusals are the same batch and carry the same reason. None was
+  unclassifiable.
 
 ### Phase 2: Reap or surface
 
