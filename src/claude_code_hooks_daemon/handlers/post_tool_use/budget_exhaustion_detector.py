@@ -21,14 +21,44 @@ Deliberately NEVER keys on the configurable ceiling number (e.g. "200" of
 configurable (``CLAUDE_CODE_MAX_WEB_SEARCHES``), so a number alone is not a
 stable signal and would false-fire on ordinary counts ("Found 200 results").
 
-**Precision**: by default, Read/Grep/Glob/Edit/Write/NotebookEdit tool
-responses are excluded from
-matching (``options.excluded_tools``). Those tools return FILE CONTENTS the
-model merely read -- prose in a file that happens to discuss budget
-exhaustion (this very docstring, for instance) is not a live exhaustion
-event, and firing on it would be a false positive on the single most common
-shape of activity in a session. Every other tool's ``tool_response`` is a
-genuine tool-produced result, where the same wording is a live signal.
+**Precision**: by default, Read/Grep/Glob/Edit/Write/NotebookEdit/Task/Agent
+tool responses are excluded from matching (``options.excluded_tools``). The
+first six return FILE CONTENTS the model merely read -- prose in a file that
+happens to discuss budget exhaustion (this very docstring, for instance) is
+not a live exhaustion event. Task/Agent's ``tool_response`` is a dispatched
+sub-agent's own composed final message, never a field the Task/Agent tool
+machinery itself populates from a budget check; if the sub-agent's own work
+genuinely hits a budget, that fires directly in the sub-agent's own session
+at the tool call that hit it, so excluding the orchestrator's echo of it
+loses no signal. Every other tool's ``tool_response`` is a genuine
+tool-produced result, where the same wording is a live signal.
+
+Beyond the excluded-tools list, two STRUCTURAL checks (not keyword lists)
+keep the detector from self-triggering on text that merely QUOTES a budget
+message rather than delivering one, documented in full in
+``CLAUDE/Plan/00319-supervisor-release-review-followups/BUDGET-DETECTOR-DESIGN.md``:
+
+  - a Bash ``tool_response`` is excluded when the COMMAND's every pipeline
+    stage is a content-passthrough verb (``cat``, ``grep``, ``jq``, ``tail``,
+    etc. -- see ``_CONTENT_PASSTHROUGH_VERBS``), because such a command only
+    ever reproduces or reformats bytes that already exist somewhere; it never
+    independently discovers a live budget signal. Classified by VERB, not by
+    which file is named, so it generalises to any file (a copy of the
+    ledger, a generated report, this handler's own source) without listing
+    any of them.
+  - any span of ``tool_response`` text that parses as a JSON object carrying
+    this handler's own ledger record key set (``_LEDGER_RECORD_KEYS``) is
+    stripped before matching runs, because a genuine harness budget message
+    is prose, never JSON in this handler's own record shape. This survives
+    ``jq``'s pretty-printing, which defeats a literal-substring or
+    per-line-JSON check.
+
+The pre-existing literal ``_SELF_REFERENTIAL_COMMAND_MARKERS`` /
+``_SELF_REFERENTIAL_RESPONSE_MARKERS`` checks still run underneath both of
+the above -- they catch the one shape neither structural check does: a
+*generated report* whose producing command is not a content-passthrough verb
+(e.g. a Python script) but whose output names this handler by class or
+module.
 
 On a match: ALLOW with an advisory instructing the agent to surface the
 budget hit to the user with a bold, prominent banner, name the affected
@@ -48,11 +78,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import (
+    SUBAGENT_DISPATCH_TOOL_NAMES,
     HandlerID,
     HandlerTag,
     HookInputField,
@@ -62,13 +94,23 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.retention import cap_log_file
+from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 logger = logging.getLogger(__name__)
 
 # ─── Tools excluded from matching by default ─────────────────────────────────
 
 # File-content tools: their tool_response is what a file merely SAYS, not a
-# live budget signal from a tool that was actually rate/quota-limited.
+# live budget signal from a tool that was actually rate/quota-limited. Task
+# and Agent (SUBAGENT_DISPATCH_TOOL_NAMES -- the same constant
+# dispatch_declaration/agent_isolation_advisor use for the same two tool
+# names) join them for a related reason: their tool_response is a dispatched
+# sub-agent's own composed final message, never a field the Task/Agent tool
+# machinery itself populates from a live budget check. A genuine budget hit
+# during the sub-agent's own work already fires directly in the sub-agent's
+# own session, at the tool call that hit it -- hooks run per-session, so
+# that is a fully independent event. Excluding the orchestrator's later,
+# LLM-mediated echo of it loses no signal (PLAN.md Task 4.5).
 _DEFAULT_EXCLUDED_TOOLS: Final[tuple[str, ...]] = (
     "Read",
     "Grep",
@@ -79,6 +121,7 @@ _DEFAULT_EXCLUDED_TOOLS: Final[tuple[str, ...]] = (
     "Edit",
     "Write",
     "NotebookEdit",
+    *sorted(SUBAGENT_DISPATCH_TOOL_NAMES),
 )
 
 # A Bash command naming any of these is INSPECTING recorded/pattern text —
@@ -110,7 +153,87 @@ _SELF_REFERENTIAL_RESPONSE_MARKERS: Final[tuple[str, ...]] = (
     # because that is precisely what the block simulates. So the detector fired
     # on its own test fixture, and named the class while doing it.
     "BudgetExhaustionDetector",
+    # Belt-and-braces alongside the structural JSON-shape check below
+    # (`_strip_ledger_records`): this is the ledger's own record key, which a
+    # genuine harness budget message -- prose, never JSON in this handler's
+    # own record shape -- will never contain as a bare substring either.
+    "matched_fragment",
 )
+
+# ─── Content-passthrough Bash commands ────────────────────────────────────────
+
+# Utilities whose entire function is to REPRODUCE or losslessly filter/
+# reformat bytes already sitting in a named source (a file, stdin) -- never to
+# invoke a live service or generate new content. A Bash command is classified
+# as content-passthrough when EVERY pipeline stage's leading verb is one of
+# these (see `_is_content_passthrough_command`), which is why `curl | jq .`
+# is correctly NOT passthrough: `curl` genuinely fetches live content, and one
+# passthrough stage in a pipeline does not launder the others. Closed by
+# definition (the semantic category "read/filter/reformat, cannot originate
+# content"), not an open list of filenames or handler names to keep adding to.
+_CONTENT_PASSTHROUGH_VERBS: Final[frozenset[str]] = frozenset(
+    {
+        "cat",
+        "head",
+        "tail",
+        "less",
+        "more",
+        "grep",
+        "egrep",
+        "fgrep",
+        "rg",
+        "jq",
+        "awk",
+        "sed",
+        "strings",
+        "od",
+        "xxd",
+        "hexdump",
+        "wc",
+        "nl",
+        "cut",
+        "tac",
+    }
+)
+
+# Longest-first so `&&`/`||` match whole before the single-character `&`/`|`
+# variants claim the first character (mirrors shell_segmentation's own rule).
+_PIPELINE_SEPARATORS: Final[tuple[str, ...]] = ("&&", "||", ";", "|", "&", "\n")
+
+
+def _leading_verb(segment: str) -> str:
+    """Return the command word a pipeline segment starts with, or "" if none."""
+    stripped = segment.strip().lstrip("(){}")
+    if not stripped:
+        return ""
+    return stripped.split(maxsplit=1)[0].rsplit("/", 1)[-1]
+
+
+def _is_content_passthrough_command(command: str) -> bool:
+    """True when every stage of ``command`` is a content-passthrough verb.
+
+    Segments the command the same way the project's other Bash-shape
+    handlers do (`shell_segmentation.split_unquoted`), so a separator sitting
+    inside a quoted argument is never mistaken for a pipeline boundary. A
+    command with no recognisable leading verb (empty, or one built by shell
+    expansion) is conservatively NOT passthrough -- the safe direction is to
+    leave it eligible for detection, never to grant an exemption a caller
+    cannot justify.
+    """
+    segments = split_unquoted(command, _PIPELINE_SEPARATORS)
+    found_verb = False
+    for segment in segments:
+        if not segment.strip():
+            continue
+        verb = _leading_verb(segment)
+        if not verb or verb not in _CONTENT_PASSTHROUGH_VERBS:
+            return False
+        found_verb = True
+    # An all-blank command (no verb found anywhere) is NOT passthrough -- a
+    # vacuous "every segment passed" must not grant an exemption nothing
+    # justified.
+    return found_verb
+
 
 # ─── Pattern family ───────────────────────────────────────────────────────────
 
@@ -160,6 +283,83 @@ _MATCHED_FRAGMENT_TRUNCATE_LEN: Final[int] = 200
 # Mirrors stop-events.jsonl's bound (Plan 00181): keep newest half on breach.
 _LEDGER_MAX_BYTES: Final[int] = 644 * 1024
 
+# One declared name per ledger record field, reused by BOTH the writer
+# (`_append_ledger_entry`) and the structural self-feed recognizer
+# (`_strip_ledger_records`) -- a single source of truth for the ledger's own
+# schema, so the two can never drift apart.
+_LEDGER_TIMESTAMP_KEY: Final[str] = "timestamp"
+_LEDGER_SESSION_ID_KEY: Final[str] = "session_id"
+_LEDGER_TOOL_NAME_KEY: Final[str] = "tool_name"
+_LEDGER_MATCHED_FRAGMENT_KEY: Final[str] = "matched_fragment"
+_LEDGER_RECORD_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        _LEDGER_TIMESTAMP_KEY,
+        _LEDGER_SESSION_ID_KEY,
+        _LEDGER_TOOL_NAME_KEY,
+        _LEDGER_MATCHED_FRAGMENT_KEY,
+    }
+)
+
+
+def _iter_balanced_json_objects(text: str) -> Iterator[str]:
+    """Yield each top-level, brace-balanced ``{...}`` span in ``text``.
+
+    String-aware: a ``{``/``}`` inside a JSON string value never affects
+    depth. Deliberately a scanner, not a JSON parser -- callers still run
+    ``json.loads`` on each yielded span and discard anything that fails to
+    parse. This is what lets the ledger self-feed recognizer survive ``jq
+    .``'s pretty-printing (a record spread across several lines is still one
+    balanced span), where a per-line parse would not.
+    """
+    depth = 0
+    start = -1
+    in_string = False
+    escape = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start != -1:
+                    yield text[start : index + 1]
+                    start = -1
+
+
+def _strip_ledger_records(text: str) -> str:
+    """Remove any span of ``text`` that structurally IS this handler's own
+    ledger record (F2, PLAN.md Task 1.4).
+
+    A genuine harness-delivered budget message is prose from a tool
+    integration -- it is never a JSON object carrying exactly this handler's
+    own record key set, because nothing outside this module ever produces
+    that shape. Recognising the SHAPE (parse + key-set check), not a keyword,
+    is what survives `cat` (single-line JSONL), `jq .` (the same record
+    reformatted across several lines) and any future reproduction that does
+    not spell the ledger's filename.
+    """
+    result = text
+    for candidate in _iter_balanced_json_objects(text):
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and parsed.keys() >= _LEDGER_RECORD_KEYS:
+            result = result.replace(candidate, "", 1)
+    return result
+
 
 def _stringify_tool_response(tool_response: Any) -> str:
     """Return a searchable string form of ``tool_response``.
@@ -208,11 +408,17 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
 
     Generic pattern family (never keyed on a configurable ceiling number) over
     the tool_response of any completed tool call, excluding file-content
-    tools (Read/Grep/Glob/Edit/Write/NotebookEdit) by default so file prose
-    about budgets is never
-    mistaken for a live exhaustion event. Never blocks: on a match it ALLOWs
-    with an advisory demanding prominent user-facing reporting, and appends
-    one line to an untracked occurrence ledger.
+    tools (Read/Grep/Glob/Edit/Write/NotebookEdit) and dispatched sub-agent
+    responses (Task/Agent) by default so file prose and a sub-agent's own
+    composed report are never mistaken for a live exhaustion event. Two
+    structural checks (a content-passthrough Bash command shape; the
+    ledger's own JSON record shape) additionally exclude text that merely
+    QUOTES a budget message rather than delivering one -- see the module
+    docstring and
+    ``CLAUDE/Plan/00319-supervisor-release-review-followups/BUDGET-DETECTOR-DESIGN.md``.
+    Never blocks: on a match it ALLOWs with an advisory demanding prominent
+    user-facing reporting, and appends one line to an untracked occurrence
+    ledger.
     """
 
     def __init__(self) -> None:
@@ -262,24 +468,55 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
             self._compiled_extra_patterns = compiled
         return self._compiled_extra_patterns
 
-    def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Return True if the tool response matches a budget-exhaustion pattern."""
-        self._cached_fragment = None
+    def _quoted_not_delivered(self, hook_input: dict[str, Any]) -> bool:
+        """True when this event's ``tool_input.command`` structurally cannot
+        be delivering a live budget signal.
+
+        Two independent checks, both structural rather than keyword-based
+        beyond the pre-existing literal marker list: a self-referential
+        marker in the command text (unchanged), and a Bash command whose
+        every pipeline stage is a content-passthrough verb (new -- see
+        ``_is_content_passthrough_command``).
+        """
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+        if not isinstance(tool_input, dict):
+            return False
+        command = tool_input.get("command")
+        if not isinstance(command, str):
+            return False
+        if any(marker in command for marker in _SELF_REFERENTIAL_COMMAND_MARKERS):
+            return True
+        return _is_content_passthrough_command(command)
+
+    def _prepared_response_text(self, hook_input: dict[str, Any]) -> str | None:
+        """Return the response text eligible for pattern matching, or None.
+
+        None means "structurally cannot be a delivered budget message" --
+        either an excluded tool, a content-passthrough/self-referential
+        command, or a response with nothing left after ledger-record spans
+        (F2) and the literal self-referential response markers are removed.
+        """
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         if tool_name in self._resolved_excluded_tools():
-            return False
-        tool_input = hook_input.get(HookInputField.TOOL_INPUT)
-        if isinstance(tool_input, dict):
-            command = tool_input.get("command")
-            if isinstance(command, str) and any(
-                marker in command for marker in _SELF_REFERENTIAL_COMMAND_MARKERS
-            ):
-                return False
+            return None
+        if self._quoted_not_delivered(hook_input):
+            return None
         tool_response = hook_input.get(HookInputField.TOOL_RESPONSE)
         text = _stringify_tool_response(tool_response)
         if not text:
-            return False
+            return None
+        text = _strip_ledger_records(text)
+        if not text:
+            return None
         if any(marker in text for marker in _SELF_REFERENTIAL_RESPONSE_MARKERS):
+            return None
+        return text
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        """Return True if the tool response matches a budget-exhaustion pattern."""
+        self._cached_fragment = None
+        text = self._prepared_response_text(hook_input)
+        if text is None:
             return False
         fragment = _find_matched_fragment(text, self._resolved_extra_patterns())
         if fragment is None:
@@ -293,8 +530,9 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
         self._cached_fragment = None
         if cached is not None:
             return cached
-        tool_response = hook_input.get(HookInputField.TOOL_RESPONSE)
-        text = _stringify_tool_response(tool_response)
+        text = self._prepared_response_text(hook_input)
+        if text is None:
+            return None
         return _find_matched_fragment(text, self._resolved_extra_patterns())
 
     def _append_ledger_entry(self, session_id: str, tool_name: str, matched_fragment: str) -> bool:
@@ -315,10 +553,10 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
             ledger_path = untracked_dir / _LEDGER_FILENAME
             make_private_dir(ledger_path.parent)
             entry: dict[str, Any] = {
-                "timestamp": datetime.now(tz=UTC).isoformat(),
-                "session_id": session_id,
-                "tool_name": tool_name,
-                "matched_fragment": matched_fragment[:_MATCHED_FRAGMENT_TRUNCATE_LEN],
+                _LEDGER_TIMESTAMP_KEY: datetime.now(tz=UTC).isoformat(),
+                _LEDGER_SESSION_ID_KEY: session_id,
+                _LEDGER_TOOL_NAME_KEY: tool_name,
+                _LEDGER_MATCHED_FRAGMENT_KEY: matched_fragment[:_MATCHED_FRAGMENT_TRUNCATE_LEN],
             }
             with open_private_append(ledger_path) as handle:
                 handle.write(json.dumps(entry) + "\n")
@@ -374,7 +612,21 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
             "bold banner naming the budget, state what you were attempting and what "
             "work is now affected, and stop hammering the exhausted tool.\n\n"
             "File-content tools (Read/Grep/Glob/Edit/Write/NotebookEdit) are excluded by default, since their "
-            "response is text a file merely CONTAINS, not a live exhaustion signal.\n\n"
+            "response is text a file merely CONTAINS, not a live exhaustion signal. "
+            "Dispatched sub-agent responses (Task/Agent) are excluded too -- a "
+            "sub-agent's final message is its own composed prose, never a field the "
+            "Task/Agent tool populates from a budget check; a genuine hit during the "
+            "sub-agent's own work already fires directly in its own session.\n\n"
+            "**Quoted text never re-triggers this handler.** A Bash command whose "
+            "every pipeline stage is a content-passthrough verb (`cat`, `grep`, "
+            "`jq`, `tail`, ...) is excluded -- such a command only reproduces or "
+            "reformats bytes that already exist, so `cat untracked/*.jsonl`, "
+            "`jq . budget*.jsonl` or `grep ... playbook.md` never re-fire the "
+            "advisory. Any text that structurally IS this handler's own ledger "
+            "record (a JSON object carrying its record key set) is stripped before "
+            "matching, which survives `jq .`'s reformatting. See "
+            "`CLAUDE/Plan/00319-supervisor-release-review-followups/"
+            "BUDGET-DETECTOR-DESIGN.md` for the full design.\n\n"
             "Every detection is appended to `budget-exhaustion-events.jsonl` in the "
             "daemon's untracked directory, so recurrence is visible across the "
             "session and afterwards.\n\n"
@@ -387,7 +639,7 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
             "    budget_exhaustion_detector:\n"
             "      enabled: true\n"
             "      options:\n"
-            "        excluded_tools: [Read, Grep, Glob, Edit, Write, NotebookEdit]  # override\n"
+            "        excluded_tools: [Read, Grep, Glob, Edit, Write, NotebookEdit, Task, Agent]  # override\n"
             "        extra_patterns: []                   # extra regexes, additive\n"
             "```\n"
         )
