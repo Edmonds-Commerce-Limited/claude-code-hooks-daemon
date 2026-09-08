@@ -1,5 +1,6 @@
 """Utility functions for hook handlers."""
 
+import logging
 import os
 import re
 import shlex
@@ -9,6 +10,8 @@ from typing import Any, Final, NamedTuple, cast
 from claude_code_hooks_daemon.constants import HookInputField, ToolName
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
+
+logger = logging.getLogger(__name__)
 
 # --- Bash write-target detection (Plan 00260) --------------------------------
 # Shell operators and verbs that put bytes into a named file. Each is here
@@ -357,7 +360,36 @@ def _written_paths(candidate: _TargetCandidate, cwd: Any) -> list[str]:
     if destination is None:
         return []
     directory_only = candidate.directory_only or candidate.destination.endswith("/")
-    if Path(destination).is_dir():
+    try:
+        destination_is_dir = Path(destination).is_dir()
+    except OSError as exc:
+        # Logged, not swallowed. This is the only thing that separates the
+        # branch from the silent-fallback antipattern the repo's own
+        # error-hiding auditor exists to catch: without a record, "the guard
+        # decided this is not a directory" and "the guard could not look" are
+        # indistinguishable to whoever is asking why a policy did not fire.
+        logger.warning(
+            "Could not stat write destination %r (%s) -- treating it as a "
+            "non-directory. A path-keyed guard may see a different target "
+            "than the shell will write.",
+            destination,
+            exc,
+        )
+        # An unstattable destination is not KNOWN to be a directory, so it is
+        # treated as not one -- the same answer pathlib already gives for every
+        # stat failure it considers expected (ENOENT, ENOTDIR, ELOOP, EBADF).
+        # EACCES is absent from that set, so `is_dir()` RAISES on a path whose
+        # parent chain lacks `+x` for the daemon's user, and these paths come
+        # from a command a user typed: the daemon has no say in whether it can
+        # stat them.
+        #
+        # Reporting nothing here would be the worse failure. It would turn an
+        # unreadable parent directory into a blanket exemption from every
+        # path-keyed guard, which is the direction a guard must never fail in.
+        # The copy-verb expansion below stays suppressed, so nothing is
+        # fabricated inside a directory this cannot see.
+        destination_is_dir = False
+    if destination_is_dir:
         return [str(Path(destination) / Path(source).name) for source in candidate.sources]
     return [] if directory_only else [destination]
 
