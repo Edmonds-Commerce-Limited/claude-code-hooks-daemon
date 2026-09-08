@@ -74,8 +74,16 @@ def test_default_config_deploy_is_byte_identical(tmp_path: Path) -> None:
         assert "relay hot path" not in deployed
 
 
-def test_no_venv_python_deploy_is_byte_identical(tmp_path: Path) -> None:
-    """No venv python resolved (e.g. an early caller): generation step skips cleanly."""
+def test_no_venv_python_deploy_still_strips_the_guard(tmp_path: Path) -> None:
+    """No venv python resolved (e.g. an early caller): the Python
+    regeneration step skips cleanly, but ``deploy_hook_scripts`` itself must
+    still strip any guard block baked into the tracked SOURCE forwarders
+    (Plan 00295 Task 1.6) -- this repo dogfoods the relay, so
+    ``_SOURCE_HOOKS_DIR`` may carry a guard pointing at THIS repo's own
+    ``/workspace`` paths. The F1 guarantee ("clean by default") must hold
+    WITHOUT a venv or a surviving generator, not only when the Python
+    regenerator happens to be available -- a plain `cp` of a contaminated
+    source is exactly the bug the guard-stripping fix exists to close."""
     daemon_dir = tmp_path / "daemon"
     project_root = tmp_path / "project"
     _seed_daemon_dir(daemon_dir)
@@ -86,7 +94,8 @@ def test_no_venv_python_deploy_is_byte_identical(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     deployed = (project_root / ".claude" / "hooks" / "pre-tool-use").read_text()
     source = (_SOURCE_HOOKS_DIR / "pre-tool-use").read_text()
-    assert deployed == source
+    assert deployed == strip_relay_guard_block(source)
+    assert "relay hot path" not in deployed
 
 
 def test_relay_enabled_config_inserts_guard(tmp_path: Path) -> None:
