@@ -51,7 +51,8 @@ while the detectors silently do not run.
   release as part of the pipeline so a release can never ship without them,
   and make the skill scripts fall back to the installed local wrapper when
   the manifest download fails instead of aborting.
-- [ ] ⬜ **Task 1.2** (report §2, HIGH): `config-validate` and the upgrade
+- [x] ✅ **Task 1.2** (report §2, HIGH; merged at `d97d609d`^, new
+  `audit-handler-keys` verb and `install/handler_key_audit.py`): `config-validate` and the upgrade
   config diff warn on a handler key that does not exist for its event, name
   the event it moved to where one is known (the two nitpick detectors →
   `pseudo_events.nitpick.handlers`), and the upgrade migrates those two
