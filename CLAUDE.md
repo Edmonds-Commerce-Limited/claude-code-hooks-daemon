@@ -515,10 +515,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
-<!-- handler: budget-exhaustion-detector -->
-
-- budget_exhaustion_detector — hidden agent budgets are surfaced
-
 <!-- handler: model-downgrade-recorder -->
 
 - model_downgrade_recorder — the automatic model downgrade is written down
@@ -534,6 +530,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: goal-injection -->
 
 - goal_injection — plan-start goal signal for the ccy supervisor
+
+<!-- handler: budget-exhaustion-detector -->
+
+- budget_exhaustion_detector — hidden agent budgets are surfaced
 
 <!-- handler: ccy-supervisor-integrity -->
 
