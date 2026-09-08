@@ -140,4 +140,6 @@ agent thread, as the final confirmation step AFTER a release ships.
 
 ## Delivery & Milestones
 
-- <!-- milestone or delivery commit hash -->
+- `a0ac90f5` — Tasks 1.1, 2.1 and 2.2 delivered under Plan 00362 Task 2.2
+  (fresh-clone stop step, shared v-tolerant version parser, retained-config
+  migration advisory).
