@@ -354,7 +354,8 @@ README row for 00144; stats 41→42") — same self-correction pattern as
 - [ ] Missing `{plan_dir}/Completed/` (or configured archive dirs) is
   reported by the sweep with exact remediation
 - [ ] Full QA suite passes; `./scripts/qa/run_all.sh` green
-- [ ] Handler docs (`get_claude_md`) accurate per the Step 11 release audit
+- [ ] Handler docs (`get_claude_md`) accurate — the same coverage check the
+  release's Step 11 runs, verified here by its integration test
   standard
 
 ## Risks & Mitigations

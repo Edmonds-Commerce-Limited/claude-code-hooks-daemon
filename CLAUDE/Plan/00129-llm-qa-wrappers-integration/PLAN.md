@@ -142,7 +142,8 @@ Both reference repos are cloned (untracked) for inspection during this plan:
 
 - [ ] ⬜ **Task 5.1**: Document the dependency, the redirect mapping, and the jq workflow in
   `CLAUDE/` + handler reference; regenerate `generate-docs`.
-- [ ] ⬜ **Task 5.2**: Changelog + release notes; ship behind config (default conservative)
+- [ ] ⬜ **Task 5.2**: Changelog entry + a note in the pending-release holding
+  area (Plan 00360); ship behind config (default conservative)
   so existing projects opt in.
 
 ## Dependencies
@@ -177,7 +178,8 @@ release discipline in the wrapper repo), language package managers (per-runtime,
 - [ ] At least one redirect handler ships (TDD, 95%+ coverage, acceptance tests, dogfooded,
   daemon restart verified) redirecting a raw tool to its wrapper and teaching jq parsing.
 - [ ] php-qa-ci global JSON integration implemented and wired into the redirect mapping.
-- [ ] All QA checks pass; docs regenerated; changelog/release notes updated.
+- [ ] All QA checks pass; docs regenerated; changelog entry and holding-area
+  note written.
 
 ## Risks & Mitigations
 

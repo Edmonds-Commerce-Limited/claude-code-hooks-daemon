@@ -1,6 +1,6 @@
 # Plan 00356: secret guard bracket glob false positive
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Medium
@@ -156,7 +156,8 @@ accept, so the shape gate is rejected.
 
 ## Follow-up found while working, deliberately NOT fixed here
 
-- [ ] ⬜ **`_expand_glob_token` crashes on a `***` token, failing a security
+- [x] ✅ Shipped as Plan 00357 at `ce95acae`, exactly as described below.
+  **`_expand_glob_token` crashes on a `***` token, failing a security
   handler OPEN.** `find_protected_mention_strict` → `_expand_glob_token` does
   `try: matches = base.glob(pattern_str) except (OSError, ValueError): continue`
   and then iterates `matches` OUTSIDE the `try`. `Path.glob` is a generator
@@ -180,7 +181,8 @@ accept, so the shape gate is rejected.
   full, in both directions.
 - [x] `cat .vault-p*`, `find . -name "*secret*"` and `[Vv]ault_pass` remain
   denied — the fix does not over-correct into a fail-open.
-- [ ] `./scripts/qa/llm_qa.py all` is green.
+- [x] `./scripts/qa/llm_qa.py all` is green (the run that closed Plans 00357
+  and 00359 covered this tree).
 - [x] Plan 00311 Task 1.2 carries a cross-reference recording this as the
   predicted next incident.
 
@@ -190,4 +192,5 @@ accept, so the shape gate is rejected.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00356-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- Fixed on the agent branch and merged to main by the worktree sub-agent; the
+  follow-up it found shipped as Plan 00357 at `ce95acae`.

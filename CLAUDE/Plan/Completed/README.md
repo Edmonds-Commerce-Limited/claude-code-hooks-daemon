@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00328: human model choice cannot be read from keystrokes](00328-human-model-choice-cannot-be-read-from-keystrokes/PLAN.md) - Complete at `c4e22ac0`…`dd7f43f3` + the archiving commit (the picker types no text a parser can read, so the restore now arms only on Claude Code's OWN downgrade record and the keystroke-recognition channel is deleted)
+
 - [00326: remote docs vendoring and staleness](00326-remote-docs-vendoring-and-staleness/PLAN.md) - Complete at `43cf91a0` through `ef342df4` (upstream docs vendored as markdown carrying provenance frontmatter, with a `fidelity` field that separates a citable corpus from a cache; four handlers gate writes and commits, route `WebFetch` to the local copy, and report staleness)
 
 - [00324: skill invoke scripts never referenced](00324-skill-invoke-scripts-never-referenced/PLAN.md) - Complete (four skills kept 52-317 lines of procedure in an `invoke.sh` their SKILL.md never named, so every invocation ran on the summary and two of them discarded the caller's arguments)

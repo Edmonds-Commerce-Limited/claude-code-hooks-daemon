@@ -1,6 +1,6 @@
 # Plan 00100 (v3): Venv SSOT Consolidation — Stop the Release Treadmill
 
-**Status**: Dormant (residue scope awaits a dedicated release)
+**Status**: Dormant (residue scope awaits scheduling)
 
 ## Wave 4 close-out note (Plan 00107)
 
