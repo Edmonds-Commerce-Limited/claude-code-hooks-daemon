@@ -65,6 +65,12 @@ BLOCKING_RESPONSE_LOG_CHARS: Final[int] = 1000
 _DECISION_BLOCK: Final[str] = "block"
 _INTERRUPTING_DECISIONS: Final[frozenset[str]] = frozenset({"deny", "ask"})
 
+# Read granularity for `_read_event_payload`'s bounded EOF read loop. Not a
+# protocol limit like `SocketLimit.REQUEST_BUFFER_BYTES` -- just the chunk
+# size each `reader.read()` call requests before the running total is
+# checked against that limit.
+_EVENT_PAYLOAD_READ_CHUNK_BYTES: Final[int] = 65536
+
 
 def redacted_blocking_response(response_json: str) -> str:
     """Prepare a blocking response for the DEBUG log: redacted, then truncated.
@@ -965,9 +971,8 @@ class HooksDaemon:
         """
         chunks: list[bytes] = []
         total = 0
-        chunk_size = 65536
         while True:
-            chunk = await reader.read(chunk_size)
+            chunk = await reader.read(_EVENT_PAYLOAD_READ_CHUNK_BYTES)
             if not chunk:
                 break
             total += len(chunk)

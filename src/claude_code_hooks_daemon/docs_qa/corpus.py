@@ -34,6 +34,7 @@ block it names, and hides a genuine duplicate against a file that gained one
 
 import json
 import logging
+import os
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -267,6 +268,74 @@ def matches_scope_exclude(rel_path: str, patterns: tuple[str, ...]) -> bool:
     """
     basename = rel_path.rsplit("/", 1)[-1]
     return any(fnmatch(rel_path, pattern) or fnmatch(basename, pattern) for pattern in patterns)
+
+
+def dir_matches_scope_exclude(rel_parts: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
+    """Whether a DIRECTORY is inside a configured ``scope_exclude_globs`` entry.
+
+    :func:`matches_scope_exclude` judges a FILE path. A pattern written to
+    cover a subtree (``infra/roles/**``) does not match the directory
+    ``infra/roles`` itself, so pruning a tree walk on the raw pattern alone
+    would still descend it. Testing the directory against the pattern with a
+    trailing ``/**`` stripped closes that, and keeps a walk's prune exactly
+    equivalent to the file-level post-filter, never broader than it. Public,
+    and the shared ``also_prune`` predicate for :func:`iter_markdown_paths`,
+    so ``module-doc-budget`` and ``source-tree-markdown`` prune the same
+    configured subtrees from the one walk they now share (Plan 00295).
+    """
+    rel_dir = "/".join(rel_parts)
+    for pattern in patterns:
+        subtree_root = pattern[:-3] if pattern.endswith("/**") else pattern
+        if fnmatch(rel_dir, subtree_root) or fnmatch(rel_dir, pattern):
+            return True
+    return False
+
+
+def iter_markdown_paths(
+    project_root: Path,
+    *,
+    vendor_scopes: Sequence[VendorScope],
+    also_prune: Callable[[tuple[str, ...]], bool] | None = None,
+) -> list[str]:
+    """Every ``.md`` path under ``project_root``, minus the walk exclusions.
+
+    The single shared walk for every SWEEP-stage check that needs every
+    on-disk markdown path (``module-doc-budget``, ``source-tree-markdown``) --
+    reached via ``CheckContext.markdown_paths`` (built once by
+    :func:`docs_qa.context.sweep_context`) so a sweep performs this walk
+    exactly once rather than once per consumer (Plan 00295). Both checks
+    previously carried a near-identical private ``os.walk`` loop each.
+
+    Pruned ``os.walk`` (F3, Plan 00287), not ``Path.rglob``, which cannot
+    skip a matched directory: it would physically descend a huge
+    vendored/excluded tree even though the results are discarded a moment
+    later. ``also_prune`` reaches :func:`walk_into` unchanged, so a caller's
+    ``scope_exclude_globs`` (via :func:`dir_matches_scope_exclude`) prunes
+    the shared walk exactly as it pruned each check's own walk before --
+    safe for every consumer because every consumer already re-applies
+    :func:`matches_scope_exclude` as a per-file post-filter too; this only
+    changes whether an excluded subtree is physically entered, never which
+    paths end up in the result.
+    """
+    matches: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(project_root):
+        rel_dir_parts = Path(dirpath).relative_to(project_root).parts
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if walk_into((*rel_dir_parts, name), vendor_scopes=vendor_scopes, also_prune=also_prune)
+        ]
+        for filename in filenames:
+            if not filename.endswith(_MARKDOWN_SUFFIX):
+                continue
+            rel_path = "/".join((*rel_dir_parts, filename))
+            # Descending is not including: a file reached only because its
+            # parent had to be walked for a vendor exception is still
+            # vendored unless it IS the exception.
+            if rel_dir_parts and is_vendored_path_in_scopes(rel_path, vendor_scopes):
+                continue
+            matches.append(rel_path)
+    return sorted(matches)
 
 
 def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> bool:

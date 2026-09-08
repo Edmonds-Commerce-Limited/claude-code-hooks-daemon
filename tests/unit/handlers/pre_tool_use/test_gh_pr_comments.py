@@ -295,6 +295,36 @@ class TestGhPrCommentsHandler:
         assert result.reason is not None
         assert expected_suggestion in result.reason
 
+    def test_handle_scopes_the_comments_append_to_the_view_segment(
+        self, handler: GhPrCommentsHandler
+    ) -> None:
+        """Plan 00295 Task 3.9: naive whole-command concatenation appended
+        --comments to the END of a chained command -- flagging the WRONG
+        sub-command (echo, not gh pr view) and producing a remediation
+        that does not fix anything."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh pr view 123 && echo done"},
+        }
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert "gh pr view 123 --comments && echo done" in result.reason
+        assert "echo done --comments" not in result.reason
+
+    def test_handle_does_not_borrow_a_json_flag_from_a_different_chained_command(
+        self, handler: GhPrCommentsHandler
+    ) -> None:
+        """A --json flag belonging to an UNRELATED chained command must not
+        be mistaken for the gh-pr-view invocation's own --json flag."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh pr view 123 && echo --json foo"},
+        }
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert "gh pr view 123 --comments && echo --json foo" in result.reason
+        assert "foo,comments" not in result.reason
+
     def test_handle_allows_when_no_command(self, handler: GhPrCommentsHandler) -> None:
         """Should return ALLOW if somehow handle is called with no command."""
         hook_input = {

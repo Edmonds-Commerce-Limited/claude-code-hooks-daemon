@@ -1,7 +1,11 @@
 """Tests for ``docs_qa.corpus`` (Plan 00284, Task 3.1a)."""
 
 import json
+import os
+from collections.abc import Callable, Generator
 from pathlib import Path
+
+import pytest
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.paths import ProjectPath
@@ -13,10 +17,12 @@ from claude_code_hooks_daemon.docs_qa.corpus import (
     DocRecord,
     QuoteRef,
     build_and_save_corpus,
+    dir_matches_scope_exclude,
     extract_link_targets,
     is_in_scope,
     is_module_doc_path,
     iter_corpus_paths,
+    iter_markdown_paths,
     load_cached_corpus,
     load_edit_corpus,
     load_or_cold_corpus,
@@ -1098,3 +1104,91 @@ class TestWalkInto:
     def test_also_prune_cannot_un_prune_what_the_shared_rules_reject(self) -> None:
         """The predicate ADDS exclusions; it is never asked to overrule one."""
         assert walk_into((".git",), vendor_scopes=(), also_prune=lambda _parts: False) is False
+
+
+class TestDirMatchesScopeExclude:
+    """The directory-level counterpart to ``matches_scope_exclude`` -- shared
+    by ``iter_markdown_paths`` so a ``scope_exclude_globs`` subtree is pruned
+    once, for every caller, rather than merely post-filtered."""
+
+    def test_subtree_glob_matches_its_own_root_directory(self) -> None:
+        assert dir_matches_scope_exclude(("infra", "roles"), ("infra/roles/**",)) is True
+
+    def test_subtree_glob_does_not_match_an_unrelated_directory(self) -> None:
+        assert dir_matches_scope_exclude(("src", "pkg"), ("infra/roles/**",)) is False
+
+    def test_no_patterns_never_matches(self) -> None:
+        assert dir_matches_scope_exclude(("infra", "roles"), ()) is False
+
+
+class TestIterMarkdownPaths:
+    """The single shared walk ``module-doc-budget`` and ``source-tree-markdown``
+    both draw from (Plan 00295 Task 3.3) rather than each running its own
+    ``os.walk`` of the whole project root."""
+
+    def test_finds_every_markdown_file(self, tmp_path: Path) -> None:
+        (tmp_path / "src" / "pkg").mkdir(parents=True)
+        (tmp_path / "src" / "pkg" / "NOTES.md").write_text("notes")
+        (tmp_path / "CLAUDE.md").write_text("root")
+        assert iter_markdown_paths(tmp_path, vendor_scopes=()) == [
+            "CLAUDE.md",
+            "src/pkg/NOTES.md",
+        ]
+
+    def test_non_markdown_files_are_excluded(self, tmp_path: Path) -> None:
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "module.py").write_text("x = 1\n")
+        assert iter_markdown_paths(tmp_path, vendor_scopes=()) == []
+
+    def test_vendor_scopes_prune_a_directory(self, tmp_path: Path) -> None:
+        (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
+        (tmp_path / "node_modules" / "pkg" / "README.md").write_text("vendored")
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "NOTES.md").write_text("real")
+        scopes = (VendorScope(vendor_dirs=frozenset({"node_modules"})),)
+        assert iter_markdown_paths(tmp_path, vendor_scopes=scopes) == ["src/NOTES.md"]
+
+    def test_also_prune_removes_a_configured_subtree(self, tmp_path: Path) -> None:
+        (tmp_path / "infra" / "roles").mkdir(parents=True)
+        (tmp_path / "infra" / "roles" / "NOTES.md").write_text("excluded")
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "NOTES.md").write_text("real")
+
+        def also_prune(rel_parts: tuple[str, ...]) -> bool:
+            return dir_matches_scope_exclude(rel_parts, ("infra/roles/**",))
+
+        assert iter_markdown_paths(tmp_path, vendor_scopes=(), also_prune=also_prune) == [
+            "src/NOTES.md"
+        ]
+
+    def test_the_walk_does_not_physically_descend_into_a_pruned_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
+        (tmp_path / "node_modules" / "pkg" / "README.md").write_text("vendored")
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "NOTES.md").write_text("real")
+
+        entered_dirs: list[str] = []
+        real_walk = os.walk
+
+        def _spying_walk(
+            top: str,
+            topdown: bool = True,
+            onerror: Callable[[OSError], object] | None = None,
+            followlinks: bool = False,
+        ) -> Generator[tuple[str, list[str], list[str]], None, None]:
+            for dirpath, dirnames, filenames in real_walk(
+                top, topdown=topdown, onerror=onerror, followlinks=followlinks
+            ):
+                entered_dirs.append(dirpath)
+                yield dirpath, dirnames, filenames
+
+        monkeypatch.setattr(os, "walk", _spying_walk)
+        scopes = (VendorScope(vendor_dirs=frozenset({"node_modules"})),)
+
+        matches = iter_markdown_paths(tmp_path, vendor_scopes=scopes)
+
+        assert matches == ["src/NOTES.md"]
+        assert entered_dirs
+        assert not any("node_modules" in entered for entered in entered_dirs)

@@ -61,7 +61,6 @@ finding — the same treatment ``duplicate-block`` gives an always-advisory
 check, since there is no severity left to downgrade.
 """
 
-import os
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Final
@@ -71,8 +70,8 @@ from claude_code_hooks_daemon.docs_qa.checks.generated_doc_hand_edit import (
 )
 from claude_code_hooks_daemon.docs_qa.corpus import (
     COMMON_VENDORED_BUILD_DIR_NAMES,
+    iter_markdown_paths,
     matches_scope_exclude,
-    walk_into,
 )
 from claude_code_hooks_daemon.docs_qa.types import (
     CheckContext,
@@ -81,10 +80,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
-from claude_code_hooks_daemon.utils.vendor_paths import (
-    VendorScope,
-    is_vendored_path_in_scopes,
-)
+from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 CHECK_ID: Final[str] = "source-tree-markdown"
 
@@ -134,10 +130,11 @@ def _iter_markdown_paths(
 ) -> list[str]:
     """Every ``.md`` path under ``project_root``, minus the walk exclusions.
 
-    Pruned ``os.walk`` (not ``Path.rglob``, which cannot skip a matched
-    directory) -- the same idiom ``module_doc_budget`` uses, for the same
-    reason: never physically descend a huge vendored/worktree tree only to
-    discard the results a moment later.
+    A thin wrapper around the shared :func:`docs_qa.corpus.iter_markdown_paths`
+    walk (Plan 00295 Task 3.3) -- kept as its own function for callers
+    (direct tests, and :func:`_run_sweep`'s fallback when no pre-built
+    ``markdown_paths`` is available) that need the walk run fresh rather
+    than shared with ``module-doc-budget``.
 
     ``vendor_scopes`` carries each declared project's EFFECTIVE vendored set
     alongside the root it governs, threaded from ``DocumentationPolicy``
@@ -145,25 +142,7 @@ def _iter_markdown_paths(
     ``layout.vendor_dirs`` prunes here too (Plan 00331), and a monorepo
     sub-project's declaration prunes only its own tree (Plan 00332).
     """
-    matches: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(project_root):
-        rel_dir_parts = Path(dirpath).relative_to(project_root).parts
-        dirnames[:] = [
-            name
-            for name in dirnames
-            if walk_into((*rel_dir_parts, name), vendor_scopes=vendor_scopes)
-        ]
-        for filename in filenames:
-            if not filename.endswith(_MARKDOWN_SUFFIX):
-                continue
-            rel_path = "/".join((*rel_dir_parts, filename))
-            # Descending is not including: a file reached only because its
-            # parent had to be walked for an exception is still vendored
-            # unless it IS the exception.
-            if rel_dir_parts and is_vendored_path_in_scopes(rel_path, vendor_scopes):
-                continue
-            matches.append(rel_path)
-    return sorted(matches)
+    return iter_markdown_paths(project_root, vendor_scopes=vendor_scopes)
 
 
 def _finding(rel_path: str) -> Finding:
@@ -191,10 +170,15 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         return []
 
     findings: list[Finding] = []
-    for rel_path in _iter_markdown_paths(
-        context.project_root,
-        vendor_scopes=context.policy.vendor_scopes,
-    ):
+    # A sweep built via docs_qa.context.sweep_context() already carries the
+    # ONE shared walk (Plan 00295 Task 3.3); walking fresh here is only a
+    # fallback for a CheckContext built some other way.
+    markdown_paths = (
+        context.markdown_paths
+        if context.markdown_paths is not None
+        else _iter_markdown_paths(context.project_root, vendor_scopes=context.policy.vendor_scopes)
+    )
+    for rel_path in markdown_paths:
         basename = rel_path.rsplit("/", 1)[-1]
         if basename in (_CLAUDE_MD_FILENAME, _README_FILENAME):
             continue

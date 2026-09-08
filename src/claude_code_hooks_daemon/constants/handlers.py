@@ -735,9 +735,7 @@ class HandlerID:
 
     # Docs QA edit lint (PreToolUse handler) — Plan 00284: EDIT-stage checks
     # on the would-be content of a documentation-scoped file at Write/Edit
-    # time. No commit-gate sibling ships yet: STAGED-stage docs QA is
-    # deliberately deferred (Task 3.1e), matching plan_qa's own rollout order
-    # (its commit gate "landed last, warn-first" after edit + sweep shipped).
+    # time. Its STAGED-stage commit-gate sibling is DOCS_QA_COMMIT_GATE below.
     DOCS_QA_EDIT = HandlerIDMeta(
         class_name="DocsQaEditHandler",
         config_key="docs_qa_edit",

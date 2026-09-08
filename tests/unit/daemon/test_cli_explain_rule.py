@@ -32,7 +32,7 @@ def _rule_args(**overrides: Any) -> argparse.Namespace:
 
 
 def _handler_args(**overrides: Any) -> argparse.Namespace:
-    values: dict[str, Any] = {"name": None, "project_root": None}
+    values: dict[str, Any] = {"name": None, "list_handlers": False, "project_root": None}
     values.update(overrides)
     return argparse.Namespace(**values)
 
@@ -101,6 +101,43 @@ class TestCmdExplainHandler:
         assert exit_code == 1
         err = capsys.readouterr().err
         assert "destructive_git" in err
+
+    def test_unknown_handler_hints_explain_handler_list(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`explain-rule --list` omits rules-less advisory handlers -- the
+        hint must point somewhere that enumerates every handler name."""
+        exit_code = cmd_explain_handler(_handler_args(name="totally-made-up-zzzz"))
+        assert exit_code == 1
+        err = capsys.readouterr().err
+        assert "explain-handler --list" in err
+
+    def test_missing_name_and_no_list_is_a_usage_error(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        exit_code = cmd_explain_handler(_handler_args())
+        assert exit_code == 1
+        assert capsys.readouterr().err != ""
+
+    def test_list_prints_every_handler_including_rules_less_ones(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The gap `explain-rule --list` has: a handler with NO declared
+        rules never appears there, even though `explain-handler <name>`
+        answers it just fine."""
+        exit_code = cmd_explain_handler(_handler_args(list_handlers=True))
+        assert exit_code == 0
+        out = capsys.readouterr().out
+        assert "destructive_git" in out
+        assert "agent_isolation_advisor" in out
+
+    def test_list_with_a_name_still_lists(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--list takes priority over a name, matching explain-rule's own
+        --list-takes-priority contract."""
+        exit_code = cmd_explain_handler(_handler_args(name="destructive_git", list_handlers=True))
+        assert exit_code == 0
+        out = capsys.readouterr().out
+        assert "agent_isolation_advisor" in out
 
 
 class TestProjectContextInitialisation:

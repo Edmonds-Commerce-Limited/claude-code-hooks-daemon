@@ -31,8 +31,8 @@ BLOCK-eligible; unchanged is ADVISE; shrinking is silent. A path matching
 """
 
 import logging
-import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
@@ -40,9 +40,10 @@ from typing import Final
 
 from claude_code_hooks_daemon.docs_qa.corpus import (
     COMMON_VENDORED_BUILD_DIR_NAMES,
+    dir_matches_scope_exclude,
     is_module_doc_path,
+    iter_markdown_paths,
     matches_scope_exclude,
-    walk_into,
 )
 from claude_code_hooks_daemon.docs_qa.types import (
     CheckContext,
@@ -226,6 +227,33 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     return [finding] if finding is not None else []
 
 
+def _filter_module_doc_paths(
+    markdown_paths: Iterable[str],
+    agent_tree: str,
+    scope_exclude_globs: tuple[str, ...],
+    vendor_scopes: tuple[VendorScope, ...],
+) -> list[str]:
+    """Narrow a raw ``.md``-path listing down to in-scope module docs.
+
+    The post-filter half of what ``_iter_module_doc_paths`` used to do in
+    one pass -- split out so :func:`_run_sweep` can apply it to an
+    ALREADY-WALKED ``CheckContext.markdown_paths`` too, rather than walking
+    the tree a second time (Plan 00295 Task 3.3).
+    """
+    matches: list[str] = []
+    for rel_path in markdown_paths:
+        if matches_scope_exclude(rel_path, scope_exclude_globs):
+            continue
+        # Descending is not including: a doc reached only because its parent
+        # had to be walked for a vendor exception is still vendored unless
+        # it IS the exception.
+        if is_vendored_path_in_scopes(rel_path, vendor_scopes):
+            continue
+        if is_module_doc_path(rel_path, agent_tree):
+            matches.append(rel_path)
+    return sorted(matches)
+
+
 def _iter_module_doc_paths(
     project_root: Path,
     agent_tree: str,
@@ -237,13 +265,11 @@ def _iter_module_doc_paths(
 ) -> list[str]:
     """Every module-scoped CLAUDE.md on disk.
 
-    F3 (Plan 00287): uses a PRUNED ``os.walk`` rather than ``Path.rglob`` --
-    ``rglob`` has no way to skip a directory once matched, so it physically
-    descends a huge ``node_modules``/``.git`` tree on every session start
-    even though the results are discarded a moment later by the
-    post-filter below. Pruning removes an excluded directory from
-    ``dirnames`` in place (the documented ``os.walk`` idiom), so the walk
-    never enters it at all.
+    A thin wrapper around the shared :func:`docs_qa.corpus.iter_markdown_paths`
+    walk (Plan 00295 Task 3.3) plus :func:`_filter_module_doc_paths` --
+    kept as its own function for callers (direct tests, and
+    :func:`_run_sweep`'s fallback when no pre-built ``markdown_paths`` is
+    available) that need the walk run fresh rather than shared.
 
     ``scope_exclude_globs`` is the project's configured exclusion (Plan
     00289), applied here BECAUSE this check walks the tree itself instead of
@@ -253,9 +279,9 @@ def _iter_module_doc_paths(
     report) got a permanent sweep advisory that the one documented
     suppression could not silence. ``corpus.OWN_EXCLUDED_DIR_NAMES`` could not
     stand in for it either -- those are well-known BASENAMES, and a vendored
-    path the project chose is not guessable. It reaches the shared
-    ``corpus.walk_into`` as its ``also_prune`` predicate, which is the ONLY
-    thing this walk needs beyond the shared prune rules.
+    path the project chose is not guessable. It reaches the shared walk as
+    its ``also_prune`` predicate (via :func:`dir_matches_scope_exclude`),
+    which is the ONLY thing this walk needs beyond the shared prune rules.
 
     ``vendor_dirs`` is the project's EFFECTIVE vendored-directory set
     (``ProjectLayout.vendor_dirs``, reaching here via
@@ -263,72 +289,35 @@ def _iter_module_doc_paths(
     constant because it is configurable: folding it into a module-scope
     frozenset froze the prune to the BUILT-IN names, which is what left a
     declared ``layout.vendor_dirs`` inert here (Plan 00331).
-
-    Applied as a PRUNE, matching the hardcoded set: an excluded directory is
-    never entered, rather than being walked and filtered afterwards. A
-    directory-scoped pattern (``roles/**``) therefore has to match the
-    directory itself, so it is tested with its ``/`` suffix stripped from
-    the glob's trailing ``/**`` -- and a doc that slips past the prune (a
-    filename-shape pattern like ``CLAUDE.md`` matches no directory) is
-    caught by the post-filter below.
     """
 
     def scope_exclusion(rel_parts: tuple[str, ...]) -> bool:
-        return _dir_is_scope_excluded(rel_parts, scope_exclude_globs)
+        return dir_matches_scope_exclude(rel_parts, scope_exclude_globs)
 
-    matches: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(project_root):
-        rel_dir_parts = Path(dirpath).relative_to(project_root).parts
-        dirnames[:] = [
-            name
-            for name in dirnames
-            if walk_into(
-                (*rel_dir_parts, name),
-                vendor_scopes=vendor_scopes,
-                also_prune=scope_exclusion,
-            )
-        ]
-        if _CLAUDE_MD_FILENAME not in filenames:
-            continue
-        rel_path = "/".join((*rel_dir_parts, _CLAUDE_MD_FILENAME))
-        if matches_scope_exclude(rel_path, scope_exclude_globs):
-            continue
-        # Descending is not including: a doc reached only because its parent
-        # had to be walked for an exception is still vendored unless it IS
-        # the exception.
-        if is_vendored_path_in_scopes(rel_path, vendor_scopes):
-            continue
-        if is_module_doc_path(rel_path, agent_tree):
-            matches.append(rel_path)
-    return sorted(matches)
-
-
-def _dir_is_scope_excluded(rel_parts: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
-    """Whether a DIRECTORY is inside a configured scope exclusion.
-
-    ``matches_scope_exclude`` judges a FILE path. A pattern written to cover
-    a subtree (``infra/ansible/roles/**``) does not match the directory
-    ``infra/ansible/roles`` itself, so pruning on the raw pattern alone would
-    still descend the tree. Testing the directory against the pattern with a
-    trailing ``/**`` removed closes that, and keeps the prune equivalent to
-    the post-filter rather than broader than it.
-    """
-    rel_dir = "/".join(rel_parts)
-    for pattern in patterns:
-        subtree_root = pattern[:-3] if pattern.endswith("/**") else pattern
-        if fnmatch(rel_dir, subtree_root) or fnmatch(rel_dir, pattern):
-            return True
-    return False
+    markdown_paths = iter_markdown_paths(
+        project_root, vendor_scopes=vendor_scopes, also_prune=scope_exclusion
+    )
+    return _filter_module_doc_paths(markdown_paths, agent_tree, scope_exclude_globs, vendor_scopes)
 
 
 def _run_sweep(context: CheckContext) -> list[Finding]:
     findings: list[Finding] = []
-    for rel_path in _iter_module_doc_paths(
-        context.project_root,
-        context.policy.trees.agent,
-        tuple(context.policy.qa.scope_exclude_globs),
-        vendor_scopes=context.policy.vendor_scopes,
-    ):
+    agent_tree = context.policy.trees.agent
+    scope_exclude_globs = tuple(context.policy.qa.scope_exclude_globs)
+    vendor_scopes = context.policy.vendor_scopes
+    # A sweep built via docs_qa.context.sweep_context() already carries the
+    # ONE shared walk (Plan 00295 Task 3.3); walking fresh here is only a
+    # fallback for a CheckContext built some other way.
+    rel_paths = (
+        _filter_module_doc_paths(
+            context.markdown_paths, agent_tree, scope_exclude_globs, vendor_scopes
+        )
+        if context.markdown_paths is not None
+        else _iter_module_doc_paths(
+            context.project_root, agent_tree, scope_exclude_globs, vendor_scopes=vendor_scopes
+        )
+    )
+    for rel_path in rel_paths:
         abs_path = context.project_root / rel_path
         if not abs_path.is_file():
             continue

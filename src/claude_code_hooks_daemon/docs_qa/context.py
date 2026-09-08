@@ -19,7 +19,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
-from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus
+from claude_code_hooks_daemon.docs_qa.corpus import (
+    DocCorpus,
+    dir_matches_scope_exclude,
+    iter_markdown_paths,
+)
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.types import CheckContext
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
@@ -72,8 +76,34 @@ def sweep_context(
     corpus: DocCorpus,
     layout: "ProjectLayout | None" = None,
 ) -> CheckContext:
-    """Build the SWEEP-stage context from an already-built corpus."""
-    return CheckContext(project_root=project_root, policy=policy, corpus=corpus, layout=layout)
+    """Build the SWEEP-stage context from an already-built corpus.
+
+    Also performs the ONE shared markdown-path walk
+    (:func:`docs_qa.corpus.iter_markdown_paths`) that module-doc-budget and
+    source-tree-markdown both need, so a sweep does this ``os.walk`` once
+    rather than once per consumer check (Plan 00295 Task 3.3). The
+    directory-level prune reuses each check's own ``scope_exclude_globs``
+    exclusion (:func:`docs_qa.corpus.dir_matches_scope_exclude`) -- safe to
+    apply to the one shared walk because every consumer already re-applies
+    the equivalent file-level filter, so this only prunes what would have
+    been discarded anyway.
+    """
+
+    def scope_exclusion(rel_parts: tuple[str, ...]) -> bool:
+        return dir_matches_scope_exclude(rel_parts, tuple(policy.qa.scope_exclude_globs))
+
+    markdown_paths = tuple(
+        iter_markdown_paths(
+            project_root, vendor_scopes=policy.vendor_scopes, also_prune=scope_exclusion
+        )
+    )
+    return CheckContext(
+        project_root=project_root,
+        policy=policy,
+        corpus=corpus,
+        layout=layout,
+        markdown_paths=markdown_paths,
+    )
 
 
 def staged_context(

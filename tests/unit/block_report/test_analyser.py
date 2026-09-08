@@ -163,6 +163,19 @@ class TestAnalyseTranscripts:
         assert summary.malformed_lines == 1
         assert summary.blocks == {}
 
+    def test_oversized_line_is_skipped_unparsed(self, tmp_path: Path) -> None:
+        """A pathological multi-megabyte line is skipped without being
+        JSON-parsed -- mirrors tool_report's equivalent test."""
+        root = tmp_path / "projects" / "-workspace"
+        root.mkdir(parents=True)
+        big = '{"type": "assistant", "pad": "' + ("x" * 20_000_000) + '"}'
+        session = root / "session-a.jsonl"
+        deny = _deny_record("session-a", "BLOCKED [R-EXAMPLE]: reason text")
+        session.write_text(big + "\n" + json.dumps(deny) + "\n", encoding="utf-8")
+        summary = analyse_transcripts(root)
+        assert summary.malformed_lines == 0
+        assert "pad" not in str(summary)
+
     def test_privacy_no_command_text_leaks_into_summary_repr(self, tmp_path: Path) -> None:
         root = tmp_path / "projects" / "-workspace"
         root.mkdir(parents=True)

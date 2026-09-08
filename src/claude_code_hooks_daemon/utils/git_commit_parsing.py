@@ -24,10 +24,14 @@ from __future__ import annotations
 import shlex
 from typing import Final
 
-#: The commit message flags recognised as a WHOLE token (own token, or the
-#: `--message=` attached-value spelling handled separately below).
+#: The commit message flags recognised as a WHOLE token (own token). The
+#: `-m` attached-value spelling (`-mFOO`, `-am`) is not listed here -- it is
+#: recognised by the short-flag cluster reader below, per git's own
+#: cluster-parsing rule.
 MESSAGE_FLAGS: Final[frozenset[str]] = frozenset({"-m", "--message"})
-MESSAGE_FLAG_PREFIXES: Final[tuple[str, ...]] = ("-m", "--message=")
+#: The `--message=` attached-value spelling's prefix (its own whole token,
+#: unlike `-mFOO` which the cluster reader below handles).
+MESSAGE_LONGFORM_PREFIX: Final[str] = "--message="
 MESSAGE_JOINER: Final[str] = "\n\n"
 
 #: git-commit flags that take a SEPARATE value token (not a pathspec) when
@@ -125,8 +129,8 @@ def extract_commit_message(tokens: list[str]) -> str | None:
             parts.append(tokens[index + 1])
             index += 2
             continue
-        if token.startswith(MESSAGE_FLAG_PREFIXES[1]):
-            parts.append(token[len(MESSAGE_FLAG_PREFIXES[1]) :])
+        if token.startswith(MESSAGE_LONGFORM_PREFIX):
+            parts.append(token[len(MESSAGE_LONGFORM_PREFIX) :])
             index += 1
             continue
         cluster = _short_cluster_value_letter(token)

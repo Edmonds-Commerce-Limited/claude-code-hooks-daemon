@@ -5721,7 +5721,9 @@ def cmd_block_report(args: argparse.Namespace) -> int:
 
 _EXPLAIN_UNKNOWN_RULE_HINT = "Run 'hooks-daemon explain-rule --list' to see every known rule ID."
 _EXPLAIN_UNKNOWN_HANDLER_HINT = (
-    "Run 'hooks-daemon explain-rule --list' to see every known handler and rule ID."
+    "Run 'hooks-daemon explain-handler --list' to see every known handler name "
+    "(including advisory handlers with no declared rules, which "
+    "'explain-rule --list' omits), or 'hooks-daemon explain-rule --list' for rule IDs."
 )
 
 
@@ -5848,16 +5850,25 @@ def cmd_explain_rule(args: argparse.Namespace) -> int:
 
 
 def cmd_explain_handler(args: argparse.Namespace) -> int:
-    """Print a handler's rules (IDs + terse) plus its get_claude_md() text.
+    """Print a handler's rules (IDs + terse) plus its get_claude_md() text,
+    or list every known handler name.
 
-    Plan 00116 Task 6.1, Decision F.
+    Plan 00116 Task 6.1, Decision F. ``--list`` (Plan 00295 Task 3.4) exists
+    because ``explain-rule --list`` enumerates RULES, not handlers -- an
+    advisory handler with no declared ``Rule`` objects (most of this
+    daemon's SessionStart advisories) never appears there, even though
+    ``explain-handler <name>`` answers it fine. This command's own listing
+    walks the same ``discover_handler_rules()`` result directly, so a
+    rules-less handler is never omitted.
 
     Args:
-        args: Parsed CLI arguments with ``name`` — a config key (e.g.
-            ``destructive_git``) or a class name, case-insensitive.
+        args: Parsed CLI arguments with ``name`` (optional positional) — a
+            config key (e.g. ``destructive_git``) or a class name,
+            case-insensitive — and ``list_handlers`` (``--list`` flag).
 
     Returns:
-        0 on success; 1 if the handler name is unknown.
+        0 on success (detail printed, or the full list printed); 1 if the
+        handler name is unknown or missing with no ``--list``.
     """
     from claude_code_hooks_daemon.core.rule import RuleFormatter
     from claude_code_hooks_daemon.rule_explain.lookup import (
@@ -5868,7 +5879,22 @@ def cmd_explain_handler(args: argparse.Namespace) -> int:
 
     _init_project_context_for_explain(args)
     handlers = discover_handler_rules()
+
+    if getattr(args, "list_handlers", False):
+        for handler_entry in handlers:
+            print(
+                f"{handler_entry.config_key}\t{handler_entry.class_name}\t"
+                f"{len(handler_entry.rules)} rule(s)"
+            )
+        return 0
+
     name = getattr(args, "name", None) or ""
+    if not name:
+        print(
+            "ERROR: explain-handler requires a handler name, or --list to see every known handler.",
+            file=sys.stderr,
+        )
+        return 1
 
     handler = find_handler(handlers, name)
     if handler is None:
@@ -6818,7 +6844,18 @@ def main() -> int:
     )
     parser_explain_handler.add_argument(
         "name",
+        nargs="?",
+        default=None,
         help="Handler config key or class name, e.g. destructive_git (case-insensitive)",
+    )
+    parser_explain_handler.add_argument(
+        "--list",
+        dest="list_handlers",
+        action="store_true",
+        help=(
+            "List every known handler name, including advisory handlers with no "
+            "declared rules (which explain-rule --list omits)"
+        ),
     )
     parser_explain_handler.add_argument(
         "--project-root",

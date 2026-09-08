@@ -25,10 +25,16 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# A transcript line longer than this is skipped without parsing. Real
-# tool_use records are far smaller; multi-megabyte lines are file bodies or
-# pathological content the analyser has no business loading.
-MAX_LINE_BYTES = 4_000_000
+# A transcript line longer than this (in decoded characters, not raw bytes
+# -- the file is opened in text mode, so `len(line)` counts code points) is
+# skipped without parsing. This bounds json.loads() PARSE COST, not
+# read-time memory: the line iterator has already buffered the whole line
+# into a str before this check runs, so one pathological line still costs
+# its own size in memory transiently -- it is just never handed to the JSON
+# parser or retained past this loop iteration. Real tool_use records are far
+# smaller; multi-megabyte lines are file bodies or pathological content the
+# analyser has no business loading.
+MAX_LINE_CHARS = 4_000_000
 
 # Claude Code slugs a project path into a transcripts directory name by
 # replacing every non-alphanumeric character with a dash (observed:
@@ -93,7 +99,7 @@ def _scan_lines(transcript: Path, counts: Counter[str]) -> int:
     malformed = 0
     with transcript.open("r", encoding="utf-8", errors="replace") as handle:
         for line in handle:
-            if len(line) > MAX_LINE_BYTES:
+            if len(line) > MAX_LINE_CHARS:
                 continue
             stripped = line.strip()
             if not stripped:

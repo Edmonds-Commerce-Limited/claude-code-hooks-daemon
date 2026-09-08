@@ -157,6 +157,13 @@ class AcceptanceTest:
         required_tools: Optional list of executables that must be in PATH for this
             test to run. If any are missing the test is skipped. Use for language
             linters that may not be installed (e.g. ["go"], ["rustc"], ["swiftc"]).
+        requires_llm_commands: The ``required_tools`` idea for a precondition that
+            is not a PATH executable: some handlers (``validate_eslint_on_write``)
+            only exercise real tool behaviour when the project's ``package.json``
+            declares an ``llm:``-prefixed script, taking an advisory branch
+            otherwise. Set True to have the playbook probe
+            ``utils.npm.has_llm_commands_in_package_json`` and render the same
+            SKIP treatment ``required_tools`` gives a missing binary.
         recommended_model: Suggested model for running this test. HAIKU for simple
             blocking tests, SONNET for advisory/context tests, OPUS for complex
             judgment tests. None means no preference.
@@ -227,6 +234,7 @@ class AcceptanceTest:
     requires_event: str | None = None
     test_type: TestType = TestType.BLOCKING
     required_tools: list[str] | None = None
+    requires_llm_commands: bool = False
     recommended_model: RecommendedModel | None = None
     requires_main_thread: bool = False
     harness_cannot_produce: str | None = None

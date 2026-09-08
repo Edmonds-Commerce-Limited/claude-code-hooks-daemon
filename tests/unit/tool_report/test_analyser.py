@@ -105,8 +105,10 @@ class TestAnalyseTranscripts:
         assert summary.malformed_lines == 1
 
     def test_oversized_lines_are_skipped(self, tmp_path: Path) -> None:
-        """A pathological multi-megabyte line must not be parsed — bounded
-        memory is part of the analyser's contract."""
+        """A pathological multi-megabyte line is skipped unparsed -- avoiding
+        the json.loads() cost on it, and keeping it out of every output
+        structure. (Not a peak-memory bound: the line iterator has already
+        read the whole line into a str by the time this check runs.)"""
         big = '{"type": "assistant", "pad": "' + ("x" * 20_000_000) + '"}'
         session = tmp_path / "55555555-5555-5555-5555-555555555555.jsonl"
         session.write_text(big + "\n" + _tool_use_record("Write") + "\n")
