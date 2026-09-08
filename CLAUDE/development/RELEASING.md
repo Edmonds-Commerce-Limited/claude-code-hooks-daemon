@@ -834,32 +834,38 @@ until the sibling-script thinning plan lands. Once the siblings are
 thinned too, all four artifacts can be dropped together.
 
 ```bash
-# Build the bootstrap manifest. List every artifact every self-bootstrap
-# stanza may verify against — all four skill scripts.
-mkdir -p untracked/release-artifacts
-SKILL_SCRIPTS_DIR="src/claude_code_hooks_daemon/skills/hooks-daemon/scripts"
-for script in upgrade.sh daemon-cli.sh health-check.sh init-handlers.sh; do
-    cp "$SKILL_SCRIPTS_DIR/$script" "untracked/release-artifacts/$script"
-done
-scripts/release/build_bootstrap_checksums.sh \
-   untracked/release-artifacts/bootstrap-checksums.txt \
-   untracked/release-artifacts/upgrade.sh \
-   untracked/release-artifacts/daemon-cli.sh \
-   untracked/release-artifacts/health-check.sh \
-   untracked/release-artifacts/init-handlers.sh
-
 git tag -a vX.Y.Z -m "[Full release notes from RELEASES/vX.Y.Z.md]"
 git push origin vX.Y.Z
 
 gh release create vX.Y.Z \
   --title "vX.Y.Z - [Release Title]" \
   --notes-file RELEASES/vX.Y.Z.md \
-  --latest \
-  untracked/release-artifacts/upgrade.sh \
-  untracked/release-artifacts/daemon-cli.sh \
-  untracked/release-artifacts/health-check.sh \
-  untracked/release-artifacts/init-handlers.sh \
-  untracked/release-artifacts/bootstrap-checksums.txt
+  --latest
+
+# Stage the four skill scripts, build bootstrap-checksums.txt, upload all
+# five assets to the release just created, and read the release back to
+# prove every asset landed. Non-zero exit = the release is NOT done.
+scripts/release/publish_bootstrap_assets.sh vX.Y.Z
+```
+
+`publish_bootstrap_assets.sh` is the ONLY supported way to attach the
+bundle: it scans the skill tree for every script carrying the stanza and
+refuses to build a manifest that misses one, and
+`tests/integration/test_publish_bootstrap_assets.py` pins that this file,
+`.claude/skills/release/invoke.sh` and `.claude/agents/release-agent.md`
+all invoke it after `gh release create`. v3.62.1 shipped with no assets
+because the followed procedure ran `gh release create` bare; a release
+whose procedure omits this step cannot pass QA now. To inspect the bundle
+without a release: `scripts/release/publish_bootstrap_assets.sh vX.Y.Z --build-only`.
+
+To repair an ALREADY published release that is missing its assets, bundle
+the bytes of that tag rather than of `main` HEAD:
+
+```bash
+git worktree add untracked/worktrees/tag-vX.Y.Z vX.Y.Z
+HOOKS_DAEMON_SKILL_SCRIPTS_DIR=untracked/worktrees/tag-vX.Y.Z/src/claude_code_hooks_daemon/skills/hooks-daemon/scripts \
+  scripts/release/publish_bootstrap_assets.sh vX.Y.Z
+git worktree remove untracked/worktrees/tag-vX.Y.Z
 ```
 
 ### Relay binary (Plan 00290 Phase 5 — the `daemon.transport.relay_source: download` convenience asset)
@@ -877,16 +883,6 @@ hard failure.
 ```bash
 scripts/release/build_relay_release_assets.sh untracked/release-artifacts
 
-gh release create vX.Y.Z \
-  ... [the four skill-script artifacts above, plus:] \
-  untracked/release-artifacts/hooks-relay-x86_64-unknown-linux-musl \
-  untracked/release-artifacts/SHA256SUMS
-```
-
-**If `gh release create` already ran** (the four skill-script artifacts
-above), upload the relay assets to the same release instead of re-creating it:
-
-```bash
 gh release upload vX.Y.Z \
   untracked/release-artifacts/hooks-relay-x86_64-unknown-linux-musl \
   untracked/release-artifacts/SHA256SUMS
@@ -949,6 +945,7 @@ gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
 # 6. Commit and push
 # 7. Tag: git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z
 # 8. gh release create vX.Y.Z --title "vX.Y.Z - [Title]" --notes-file RELEASES/vX.Y.Z.md --latest
+# 9. scripts/release/publish_bootstrap_assets.sh vX.Y.Z   (the release is NOT done until this exits 0)
 ```
 
 ## Semver Guidelines

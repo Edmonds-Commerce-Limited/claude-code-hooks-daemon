@@ -650,13 +650,17 @@ git push origin main
 git tag -a vX.Y.Z -m "$(cat RELEASES/vX.Y.Z.md)"
 git push origin vX.Y.Z
 gh release create vX.Y.Z --title "vX.Y.Z" --notes-file RELEASES/vX.Y.Z.md --latest
+# REQUIRED: attach bootstrap-checksums.txt + the four skill scripts. Every
+# client skill wrapper fetches the manifest from releases/latest/download/.
+scripts/release/publish_bootstrap_assets.sh vX.Y.Z
 ```
 
 3. **Verify & Report:**
 
 ```bash
 git tag -l vX.Y.Z
-gh release view vX.Y.Z
+gh release view vX.Y.Z --json assets --jq '.assets[].name'
+# Expected: upgrade.sh daemon-cli.sh health-check.sh init-handlers.sh bootstrap-checksums.txt
 # Display success summary
 ```
 

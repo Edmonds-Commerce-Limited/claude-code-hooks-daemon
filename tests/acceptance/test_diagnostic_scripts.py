@@ -461,16 +461,23 @@ def test_stale_diagnostic_script_self_bootstraps_on_first_invocation(
     )
 
 
-@pytest.mark.parametrize("basename", _BOOTSTRAPPED_BASENAMES)
-def test_diagnostic_script_aborts_on_network_failure(tmp_path: Path, basename: str) -> None:
-    """Case 7: network unreachable MUST abort loudly for every diagnostic script.
+def test_bootstrap_stanza_is_identical_across_diagnostic_scripts() -> None:
+    """The stanza is shared verbatim, so the fixtures below (built from
+    daemon-cli.sh) genuinely exercise health-check.sh and init-handlers.sh."""
+    canonical = _extract_bootstrap_stanza()
+    for script in (HEALTH_CHECK_SH, INIT_HANDLERS_SH):
+        text = script.read_text(encoding="utf-8")
+        start = text.find(_BEGIN_MARKER)
+        end = text.find(_END_MARKER)
+        assert start != -1 and end != -1, f"{script.name} has lost its bootstrap stanza"
+        assert text[start : end + len(_END_MARKER)] == canonical, (
+            f"{script.name}: bootstrap stanza has drifted from daemon-cli.sh"
+        )
 
-    Mirrors case 5 (skill upgrade.sh) for the three diagnostic scripts. The
-    bootstrap stanza MUST exit non-zero with a clear operator-facing
-    directive when the manifest URL cannot be reached, rather than silently
-    continuing on with the stale local body — that would be the
-    silent-fallback antipattern that caused the v3.9.0 field bug.
-    """
+
+def _run_stale_script_against(
+    tmp_path: Path, basename: str, release_dir: Path
+) -> tuple[subprocess.CompletedProcess[str], Path]:
     bootstrap_tmp = tmp_path / "bootstrap-tmp"
     bootstrap_tmp.mkdir()
 
@@ -480,9 +487,8 @@ def test_diagnostic_script_aborts_on_network_failure(tmp_path: Path, basename: s
     stale_script_path.write_text(_wrap_stanza("STALE_BODY_RAN"), encoding="utf-8")
     stale_script_path.chmod(stale_script_path.stat().st_mode | stat.S_IEXEC)
 
-    unreachable_dir = tmp_path / "does-not-exist"
     env = os.environ.copy()
-    env["HOOKS_DAEMON_BOOTSTRAP_BASE_URL"] = f"file://{unreachable_dir}"
+    env["HOOKS_DAEMON_BOOTSTRAP_BASE_URL"] = f"file://{release_dir}"
     env["TMPDIR"] = str(bootstrap_tmp)
 
     result = subprocess.run(
@@ -492,19 +498,89 @@ def test_diagnostic_script_aborts_on_network_failure(tmp_path: Path, basename: s
         env=env,
         check=False,
     )
+    return result, bootstrap_tmp / "hooks-daemon-bootstrap"
 
+
+def _assert_fell_back_to_local_copy(
+    basename: str, result: subprocess.CompletedProcess[str], marker_dir: Path
+) -> None:
+    assert result.returncode == 0, (
+        f"{basename}: when the release manifest cannot be fetched the installed "
+        f"local copy MUST run. stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "STALE_BODY_RAN" in result.stdout, (
+        f"{basename}: the installed local body MUST run as the fallback. stdout={result.stdout!r}"
+    )
+    warnings = [line for line in result.stderr.splitlines() if line.startswith("Warning:")]
+    assert len(warnings) == 1, (
+        f"{basename}: exactly one warning line must announce the fallback. stderr={result.stderr!r}"
+    )
+    assert "local copy" in warnings[0], warnings[0]
+    assert "Error:" not in result.stderr, (
+        f"{basename}: a fallback is not an error. stderr={result.stderr!r}"
+    )
+    assert not marker_dir.exists() or not any(marker_dir.iterdir()), (
+        f"{basename}: an unverified body MUST NOT be cached as verified — the "
+        f"next invocation has to retry the manifest fetch"
+    )
+
+
+@pytest.mark.parametrize("basename", _BOOTSTRAPPED_BASENAMES)
+def test_diagnostic_script_falls_back_to_local_copy_when_manifest_unreachable(
+    tmp_path: Path, basename: str
+) -> None:
+    """Case 7 (Plan 00362 Task 1.1): manifest 404/network → run the local copy.
+
+    v3.62.1 shipped with no release assets, so the manifest fetch 404'd and
+    every diagnostic script aborted on every client install — the wrapper the
+    operator already had on disk was refused for want of a file that only
+    exists to check whether it is stale. The stanza now logs one warning and
+    proceeds with the installed copy; integrity failures (a manifest that IS
+    fetched but disagrees with a download) still abort.
+    """
+    unreachable_dir = tmp_path / "does-not-exist"
+    result, marker_dir = _run_stale_script_against(tmp_path, basename, unreachable_dir)
+    _assert_fell_back_to_local_copy(basename, result, marker_dir)
+    assert "bootstrap-checksums.txt" in result.stderr, (
+        f"the warning must name what could not be fetched. stderr={result.stderr!r}"
+    )
+
+
+@pytest.mark.parametrize("basename", _BOOTSTRAPPED_BASENAMES)
+def test_diagnostic_script_falls_back_to_local_copy_when_fresh_script_unreachable(
+    tmp_path: Path, basename: str
+) -> None:
+    """The manifest says we are stale, but the fresh body cannot be fetched:
+    that is still a network failure, not an integrity failure, so the local
+    copy runs with a warning."""
+    release_dir = tmp_path / "release-mock"
+    release_dir.mkdir()
+    checksums_path = release_dir / "bootstrap-checksums.txt"
+    checksums_path.write_text(f"{'0' * 64}  {basename}\n", encoding="utf-8")
+
+    result, marker_dir = _run_stale_script_against(tmp_path, basename, release_dir)
+    _assert_fell_back_to_local_copy(basename, result, marker_dir)
+    assert basename in result.stderr
+
+
+@pytest.mark.parametrize("basename", _BOOTSTRAPPED_BASENAMES)
+def test_diagnostic_script_still_aborts_on_checksum_mismatch(tmp_path: Path, basename: str) -> None:
+    """The fallback is for an UNREACHABLE release, never for a download that
+    fails verification — a tampered or inconsistent release must not run."""
+    release_dir = tmp_path / "release-mock"
+    release_dir.mkdir()
+    fresh_script_path = release_dir / basename
+    fresh_script_path.write_text(_wrap_stanza("FRESH_BODY_RAN"), encoding="utf-8")
+    checksums_path = release_dir / "bootstrap-checksums.txt"
+    checksums_path.write_text(f"{'0' * 64}  {basename}\n", encoding="utf-8")
+
+    result, _ = _run_stale_script_against(tmp_path, basename, release_dir)
     assert result.returncode != 0, (
-        f"{basename} self-bootstrap MUST exit non-zero when the bootstrap "
-        f"source is unreachable. stdout={result.stdout!r} stderr={result.stderr!r}"
+        f"{basename}: a checksum mismatch MUST abort. stdout={result.stdout!r}"
     )
-    assert "STALE_BODY_RAN" not in result.stdout, (
-        f"{basename}: the stale body MUST NOT run after a failed bootstrap — "
-        f"that would be the silent-fallback antipattern. stdout={result.stdout!r}"
-    )
-    assert "failed to download" in result.stderr.lower(), (
-        f"{basename}: failure message MUST direct the operator at the network "
-        f"problem. stderr={result.stderr!r}"
-    )
+    assert "STALE_BODY_RAN" not in result.stdout
+    assert "FRESH_BODY_RAN" not in result.stdout
+    assert "checksum mismatch" in result.stderr.lower()
 
 
 @pytest.mark.parametrize("basename", _BOOTSTRAPPED_BASENAMES)

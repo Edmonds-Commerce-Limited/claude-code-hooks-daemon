@@ -311,12 +311,18 @@ gh release create vX.Y.Z \\
   --title "vX.Y.Z - [Title]" \\
   --notes-file RELEASES/vX.Y.Z.md \\
   --latest
+
+# REQUIRED: attach the self-bootstrap bundle (bootstrap-checksums.txt plus
+# the four skill scripts). Every client skill wrapper fetches this manifest
+# from releases/latest/download/ — a release without it 404s them all.
+scripts/release/publish_bootstrap_assets.sh vX.Y.Z
 \`\`\`
 
 3. Verify:
 \`\`\`bash
 git tag -l vX.Y.Z
-gh release view vX.Y.Z
+gh release view vX.Y.Z --json assets --jq '.assets[].name'
+# Expected: upgrade.sh daemon-cli.sh health-check.sh init-handlers.sh bootstrap-checksums.txt
 \`\`\`
 
 4. Display success summary:
