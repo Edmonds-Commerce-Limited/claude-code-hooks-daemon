@@ -46,7 +46,8 @@ while the detectors silently do not run.
 
 ### Phase 1: The client report
 
-- [ ] ⬜ **Task 1.1** (report §1, HIGH): attach the bootstrap assets to the
+- [x] ✅ **Task 1.1** (report §1, HIGH; merged at `26e2feda`, v3.62.1 repaired
+  with all five assets via `scripts/release/publish_bootstrap_assets.sh`): attach the bootstrap assets to the
   release as part of the pipeline so a release can never ship without them,
   and make the skill scripts fall back to the installed local wrapper when
   the manifest download fails instead of aborting.
@@ -60,22 +61,25 @@ while the detectors silently do not run.
   client installs alongside the other deployed scripts, and the pipe_blocker
   guidance names its deployed absolute path only when it resolves, falling
   back to the redirect recipe otherwise.
-- [ ] ⬜ **Task 1.4** (report §4, MEDIUM): `project_containment` recognises
+- [x] ✅ **Task 1.4** (report §4, MEDIUM; merged at `794854cc`): `project_containment` recognises
   the harness's per-session scratchpad directory as an allowed write target,
   and its guidance says so.
-- [ ] ⬜ **Task 1.5** (report §5, LOW): the `sed -n` deny is deliberate; the
+- [x] ✅ **Task 1.5** (report §5, LOW; merged at `3d901585`): the `sed -n` deny is deliberate; the
   deny message says so explicitly and points at `Read` with offset/limit,
   and the handler doc's "read-only pipelines are allowed" sentence is
   corrected so it no longer contradicts the rule.
-- [ ] ⬜ **Task 1.6** (report §6, HIGH): `tdd_enforcement` accepts a MIRROR
+- [x] ✅ **Task 1.6** (report §6, HIGH; merged at `44430c99`): `tdd_enforcement` accepts a MIRROR
   test root (`{source_glob, test_dir, mirror: true}` in `test_path_map`, or
   `layout.test_dirs` entries) and checks every declared root, so a
   `tests/Small/<mirror>` layout can be enforced instead of disabled.
-- [ ] ⬜ **Task 1.7** (report §7, LOW): the CLI accepts `validate-config` as an
+- [x] ✅ **Task 1.7** (report §7, LOW; merged at `3d901585`): the CLI accepts `validate-config` as an
   alias of `config-validate`, `config_path` defaults to the project config,
   and the deployed skill text is checked against the CLI's verb list by a
   test.
-- [ ] ⬜ **Task 1.8** (report §8, LOW): the optimise procedure reads the
+- [x] ✅ **Task 1.8** (report §8, LOW; merged at `44430c99` — the manifests were
+  already shipped inside the installed daemon tree, the skill text pointed at
+  the wrong root; the `daemon_stats` manifest entry was mis-keyed and fired
+  for every config): the optimise procedure reads the
   config-changes manifests from the installed daemon tree (deploy them, or
   read them from the package), and the upgrader flags a still-enabled
   `daemon_stats` on a config that predates v3.40.
