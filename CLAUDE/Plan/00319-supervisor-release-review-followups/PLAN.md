@@ -293,14 +293,16 @@ produce now fails CI rather than a release gate.
 
 ## Success Criteria
 
-- [ ] All sixteen items (F1 through F10 and the six Phase 4 acceptance-run
+- [x] All sixteen items (F1 through F10 and the six Phase 4 acceptance-run
   observations) are closed — each either fixed with a
   regression test that fails against the pre-fix code, or marked won't-fix
-  with a recorded reason.
+  with a recorded reason (merged at `5ad0d539` and `1c00aced`).
 - [ ] `./scripts/qa/llm_qa.py all` passes 25/25 after the changes.
-- [ ] For any supervisor change: the worker hot-reload is verified by pid, per
+- [x] For any supervisor change: the worker hot-reload is verified by pid, per
   the contract in the global `CLAUDE.md` — a `ps` check showing a NEW
-  `--worker` pid before any behaviour is tested.
+  `--worker` pid before any behaviour is tested (pid 683611 after `5ad0d539`).
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/11-supervisor-review-followups-closed.md`.
 
 ## Delivery & Milestones
 

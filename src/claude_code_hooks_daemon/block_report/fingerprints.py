@@ -44,6 +44,7 @@ import re
 from functools import lru_cache
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.rule_explain.lookup import discover_handler_rules
 
 # Matches the leading header every RuleFormatter-rendered deny text carries
@@ -154,14 +155,12 @@ UNRESOLVED_HANDLER_PAIRS: dict[str, str] = {
 }
 
 
-@lru_cache(maxsize=1)
-def _rule_id_to_config_key() -> dict[str, str]:
+def _build_rule_index() -> dict[str, str]:
     """Build a ``rule_id -> handler config_key`` index from every discovered rule.
 
     Reuses ``rule_explain.lookup.discover_handler_rules`` (the same
     enumeration ``explain-rule`` uses) rather than duplicating handler
-    discovery here. Cached because handler discovery walks the package on
-    every call and the result is immutable for the life of the process.
+    discovery here.
 
     Returns:
         Mapping of upper-cased rule ID to its owning handler's config key.
@@ -171,6 +170,27 @@ def _rule_id_to_config_key() -> dict[str, str]:
         for handler in discover_handler_rules()
         for rule in handler.rules
     }
+
+
+@lru_cache(maxsize=1)
+def _cached_rule_index() -> dict[str, str]:
+    """Memoised index: handler discovery walks the package on every call and
+    the result is immutable for the life of the process ONCE ProjectContext is
+    initialised (see :func:`_rule_id_to_config_key`)."""
+    return _build_rule_index()
+
+
+def _rule_id_to_config_key() -> dict[str, str]:
+    """The rule index, memoised only once it can be complete.
+
+    A handler whose ``__init__`` reads ``ProjectContext`` cannot be constructed
+    before initialisation and drops out of discovery, so an index built then is
+    PARTIAL. Memoising it would mis-attribute every rule of the missing
+    handlers for the rest of the process; such a call is served uncached.
+    """
+    if ProjectContext.is_initialized():
+        return _cached_rule_index()
+    return _build_rule_index()
 
 
 def attribute_deny(text: str) -> str | None:

@@ -74,9 +74,9 @@ class TestAttributeDeny:
         for handler, fragments in FINGERPRINT_TABLE.items():
             for fragment in fragments:
                 wrapped = f"🚫 {fragment} — some trailing detail the handler generated\n\n"
-                assert (
-                    attribute_deny(wrapped) == handler
-                ), f"fragment {fragment!r} did not attribute back to {handler}"
+                assert attribute_deny(wrapped) == handler, (
+                    f"fragment {fragment!r} did not attribute back to {handler}"
+                )
 
     def test_unrelated_text_is_unattributed(self) -> None:
         assert attribute_deny("Error: exit code 2, command not found") is None
@@ -126,12 +126,11 @@ class TestAttributeDenyFromRuleFormattedText:
                 verbose_text = formatter.verbose(rule)
                 terse_text = formatter.terse(rule)
                 assert attribute_deny(verbose_text) == handler.config_key, (
-                    f"verbose render of {rule.rule_id} did not attribute to "
-                    f"{handler.config_key}"
+                    f"verbose render of {rule.rule_id} did not attribute to {handler.config_key}"
                 )
-                assert (
-                    attribute_deny(terse_text) == handler.config_key
-                ), f"terse render of {rule.rule_id} did not attribute to {handler.config_key}"
+                assert attribute_deny(terse_text) == handler.config_key, (
+                    f"terse render of {rule.rule_id} did not attribute to {handler.config_key}"
+                )
         assert exercised_any_rule, "no handler declared any Rule via get_rules()"
 
 
@@ -146,3 +145,21 @@ class TestUnresolvedHandlerPairs:
 
     def test_unresolved_handlers_are_not_in_the_fingerprint_table(self) -> None:
         assert not set(UNRESOLVED_HANDLER_PAIRS) & set(FINGERPRINT_TABLE)
+
+
+class TestRuleIndexIsNotPoisonedByAnEarlyCall:
+    """A rule-ID lookup made BEFORE ProjectContext is initialised sees only the
+    handlers that can be constructed without it, so memoising that partial
+    discovery for the life of the process silently mis-attributes every rule
+    of the handlers that were missing (surfaced as an order-dependent failure
+    of the render-attribution test after the block-report analyser tests)."""
+
+    def test_a_lookup_before_initialisation_is_not_memoised(self) -> None:
+        from claude_code_hooks_daemon.block_report import fingerprints
+
+        fingerprints._cached_rule_index.cache_clear()
+        ProjectContext.reset()
+        early = attribute_deny("BLOCKED [R-MARKDOWN-PLAN-SYNC]: probe")
+        assert early != "markdown_organization"
+        ProjectContext.initialize(_project_root() / ".claude" / "hooks-daemon.yaml")
+        assert attribute_deny("BLOCKED [R-MARKDOWN-PLAN-SYNC]: probe") == "markdown_organization"

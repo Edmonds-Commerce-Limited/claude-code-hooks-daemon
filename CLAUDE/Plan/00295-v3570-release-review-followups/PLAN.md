@@ -122,33 +122,41 @@ All eleven fixed with tests in one worktree pass (`b7b6cd44`), merged at
 
 ### Phase 3: LOW — cleanup
 
-- [ ] ⬜ **Task 3.1**: `_read_event_payload` chunk_size 65536 unnamed
+- [x] ✅ **Task 3.1** (fixed at `91882c36`): `_read_event_payload` chunk_size 65536 unnamed
   (daemon/server.py); `_GUARD_MARKER` dead in transport_verify.py:70;
   `_MESSAGE_FLAG_PREFIXES[0]` never read in the (now-shared) commit-gate
   parser and attached `-m"msg"` form unhandled if the pre-release fix did not
   cover it; registry `doc_attrs` one-iteration setattr loop.
-- [ ] ⬜ **Task 3.2**: tool_report/analyser.py MAX_LINE_BYTES compares
+- [x] ✅ **Task 3.2** (fixed at `ae3adc35`): tool_report/analyser.py MAX_LINE_BYTES compares
   characters not bytes and bounds parse cost, not memory — align code and
   docstring.
-- [ ] ⬜ **Task 3.3**: docs_qa sweep does three full-repo traversals
+- [x] ✅ **Task 3.3** (fixed at `b1106921`): docs_qa sweep does three full-repo traversals
   (corpus rglobs + two os.walks) — share one walk between
   module_doc_budget and source_tree_markdown.
-- [ ] ⬜ **Task 3.4**: explain-rule UX: `_EXPLAIN_UNKNOWN_HANDLER_HINT` points
+- [x] ✅ **Task 3.4** (fixed at `02890b1f`): explain-rule UX: `_EXPLAIN_UNKNOWN_HANDLER_HINT` points
   to `explain-rule --list`, which omits rules-less advisory handlers — add a
   `--list` to explain-handler.
-- [ ] ⬜ **Task 3.5**: rule_explain/lookup.py imports private
+- [x] ✅ **Task 3.5** (fixed at `13677f21`): rule_explain/lookup.py imports private
   `_to_snake_case` from handlers.registry — give the mapping a public name.
-- [ ] ⬜ **Task 3.6**: stale comment in `constants/handlers.py`: DOCS_QA_EDIT
+- [x] ✅ **Task 3.6** (fixed at `6baedd48`): stale comment in `constants/handlers.py`: DOCS_QA_EDIT
   says "No commit-gate sibling ships yet" directly above
   DOCS_QA_COMMIT_GATE's definition.
-- [ ] ⬜ **Task 3.7**: DisclosureTracker.\_state has no eviction (finished
+- [x] ✅ **Task 3.7** (documented at `adec60ee`): DisclosureTracker.\_state has no eviction (finished
   sub-agent transcript paths accumulate for the daemon's lifetime — a few KB
   over weeks). Document the bound in the module note or add cheap eviction.
 - [x] ✅ **Task 3.8** — fixed at `422014c1`, pyright seven errors to zero.
   Original text: `.claude/ccy/claude-supervise.py` pre-existing Pyright
   `int | None` fd-argument errors around lines 4498-4631 (surfaced when the
   release bump touched the file; not release-introduced).
-- [ ] ⬜ **Task 3.9**: acceptance-playbook drift from the v3.57.0 run: refresh
+- [x] ✅ **Task 3.9** (eslint/llm:lint probe `23ccaa1c`, test 205's mutator
+  `09ac3a8d`, gh_issue/pr_comments remediation `1017e928`, the
+  Artifact/Grep unreachability note `5c10d368`; the stale
+  `expected_message_patterns` are closed by Plan 00319 Task 4.6's acceptance
+  contract test, which drives every BLOCKING pattern through the real handler;
+  test 87's `[[ ... ]]` wrapper no longer defeats the producer assertion since
+  Plan 00305 Task 2.6's quoted-argument narrowing; Python's TDD deny already
+  uses the same `BLOCKED [R-TDD-TEST-FIRST]` short form as the other ten
+  languages): acceptance-playbook drift from the v3.57.0 run: refresh
   handlers' `expected_message_patterns` stale against the Rule-migration
   `BLOCKED [R-...]` format and the terse repeat-fire short form (notably
   security_antipattern's "SECURITY ANTIPATTERN BLOCKED", error_hiding's
@@ -164,8 +172,10 @@ All eleven fixed with tests in one worktree pass (`b7b6cd44`), merged at
 
 ## Success Criteria
 
-- [ ] Every task above fixed (TDD where behavioural) or rejected with a
-  recorded reason in this plan's JOURNAL/.
+- [x] Every task above fixed (TDD where behavioural) or rejected with a
+  recorded reason in this plan's JOURNAL/ (all 26 fixed; none rejected).
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/10-v3570-review-followups-closed.md`.
 - [ ] Full QA green after each phase.
 
 ## Delivery & Milestones

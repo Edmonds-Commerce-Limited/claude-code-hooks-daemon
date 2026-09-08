@@ -100,10 +100,18 @@ pipeline to fold it in.
 
 ## Success Criteria
 
-- [ ] A plan can close with a note in the holding area and nothing waiting on
-  a release
-- [ ] A release with a pending note cannot complete without folding it in
-- [ ] The slate check shows pending notes without changing its verdict
+- [x] A plan can close with a note in the holding area and nothing waiting on
+  a release (Plans 00358, 00311, 00205 and 00361 closed this way; the
+  project-only gate `plan_done_requires_holding_area` denies a Complete flip
+  without the criterion)
+- [x] A release with a pending note cannot complete without folding it in
+  (RELEASING.md Step 5 folds the callouts into Highlights, Step 6 moves them
+  and ABORTs if any `NN-*.md` remains)
+- [x] The slate check shows pending notes without changing its verdict
+  (`SlateReport.pending_release_notes`, informational; pinned in
+  `tests/unit/core/test_release_slate.py`)
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/12-release-slate-lists-pending-notes.md`.
 
 ## Delivery & Milestones
 
