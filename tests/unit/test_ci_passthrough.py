@@ -58,7 +58,9 @@ def _build_clean_env(
     env: dict[str, str] = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": os.environ.get("HOME", "/root"),
-        "HOSTNAME": os.environ.get("HOSTNAME", "test-host"),
+        # hostname-suffix-exempt: pins HOSTNAME in the CHILD env rather than
+        # deriving a runtime path, so both sides read the same explicit value.
+        "HOSTNAME": os.environ.get("HOSTNAME", "test-host"),  # hostname-suffix-exempt: as above
         # At SOURCE time this must equal the real repo root, and only then is
         # it overridden to the fake project (the generated script re-sets it
         # immediately after `source`, which is what carries the test's intent).

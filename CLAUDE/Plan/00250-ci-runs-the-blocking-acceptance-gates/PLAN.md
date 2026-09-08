@@ -82,25 +82,29 @@ expired.** `Tests + coverage` is RED on `main` and has been for a long stretch.
 It was 9 failures per interpreter across three files when found (while
 regression-testing Plan 00347), and is **4** after Task 2.4a:
 
-| File                                               | Why it fails on a runner                                                                                                           |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/integration/test_deployed_skill_trees.py`   | Asked git about a directory-only ignore pattern for a path absent on a runner. **Fixed (2.4a).**                                   |
-| `tests/integration/test_forwarder_socket_stdin.py` | Hardcoded `/workspace`, so the forwarders were never found. **Path fixed (2.4a)**; now reaches the daemon and fails there instead. |
-| `tests/integration/test_relay_guard_fail_open.py`  | Exercises the `nc` socket-relay rung against a live local socket. **Still failing (2.4b).**                                        |
+| File                                               | Why it fails on a runner                                                                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `tests/integration/test_deployed_skill_trees.py`   | Asked git about a directory-only ignore pattern for a path absent on a runner. **Fixed (2.4a).**                                     |
+| `tests/integration/test_forwarder_socket_stdin.py` | Hardcoded `/workspace`, so the forwarders were never found. **Path fixed (2.4a)**; now reaches the daemon and fails there instead.   |
+| `tests/integration/test_relay_guard_fail_open.py`  | Re-derived the hostname socket suffix without the `gethostname()` rung, so it dialled a path nothing was bound to. **Fixed (2.4b).** |
 
-These are the **same missing dependency** as the 11 skips above, showing up as
-hard failures instead. That difference matters in both directions: a failure is
-louder than a skip, but a run that is *always* red teaches readers to skim it,
-which is how the `Format (black)` breakage in Plan 00346 stayed hidden for
-hours inside the noise. Two different failure modes of one provisioning gap.
+Two of the three turned out NOT to be the same missing dependency at all — they
+were plain defects that would fail on any machine without a deployed install,
+and only *looked* like daemon fallout. That difference matters in both
+directions: a failure is louder than a skip, but a run that is *always* red
+teaches readers to skim it, which is how the `Format (black)` breakage in Plan
+00346 stayed hidden for hours inside the noise.
 
-**Consequence for this plan**: Task 4.2 ("a green CI run") cannot be met while
-these three files fail, whatever happens to the 11 skips. They are in scope
-here because the fix is the same decision — provision, or skip honestly — not
-because they are acceptance gates.
+**Consequence for this plan**: Task 4.2 ("a green CI run") needs all three
+fixed, whatever happens to the skips (**16**, per Task 1.1's measurement — the
+"11" this plan was written with was already stale). All three are now fixed;
+what remains of `test_forwarder_socket_stdin.py` genuinely does need a daemon,
+which Task 2.1 now provisions.
 
-The hardcoded `/workspace` path is the one part that is separable: it is wrong
-independently of any daemon, and would still be wrong if CI provisioned one.
+Method worth keeping: both separable defects were found by reproducing the
+runner condition locally, not by reading a CI log — a `git worktree` for the
+missing install, `env -u HOSTNAME` for the unexported shell variable. Seconds
+each, no round trip.
 
 ## Goals
 
@@ -222,26 +226,32 @@ have reopened a plan whose success criteria were satisfied.
 - [ ] ⬜ **Task 2.3**: Verify the CI daemon cannot collide with anything (its own
   `HOSTNAME`-derived socket, per the hostname-isolation design)
 - [x] ✅ **Task 2.4a**: The two failures that were plain defects rather than
-  provisioning gaps, both fixed with a test that reproduces the CI condition
-  locally — the point being that neither needed a daemon at all:
-  - `test_deployed_skill_trees.py` asked git whether `.claude/hooks-daemon` is
-    ignored. The pattern is `/hooks-daemon/`, and a trailing slash makes it
-    **directory-only**: git will not match it against a path it cannot tell is
-    a directory, so any checkout without a deployed install answers "not
-    ignored". The guard was testing the container, not the pattern. It now
-    asks about a path INSIDE the directory, which is existence-independent.
-  - `test_forwarder_socket_stdin.py` hardcoded `Path("/workspace/.claude/hooks")`.
-    The forwarders are tracked and not ignored, so they exist on any checkout —
-    just not there. Now derived from the checkout, with a test pinning that.
-- [ ] ⬜ **Task 2.4b**: `test_relay_guard_fail_open.py:443`, which is a real
-  provisioning gap and this plan's Decision 1 again. It sets
-  `HOOKS_DAEMON_NC_UNIX_CAPABLE=1`, overriding the daemon's own capability
-  detection, then asserts the `nc` rung reached a Unix socket — so it requires
-  an `nc` with `-U` support (`netcat-openbsd`) on the runner. **Unverified
-  hypothesis**: the runner's `nc` lacks it. Confirm on a runner before fixing.
-  Do NOT resolve it by adding a silent skip — that converts a red gate into an
-  invisible one, which is the defect this plan exists to remove. Phase 3's
-  guard must cover it.
+  provisioning gaps — neither needed a daemon at all, and both were fixed with a
+  test reproducing the CI condition locally. `test_deployed_skill_trees.py`
+  asked git about a **directory-only** ignore pattern (`/hooks-daemon/`) for a
+  path absent on a runner, so it was testing the container rather than the
+  pattern; it now asks about a path inside the directory.
+  `test_forwarder_socket_stdin.py` hardcoded `/workspace`; now derived from the
+  checkout. Detail in `JOURNAL/`.
+- [x] ✅ **Task 2.4b**: `test_relay_guard_fail_open.py`. ~~a real provisioning
+  gap and this plan's Decision 1 again … so it requires an `nc` with `-U`
+  support (`netcat-openbsd`) on the runner. **Unverified hypothesis**: the
+  runner's `nc` lacks it.~~ **The hypothesis was wrong on both counts**: not a
+  provisioning gap, and nothing to do with `nc`. It was a **test bug**, and the
+  task's own instruction to confirm before fixing is what caught it.
+  The test derived its socket path from `os.environ.get("HOSTNAME", "localhost")`,
+  omitting the middle rung both real implementations have (`$HOSTNAME` →
+  `socket.gethostname()` → `"localhost"`). bash populates `$HOSTNAME` as a
+  **shell** variable without exporting it, so on a runner `init.sh` resolved a
+  real OS hostname while the test resolved `"localhost"` — server and nc rung
+  used different paths. **Reproduced locally** with `env -u HOSTNAME pytest …`,
+  so no CI round trip was needed; fixed by calling
+  `paths._get_hostname_suffix()`. **Class guarded**:
+  `test_hostname_suffix_parity.py` pinned the two production helpers against
+  each other but nothing stopped a TEST adding a third computation, so it now
+  scans `tests/` for unexempted `$HOSTNAME` reads with a
+  `# hostname-suffix-exempt: <reason>` marker and a vacuity class. No silent
+  skip was added. Full narrative in `JOURNAL/`.
 
 ### Phase 3: Guard the class
 

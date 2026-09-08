@@ -42,6 +42,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
+from claude_code_hooks_daemon.daemon.paths import _get_hostname_suffix
 from claude_code_hooks_daemon.install.forwarder_generator import generate_forwarder_content
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -411,7 +412,18 @@ def test_nc_rung_round_trip_completes_promptly(live_pid_file: Path) -> None:
         # bind where THAT computation actually lands, and
         # HOOKS_DAEMON_ROOT_DIR must point at our short_root tree rather
         # than the real repo checkout.
-        hostname_suffix = "-" + os.environ.get("HOSTNAME", "localhost").lower().replace(" ", "-")
+        # Use the daemon's OWN resolver rather than re-deriving the suffix here.
+        # This line previously read `os.environ.get("HOSTNAME", "localhost")`,
+        # which silently omits the middle rung of the resolution chain both real
+        # sides implement: $HOSTNAME -> socket.gethostname() -> "localhost".
+        # bash auto-populates $HOSTNAME as a SHELL variable without exporting
+        # it, so on a GitHub runner init.sh resolved a real OS hostname while
+        # this test resolved "localhost" — the server bound one path, the nc
+        # rung dialled another, and the reachability assertion failed with no
+        # hint that a hostname was involved. test_hostname_suffix_parity.py
+        # already pins bash/Python agreement for the production helpers; nothing
+        # was pinning a TEST that re-implements them.
+        hostname_suffix = _get_hostname_suffix()
         events_dir = untracked_dir / f"events{hostname_suffix}"
         events_dir.mkdir(parents=True)
         event_sock = events_dir / "pre-tool-use.sock"

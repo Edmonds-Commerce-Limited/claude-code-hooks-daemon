@@ -139,3 +139,85 @@ def test_bash_and_python_agree_when_hostname_set() -> None:
     assert (
         bash_suffix == python_suffix == "-my-host"
     ), f"explicit HOSTNAME parity failed: bash={bash_suffix!r} python={python_suffix!r}"
+
+
+# ---------------------------------------------------------------------------
+# No THIRD implementation: a test may not re-derive the suffix either
+# ---------------------------------------------------------------------------
+#
+# The four tests above pin bash against Python for the two PRODUCTION helpers.
+# They cannot see a TEST that computes the suffix a third way, and Plan 00250
+# found one doing exactly that: test_relay_guard_fail_open.py read
+# `os.environ.get("HOSTNAME", "localhost")`, omitting the middle rung
+# (socket.gethostname()) that both real implementations have.
+#
+# That omission is invisible wherever HOSTNAME is exported — every dev container
+# — and only bites where it is not, such as a GitHub runner, where bash
+# auto-populates HOSTNAME as a non-exported SHELL variable. The failure surfaced
+# as an unreachable socket with no mention of a hostname anywhere.
+#
+# So: reading $HOSTNAME from the environment inside tests/ is denied unless the
+# line carries a marker saying why it is not deriving a runtime path.
+
+_HOSTNAME_ENV_READ = re.compile(r"""os\.environ(?:\.get\(|\[)\s*["']HOSTNAME["']""")
+
+_HOSTNAME_EXEMPT_MARKER = "# hostname-suffix-exempt:"
+
+_TESTS_ROOT = REPO_ROOT / "tests"
+
+
+def _unexempted_hostname_reads() -> list[str]:
+    """Return ``path:line`` for every unexempted ``$HOSTNAME`` read under tests/."""
+    findings: list[str] = []
+    for path in sorted(_TESTS_ROOT.rglob("*.py")):
+        # This file DEFINES the pattern and exercises it in its own vacuity
+        # fixtures, so scanning itself would report guaranteed hits.
+        if path == Path(__file__).resolve():
+            continue
+        for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+            # A comment can legitimately quote the offending shape when
+            # explaining why it is wrong — that is documentation, not a third
+            # implementation.
+            if line.lstrip().startswith("#"):
+                continue
+            if not _HOSTNAME_ENV_READ.search(line):
+                continue
+            marker, _, reason = line.partition(_HOSTNAME_EXEMPT_MARKER)
+            # A marker with no reason after it does not exempt: the point of the
+            # marker is the justification, not the token.
+            if marker != line and reason.strip():
+                continue
+            findings.append(f"{path.relative_to(REPO_ROOT)}:{lineno}")
+    return findings
+
+
+def test_no_test_re_derives_the_hostname_suffix() -> None:
+    """No test reads $HOSTNAME to build a runtime path without justifying it."""
+    findings = _unexempted_hostname_reads()
+    assert not findings, (
+        "These lines read $HOSTNAME directly, which omits the socket.gethostname() "
+        "rung that init.sh and paths.py both have — they will disagree with the "
+        "daemon wherever HOSTNAME is unexported (CI runners, macOS/zsh). Call "
+        "`paths._get_hostname_suffix()` instead, or append "
+        f"`{_HOSTNAME_EXEMPT_MARKER} <reason>` if the read is not deriving a "
+        f"runtime path: {findings}"
+    )
+
+
+class TestTheGuardIsNotVacuous:
+    """The scan above passes trivially if its regex matches nothing real."""
+
+    def test_the_regex_matches_the_shape_that_caused_the_bug(self) -> None:
+        offending = 'hostname_suffix = "-" + os.environ.get("HOSTNAME", "localhost").lower()'
+        assert _HOSTNAME_ENV_READ.search(offending)
+
+    def test_the_regex_matches_subscript_access_too(self) -> None:
+        assert _HOSTNAME_ENV_READ.search('name = os.environ["HOSTNAME"]')
+
+    def test_a_marker_without_a_reason_does_not_exempt(self) -> None:
+        line = f'x = os.environ.get("HOSTNAME")  {_HOSTNAME_EXEMPT_MARKER}'
+        marker, _, reason = line.partition(_HOSTNAME_EXEMPT_MARKER)
+        assert marker != line and not reason.strip()
+
+    def test_the_scan_actually_reaches_test_files(self) -> None:
+        assert len(list(_TESTS_ROOT.rglob("*.py"))) > 100
