@@ -31,6 +31,12 @@ class CliAcceptanceTest:
         setup_commands: Commands to run before the test
         cleanup_commands: Commands to run after the test
         safety_notes: Explanation of why the test is safe to execute
+        requires_main_thread: Same routing field a handler ``AcceptanceTest``
+            carries (see its docstring). Defaults to ``True`` -- the SAFE
+            posture -- because a CLI test typically mutates shared daemon
+            state (mode, restart) that races against any other test batch
+            touching the same daemon if delegated. A read-only CLI test may
+            declare ``False`` to opt into delegation.
     """
 
     title: str
@@ -41,6 +47,7 @@ class CliAcceptanceTest:
     setup_commands: list[str] | None = None
     cleanup_commands: list[str] | None = None
     safety_notes: str | None = None
+    requires_main_thread: bool = True
 
     def __post_init__(self) -> None:
         """Validate fields after initialization."""

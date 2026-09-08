@@ -154,6 +154,43 @@ class TestPlaybookGeneratorCliTests:
         # Should count these 2 CLI tests in total
         assert "**Total Tests**: 2" in markdown
 
+    def test_cli_test_shows_requires_main_thread_field_default(self) -> None:
+        """Plan 00319 Task 4.4: every CLI Feature test must carry the SAME
+
+        `Requires Main Thread` routing field a handler test carries -- a
+        runner that routes by that field (RELEASING.md Step 12.4) must never
+        find a test with neither `yes` nor `no`, which is how three CLI
+        tests went unexecuted across two consecutive v3.60.0 acceptance
+        passes.
+        """
+        cli_tests = [
+            CliAcceptanceTest(
+                title="Restart mode advisory",
+                description="Verify restart prints mode advisory",
+                command="restart",
+                expected_stdout_patterns=["Mode before restart"],
+            ),
+        ]
+        gen = self._make_generator(cli_tests=cli_tests)
+        markdown = gen.generate_markdown()
+
+        assert "**Requires Main Thread**: yes" in markdown
+
+    def test_cli_test_shows_requires_main_thread_field_when_false(self) -> None:
+        cli_tests = [
+            CliAcceptanceTest(
+                title="Read-only CLI probe",
+                description="A safe-to-delegate CLI test",
+                command="status",
+                expected_stdout_patterns=["running"],
+                requires_main_thread=False,
+            ),
+        ]
+        gen = self._make_generator(cli_tests=cli_tests)
+        markdown = gen.generate_markdown()
+
+        assert "**Requires Main Thread**: no" in markdown
+
     def test_json_includes_cli_tests(self) -> None:
         """JSON output includes CLI tests with correct fields."""
         cli_tests = [
@@ -181,3 +218,24 @@ class TestPlaybookGeneratorCliTests:
         assert entry["source"] == "cli"
         assert entry["setup_commands"] == ["setup"]
         assert entry["cleanup_commands"] == ["cleanup"]
+
+    def test_json_includes_requires_main_thread_field(self) -> None:
+        """Plan 00319 Task 4.4: the JSON payload must expose the same routing
+
+        field the markdown renders, so a machine-driven consumer of the JSON
+        playbook never has to fall back to parsing markdown for this alone.
+        """
+        cli_tests = [
+            CliAcceptanceTest(
+                title="JSON routing test",
+                description="Tests JSON",
+                command="restart",
+                expected_stdout_patterns=["advisory"],
+                requires_main_thread=False,
+            ),
+        ]
+        gen = self._make_generator(cli_tests=cli_tests)
+        json_tests = gen.generate_json()
+
+        entry = next(t for t in json_tests if t.get("source") == "cli")
+        assert entry["requires_main_thread"] is False

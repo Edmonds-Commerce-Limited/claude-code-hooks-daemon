@@ -82,3 +82,31 @@ class TestCliAcceptanceTest:
             expected_stdout_patterns=["pat"],
         )
         assert test.expected_exit_code == 0
+
+    def test_default_requires_main_thread_is_true(self) -> None:
+        """Plan 00319 Task 4.4: default is the SAFE posture -- do not delegate.
+
+        A CLI test that mutates shared daemon state (mode, restart) races
+        against any other test batch touching the same daemon if delegated,
+        so absence of an explicit override must read as "main thread only",
+        matching the same fallback rule the handler-test playbook documents
+        for its own `Requires Main Thread` field.
+        """
+        test = CliAcceptanceTest(
+            title="title",
+            description="desc",
+            command="cmd",
+            expected_stdout_patterns=["pat"],
+        )
+        assert test.requires_main_thread is True
+
+    def test_requires_main_thread_can_be_declared_false(self) -> None:
+        """A read-only CLI test may opt into delegation explicitly."""
+        test = CliAcceptanceTest(
+            title="title",
+            description="desc",
+            command="cmd",
+            expected_stdout_patterns=["pat"],
+            requires_main_thread=False,
+        )
+        assert test.requires_main_thread is False
