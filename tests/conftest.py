@@ -366,6 +366,74 @@ def tmp_git_repo(tmp_path: Path) -> Path:
     return repo
 
 
+#: The one identity every test process commits as (Plan 00252 finding A).
+#: Deliberately not a real person: a commit carrying it is a test artefact.
+HERMETIC_GIT_NAME = "Hooks Daemon Test"
+HERMETIC_GIT_EMAIL = "test@hooks-daemon.invalid"
+
+#: Ambient git variables that would make a test's outcome depend on the shell
+#: that ran it. Cleared before the fixed identity is set, so a developer's
+#: exported override cannot survive into the suite.
+_AMBIENT_GIT_VARS = (
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_AUTHOR_DATE",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+    "GIT_COMMITTER_DATE",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def hermetic_git_environment(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Generator[None, None, None]:
+    """Give every test process the bare git environment a CI runner has.
+
+    A test that needs a git repo has to establish its own identity premise;
+    seven did not (Plans 00245 and 00248), passed on the developer's machine
+    because a global ``user.name``/``user.email`` supplied one, and failed on a
+    fresh runner where nothing did. Each was fixed by hand and nothing stopped
+    the next. This fixture stops the next: the global and system config git
+    reads are EMPTY files under a session temp dir, so nothing under ``HOME``
+    is visible, and the identity is pinned as ``GIT_AUTHOR_*`` /
+    ``GIT_COMMITTER_*`` so a commit still succeeds — with the same author on
+    every machine. Ambient signing, hooks paths, default-branch names and
+    credential helpers all disappear with the config files.
+
+    Session-scoped and applied through :class:`pytest.MonkeyPatch` directly
+    (the ``monkeypatch`` fixture is function-scoped). A test that wants a
+    specific identity still sets its own ``env`` or ``--local`` config; this
+    only removes what the shell brought in. ``tests/unit/test_hermetic_git_environment.py``
+    is the proof that the developer's real identity cannot be observed.
+    """
+    config_dir = tmp_path_factory.mktemp("hermetic-git")
+    global_config = config_dir / "gitconfig-global"
+    system_config = config_dir / "gitconfig-system"
+    global_config.write_text("", encoding="utf-8")
+    system_config.write_text("", encoding="utf-8")
+
+    patch = pytest.MonkeyPatch()
+    for var in _AMBIENT_GIT_VARS:
+        patch.delenv(var, raising=False)
+    patch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+    patch.setenv("GIT_CONFIG_SYSTEM", str(system_config))
+    patch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    patch.setenv("GIT_AUTHOR_NAME", HERMETIC_GIT_NAME)
+    patch.setenv("GIT_AUTHOR_EMAIL", HERMETIC_GIT_EMAIL)
+    patch.setenv("GIT_COMMITTER_NAME", HERMETIC_GIT_NAME)
+    patch.setenv("GIT_COMMITTER_EMAIL", HERMETIC_GIT_EMAIL)
+    try:
+        yield
+    finally:
+        patch.undo()
+
+
 #: Runtime-path overrides that take precedence over every computed daemon path
 #: (see CLAUDE.md, "Environment Overrides"). Because they win unconditionally,
 #: a developer or CI runner that happens to export one silently changes what
