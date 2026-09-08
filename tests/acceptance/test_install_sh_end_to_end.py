@@ -39,6 +39,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.install.plan_workflow import MKPLAN_SCRIPT_NAME
+from claude_code_hooks_daemon.utils.hook_registration import HOOK_EVENTS_IN_SETTINGS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_VERSION_SH = REPO_ROOT / "scripts" / "install_version.sh"
@@ -254,7 +255,83 @@ def _assert_mkplan_deployed(project_root: Path, phase: str) -> None:
     assert mode == 0o755, f"{phase}: deployed mkplan.bash must be mode 0o755, got {mode:o}"
 
 
-@pytest.mark.slow
+#: A deny rule no daemon default contains, so finding it after an upgrade can
+#: only mean it was carried through rather than coincidentally re-shipped.
+_CLIENT_DENY = "Bash(rm:-rf /client-marker)"
+_CLIENT_HOOK_COMMAND = "./ci/client-only-gate.sh"
+
+
+def _customise_settings(project_root: Path) -> None:
+    """Make the installed settings.json look like a client has lived in it.
+
+    Three shapes, because they exercise three different ownership rules: a
+    top-level key of the client's own, a value inside a block the daemon also
+    writes to, and a hook sharing an event array with a daemon forwarder.
+    """
+    settings_file = project_root / ".claude" / "settings.json"
+    settings = json.loads(settings_file.read_text(encoding="utf-8"))
+
+    settings["permissions"] = {"deny": [_CLIENT_DENY]}
+    settings["clientOwnKey"] = {"kept": True}
+
+    event = next(iter(HOOK_EVENTS_IN_SETTINGS))
+    entries = settings.setdefault("hooks", {}).setdefault(event, [])
+    entries.append({"hooks": [{"type": "command", "command": _CLIENT_HOOK_COMMAND}]})
+
+    settings_file.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+
+
+def _assert_settings_survived_the_upgrade(project_root: Path, upgrade_output: str) -> None:
+    """The whole point of Plan 00176: refreshed AND preserved, not one or other.
+
+    ``upgrade_output`` must be stdout AND stderr combined — every ``print_*``
+    helper writes to stderr so a ``VAR=$(helper ...)`` capture cannot be
+    corrupted by progress text, which is the v3.10.0 SEV-1 this whole file was
+    written for.
+
+    It is checked FIRST and deliberately. Preservation alone is
+    indistinguishable from the deploy never running: a step that skips the file
+    entirely leaves every client key exactly where it was and passes every
+    assertion below. Proving the merge RAN is what makes the rest evidence.
+    """
+    assert "Merged settings.json" in upgrade_output, (
+        "The upgrade did not merge settings.json at all. Every assertion below "
+        "would still pass — an untouched file preserves customisations "
+        "perfectly — so this gate would be green while the merge never ran.\n"
+        f"--- upgrade output (tail) ---\n{upgrade_output[-3000:]}"
+    )
+
+    settings_file = project_root / ".claude" / "settings.json"
+    settings = json.loads(settings_file.read_text(encoding="utf-8"))
+
+    assert settings.get("permissions") == {"deny": [_CLIENT_DENY]}, (
+        "The upgrade dropped the client's permissions block. Two of the shipped "
+        "top-level keys are security controls, so this is the regression that "
+        "matters most."
+    )
+    assert settings.get("clientOwnKey") == {"kept": True}, (
+        "A top-level key the daemon has never heard of did not survive, so the "
+        "merge is building a daemon document rather than editing the client's."
+    )
+
+    hooks = settings.get("hooks", {})
+    missing = sorted(set(HOOK_EVENTS_IN_SETTINGS) - set(hooks))
+    assert not missing, f"The upgrade left the wired-hook set incomplete: {missing}"
+
+    event = next(iter(HOOK_EVENTS_IN_SETTINGS))
+    commands = [
+        inner.get("command") for group in hooks.get(event, []) for inner in group.get("hooks", [])
+    ]
+    assert _CLIENT_HOOK_COMMAND in commands, (
+        f"A client hook sharing the {event} array with our forwarder was "
+        f"dropped. Got: {commands}"
+    )
+    assert any(
+        isinstance(command, str) and f".claude/hooks/{HOOK_EVENTS_IN_SETTINGS[event]}" in command
+        for command in commands
+    ), f"The daemon's own {event} forwarder is missing after the upgrade: {commands}"
+
+
 def test_install_sh_end_to_end_produces_running_daemon(tmp_path: Path) -> None:
     """Plan 00105 Phase 1 Task 1.1 — the canonical install end-to-end gate.
 
@@ -510,6 +587,13 @@ def test_upgrade_version_sh_end_to_end_produces_running_daemon(tmp_path: Path) -
         venv_python = venv_path / "bin" / "python"
         assert venv_python.is_file(), f"venv Python must exist post-install: {venv_python}"
 
+        # Plan 00176 Task 3.1: make the project look lived-in BEFORE the
+        # upgrade. Every deploy route used to overwrite settings.json
+        # verbatim, so this is the state the merge exists to protect and the
+        # only place the whole chain — shell helper, CLI, merge — is proved
+        # together against a real install.
+        _customise_settings(project_root)
+
         # Compute the daemon dir's short SHA. upgrade_version.sh sets
         # ROLLBACK_REF via `git describe --tags --exact-match` then
         # `git rev-parse --short HEAD`. The worktree is at HEAD with no
@@ -585,6 +669,14 @@ def test_upgrade_version_sh_end_to_end_produces_running_daemon(tmp_path: Path) -
         # mkplan.bash. This is the exact v3.24.0 field bug — the upgrade path
         # previously never delivered the script plan_number_helper references.
         _assert_mkplan_deployed(project_root, "upgrade")
+
+        # Plan 00176 regression gate: the upgrade must refresh the daemon's
+        # wired-hook block AND keep everything else the client put here. Either
+        # one alone is a bug — an overwrite delivers the first by destroying
+        # the second, which is exactly what this replaced.
+        _assert_settings_survived_the_upgrade(
+            project_root, upgrade_result.stdout + upgrade_result.stderr
+        )
 
     finally:
         if venv_python is not None:

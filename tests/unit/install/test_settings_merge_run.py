@@ -164,6 +164,58 @@ class TestTheBaselineIsUsedWhenItIsGivenAndNotGuessedWhenItIsNot:
         assert outcome.status is not MergeStatus.ESCALATED
 
 
+class TestTheGateMustNotContradictTheMergesOwnRule:
+    """Found by the end-to-end gate, which is the only place it could be.
+
+    The merge PRESERVES a client hook sharing an event array with our
+    forwarder — that is the headline ownership rule. `validate_hook_commands`
+    counts every `type: command` hook in that array and calls more than one a
+    duplicate registration, so using it as the write gate escalated the upgrade
+    for precisely the clients whose customisations this exists to protect, on
+    every run, forever. Preserved-but-never-written is worse than the overwrite.
+    """
+
+    def test_a_client_hook_beside_our_forwarder_does_not_escalate(
+        self, paths: dict[str, Path]
+    ) -> None:
+        client = {
+            "hooks": {
+                _EVENT: [
+                    {"hooks": [{"type": "command", "command": "./ci/client-only-gate.sh"}]},
+                ]
+            }
+        }
+        paths["client"].write_text(json.dumps(client), encoding="utf-8")
+        outcome = run_settings_merge(paths["client"], paths["new_default"])
+        assert outcome.status is not MergeStatus.ESCALATED, outcome.messages
+
+    def test_and_the_client_hook_is_still_there_afterwards(self, paths: dict[str, Path]) -> None:
+        client = {
+            "hooks": {
+                _EVENT: [
+                    {"hooks": [{"type": "command", "command": "./ci/client-only-gate.sh"}]},
+                ]
+            }
+        }
+        paths["client"].write_text(json.dumps(client), encoding="utf-8")
+        run_settings_merge(paths["client"], paths["new_default"])
+        written = json.loads(paths["client"].read_text(encoding="utf-8"))
+        commands = [
+            inner["command"] for group in written["hooks"][_EVENT] for inner in group["hooks"]
+        ]
+        assert "./ci/client-only-gate.sh" in commands
+        assert _CANONICAL in commands
+
+    def test_a_genuinely_doubled_forwarder_still_escalates(self, paths: dict[str, Path]) -> None:
+        """Loosening the gate must not blind it to a real double registration."""
+        doubled = {"type": "command", "command": _CANONICAL}
+        client = {"hooks": {_EVENT: [{"hooks": [doubled, dict(doubled)]}]}}
+        paths["client"].write_text(json.dumps(client), encoding="utf-8")
+        outcome = run_settings_merge(paths["client"], paths["new_default"])
+        assert outcome.status is MergeStatus.ESCALATED
+        assert any("forwarder" in message for message in outcome.messages)
+
+
 class TestTheMergedResultIsValidatedBeforeItLands:
     def test_a_result_missing_a_wired_event_would_escalate(
         self, paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch

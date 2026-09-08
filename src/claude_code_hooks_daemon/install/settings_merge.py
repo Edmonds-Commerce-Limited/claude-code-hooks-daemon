@@ -50,7 +50,6 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     HOOK_EVENTS_IN_SETTINGS,
     build_hook_registration,
     canonical_hook_entry,
-    validate_hook_commands,
     validate_settings_hooks,
 )
 
@@ -167,6 +166,43 @@ def _daemon_bash_key(inner: Any) -> str | None:
     if legacy is not None and legacy in _WIRED_BASH_KEYS:
         return legacy
     return _CANONICAL_COMMANDS.get(command)
+
+
+def _validate_daemon_forwarders(settings: Mapping[str, Any]) -> list[str]:
+    """Exactly one canonical daemon forwarder per wired event, and no more.
+
+    Deliberately NOT ``validate_hook_commands``, which counts every ``type:
+    command`` hook in a wired event's array and calls more than one a duplicate
+    registration. That is incompatible with this merge's own ownership rule — a
+    client hook may legitimately share an event array with our forwarder, and
+    preserving it is the headline behaviour — so using that validator as the
+    write gate escalated the upgrade for precisely the clients whose
+    customisations this exists to protect, on every run. A file that is
+    preserved but never merged is worse than the overwrite it replaced: the
+    wired set silently rots instead.
+
+    The discriminator is what makes the narrower check possible: it can tell OUR
+    forwarder from a client's hook, which a count cannot.
+    """
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        return ["`hooks` is not an object"]
+
+    issues: list[str] = []
+    for json_key, bash_key in sorted(HOOK_EVENTS_IN_SETTINGS.items()):
+        entries = hooks.get(json_key)
+        if not isinstance(entries, list):
+            issues.append(f"{json_key} has no daemon forwarder")
+            continue
+        found = 0
+        for group in entries:
+            inner_list = group.get(_HOOKS_KEY) if isinstance(group, dict) else None
+            if not isinstance(inner_list, list):
+                continue
+            found += sum(1 for inner in inner_list if _daemon_bash_key(inner) == bash_key)
+        if found != 1:
+            issues.append(f"{json_key} has {found} daemon forwarders, expected exactly 1")
+    return issues
 
 
 def _merge_hooks(existing: Any) -> tuple[dict[str, Any], tuple[str, ...], tuple[str, ...]]:
@@ -394,7 +430,7 @@ def run_settings_merge(
 
     merged, report = merge_settings(client, new_default, old_default)
 
-    problems = validate_settings_hooks(merged) + validate_hook_commands(merged)
+    problems = validate_settings_hooks(merged) + _validate_daemon_forwarders(merged)
     if problems:
         return _escalate(
             client_path,
