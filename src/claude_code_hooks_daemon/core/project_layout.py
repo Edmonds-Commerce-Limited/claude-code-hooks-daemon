@@ -38,6 +38,7 @@ the option it governs).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from typing import TYPE_CHECKING, Final
 
 from claude_code_hooks_daemon.docs_qa.corpus import COMMON_VENDORED_BUILD_DIR_NAMES
@@ -106,9 +107,35 @@ def _path_parts(rel_path: str) -> tuple[str, ...]:
     return tuple(part for part in rel_path.split("/") if part and part != ".")
 
 
+def _matches_dir_entry(parts: tuple[str, ...], entry: str) -> bool:
+    """True when some contiguous run of ``parts`` matches ``entry``.
+
+    ``entry`` is a bare NAME, a multi-segment PATH, or a glob (``config/models.py``'s
+    ``LayoutConfig.source_dirs``/``test_dirs`` field docs promise "names/globs",
+    with a path example -- ``["backend/src"]``). A bare name (no ``/``) is a
+    single-segment window, so this reduces to the original "matches any
+    segment" behaviour for that case; a multi-segment entry matches a
+    contiguous run of that many segments starting at ANY depth, not only from
+    the repo root -- consistent with the single-segment case, and each
+    window is matched via :func:`fnmatch.fnmatch` so glob metacharacters
+    (``*``, ``?``, ``[...]``) work in either shape.
+    """
+    entry_parts = tuple(part for part in entry.split("/") if part)
+    window = len(entry_parts)
+    if window == 0 or window > len(parts):
+        return False
+    pattern = "/".join(entry_parts)
+    return any(
+        fnmatch("/".join(parts[start : start + window]), pattern)
+        for start in range(len(parts) - window + 1)
+    )
+
+
 def _has_dir_component(rel_path: str, dirs: tuple[str, ...]) -> bool:
-    """True when any segment of ``rel_path`` names one of ``dirs``."""
-    return any(part in dirs for part in _path_parts(rel_path))
+    """True when any declared/built-in name, path, or glob in ``dirs`` matches
+    some contiguous run of ``rel_path``'s segments."""
+    parts = _path_parts(rel_path)
+    return any(_matches_dir_entry(parts, entry) for entry in dirs)
 
 
 def _dirs_from_layout_config(

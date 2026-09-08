@@ -108,6 +108,40 @@ class TestMembershipHelpers:
         layout = ProjectLayout.from_config(Config())
         assert layout.is_test_path("src/foo.py") is False
 
+    def test_is_source_path_true_for_declared_multi_segment_path(self) -> None:
+        # Plan 00295 Task 1.3: the field docs (config/models.py
+        # LayoutConfig.source_dirs) promise "names/globs" with a
+        # multi-segment example ("backend/src") -- it must actually match.
+        config = Config.model_validate({"layout": {"source_dirs": ["backend/src"]}})
+        layout = ProjectLayout.from_config(config)
+        assert layout.is_source_path("backend/src/foo.py") is True
+
+    def test_is_source_path_true_for_declared_multi_segment_path_at_depth(self) -> None:
+        config = Config.model_validate({"layout": {"source_dirs": ["backend/src"]}})
+        layout = ProjectLayout.from_config(config)
+        assert layout.is_source_path("monorepo/backend/src/foo.py") is True
+
+    def test_is_source_path_false_when_segments_are_not_contiguous(self) -> None:
+        config = Config.model_validate({"layout": {"source_dirs": ["backend/src"]}})
+        layout = ProjectLayout.from_config(config)
+        assert layout.is_source_path("backend/other/src/foo.py") is False
+
+    def test_is_test_path_true_for_declared_glob(self) -> None:
+        config = Config.model_validate({"layout": {"test_dirs": ["spec_*"]}})
+        layout = ProjectLayout.from_config(config)
+        assert layout.is_test_path("spec_integration/foo.py") is True
+
+    def test_is_test_path_false_for_glob_non_match(self) -> None:
+        config = Config.model_validate({"layout": {"test_dirs": ["spec_*"]}})
+        layout = ProjectLayout.from_config(config)
+        assert layout.is_test_path("specs/foo.py") is False
+
+    def test_is_source_path_still_true_for_bare_declared_name_at_any_depth(self) -> None:
+        # Existing single-segment-name behaviour must survive unchanged.
+        config = Config.model_validate({"layout": {"source_dirs": ["engine"]}})
+        layout = ProjectLayout.from_config(config)
+        assert layout.is_source_path("monorepo/engine/foo.py") is True
+
     def test_is_vendored_path_true_for_node_modules(self) -> None:
         layout = ProjectLayout.from_config(Config())
         assert layout.is_vendored_path("frontend/node_modules/pkg/index.js") is True
