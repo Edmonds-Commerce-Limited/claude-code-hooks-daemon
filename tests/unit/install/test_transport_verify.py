@@ -148,6 +148,26 @@ class TestStopHardBlockProbe:
         result = probe_stop_hard_block(tmp_path)
         assert not result.passed
 
+    def test_exit_0_with_a_non_json_body_fails_rather_than_reading_as_not_blocked(
+        self, tmp_path: Path
+    ) -> None:
+        # A body that is not JSON cannot carry a decision. Treating it as
+        # "no block decision" would pass a forwarder that emits garbage as a
+        # healthy not-blocked round trip.
+        _write_script(
+            tmp_path / "stop", "cat >/dev/null\necho 'Traceback (most recent call last)'\n"
+        )
+        result = probe_stop_hard_block(tmp_path)
+        assert not result.passed
+        assert "not JSON" in result.detail
+
+    def test_exit_0_with_an_empty_body_is_not_blocked(self, tmp_path: Path) -> None:
+        # No body at all is the shape of a forwarder that had nothing to say,
+        # which is a not-blocked round trip, not a broken one.
+        _write_script(tmp_path / "stop", "cat >/dev/null\n")
+        result = probe_stop_hard_block(tmp_path)
+        assert result.passed, result.detail
+
 
 class TestListenerProbes:
     def test_all_wired_sockets_present_passes(

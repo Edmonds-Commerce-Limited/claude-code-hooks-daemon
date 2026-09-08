@@ -265,10 +265,15 @@ def probe_stop_hard_block(hooks_dir: Path) -> ProbeResult:
             return ProbeResult(name, False, f"timed out after {PROBE_TIMEOUT_SECONDS}s")
     if _ENXIO_MARKER in err:
         return ProbeResult(name, False, f"stdin socket re-open failed (ENXIO): {_snippet(err)}")
-    try:
-        parsed = json.loads(out.decode().strip())
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        parsed = None
+    body = out.decode(errors="replace").strip()
+    parsed: object = None
+    if body:
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            # A body that is not JSON cannot carry a decision, so treating
+            # it as "not blocked" would pass a broken forwarder as healthy.
+            return ProbeResult(name, False, f"response body is not JSON: {_snippet(out)}")
     decision = parsed.get("decision") if isinstance(parsed, dict) else None
     if returncode != _EXIT_HARD_BLOCK:
         if decision != "block":
