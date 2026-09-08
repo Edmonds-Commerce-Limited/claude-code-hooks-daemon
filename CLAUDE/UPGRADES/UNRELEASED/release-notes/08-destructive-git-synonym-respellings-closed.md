@@ -1,7 +1,7 @@
 # Callout: two plumbing synonyms for already-blocked destructive git commands are now closed
 
 **Plan**: 00205
-**Audience**: operators | handler authors
+**Audience**: operators
 
 `destructive_git` blocked `git push --force` and `git branch -D`, but not
 their exact plumbing equivalents: a `+`-prefixed refspec (`git push origin +main:main`) and `git update-ref -d refs/heads/<name>`. Both are ordinary
