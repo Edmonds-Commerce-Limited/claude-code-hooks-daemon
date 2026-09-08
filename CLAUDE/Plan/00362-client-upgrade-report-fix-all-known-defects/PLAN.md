@@ -82,9 +82,52 @@ while the detectors silently do not run.
 
 ### Phase 2: Every other known defect in a live plan
 
-- [ ] ⬜ **Task 2.1**: enumerate every defect recorded in the 25 live plans
-  (the sweep report lands in this folder as `DEFECT-LEDGER.md`); add one task
-  per defect below, each naming its plan and task ref.
+- [x] ✅ **Task 2.1**: enumerate every defect recorded in the 25 live plans:
+  [DEFECT-LEDGER.md](DEFECT-LEDGER.md), 22 defects re-verified against the
+  tree (D5, D6, D16, D17, D20 and D22 are Phase 1's §1, §2, §4, §6, §8 and
+  §3), two risks, eleven already-fixed items listed so nobody re-does them,
+  and thirteen plans with no defect left.
+- [ ] ⬜ **Task 2.2** (D3, D11, D12 — Plan 00291 Tasks 1.1, 2.1, 2.2, HIGH):
+  the documented fresh-clone upgrade aborts into rollback
+  (`upgrade_version.sh` calling `stop_daemon_safe` with an empty venv
+  python); `truth_changes._parse_version` rejects the `v` prefix every doc
+  produces; an old-format config is retained silently on install.
+- [ ] ⬜ **Task 2.3** (D2, D9 — Plan 00172 Findings 1 and 2, HIGH): config
+  for 20 of 31 wired events is silently dropped because `HandlersConfig`
+  declares 11 event fields; `PluginConfig.event_type` omits the worktree
+  events.
+- [ ] ⬜ **Task 2.4** (D1, D7 — Plan 00252 Phase 3 and Plan 00264 Question 7,
+  HIGH): staged content is never inspected for secret-list terms, and a `gh`
+  issue/PR comment body is not a candidate at all. Decision: both belong to
+  `sensitive_content`, as two more surfaces of the one guard.
+- [ ] ⬜ **Task 2.5** (D8 — Plan 00189 Tasks 1.1 to 1.3, MEDIUM): a daemon-down
+  `WorktreeCreate` hook writes JSON to a stdout Claude Code reads as a path;
+  generalise over the `raw_stdout` event flag.
+- [ ] ⬜ **Task 2.6** (D10 — Plan 00252 Phases 1 and 2, MEDIUM): the test suite
+  neutralises ambient git identity and config so a fresh runner and a local
+  run agree.
+- [ ] ⬜ **Task 2.7** (D13 — Plan 00329, MEDIUM): the truth-changes
+  reconciliation collapses superseded entries so only the current truth is
+  asserted. Decision: collapse by truth key, keeping the highest-version
+  entry.
+- [ ] ⬜ **Task 2.8** (D14, D19, R2, D21 — Plans 00175 and 00159, plus the
+  bug-report tool): the statusline suggestion and the install fallback both
+  recommend `refreshInterval: 1`; the seven Pyright `int | None` sites in
+  `supervise()`; the nine pid-keyed temp filenames gain a unique component;
+  `debug_info.py` no longer runs an empty command in its own report.
+- [ ] ⬜ **Task 2.9** (D18 — Plan 00330 Task 1.4, MEDIUM): docs QA and plan QA
+  honour `daemon.exclude_paths`. Decision: honour it; a fixture tree that
+  must keep producing findings is declared explicitly, not by omission.
+- [ ] ⬜ **Task 2.10** (D4 — Plan 00100 Phase 4, HIGH): concurrent venv
+  mutation is serialised with a lock, after the bind-mount `flock` spike the
+  plan asks for.
+- [ ] ⬜ **Task 2.11** (R1 — Plan 00327 Phase 1): measure the delta between the
+  vendored hook contract and current upstream so a stability release does not
+  rest on an unaudited contract; any drifted claim becomes a task here.
+- [ ] ⬜ **Task 2.12** (D15 — Plan 00242): NOT in this push. A terminal ALLOW
+  ending the chain is a structural change with a measurement-gated staged
+  rollout; it stays in its own plan and is named here so the release notes
+  can say so.
 
 ### Phase 3: Verify
 
