@@ -250,6 +250,10 @@ the opt-in idle trigger for the same pass.
   (`59b11a0a`, `f458057e`).
 - [x] Every routed subcommand is one a human invokes; the rest are documented
   capabilities (`f458057e`).
+- [ ] All QA checks passing on the merged tree; daemon RUNNING.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/28-optimise-is-registry-derived.md` and
+  `UNRELEASED/release-notes/29-one-housekeeping-command-and-a-smaller-skill-surface.md`.
 
 ## Delivery & Milestones
 
@@ -260,6 +264,7 @@ the opt-in idle trigger for the same pass.
 - Milestone A — the real surface and the real coverage gap are measured.
 - Milestone B — `optimise` is registry-derived and cannot silently omit a
   handler. Delivered in `bf5da1f5`.
-- Milestone C — a single housekeeping invocation exists.
+- Milestone C — a single housekeeping invocation exists. Delivered in
+  `59b11a0a` and `f458057e`.
 - Milestone D — the release gate blocks a drifted skill surface. Delivered in
   `bf5da1f5`.
