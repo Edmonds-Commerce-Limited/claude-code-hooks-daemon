@@ -4,6 +4,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00358: a worktree venv can silently test the WRONG source tree](00358-worktree-venv-tests-wrong-source-tree/PLAN.md) - Not Started (a sub-agent's correct fix appeared to fail, because the worktree's venv symlinks to main's, whose editable install points at `/workspace/src` — so GREEN can never pass and a green QA run is not evidence about the branch)
+
+- [00357: a ValueError escapes glob expansion and fails a security guard open](00357-glob-expansion-valueerror-escapes-fail-open/PLAN.md) - Not Started (`Path.glob` is a generator, so the `ValueError` fires on iteration OUTSIDE the `try` that means to catch it; the exception escapes into the handler and the fail-open design then skips a security guard)
+
 - [00356: secret guard bracket glob false positive](00356-secret-guard-bracket-glob-false-positive/PLAN.md) - In Progress; the reported defect is fixed and shipped, and the plan stays open for one unrelated fail-open found while working on it (a bracket expression at a token's edge was read as an open wildcard, so an ordinary jq array subscript was denied)
 
 - [00355: supervisor announces every keystroke it sends](00355-supervisor-announces-every-keystroke-it-sends/PLAN.md) - In Progress, shipped and CI-green; only a live observation remains (the ESC injected to flush a stalled compaction — 122 of them in one session — now raises the banner on the tick that sends it, and repeats collapse to a tally like `esc (20), compact (15)`)
@@ -271,35 +275,35 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 356 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 358 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 297 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 42 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 44 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 42 + 297 + 7 = **346 folders**, spanning
-  **343 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 44 + 297 + 7 = **348 folders**, spanning
+  **345 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  356 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  358 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  343 + 13 = 356. ✅
+  345 + 13 = 358. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the merge of Plan 00356 (42 root, 297
-  `Completed/`, 7 `Cancelled/`, 343 distinct numbers against a counter of 356 —
-  346 folders, three of which share a number with another from before the
+- **Last reconciled at**: the filing of Plans 00357 and 00358 (44 root, 297
+  `Completed/`, 7 `Cancelled/`, 345 distinct numbers against a counter of 358 —
+  348 folders, three of which share a number with another from before the
   counter existed: 00034, 00039, 00041). Every figure above was recounted from
   disk rather than incremented, and the folderless set was recomputed the same
   way. The index carries NO
