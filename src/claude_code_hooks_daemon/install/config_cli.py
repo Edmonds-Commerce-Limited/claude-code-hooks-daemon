@@ -24,6 +24,12 @@ from claude_code_hooks_daemon.install.config_migrations import (
     list_known_versions as _list_known_versions,
 )
 from claude_code_hooks_daemon.install.config_validator import ConfigValidator
+from claude_code_hooks_daemon.install.handler_key_audit import (
+    applied_relocations,
+    audit_handler_keys,
+    format_findings,
+    migrate_relocated_handler_keys,
+)
 from claude_code_hooks_daemon.install.worktree_seed_report import (
     build_seed_report,
     format_report_for_llm,
@@ -125,13 +131,27 @@ def run_config_merge(
     old_default_config = _load_yaml(old_default_config_path)
     new_default_config = _load_yaml(new_default_config_path)
 
+    # Plan 00362: relocate BEFORE diffing, on both sides. A relocated key the
+    # old default also carried would otherwise diff as a priority/enabled
+    # change on a handler the new default removed -- a conflict, with the
+    # user's `enabled: false` silently replaced by the new default's block.
+    # Once the user's entry sits under `pseudo_events`, the differ records it
+    # as a custom section and the merger deep-merges it over the new default's
+    # nitpick block, so the user's values win and the triggers still arrive.
+    user_config, migrations = migrate_relocated_handler_keys(user_config, scaffold=False)
+    old_default_config, _ = migrate_relocated_handler_keys(old_default_config, scaffold=False)
+
     differ = ConfigDiffer()
     diff = differ.diff(user_config=user_config, default_config=old_default_config)
 
     merger = ConfigMerger()
     result = merger.merge(new_default_config=new_default_config, diff=diff)
 
-    return result.to_dict()
+    output = result.to_dict()
+    output["handler_key_migrations"] = [
+        m.to_dict() for m in [*migrations, *result.handler_key_migrations]
+    ]
+    return output
 
 
 def run_check_config_migrations(
@@ -176,8 +196,9 @@ def run_check_config_migrations(
     result: dict[str, Any] = {
         "from_version": advisory.from_version,
         "to_version": advisory.to_version,
-        "has_warnings": bool(advisory.warnings),
+        "has_warnings": advisory.has_warnings,
         "has_suggestions": bool(advisory.suggestions),
+        "stale_handler_keys": [f.to_dict() for f in advisory.stale_handler_keys],
         "warnings": [
             {
                 "key": w.key,
@@ -266,6 +287,46 @@ def run_check_worktree_seed(
         ),
         **({"text": format_report_for_llm(report)} if output_format == "text" else {}),
     }
+
+
+def run_audit_handler_keys(
+    config_path: Path,
+    migrated_from: Path | None = None,
+) -> dict[str, Any]:
+    """Audit every ``handlers.<event>.<key>`` against the handler registry.
+
+    Plan 00362. Unlike :func:`run_check_config_migrations` this takes no
+    version range: a key is stale against the code that is installed, not
+    against a release manifest, so the answer comes from the registry.
+
+    Args:
+        config_path: Path to the hooks-daemon.yaml to audit.
+        migrated_from: Optional pre-upgrade copy of the same config. When
+            given, the result also lists the relocations the upgrade
+            performed between the two files (``applied_migrations``), which
+            is what the upgrade summary line reports.
+
+    Returns:
+        Dictionary with ``has_findings``, ``findings`` (one dict per
+        finding, see ``HandlerKeyFinding.to_dict``), ``text`` (one line per
+        finding), and ``applied_migrations`` when ``migrated_from`` is given.
+
+    Raises:
+        FileNotFoundError: If a config file doesn't exist.
+        ValueError: If a config file is not a YAML mapping.
+    """
+    config = _load_yaml(config_path)
+    findings = audit_handler_keys(config)
+
+    result: dict[str, Any] = {
+        "has_findings": bool(findings),
+        "findings": [f.to_dict() for f in findings],
+        "text": "\n".join(format_findings(findings)),
+    }
+    if migrated_from is not None:
+        before = _load_yaml(migrated_from)
+        result["applied_migrations"] = [m.to_dict() for m in applied_relocations(before, config)]
+    return result
 
 
 def run_config_validate(

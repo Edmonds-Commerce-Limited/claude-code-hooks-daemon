@@ -12,6 +12,7 @@ import yaml
 
 from claude_code_hooks_daemon.install.config_cli import (
     list_known_versions,
+    run_audit_handler_keys,
     run_check_config_migrations,
     run_config_diff,
     run_config_merge,
@@ -415,3 +416,174 @@ class TestListKnownVersions:
     def test_returns_empty_for_missing_dir(self, tmp_path: Path) -> None:
         result = list_known_versions(manifests_dir=tmp_path / "missing")
         assert result == []
+
+
+class TestHandlerKeyAuditInCli:
+    """Plan 00362: the CLI layer surfaces stale handler keys and the merge's moves."""
+
+    def test_config_validate_warns_on_relocated_key(self, tmp_path: Path) -> None:
+        config = {
+            "version": "2.0",
+            "daemon": {"log_level": "INFO"},
+            "handlers": {"stop": {"hedging_language_detector": {"enabled": True}}},
+        }
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text(yaml.safe_dump(config))
+
+        result = run_config_validate(config_path=config_path)
+        assert result["valid"] is True
+        assert any(
+            "pseudo_events.nitpick.handlers.hedging_language" in w for w in result["warnings"]
+        )
+
+    def test_check_config_migrations_reports_stale_keys_without_a_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        md = tmp_path / "manifests"
+        md.mkdir()
+        cfg = tmp_path / "hooks-daemon.yaml"
+        cfg.write_text(
+            yaml.safe_dump(
+                {
+                    "handlers": {
+                        "stop": {"dismissive_language_detector": {"enabled": True}},
+                        "notification": {"notification_logger": {"enabled": True}},
+                    },
+                    "daemon": {},
+                }
+            )
+        )
+
+        result = run_check_config_migrations(
+            from_version="3.41.0",
+            to_version="3.62.1",
+            user_config_path=cfg,
+            manifests_dir=md,
+        )
+
+        assert result["has_warnings"] is True
+        paths = {f["path"] for f in result["stale_handler_keys"]}
+        assert paths == {
+            "handlers.stop.dismissive_language_detector",
+            "handlers.notification.notification_logger",
+        }
+        assert "pseudo_events.nitpick.handlers.dismissive_language" in result["text"]
+        assert "no longer exists" in result["text"]
+
+    def test_check_config_migrations_clean_config_has_no_stale_keys(self, tmp_path: Path) -> None:
+        md = tmp_path / "manifests"
+        md.mkdir()
+        cfg = tmp_path / "hooks-daemon.yaml"
+        cfg.write_text(yaml.safe_dump({"handlers": {"stop": {"auto_continue_stop": {}}}}))
+
+        result = run_check_config_migrations(
+            from_version="3.41.0", to_version="3.62.1", user_config_path=cfg, manifests_dir=md
+        )
+        assert result["stale_handler_keys"] == []
+        assert result["has_warnings"] is False
+
+    def test_config_merge_moves_relocated_keys_and_reports_them(self, tmp_path: Path) -> None:
+        user = {
+            "version": "2.0",
+            "daemon": {"log_level": "INFO"},
+            "handlers": {"stop": {"hedging_language_detector": {"enabled": True, "priority": 30}}},
+        }
+        default = {"version": "2.0", "daemon": {"log_level": "INFO"}, "handlers": {"stop": {}}}
+        user_path = tmp_path / "user.yaml"
+        old_path = tmp_path / "old.yaml"
+        new_path = tmp_path / "new.yaml"
+        user_path.write_text(yaml.safe_dump(user))
+        old_path.write_text(yaml.safe_dump(default))
+        new_path.write_text(yaml.safe_dump(default))
+
+        result = run_config_merge(user_path, old_path, new_path)
+
+        merged = result["merged_config"]
+        assert "hedging_language_detector" not in merged["handlers"]["stop"]
+        assert merged["pseudo_events"]["nitpick"]["handlers"]["hedging_language"] == {
+            "enabled": True,
+            "priority": 30,
+        }
+        assert [m["action"] for m in result["handler_key_migrations"]] == ["moved"]
+
+    def test_config_merge_keeps_user_settings_when_old_default_had_the_key(
+        self, tmp_path: Path
+    ) -> None:
+        """The client shape: old default AND user carry the key; new default has nitpick.
+
+        Without pre-migrating the user's config the differ sees only a
+        priority/enabled change on a handler the new default removed, reports
+        a conflict, and the new default's `enabled: true` silently replaces
+        the user's `enabled: false`.
+        """
+        old_default = {
+            "version": "2.0",
+            "daemon": {"log_level": "INFO"},
+            "handlers": {"stop": {"hedging_language_detector": {"enabled": True, "priority": 30}}},
+        }
+        user = {
+            "version": "2.0",
+            "daemon": {"log_level": "INFO"},
+            "handlers": {"stop": {"hedging_language_detector": {"enabled": False, "priority": 31}}},
+        }
+        new_default = {
+            "version": "2.0",
+            "daemon": {"log_level": "INFO"},
+            "handlers": {"stop": {}},
+            "pseudo_events": {
+                "nitpick": {
+                    "enabled": True,
+                    "triggers": ["stop:1/1"],
+                    "handlers": {"hedging_language": {"enabled": True}},
+                }
+            },
+        }
+        user_path = tmp_path / "user.yaml"
+        old_path = tmp_path / "old.yaml"
+        new_path = tmp_path / "new.yaml"
+        user_path.write_text(yaml.safe_dump(user))
+        old_path.write_text(yaml.safe_dump(old_default))
+        new_path.write_text(yaml.safe_dump(new_default))
+
+        result = run_config_merge(user_path, old_path, new_path)
+
+        nitpick = result["merged_config"]["pseudo_events"]["nitpick"]
+        assert nitpick["handlers"]["hedging_language"] == {"enabled": False, "priority": 31}
+        assert nitpick["triggers"] == ["stop:1/1"]
+        assert "hedging_language_detector" not in result["merged_config"]["handlers"]["stop"]
+        assert [m["summary"] for m in result["handler_key_migrations"]] == [
+            "handlers.stop.hedging_language_detector -> "
+            "pseudo_events.nitpick.handlers.hedging_language"
+        ]
+        assert result["conflicts"] == []
+
+    def test_run_audit_handler_keys(self, tmp_path: Path) -> None:
+        cfg = tmp_path / "hooks-daemon.yaml"
+        cfg.write_text(
+            yaml.safe_dump({"handlers": {"stop": {"hedging_language_detector": {"enabled": True}}}})
+        )
+        result = run_audit_handler_keys(config_path=cfg)
+        assert result["has_findings"] is True
+        assert result["findings"][0]["kind"] == "relocated"
+        assert "applied_migrations" not in result
+
+    def test_run_audit_handler_keys_reports_applied_migrations(self, tmp_path: Path) -> None:
+        backup = tmp_path / "hooks-daemon.yaml.backup"
+        backup.write_text(
+            yaml.safe_dump({"handlers": {"stop": {"hedging_language_detector": {"enabled": True}}}})
+        )
+        cfg = tmp_path / "hooks-daemon.yaml"
+        cfg.write_text(
+            yaml.safe_dump(
+                {
+                    "handlers": {"stop": {}},
+                    "pseudo_events": {"nitpick": {"handlers": {"hedging_language": {}}}},
+                }
+            )
+        )
+        result = run_audit_handler_keys(config_path=cfg, migrated_from=backup)
+        assert result["has_findings"] is False
+        assert [m["summary"] for m in result["applied_migrations"]] == [
+            "handlers.stop.hedging_language_detector -> "
+            "pseudo_events.nitpick.handlers.hedging_language"
+        ]

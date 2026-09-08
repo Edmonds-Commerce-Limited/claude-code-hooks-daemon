@@ -759,3 +759,50 @@ class TestCustomisedSectionsReceiveNewDefaultSubkeys:
             "plans_directory": "docs/Plans",
             "auto_number": True,
         }
+
+
+class TestRelocatedHandlerKeyMigration:
+    """Plan 00362: the merge moves relocated keys to their pseudo-event home."""
+
+    def test_relocated_keys_carried_by_the_user_are_moved(self) -> None:
+        base: dict[str, Any] = {
+            "version": "2.0",
+            "daemon": {"log_level": "INFO"},
+            "handlers": {"stop": {"auto_continue_stop": {"enabled": True, "priority": 10}}},
+        }
+        user: dict[str, Any] = {
+            "version": "2.0",
+            "daemon": {"log_level": "INFO"},
+            "handlers": {
+                "stop": {
+                    "auto_continue_stop": {"enabled": True, "priority": 10},
+                    "hedging_language_detector": {"enabled": True, "priority": 30},
+                    "dismissive_language_detector": {"enabled": True, "priority": 58},
+                }
+            },
+        }
+        diff = ConfigDiffer().diff(user_config=user, default_config=base)
+        result = ConfigMerger().merge(new_default_config=base, diff=diff)
+
+        stop = result.merged_config["handlers"]["stop"]
+        assert "hedging_language_detector" not in stop
+        assert "dismissive_language_detector" not in stop
+        nitpick = result.merged_config["pseudo_events"]["nitpick"]["handlers"]
+        assert nitpick["hedging_language"] == {"enabled": True, "priority": 30}
+        assert nitpick["dismissive_language"] == {"enabled": True, "priority": 58}
+        assert [m.action for m in result.handler_key_migrations] == ["moved", "moved"]
+        summaries = {m["summary"] for m in result.to_dict()["handler_key_migrations"]}
+        assert summaries == {
+            "handlers.stop.hedging_language_detector -> "
+            "pseudo_events.nitpick.handlers.hedging_language",
+            "handlers.stop.dismissive_language_detector -> "
+            "pseudo_events.nitpick.handlers.dismissive_language",
+        }
+
+    def test_no_relocations_means_empty_list(self) -> None:
+        result = ConfigMerger().merge(
+            new_default_config={"handlers": {"stop": {}}},
+            diff=ConfigDiff(),
+        )
+        assert result.handler_key_migrations == []
+        assert result.to_dict()["handler_key_migrations"] == []

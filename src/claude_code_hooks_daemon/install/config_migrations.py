@@ -21,6 +21,10 @@ from typing import Any
 
 import yaml
 
+from claude_code_hooks_daemon.install.handler_key_audit import (
+    HandlerKeyFinding,
+    audit_handler_keys,
+)
 from claude_code_hooks_daemon.install.version_parse import parse_version_tuple
 
 # ---------------------------------------------------------------------------
@@ -39,6 +43,7 @@ _SECTION_DAEMON = "daemon"
 _HANDLER_REFERENCE_DOC = "docs/guides/HANDLER_REFERENCE.md"
 
 _LABEL_ACTION_REQUIRED = "⚠️  Action Required"
+_LABEL_STALE_HANDLER_KEYS = "⚠️  Stale handler keys"
 _LABEL_RECOMMENDED = "🆕 Recommended — enable these"
 _LABEL_NEW_OPTIONS = "💡 New Options Available"
 _LABEL_NO_CHANGES = "✅ No Changes Needed"
@@ -314,12 +319,22 @@ class MigrationAdvisory:
         suggestions: New options the user might want to configure
         from_version: Version user is upgrading from
         to_version: Version user is upgrading to
+        stale_handler_keys: ``handlers.<event>.<key>`` entries the registry
+            does not know for that event (Plan 00362). Not version-gated:
+            a manifest can only describe the release that made a change,
+            while a stale key is stale against the code that is installed.
     """
 
     warnings: list[AdvisoryWarning]
     suggestions: list[AdvisorySuggestion]
     from_version: str
     to_version: str
+    stale_handler_keys: list[HandlerKeyFinding] = field(default_factory=list)
+
+    @property
+    def has_warnings(self) -> bool:
+        """Whether anything needs the user's attention (not merely their interest)."""
+        return bool(self.warnings or self.stale_handler_keys)
 
 
 # ---------------------------------------------------------------------------
@@ -583,6 +598,7 @@ def generate_migration_advisory(
         suggestions=suggestions,
         from_version=from_version,
         to_version=to_version,
+        stale_handler_keys=audit_handler_keys(user_config),
     )
 
 
@@ -637,13 +653,23 @@ def format_advisory_for_llm(advisory: MigrationAdvisory) -> str:
     lines.append(f"Config Migration Advisory: v{advisory.from_version} → v{advisory.to_version}")
     lines.append("")
 
-    if not advisory.warnings and not advisory.suggestions:
+    if not advisory.has_warnings and not advisory.suggestions:
         lines.append(_LABEL_NO_CHANGES)
         lines.append("")
         lines.append("Your config is up to date for this version range.")
         lines.append("")
         lines.append(f"See {_HANDLER_REFERENCE_DOC} for full option details.")
         return "\n".join(lines)
+
+    if advisory.stale_handler_keys:
+        stale_count = len(advisory.stale_handler_keys)
+        key_word = "key" if stale_count == 1 else "keys"
+        lines.append(f"{_LABEL_STALE_HANDLER_KEYS} ({stale_count} {key_word})")
+        lines.append("")
+        lines.append("  These handlers: entries do nothing on the installed version:")
+        for finding in advisory.stale_handler_keys:
+            lines.append(f"    - {finding.message}")
+        lines.append("")
 
     if advisory.warnings:
         issue_count = len(advisory.warnings)

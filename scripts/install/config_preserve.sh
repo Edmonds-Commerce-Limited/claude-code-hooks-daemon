@@ -606,6 +606,28 @@ preserve_config_for_upgrade() {
         return 1
     fi
 
+    # Step 2a: Report handler keys the merge moved to a pseudo-event (Plan
+    # 00362). The merge JSON carries `handler_key_migrations`; each is a
+    # retired `handlers.<event>.<key>` whose behaviour lives on under
+    # `pseudo_events`, moved with its enabled/priority intact. Same stdin
+    # contract as the writer above: JSON on stdin, nothing interpolated.
+    local migration_lines
+    if migration_lines=$(printf '%s' "$merge_output" | "$venv_python" -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+for record in data.get('handler_key_migrations', []):
+    print(record.get('summary', ''))
+"); then
+        if [ -n "$migration_lines" ]; then
+            print_info "Handler keys moved to their pseudo-event home:"
+            while IFS= read -r line; do
+                print_info "  $line"
+            done <<< "$migration_lines"
+        fi
+    else
+        print_warning "Could not read handler-key migrations from the merge output"
+    fi
+
     # Step 3: Validate
     print_info "Step 3/5: Validating merged config..."
     local validate_output
