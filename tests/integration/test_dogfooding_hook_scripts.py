@@ -18,9 +18,8 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.install.forwarder_generator import (
-    normalise_project_root,
     recorded_untracked_dir,
-    surviving_absolute_paths,
+    unexpected_absolute_paths,
 )
 
 
@@ -210,25 +209,37 @@ class TestDogfoodingHookScripts:
             pytest.fail("".join(error_msg))
 
     def test_no_other_machine_specific_path_survives(self):
-        """Normalising the project root must not hide a SECOND baked path.
+        """The comparison above must not hide a SECOND baked path.
 
-        The comparison above normalises exactly one thing. If a future change
-        bakes another absolute path into a forwarder, the comparison would
-        silently treat it as template — so it is asserted here instead, over
-        the tracked files themselves.
+        The forwarders bake one machine-specific thing on purpose: the
+        untracked directory the relay guard needs. If a future change bakes
+        another absolute path, the comparison would treat it as template — so
+        it is asserted here instead, over the tracked files themselves.
+
+        The roots are DECLARED rather than assumed to be this checkout's. The
+        artefact records where it was generated, which is only the live
+        checkout on the machine that generated it — judging against the live
+        root alone reported every legitimately baked path as an offender on
+        every CI runner, which is the same defect Task 2.4c fixed in the
+        comparison this guards.
         """
-        root = str(get_project_root())
-        offenders = {}
-        for name, content in get_installed_hook_scripts().items():
-            surviving = surviving_absolute_paths(normalise_project_root(content, root))
-            if surviving:
-                offenders[name] = surviving
+        installed = get_installed_hook_scripts()
+        baked_roots = [str(get_project_root())]
+        recorded = recorded_untracked_dir(installed)
+        if recorded is not None:
+            baked_roots.append(str(recorded))
+
+        offenders = {
+            name: unexpected
+            for name, content in installed.items()
+            if (unexpected := unexpected_absolute_paths(content, baked_roots))
+        }
 
         assert not offenders, (
-            "a tracked hook script names an absolute path that is neither the "
-            "project root nor a portable system path, so it is machine-specific "
-            "content the dogfooding comparison would normalise away rather than "
-            f"catch:\n{offenders}"
+            "a tracked hook script names an absolute path that is neither a "
+            f"baked root ({baked_roots}) nor a portable system path, so it is "
+            "machine-specific content the dogfooding comparison would compare "
+            f"away rather than catch:\n{offenders}"
         )
 
     def test_all_hook_scripts_are_executable(self):

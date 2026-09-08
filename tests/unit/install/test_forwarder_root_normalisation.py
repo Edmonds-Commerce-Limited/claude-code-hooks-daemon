@@ -41,6 +41,7 @@ from claude_code_hooks_daemon.install.forwarder_generator import (
     normalise_project_root,
     recorded_untracked_dir,
     surviving_absolute_paths,
+    unexpected_absolute_paths,
 )
 
 _ROOT = "/workspace"
@@ -289,3 +290,84 @@ class TestTheRecordedRootIsHostnameIndependentInPractice:
         reference = self._guard()
         monkeypatch.setenv("HOSTNAME", "y" * 53)
         assert self._guard() != reference
+
+
+class TestTheGuardJudgesTheBAKEDRootNotTheLIVEOne:
+    """The same mistake, one level up — caught by the guard itself on CI.
+
+    `test_no_other_machine_specific_path_survives` normalised the tracked
+    forwarders against `get_project_root()`, the LIVE checkout. On the machine
+    that generated them those two roots are the same string, so the difference
+    was invisible; on a runner they differ and every baked path was reported as
+    a second machine-specific path.
+
+    So the guard must be told which roots the artefact BAKES, and judge what is
+    left over — the same correction Task 2.4c made to the comparison it guards.
+    """
+
+    _BAKED = "/workspace"
+    _LIVE = _OTHER_ROOT
+
+    def _content(self) -> str:
+        return _GUARD.format(root=self._BAKED)
+
+    def test_a_baked_root_is_not_reported_when_it_is_declared(self) -> None:
+        assert not unexpected_absolute_paths(self._content(), [self._BAKED])
+
+    def test_judging_against_the_live_root_alone_is_what_failed_on_ci(self) -> None:
+        """Pins the defect, so a revert cannot pass quietly."""
+        assert unexpected_absolute_paths(self._content(), [self._LIVE]) == [
+            f"{self._BAKED}/untracked",
+            f"{self._BAKED}/untracked/bin/hooks-relay",
+        ]
+
+    def test_declaring_both_roots_is_what_the_caller_actually_does(self) -> None:
+        """The live checkout stays declared: on one machine it IS the baked one."""
+        assert not unexpected_absolute_paths(self._content(), [self._LIVE, self._BAKED])
+
+    def test_a_root_nested_inside_another_is_stripped_whole(self) -> None:
+        """`untracked` sits under the root, so the two declared roots overlap.
+
+        Replacing the shorter one first would leave the longer one's tail
+        looking like a fresh absolute path.
+        """
+        assert not unexpected_absolute_paths(
+            self._content(), [self._BAKED, f"{self._BAKED}/untracked"]
+        )
+
+    def test_an_undeclared_path_is_still_reported(self) -> None:
+        """The guard must not be turned off by the fix that made it portable."""
+        content = self._content() + '_other="/home/someone/.cargo/bin/tool"\n'
+        assert unexpected_absolute_paths(content, [self._BAKED]) == [
+            "/home/someone/.cargo/bin/tool"
+        ]
+
+    def test_no_declared_roots_reports_every_absolute_path(self) -> None:
+        assert unexpected_absolute_paths(self._content(), []) == [
+            f"{self._BAKED}/untracked",
+            f"{self._BAKED}/untracked/bin/hooks-relay",
+        ]
+
+    def test_the_real_tracked_forwarders_are_clean_from_a_FOREIGN_checkout(self) -> None:
+        """The CI failure itself, reproduced against the real artefact.
+
+        Runs the guard over the tracked forwarders while claiming to live
+        somewhere they were not generated — which is every machine but this
+        one. Judging locally proves nothing here: the two roots coincide, and
+        that coincidence is what hid the defect until a runner found it.
+        """
+        hooks_dir = Path(__file__).resolve().parents[3] / ".claude" / "hooks"
+        contents = {
+            path.name: path.read_text(encoding="utf-8")
+            for path in hooks_dir.iterdir()
+            if path.is_file() and not path.name.endswith(".bak")
+        }
+        recorded = recorded_untracked_dir(contents)
+        assert recorded is not None, "the tracked forwarders record no root to judge against"
+
+        offenders = {
+            name: unexpected
+            for name, content in contents.items()
+            if (unexpected := unexpected_absolute_paths(content, [_OTHER_ROOT, str(recorded)]))
+        }
+        assert not offenders

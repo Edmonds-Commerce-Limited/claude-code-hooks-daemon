@@ -200,59 +200,60 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
   `-script` on `.kt` and carried a `2>&1` no shell was ever going to expand),
   and one is a harness budget equal to the handler's own, so `lint_on_edit`'s
   fail-open could never be reached and one slow lint killed all 201 probes.
-  Each fixed with a class-level guard rather than a one-off. Detail and the
-  reproduction in [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
+  Each fixed with a class-level guard. See
+  [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 - [x] ✅ **Task 2.4c**: `test_dogfooding_hook_scripts.py::test_hook_scripts_match_installer`.
   The comparison now generates for the root the deployed forwarders **record**
   (`recorded_untracked_dir` reads `_rl_dir="…"` back out), not for the current
   checkout's — so it is byte-exact on any machine, and refuses to guess when two
   forwarders disagree. Root-normalisation was the first attempt and was **not
   sufficient**: a runner-length checkout crosses the AF_UNIX limit and takes a
-  different generator branch. The prior question is settled — `hooks_deploy.sh`
-  copies the tracked forwarders into client projects and hard-fails without
-  them, so they must stay tracked. Hostname headroom measured at 54 characters
-  and pinned. See [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
-- [ ] ⬜ **Task 2.4e**: Playbook probe **#144** (Swift lint — invalid code
-  blocked) reports "no decision at all" on Python 3.11 while passing on 3.12 and
-  3.13, same runner image. Not a timeout (that branch returns an advisory, so it
-  would show text, not silence) and not a missing tool (`required_tools` gates
-  it). Needs a reproduction, not a patch.
+  different generator branch. The forwarders must stay tracked —
+  `hooks_deploy.sh` copies them into client projects and hard-fails without
+  them. Hostname headroom measured at 54 characters. See
+  [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
+- [x] ✅ **Task 2.4f**: `test_no_other_machine_specific_path_survives` — the
+  guard added *for* 2.4c — carried 2.4c's own defect, judging the tracked
+  forwarders against the **live** checkout, so a runner read all 27 baked files
+  as offenders. The baked roots are now an argument
+  (`unexpected_absolute_paths`), measured against the real artefact from a
+  foreign root: 27 files before, none after.
+- [ ] ⬜ **Task 2.4e**: Playbook probe **#144** (Swift lint) reports "no
+  decision at all". **Flaky, not interpreter-specific** — a different single
+  interpreter in each of two runs. Not a timeout and not a missing tool, which
+  leaves an ALLOW. Needs a reproduction, not a patch; candidates and the
+  shared-fixture lead are in
+  [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
 - [x] ✅ **Task 2.4a**: The two failures that were plain defects rather than
   provisioning gaps — neither needed a daemon at all, and both were fixed with a
   test reproducing the CI condition locally. `test_deployed_skill_trees.py`
   asked git about a **directory-only** ignore pattern (`/hooks-daemon/`) for a
-  path absent on a runner, so it was testing the container rather than the
-  pattern; it now asks about a path inside the directory.
-  `test_forwarder_socket_stdin.py` hardcoded `/workspace`; now derived from the
-  checkout. Detail in `JOURNAL/`.
-- [x] ✅ **Task 2.4b**: `test_relay_guard_fail_open.py`. ~~a real provisioning
-  gap and this plan's Decision 1 again … so it requires an `nc` with `-U`
-  support (`netcat-openbsd`) on the runner. **Unverified hypothesis**: the
-  runner's `nc` lacks it.~~ **The hypothesis was wrong on both counts**: not a
-  provisioning gap, and nothing to do with `nc`. It was a **test bug**, and the
-  task's own instruction to confirm before fixing is what caught it.
+  path absent on a runner, testing the container rather than the pattern; it now
+  asks about a path inside the directory. `test_forwarder_socket_stdin.py`
+  hardcoded `/workspace`; now derived. Detail in `JOURNAL/`.
+- [x] ✅ **Task 2.4b**: `test_relay_guard_fail_open.py`. ~~a provisioning gap
+  needing an `nc` with `-U` on the runner~~ — **the hypothesis was wrong on both
+  counts**: a **test bug**, nothing to do with `nc`, and the task's own
+  instruction to confirm before fixing is what caught it.
   The test derived its socket path from `os.environ.get("HOSTNAME", "localhost")`,
   omitting the middle rung both real implementations have
   (`socket.gethostname()`). bash sets `$HOSTNAME` as a **shell** variable without
   exporting it, so a runner resolved a real hostname where the test resolved
   `"localhost"`. **Reproduced locally** with `env -u HOSTNAME pytest …`; fixed by
   calling `paths._get_hostname_suffix()`. **Class guarded**:
-  `test_hostname_suffix_parity.py` now scans `tests/` for unexempted `$HOSTNAME`
-  reads, with an exemption marker and a vacuity class. Full narrative in
-  `JOURNAL/`.
+  `test_hostname_suffix_parity.py` scans `tests/` for unexempted `$HOSTNAME`
+  reads, with an exemption marker and a vacuity class. Narrative in `JOURNAL/`.
 
 ### Phase 3: Guard the class
 
 - [x] ✅ **Task 3.1**: `tests/acceptance/blocking_gate_guard.py` rewrites a
   skipped report into a failed one naming the file, the declaration and the
-  **original skip reason**. Proven end-to-end by a nested pytest run, not only
-  by unit tests of the predicate: the declared file fails, an undeclared one
-  still skips.
+  **original skip reason**. Proven end-to-end by a nested pytest run: the
+  declared file fails, an undeclared one still skips.
 - [x] ✅ **Task 3.2**: the guard **reads** the set off Step 12.0's command line,
   so "in the set but not covered" is unreachable rather than merely tested. The
-  risk that replaces it is a parser that quietly stops finding the declaration,
-  so parsing **raises** on a missing, duplicated or argument-less declaration —
-  each covered, plus "every declared file exists on disk".
+  risk that replaces it is a parser that quietly finds nothing, so parsing
+  **raises** on a missing, duplicated or argument-less declaration.
 
 ### Phase 4: Verify
 

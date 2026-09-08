@@ -23,6 +23,7 @@ import argparse
 import logging
 import re
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
@@ -281,6 +282,31 @@ def surviving_absolute_paths(content: str) -> list[str]:
             if not match.group(0).startswith(_PORTABLE_PATH_PREFIXES)
         }
     )
+
+
+def unexpected_absolute_paths(content: str, baked_roots: Iterable[str | Path]) -> list[str]:
+    """Absolute paths beyond the ones a forwarder is DESIGNED to bake.
+
+    ``surviving_absolute_paths`` alone answers "what is left after normalising
+    one root", which silently assumes the caller knows which root that is. A
+    caller that reaches for the LIVE checkout gets the right answer only on the
+    machine that generated the artefact — the same mistake Task 2.4c fixed in
+    the comparison, repeated in the guard that watches it.
+
+    Declaring the roots makes the assumption an argument. Pass every root the
+    forwarders legitimately bake (the recorded untracked dir, and the live
+    checkout — on one machine they are the same string); anything else absolute
+    and non-portable that survives is a second baked path the byte comparison
+    would hide.
+
+    Roots are stripped longest-first so an overlapping pair (``/repo`` and
+    ``/repo/untracked``) cannot leave the longer one's tail looking like a
+    fresh absolute path.
+    """
+    normalised = content
+    for root in sorted((str(root) for root in baked_roots), key=len, reverse=True):
+        normalised = normalise_project_root(normalised, root)
+    return surviving_absolute_paths(normalised)
 
 
 #: Matches the single `send_request_stdin "Event" [mode]` or

@@ -325,9 +325,9 @@ why (Plan 00290 F3):
 
 Which branch you get is a function of the checkout path's LENGTH:
 
-| Root                                                                | Length | Branch   | Second baked path                            |
-| ------------------------------------------------------------------- | ------ | -------- | ---------------------------------------------- |
-| `/workspace`                                                        | 10     | dynamic  | none                                           |
+| Root                                                                  | Length | Branch   | Second baked path                             |
+| --------------------------------------------------------------------- | ------ | -------- | --------------------------------------------- |
+| `/workspace`                                                          | 10     | dynamic  | none                                          |
 | `/home/runner/work/claude-code-hooks-daemon/claude-code-hooks-daemon` | 67     | fallback | `/run/user/1000/hooks-daemon-5768fca8-events` |
 
 So the tracked forwarders (generated at a 10-character root) and a runner's
@@ -371,9 +371,9 @@ builds `{untracked}/events{hostname_suffix}/{longest_event}.sock` and asks
 whether it fits AF_UNIX's 108 bytes. Longest wired event name:
 `user-prompt-expansion` (21 chars).
 
-| Checkout root                                                       | Resulting socket path | Margin  | Branch   |
-| ------------------------------------------------------------------- | --------------------- | ------- | -------- |
-| `/workspace`                                                        | 67 bytes              | **+41** | dynamic  |
+| Checkout root                                                         | Resulting socket path | Margin  | Branch   |
+| --------------------------------------------------------------------- | --------------------- | ------- | -------- |
+| `/workspace`                                                          | 67 bytes              | **+41** | dynamic  |
 | `/home/runner/work/claude-code-hooks-daemon/claude-code-hooks-daemon` | 124 bytes             | **−16** | fallback |
 
 A runner is 16 bytes over. Not marginal, and not fixable by shortening a name.
@@ -390,3 +390,63 @@ The third machine-specific input is worth naming explicitly, since two of the
 three surprised someone today: the generated guard depends on the checkout
 **root**, the **hostname**, and the set of **wired event names** (a longer event
 name added later eats the same budget).
+
+## Task 2.4f: the guard repeated the defect it was built to catch
+
+`test_no_other_machine_specific_path_survives` was added as 2.4c's safety net —
+"normalising one path must not hide a second one". CI then failed it, on all
+three interpreters, with 27 of the 31 tracked forwarders reported as offenders:
+
+```text
+{'task-created': ['/workspace/untracked', '/workspace/untracked/bin/hooks-relay'], ...}
+```
+
+The guard normalised against `get_project_root()`, the **live** checkout. On the
+machine that generated the forwarders the live root and the baked root are the
+same string, so the distinction is invisible there; on a runner they differ and
+every legitimately baked path reads as a second machine-specific path. That is
+2.4c's defect exactly, one level up, in the test written to catch it.
+
+**The fix makes the assumption an argument.** `unexpected_absolute_paths(content, baked_roots)` takes the roots the forwarders are *designed* to bake — the
+recorded untracked dir, plus the live checkout, which coincide on one machine —
+strips them longest-first so an overlapping pair (`/repo` and `/repo/untracked`)
+cannot leave a tail behind, and reports whatever else survives.
+
+Measured over the real tracked forwarders rather than a fixture, since judging
+them locally proves nothing here:
+
+| Declared roots           | Files reported |
+| ------------------------ | -------------- |
+| a foreign live root only | **27**         |
+| the recorded root        | **0**          |
+
+The 27 matches CI's count exactly, so the local reproduction is the CI failure
+and not something adjacent to it.
+
+**The generalisable point**: a test that hard-codes an environment value it
+could instead read from the artefact is asserting something about the machine,
+whatever its name says. The guard was right about the paths and wrong about
+which root they should be measured from.
+
+## Task 2.4e: probe #144 is flaky, not interpreter-specific
+
+Recorded first as "fails on 3.11, passes on 3.12 and 3.13" from run
+34191767135\. The next run contradicts that:
+
+| Run         | 3.11 | 3.12     | 3.13 |
+| ----------- | ---- | -------- | ---- |
+| 34191767135 | fail | pass     | pass |
+| 34192920901 | pass | **fail** | pass |
+
+One interpreter per run, a different one each time — so the variable is not the
+interpreter. Two candidate causes remain, and the CI log cannot separate them:
+`handle()` has no `None` return, so an empty stdout is its terminal
+`BlockingResult(decision=ALLOW)` with no reason, reached either when the file
+was not lintable at lint time (`_is_lintable` ends with `Path(file_path).exists()`)
+or when `swiftc -typecheck` exited 0. A timeout is excluded — that branch
+returns an ALLOW *with* an advisory, so it would surface as text.
+
+The fixture directory is shared by probes #143 and #144 and is `rm -rf`'d by
+each one's cleanup, which is where a reproduction should start looking.
+`swiftc` is not installed in this container, so the reproduction needs either a
+Swift toolchain or a stub that reproduces the ordering rather than the linting.
