@@ -123,7 +123,7 @@ while the detectors silently do not run.
   recommend `refreshInterval: 1`; the seven Pyright `int | None` sites in
   `supervise()`; the nine pid-keyed temp filenames gain a unique component;
   `debug_info.py` no longer runs an empty command in its own report.
-- [ ] ⬜ **Task 2.9** (D18 — Plan 00330 Task 1.4, MEDIUM): docs QA and plan QA
+- [x] ✅ **Task 2.9** (D18 — Plan 00330 Task 1.4, MEDIUM; merged at `406cbeef`^): docs QA and plan QA
   honour `daemon.exclude_paths`. Decision: honour it; a fixture tree that
   must keep producing findings is declared explicitly, not by omission.
 - [x] ✅ **Task 2.10** (D4 — Plan 00100 Phase 4, HIGH): concurrent venv
