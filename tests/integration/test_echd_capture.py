@@ -104,9 +104,9 @@ def test_preserves_upstream_failure_with_pipefail(tmp_path: Path) -> None:
     even though the helper itself succeeds — so agents still see failures."""
     producer = "printf 'partial\\n'; exit 7"
     result = _run_pipe(producer, "5", tmp_path)
-    assert result.returncode == 7, (
-        f"pipefail pipeline must surface the producer's non-zero exit; got {result.returncode}"
-    )
+    assert (
+        result.returncode == 7
+    ), f"pipefail pipeline must surface the producer's non-zero exit; got {result.returncode}"
     # Output was still captured despite the failure.
     capture = _capture_file_from_output(result.stdout)
     assert "partial" in capture.read_text()

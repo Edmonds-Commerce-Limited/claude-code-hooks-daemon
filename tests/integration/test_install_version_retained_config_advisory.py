@@ -115,9 +115,9 @@ def test_retained_config_advisory_names_the_baseline_it_checked_from(tmp_path: P
     which baseline it assumed rather than presenting a guess as fact."""
     result = _run_step7(tmp_path, existing_config=_OLD_CONFIG)
     combined = result.stdout + result.stderr
-    assert re.search(r"earliest|every manifest|since v?\d+\.\d+\.\d+", combined, re.IGNORECASE), (
-        combined
-    )
+    assert re.search(
+        r"earliest|every manifest|since v?\d+\.\d+\.\d+", combined, re.IGNORECASE
+    ), combined
 
 
 def test_retained_config_is_never_rewritten_by_the_advisory(tmp_path: Path) -> None:

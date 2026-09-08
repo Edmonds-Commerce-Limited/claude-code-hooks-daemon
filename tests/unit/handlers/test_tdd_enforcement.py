@@ -614,9 +614,9 @@ class TestTddEnforcementHandler:
         result = handler.handle(hook_input)
 
         # Should ALLOW because test exists
-        assert result.decision == "allow", (
-            f"Should allow when test exists, but got: {result.reason}"
-        )
+        assert (
+            result.decision == "allow"
+        ), f"Should allow when test exists, but got: {result.reason}"
 
     def test_get_test_file_path_handles_utils_structure(self, handler):
         """Test: _get_test_file_path() should handle utils/ structure.
@@ -1176,9 +1176,9 @@ class TestTddEnforcementHandler:
 
         # EXPECTED: Should ALLOW (test exists in mirror structure)
         # ACTUAL (before fix): Will DENY (handler only checks stripped path, gets False)
-        assert result.decision == "allow", (
-            f"Should ALLOW when test exists in mirror structure. Got decision={result.decision}"
-        )
+        assert (
+            result.decision == "allow"
+        ), f"Should ALLOW when test exists in mirror structure. Got decision={result.decision}"
 
     def test_bug_current_structure_still_works(self, handler):
         """Ensure existing Python convention (strip package) still works after fix."""
@@ -1218,9 +1218,9 @@ class TestTddEnforcementHandler:
             result = handler.handle(hook_input)
 
         assert result.decision == "deny", "Should DENY when test missing in all locations"
-        assert "Searched locations:" in result.reason, (
-            "Error message should show all searched locations"
-        )
+        assert (
+            "Searched locations:" in result.reason
+        ), "Error message should show all searched locations"
 
     def test_php_psr4_mirror_structure(self, handler):
         """PHP PSR-4 should work with mirror structure (real-world scenario).
@@ -1244,9 +1244,9 @@ class TestTddEnforcementHandler:
         with patch.object(Path, "exists", path_exists_side_effect):
             result = handler.handle(hook_input)
 
-        assert result.decision == "allow", (
-            "Should ALLOW PHP file when test exists in PSR-4 mirror structure"
-        )
+        assert (
+            result.decision == "allow"
+        ), "Should ALLOW PHP file when test exists in PSR-4 mirror structure"
 
     # ================================================================
     # Collocated Test Location Support (Plan 00076)
@@ -1461,9 +1461,9 @@ class TestTddEnforcementHandler:
         with patch.object(Path, "exists", path_exists_side_effect):
             result = handler.handle(hook_input)
 
-        assert result.decision == "allow", (
-            "Should ALLOW Go file when collocated test (handler_test.go) exists"
-        )
+        assert (
+            result.decision == "allow"
+        ), "Should ALLOW Go file when collocated test (handler_test.go) exists"
 
     def test_handle_allows_when_collocated_test_exists_js(self):
         """handle() should ALLOW when collocated JS test exists (e.g., helpers.test.ts)."""
@@ -1482,9 +1482,9 @@ class TestTddEnforcementHandler:
         with patch.object(Path, "exists", path_exists_side_effect):
             result = handler.handle(hook_input)
 
-        assert result.decision == "allow", (
-            "Should ALLOW TS file when collocated test (helpers.test.ts) exists"
-        )
+        assert (
+            result.decision == "allow"
+        ), "Should ALLOW TS file when collocated test (helpers.test.ts) exists"
 
     def test_handle_allows_when_tests_subdir_test_exists(self):
         """handle() should ALLOW when __tests__/ subdirectory test exists."""
@@ -1673,9 +1673,9 @@ class TestDeclaredTestPathMap:
         handler._test_path_map = self._mapped()
         rule = self._rule(tmp_path)
 
-        assert handler.matches(self._write(rule)), (
-            "the gate must still fire — this is not an escape"
-        )
+        assert handler.matches(
+            self._write(rule)
+        ), "the gate must still fire — this is not an escape"
         assert handler.handle(self._write(rule)).decision == "allow"
 
     def test_a_missing_declared_test_still_denies_and_names_the_right_path(

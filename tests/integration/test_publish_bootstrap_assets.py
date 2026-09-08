@@ -121,9 +121,9 @@ class TestBuild:
             copied = artifacts / name
             assert copied.is_file(), f"{name} must be staged next to the manifest"
             assert entries[name] == hashlib.sha256(copied.read_bytes()).hexdigest()
-            assert copied.read_bytes() == (SKILL_SCRIPTS / name).read_bytes(), (
-                f"staged {name} must be the exact bytes shipped in the skill tree"
-            )
+            assert (
+                copied.read_bytes() == (SKILL_SCRIPTS / name).read_bytes()
+            ), f"staged {name} must be the exact bytes shipped in the skill tree"
         assert "upgrade.sh" in entries, "upgrade.sh is bundled for cross-symmetry"
 
     def test_build_is_deterministic(self, tmp_path: Path) -> None:
@@ -200,14 +200,14 @@ class TestUpload:
         uploads = [c for c in calls if c.startswith("release upload v9.9.9 ")]
         assert len(uploads) == 1, f"expected exactly one upload call, got {calls!r}"
         upload = uploads[0]
-        assert "--clobber" in upload, (
-            "re-running the step must replace, not fail on, existing assets"
-        )
+        assert (
+            "--clobber" in upload
+        ), "re-running the step must replace, not fail on, existing assets"
         for name in [*_self_bootstrapping_scripts(), "upgrade.sh", "bootstrap-checksums.txt"]:
             assert str(artifacts / name) in upload, f"{name} missing from upload: {upload!r}"
-        assert any(c.startswith("release view v9.9.9") for c in calls), (
-            "the step must verify the assets landed by reading the release back"
-        )
+        assert any(
+            c.startswith("release view v9.9.9") for c in calls
+        ), "the step must verify the assets landed by reading the release back"
 
     def test_upload_fails_when_release_read_back_lacks_an_asset(self, tmp_path: Path) -> None:
         log = tmp_path / "gh-calls.log"
@@ -221,9 +221,9 @@ class TestUpload:
         )
         gh.chmod(gh.stat().st_mode | stat.S_IEXEC)
         result = _run_publish(["v9.9.9"], artifacts_dir=tmp_path / "artifacts", gh_bin=gh)
-        assert result.returncode != 0, (
-            "a release still missing an asset after upload must fail the step"
-        )
+        assert (
+            result.returncode != 0
+        ), "a release still missing an asset after upload must fail the step"
         assert "bootstrap-checksums.txt" in result.stderr
 
     def test_refuses_to_run_without_a_tag(self, tmp_path: Path) -> None:

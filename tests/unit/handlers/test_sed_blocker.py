@@ -139,14 +139,12 @@ class TestSedBlockerHandler:
         """Should NOT match git commit with heredoc mentioning sed."""
         hook_input = {
             "tool_name": "Bash",
-            "tool_input": {
-                "command": """git commit -m "$(cat <<'EOF'
+            "tool_input": {"command": """git commit -m "$(cat <<'EOF'
 Block sed command
 
 sed is dangerous
 EOF
-)"""
-            },
+)"""},
         }
         assert handler.matches(hook_input) is False
 
@@ -810,12 +808,10 @@ EOF
         """Should NOT match gh issue create with sed in body text (documentation)."""
         hook_input = {
             "tool_name": "Bash",
-            "tool_input": {
-                "command": """gh issue create --title "Block sed" --body "$(cat <<'EOF'
+            "tool_input": {"command": """gh issue create --title "Block sed" --body "$(cat <<'EOF'
 sed commands are dangerous
 EOF
-)" """
-            },
+)" """},
         }
         assert handler.matches(hook_input) is False
 
@@ -839,13 +835,11 @@ EOF
         """Should NOT match gh pr comment with sed in heredoc."""
         hook_input = {
             "tool_name": "Bash",
-            "tool_input": {
-                "command": """gh pr comment 456 --body "$(cat <<'EOF'
+            "tool_input": {"command": """gh pr comment 456 --body "$(cat <<'EOF'
 Package.resolved file
 sed commands blocked
 EOF
-)" """
-            },
+)" """},
         }
         assert handler.matches(hook_input) is False
 
@@ -1175,9 +1169,9 @@ class TestGuidanceMatchesBehaviour:
         """A rule stated only by a passing example teaches the wrong boundary."""
         guidance = handler.get_claude_md()
         assert guidance is not None
-        assert "wc -l" in guidance, (
-            "guidance must give the DENIED counter-example, not only the allowed one"
-        )
+        assert (
+            "wc -l" in guidance
+        ), "guidance must give the DENIED counter-example, not only the allowed one"
         assert "grep" in guidance and "echo" in guidance
 
 

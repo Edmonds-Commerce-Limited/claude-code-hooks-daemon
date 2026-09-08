@@ -65,8 +65,7 @@ def _write_stub_uv(tmp_path: Path, uv_log: Path, sleep_seconds: float) -> Path:
     stub_dir = tmp_path / "stubs"
     stub_dir.mkdir(exist_ok=True)
     uv_stub = stub_dir / "uv"
-    uv_stub.write_text(
-        textwrap.dedent(f"""\
+    uv_stub.write_text(textwrap.dedent(f"""\
         #!/bin/bash
         echo "uv_sync pid=$$ target=${{UV_PROJECT_ENVIRONMENT:-UNSET}}" >> "{uv_log}"
         sleep {sleep_seconds}
@@ -76,8 +75,7 @@ def _write_stub_uv(tmp_path: Path, uv_log: Path, sleep_seconds: float) -> Path:
             chmod +x "$UV_PROJECT_ENVIRONMENT/bin/python"
         fi
         exit 0
-        """)
-    )
+        """))
     uv_stub.chmod(0o755)
     return stub_dir
 
@@ -179,24 +177,24 @@ class TestConcurrentStartersBuildOnce:
 
         assert rc1 == 0, f"first starter failed:\n{err1}"
         assert rc2 == 0, f"second starter failed:\n{err2}"
-        assert out1.strip() == out2.strip(), (
-            f"both starters must report the same venv path: {out1!r} vs {out2!r}"
-        )
-        assert len(calls) == 1, (
-            f"exactly ONE uv sync must run for two concurrent starters; got {calls}"
-        )
-        assert WAITING_FRAGMENT in err2, (
-            f"the second starter must say it is waiting on the lock; stderr:\n{err2}"
-        )
-        assert WAITING_FRAGMENT not in err1, (
-            f"the first starter took the lock uncontended and must not claim to wait:\n{err1}"
-        )
+        assert (
+            out1.strip() == out2.strip()
+        ), f"both starters must report the same venv path: {out1!r} vs {out2!r}"
+        assert (
+            len(calls) == 1
+        ), f"exactly ONE uv sync must run for two concurrent starters; got {calls}"
+        assert (
+            WAITING_FRAGMENT in err2
+        ), f"the second starter must say it is waiting on the lock; stderr:\n{err2}"
+        assert (
+            WAITING_FRAGMENT not in err1
+        ), f"the first starter took the lock uncontended and must not claim to wait:\n{err1}"
         venv_path = Path(out1.strip())
         assert (venv_path / "bin" / "python").exists()
         assert (venv_path / ".daemon-version").read_text().strip() == "v99.0.0"
-        assert (daemon_dir / "untracked" / LOCK_FILE_NAME).exists(), (
-            "the lock file must live beside the venv, under untracked/"
-        )
+        assert (
+            daemon_dir / "untracked" / LOCK_FILE_NAME
+        ).exists(), "the lock file must live beside the venv, under untracked/"
 
     @pytest.mark.slow
     def test_twenty_iterations_never_double_build(self, tmp_path: Path) -> None:

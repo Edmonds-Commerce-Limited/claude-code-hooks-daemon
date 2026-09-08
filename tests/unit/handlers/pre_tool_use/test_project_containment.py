@@ -234,9 +234,9 @@ class TestRelativeDestinationsResolveAgainstCwd:
     def test_a_relative_destination_escaping_the_root_matches(
         self, handler: ProjectContainmentHandler, label: str, command: str
     ) -> None:
-        assert handler.matches(_bash(command, cwd="/repo/sub")) is True, (
-            f"{label} reached out-of-root unjudged"
-        )
+        assert (
+            handler.matches(_bash(command, cwd="/repo/sub")) is True
+        ), f"{label} reached out-of-root unjudged"
 
     @pytest.mark.parametrize(
         ("label", "command"),
@@ -284,9 +284,9 @@ class TestUnexpandableTokensAreDeclinedNotFabricated:
     def test_an_unexpandable_token_is_declined_not_fabricated(
         self, handler: ProjectContainmentHandler, label: str, command: str
     ) -> None:
-        assert handler.matches(_bash(command, cwd="/tmp/work")) is False, (
-            f"{label} was fabricated into a path instead of declined"
-        )
+        assert (
+            handler.matches(_bash(command, cwd="/tmp/work")) is False
+        ), f"{label} was fabricated into a path instead of declined"
 
     def test_an_ordinary_relative_token_is_still_resolved_and_denied(
         self, handler: ProjectContainmentHandler

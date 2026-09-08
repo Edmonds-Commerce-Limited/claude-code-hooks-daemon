@@ -60,6 +60,6 @@ def test_every_pseudo_event_handler_is_listed(reference: dict[str, Any]) -> None
         assert isinstance(block, dict), f"reference config has no pseudo_events.{name} block"
         assert block.get("triggers"), f"pseudo_events.{name} needs triggers to ever fire"
         listed = set((block.get("handlers") or {}).keys())
-        assert set(classes) <= listed, (
-            f"pseudo_events.{name}.handlers omits {sorted(set(classes) - listed)}"
-        )
+        assert (
+            set(classes) <= listed
+        ), f"pseudo_events.{name}.handlers omits {sorted(set(classes) - listed)}"

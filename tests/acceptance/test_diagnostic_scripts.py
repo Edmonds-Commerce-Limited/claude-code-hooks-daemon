@@ -470,9 +470,9 @@ def test_bootstrap_stanza_is_identical_across_diagnostic_scripts() -> None:
         start = text.find(_BEGIN_MARKER)
         end = text.find(_END_MARKER)
         assert start != -1 and end != -1, f"{script.name} has lost its bootstrap stanza"
-        assert text[start : end + len(_END_MARKER)] == canonical, (
-            f"{script.name}: bootstrap stanza has drifted from daemon-cli.sh"
-        )
+        assert (
+            text[start : end + len(_END_MARKER)] == canonical
+        ), f"{script.name}: bootstrap stanza has drifted from daemon-cli.sh"
 
 
 def _run_stale_script_against(
@@ -508,17 +508,17 @@ def _assert_fell_back_to_local_copy(
         f"{basename}: when the release manifest cannot be fetched the installed "
         f"local copy MUST run. stdout={result.stdout!r} stderr={result.stderr!r}"
     )
-    assert "STALE_BODY_RAN" in result.stdout, (
-        f"{basename}: the installed local body MUST run as the fallback. stdout={result.stdout!r}"
-    )
+    assert (
+        "STALE_BODY_RAN" in result.stdout
+    ), f"{basename}: the installed local body MUST run as the fallback. stdout={result.stdout!r}"
     warnings = [line for line in result.stderr.splitlines() if line.startswith("Warning:")]
-    assert len(warnings) == 1, (
-        f"{basename}: exactly one warning line must announce the fallback. stderr={result.stderr!r}"
-    )
+    assert (
+        len(warnings) == 1
+    ), f"{basename}: exactly one warning line must announce the fallback. stderr={result.stderr!r}"
     assert "local copy" in warnings[0], warnings[0]
-    assert "Error:" not in result.stderr, (
-        f"{basename}: a fallback is not an error. stderr={result.stderr!r}"
-    )
+    assert (
+        "Error:" not in result.stderr
+    ), f"{basename}: a fallback is not an error. stderr={result.stderr!r}"
     assert not marker_dir.exists() or not any(marker_dir.iterdir()), (
         f"{basename}: an unverified body MUST NOT be cached as verified — the "
         f"next invocation has to retry the manifest fetch"
@@ -541,9 +541,9 @@ def test_diagnostic_script_falls_back_to_local_copy_when_manifest_unreachable(
     unreachable_dir = tmp_path / "does-not-exist"
     result, marker_dir = _run_stale_script_against(tmp_path, basename, unreachable_dir)
     _assert_fell_back_to_local_copy(basename, result, marker_dir)
-    assert "bootstrap-checksums.txt" in result.stderr, (
-        f"the warning must name what could not be fetched. stderr={result.stderr!r}"
-    )
+    assert (
+        "bootstrap-checksums.txt" in result.stderr
+    ), f"the warning must name what could not be fetched. stderr={result.stderr!r}"
 
 
 @pytest.mark.parametrize("basename", _BOOTSTRAPPED_BASENAMES)
@@ -575,9 +575,9 @@ def test_diagnostic_script_still_aborts_on_checksum_mismatch(tmp_path: Path, bas
     checksums_path.write_text(f"{'0' * 64}  {basename}\n", encoding="utf-8")
 
     result, _ = _run_stale_script_against(tmp_path, basename, release_dir)
-    assert result.returncode != 0, (
-        f"{basename}: a checksum mismatch MUST abort. stdout={result.stdout!r}"
-    )
+    assert (
+        result.returncode != 0
+    ), f"{basename}: a checksum mismatch MUST abort. stdout={result.stdout!r}"
     assert "STALE_BODY_RAN" not in result.stdout
     assert "FRESH_BODY_RAN" not in result.stdout
     assert "checksum mismatch" in result.stderr.lower()
