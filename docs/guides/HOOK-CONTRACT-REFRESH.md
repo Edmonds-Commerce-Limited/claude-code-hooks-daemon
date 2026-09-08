@@ -31,29 +31,47 @@ A fabricated enum value vendored here would be enforced against the daemon as
 if documented. Every claim written into a contract JSON must be found
 VERBATIM in the raw markdown before it is recorded.
 
-## Procedure
+## Step 0: ask whether anything changed
 
-1. Fetch raw: `curl -fsSL -o untracked/hooks-raw.md https://code.claude.com/docs/en/hooks.md`
-2. Diff against the previous audit: compare `sha256sum untracked/hooks-raw.md`
-   with `META.json.docs_sha256`. Identical hash ⇒ only bump
-   `last_audited_claude_code_version` and `fetch_date` in `META.json`; done.
-3. For a changed doc, read the changed sections of the RAW text (the
-   "#### Decision control" table and each event's "decision control" /
-   "output" section) and update the affected per-event JSON files. For every
-   changed claim, locate the exact supporting sentence in the raw markdown.
-   Extraction is a verified manual/agent step by design — never an automated
-   summarisation (Plan 00271 Decision 3).
-4. A newly documented event gets a new `<Event>.json` file (the checker treats
+```bash
+bin/hooks-daemon contract-status --save untracked/hooks-raw.md
+```
+
+That is the mechanised half of this procedure (Plan 00327): a plain https
+GET of `META.json.docs_url` — the exact bytes, no summarising layer — hashed
+and compared with `META.json.docs_sha256`. The verdict is the exit code:
+
+| Exit | Verdict     | What to do                                                                                                                   |
+| ---- | ----------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 0    | `unchanged` | Upstream matches the last audit. Bump only `last_audited_claude_code_version` and `fetch_date` in `META.json`; done.         |
+| 1    | `CHANGED`   | Upstream moved. `--save` has left the RAW body on disk (keep it untracked); continue with the manual steps below.            |
+| 2    | error       | `META.json` unreadable/incomplete, or the fetch failed. Nothing has been compared — fix the cause, do not guess the verdict. |
+
+Everything after this point is judgement, and stays manual by design.
+
+## Manual steps for a CHANGED verdict
+
+1. Diff the saved RAW text against the previously audited text and read the
+   changed sections (the "#### Decision control" table and each event's
+   "decision control" / "output" section). Update the affected per-event JSON
+   files. For every changed claim, locate the exact supporting sentence in
+   the raw markdown and record it in the plan's audit document. Extraction is
+   a verified manual/agent step by design — never an automated summarisation
+   (Plan 00271 Decision 3).
+2. A newly documented event gets a new `<Event>.json` file (the checker treats
    a documented event missing from the daemon's catalogue as a finding, which
    is the intended pressure).
-5. Update `META.json`: `fetch_date`, `docs_bytes`, `docs_sha256`,
+3. Update `META.json`: `fetch_date`, `docs_bytes`, `docs_sha256` (the values
+   `contract-status` printed for the upstream body),
    `last_audited_claude_code_version` (the installed Claude Code version
-   audited against), `event_count`.
-6. Re-run the guard: `./scripts/qa/llm_qa.py hook_contract`. Triage every new
+   audited against), `event_count`. `TestMetaProvenance` in
+   `tests/unit/qa/test_check_hook_contract.py` pins the same three values;
+   move them together. Re-run `contract-status` and expect exit 0.
+4. Re-run the guard: `./scripts/qa/llm_qa.py hook_contract`. Triage every new
    finding into either a fix task (preferred) or an `ALLOWLIST.yaml` entry
    carrying a reason and a linked plan/task. Stale allowlist entries FAIL the
    check — delete entries whose drift no longer exists.
-7. Re-triage the INPUT side (Plan 00273): run
+5. Re-triage the INPUT side (Plan 00273): run
    `./scripts/qa/llm_qa.py input_contract`, and diff the refreshed
    `input_example`s against the daemon's current read surface
    (`scripts/qa/check_input_contract.py --inventory`). Triage every new

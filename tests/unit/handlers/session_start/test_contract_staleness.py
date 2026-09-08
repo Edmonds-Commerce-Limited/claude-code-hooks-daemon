@@ -94,6 +94,7 @@ class TestHandle:
         assert "2.1.246" in text
         assert "2.2.0" in text
         assert "HOOK-CONTRACT-REFRESH.md" in text
+        assert "hooks-daemon contract-status" in text, "Plan 00327: the mechanised step is named"
 
     def test_silent_when_version_unreadable(self, handler: ContractStalenessHandler) -> None:
         handler.installed_version_reader = lambda: None
@@ -115,6 +116,30 @@ class TestHandle:
     def test_non_numeric_versions_stay_silent(self, handler: ContractStalenessHandler) -> None:
         handler.installed_version_reader = lambda: "dev-build"
         assert handler.handle(_hook_input()).context == []
+
+
+class TestVendoredMetaIsCurrent:
+    """Plan 00327 Task 3.1: the advisory is silent against the REAL META.json.
+
+    Uses the vendored ``contracts/claude-code-hooks/META.json`` (no fixture)
+    with the installed version pinned to the version that audit recorded, so
+    a new session on that Claude Code sees nothing. A later Claude Code
+    release re-arms the advisory by design; this pins that the refresh
+    itself cleared it.
+    """
+
+    def test_new_session_on_the_audited_version_is_silent(self) -> None:
+        h = ContractStalenessHandler()
+        assert h.meta_path.is_file(), "vendored META.json must ship with the repository"
+        meta = json.loads(h.meta_path.read_text(encoding="utf-8"))
+        audited = meta["last_audited_claude_code_version"]
+        assert audited == "2.1.263"
+        h.installed_version_reader = lambda: audited
+        h.self_install_reader = lambda: True
+        assert h.matches(_hook_input()) is True
+        result = h.handle(_hook_input())
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
 
 
 class TestClientInstallAdvisory:

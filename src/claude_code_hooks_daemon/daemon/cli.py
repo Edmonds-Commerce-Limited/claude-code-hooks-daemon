@@ -4541,6 +4541,44 @@ def cmd_secret_meta(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_contract_status(
+    args: argparse.Namespace,
+    fetch: "Callable[[str], bytes] | None" = None,
+) -> int:
+    """Compare upstream hooks.md with the vendored contract's recorded hash.
+
+    Plan 00327 Task 3.2: steps 1-2 of ``docs/guides/HOOK-CONTRACT-REFRESH.md``
+    (raw fetch + sha256 comparison) as one command. The verdict is the exit
+    code; the extraction steps that follow a CHANGED verdict remain manual
+    by design.
+
+    Returns:
+        0 unchanged, 1 changed, 2 when META.json or the fetch is unusable.
+    """
+    from claude_code_hooks_daemon.daemon.contract_status import (
+        DEFAULT_FETCH,
+        DEFAULT_META_PATH,
+        EXIT_CHANGED,
+        EXIT_ERROR,
+        EXIT_UNCHANGED,
+        ContractStatusError,
+        compare_contract,
+        render_status,
+    )
+
+    meta_override = getattr(args, "meta", None)
+    meta_path = Path(meta_override) if meta_override else DEFAULT_META_PATH
+    save_override = getattr(args, "save", None)
+    save_to = Path(save_override) if save_override else None
+    try:
+        status = compare_contract(meta_path, fetch or DEFAULT_FETCH, save_to=save_to)
+    except ContractStatusError as exc:
+        print(f"contract-status: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    print(render_status(status))
+    return EXIT_CHANGED if status.changed else EXIT_UNCHANGED
+
+
 def cmd_record_config_optimisation_run(args: argparse.Namespace) -> int:
     """Record that the config-optimisation review ran (Plan 00308).
 
@@ -7434,6 +7472,28 @@ def main() -> int:
         help="Project root for config + key resolution (trusted as-is; auto-detected by default)",
     )
     parser_secret_meta.set_defaults(func=cmd_secret_meta)
+
+    # contract-status (Plan 00327) — is the vendored hooks contract current upstream?
+    parser_contract_status = subparsers.add_parser(
+        "contract-status",
+        help=(
+            "Raw-fetch the upstream hooks.md and compare its sha256 with the vendored "
+            "contract's META.json (exit 0 unchanged, 1 changed, 2 error)"
+        ),
+    )
+    parser_contract_status.add_argument(
+        "--meta",
+        type=Path,
+        default=None,
+        help="META.json to compare against (default: contracts/claude-code-hooks/META.json)",
+    )
+    parser_contract_status.add_argument(
+        "--save",
+        type=Path,
+        default=None,
+        help="Also write the raw fetched body to this path (the refresh procedure's step-1 capture)",
+    )
+    parser_contract_status.set_defaults(func=cmd_contract_status)
 
     # record-config-optimisation-run (Plan 00308) — the step records its own runs
     parser_record_config_optimisation_run = subparsers.add_parser(

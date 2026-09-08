@@ -164,11 +164,13 @@ class ContractStalenessHandler(SessionStartHandlerBase):
             ),
             "",
             (
-                f"The hooks output contract may have changed. Run the refresh "
-                f"procedure in {refresh_doc}: fetch the RAW hooks.md (never a "
-                f"summarising fetch layer), verify each claim verbatim, update "
-                f"the vendored JSON + META.json, and re-run the hook_contract "
-                f"QA check."
+                f"The hooks output contract may have changed. Run "
+                f"`hooks-daemon contract-status` first: exit 0 means upstream "
+                f"is unchanged and only the META.json version needs bumping. "
+                f"Otherwise follow the refresh procedure in {refresh_doc}: "
+                f"read the RAW hooks.md (never a summarising fetch layer), "
+                f"verify each claim verbatim, update the vendored JSON + "
+                f"META.json, and re-run the hook_contract QA check."
             ),
         ]
 
