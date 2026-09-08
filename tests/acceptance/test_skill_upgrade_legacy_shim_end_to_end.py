@@ -27,7 +27,11 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from tests.acceptance.conftest import assert_clone_is_pinned, create_daemon_clone
+from tests.acceptance.conftest import (
+    assert_clone_is_pinned,
+    clone_install_script,
+    create_daemon_clone,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_VERSION_SH = REPO_ROOT / "scripts" / "install_version.sh"
@@ -96,8 +100,10 @@ def test_legacy_already_bootstrapped_flag_upgrade_succeeds(tmp_path: Path) -> No
         env.pop("HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP", None)
         env["NO_COLOR"] = "1"
 
+        # Baseline install with the pinned clone's OWN installer, as a client
+        # would. See conftest's docstring.
         install_result = subprocess.run(
-            [BASH, str(INSTALL_VERSION_SH), str(project_root), str(daemon_dir)],
+            [BASH, str(clone_install_script(daemon_dir)), str(project_root), str(daemon_dir)],
             capture_output=True,
             text=True,
             env=env,

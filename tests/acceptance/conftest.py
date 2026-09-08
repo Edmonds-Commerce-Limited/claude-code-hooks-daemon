@@ -29,6 +29,20 @@ version == target version in both conditions, with no synthesised state and no
 invented tags. ``assert_clone_is_pinned`` then re-checks that premise so a
 future drift fails here, named, instead of surfacing as a uv error deep inside
 a subprocess.
+
+**Why the baseline install runs the CLONE's installer, not the working tree's.**
+
+Pinning the clone to a tag means its ``src/`` is that tag's source. The Layer 2
+installer (``scripts/install_version.sh`` -> ``install.py``) imports from the
+``src/`` it is installing, so the installer and the source it installs MUST come
+from the same commit — which is exactly what a real client gets, because Layer 1
+``install.sh``/``upgrade.sh`` both hand off to ``$DAEMON_DIR/scripts/``. Running
+the working tree's installer against the pinned clone mixes HEAD's install code
+with the tag's ``src/``: the moment HEAD's installer needs a symbol the tag does
+not export, the baseline dies with an ``ImportError`` a client could never see.
+``clone_install_script`` returns the clone's own installer so the baseline is a
+faithful client install; the working tree's Layer 1 ``scripts/upgrade.sh`` and
+skill shim are still what the upgrade step exercises.
 """
 
 from __future__ import annotations
@@ -103,6 +117,23 @@ def create_daemon_clone(daemon_dir: Path) -> str:
     # version the upgrade will target.
     _git("-C", str(daemon_dir), "checkout", "--quiet", tag)
     return tag
+
+
+def clone_install_script(daemon_dir: Path) -> Path:
+    """Return the pinned clone's own Layer 2 installer for the baseline install.
+
+    A client's baseline install runs the installer shipped INSIDE the daemon
+    dir, alongside the ``src/`` it installs. Read the module docstring for why
+    the working tree's installer must not be substituted here.
+    """
+    install_script = daemon_dir / "scripts" / "install_version.sh"
+    if not install_script.is_file():
+        raise AssertionError(
+            f"Upgrade fixture premise broken: the pinned clone at {daemon_dir} "
+            f"has no scripts/install_version.sh, so no baseline install can be "
+            f"performed the way a client would perform it."
+        )
+    return install_script
 
 
 def assert_clone_is_pinned(daemon_dir: Path, tag: str) -> None:
