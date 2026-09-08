@@ -254,6 +254,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 - [00177: Stop hook false "daemon not running" on long sessions](00177-stop-hook-transcript-timeout-false-daemon-down/PLAN.md) - Complete (downstream field report, verified upstream at v3.44.0 and fixed TDD-first.)
 
+- [00176: settings.json merge — preserve client customizations on upgrade](00176-settings-json-merge-preserve-on-upgrade/PLAN.md) - Complete at `d23b836d`…`74f640c2` + the archiving commit (all three deploy routes copied the daemon's `settings.json` over the client's, so every upgrade discarded a custom `statusLine`, a `permissions` block, an extra hook and any deliberate override; `merge_settings` now deep-copies the CLIENT document and edits only the daemon-owned wired-hook block, and an unmergeable file changes nothing and leaves a `.merge-proposal` beside it rather than aborting mid-upgrade)
+
 - [00173: Supervisor Ctrl+Z guard + status-line message channel](00173-supervisor-ctrlz-guard-and-status-message/PLAN.md) - Complete (neutralises the Ctrl+Z-suspends-Claude footgun (upstream anthropics/claude-code#43596): the ccy PTY supervisor strips the `0x1a` SUSP byte from its forwarded stdin so it never reaches Claude's PTY …)
 
 - [00171: supervisor_indicator /proc-scan negative caching](00171-supervisor-indicator-proc-scan-negative-caching/PLAN.md) - Complete (fast follow-up closing the three non-blocking v3.43.0 release code-review findings per Plan 00157 "never drop a finding".)

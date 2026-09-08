@@ -1,6 +1,6 @@
 # Plan 00176: settings.json merge — preserve client customizations on upgrade
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-17
 **Owner**: joseph
 **Priority**: Medium
@@ -233,12 +233,50 @@ should build on the `src/` pair, since it runs inside the daemon and
 
 ### Phase 3: Rollout, docs, QA
 
-- [ ] ⬜ **Task 3.1**: End-to-end acceptance gates: fresh install applies
-  defaults; upgrade with a customized settings.json preserves the customization
-  AND refreshes the wired-hook set (mirror the H-1 install/upgrade gates).
-- [ ] ⬜ **Task 3.2**: `config-changes`/upgrade-guide note; regenerate docs;
-  reconcile with Plan 00175's validator.
-- [ ] ⬜ **Task 3.3**: Full QA green, daemon restart RUNNING, 95%+ coverage.
+- [x] ✅ **Task 3.1**: End-to-end acceptance gates in
+  `tests/acceptance/test_install_sh_end_to_end.py` — fresh install applies
+  defaults; an upgrade over a customised `settings.json` preserves the
+  customisation AND refreshes the wired-hook set. Both pass.
+
+  **The gate first passed vacuously, and the reason is worth keeping.** A
+  deliberate mutation (`merged = dict(new_default)`, discarding the client
+  document entirely) did not fail it. Two independent causes: the fixture
+  clones the repo at **HEAD**, so an uncommitted mutation is invisible to it —
+  which makes naive mutation-testing of this gate meaningless — and
+  `print_success` writes to **stderr**, so an assertion reading only stdout
+  sees nothing. Fixed by reading `stdout + stderr` and by asserting the merge
+  RAN (`"Merged settings.json" in upgrade_output`) BEFORE asserting its
+  outcomes; an outcome assertion alone passes when the merge never happened.
+
+- [x] ✅ **Task 3.2**: `truth-changes/v3.63.0.yaml` written (three `{was, now}`
+  entries). No `config-changes` entry: this plan changes `settings.json`
+  handling, not the `hooks-daemon.yaml` schema that manifest tracks. No upgrade
+  guide: nothing here is breaking — preservation strictly improves. Generated
+  docs regenerated with no drift.
+
+  **Reconciliation with Plan 00175's validator — a real conflict, resolved by
+  NOT reusing it.** `validate_hook_commands` counts every `type: command` hook
+  in a wired event array and reports >1 as a duplicate registration. That
+  directly contradicts this merge's own rule that a client hook may legitimately
+  share an array with a daemon forwarder. Had the merge validated with it, every
+  client carrying an extra hook would have escalated permanently — "preserved
+  but never merged" — which quietly lets the wired forwarder set rot, the exact
+  failure this plan exists to fix. The gate above caught it.
+
+  `merge_settings` therefore validates with its own `_validate_daemon_forwarders`
+  (exactly one canonical daemon forwarder per wired event, indifferent to
+  siblings). `validate_hook_commands` is deliberately left alone: it serves the
+  session-start advisory, where Plan 00266 reasoned about that counting rule on
+  purpose.
+
+  **Follow-up left open (not in scope here)**: the two now encode different
+  notions of "correctly registered", so a client with a sibling hook gets a
+  clean merge and a session-start advisory warning about it. Reconciling that
+  advisory is its own change with its own decision to make — it belongs to
+  00266's rule, not to this one.
+
+- [x] ✅ **Task 3.3**: Full QA green — 26/26, 19962 passed, coverage 95.2%,
+  daemon RUNNING.
 
 ## Technical Decisions
 
@@ -255,21 +293,36 @@ while client sibling hooks survive). Final shape decided in Phase 1.
 
 ## Success Criteria
 
-- [ ] Upgrade preserves: client extra hooks, custom `statusLine`, `permissions`,
+- [x] Upgrade preserves: client extra hooks, custom `statusLine`, `permissions`,
   extra keys, and deliberate value overrides.
-- [ ] Upgrade always delivers the complete current daemon wired-hook forwarder
+- [x] Upgrade always delivers the complete current daemon wired-hook forwarder
   set.
-- [ ] Fresh install applies recommended defaults; ambiguous merges fail safe
+- [x] Fresh install applies recommended defaults; ambiguous merges fail safe
   (preserve client data) and surface an agent-assisted diff.
-- [ ] Acceptance gates for install + customized-upgrade pass; full QA green;
-  daemon RUNNING; 95%+ coverage; docs + config-changes updated.
+- [x] Acceptance gates for install + customized-upgrade pass; full QA green;
+  daemon RUNNING; 95%+ coverage; docs + truth-changes updated (no
+  `config-changes` entry is due — see Task 3.2).
 
 ## Delivery & Milestones
 
 <!-- Curated milestones + delivery commit hashes only (git is the SSoT for
      "when"). Blow-by-blow lives in JOURNAL/00176-Journal-YY-MM-DD.md. -->
 
-- Design authored (this PLAN.md); refine + implementation pending.
+- **Phase 1 — the design questions decided against the code, not in the
+  abstract** (`aac3eb6b`, `f9d262ad`, `253c0f7a`, `ff1fae00`, `6cee2d00`). The
+  four clobber routes were mapped first (`d23b836d`, `6a772acf`, `bc92e3a0`),
+  which is what revealed that the two installers already disagreed and one of
+  them was right.
+- **Phase 2 — the merge itself** (`2020b6ef`, `4ec8582a`, `567e9bd0`,
+  `07a400d4`), plus the two pre-merge clobber fixes shipped ahead of it
+  (`cdacbc56`, `56a845ac` — `--force` was the one install that took no backup).
+  The safety property is the DIRECTION of the copy: `merge_settings` deep-copies
+  the CLIENT document and edits the daemon-owned parts, so anything it fails to
+  reason about survives by default.
+- **Phase 3 — the acceptance gate earned its cost immediately** (`64330de0`,
+  `74f640c2`). It caught the merge's own write gate contradicting itself: the
+  Plan 00175 validator would have escalated every client carrying a sibling
+  hook. See Task 3.2.
 
 ## Notes & Updates
 

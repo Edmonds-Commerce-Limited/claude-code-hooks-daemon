@@ -139,12 +139,22 @@ slash-command families, whose sequence genuinely is meaningful.
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: Full QA green, daemon restart RUNNING.
+- [x] ✅ **Task 3.1**: Full QA green (26/26, 19962 passed, coverage 95.2%),
+  daemon restart RUNNING.
 
-- [ ] ⬜ **Task 3.2**: **Verify the WORKER actually reloaded** before believing
-  any live observation — `ps -eo pid,lstart,args | grep 'claude-supervise.py --worker'` must show a pid newer than the edit. A bare `touch` does not
-  trigger it (the check is content-hash based) and a `git log` time is not a
-  deploy time. Then observe a real ESC and confirm the banner appears.
+- [x] ✅ **Task 3.2**: **The WORKER reload is verified, not assumed.** The host
+  is pid 2 (started Sep 4, owning the live `claude` process); the worker is its
+  child, and it respawned at `10:09:39` — five seconds after the file's last
+  write at `10:09:34`, matching the ~5s `_WORKER_RELOAD_CHECK_SECONDS` poll.
+  The live worker is therefore running this code, and no session restart was
+  needed. Recorded here because the trap it avoids is silent: a `git log` time
+  is not a deploy time, and testing against a stale worker "verifies" the old
+  code.
+
+- [ ] ⬜ **Task 3.3**: Observe a real ESC post-reload and confirm the banner
+  file is written. A watch is armed on `decision.log`; escapes are frequent
+  (123 in this session) but arrive only when a queued `/compact` stalls, so
+  this completes on the next natural occurrence rather than being forced.
 
 ## Success Criteria
 
