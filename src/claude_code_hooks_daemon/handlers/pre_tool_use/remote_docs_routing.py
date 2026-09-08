@@ -162,6 +162,8 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
         if tool == ToolName.WEB_FETCH:
             url = self._url(hook_input)
             # No tree means the project never opted in; stay entirely silent.
+            # eacces-safe-exempt: the configured remote-docs tree, a project
+            # directory the daemon owns -- the URL is the caller-supplied part.
             if url is None or not self._tree().is_dir():
                 return False
             # Either we already hold this page (route to it), or its domain is

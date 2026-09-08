@@ -298,6 +298,8 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
             # when the daemon runs with a restricted system PATH. In a monorepo
             # these are the SIBLING workspace's binaries, not the repo root's.
             env = os.environ.copy()
+            # eacces-safe-exempt: workspace bin dirs from config, used to build
+            # PATH for the linter -- not the file being checked.
             existing = [bin_dir for bin_dir in workspace_bin_dirs if bin_dir.exists()]
             if existing:
                 prefix = os.pathsep.join(str(bin_dir) for bin_dir in existing)

@@ -550,6 +550,8 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         folder_path = base_folder / folder_name
 
         # If no collision, return immediately
+        # eacces-safe-exempt: a candidate folder under the configured plan
+        # directory, named from a plan number the daemon allocated.
         if not folder_path.exists():
             return folder_name
 
@@ -558,6 +560,7 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         while True:
             folder_name_with_suffix = f"{plan_number}-{plan_name}-{suffix}"
             folder_path_with_suffix = base_folder / folder_name_with_suffix
+            # eacces-safe-exempt: same directory as the candidate above.
             if not folder_path_with_suffix.exists():
                 return folder_name_with_suffix
             suffix += 1
@@ -575,6 +578,7 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         Returns:
             Path to matching plan folder, or None if not found
         """
+        # eacces-safe-exempt: the configured plan directory itself.
         if not plan_base.exists():
             return None
 
@@ -585,6 +589,8 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         suffix = f"-{sanitized}"
         matches_found: list[Path] = []
         for entry in plan_base.iterdir():
+            # eacces-safe-exempt: an entry of a directory just traversed
+            # successfully, so its parent chain is readable already.
             if entry.is_dir() and entry.name.endswith(suffix):
                 matches_found.append(entry)
 
@@ -638,6 +644,7 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         settings_path = self._workspace_root / ".claude" / "settings.json"
         expected_value = f"./{self._track_plans_in_project}"
 
+        # eacces-safe-exempt: the project's own .claude/settings.json.
         if not settings_path.exists():
             return self._deny_plan_sync(
                 "settings.json not found.\n\n"
@@ -806,6 +813,8 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
 
         if self._plan_workflow_docs:
             workflow_path = self._workspace_root / self._plan_workflow_docs
+            # eacces-safe-exempt: a configured docs path under the workspace
+            # root, used only to decide whether to cite it.
             if workflow_path.exists():
                 context_parts.append(
                     f"See `{self._plan_workflow_docs}` for plan workflow conventions."
@@ -834,6 +843,10 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             return GatingResult(decision=Decision.ALLOW)
 
         plan_file = plan_folder / "PLAN.md"
+        # eacces-safe-exempt: `plan_folder` came from listing the configured
+        # plan directory, so this path is one the daemon just enumerated. The
+        # `read_text` below would raise on EACCES anyway -- guarding only the
+        # stat would move the failure, not remove it.
         if not plan_file.exists():
             return GatingResult(decision=Decision.ALLOW)
 

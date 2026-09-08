@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00310: plan readme completed row ageout](00310-plan-readme-completed-row-ageout/PLAN.md) - Complete (Completed rows now age out: main README retains the 30 highest-numbered; older rows archived verbatim in Completed/README.md, enforced by test_plan_index_navigability.py)
+
 - [00309: lint on edit per language timeout](00309-lint-on-edit-per-language-timeout/PLAN.md) - Complete at 373db1f9, merged at 6ca8bf79 (per-language `options.timeouts.<Language>` for lint_on_edit; fail-open kept, fired timeouts now name the language, budget and config key)
 
 - [00308: post upgrade config optimisation autorun](00308-post-upgrade-config-optimisation-autorun/PLAN.md) - Complete at 022dbcea (merged) (/optimise promoted as the canonical config-optimisation step with manifest-diff + run recording; upgrade/install flows invoke it with `--skip-config-optimisation` opt-out; `config_optimisation_reminder` SessionStart safety net)

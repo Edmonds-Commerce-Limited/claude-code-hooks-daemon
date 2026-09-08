@@ -205,6 +205,8 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         # can see least about.
         if path_is_dir(target, unreadable_means=False):
             return None
+        # eacces-safe-exempt: the deployed scaffolder under the CONFIGURED plan
+        # directory. Both halves are daemon config, not the mkdir target above.
         if not (self._workspace_root / plan_dir / MKPLAN_SCRIPT_NAME).exists():
             return None
 
@@ -503,6 +505,8 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
             # Add workflow docs reference if configured
             if self._plan_workflow_docs:
                 workflow_path = self._workspace_root / self._plan_workflow_docs
+                # eacces-safe-exempt: a configured docs path under the
+                # workspace root, used only to decide whether to cite it.
                 if workflow_path.exists():
                     message += (
                         f"\n📖 See `{self._plan_workflow_docs}` for plan structure and conventions."

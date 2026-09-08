@@ -165,6 +165,9 @@ class ProjectHandlerLoader:
             RuntimeError: If handler fails to load (import error, no concrete
                 subclass found, multiple subclasses, or instantiation failure)
         """
+        # eacces-safe-exempt: a handler module under the project-handlers root,
+        # reached by walking that configured directory. It is about to be
+        # IMPORTED, so an unreadable one has to fail loudly either way.
         if not file_path.exists():
             raise RuntimeError(f"Project handler file not found: {file_path}")
 
@@ -346,6 +349,7 @@ class ProjectHandlerLoader:
             A :class:`ProjectHandlerDiscovery` with the loaded handlers and the
             structured load failures.
         """
+        # eacces-safe-exempt: the configured project-handlers root.
         if not project_handlers_path.exists() or not project_handlers_path.is_dir():
             logger.debug("Project handlers directory does not exist: %s", project_handlers_path)
             return ProjectHandlerDiscovery()
@@ -355,6 +359,8 @@ class ProjectHandlerLoader:
 
         for dir_name, event_type in EVENT_TYPE_MAPPING.items():
             event_dir = project_handlers_path / dir_name
+            # eacces-safe-exempt: a fixed event-name subdirectory of the root
+            # checked above; `dir_name` comes from EVENT_TYPE_MAPPING.
             if not event_dir.is_dir():
                 continue
 

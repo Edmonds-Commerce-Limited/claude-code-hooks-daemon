@@ -310,6 +310,9 @@ class HandlerRegistry:
 
         for dir_name, event_type in EVENT_TYPE_MAPPING.items():
             event_dir = handlers_dir / dir_name
+            # eacces-safe-exempt: the daemon's OWN installed source tree
+            # (`Path(__file__).parent`). Unreadable here means it cannot load
+            # its own handlers, which must surface rather than be absorbed.
             if not event_dir.is_dir():
                 continue
 
@@ -351,6 +354,7 @@ class HandlerRegistry:
 
         for dir_name, event_type in EVENT_TYPE_MAPPING.items():
             event_dir = handlers_dir / dir_name
+            # eacces-safe-exempt: same daemon-owned source tree as PASS 1.
             if not event_dir.is_dir():
                 continue
 

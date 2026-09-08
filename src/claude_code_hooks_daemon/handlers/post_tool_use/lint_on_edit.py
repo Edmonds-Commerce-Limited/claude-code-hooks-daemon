@@ -412,10 +412,13 @@ class LintOnEditHandler(PostToolUseHandlerBase):
 
         for bin_dir in workspace_bin_dirs:
             workspace_candidate = bin_dir / executable
+            # eacces-safe-exempt: resolving the LINTER binary, not the file
+            # under lint. These bin dirs come from workspace config.
             if workspace_candidate.is_file():
                 return str(workspace_candidate)
 
         candidate = _INTERPRETER_BIN_DIR / executable
+        # eacces-safe-exempt: the daemon's own interpreter bin dir.
         if candidate.is_file():
             return str(candidate)
 

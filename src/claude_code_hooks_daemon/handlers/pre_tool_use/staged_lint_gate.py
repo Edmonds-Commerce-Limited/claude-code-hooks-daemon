@@ -333,6 +333,8 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         if Path(executable).is_absolute():
             return executable
         candidate = _INTERPRETER_BIN_DIR / executable
+        # eacces-safe-exempt: the daemon's own interpreter bin dir, where the
+        # lint tooling lives -- not a staged file.
         if candidate.is_file():
             return str(candidate)
         return shutil.which(executable)

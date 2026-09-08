@@ -1,6 +1,6 @@
 # Plan 00347: handlers raise on unstattable paths
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: High
@@ -166,19 +166,36 @@ that may well exist. Narrowed to `is False`.
 
 ### Phase 3: Stop it coming back
 
-- [ ] ⬜ **Task 3.1**: A static QA gate over `handlers/`, modelled on
-  `scripts/qa/check_canonical_callers.sh`, which already enforces "go through
-  the canonical helper, or carry an inline `# canonical-resolver-exempt: <reason>` marker" for venv resolution. The same shape applies here, so a
-  daemon-controlled site records its reason in place instead of being
-  indistinguishable from an oversight.
+- [x] ✅ **Task 3.1**: `scripts/qa/check_eacces_safe_predicates.py`, the 26th
+  QA gate, modelled on `check_canonical_callers.sh`: go through the canonical
+  helper, or carry an inline `# eacces-safe-exempt: <reason>` marker. A marker
+  with no reason does not exempt — an empty one is a silencer, not a record.
+
+**Scope was the real decision.** Only some handler families can receive a path
+the daemon did not choose: a `PreToolUse`/`PostToolUse` handler reads
+`tool_input.file_path`, a worktree handler reads one from its event payload. A
+`SessionStart` or `status_line` handler has no such input, so its paths are
+daemon-built by construction — requiring markers there would mean 33 comments
+asserting something already guaranteed, and noise is how a real marker stops
+being read. An **unrecognised** family is scanned, not skipped: a gate that
+defaults to "skip" silently stops covering whatever is added after it was
+written, which is this plan's own failure mode.
+
+That left 26 sites needing a recorded reason, each written from what the path
+actually is — the daemon's own source tree, a configured plan directory, a
+linter binary, an entry of a directory just traversed.
 
 ## Success Criteria
 
-- [ ] A handler given a path behind an unreadable directory returns a decision,
-  proved by a test that FORCES `EACCES` rather than relying on mode bits.
-- [ ] Every remaining raw predicate under `handlers/` is either
-  daemon-controlled or carries an in-place exemption reason.
-- [ ] A newly added raw predicate on a caller-supplied path fails a check.
+- [x] A handler given a path behind an unreadable directory returns a decision,
+  proved by a test that FORCES `EACCES` rather than relying on mode bits — 80
+  tests across four files, each opening with a vacuity guard.
+- [x] Every remaining raw predicate under `handlers/` is either in a family that
+  cannot receive a caller-supplied path, or carries an in-place exemption
+  reason.
+- [x] A newly added raw predicate on a caller-supplied path fails a check —
+  `eacces_safe`, verified against fixtures for all three predicate names, all
+  three tool-input-bearing families, and an unrecognised family.
 
 ## Delivery & Milestones
 
@@ -189,6 +206,25 @@ that may well exist. Narrowed to `is False`.
 - **Task 2.2 complete** — all 73 sites classified (14 caller-supplied, 59
   daemon-controlled), and the pass falsified Phase 1's original "one canonical
   fallback" design before any code was written to it.
+- **Phase 1** — `utils/path_predicates.py`, whose signature is the deliverable:
+  the fallback is keyword-only with **no default**, so the answer is chosen at
+  each site rather than inherited.
+- **Phase 2** — 14 sites, split 11 `False` / 1 `True` / 2 `None`. The one
+  `True` (`write_clobber_guard`) is the proof that a single canonical fallback
+  would have been dangerous rather than merely unhelpful.
+- **Phase 3** — the `eacces_safe` QA gate, plus 26 in-place exemption reasons.
 - The originating instance (`core/utils.py:_written_paths`) is fixed at
   `f17fabcd`, which is where the test technique comes from — force the
   `EACCES`, never rely on mode bits.
+
+## What this plan got wrong, twice
+
+Both times the error was **trusting a conclusion instead of its evidence**, and
+both times the repository caught it rather than a review.
+
+Phase 1 was written as "one canonical answer" and was falsified by the
+classification pass it had itself commissioned. The delegated report then
+recommended `True` for `plan_qa_edit`, and that was wrong too — its mechanism
+was exact, its recommendation did not follow from it, and reading
+`archive_immutability` directly showed the consumer had already decided what
+uncertainty should mean.

@@ -101,6 +101,8 @@ class GitHooksExecutableFixerHandler(PostToolUseHandlerBase):
         git_result = run_git(repo, *_GIT_HOOKS_PATH_ARGS)
 
         hooks_dir = self._parse_hooks_dir(git_result.returncode, git_result.stdout, cwd)
+        # eacces-safe-exempt: git itself reported this path for the repository
+        # the daemon is running in, not a path anyone passed to a tool.
         if hooks_dir is None or not hooks_dir.is_dir():
             return BlockingResult(
                 decision=Decision.ALLOW,
@@ -185,6 +187,8 @@ class GitHooksExecutableFixerHandler(PostToolUseHandlerBase):
         """
         fixed: list[str] = []
         for entry in hooks_dir.iterdir():
+            # eacces-safe-exempt: an entry of a directory the daemon has just
+            # traversed successfully, so the parent chain is readable already.
             if not entry.is_file():
                 continue
             if entry.name.endswith(_SAMPLE_SUFFIX):

@@ -172,6 +172,8 @@ def write_state_record(
     path = Path(state_file)
     path.parent.mkdir(parents=True, exist_ok=True)
     existing: list[str] = []
+    # eacces-safe-exempt: the daemon's own state file, whose parent it created
+    # two lines above. EACCES here means the daemon cannot write its own state.
     if path.exists():
         existing = [ln for ln in path.read_text().splitlines() if ln.strip()]
     existing.append(json.dumps(record))

@@ -127,6 +127,8 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
         settings_path = root_path / ".claude" / "settings.json"
 
         settings: dict[str, Any] = {}
+        # eacces-safe-exempt: the project's own .claude/settings.json under the
+        # workspace root. If that is unreadable the daemon cannot run at all.
         exists = settings_path.exists()
         if exists:
             try:
@@ -151,6 +153,8 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
         try:
             if exists:
                 backup_path = settings_path.with_name(settings_path.name + _BACKUP_SUFFIX)
+                # eacces-safe-exempt: sits beside the settings file above, in a
+                # directory this method has already read successfully.
                 if not backup_path.exists():
                     shutil.copy2(settings_path, backup_path)
             else:

@@ -93,6 +93,9 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         # directory that is not a registered worktree is accepted and echoed
         # back as valid. Tightening it means reconciling against
         # ``git worktree list``, which is out of scope here (Plan 00267 T1.4).
+        # eacces-safe-exempt: built by `worktree_path()` from a slugified name
+        # under a fixed `.claude/worktrees/` prefix, never from the payload
+        # directly -- unlike WorktreeRemove, which does take a payload path.
         if not path.exists():
             entries = self._seed_entries()
             # BEFORE creation: an unusable entry must abandon the whole

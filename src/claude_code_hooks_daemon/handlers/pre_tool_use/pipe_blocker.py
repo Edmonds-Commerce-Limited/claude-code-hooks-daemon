@@ -730,6 +730,8 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             return None
 
         helper = daemon_dir.joinpath(*_ECHD_CAPTURE_REL_PARTS)
+        # eacces-safe-exempt: the daemon's own deployed helper script, under
+        # its own install directory.
         if not helper.is_file():
             return None
 

@@ -260,6 +260,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="python_var_guidance.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "eacces_safe": ToolConfig(
+        command=_python("check_eacces_safe_predicates.py", "--json"),
+        json_file="eacces_safe.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
     "semgrep": ToolConfig(
         command=_bash("run_semgrep_check.sh"),
         json_file="semgrep.json",
@@ -461,6 +466,11 @@ def _summarize_python_var_guidance(data: QaReport) -> str:
     return f"{total} violations"
 
 
+def _summarize_eacces_safe(data: QaReport) -> str:
+    total = data.get("summary", {}).get("total_violations", 0)
+    return f"{total} violations"
+
+
 def _summarize_repo_hygiene(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
@@ -546,6 +556,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "canonical_callers": _summarize_canonical_callers,
     "capture_corruption": _summarize_capture_corruption,
     "python_var_guidance": _summarize_python_var_guidance,
+    "eacces_safe": _summarize_eacces_safe,
     "smoke_test": _summarize_smoke_test,
     "repo_hygiene": _summarize_repo_hygiene,
     "doc_truth": _summarize_doc_truth,
