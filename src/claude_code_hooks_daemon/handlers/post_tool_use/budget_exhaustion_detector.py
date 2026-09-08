@@ -89,6 +89,10 @@ _DEFAULT_EXCLUDED_TOOLS: Final[tuple[str, ...]] = (
 _SELF_REFERENTIAL_COMMAND_MARKERS: Final[tuple[str, ...]] = (
     "budget-exhaustion-events.jsonl",
     "budget_exhaustion_detector",
+    # The same handler under its other spelling. Registries, playbooks and
+    # generated reports name handlers by CLASS, so a marker list that knows
+    # only the module path misses every one of them.
+    "BudgetExhaustionDetector",
 )
 
 # The same markers, applied to the tool RESPONSE. A payload that names this
@@ -101,6 +105,11 @@ _SELF_REFERENTIAL_COMMAND_MARKERS: Final[tuple[str, ...]] = (
 _SELF_REFERENTIAL_RESPONSE_MARKERS: Final[tuple[str, ...]] = (
     "budget-exhaustion-events.jsonl",
     "budget_exhaustion_detector",
+    # A generated report is the sharpest case: it prints this handler's own
+    # acceptance blocks, one of which quotes the refusal sentence verbatim
+    # because that is precisely what the block simulates. So the detector fired
+    # on its own test fixture, and named the class while doing it.
+    "BudgetExhaustionDetector",
 )
 
 # ─── Pattern family ───────────────────────────────────────────────────────────

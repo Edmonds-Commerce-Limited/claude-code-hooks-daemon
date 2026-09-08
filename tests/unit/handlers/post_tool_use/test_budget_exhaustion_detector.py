@@ -173,6 +173,37 @@ class TestExcludedToolsByDefault:
         hook_input["tool_input"] = {"command": "head -n 40 CHANGELOG.md"}
         assert handler.matches(hook_input) is False
 
+    @pytest.mark.parametrize(
+        "report_text",
+        [
+            # A generated acceptance-test report printing this handler's own
+            # test definitions. The block's `command` field quotes the refusal
+            # sentence verbatim, because that IS what the test simulates.
+            "#190 BudgetExhaustionDetectorHandler [PostToolUse]\n"
+            "  title    : Web-search budget refusal triggers a prominent advisory\n"
+            "  command  : Simulate a WebSearch tool response containing the text\n"
+            "    'Web search was not performed: this session has used its web\n"
+            "    search budget (200 of 200 WebSearch calls).'",
+            # The handler registry / documentation listing, same naming form.
+            "BudgetExhaustionDetectorHandler — hidden agent budgets are surfaced\n"
+            "  matches on: web search budget, quota exceeded",
+        ],
+    )
+    def test_report_naming_the_handler_class_never_fires(
+        self, handler: BudgetExhaustionDetectorHandler, report_text: str
+    ) -> None:
+        """Text naming this handler by its CLASS name is documentation about the
+        feature, exactly like text naming its module.
+
+        The response guard knew only the snake_case module form, so a generated
+        report — which names handlers by class — slipped past it and fired the
+        advisory on the handler's own test fixture. Observed live twice in one
+        session while auditing the acceptance playbook.
+        """
+        hook_input = _tool_input("Bash", {"stdout": report_text, "stderr": ""})
+        hook_input["tool_input"] = {"command": "python scripts/dump_playbook.py 190"}
+        assert handler.matches(hook_input) is False
+
     def test_excluded_tools_configurable(self, handler: BudgetExhaustionDetectorHandler) -> None:
         handler._excluded_tools = ["Bash"]
         hook_input = _tool_input(
