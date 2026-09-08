@@ -144,9 +144,12 @@ earlier draft of this plan described.
 
 - [ ] ⬜ **Task 3.1**: Full QA green, daemon restart RUNNING.
 
-- [ ] ⬜ **Task 3.2**: Confirm end-to-end that a tool call carrying such a
-  token is now judged by the guard rather than skipping it — the behaviour the
-  plan exists to restore, observed rather than assumed.
+- [x] ✅ **Task 3.2**: Observed live after a daemon restart on the fixed code:
+  a real Bash call `cat untracked/scratch/a**b.md <literal DETAIL token>` was
+  DENIED by `R-QUARANTINE-ARTEFACT-READ` (pre-fix the malformed first token
+  aborted matching before the literal one was reached); the malformed token
+  alone was allowed as a judged no-match; the daemon log shows the guard
+  matching the event and no handler exception.
 
 ## Success Criteria
 
