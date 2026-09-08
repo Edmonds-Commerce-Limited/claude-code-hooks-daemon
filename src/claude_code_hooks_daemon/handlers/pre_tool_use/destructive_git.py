@@ -43,11 +43,17 @@ _GIT_INVOCATION = GIT_INVOCATION
 # `[^;&|]*?` consumes only characters within the push segment (never a command
 # separator), so a non-push `--force` later in a compound command — e.g.
 # `git push origin main; git worktree remove <path> --force` — is NOT matched.
-# Within the segment, the long (`--force`, `--force-with-lease`) and short (`-f`)
-# force flags all qualify as a destructive force push.
+# Within the segment, three spellings all qualify as a destructive force push:
+#   - the long/short FLAGS: `--force`, `--force-with-lease`, `-f`
+#   - a `+`-prefixed REFSPEC (Plan 00205): `git push origin +main:main` forces
+#     the update exactly like `--force` and needs no flag at all. `(?<!\S)`
+#     requires the `+` to start a whitespace-delimited token (not merely
+#     appear inside one), so a branch name that happens to CONTAIN `+`
+#     (`git push origin feature+fix`) is never matched — only a `+` in the
+#     LEADING position of a refspec argument is the force marker.
 _GIT_PUSH_FORCE_PATTERN = (
     rf"{_GIT_INVOCATION}push\b[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?"
-    r"(?:--force(?:-with-lease)?|-f)\b"
+    r"(?:(?:--force(?:-with-lease)?|-f)\b|(?<!\S)\+\S)"
 )
 
 # SINGLE SOURCE OF TRUTH: ordered (pattern, reason) pairs consumed by BOTH matches()
@@ -100,6 +106,17 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
         rf"{_GIT_INVOCATION}branch\s+.*(?-i:-D)\b",
         "git branch -D force-deletes a branch without checking if it has been merged",
     ),
+    # Plan 00205: `git update-ref -d refs/heads/<name>` is the plumbing
+    # equivalent of `git branch -D` — same force delete, no merge check, no
+    # flag an agent would recognise as "the dangerous one". Scoped to `-d`
+    # with a `refs/heads/` target (PLAN.md Risks & Mitigations): creating or
+    # moving a ref (no `-d`), and deleting a non-branch ref (e.g.
+    # `refs/remotes/...`), stay untouched.
+    (
+        rf"{_GIT_INVOCATION}update-ref\s+.*-d\s+refs/heads/\S+",
+        "git update-ref -d refs/heads/<name> force-deletes a branch ref with no "
+        "merge check — the plumbing equivalent of git branch -D",
+    ),
     (
         rf"{_GIT_INVOCATION}commit\s+.*--amend\b",
         "git commit --amend rewrites the previous commit, creating messy history "
@@ -121,6 +138,7 @@ _PATTERN_RULE_IDS: tuple[str, ...] = (
     RuleID.GIT_STASH_CLEAR,
     RuleID.GIT_PUSH_FORCE,
     RuleID.GIT_BRANCH_FORCE_DELETE,
+    RuleID.GIT_BRANCH_FORCE_DELETE,  # git update-ref -d refs/heads/<name> (Plan 00205)
     RuleID.GIT_COMMIT_AMEND,
 )
 
@@ -185,13 +203,13 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
     ),
     (
         RuleID.GIT_PUSH_FORCE,
-        "`git push --force`",
+        "`git push --force` / `git push <remote> +<refspec>`",
         "Can overwrite remote history and destroy team members' work",
         "Ask the user to run it manually, or coordinate and use `--force-with-lease`",
     ),
     (
         RuleID.GIT_BRANCH_FORCE_DELETE,
-        "`git branch -D`",
+        "`git branch -D` / `git update-ref -d refs/heads/<name>`",
         "Force-deletes a branch without checking if it has been merged",
         "Use `git branch -d` first (refuses unmerged branches); ask the user for -D",
     ),
@@ -331,8 +349,10 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "| `git restore <file>` | Discards local changes (`--staged` is allowed) |\n"
             "| `git stash drop` | Permanently destroys stashed changes |\n"
             "| `git stash clear` | Permanently destroys all stashes |\n"
-            "| `git push --force` | Can overwrite remote history and destroy teammates' work |\n"
-            "| `git branch -D` | Force-deletes branch without checking if merged (lowercase `-d` is safe) |\n"
+            "| `git push --force` / `git push <remote> +<refspec>` "
+            "| Can overwrite remote history and destroy teammates' work |\n"
+            "| `git branch -D` / `git update-ref -d refs/heads/<name>` "
+            "| Force-deletes branch without checking if merged (lowercase `-d` is safe) |\n"
             "| `git commit --amend` | Rewrites the previous commit — create a new commit instead |\n\n"
             "If the user needs to run one of these, ask them to do it manually. "
             "Do not attempt to work around the block.\n\n"
@@ -519,6 +539,42 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                     r"messy history",
                 ],
                 safety_notes="Uses echo - command is not actually executed",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="git push +refspec (plumbing force push)",
+                command='echo "git push origin +NONEXISTENT_SAFE_TEST_BRANCH:NONEXISTENT_SAFE_TEST_BRANCH"',
+                dispatch_as_bash=True,
+                description=(
+                    "Blocks a `+`-prefixed refspec push (Plan 00205) — the plumbing "
+                    "equivalent of `git push --force`"
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"overwrite remote history",
+                    r"destroy.*work",
+                ],
+                safety_notes="Uses non-existent branch name - would fail harmlessly if executed",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="git update-ref -d refs/heads (plumbing branch delete)",
+                command='echo "git update-ref -d refs/heads/NONEXISTENT_SAFE_TEST_BRANCH"',
+                dispatch_as_bash=True,
+                description=(
+                    "Blocks git update-ref -d refs/heads/<name> (Plan 00205) — the "
+                    "plumbing equivalent of git branch -D"
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"[Ff]orce-deletes.*branch",
+                    r"merged",
+                ],
+                safety_notes="Uses non-existent branch - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

@@ -147,6 +147,14 @@ class PlanDoneRequiresHoldingAreaHandler(Handler):
                 "content": probe_content,
             },
         )
+        near_miss_payload = ToolPayload(
+            tool_name=ToolName.EDIT,
+            tool_input={
+                "file_path": "$CLAUDE_PROJECT_DIR/CLAUDE/Plan/00000-acceptance-probe/PLAN.md",
+                "old_string": "**Status**: In Progress",
+                "new_string": "**Status**: Complete",
+            },
+        )
         return [
             AcceptanceTest(
                 title="Deny a Complete flip with no holding-area criterion",
@@ -163,10 +171,7 @@ class PlanDoneRequiresHoldingAreaHandler(Handler):
             ),
             AcceptanceTest(
                 title="Allow a status flip the handler has no content to judge",
-                command=(
-                    "Edit CLAUDE/Plan/00000-acceptance-probe/PLAN.md replacing "
-                    "'**Status**: In Progress' with '**Status**: Complete'"
-                ),
+                command=near_miss_payload.as_instruction(),
                 description=(
                     "A near miss: the same Complete flip, but on a file that does "
                     "not exist. The handler fails open (the Edit tool refuses an "
@@ -176,5 +181,6 @@ class PlanDoneRequiresHoldingAreaHandler(Handler):
                 expected_message_patterns=[],
                 safety_notes="The Edit tool rejects the missing file; nothing is written.",
                 test_type=TestType.ADVISORY,
+                tool_payload=near_miss_payload,
             ),
         ]

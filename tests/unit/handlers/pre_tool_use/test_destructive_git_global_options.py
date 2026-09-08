@@ -56,6 +56,9 @@ _DESTRUCTIVE_SUBCOMMANDS = [
     "commit --amend -m x",
     "checkout HEAD -- src/app.py",
     "restore src/app.py",
+    # Plan 00205 synonym-axis additions: same rule, different spelling.
+    "push origin +main:main",
+    "update-ref -d refs/heads/feature",
 ]
 
 

@@ -11,6 +11,8 @@ from typing import Any
 import pytest
 from plan_done_requires_holding_area import PlanDoneRequiresHoldingAreaHandler
 
+from claude_code_hooks_daemon.core.hook_result import Decision
+
 _ACTIVE = "CLAUDE/Plan/00999-example/PLAN.md"
 _ARCHIVED = "CLAUDE/Plan/Completed/00999-example/PLAN.md"
 
@@ -216,6 +218,11 @@ class TestDeclaredAcceptanceTestsAreProducible:
                 "tool_name": test.tool_payload.tool_name,
                 "tool_input": test.tool_payload.tool_input,
             }
+            if test.expected_decision == Decision.ALLOW:
+                # The near miss: this handler allows by NOT matching, so
+                # there is no handle() verdict to inspect.
+                assert handler.matches(hook_input) is False, test.title
+                continue
             assert handler.matches(hook_input) is True
             result = handler.handle(hook_input)
             assert result.decision == test.expected_decision, test.title
