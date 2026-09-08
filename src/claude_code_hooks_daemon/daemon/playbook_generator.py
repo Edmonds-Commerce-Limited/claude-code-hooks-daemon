@@ -13,6 +13,7 @@ import logging
 import shutil
 from collections.abc import Sequence
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.constants.config import ConfigKey, resolve_priority
@@ -26,6 +27,7 @@ from claude_code_hooks_daemon.pseudo_events.registry import (
     enabled_pseudo_event_handler_classes,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
@@ -74,13 +76,16 @@ def _skip_block(test: AcceptanceTest) -> list[str]:
     project handlers share this so a test is never skipped in one section and
     demanded in the other.
 
-    Two reasons a test is unrunnable, in precedence order:
+    Three reasons a test is unrunnable, in precedence order:
 
     1. ``harness_cannot_produce`` — Claude Code rewrites the input before the
        daemon sees it, so the assertion is unreachable by construction. Checked
        first: no tool install can make such a test runnable.
     2. ``required_tools`` — a language toolchain is absent from this machine,
        so the test is merely unrunnable *here*.
+    3. ``requires_llm_commands`` — the project's ``package.json`` declares no
+       ``llm:``-prefixed script, so the handler takes its advisory branch
+       instead of exercising the real tool this test means to validate.
     """
     if test.harness_cannot_produce:
         return [
@@ -100,6 +105,16 @@ def _skip_block(test: AcceptanceTest) -> list[str]:
                 "",
                 "**Result**: SKIP (tool not available)",
             ]
+
+    if test.requires_llm_commands and not has_llm_commands_in_package_json(Path.cwd()):
+        return [
+            "**⚠️ SKIP**: No `llm:`-prefixed script declared in `package.json`.",
+            "*Add an `llm:` script (see the handler's CLAUDE.md guidance) to "
+            "enable this test, or accept that it only exercises the advisory "
+            "branch here.*",
+            "",
+            "**Result**: SKIP (llm: commands not available)",
+        ]
 
     return []
 
@@ -439,6 +454,16 @@ class PlaybookGenerator:
                     "requires_event": test.requires_event,
                     "required_tools": test.required_tools,
                     "tools_available": all(shutil.which(t) for t in (test.required_tools or [])),
+                    "requires_llm_commands": test.requires_llm_commands,
+                    # Mirrors "tools_available" for the requires_llm_commands
+                    # precondition -- True (vacuously) when the test never
+                    # declared it, exactly like tools_available on an empty
+                    # required_tools list.
+                    "llm_commands_available": (
+                        has_llm_commands_in_package_json(Path.cwd())
+                        if test.requires_llm_commands
+                        else True
+                    ),
                     "recommended_model": (
                         test.recommended_model.value if test.recommended_model else None
                     ),

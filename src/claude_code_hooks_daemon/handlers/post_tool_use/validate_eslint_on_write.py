@@ -446,6 +446,13 @@ is not evidence that a `.ts` file is clean."""
                 cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
+                # This handler only reaches real ESLint when package.json
+                # declares an llm: script -- without one (this daemon's own
+                # self-install checkout, notably) the patterns above still
+                # happen to match the advisory branch too, but the test would
+                # no longer be validating what its title claims. Probed the
+                # same way required_tools skips a missing toolchain binary.
+                requires_llm_commands=True,
             ),
             AcceptanceTest(
                 title="ESLint denies a Bash-authored TypeScript file",
