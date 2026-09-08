@@ -17,7 +17,8 @@ from dataclasses import dataclass
 
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.rule import Rule
-from claude_code_hooks_daemon.handlers.registry import HandlerRegistry, _to_snake_case
+from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+from claude_code_hooks_daemon.utils.naming import class_name_to_config_key
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ def collect_handler_rules(handler_classes: Iterable[type[Handler]]) -> list[Hand
             continue
         collected.append(
             HandlerRules(
-                config_key=_to_snake_case(handler_class.__name__),
+                config_key=class_name_to_config_key(handler_class.__name__),
                 class_name=handler_class.__name__,
                 rules=rules,
                 claude_md=claude_md,

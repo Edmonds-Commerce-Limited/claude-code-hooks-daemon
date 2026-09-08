@@ -134,6 +134,18 @@ class TestCollectHandlerRules:
         assert keys == sorted(keys)
 
 
+class TestConfigKeyConversionUsesThePublicNamingUtility:
+    """Plan 00295 Task 3.5: the class-name -> config-key mapping must come
+    from a public name, not handlers.registry's private ``_to_snake_case``
+    -- ``utils.naming.class_name_to_config_key`` already IS that public
+    name (built to eliminate exactly this duplication)."""
+
+    def test_lookup_module_does_not_import_the_private_registry_helper(self) -> None:
+        import claude_code_hooks_daemon.rule_explain.lookup as lookup_module
+
+        assert not hasattr(lookup_module, "_to_snake_case")
+
+
 class TestFindRule:
     def test_finds_exact_id(self) -> None:
         collected = collect_handler_rules([FixtureTwoRuleHandler])
