@@ -149,7 +149,11 @@ quietly became a resolver would put the daemon back to guessing.
   the source file's declared WORKSPACE ONLY (Plan 00300 hard cutover removed
   the extra project-root-anchored candidate — a single anchoring semantics
   everywhere, unchanged in a single-project repo since the workspace IS the
-  repo root there).
+  repo root there). A `mirror: true` entry reproduces the source's directory
+  path after the glob's literal root under `test_dir`, anchored the same way;
+  a nested `layout.test_dirs` entry (`tests/Small`) is a mirror root without
+  a map entry, anchored on the segments before the source dir exactly as the
+  built-in `tests/<mirror>` resolver is (Plan 00362).
 - **`validate_eslint_on_write`'s `workspace_root` constructor argument** — a
   test seam, not user configuration. It is not read from YAML.
 - **`layout.source_dirs` and friends** — roles *within* a project, a

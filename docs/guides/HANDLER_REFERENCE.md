@@ -1749,6 +1749,7 @@ handlers:
 - Separate mirror tree -- `tests/unit/{subdir}/test_{module}.py`
 - Collocated -- `{source_dir}/{module}.test.ts` (JS/TS projects)
 - Test subdirectory -- `{source_dir}/__tests__/{module}.test.ts`
+- Every declared root -- each `test_path_map` entry, and each NESTED `layout.test_dirs` entry (`tests/Small`, `tests/Large`) as `{entry}/{mirror after src/}/{TestName}`; a bare name such as `e2e` only classifies
 
 **Allowed through without blocking:** vendor directories, `node_modules`, build outputs, generated files, and any extension with no registered strategy.
 
@@ -1763,12 +1764,12 @@ Write tool creating src/handlers/pre_tool_use/new_handler.py
 
 **Options:**
 
-| Option           | Type         | Default        | Description                                                                                                                                                                                               |
-| ---------------- | ------------ | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `languages`      | `list[str]`  | all registered | Restrict TDD enforcement to specific languages. Unset or empty enforces EVERY registered language. Takes precedence over the project-wide `daemon.languages` list when both are set.                      |
-| `test_locations` | `list[str]`  | all three      | Which INFERENCE styles to try: `separate`, `collocated`, `test_subdir`. Does not affect `test_path_map`, which is a declaration rather than a style.                                                      |
-| `test_path_map`  | `list[dict]` | `[]`           | Declared `{source_glob, test_dir}` mappings for layouts no resolver can infer. `test_dir` is project-root-relative (or absolute) and FLAT — the test filename goes directly in it, not mirrored under it. |
-| `exclude_paths`  | `list[str]`  | `[]`           | Gitignore-style globs exempted from TDD enforcement entirely. Additive with the project-wide `daemon.exclude_paths`; neither overrides the other.                                                         |
+| Option           | Type         | Default        | Description                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------- | ------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `languages`      | `list[str]`  | all registered | Restrict TDD enforcement to specific languages. Unset or empty enforces EVERY registered language. Takes precedence over the project-wide `daemon.languages` list when both are set.                                                                                                                                                                                           |
+| `test_locations` | `list[str]`  | all three      | Which INFERENCE styles to try: `separate`, `collocated`, `test_subdir`. Does not affect `test_path_map`, which is a declaration rather than a style.                                                                                                                                                                                                                           |
+| `test_path_map`  | `list[dict]` | `[]`           | Declared `{source_glob, test_dir, mirror?}` mappings for layouts no resolver can infer. `test_dir` is project-root-relative (absolute is rejected). FLAT by default — the test filename goes directly in it. `mirror: true` reproduces the source's directory path after the glob's literal root (`src` for `src/**`) under it: `src/A/Foo.php` -> `{test_dir}/A/FooTest.php`. |
+| `exclude_paths`  | `list[str]`  | `[]`           | Gitignore-style globs exempted from TDD enforcement entirely. Additive with the project-wide `daemon.exclude_paths`; neither overrides the other.                                                                                                                                                                                                                              |
 
 **Declaring a test root vs. excluding a path.** Both escape a false block, but they are not equivalent — `exclude_paths` turns the gate OFF for those files, while `test_path_map` keeps it ON and only tells it where to look. Prefer the map. Reach for the exclusion when the files genuinely are not TDD-able, not when their tests merely live somewhere unusual.
 
@@ -1789,11 +1790,22 @@ handlers:
         test_path_map:
           - source_glob: "**/qaConfig/PHPStan/Rules/**"
             test_dir: "apps/app/qaConfig/Tests"
+          # A PHP size-suite layout: src/PackageType/OptimiseProbe.php is
+          # tested at tests/Small/PackageType/OptimiseProbeTest.php or
+          # tests/Large/... — both roots are searched and both are listed
+          # in a deny. (Declaring the same two directories in
+          # layout.test_dirs achieves this with no test_path_map entry.)
+          - source_glob: "src/**"
+            test_dir: "tests/Small"
+            mirror: true
+          - source_glob: "src/**"
+            test_dir: "tests/Large"
+            mirror: true
         exclude_paths:
           - "**/generated/**"
 ```
 
-A malformed `test_path_map` entry (not a mapping, or missing either key) is logged and skipped rather than raised — one bad line must not disable TDD enforcement wholesale. The skip is visible where you are already looking: the declared directory is simply absent from the deny message's searched-locations list.
+A malformed `test_path_map` entry (not a mapping, missing either key, or a `mirror` that is not a boolean) is logged and skipped rather than raised — one bad line must not disable TDD enforcement wholesale. The skip is visible where you are already looking: the declared directory is simply absent from the deny message's searched-locations list.
 
 ---
 

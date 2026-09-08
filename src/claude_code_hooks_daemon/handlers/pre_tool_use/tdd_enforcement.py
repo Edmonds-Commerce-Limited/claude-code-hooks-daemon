@@ -48,9 +48,13 @@ _DEFAULT_TEST_LOCATIONS = frozenset(
     {_TEST_LOCATION_SEPARATE, _TEST_LOCATION_COLLOCATED, _TEST_LOCATION_TEST_SUBDIR}
 )
 
-# `test_path_map` option keys (Plan 00251 Phase 3)
+# `test_path_map` option keys (Plan 00251 Phase 3; `mirror` from Plan 00362)
 _KEY_SOURCE_GLOB = "source_glob"
 _KEY_TEST_DIR = "test_dir"
+_KEY_MIRROR = "mirror"
+
+# Characters that make a path segment a glob rather than a literal name.
+_GLOB_METACHARACTERS = frozenset("*?[")
 
 # Single rule (Plan 00116): the language dimension lives in the strategy
 # registry, not in a per-language RuleID -- every language's missing-test
@@ -104,15 +108,22 @@ class DeclaredTestDir:
             -- an absolute ``test_dir`` is rejected by :func:`_parse_test_path_map`
             per the zero-absolute-paths config ruling (Plan 00296): a repository
             is mounted at different places on different machines, so an absolute
-            path in committed config is correct on exactly one of them. NOT
-            mirrored — the test filename is placed directly in this directory,
+            path in committed config is correct on exactly one of them. FLAT by
+            default — the test filename is placed directly in this directory,
             because that is what a flat PSR-4 test namespace looks like.
-            Mirroring is already available for ``src/`` layouts via the built-in
-            ``separate`` resolvers.
+        mirror: When True the source's directory path (relative to the LITERAL
+            leading segments of ``source_glob``, e.g. ``src`` for ``src/**``)
+            is reproduced under ``test_dir``, so ``src/A/B/Foo.php`` is tested
+            at ``<test_dir>/A/B/FooTest.php``. This is what a nested size-suite
+            layout (``tests/Small/<mirror>``, ``tests/Large/<mirror>``) needs
+            and neither the flat contract nor the built-in ``tests/<mirror>``
+            resolver can express (Plan 00362). A glob with no literal prefix
+            (``**/Rules/**``) mirrors the whole workspace-relative path.
     """
 
     source_glob: str
     test_dir: str
+    mirror: bool = False
 
     def __post_init__(self) -> None:
         """FAIL FAST on a meaningless mapping.
@@ -175,8 +186,52 @@ def _parse_test_path_map(raw: Any) -> list[DeclaredTestDir]:
                 test_dir,
             )
             continue
-        parsed.append(DeclaredTestDir(source_glob=source_glob, test_dir=test_dir))
+        mirror = entry.get(_KEY_MIRROR, False)
+        if not isinstance(mirror, bool):
+            logger.warning(
+                "tdd_enforcement: test_path_map[%d] %s must be true or false, got %r; skipped",
+                index,
+                _KEY_MIRROR,
+                mirror,
+            )
+            continue
+        parsed.append(DeclaredTestDir(source_glob=source_glob, test_dir=test_dir, mirror=mirror))
     return parsed
+
+
+def _glob_literal_root(source_glob: str) -> tuple[str, ...]:
+    """The leading path segments of ``source_glob`` that contain no wildcard.
+
+    ``src/**`` -> ``("src",)``; ``apps/app/src/**`` -> ``("apps", "app", "src")``;
+    ``**/Rules/**`` -> ``()``. A leading ``/`` (the anchored form of the
+    ``path_exclusion`` dialect) is not a segment.
+    """
+    literal: list[str] = []
+    for segment in source_glob.strip("/").split("/"):
+        if not segment or _GLOB_METACHARACTERS.intersection(segment):
+            break
+        literal.append(segment)
+    return tuple(literal)
+
+
+def _dirs_after_window(parts: tuple[str, ...], window: tuple[str, ...]) -> tuple[str, ...]:
+    """Directory segments of ``parts`` (a file path) after the first run equal to ``window``.
+
+    An empty ``window`` -- or one not present in ``parts`` -- strips nothing,
+    so the whole directory path is returned.
+    """
+    dirs = parts[:-1]
+    if window:
+        width = len(window)
+        for start in range(len(dirs) - width + 1):
+            if dirs[start : start + width] == window:
+                return dirs[start + width :]
+    return dirs
+
+
+def _is_nested_literal_dir(entry: str) -> bool:
+    """A ``layout.test_dirs`` entry usable as a mirror root: a PATH, not a name or glob."""
+    return "/" in entry.strip("/") and not _GLOB_METACHARACTERS.intersection(entry)
 
 
 class TddEnforcementHandler(PreToolUseHandlerBase):
@@ -432,6 +487,14 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         # declared test root (Plan 00251).
         candidates.extend(self._map_declared_test_paths(source_path, test_filename))
 
+        # A nested `layout.test_dirs` entry (`tests/Small`) is a declared FACT
+        # too, so it is a mirror root without a second declaration in
+        # `test_path_map` and, like that map, is not gated on the inference
+        # style selector (Plan 00362).
+        for layout_candidate in self._map_layout_mirror_paths(source_path, test_filename):
+            if layout_candidate not in candidates:
+                candidates.append(layout_candidate)
+
         # Separate test directory strategies (mirror, unit, fallback)
         if _TEST_LOCATION_SEPARATE in effective_locations:
             # Strategy 1: Mirror mapping (PHP PSR-4, Java, etc.)
@@ -482,8 +545,10 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         repository root, so zero-config behaviour is unchanged. There is no
         second, project-root-anchored candidate (Plan 00300 hard cutover) --
         a single anchoring semantics for a relative ``test_dir`` everywhere.
-        Test filenames are placed FLAT in the declared directory, never
-        mirrored under it. Mappings are returned in config order, so a
+        A flat mapping places the test filename directly in the declared
+        directory; a ``mirror: true`` mapping reproduces the source's
+        directory path after the glob's literal root under it (see
+        :class:`DeclaredTestDir`). Mappings are returned in config order, so a
         project controls which of several matching declarations the deny
         message suggests first.
 
@@ -521,8 +586,55 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
             workspace = resolve_workspace(
                 self._project_registry, Path(source_path), project_root_path
             )
-            candidates.append(workspace.root / test_dir / test_filename)
+            if not mapping.mirror:
+                candidates.append(workspace.root / test_dir / test_filename)
+                continue
+            try:
+                relative_parts = Path(source_path).relative_to(workspace.root).parts
+            except ValueError:
+                # A mirror is defined relative to the workspace; a source the
+                # glob matched from outside it has no such relation, so the
+                # mapping has nothing to place. Skip rather than guess.
+                logger.warning(
+                    "tdd_enforcement: test_path_map mirror for %r matched %r outside its "
+                    "workspace %s; skipped",
+                    mapping.source_glob,
+                    source_path,
+                    workspace.root,
+                )
+                continue
+            mirrored = _dirs_after_window(relative_parts, _glob_literal_root(mapping.source_glob))
+            candidates.append(workspace.root / test_dir / Path(*mirrored) / test_filename)
         return candidates
+
+    def _map_layout_mirror_paths(self, source_path: str, test_filename: str) -> list[Path]:
+        """Candidate test paths from NESTED ``layout.test_dirs`` entries.
+
+        ``layout.test_dirs: ["tests/Small", "tests/Large"]`` already states
+        those directories hold tests, so each path-shaped entry (contains a
+        ``/``, no wildcard) is searched as ``<entry>/<mirror>/<test file>``
+        where ``<mirror>`` is the source's directory path after its source-dir
+        segment -- ``src``, or a bare declared ``layout.source_dirs`` name.
+        Anchored on the segments before that source dir, exactly as the
+        built-in ``tests/<mirror>`` resolver is, so no project root is needed
+        and zero-config (built-in test dirs are all bare names) contributes
+        nothing. A source with no source-dir segment has no mirror origin and
+        contributes nothing either.
+        """
+        layout = self.layout_for(source_path)
+        roots = [entry.strip("/") for entry in layout.test_dirs if _is_nested_literal_dir(entry)]
+        if not roots:
+            return []
+
+        parts = Path(source_path).parts
+        source_dir_names = {_SRC_DIR, *(name for name in layout.source_dirs if "/" not in name)}
+        origin = next((i for i, part in enumerate(parts[:-1]) if part in source_dir_names), None)
+        if origin is None:
+            return []
+
+        anchor = Path(*parts[:origin]) if origin else Path.cwd()
+        mirrored = Path(*parts[origin + 1 : -1])
+        return [anchor / root / mirrored / test_filename for root in roots]
 
     @staticmethod
     def _map_src_to_tests_mirror(path_parts: tuple[str, ...], test_filename: str) -> Path | None:
@@ -639,15 +751,26 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
             "— the project needs to DECLARE the directory (below), not move the test.\n\n"
             "**A layout the resolvers cannot infer is declarable** via "
             "`handlers.pre_tool_use.tdd_enforcement.options.test_path_map` — a list of "
-            "`{source_glob, test_dir}` entries. `test_dir` is repository-root-relative "
-            "(an absolute path is rejected) and FLAT: the test filename is placed directly "
-            "in it, not mirrored under it. This keeps enforcement ON and is the preferred "
-            "fix, because a test that exists is worth more than an exemption:\n\n"
+            "`{source_glob, test_dir, mirror?}` entries. `test_dir` is repository-root-relative "
+            "(an absolute path is rejected). By default it is FLAT: the test filename is "
+            "placed directly in it. With `mirror: true` the source's directory path after "
+            "the glob's literal root (`src` for `src/**`) is reproduced under it, which is "
+            "how a nested size-suite layout (`tests/Small/<mirror>`, `tests/Large/<mirror>`) "
+            "is declared. Every declared root is searched and listed. This keeps enforcement "
+            "ON and is the preferred fix, because a test that exists is worth more than an "
+            "exemption:\n\n"
             "```yaml\n"
             "test_path_map:\n"
             '  - source_glob: "**/qaConfig/PHPStan/Rules/**"\n'
             '    test_dir: "apps/app/qaConfig/Tests"\n'
+            '  - source_glob: "src/**"\n'
+            '    test_dir: "tests/Small"\n'
+            "    mirror: true\n"
             "```\n\n"
+            "**A nested `layout.test_dirs` entry is a mirror root already.** "
+            '`layout.test_dirs: ["tests/Small", "tests/Large"]` makes the gate search '
+            "`tests/Small/<mirror after src/>/<TestName>` (and Large) with no `test_path_map` "
+            "entry at all; a bare name such as `e2e` only classifies.\n\n"
             "**A path can also be exempted entirely** via that handler's `exclude_paths` "
             "option or the project-wide `daemon.exclude_paths` — additive gitignore-style "
             "globs. Prefer `test_path_map`: excluding turns the gate OFF for those files.\n\n"
