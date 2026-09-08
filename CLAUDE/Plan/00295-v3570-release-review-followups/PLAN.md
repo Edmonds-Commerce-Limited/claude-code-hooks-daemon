@@ -1,6 +1,6 @@
 # Plan 00295: v3.57.0 Release Review Follow-ups
 
-**Status**: Not Started
+**Status**: In Progress (Phase 1 merged; Phases 2 and 3 in flight in worktrees)
 **Created**: 2026-08-31
 **Owner**: joseph
 **Priority**: Medium
@@ -38,26 +38,26 @@ several are fail-open correctness gaps worth fixing promptly (marked HIGH).
   `src/rebuild/x.py`, `src/myvenv/x.py`, `app/prebuild/y.ts` are all wrongly
   skipped (fail-open lint/ESLint). Bound the left side (match on path
   segments) or correct the comment; prefer fixing the matcher.
-- [ ] ⬜ **Task 1.2**: docs_qa checks call `relative_to` on the RAW path while
+- [x] ✅ **Task 1.2**: docs_qa checks call `relative_to` on the RAW path while
   scope decisions use the RESOLVED path (`pointer_resolves.py:119`,
   `rules_file_shape.py:240`, `quote_drift.py:138` — no scope gate at all,
   `module_doc_budget.py:225`, `duplicate_block.py:118`, `corpus.py:478`). A
   symlinked file_path raises ValueError inside handle(), which strict-mode
   chain handling turns into a DENY with a stack trace. Resolve once in the
   handler and pass the relative path on CheckContext.
-- [ ] ⬜ **Task 1.3**: `layout.source_dirs`/`test_dirs` documented as taking
+- [x] ✅ **Task 1.3**: `layout.source_dirs`/`test_dirs` documented as taking
   paths/globs but only bare segments ever match
   (`config/models.py` LayoutConfig descriptions vs
   `core/project_layout.py:93-95`; `backend/src` can never match). Implement
   path/glob matching or fix the field docs; pick one and pin with tests.
-- [ ] ⬜ **Task 1.4**: transport_verify kills nothing on probe timeout
+- [x] ✅ **Task 1.4**: transport_verify kills nothing on probe timeout
   (`install/transport_verify.py:139-148`) — orphans a forwarder/relay per
   timed-out probe. Add `proc.kill()` + second `communicate()`.
-- [ ] ⬜ **Task 1.5**: `probe_stop_hard_block` (`transport_verify.py:231`)
+- [x] ✅ **Task 1.5**: `probe_stop_hard_block` (`transport_verify.py:231`)
   makes a healthy `transport on` auto-revert for any client that disables the
   stop handler. Gate the probe on the handler being enabled, or treat a
   non-blocking Stop as a skip.
-- [ ] ⬜ **Task 1.6**: strip the relay guard block in
+- [x] ✅ **Task 1.6**: strip the relay guard block in
   `deploy_hook_scripts` (bash, `scripts/install/hooks_deploy.sh`) BEFORE the
   Python regeneration step, so the F1 guarantee holds without a venv or a
   surviving generator; 25 tracked forwarders at HEAD carry a committed guard

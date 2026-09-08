@@ -14,11 +14,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00327: hooks contract refresh audit](00327-hooks-contract-refresh-audit/PLAN.md) - Not Started (upstream's hooks documentation has changed since the 2.1.252 audit — `e2462deb…` vs META's `d514bf57…` — so the vendored contract needs its verified section-by-section extraction audit, and the mechanisable half of the refresh procedure folded into a `contract-status` command)
 
-- [00319: supervisor release review followups](00319-supervisor-release-review-followups/PLAN.md) - In Progress, 1 of 16 done (F9 shipped, since Plan 00355 made the status-line clobber routine; the rest are the v3.60.0 code-review gate's non-blocking findings)
+- [00319: supervisor release review followups](00319-supervisor-release-review-followups/PLAN.md) - In Progress, 3 of 16 done (F9, and the budget detector now keys on structure rather than keywords; the remaining supervisor and acceptance-run findings are being fixed in worktrees)
 
-- [00311: v3.59.0 release review followups](00311-v3590-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.59.0 code review: dispatch_declaration's hardcoded plan path, the secret_file_matching glob-heuristic maintenance surface, and the git rm --cached looseness verification)
-
-- [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
+- [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - In Progress, 6 of 28 done (the HIGH tier of the v3.57.0 review findings is fixed and merged; the MEDIUM and LOW tiers are being fixed in worktrees)
 
 - [00291: upgrade path hardening and guarded branch install](00291-upgrade-path-hardening-and-guarded-branch-install/PLAN.md) - Not Started (php-qa-ci canary findings: fresh-clone `upgrade_version.sh` hard-fail, UNRELEASED-manifest visibility, silent old-config retention, `v`-prefix handling — plus the owner-ruled guarded, non-obvious, loudly-warned first-party-only branch-install mechanism)
 
@@ -147,11 +145,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00311: v3.59.0 release review followups](Completed/00311-v3590-release-review-followups/PLAN.md) - Complete (all five v3.59.0 review findings dispositioned with tests at `a618ccef`, including a real `git rm --cached --pathspec-from-file` disclosure route closed and dispatch_declaration honouring a configured plan directory)
+
 - [00293: tool inventory disable and token savings](Completed/00293-tool-inventory-disable-and-token-savings/PLAN.md) - Complete (`source_disable`, the transcript analyser, `tool-report` and the advisory shipped in v3.57.0 and are dogfooded here; the one open item, a `/context` spot check in a fresh interactive session, is a one-off handed to the owner)
 
 - [00168: Supervisor Compaction Injection Not Firing](Completed/00168-supervisor-compaction-injection-not-firing/PLAN.md) - Complete (NOOP-reason logging, the ranked-hypothesis fixes and the supervisor indicator shipped; the staged red-band dogfood is answered by the live decision log, which names every deferral gate and shows `/compact` firing)
-
-- [00166: Supervisor Multi-Terminal Session Isolation](Completed/00166-supervisor-multi-terminal-session-isolation/PLAN.md) - Complete (session-scoped signal load/consume fixed the cross-terminal `continue`, released in v3.42.0; the owner's two-terminal witness is recorded at `26e4a71f`, and Plan 00160's Phase 3 was delivered here)
 
 - [00358: a worktree venv can silently test the WRONG source tree](Completed/00358-worktree-venv-tests-wrong-source-tree/PLAN.md) - Complete (a test session now refuses to start when the package resolves outside the invoking checkout, naming both paths and the setup script; the `worktree_create` guidance says a fresh worktree has no venv)
 
@@ -256,15 +254,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 360 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 308 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 309 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 30 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 29 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 12 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 30 + 308 + 12 = **350 folders**, spanning
+- **Folder-to-number reconciliation**: 29 + 309 + 12 = **350 folders**, spanning
   **347 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -280,8 +278,8 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the closure of Plans 00108, 00166, 00168 and 00293
-  on the definition-of-done ruling (30 root, 308 `Completed/`, 12 `Cancelled/`, 347 distinct numbers against a counter of 360 —
+- **Last reconciled at**: the closure of Plan 00311, the v3.59.0 review
+  ledger, worked to zero (29 root, 309 `Completed/`, 12 `Cancelled/`, 347 distinct numbers against a counter of 360 —
   350 folders, three of which share a number with another from before the
   counter existed: 00034, 00039, 00041). Every figure above was recounted from
   disk rather than incremented, and the folderless set was recomputed the same

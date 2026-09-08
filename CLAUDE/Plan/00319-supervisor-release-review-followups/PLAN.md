@@ -78,7 +78,10 @@ which of them are worth the change.
   is reset by the reload, so a partially-typed command vanishes. Dropping
   it may be the right behaviour; doing so invisibly is not — emit a trace
   so the next person debugging "my /model did nothing" can see it.
-- [ ] ⬜ **Task 1.4 (F2)**: `budget_exhaustion_detector` still self-feeds on
+- [x] ✅ **Task 1.4 (F2)** — fixed at `e63134d4` together with Task 4.5;
+  the ledger's own record shape is stripped before matching and
+  `"matched_fragment"` joined the marker list as belt and braces. Original
+  text: `budget_exhaustion_detector` still self-feeds on
   its own ledger whenever the command does not spell the filename. Both
   guards key on the literal strings `budget-exhaustion-events.jsonl` and
   `budget_exhaustion_detector`, and a ledger LINE contains neither — so
@@ -195,7 +198,14 @@ which of them are worth the change.
   rule for `CLI Feature` explicitly. The silent-drop shape is the defect:
   a dropped test is indistinguishable from a passing one in the totals.
 
-- [ ] ⬜ **Task 4.5**: `budget_exhaustion_detector` fires on the release
+- [x] ✅ **Task 4.5** — designed and fixed at `e63134d4`, design in
+  `BUDGET-DETECTOR-DESIGN.md`: a delivered message is distinguished from
+  quoted text STRUCTURALLY — sub-agent dispatch responses are composed prose
+  and are excluded, a Bash response whose every pipeline stage is a
+  content-passthrough verb (`cat`, `grep`, `jq`, `tail`, ...) can only
+  reproduce bytes already on disk and is excluded, and the handler's own
+  ledger records are stripped before matching. Genuine delivered messages
+  keep firing (46 tests). Original text: `budget_exhaustion_detector` fires on the release
   gate's own machinery. During the v3.60.0 run it triggered twice on text
   that merely QUOTED its Test 187 fixture: once on `grep` output from the
   generated playbook, once on a sub-agent dispatch prompt that cited the

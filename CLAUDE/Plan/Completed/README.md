@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00166: Supervisor Multi-Terminal Session Isolation](00166-supervisor-multi-terminal-session-isolation/PLAN.md) - Complete (session-scoped signal load/consume fixed the cross-terminal `continue`, released in v3.42.0; the owner's two-terminal witness is recorded at `26e4a71f`, and Plan 00160's Phase 3 was delivered here)
+
 - [00331: vendor dirs config is inert](00331-vendor-dirs-config-is-inert/PLAN.md) - Complete at `6b4fa867`…`ba7269d5` + the archiving commit (`layout.vendor_dirs` was a facade with zero production consumers, so declaring one did nothing; every reader now routes through it, resolved from the file's owning project)
 
 - [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Complete at the warm-up commit + the archiving commit (CI now runs the blocking acceptance gates; the last flake, probe #144, was a Swift toolchain cold-start exceeding the lint budget, fixed by warming `swiftc` before the tests rather than widening the budget, and confirmed green on all three interpreters)

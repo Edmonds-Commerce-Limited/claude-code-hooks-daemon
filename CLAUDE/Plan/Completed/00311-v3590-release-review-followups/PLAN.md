@@ -1,6 +1,6 @@
 # Plan 00311: v3590 release review followups
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: Low
@@ -33,7 +33,10 @@ deferred: N1, N2, N5.
 
 ### Phase 1: Deferred non-blocking findings from the v3.59.0 release review
 
-- [ ] ⬜ **Task 1.1 (N1)**: `dispatch_declaration` hardcodes `CLAUDE/Plan/`
+- [x] ✅ **Task 1.1 (N1)** — fixed at `a618ccef`: the pattern is built from
+  the injected `ProjectLayout` facade's `plan_dir`, the same route
+  `plan_workflow` uses, which sidesteps the tag gate below. Original text:
+  `dispatch_declaration` hardcodes `CLAUDE/Plan/`
   while its comment claims configurability
   (`src/claude_code_hooks_daemon/handlers/pre_tool_use/dispatch_declaration.py:44-48`
   — `_PLAN_PATH_PATTERN = re.compile(r"CLAUDE/Plan/\d{5}-", ...)`). A project
@@ -59,7 +62,12 @@ deferred: N1, N2, N5.
   the answer is one decision about how a non-planning handler reaches plan
   config, not two local workarounds.
 
-- [ ] ⬜ **Task 1.2 (N2)**: the glob heuristics in
+- [x] ✅ **Task 1.2 (N2)** — re-derivation attempted and rejected at
+  `a618ccef`: the five gates share no single safe formula, and the 131-test
+  adversarial corpus is the safer contract to keep. The Bash-surface residual
+  IS fixed: a one-line `python -c "import <module>"` now gets the same
+  positional import exemption as an import statement. Original text: the
+  glob heuristics in
   `src/claude_code_hooks_daemon/utils/secret_file_matching.py::find_protected_mention`
   are now heavily special-cased (~40+ lines of comment across four gates —
   residue length, substring, both-edges-wildcard near-total-match, and the
@@ -100,11 +108,11 @@ deferred: N1, N2, N5.
     will reach it.
 
   **The sixth incident has since happened, as predicted**, and is fixed under
-  [Plan 00356](../00356-secret-guard-bracket-glob-false-positive/PLAN.md): a
+  [Plan 00356](../Completed/00356-secret-guard-bracket-glob-false-positive/PLAN.md): a
   complete bracket expression at a token's edge made the edge predicates
   report an open wildcard, so the jq path `.foo.v[0]` was denied as a
-  `*.vault-password` reference. Two things about it are evidence for this
-  task rather than against it:
+  `*.vault-password` reference (plan now archived under `Completed/`). Two
+  things about it are evidence for this task rather than against it:
 
   - The Bash-surface residual described above is still live and was hit
     while diagnosing 00356 — `python -c "import ...utils.secret_file_matching"`
@@ -116,7 +124,9 @@ deferred: N1, N2, N5.
     incremental fix can get to this task's intent without doing the
     re-derivation. The re-derivation is still worth doing.
 
-- [ ] ⬜ **Task 1.4 (R5, incremental re-review)**:
+- [x] ✅ **Task 1.4 (R5, incremental re-review)** — fixed at `a618ccef`
+  using the shared `git_subcommand_index` global-flag skipper, all five
+  invocations pinned. Original text:
   `src/claude_code_hooks_daemon/utils/secret_file_matching.py::_is_git_rm_cached`
   special-cases `words[1] == "-C"` (jumping the subcommand index to 3)
   instead of skipping leading global git flags generically. Verified
@@ -129,7 +139,9 @@ deferred: N1, N2, N5.
   consuming a value where the flag needs one, before locating the
   subcommand.
 
-- [ ] ⬜ **Task 1.5 (R6, incremental re-review)**: three independent
+- [x] ✅ **Task 1.5 (R6, incremental re-review)** — fixed at `a618ccef`:
+  `utils/option_coercion.py` (`coerce_bool_option`, `coerce_int_option`)
+  with all three call sites migrated. Original text: three independent
   hand-rolled coercions of a blind-`setattr` YAML handler option exist with
   no shared helper — `_is_strict()` and `_threshold()` in this same module,
   plus a third instance cited by both of their docstrings in
@@ -144,7 +156,11 @@ deferred: N1, N2, N5.
   all three call sites, or explicitly reject if the three sites are judged
   too heterogeneous (different option semantics) to share a helper safely.
 
-- [ ] ⬜ **Task 1.3 (N5)**: the `git rm --cached` exemption in
+- [x] ✅ **Task 1.3 (N5)** — the second look found a REAL route, fixed at
+  `a618ccef`: `--pathspec-from-file=<protected>` makes git echo the file's
+  lines in its own error text, so that flag now voids the exemption;
+  `--dry-run` and `-r` were confirmed safe and pinned. Original text: the
+  `git rm --cached` exemption in
   `src/claude_code_hooks_daemon/utils/secret_file_matching.py::_is_git_rm_cached`
   matches `--cached` ANYWHERE after the `rm` subcommand, so
   `git rm --dry-run --cached x` and `git rm -r --cached x` are exempt.
@@ -157,9 +173,11 @@ deferred: N1, N2, N5.
 
 ## Success Criteria
 
-- [ ] N1, N2, N5 each have a disposition (fixed-with-tests, or explicitly
+- [x] N1, N2, N5 each have a disposition (fixed-with-tests, or explicitly
   rejected with a recorded reason) linked from this plan's closing journal
   entry.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/07-secret-guard-closes-pathspec-from-file-and-honours-plan-dir.md`
 
 ## Delivery & Milestones
 
@@ -170,3 +188,6 @@ deferred: N1, N2, N5.
 - Filed during the v3.59.0 release fix pass (see
   `untracked/agent-reports/260901-code-reviewer-release-v3590.md` for full
   finding text).
+- All five findings dispositioned in one worktree pass, `a618ccef`, merged
+  at `170103e7`, a week after the release — under the ruling that a
+  release-review defect is fixed, not parked.
