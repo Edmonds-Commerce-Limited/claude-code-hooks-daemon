@@ -1,6 +1,6 @@
 # Plan 00346: the QA venv ignores uv.lock
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Medium
@@ -51,9 +51,13 @@ modified files in someone's next diff.
 - Pinning runtime dependencies, or changing `pyproject.toml`'s bounds for their
   own sake. Bounds express compatibility; the lockfile expresses reproducibility,
   and it is the lockfile that is being bypassed.
-- Changing the client install path. `scripts/install/venv.sh` runs
-  `uv pip install -e <dir>` with no `[dev]` extra, so no client project receives
-  these tools.
+- Giving client projects the QA toolchain. `scripts/install/venv.sh` has two
+  provisioning functions: `create_venv_at_path` runs `uv sync --project` and
+  `install_package_editable` runs `uv pip install -e <dir>`. Neither passes
+  `--all-extras`, so no client project receives these tools. (An earlier
+  revision of this line cited only the second function and drew the right
+  conclusion from the wrong premise. The lockfile-integrity gap the first one
+  turned out to have is Task 2.3, which is in scope.)
 
 ## Evidence
 
@@ -82,12 +86,12 @@ Two aggravating details:
 
 ### Phase 1: Make the QA venv obey the lock
 
-- [ ] ⬜ **Task 1.1**: Change `install_deps` in `scripts/venv-include.bash` to
+- [x] ✅ **Task 1.1**: Change `install_deps` in `scripts/venv-include.bash` to
   install from `uv.lock` rather than resolving `pyproject.toml`. Establish
   what happens when `uv` is absent — degrade loudly, never silently back to
   `pip install -e ".[dev]"`, because a silent fallback reinstates exactly
   the drift this removes.
-- [ ] ⬜ **Task 1.2**: Decide what happens to the existing off-lock workspace
+- [x] ✅ **Task 1.2**: Decide what happens to the existing off-lock workspace
   venv. It cannot simply be left: it is what `venv_tool` selects today, so
   until it is rebuilt or invalidated the change has no effect.
 
@@ -97,6 +101,16 @@ Two aggravating details:
   `uv lock --check` proves the lock agrees with `pyproject.toml`; nothing
   proves the INSTALLED tools agree with the lock, which is the gap that let
   this run for as long as it has.
+- [ ] ⬜ **Task 2.2**: `.github/workflows/qa.yml:46` and `:179` provision CI
+  with `pip install -e ".[dev]"`, so the workflow gating merges is off-lock on
+  every run across three interpreters. Land this WITH Task 2.1: the new gate
+  fails CI on its first run otherwise, because CI's venv is off-lock by
+  construction.
+- [ ] ⬜ **Task 2.3**: `create_venv_at_path` in `scripts/install/venv.sh` runs
+  `uv sync` without `--frozen`, so a checkout whose `pyproject.toml` and
+  `uv.lock` disagree gets its lockfile rewritten and re-resolved against PyPI
+  instead of an error. `tests/integration/test_ensure_venv.py` already drives
+  this function against real venv builds, so it takes a RED test first.
 
 ### Phase 3: Correct the documentation
 
@@ -119,4 +133,8 @@ Two aggravating details:
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00346-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet started.
+- **Phase 1 complete** — `2de920a3` (`install_deps` syncs from `uv.lock`,
+  `--frozen`, loud failure absent `uv`) and `0de54287` (an empty `VENV_DIR`
+  built a venv in the caller's cwd and reported success; found while writing
+  the Phase 1 RED). The workspace venv is synced and the whole suite passes on
+  the locked toolchain: 25/25, 18507 tests, 95.2% coverage.
