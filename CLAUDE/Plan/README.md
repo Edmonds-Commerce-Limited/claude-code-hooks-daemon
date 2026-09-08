@@ -14,7 +14,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00327: hooks contract refresh audit](00327-hooks-contract-refresh-audit/PLAN.md) - Not Started (upstream's hooks documentation has changed since the 2.1.252 audit — `e2462deb…` vs META's `d514bf57…` — so the vendored contract needs its verified section-by-section extraction audit, and the mechanisable half of the refresh procedure folded into a `contract-status` command)
 
-- [00319: supervisor release review followups](00319-supervisor-release-review-followups/PLAN.md) - In Progress, 3 of 16 done (F9, and the budget detector now keys on structure rather than keywords; the remaining supervisor and acceptance-run findings are being fixed in worktrees)
+- [00319: supervisor release review followups](00319-supervisor-release-review-followups/PLAN.md) - In Progress, 11 of 16 done (every supervisor finding closed, the budget detector keys on structure rather than keywords; the five acceptance-run observations are being fixed in a worktree)
 
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - In Progress, 6 of 28 done (the HIGH tier of the v3.57.0 review findings is fixed and merged; the MEDIUM and LOW tiers are being fixed in worktrees)
 

@@ -1,6 +1,6 @@
 # Plan 00319: supervisor release review followups
 
-**Status**: In Progress (F9 shipped — it became urgent when Plan 00355 gave every escape a banner; the other fifteen items are untouched)
+**Status**: In Progress (all ten supervisor findings closed; the five acceptance-run observations are in flight in a worktree)
 **Created**: 2026-09-02
 **Owner**: joseph
 **Priority**: Medium
@@ -61,19 +61,24 @@ which of them are worth the change.
 
 ### Phase 1: Silent-failure findings
 
-- [ ] ⬜ **Task 1.1 (F1)**: `write_manual_model_marker` is called in the tick
+- [x] ✅ **Task 1.1 (F1)** — already fixed: Plan 00328 (`4c0998336`)
+  deleted `write_manual_model_marker` and its call site outright; there is
+  no unguarded write left. Original text: `write_manual_model_marker` is called in the tick
   path (`.claude/ccy/claude-supervise.py`) without an error guard — it is
   the only unguarded write there. Every other write in that path reports
   its outcome. A failure here silently loses the manual-model marker, and
   the symptom surfaces much later as a false "downgraded" status
   indicator. Give it the same observable write outcome the failsafe-cron
   marker got in Plan 00314.
-- [ ] ⬜ **Task 1.2 (F3)**: the audit flush's `decision.log` line is dropped
+- [x] ✅ **Task 1.2 (F3)** — fixed at `422014c1`
+  (`test_audit_banner.py::TestAuditFlushSurvivesAStandingAuthInjection`).
+  Original text: the audit flush's `decision.log` line is dropped
   when the standing-authorisation branch injects on the same tick. The
   audit trail is the documented source of truth for what the supervisor
   did (see `CLAUDE/UPGRADES/truth-changes/v3.60.0.yaml`), so a tick that
   silently writes no line makes it an incomplete record.
-- [ ] ⬜ **Task 1.3 (F8)**: a worker restart mid-line drops a typed
+- [x] ✅ **Task 1.3 (F8)** — fixed at `422014c1`: the drop now leaves a
+  trace (`test_policy_worker.py`). Original text: a worker restart mid-line drops a typed
   `/compact` / `/model` with no diagnostic trace. The recognizer's buffer
   is reset by the reload, so a partially-typed command vanishes. Dropping
   it may be the right behaviour; doing so invisibly is not — emit a trace
@@ -98,19 +103,27 @@ which of them are worth the change.
 
 ### Phase 2: Unbounded-growth findings
 
-- [ ] ⬜ **Task 2.1 (F4)**: `claude-supervise-worker.err.log` is uncapped and
+- [x] ✅ **Task 2.1 (F4)** — fixed at `422014c1`: capped, and the human's
+  typed lines are no longer recorded (`test_worker_error_safety_net.py`).
+  Original text: `claude-supervise-worker.err.log` is uncapped and
   logs every submitted `/`-line verbatim. Two problems, one file: it grows
   without limit in a long session, and it records what the human typed.
   Cap it (rotate or truncate) and decide deliberately what belongs in it.
-- [ ] ⬜ **Task 2.2 (F5)**: `manual-model-changes/` markers are never reaped.
+- [x] ✅ **Task 2.2 (F5)** — already fixed: the marker directory was
+  deleted with F1's writer in Plan 00328. Original text: `manual-model-changes/` markers are never reaped.
   Each manual `/model` leaves a file behind and nothing removes it.
-- [ ] ⬜ **Task 2.3 (F7)**: a second unbounded per-session `MtimeCachedFile`
+- [x] ✅ **Task 2.3 (F7)** — fixed at `0eab945a` with the existing bound
+  shape (`test_paths_stale_cleanup.py`, `test_mtime_cache.py`). Original
+  text: a second unbounded per-session `MtimeCachedFile`
   entry set was added without a bound. The project has already fixed this
   exact shape once; apply the same bound.
 
 ### Phase 3: Contract-drift findings
 
-- [ ] ⬜ **Task 3.1 (F6)**: the marker writer uses the raw `session_id` while
+- [x] ✅ **Task 3.1 (F6)** — already fixed: the writer/reader pair was the
+  Plan 00328-deleted mechanism, and no other supervisor-writer /
+  daemon-`safe_session_stem`-reader pair exists. Original text: the marker
+  writer uses the raw `session_id` while
   the daemon reads via `safe_session_stem()`. They agree today only
   because real session ids happen to be stem-safe. A session id that is
   not makes the marker unreadable — a silent miss, not an error. Use the
@@ -154,7 +167,10 @@ which of them are worth the change.
   Covered by `TestAnInfoMessageYieldsToALiveWarning` (6 tests) and
   `test_a_yielded_banner_keeps_its_items_for_the_next_tick`.
 
-- [ ] ⬜ **Task 3.3 (F10)**: `_cached_fragment` is mutable state on a
+- [x] ✅ **Task 3.3 (F10)** — fixed at `02d48f2b`, merged over the Task 4.5
+  redesign at `5ad0d539`: the fragment is re-derived from the event in both
+  `matches()` and `handle()`, nothing per-event lives on the instance.
+  Original text: `_cached_fragment` is mutable state on a
   router-shared handler instance. Handlers are shared across events, so
   per-event state on the instance leaks between events.
 

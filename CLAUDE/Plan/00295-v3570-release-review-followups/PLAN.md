@@ -140,7 +140,8 @@ several are fail-open correctness gaps worth fixing promptly (marked HIGH).
 - [ ] ⬜ **Task 3.7**: DisclosureTracker.\_state has no eviction (finished
   sub-agent transcript paths accumulate for the daemon's lifetime — a few KB
   over weeks). Document the bound in the module note or add cheap eviction.
-- [ ] ⬜ **Task 3.8**: `.claude/ccy/claude-supervise.py` pre-existing Pyright
+- [x] ✅ **Task 3.8** — fixed at `422014c1`, pyright seven errors to zero.
+  Original text: `.claude/ccy/claude-supervise.py` pre-existing Pyright
   `int | None` fd-argument errors around lines 4498-4631 (surfaced when the
   release bump touched the file; not release-introduced).
 - [ ] ⬜ **Task 3.9**: acceptance-playbook drift from the v3.57.0 run: refresh
