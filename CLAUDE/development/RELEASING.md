@@ -162,25 +162,37 @@ Two non-negotiable rules close that gap:
    fixed and re-verified in one pass rather than triggering a downstream
    FAIL-FAST re-run.
 
-2. **Never drop a finding.** Every review finding is either (a) fixed before the
-   release ships, or (b) captured as a tracked MUST-FIX item in a follow-up plan
-   (`CLAUDE/Plan/NNNNN-*`) with file:line, severity, and remediation, and fixed
-   **immediately after** the release to close the loop. A review whose findings
-   evaporate into scrollback is wasted work.
+2. **A release carries no known defect.** Every review finding that describes
+   a DEFECT — wrong behaviour, a fail-open gap, a leak, a contract the code
+   does not keep — is fixed before the release ships, whether or not the
+   reviewer called it blocking. "Non-blocking" is the reviewer's estimate of
+   urgency; it is not permission to ship the defect. A review whose findings
+   evaporate into scrollback is wasted work, and a review whose findings are
+   parked is a release that knowingly ships broken.
 
-   **Filing that plan is automatic and needs NO human approval.** It is not a
-   scope decision to put to the human, and "shall I file it?" is not a question
-   to ask — deferring a non-blocking finding is exactly how it becomes silent
-   tech debt, which is the failure this section exists to prevent. File the plan
-   as the closing act of the release, in the same session, before reporting the
-   release complete. The human decides when the follow-up work is *scheduled*;
-   they do not decide whether the finding gets *recorded*.
+   **Fix it in the release session, before the tag.** With rule 1 the review
+   runs before the QA and acceptance gates, so fixing in place costs one pass,
+   not a FAIL-FAST restart. Fix the defect, run QA, continue the pipeline.
+
+   **Deferral is the human's call, never the agent's.** A defect may ship
+   only if the human, asked in the release session, explicitly accepts it
+   (say what it is and what it costs). An accepted defect is then the FIRST
+   unit of work after Step 15, started in the same session — not a plan
+   filed for someone to schedule. Three ledger plans (00295, 00311, 00319)
+   sat untouched for a week under the previous wording, which is exactly the
+   silent tech debt this section exists to prevent.
+
+   **What may be filed instead of fixed**: a finding that is not a defect — a
+   refactoring suggestion, a design question, a judgement call the reviewer
+   flagged as such. File it as a plan (`CLAUDE/Plan/NNNNN-*`) with file:line
+   and the reviewer's reasoning. Filing is automatic and needs no approval;
+   "shall I file it?" is not a question to ask.
 
    **Preserve the evidence with it.** Review reports and probe harnesses
    normally land in `untracked/`, which is gitignored and does not survive a
    container restart — so the corpus proving a finding real is the first thing
-   lost. Copy the report and any probes into the follow-up plan's own folder
-   (which IS tracked) as part of filing it.
+   lost. Copy the report and any probes into the plan's own folder (which IS
+   tracked) as part of filing it.
 
    This rule is not release-specific — it governs ANY review. The general
    statement, and the Definition of Done item that carries it, is
@@ -486,7 +498,10 @@ Review checklist:
 - Named constants (no magic values), SOLID principles
 - No debug code, workarounds, or leftover TODOs
 
-Issues found = ABORT, fix, re-run `/release`.
+Issues found = ABORT, fix, re-run `/release`. That applies to EVERY defect the
+review finds, not only the ones the reviewer labelled blocking — see "Review
+Early, Never Drop Findings" above: a release carries no known defect, and a
+deferral needs the human's explicit acceptance in this session.
 
 ---
 

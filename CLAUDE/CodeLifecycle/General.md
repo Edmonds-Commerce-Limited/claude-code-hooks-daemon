@@ -198,18 +198,26 @@ pass every self-install test and still be broken for every user.
 Applies to ANY review — a `code-reviewer` dispatch, a peer session's report, a
 self-review — not just the release gate.
 
-- [ ] Every BLOCKING finding is fixed before the change ships
-- [ ] Every NON-BLOCKING finding is filed as a plan (`CLAUDE/Plan/NNNNN-*`)
-  with file:line, severity and remediation
+- [ ] Every finding that describes a DEFECT is fixed before the change ships,
+  whether the reviewer called it blocking or not
+- [ ] Every finding that is NOT a defect (a refactoring suggestion, a design
+  question, a flagged judgement call) is filed as a plan
+  (`CLAUDE/Plan/NNNNN-*`) with file:line and the reviewer's reasoning
 - [ ] The review report and any probe/reproduction scripts are copied into
   that plan's folder
 
-**Filing is automatic and needs NO human approval.** It is not a scope
-question to put to the human, and "shall I file these?" is not a question to
-ask — asking is itself the deferral this rule exists to prevent. File the
-plan in the same session that produced the findings, before reporting the
-work complete. The human decides when the follow-up is SCHEDULED; they do not
-decide whether a finding is RECORDED.
+**A defect is fixed, not filed.** "Non-blocking" is the reviewer's estimate
+of urgency, not permission to ship the defect; the work is done in the same
+session that produced the finding. If the fix genuinely cannot be made now
+(it needs a decision only the human can make), say so and ask — the human
+may accept shipping it, and an accepted defect is the FIRST unit of work
+afterwards, not a plan left for someone to schedule.
+
+**Filing a non-defect is automatic and needs NO human approval.** It is not
+a scope question to put to the human, and "shall I file these?" is not a
+question to ask — asking is itself the deferral this rule exists to prevent.
+File the plan in the same session that produced the findings, before
+reporting the work complete.
 
 **Why the evidence must move with it**: review reports and probes normally
 land in `untracked/`, which is gitignored and does not survive a container
@@ -217,16 +225,15 @@ restart. The corpus proving a finding real is therefore the first thing lost,
 and a finding no one can still reproduce gets quietly closed as stale. The
 plan folder is tracked; put them there.
 
-A "non-blocking" finding is one that does not stop THIS change shipping. That
-is a statement about urgency, not about whether the defect is real — so it
-gets recorded exactly like any other. Findings that evaporate into scrollback
-are the silent tech debt that makes the next review more expensive.
+Findings that evaporate into scrollback are the silent tech debt that makes
+the next review more expensive; findings parked in a ledger plan are the same
+debt with a number on it.
 
 The release pipeline's application of this rule is in
 [CLAUDE/development/RELEASING.md](../development/RELEASING.md) ("Review Early,
-Never Drop Findings"), which adds the release-specific sequencing: file as the
-closing act of the release, because fixing in place after a review PASS means
-the shipped tree is not the tree that was reviewed.
+Never Drop Findings"): a release carries no known defect, the review runs
+before the QA gates so the fix lands in the same pass, and a deferral needs
+the human's explicit acceptance in the release session.
 
 ## Common Change Types
 
