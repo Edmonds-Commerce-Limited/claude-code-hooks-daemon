@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00347: handlers raise on unstattable paths](00347-handlers-raise-on-unstattable-paths/PLAN.md) - Not Started (pathlib does not ignore EACCES, so `exists()`/`is_file()`/`is_dir()` RAISE on a caller-supplied path behind an unreadable parent — fail-open silently drops the guard on the client default, fail-closed blocks legitimate work here; one instance fixed at `f17fabcd`, ~12 remain)
+- [00347: handlers raise on unstattable paths](00347-handlers-raise-on-unstattable-paths/PLAN.md) - In Progress (pathlib does not ignore EACCES, so `exists()`/`is_file()`/`is_dir()` RAISE on a caller-supplied path behind an unreadable parent, silently dropping the guard on the client default; 14 of 73 sites affected, and no single fallback value is safe for all of them)
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 

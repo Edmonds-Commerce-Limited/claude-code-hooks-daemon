@@ -1,6 +1,6 @@
 # Plan 00347: handlers raise on unstattable paths
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: High
@@ -89,28 +89,57 @@ force the error — `f17fabcd` does it by patching the predicate to raise.
 
 ## Tasks
 
-### Phase 1: One canonical answer
+### Phase 1: Make the caller choose
 
-- [ ] ⬜ **Task 1.1**: Add EACCES-safe path predicates with an explicit contract
-  for what an unstattable path means. `f17fabcd` establishes the reasoning to
-  reuse: an unstattable path is not KNOWN to be a directory, so it is treated as
-  not one — the same answer pathlib already gives for every stat failure it
-  ignores. Each must LOG; a silent fallback fails `audit_error_hiding.py`, and
-  rightly, because "the guard decided" and "the guard could not look" are
-  otherwise indistinguishable to whoever asks why a policy did not fire.
+**This phase was originally written as "one canonical answer", reusing
+`f17fabcd`'s rule that an unstattable path is treated as not-a-directory —
+the same answer pathlib gives for the stat failures it already ignores. Task
+2.2's classification pass falsified that.** In `write_clobber_guard.matches()`
+the code is `if not Path(path).is_file(): return False`, meaning "creating a
+new file destroys nothing", so a `False` fallback makes the guard decline to
+fire and the clobber it exists to prevent is silently allowed. There, the safe
+fallback is `True`.
+
+A single canonical fallback is therefore not merely unhelpful, it is dangerous:
+it looks principled while inverting the guard at some sites. The helper must
+make the decision explicit at the call site instead of supplying a default.
+
+- [ ] ⬜ **Task 1.1**: Add EACCES-safe path predicates whose signature REQUIRES
+  the caller to state the value an unstattable path yields — no default. The
+  parameter name should carry the reasoning (what this site means by "I could
+  not look"), so review sees the choice rather than an omission.
+- [ ] ⬜ **Task 1.2**: Every predicate LOGS on the EACCES path. A silent
+  fallback fails `audit_error_hiding.py` — correctly, because "the guard
+  decided" and "the guard could not look" are otherwise indistinguishable to
+  whoever asks why a policy did not fire. `f17fabcd` was rejected by that
+  auditor on its first draft for exactly this.
 
 ### Phase 2: Convert the sites that judge caller-supplied paths
 
-- [ ] ⬜ **Task 2.1**: Convert the confirmed tool-input call sites:
-  `write_clobber_guard.py:155`, `lint_on_edit.py:265`, `comment_size.py:226`,
-  `plan_qa_edit.py:165`, `docs_qa_edit.py:140`,
-  `validate_eslint_on_write.py:229`, `markdown_table_formatter.py:224`,
-  `plan_number_helper.py:201`, `staged_lint_gate.py:240`. Each needs its own RED
-  first: the correct fallback VALUE differs by site, and a wrong fallback on a
-  DENY handler is a bypass rather than a crash.
-- [ ] ⬜ **Task 2.2**: Classify every remaining predicate in `handlers/` as
-  caller-supplied or daemon-controlled. The classification IS the deliverable —
-  daemon-controlled sites stay exactly as they are, with the reason recorded.
+- [ ] ⬜ **Task 2.1**: Convert the 14 caller-supplied sites Task 2.2 identified.
+  Each needs its own RED first: the correct fallback VALUE differs by site, and
+  a wrong fallback on a DENY handler is a bypass rather than a crash. Three
+  shapes to expect, all evidenced in the report:
+  - **Inverted** — `write_clobber_guard.py:155` needs `True`; `False` exempts
+    the clobber guard.
+  - **Naive-safe** — `comment_size.py:226` is fine with `False`, because its
+    consumer reads "no prior content" as growth and so biases toward the DENY.
+  - **No single safe boolean** — `plan_qa_edit.py:165` and `docs_qa_edit.py:140`
+    feed `file_exists_before` to three different consumers. One of them,
+    `plan_qa/checks/archive_immutability.py:30`, tests `is not True`, so both
+    `False` and `None` silently disable it. (It is `Level.ADVISE`, so the cost
+    there is a lost advisory rather than a lost block — but the shape is the
+    warning: a value consumed by several checks cannot be defaulted once.)
+- [x] ✅ **Task 2.2**: Classify every predicate in `handlers/` as
+  caller-supplied or daemon-controlled. **74 predicate calls across 73 sites:
+  14 caller-supplied, 59 daemon-controlled, none left uncertain.** Full trace
+  per site in
+  [subagent-reports/260908-eacces-site-classification-sonnet.md](subagent-reports/260908-eacces-site-classification-sonnet.md).
+  The pass found four caller-supplied sites the hand-curated list had missed —
+  `markdown_table_formatter.py:233` (sibling of the listed `:224`),
+  `github_auto_close_keywords.py:242`, `tdd_enforcement.py:358` and
+  `worktree_remove_handler.py:57` — which is the argument against converting
+  from a list someone wrote by eye.
 
 ### Phase 3: Stop it coming back
 
@@ -134,6 +163,9 @@ force the error — `f17fabcd` does it by patching the predicate to raise.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00347-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet started. The originating instance (`core/utils.py:_written_paths`) is
-  fixed at `f17fabcd`, which is where both the reasoning and the test technique
-  come from.
+- **Task 2.2 complete** — all 73 sites classified (14 caller-supplied, 59
+  daemon-controlled), and the pass falsified Phase 1's original "one canonical
+  fallback" design before any code was written to it.
+- The originating instance (`core/utils.py:_written_paths`) is fixed at
+  `f17fabcd`, which is where the test technique comes from — force the
+  `EACCES`, never rely on mode bits.
