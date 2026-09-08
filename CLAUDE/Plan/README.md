@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00361: supervisor worker crash loop visibility and backoff](00361-supervisor-worker-crash-loop-visibility-and-backoff/PLAN.md) - In Progress (165 undated worker tracebacks, every one a worker spawned from a half-edited on-disk file and respawned every tick with the host silently deciding in-process; the death is now logged, the loop held to a backoff, and the worker's own crash record dated and fingerprinted)
 
-- [00360: pending release notes holding area](00360-pending-release-notes-holding-area/PLAN.md) - In Progress, the area and its project-only gate shipped, the release-side consumption remains (a plan closes by writing its release-note callout into `UNRELEASED/release-notes/`, and the release folds the notes in mechanically — the fourth shape the holding area was missing once a release stopped being part of any plan's definition of done)
-
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
@@ -15,10 +13,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00329: post upgrade truth changes report bloat](00329-post-upgrade-truth-changes-report-bloat/PLAN.md) - Not Started (the upgrade flow's truth-changes reconciliation hands the agent up to 89KB / 74 entries with no bound and no supersession collapsing, so superseded truths are replayed and the step is skimmed rather than performed)
 
 - [00327: hooks contract refresh audit](00327-hooks-contract-refresh-audit/PLAN.md) - Not Started (upstream's hooks documentation has changed since the 2.1.252 audit — `e2462deb…` vs META's `d514bf57…` — so the vendored contract needs its verified section-by-section extraction audit, and the mechanisable half of the refresh procedure folded into a `contract-status` command)
-
-- [00319: supervisor release review followups](00319-supervisor-release-review-followups/PLAN.md) - In Progress, 11 of 16 done (every supervisor finding closed, the budget detector keys on structure rather than keywords; the five acceptance-run observations are being fixed in a worktree)
-
-- [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - In Progress, 6 of 28 done (the HIGH tier of the v3.57.0 review findings is fixed and merged; the MEDIUM and LOW tiers are being fixed in worktrees)
 
 - [00291: upgrade path hardening and guarded branch install](00291-upgrade-path-hardening-and-guarded-branch-install/PLAN.md) - Not Started (php-qa-ci canary findings: fresh-clone `upgrade_version.sh` hard-fail, UNRELEASED-manifest visibility, silent old-config retention, `v`-prefix handling — plus the owner-ruled guarded, non-obvious, loudly-warned first-party-only branch-install mechanism)
 
@@ -41,8 +35,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00189: WorktreeCreate daemon-down raw-path completion](00189-worktree-create-daemon-down-raw-path-completion/PLAN.md) - Not Started (tracked follow-up captured by the v3.49.0 release Code Review Gate per RELEASING.md "never drop a finding".)
 
 - [00204: security_antipattern — the three data-flow categories](00204-security-antipattern-dataflow-categories/PLAN.md) - Not Started (v3.52.0 corrected guidance that claimed SQL injection, weak cryptography and path traversal were blocked when no strategy implements any of them; this decides whether construct-level regexes can carry signal for them without the false-positive rate that gets a handler disabled.)
-
-- [00205: destructive git synonym respellings](00205-destructive-git-synonym-respellings/PLAN.md) - Not Started (tracked follow-up captured by the v3.52.0 release gate per RELEASING.md "never drop a finding": v3.52.0 closed ten *invocation* respellings but not *synonym* ones — `git update-ref -d refs/heads/X` is an unguarded `git branch -D`, and `git push origin +main:main` an unguarded `git push --force`.)
 
 ### Status Line / Agent View
 
@@ -108,19 +100,17 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Handler UX Adjustments
 
-- [00117: Enable ask_user_question_blocker (dogfood → default-on)](00117-ask-user-question-blocker-default-on/PLAN.md) - Dormant (remaining: flip shipped default + regression test; awaiting scheduling)
+- Dogfooding alert: agent stalled twice asking tautological questions ("Should I push?"); the prefix-positive `ask_user_question_blocker` (Plan 00108 / v3.14.0) was shipped `enabled: false` so it never fired
 
-  - Dogfooding alert: agent stalled twice asking tautological questions ("Should I push?"); the prefix-positive `ask_user_question_blocker` (Plan 00108 / v3.14.0) was shipped `enabled: false` so it never fired
+- Phase 1 DONE: enabled in this project's config, daemon restarted, live probe confirms unprefixed AskUserQuestion is denied with `ASKING BECAUSE:` guidance
 
-  - Phase 1 DONE: enabled in this project's config, daemon restarted, live probe confirms unprefixed AskUserQuestion is denied with `ASKING BECAUSE:` guidance
+- Remaining: flip the shipped install/upgrade default to enabled (G2), regression test pinning the default (G4), upgrade-guide/changelog note (G5)
 
-  - Remaining: flip the shipped install/upgrade default to enabled (G2), regression test pinning the default (G4), upgrade-guide/changelog note (G5)
+- Replace always-deny `ask_user_question_blocker` with prefix-positive `ASKING BECAUSE:` policy mirroring the Stop handler's `STOPPING BECAUSE:` convention
 
-  - Replace always-deny `ask_user_question_blocker` with prefix-positive `ASKING BECAUSE:` policy mirroring the Stop handler's `STOPPING BECAUSE:` convention
+- DENY path instructs agent to state assumed-correct answer and proceed (audit log for the watching user)
 
-  - DENY path instructs agent to state assumed-correct answer and proceed (audit log for the watching user)
-
-  - Ships `enabled: false`; flip to default-on in follow-up after dogfooding
+- Ships `enabled: false`; flip to default-on in follow-up after dogfooding
 
 ### Stop-Quality Stack (dependency chain)
 
@@ -147,11 +137,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
-- [00311: v3.59.0 release review followups](Completed/00311-v3590-release-review-followups/PLAN.md) - Complete (all five v3.59.0 review findings dispositioned with tests at `a618ccef`, including a real `git rm --cached --pathspec-from-file` disclosure route closed and dispatch_declaration honouring a configured plan directory)
+- [00360: pending release notes holding area](Completed/00360-pending-release-notes-holding-area/PLAN.md) - Complete (a plan closes by leaving its callout in `UNRELEASED/release-notes/`, the project-only gate denies a Complete flip without the holding-area criterion, the release folds the callouts in and moves them with an ABORT if any remain, and `release-slate-check` lists them without changing its verdict)
 
-- [00293: tool inventory disable and token savings](Completed/00293-tool-inventory-disable-and-token-savings/PLAN.md) - Complete (`source_disable`, the transcript analyser, `tool-report` and the advisory shipped in v3.57.0 and are dogfooded here; the one open item, a `/context` spot check in a fresh interactive session, is a one-off handed to the owner)
+- [00319: supervisor release review followups](Completed/00319-supervisor-release-review-followups/PLAN.md) - Complete at `5ad0d539` and `1c00aced` + the archiving commit (all ten supervisor findings and six acceptance-run observations closed; the budget detector distinguishes delivered from quoted budget text structurally; every BLOCKING acceptance test carries a structured payload the contract test drives through the real handler)
 
-- [00168: Supervisor Compaction Injection Not Firing](Completed/00168-supervisor-compaction-injection-not-firing/PLAN.md) - Complete (NOOP-reason logging, the ranked-hypothesis fixes and the supervisor indicator shipped; the staged red-band dogfood is answered by the live decision log, which names every deferral gate and shows `/compact` firing)
+- [00295: v3.57.0 release review followups](Completed/00295-v3570-release-review-followups/PLAN.md) - Complete at `420735b3` + the archiving commit (all 26 v3.57.0 review findings fixed across three tiers: the fail-open lint skip-path and docs QA symlink gaps, transport probe orphan kill, `layout` path matching, `explain-handler --list`, the shared docs QA walk, and the acceptance-playbook drift)
 
 - [00358: a worktree venv can silently test the WRONG source tree](Completed/00358-worktree-venv-tests-wrong-source-tree/PLAN.md) - Complete (a test session now refuses to start when the package resolves outside the invoking checkout, naming both paths and the setup script; the `worktree_create` guidance says a fresh worktree has no venv)
 
@@ -256,15 +246,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 361 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 309 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 314 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 30 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 25 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 12 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 30 + 309 + 12 = **351 folders**, spanning
+- **Folder-to-number reconciliation**: 25 + 314 + 12 = **351 folders**, spanning
   **348 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

@@ -1,6 +1,6 @@
 # Plan 00319: supervisor release review followups
 
-**Status**: In Progress (all ten supervisor findings closed; the five acceptance-run observations are in flight in a worktree)
+**Status**: Complete
 **Created**: 2026-09-02
 **Owner**: joseph
 **Priority**: Medium
@@ -297,7 +297,9 @@ produce now fails CI rather than a release gate.
   observations) are closed — each either fixed with a
   regression test that fails against the pre-fix code, or marked won't-fix
   with a recorded reason (merged at `5ad0d539` and `1c00aced`).
-- [ ] `./scripts/qa/llm_qa.py all` passes 25/25 after the changes.
+- [x] `./scripts/qa/llm_qa.py all` passes after the changes (the suite now has
+  26 checks; final run on the merged tree: tests 20283 passed, coverage 95.2%,
+  the one format finding applied at `ba0db5c6`).
 - [x] For any supervisor change: the worker hot-reload is verified by pid, per
   the contract in the global `CLAUDE.md` — a `ps` check showing a NEW
   `--worker` pid before any behaviour is tested (pid 683611 after `5ad0d539`).

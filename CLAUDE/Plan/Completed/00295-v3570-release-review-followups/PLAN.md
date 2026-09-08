@@ -1,6 +1,6 @@
 # Plan 00295: v3.57.0 Release Review Follow-ups
 
-**Status**: In Progress (Phase 1 merged; Phases 2 and 3 in flight in worktrees)
+**Status**: Complete
 **Created**: 2026-08-31
 **Owner**: joseph
 **Priority**: Medium
@@ -176,7 +176,8 @@ All eleven fixed with tests in one worktree pass (`b7b6cd44`), merged at
   recorded reason in this plan's JOURNAL/ (all 26 fixed; none rejected).
 - [x] Every release-bound consequence is in the pending-release holding area:
   `UNRELEASED/release-notes/10-v3570-review-followups-closed.md`.
-- [ ] Full QA green after each phase.
+- [x] Full QA green after each phase (final run on the merged tree: tests
+  20283 passed, coverage 95.2%, the one format finding applied at `ba0db5c6`).
 
 ## Delivery & Milestones
 

@@ -1,6 +1,6 @@
 # Plan 00360: pending release notes holding area
 
-**Status**: In Progress (Phase 1 shipped; the release-side consumption is Phase 2)
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Medium
@@ -96,7 +96,9 @@ pipeline to fold it in.
   so the test pins the schema instead and the abort in Step 6 pins the
   emptying; the slate-check unit tests cover the informational listing.
 
-- [ ] ⬜ **Task 3.2**: Full QA green, daemon restart RUNNING.
+- [x] ✅ **Task 3.2**: Full QA green (final run on the merged tree: tests 20283
+  passed, coverage 95.2%, the one format finding applied at `ba0db5c6`),
+  daemon restart RUNNING.
 
 ## Success Criteria
 

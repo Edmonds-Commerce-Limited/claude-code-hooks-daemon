@@ -4,6 +4,16 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00311: v3.59.0 release review followups](00311-v3590-release-review-followups/PLAN.md) - Complete (all five v3.59.0 review findings dispositioned with tests at `a618ccef`, including a real `git rm --cached --pathspec-from-file` disclosure route closed and dispatch_declaration honouring a configured plan directory)
+
+- [00293: tool inventory disable and token savings](00293-tool-inventory-disable-and-token-savings/PLAN.md) - Complete (`source_disable`, the transcript analyser, `tool-report` and the advisory shipped in v3.57.0 and are dogfooded here; the one open item, a `/context` spot check in a fresh interactive session, is a one-off handed to the owner)
+
+- [00205: destructive git synonym respellings](00205-destructive-git-synonym-respellings/PLAN.md) - Complete at `48f1489b` + the archiving commit (`git push origin +main:main` and `git update-ref -d refs/heads/<name>` denied under the rule IDs of their porcelain equivalents; the other seven rules have no single ordinary synonym, recorded in the synonym-axis evasion suite)
+
+- [00168: Supervisor Compaction Injection Not Firing](00168-supervisor-compaction-injection-not-firing/PLAN.md) - Complete (NOOP-reason logging, the ranked-hypothesis fixes and the supervisor indicator shipped; the staged red-band dogfood is answered by the live decision log, which names every deferral gate and shows `/compact` firing)
+
+- [00117: Enable ask_user_question_blocker (dogfood → default-on)](00117-ask-user-question-blocker-default-on/PLAN.md) - Complete at `22d32706` + the archiving commit (the shipped default flipped on with its regression test, after the dogfood period surfaced no false positives)
+
 - [00166: Supervisor Multi-Terminal Session Isolation](00166-supervisor-multi-terminal-session-isolation/PLAN.md) - Complete (session-scoped signal load/consume fixed the cross-terminal `continue`, released in v3.42.0; the owner's two-terminal witness is recorded at `26e4a71f`, and Plan 00160's Phase 3 was delivered here)
 
 - [00331: vendor dirs config is inert](00331-vendor-dirs-config-is-inert/PLAN.md) - Complete at `6b4fa867`…`ba7269d5` + the archiving commit (`layout.vendor_dirs` was a facade with zero production consumers, so declaring one did nothing; every reader now routes through it, resolved from the file's owning project)
