@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision
 
 
@@ -454,9 +455,7 @@ class TestLspEnforcementSingleFileScoping:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {
-                "command": (
-                    'grep -n "hook_input" ' "src/claude_code_hooks_daemon/core/hook_result.py"
-                )
+                "command": ('grep -n "hook_input" src/claude_code_hooks_daemon/core/hook_result.py')
             },
         }
         assert handler.matches(hook_input) is False
@@ -941,7 +940,8 @@ class TestLspEnforcementAcceptanceTests:
         grep_tool_tests = [
             test
             for test in handler.get_acceptance_tests()
-            if isinstance(test.tool_payload, ToolPayload) and test.tool_payload.tool_name == "Grep"
+            if isinstance(test.tool_payload, ToolPayload)
+            and test.tool_payload.tool_name == ToolName.GREP
         ]
         assert len(grep_tool_tests) == 2, "expected exactly the two Grep-tool probes"
         for test in grep_tool_tests:

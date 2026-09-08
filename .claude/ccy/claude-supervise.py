@@ -285,6 +285,28 @@ _WORKER_SWAP_DROPPED_LINE_TRACE = (
     "recognizer's buffer was reset, so a partially-typed /compact or /effort "
     "command may have been lost"
 )
+# Plan 00361: a worker spawned from a half-edited on-disk file dies on its
+# first tick, and `if not alive(): restart()` every tick turned that into an
+# invisible crash loop with the host deciding in-process throughout. The guard
+# respawns a dead worker once per source fingerprint, logs the loop ONCE, then
+# holds respawns to this cadence until the source changes again.
+_WORKER_CRASH_BACKOFF_SECONDS = 10.0
+_WORKER_DIED_LINE = "worker died (exit {exit_code}, source {dead}) -> respawned"
+_WORKER_DIED_SOURCE_CHANGED_LINE = (
+    "worker died (exit {exit_code}, source {dead}); source changed on disk ({on_disk}) -> respawned"
+)
+_WORKER_CRASH_LOOP_LINE = (
+    "worker crash-looping on source {dead} ({deaths} deaths, exit {exit_code}); "
+    "host deciding in-process; respawn retried every {backoff:g}s or when the "
+    "source changes (see the worker error log)"
+)
+_WORKER_RECOVERED_LINE = "worker recovered (source {fingerprint})"
+_WORKER_FALLBACK_BEGAN_LINE = (
+    "worker did not answer -> host deciding in-process (see the worker error log)"
+)
+_WORKER_FALLBACK_ENDED_LINE = "worker answering again -> host in-process fallback ended"
+_WORKER_CRASH_RECORD = "worker crashed (source {fingerprint}):\n"
+_UNKNOWN_FINGERPRINT = "unknown"
 
 # ─── DOGFOODING: EDITING THIS FILE DOES NOT TAKE EFFECT UNTIL THE WORKER RELOADS ───
 # Every injection decision runs in the `--worker` SUBPROCESS, not the running
@@ -306,9 +328,12 @@ _WORKER_SWAP_DROPPED_LINE_TRACE = (
 # the worker actually reloaded before testing behaviour:
 #     ps -eo pid,lstart,args | grep 'claude-supervise.py --worker' | grep -v grep
 # A NEW pid / start-time means the new code is live. If it has not changed, force
-# it: `kill <worker-pid>` — the host's `if not worker.alive(): worker.restart()`
-# path respawns a fresh worker from current on-disk code on its next tick. Never
-# restart the whole ccy session just to reload the worker.
+# it: `kill <worker-pid>` — the host's dead-worker path (WorkerCrashGuard, Plan
+# 00361) respawns a fresh worker from current on-disk code on its next tick and
+# logs `worker died ... -> respawned` to decision.log. Kill it ONCE: a second
+# death on the same source fingerprint reads as a crash loop and holds respawns
+# to _WORKER_CRASH_BACKOFF_SECONDS. Never restart the whole ccy session just to
+# reload the worker.
 # See also .claude/rules/ccy-supervisor-dogfooding.md.
 
 # Braille spinner frames for the brief pre-fork "starting up" flourish.
@@ -4922,8 +4947,7 @@ def decide_once(
             target = machine.effort_pending.rsplit(":", 1)[-1]
             effort_command = f"{_EFFORT_COMMAND} {target}"
             reason = (
-                f"effort below floor ({machine.effort_pending}) -> "
-                f"would inject {effort_command}"
+                f"effort below floor ({machine.effort_pending}) -> would inject {effort_command}"
             )
             if dry_run:
                 payload = (
@@ -5627,6 +5651,20 @@ class PolicyWorker:
         except OSError:
             return None
 
+    @property
+    def source_fingerprint(self) -> str | None:
+        """The fingerprint the current (or last) worker was spawned from."""
+        return self._source_fingerprint
+
+    def on_disk_fingerprint(self) -> str | None:
+        """The fingerprint of the supervisor file as it is on disk right now."""
+        return self._current_fingerprint()
+
+    def exit_code(self) -> int | None:
+        """The worker's exit code once it has exited; None while alive/unstarted."""
+        proc = self._proc
+        return None if proc is None else proc.poll()
+
     def start(self) -> bool:
         """Spawn the worker subprocess. Returns True on success."""
         argv = [sys.executable, str(self._self_path), _WORKER_FLAG]
@@ -5753,6 +5791,101 @@ class PolicyWorker:
         except OSError as exc:
             append_worker_error(f"worker terminate failed: {exc}")
         self._close_err_stream()
+
+
+class WorkerCrashGuard:
+    """Host-side policy for a policy worker that has died (Plan 00361).
+
+    Pure and clock-free: the caller passes ``now``. Decides whether the dead
+    worker is respawned NOW and what single ``decision.log`` line (if any)
+    records it. First death on a source fingerprint: respawn and log. A second
+    death on the SAME fingerprint is a crash loop (the on-disk file cannot run):
+    log it once, then hold respawns to ``backoff_seconds`` so the host's
+    in-process fallback carries the session cheaply. A changed on-disk
+    fingerprint respawns at once, whatever the loop state -- the edit that
+    fixes the file must go live without waiting.
+    """
+
+    def __init__(self, backoff_seconds: float = _WORKER_CRASH_BACKOFF_SECONDS) -> None:
+        self._backoff_seconds = backoff_seconds
+        self._fingerprint: str | None = None
+        self._deaths = 0
+        self._looping = False
+        self._last_respawn_ts: float | None = None
+
+    def on_death(
+        self,
+        *,
+        dead_fingerprint: str | None,
+        on_disk_fingerprint: str | None,
+        exit_code: int | None,
+        now: float,
+    ) -> tuple[bool, str | None]:
+        """Return ``(respawn_now, log_line)`` for a worker found dead."""
+        dead = dead_fingerprint or _UNKNOWN_FINGERPRINT
+        on_disk = on_disk_fingerprint or _UNKNOWN_FINGERPRINT
+        code = _UNKNOWN_FINGERPRINT if exit_code is None else str(exit_code)
+        if dead != self._fingerprint:
+            self._fingerprint = dead
+            self._deaths = 0
+            self._looping = False
+        self._deaths += 1
+        if on_disk != dead:
+            # The source moved on: the next worker is a different program, so
+            # this fingerprint's history is over.
+            self._fingerprint = None
+            self._deaths = 0
+            self._looping = False
+            self._last_respawn_ts = now
+            return True, _WORKER_DIED_SOURCE_CHANGED_LINE.format(
+                exit_code=code, dead=dead, on_disk=on_disk
+            )
+        if self._deaths == 1:
+            self._last_respawn_ts = now
+            return True, _WORKER_DIED_LINE.format(exit_code=code, dead=dead)
+        if not self._looping:
+            self._looping = True
+            self._last_respawn_ts = now
+            return False, _WORKER_CRASH_LOOP_LINE.format(
+                dead=dead,
+                deaths=self._deaths,
+                exit_code=code,
+                backoff=self._backoff_seconds,
+            )
+        last = self._last_respawn_ts if self._last_respawn_ts is not None else now
+        if now - last >= self._backoff_seconds:
+            self._last_respawn_ts = now
+            return True, None
+        return False, None
+
+    def on_answer(self, *, fingerprint: str | None) -> str | None:
+        """A worker answered a tick: closes a crash loop, logging it once."""
+        if not self._looping:
+            return None
+        self._looping = False
+        self._deaths = 0
+        self._fingerprint = None
+        return _WORKER_RECOVERED_LINE.format(fingerprint=fingerprint or _UNKNOWN_FINGERPRINT)
+
+
+class FallbackTransitions:
+    """Log lines for the worker-answered <-> host-fallback transitions only.
+
+    Plan 00361: a tick the worker does not answer is decided in-process by the
+    host, with older code. That is by design, but a STRETCH of such ticks used
+    to be invisible. Only the edges are logged, so a long fallback costs two
+    lines, not one per tick.
+    """
+
+    def __init__(self) -> None:
+        self._answering = True
+
+    def note(self, *, worker_answered: bool) -> str | None:
+        previous = self._answering
+        self._answering = worker_answered
+        if previous == worker_answered:
+            return None
+        return _WORKER_FALLBACK_ENDED_LINE if worker_answered else _WORKER_FALLBACK_BEGAN_LINE
 
 
 def _get_winsize(stdin_fd: int) -> bytes:
@@ -5952,6 +6085,8 @@ def supervise(
     # Plan 00317: fed the same forwarded bytes as `activity`, drained once per
     # tick into TickFacts.human_raw_input for the worker's own recognizer.
     raw_tap = RawInputTap()
+    # Plan 00361: only the EDGES of a worker-silent stretch are logged.
+    fallback_transitions = FallbackTransitions()
     # Plan 00295 Task 3.8: kept as a SEPARATE, never-reassigned `int`-typed name
     # rather than narrowing the `int | None` parameter in place. `_on_winch`
     # below is registered as a real SIGWINCH handler, so a type checker cannot
@@ -6064,6 +6199,9 @@ def supervise(
                     machine_state=machine.export_state(),
                 )
             )
+            transition = fallback_transitions.note(worker_answered=outcome is not None)
+            if transition is not None and log is not None:
+                log.write(transition)
         if outcome is not None:
             # Plan 00182: pass the host's authoritative PRE-tick state so a stale
             # WOULD_COMPACT reply (worker still MONITOR, host already awaiting)
@@ -6293,6 +6431,14 @@ def _run_emit_model_switch(argv: list[str]) -> int:
     return 0
 
 
+def _self_source_fingerprint() -> str:
+    """Fingerprint of THIS file on disk, or ``unknown`` if it cannot be read."""
+    try:
+        return compute_source_hash(_SELF_PATH)
+    except OSError:
+        return _UNKNOWN_FINGERPRINT
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point: parse args, run the PTY supervisor, return the exit code.
 
@@ -6320,13 +6466,26 @@ def main(argv: list[str] | None = None) -> int:
         # this via Popen, but a direct/manual `--worker` run must not flood a
         # tty either). See Plan 00166.
         _redirect_worker_stderr_to_log()
-        return run_worker(
-            sys.stdin,
-            sys.stdout,
-            dry_run="--arm" not in argv,
-            sidecar_dir=_default_sidecar_dir(),
-            policy=CompactPolicy(),
-        )
+        try:
+            return run_worker(
+                sys.stdin,
+                sys.stdout,
+                dry_run="--arm" not in argv,
+                sidecar_dir=_default_sidecar_dir(),
+                policy=CompactPolicy(),
+            )
+        except Exception:
+            # Plan 00361: an escaped exception (typically a half-edited source
+            # file: a method removed before its call site) used to reach the
+            # error log as a raw, undated stderr traceback. Record it with a
+            # timestamp and the fingerprint it ran from, then exit non-zero so
+            # the host's crash guard sees a real death. Deliberate broad catch:
+            # this is the process's last line, and the traceback is the point.
+            append_worker_error(
+                _WORKER_CRASH_RECORD.format(fingerprint=_self_source_fingerprint())
+                + traceback.format_exc()
+            )
+            return 1
 
     child_argv = _split_child_argv(argv)
     if child_argv is None:
@@ -6354,7 +6513,7 @@ def main(argv: list[str] | None = None) -> int:
     # disturbing this PTY host. Worker failure is invisible — the host falls back
     # to an identical in-process decision — so the session is never at risk.
     worker = _make_policy_worker(flags.dry_run)
-    decider = _make_worker_decider(worker) if worker is not None else None
+    decider = _make_worker_decider(worker, log=log) if worker is not None else None
     try:
         return supervise(child_argv, dry_run=flags.dry_run, log=log, decider=decider)
     finally:
@@ -6374,24 +6533,51 @@ def _make_policy_worker(dry_run: bool) -> PolicyWorker | None:
     return worker
 
 
-def _make_worker_decider(worker: PolicyWorker) -> Callable[[TickFacts], TickOutcome | None]:
+def _make_worker_decider(
+    worker: PolicyWorker, log: DecisionLog | None = None
+) -> Callable[[TickFacts], TickOutcome | None]:
     """Return a per-tick decider that hot-reloads the worker on code change and
-    asks it to decide, returning None on any failure so the host falls back."""
+    asks it to decide, returning None on any failure so the host falls back.
+
+    Plan 00361: a dead worker goes through ``WorkerCrashGuard`` -- respawned
+    once per source fingerprint and logged to ``decision.log``; a repeat death
+    on the same source is a crash loop, held to a backoff so the host's
+    in-process fallback carries the session instead of a respawn every tick.
+    """
     last_reload_check = [0.0]
+    guard = WorkerCrashGuard()
+
+    def _record(line: str | None) -> None:
+        if line is not None and log is not None:
+            log.write(line)
 
     def _decide(facts: TickFacts) -> TickOutcome | None:
+        # The death check runs BEFORE the staleness check so a worker that died
+        # on a now-changed source is logged as a death, not silently reloaded.
+        if not worker.alive():
+            respawn, line = guard.on_death(
+                dead_fingerprint=worker.source_fingerprint,
+                on_disk_fingerprint=worker.on_disk_fingerprint(),
+                exit_code=worker.exit_code(),
+                now=facts.now_wall,
+            )
+            _record(line)
+            if not respawn:
+                return None
+            if worker.restart() and not facts.input_line_empty:
+                append_worker_error(
+                    _WORKER_SWAP_DROPPED_LINE_TRACE.format(trigger="restarted (was not alive)")
+                )
         if facts.now_wall - last_reload_check[0] >= _WORKER_RELOAD_CHECK_SECONDS:
             last_reload_check[0] = facts.now_wall
             if worker.reload_if_stale() and not facts.input_line_empty:
                 append_worker_error(
                     _WORKER_SWAP_DROPPED_LINE_TRACE.format(trigger="reloaded (stale code)")
                 )
-        if not worker.alive():
-            if worker.restart() and not facts.input_line_empty:
-                append_worker_error(
-                    _WORKER_SWAP_DROPPED_LINE_TRACE.format(trigger="restarted (was not alive)")
-                )
-        return worker.decide(facts)
+        outcome = worker.decide(facts)
+        if outcome is not None:
+            _record(guard.on_answer(fingerprint=worker.source_fingerprint))
+        return outcome
 
     return _decide
 
