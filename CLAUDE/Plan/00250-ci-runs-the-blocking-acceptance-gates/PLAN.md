@@ -68,27 +68,12 @@ The conclusion survives — it IS a provisioning gap — but the cheap route to 
 does not. There is nothing to reuse, so Phase 2 has to decide what a CI install
 looks like rather than copy a step.
 
-One caution raised here has since been **measured**, and it resolves in a way
-that unblocks the decision. A self-install regenerates `.claude/HOOKS-DAEMON.md`
-and the `CLAUDE.md` `<hooksdaemon>` block, which sounded like it would leave the
-tree dirty inside a job that also lints it. What actually happens:
-
-- `CLAUDE.md` regenerates **byte-identical**. Neither artefact contains a single
-  absolute path or other environment-specific content (`grep -c /workspace` is
-  0 in both), so the generating machine does not leak in.
-- `.claude/HOOKS-DAEMON.md` **does** go dirty, but by exactly one line — its
-  header carries a generation date (`Generated on 2026-09-07 (v3.62.1)`), so it
-  changes on any day after it was last committed.
-- That line is **inert**. `qa.yml` has no `git diff --exit-code` or
-  `git status --porcelain` cleanliness assertion, and its `black --check`
-  covers `src/` and `tests/` only. The three QA scripts that read the generated
-  doc — `check_doc_truth.py`, `check_handler_reference.py`,
-  `measure_instruction_footprint.py` — parse handler content, not the header.
-
-So the dirty tree is real but harmless, and if that ever changes the remedy is a
-one-line exclusion rather than a different CI structure. Still unmeasured: this
-covers `regenerate-docs`, not a full `--self-install`, which also deploys files
-and creates a symlink and may dirty more.
+What that install has to look like is now **measured rather than guessed** —
+see [RESEARCH-ci-install.md](RESEARCH-ci-install.md) for the evidence. The two
+results Phase 2 turns on: the tracked files a self-install regenerates are a
+non-issue (one inert date line), and the install **must not pass `--force`**,
+which would replace this project's 1188-line handler config with a default
+template and let the gates go green against a configuration nobody uses.
 
 ## The same gap has a louder sibling, and CI is no longer green
 
@@ -207,11 +192,12 @@ have reopened a plan whose success criteria were satisfied.
   inventing a second way to start one~~ — **there is nothing to reuse**, per the
   struck-through claim above. What remains is one decision: where a CI install
   goes — a step in the `qa` job, or its own job the gates move into.
-  - [x] ✅ The regenerated-tracked-files worry is **settled and not a
-    constraint**: `CLAUDE.md` regenerates byte-identical, `.claude/HOOKS-DAEMON.md`
-    changes only its one-line generation date, and no CI gate asserts tree
-    cleanliness or reads that header. Measured above; it does not constrain
-    where the install lives.
+  - [x] ✅ Constraints measured — see
+    [RESEARCH-ci-install.md](RESEARCH-ci-install.md). In short: the regenerated
+    tracked files are a non-issue; the install **must not pass `--force`**; and
+    it cannot be rehearsed locally, because `validate_installation_target`
+    refuses inside any parent holding `.claude/hooks-daemon` (true of every
+    worktree here, false on a runner — so not a CI blocker).
   - [ ] ⬜ **The blocker is now named**, from a CI run after Task 2.4a made the
     forwarders reachable: `ensure_daemon` REFUSES to auto-start here, with
     `hooks_daemon_repo_detected — This is the hooks-daemon repository. To install for development, run: python install.py --self-install`. So the QA
