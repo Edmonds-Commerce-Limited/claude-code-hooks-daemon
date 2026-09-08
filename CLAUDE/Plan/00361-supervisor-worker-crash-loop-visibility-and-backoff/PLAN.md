@@ -64,22 +64,22 @@ in-process throughout, and there was no way to tell from the logs.
 
 ### Phase 2: Visibility and backoff (TDD)
 
-- [ ] ⬜ **Task 2.1**: Worker-side fatal-crash record: the `--worker` branch of
+- [x] ✅ **Task 2.1** (delivered at `da5b7258`): Worker-side fatal-crash record: the `--worker` branch of
   `main()` catches an escaped exception from `run_worker`, appends a
   timestamped `worker crashed (source <fingerprint>)` entry with the full
   traceback to the worker error log, and exits non-zero. Hot-reloadable.
-- [ ] ⬜ **Task 2.2**: `WorkerCrashGuard` (pure, host-side): given the dead
+- [x] ✅ **Task 2.2** (delivered at `da5b7258`): `WorkerCrashGuard` (pure, host-side): given the dead
   worker's fingerprint, exit code, the on-disk fingerprint and the time,
   decides whether to respawn now and what single line to log. First death on
   a fingerprint: respawn and log. Repeated death on the same fingerprint:
   log the crash loop once, then hold respawns to `_WORKER_CRASH_BACKOFF_SECONDS`
   until the source changes. A worker that answers a tick after a loop logs
   `worker recovered`.
-- [ ] ⬜ **Task 2.3**: `_make_worker_decider` takes the `DecisionLog`, routes
+- [x] ✅ **Task 2.3** (delivered at `da5b7258`): `_make_worker_decider` takes the `DecisionLog`, routes
   dead-worker handling through the guard, and writes the guard's lines.
   `PolicyWorker` exposes the fingerprint it was spawned from, the on-disk
   fingerprint, and the last exit code.
-- [ ] ⬜ **Task 2.4**: `FallbackTransitions` (pure): logs `worker did not answer -> host deciding in-process` and `worker answering again` on transitions
+- [x] ✅ **Task 2.4** (delivered at `da5b7258`): `FallbackTransitions` (pure): logs `worker did not answer -> host deciding in-process` and `worker answering again` on transitions
   only; wired into `supervise()` at the decider call.
 
 ### Phase 3: Verify
@@ -105,3 +105,7 @@ in-process throughout, and there was no way to tell from the logs.
      JOURNAL/00361-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Evidence gathered and plan filed.
+- Phase 2 delivered at `da5b7258` (guard, transitions, accessors, crash record,
+  18 tests); the worker-side crash record went live on reload at pid 906006.
+  Phase 3's live check of the host-side lines waits for the next ccy session
+  start, since the host process never reloads.
