@@ -539,14 +539,26 @@ end-to-end against a fresh fixture project. Together they catch:
 source scripts/lib/resolve_venv.sh
 PY="$(resolve_venv_python /workspace)"
 "$PY" -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py tests/acceptance/test_skill_install_python_discovery.py tests/acceptance/test_playbook_harness.py -v
-# Expected: tests/acceptance/test_diagnostic_scripts.py — 12 passed
-#           tests/acceptance/test_install_sh_end_to_end.py — 2 passed
-#           tests/acceptance/test_tool_use_error_recovery.py — 1 passed, 1 skipped
-#           tests/acceptance/test_stop_hook_hard_block.py — 3 passed
-#           tests/acceptance/test_skill_install_python_discovery.py — 4 passed
-#           tests/acceptance/test_playbook_harness.py — 5 passed
-#           combined: 27 passed, 1 skipped, 0 failed
+# Expected: 0 failed, 0 skipped. The pass COUNT is deliberately not stated —
+# see below.
 ```
+
+**Why no expected counts** (Plan 00250 Task 1.2). This block used to carry a
+per-file pass tally and a combined total. Every one of them had gone stale:
+it claimed `test_diagnostic_scripts.py — 12 passed` (it has 15) and
+`combined: 27 passed, 1 skipped` (it is 31 passed, 0 skipped, measured against
+a running daemon). Nothing was wrong with the gate — the suite had simply grown,
+which it will keep doing.
+
+A count is a second copy of a fact the test run already reports, so it drifts
+silently and then reads as a failure to whoever follows this procedure. **0
+failed and 0 skipped** are the properties that actually matter and they do not
+drift. The FILE LIST above is the contract; the numbers were never it.
+
+The `1 skipped` in particular was load-bearing in the wrong direction: it
+documented as normal exactly the condition this gate exists to catch. A skip
+here means no daemon was running — which under H-1 is itself an abort condition,
+as the note below says.
 
 `test_playbook_harness.py` (Plan 00243) dispatches every playbook test that
 declares a `tool_payload`, through the production hook wrappers, and asserts

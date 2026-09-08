@@ -181,11 +181,12 @@ have reopened a plan whose success criteria were satisfied.
   - **`test_absolute_path_socket_deny.py` is not in the set**, though it is 6
     of the 16 skips. A declaration-keyed guard cannot cover it; decide whether
     it belongs in the set.
-  - **The expected COUNTS beside that command are already a second copy** —
-    `combined: 27 passed, 1 skipped`, restated per-file above it. Plan 00110
-    hit exactly this: a criterion phrased as a gate count was stale twice over
-    because other plans kept moving the number. Whatever Phase 3 builds should
-    read the file list and NOT the counts.
+  - [x] ✅ **The expected COUNTS were a second copy, and every one was stale.**
+    Measured against a live daemon: `combined: 27 passed, 1 skipped` is really
+    **31 passed, 0 skipped**. **Removed from RELEASING.md**, replaced with the
+    properties that do not drift — *0 failed, 0 skipped* — so Phase 3 has only
+    the file list to read. The `1 skipped` was the worst of them: it documented
+    as normal exactly the condition this gate exists to catch.
 
 ### Phase 2: Make the gates run
 
