@@ -81,20 +81,30 @@ _ENSURE_DAEMON_BLOCK_PATTERN = re.compile(
 def _render_raw_stdout_daemon_down_block(event_file_name: str) -> str:
     """The daemon-down branch a ``raw_stdout`` forwarder must carry.
 
-    Claude Code parses this hook's stdout as a raw value, so the branch writes
-    NOTHING to stdout: the diagnostic goes to stderr (the same ``HOOKS DAEMON
+    Claude Code reads this hook's stdout raw, so the branch never writes JSON
+    there. What it does write is the catalogue's
+    :attr:`EventIDMeta.daemon_down_stdout` — nothing for a parsed value
+    (``WorktreeCreate``), a visible marker for a display line
+    (``StatusLine``). The diagnostic goes to stderr (the same ``HOOKS DAEMON
     ERROR [type]`` line ``emit_hook_error`` logs) and the exit is non-zero, so
-    the hook is "not handled" rather than answered with a JSON object that
-    would be read as a path.
+    the hook is "not handled" rather than answered with a JSON object.
     """
     metas_by_bash_key = {m.bash_key: m for m in wired_event_metas()}
-    event_name = metas_by_bash_key[event_file_name].json_key
+    meta = metas_by_bash_key[event_file_name]
+    if meta.daemon_down_stdout:
+        stdout_lines = (
+            "    # This stdout is a DISPLAY line, so the outage stays visible.\n"
+            f'    echo "{meta.daemon_down_stdout}"\n'
+        )
+    else:
+        stdout_lines = "    # This stdout is parsed as a VALUE, so nothing may be printed.\n"
     return (
         "if ! ensure_daemon; then\n"
-        "    # raw_stdout event (generated; Plan 00189): Claude Code parses this\n"
-        "    # hook's stdout as a RAW value, so a JSON error here would be read as\n"
-        "    # one. Nothing on stdout; diagnostic on stderr; non-zero = not handled.\n"
-        f'    echo "HOOKS DAEMON ERROR [daemon_startup_failed]: {event_name} hook: '
+        "    # raw_stdout event (generated; Plan 00189): Claude Code reads this\n"
+        "    # hook's stdout RAW, so a JSON error here would be taken literally.\n"
+        "    # Diagnostic on stderr; non-zero exit = not handled.\n"
+        f"{stdout_lines}"
+        f'    echo "HOOKS DAEMON ERROR [daemon_startup_failed]: {meta.json_key} hook: '
         "failed to start hooks daemon. Use the hooks-daemon skill to check logs "
         '(Skill tool: skill=hooks-daemon, args=logs)" >&2\n'
         "    exit 1\n"
@@ -107,7 +117,8 @@ def apply_raw_stdout_daemon_down(source_content: str, event_file_name: str) -> s
 
     For an event in :data:`RAW_STDOUT_EVENT_FILE_NAMES` the first
     ``if ! ensure_daemon; then ... fi`` block is replaced with
-    :func:`_render_raw_stdout_daemon_down_block`; every other event, and a
+    :func:`_render_raw_stdout_daemon_down_block` (stdout carries only the
+    event's ``daemon_down_stdout``, never JSON); every other event, and a
     source with no such block, is returned unchanged. Idempotent, and applied
     at every config (it is a correctness property of the event, not a
     transport option), so a stale deployed forwarder is corrected on the next
@@ -477,8 +488,8 @@ def generate_forwarder_content(
 
     Also independently of config, a ``raw_stdout`` event's daemon-down
     stanza is rewritten by :func:`apply_raw_stdout_daemon_down` (Plan
-    00189) so it never puts JSON on a stdout Claude Code reads as a raw
-    value.
+    00189) so it never puts JSON on a stdout Claude Code reads raw — only
+    the catalogue's per-event ``daemon_down_stdout`` text, if any.
     """
     result = apply_raw_stdout_daemon_down(strip_relay_guard_block(source_content), event_file_name)
     if (

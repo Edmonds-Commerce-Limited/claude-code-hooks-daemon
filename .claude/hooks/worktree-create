@@ -21,9 +21,10 @@ source "$SCRIPT_DIR/../init.sh"
 
 # Try to start daemon - if it fails, say so on stderr and exit non-zero
 if ! ensure_daemon; then
-    # raw_stdout event (generated; Plan 00189): Claude Code parses this
-    # hook's stdout as a RAW value, so a JSON error here would be read as
-    # one. Nothing on stdout; diagnostic on stderr; non-zero = not handled.
+    # raw_stdout event (generated; Plan 00189): Claude Code reads this
+    # hook's stdout RAW, so a JSON error here would be taken literally.
+    # Diagnostic on stderr; non-zero exit = not handled.
+    # This stdout is parsed as a VALUE, so nothing may be printed.
     echo "HOOKS DAEMON ERROR [daemon_startup_failed]: WorktreeCreate hook: failed to start hooks daemon. Use the hooks-daemon skill to check logs (Skill tool: skill=hooks-daemon, args=logs)" >&2
     exit 1
 fi

@@ -7,11 +7,14 @@ ends with (``emit_hook_error ... ; exit 0``) is therefore WRONG for these
 events: the JSON error object lands on a stdout Claude Code reads as a path,
 so a daemon that cannot start yields the literal path ``/<cwd>/{...json...}``.
 
-The contract for a ``raw_stdout`` event's daemon-down branch is: NOTHING on
-stdout, the diagnostic on stderr, and a non-zero exit so Claude Code treats
-the hook as not handled. It is generalised over the catalogue's ``raw_stdout``
-flag (single source of truth), so the tests below run over EVERY wired
-``raw_stdout`` event and keep one JSON-decision event as the control.
+The contract for a ``raw_stdout`` event's daemon-down branch is: never JSON on
+stdout — only the catalogue's per-event ``daemon_down_stdout`` (empty for a
+parsed VALUE such as the worktree path; a visible marker for a DISPLAY line
+such as the status line) — the diagnostic on stderr, and a non-zero exit so
+Claude Code treats the hook as not handled. It is generalised over the
+catalogue's ``raw_stdout`` flag (single source of truth), so the tests below
+run over EVERY wired ``raw_stdout`` event and keep one JSON-decision event as
+the control.
 
 The forwarders are driven for real, under ``bash``, against a stub ``init.sh``
 whose ``ensure_daemon`` fails — so the assertion is about what actually
@@ -27,7 +30,11 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
-from claude_code_hooks_daemon.constants.events import raw_stdout_bash_keys, wired_event_metas
+from claude_code_hooks_daemon.constants.events import (
+    EventID,
+    raw_stdout_bash_keys,
+    wired_event_metas,
+)
 from claude_code_hooks_daemon.install.forwarder_generator import (
     apply_raw_stdout_daemon_down,
     generate_forwarder_content,
@@ -90,17 +97,39 @@ def test_raw_stdout_bash_keys_derive_from_the_flag() -> None:
 
 
 @pytest.mark.parametrize("event_file_name", _RAW_STDOUT_EVENTS)
-def test_raw_stdout_forwarder_daemon_down_writes_nothing_to_stdout(
+def test_raw_stdout_forwarder_daemon_down_prints_only_the_catalogue_text(
     tmp_path: Path, event_file_name: str
 ) -> None:
+    meta = next(m for m in wired_event_metas() if m.bash_key == event_file_name)
     result = _run_generated_forwarder(tmp_path, event_file_name)
 
-    assert result.stdout == "", (
-        f"{event_file_name}: Claude Code reads this stdout as a raw value, got {result.stdout!r}"
+    assert result.stdout.strip() == meta.daemon_down_stdout, (
+        f"{event_file_name}: Claude Code reads this stdout raw; expected "
+        f"{meta.daemon_down_stdout!r}, got {result.stdout!r}"
     )
+    assert "{" not in result.stdout, f"{event_file_name}: JSON reached a raw stdout"
     assert result.returncode != 0, f"{event_file_name}: must exit non-zero (not handled)"
     assert result.returncode != 99, f"{event_file_name}: transport ran with the daemon down"
     assert "HOOKS DAEMON ERROR" in result.stderr
+    assert "daemon_startup_failed" in result.stderr
+
+
+def test_worktree_create_daemon_down_prints_nothing(tmp_path: Path) -> None:
+    """The stdout IS the path: anything printed becomes a garbage directory name."""
+    assert EventID.WORKTREE_CREATE.daemon_down_stdout == ""
+    result = _run_generated_forwarder(tmp_path, "worktree-create")
+
+    assert result.stdout == ""
+    assert result.returncode == 1
+
+
+def test_status_line_daemon_down_keeps_the_visible_marker(tmp_path: Path) -> None:
+    """The stdout is a DISPLAY line: silence would hide the outage from the human."""
+    assert EventID.STATUS_LINE.daemon_down_stdout == "⚠️ DAEMON FAILED"
+    result = _run_generated_forwarder(tmp_path, "status-line")
+
+    assert result.stdout.strip() == "⚠️ DAEMON FAILED"
+    assert result.returncode == 1
     assert "daemon_startup_failed" in result.stderr
 
 
@@ -142,6 +171,7 @@ def test_transform_rewrites_the_legacy_stanza_for_a_raw_stdout_event() -> None:
     assert "exit 0" not in result
     assert ">&2" in result
     assert "exit 1" in result
+    assert "DAEMON FAILED" not in result  # a parsed value gets no stdout text
     # Everything outside the stanza is untouched.
     assert result.endswith('send_request_stdin "WorktreeCreate" "worktree"\n')
     assert result.startswith("#!/bin/bash\nset -euo pipefail\n")

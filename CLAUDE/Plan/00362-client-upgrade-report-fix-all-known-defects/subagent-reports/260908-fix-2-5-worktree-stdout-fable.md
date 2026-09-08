@@ -72,5 +72,10 @@ GREEN after.
 - Plan 00189 Task 1.4 (full QA + daemon restart + live dogfood) remains open and
   belongs to the merge/release gate. The `init.sh` worktree-mode socket-error
   path already exits non-zero (Plan 00188), so no `init.sh` change was needed.
-- `StatusLine` daemon-down now shows nothing rather than `⚠️ DAEMON FAILED`; the
-  diagnostic is on stderr. This is the generalised contract the task asked for.
+- Coordinator correction (second commit): the catalogue now carries a per-event
+  `EventIDMeta.daemon_down_stdout` — empty for `WorktreeCreate` (stdout is a
+  parsed value, nothing printed) and `⚠️ DAEMON FAILED` for `StatusLine`
+  (stdout is a display line, the marker stays visible). The generator renders
+  that text, the tracked forwarders were regenerated, and the test asserts
+  each event's catalogue text plus named cases for both shapes; same checks
+  re-run clean (517 passed, 3 skipped; ruff, mypy --strict, shellcheck).
