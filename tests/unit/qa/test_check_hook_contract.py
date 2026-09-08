@@ -385,3 +385,41 @@ class TestFullScan:
     def test_json_payload_round_trips(self) -> None:
         report = chc.scan(REPO_ROOT)
         json.loads(json.dumps(report.to_dict()))
+
+
+class TestMetaProvenance:
+    """Plan 00327 Phase 1 / Plan 00362 Task 2.11: the audit provenance is
+    pinned so a refresh cannot half-land.
+
+    The values are the ones the raw-fetch procedure in
+    ``docs/guides/HOOK-CONTRACT-REFRESH.md`` produced for the last audit:
+    ``docs_sha256`` and ``docs_bytes`` are computed from the captured
+    response body, never typed. A later refresh updates META.json AND this
+    pin together, by re-running that procedure.
+    """
+
+    CONTRACT_DIR = REPO_ROOT / "contracts" / "claude-code-hooks"
+    AUDITED_VERSION = "2.1.263"
+    AUDITED_SHA256 = "c30a50b8192dadf4e6ba016e451685f57a6d1d2c360d268887a9a94022d29f3e"
+    AUDITED_BYTES = 317632
+
+    def _meta(self) -> dict[str, object]:
+        meta: dict[str, object] = json.loads(
+            (self.CONTRACT_DIR / "META.json").read_text(encoding="utf-8")
+        )
+        return meta
+
+    def test_audit_provenance_matches_the_last_raw_fetch(self) -> None:
+        meta = self._meta()
+        assert meta["last_audited_claude_code_version"] == self.AUDITED_VERSION
+        assert meta["docs_sha256"] == self.AUDITED_SHA256
+        assert meta["docs_bytes"] == self.AUDITED_BYTES
+
+    def test_event_count_matches_the_vendored_files(self) -> None:
+        """Every ``<Event>.json`` is one documented event; META.json must
+        agree with the directory, or a new upstream event was vendored
+        without the provenance being refreshed (or the reverse)."""
+        meta = self._meta()
+        vendored = sorted(p.stem for p in self.CONTRACT_DIR.glob("*.json") if p.name != "META.json")
+        assert meta["event_count"] == len(vendored) == 33
+        assert vendored == sorted(chc.load_contracts(self.CONTRACT_DIR))
