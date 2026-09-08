@@ -715,19 +715,19 @@ File issues on the GitHub repository with:
 
 ### CLI command reference
 
-| Command             | Description                                          |
-| ------------------- | ---------------------------------------------------- |
-| `status`            | Check if daemon is running, show PID and socket path |
-| `start`             | Start daemon in background                           |
-| `stop`              | Stop the running daemon                              |
-| `restart`           | Stop and start the daemon                            |
-| `logs`              | View in-memory log buffer                            |
-| `health`            | Check daemon health (memory, uptime)                 |
-| `handlers`          | List all registered handlers                         |
-| `config`            | Show loaded configuration                            |
-| `config-validate`   | Validate config against schema                       |
-| `config-diff`       | Compare your config to default                       |
-| `config-merge`      | Merge new defaults into your config                  |
-| `init-config`       | Generate a configuration template                    |
-| `repair`            | Repair broken virtual environment                    |
-| `generate-playbook` | Generate acceptance test playbook                    |
+| Command             | Description                                                                                   |
+| ------------------- | --------------------------------------------------------------------------------------------- |
+| `status`            | Check if daemon is running, show PID and socket path                                          |
+| `start`             | Start daemon in background                                                                    |
+| `stop`              | Stop the running daemon                                                                       |
+| `restart`           | Stop and start the daemon                                                                     |
+| `logs`              | View in-memory log buffer                                                                     |
+| `health`            | Check daemon health (memory, uptime)                                                          |
+| `handlers`          | List all registered handlers                                                                  |
+| `config`            | Show loaded configuration                                                                     |
+| `config-validate`   | Validate config against schema (alias `validate-config`; path defaults to the project config) |
+| `config-diff`       | Compare your config to default                                                                |
+| `config-merge`      | Merge new defaults into your config                                                           |
+| `init-config`       | Generate a configuration template                                                             |
+| `repair`            | Repair broken virtual environment                                                             |
+| `generate-playbook` | Generate acceptance test playbook                                                             |

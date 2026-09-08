@@ -16,7 +16,7 @@ Provides:
 - repair: Repair broken venv (runs uv sync)
 - config-diff: Compare user config against default
 - config-merge: Merge user customizations onto new default
-- config-validate: Validate config against Pydantic schema
+- config-validate (alias validate-config): Validate config against Pydantic schema
 - init-project-handlers: Scaffold project-handlers directory structure
 - validate-project-handlers: Validate project handler files
 - test-project-handlers: Run project handler tests
@@ -3041,15 +3041,22 @@ def cmd_config_validate(args: argparse.Namespace) -> int:
     """Run config validation.
 
     Args:
-        args: Parsed CLI arguments with config_path
+        args: Parsed CLI arguments with an optional config_path; when it is
+            omitted the project's own `.claude/hooks-daemon.yaml` is validated.
 
     Returns:
         0 if valid, 1 if invalid or error
     """
     from claude_code_hooks_daemon.install.config_cli import run_config_validate
 
+    if args.config_path is None:
+        project_path = get_project_path(getattr(args, "project_root", None))
+        config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    else:
+        config_path = Path(args.config_path)
+
     try:
-        result = run_config_validate(config_path=Path(args.config_path))
+        result = run_config_validate(config_path=config_path)
         print(json.dumps(result, indent=2))
         return 0 if result["valid"] else 1
     except (FileNotFoundError, ValueError) as e:
@@ -6596,12 +6603,19 @@ def main() -> int:
     )
     parser_release_slate.set_defaults(func=cmd_release_slate_check)
 
-    # config-validate command
+    # config-validate command. `validate-config` is accepted too: it is the
+    # order a human reaches for first, and an older skill text routed it.
     parser_config_validate = subparsers.add_parser(
-        "config-validate", help="Validate config against Pydantic schema"
+        "config-validate",
+        aliases=["validate-config"],
+        help="Validate config against Pydantic schema",
     )
     parser_config_validate.add_argument(
-        "config_path", type=str, help="Path to config YAML to validate"
+        "config_path",
+        type=str,
+        nargs="?",
+        default=None,
+        help="Path to config YAML to validate (default: the project's .claude/hooks-daemon.yaml)",
     )
     parser_config_validate.set_defaults(func=cmd_config_validate)
 

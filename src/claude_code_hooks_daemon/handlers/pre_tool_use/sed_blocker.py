@@ -83,6 +83,29 @@ _SED_WITH_EXECUTION_FLAG = re.compile(
     re.IGNORECASE,
 )
 
+# Detects a sed flag cluster that only reads (-n / -e without -i). Such a command
+# writes to stdout and cannot touch a file, yet it is denied on purpose; the deny
+# message for this shape says so and hands over the working replacements.
+_SED_STDOUT_ONLY_FLAG = re.compile(
+    r"\bsed\s+-[a-hj-z]*[en](?![a-hj-z]*i)",
+    re.IGNORECASE,
+)
+
+# Captures the `N,Mp` line range of a `sed -n 'N,Mp' file` so the deny message
+# can offer the equivalent awk invocation with the SAME numbers filled in.
+_SED_LINE_RANGE = re.compile(r"(\d+),(\d+)p")
+
+# Appended to the deny message when the matched sed only reads. This is the
+# note that stops an agent treating the deny as a false positive and retrying
+# with a different spelling of the same read.
+_STDOUT_ONLY_DENY_NOTE = (
+    "This deny is DELIBERATE, not a false positive: `sed -n` / `sed -e` "
+    "without `-i` only prints to stdout and cannot modify a file, but `-n` "
+    "and `-i` differ by one character, so the handler does not distinguish "
+    "them. Use instead: the `Read` tool with `offset`/`limit` (prints the same "
+    "line range), or `awk 'NR>={start} && NR<={end}' <file>` (no write path)."
+)
+
 # Detects sed run via xargs (e.g. "grep -rl X | xargs sed -i ..."). This is mass
 # file modification and must be blocked even though a grep precedes it.
 _SED_VIA_XARGS = re.compile(
@@ -100,19 +123,24 @@ class SedBlockerHandler(PreToolUseHandlerBase):
     """Block sed used for file modification - Claude gets sed wrong and causes file destruction.
 
     PURPOSE: Prevent the LLM from running dangerous sed updates that cause
-    widespread file damage. Read-only sed in pipelines (transforming stdout)
-    is acceptable — the danger is sed modifying files on disk.
+    widespread file damage. The rule is deny-by-default on the WORD `sed`
+    in a Bash command, with four narrow exemptions -- it is not a list of
+    write-capable shapes, and a sed that merely reads is still denied unless
+    an exemption covers it (`-n` and `-i` differ by one character).
 
     Blocks:
-    1. Direct sed execution (sed -i, sed -e, bare sed with file args)
-    2. Indirect sed via xargs (grep -rl X | xargs sed -i)
+    1. Any executed sed: at a command head, with an -i/-e/-n flag cluster
+       (a stdout-only `-n`/`-e` deny is deliberate and its message says so),
+       or via xargs
+    2. Any other command carrying the word sed that no exemption covers
     3. Write tool creating .sh/.bash files containing sed commands
 
-    Allows:
-    1. Read-only sed in pipelines (cat file | sed 's/x/y/' | grep z)
-    2. Markdown files (.md) - documentation can mention sed
-    3. Git/gh commands - commit messages and PR bodies can mention sed
-    4. grep searching for the word "sed"
+    Exempts (Bash):
+    1. A `git commit` message mentioning sed, with no separator before it
+    2. A `gh` issue/PR/release body mentioning sed, same separator rule
+    3. A command containing a grep, or an echo without a `sed 's/` substitution
+       (so `cat f | sed 's/x/y/' | grep z` passes, `... | wc -l` does not)
+    Exempts (Write): markdown files (.md) -- documentation can mention sed
 
     Why sed is dangerous for LLMs:
     - Syntax errors destroy hundreds of files with find -exec
@@ -272,7 +300,8 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         - via xargs (e.g. "grep -rl X | xargs sed -i ...").
 
         sed used purely as a stdout-transforming pipe stage (e.g. "cat f | sed 's/x/y/'")
-        is NOT matched here — that read-only case is judged separately.
+        is NOT matched here — that shape is judged by the grep/echo exemption, and
+        is denied when neither is present.
         """
         return bool(
             _SED_AS_COMMAND_HEAD.search(command)
@@ -281,17 +310,19 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         )
 
     def _is_safe_readonly_command(self, command: str) -> bool:
-        """Check if command is a safe read-only operation mentioning sed.
+        """Check if command is exempt because it looks like a read of sed, not a run.
 
-        Safe commands include:
-        - grep (searching for the word 'sed')
-        - echo mentioning 'sed' WITHOUT actual sed command patterns
-        - read-only pipelines where sed only transforms stdout (cat f | sed 's/x/y/')
+        Exempt (returns True):
+        - a command containing a grep (searching for the word 'sed', or a pipeline
+          such as `cat f | sed 's/x/y/' | grep z`)
+        - an echo mentioning 'sed' WITHOUT a `sed 's/` substitution
 
-        NOT safe (returns False):
+        NOT exempt (returns False):
         - any command that EXECUTES sed (sed as a command head, sed -i/-e/-n, or
           sed via xargs) — even when a grep or echo also appears in the command;
-        - find -exec sed (executing sed)
+        - find -exec sed (executing sed);
+        - a pipe stage with neither grep nor echo (`cat f | sed 's/x/y/' | wc -l`),
+          even though it cannot write — the exemption is a proxy, not a write check
 
         The execution check runs FIRST so that destructive sed chained after a grep
         (e.g. "grep x f; sed -i s/a/b/ f") is blocked rather than allowed by the
@@ -302,9 +333,9 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         if self._executes_sed(command):
             return False
 
-        # Allow grep that searches for the word 'sed' without executing it.
-        # Read-only pipelines like `cat file | sed 's/x/y/' | grep z` are safe
-        # (the _executes_sed guard above already rejected -i / xargs / chained sed).
+        # Allow grep that searches for the word 'sed' without executing it, which
+        # also passes `cat file | sed 's/x/y/' | grep z` (the _executes_sed guard
+        # above already rejected -i / xargs / chained sed).
         if re.search(r"(^|\s|[;&|])\s*grep\s+", command):
             return True
 
@@ -347,10 +378,35 @@ class SedBlockerHandler(PreToolUseHandlerBase):
                 tracker.mark_disclosed(transcript_path, RuleID.SED_FILE_MODIFICATION)
             message = self._formatter.verbose(self._rule)
 
+        # A stdout-only sed is denied on purpose; the note is what stops the
+        # agent reading the deny as a false positive, so it survives the
+        # terse ladder step too.
+        note = self._stdout_only_note(hook_input)
+        if note:
+            message = f"{message}\n\n{note}"
+
         return GatingResult(
             decision=Decision.DENY,
             reason=message,
         )
+
+    @staticmethod
+    def _stdout_only_note(hook_input: dict[str, Any]) -> str | None:
+        """Return the deliberate-deny note when the Bash sed only reads.
+
+        Applies to a `-n` / `-e` flag cluster with no `-i`. A `sed -n 'N,Mp'`
+        line range is carried into the awk replacement so the agent can run
+        it as-is; any other shape gets the placeholders.
+        """
+        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
+            return None
+        command = get_bash_command(hook_input)
+        if not command or not _SED_STDOUT_ONLY_FLAG.search(command):
+            return None
+        line_range = _SED_LINE_RANGE.search(command)
+        if line_range:
+            return _STDOUT_ONLY_DENY_NOTE.format(start=line_range.group(1), end=line_range.group(2))
+        return _STDOUT_ONLY_DENY_NOTE.format(start="a", end="b")
 
     def get_claude_md(self) -> str | None:
         return (
@@ -370,8 +426,9 @@ class SedBlockerHandler(PreToolUseHandlerBase):
             "sed via `xargs`, is blocked no matter what else is in the command. So "
             "`grep x f; sed -i 's/a/b/' f` is still denied — the `grep` does not rescue "
             "it. Note `sed -n '1,20p' file` prints to stdout and cannot write, and is "
-            "blocked anyway: `-n` and `-i` differ by one character, and `Read` with "
-            "`offset`/`limit` does the same job.\n"
+            "blocked anyway — DELIBERATELY, and the deny message says so: `-n` and "
+            "`-i` differ by one character. `Read` with `offset`/`limit` does the same "
+            "job, as does `awk 'NR>=1 && NR<=20' file`.\n"
             "2. A `git commit` message mentioning sed (sed must follow `git commit` with "
             "no command separator between).\n"
             "3. A `gh` issue/PR/release body mentioning sed (same separator rule).\n"

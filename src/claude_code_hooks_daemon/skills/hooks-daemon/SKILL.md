@@ -261,8 +261,10 @@ case "$SUBCOMMAND" in
         bash "$SKILL_DIR/scripts/daemon-cli.sh" explain-rule "$@"
         ;;
 
-    logs|status|restart|handlers|config-validate|bug-report|check|release-notes)
-        # Forward to daemon CLI wrapper
+    logs|status|restart|handlers|config-validate|validate-config|bug-report|check|release-notes)
+        # Forward to daemon CLI wrapper. The CLI accepts validate-config as
+        # an alias of config-validate, and defaults the path to the project
+        # config, so both spellings work with no argument.
         bash "$SKILL_DIR/scripts/daemon-cli.sh" "$SUBCOMMAND" "$@"
         ;;
 
@@ -283,6 +285,7 @@ case "$SUBCOMMAND" in
         echo "  status                Show daemon status"
         echo "  handlers              List loaded handlers"
         echo "  check                 Verbose environment & configuration audit"
+        echo "  config-validate [PATH] Validate a config (default: the project's); validate-config also works"
         echo "  bug-report DESC       Generate bug report with diagnostics"
         echo "  report DESC           Investigate an issue and generate a detailed report"
         echo "  release-notes [opts]  Show release notes (installed version by default)"
