@@ -187,6 +187,23 @@ reaper has to be designed against those constraints, not around them.
   command reports them and stops. Run `bin/hooks-daemon worktree-reap` to see
   the list, then add `--reap`.
 
+- [ ] ⬜ **Task 3.4**: Observe `reap_worktree` removing a real worktree and its
+  real branch. The unit tests drive a fake git, so every assertion about
+  `worktree remove` and `branch -d` is an assertion about the argv this code
+  builds — not about git accepting it. Method: `git worktree add` a throwaway,
+  confirm the predicate clears it, reap **that one only**, and check both the
+  worktree and the branch are gone.
+
+  This is a better use of Phase 3 than Task 3.2, which verifies Plan 00188's
+  handler rather than anything built here — and it does not add a 22nd
+  worktree to the pile it is meant to reduce.
+
+  **The gap it exposed is closed**: `--only NAME` acts on one worktree. Naming
+  one narrows the TARGET and never overrides the predicate — a named worktree
+  that is not reapable is still refused — and an unknown name **exits non-zero**
+  rather than doing nothing quietly, because a typo that silently no-ops reads
+  exactly like success.
+
 ## Success Criteria
 
 - [ ] `git worktree list` shows only live worktrees plus the repository

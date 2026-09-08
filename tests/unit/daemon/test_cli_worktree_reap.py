@@ -61,6 +61,7 @@ def _args(**overrides: object) -> argparse.Namespace:
         "project_root": "/repo",
         "base_branch": "main",
         "reap": False,
+        "only": None,
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -114,6 +115,42 @@ class TestActingRequiresTheFlag:
     def test_its_branch_goes_too(self, git: _FakeGit, capsys: pytest.CaptureFixture[str]) -> None:
         cmd_worktree_reap(_args(reap=True), run_fn=git)
         assert any(call[0] == "branch" and "-d" in call for call in git.mutations)
+
+
+class TestActingOnOneWorktree:
+    """Without this, a human wanting rid of ONE must take all fifteen."""
+
+    def test_only_the_named_worktree_is_removed(
+        self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        cmd_worktree_reap(_args(reap=True, only="agent-clean-1"), run_fn=git)
+        removed = [call for call in git.mutations if call[0] == "worktree"]
+        assert len(removed) == 1
+        assert "agent-clean-1" in removed[0][2]
+
+    def test_naming_a_worktree_the_predicate_refuses_removes_nothing(
+        self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Naming one is a choice of TARGET, never an override of the check."""
+        cmd_worktree_reap(_args(reap=True, only="agent-dirty-2"), run_fn=git)
+        assert git.mutations == []
+
+    def test_an_unknown_name_is_an_error_not_a_silent_no_op(
+        self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A typo that quietly does nothing reads exactly like success."""
+        exit_code = cmd_worktree_reap(_args(reap=True, only="agent-typo-9"), run_fn=git)
+        assert exit_code != 0
+        assert git.mutations == []
+        assert "agent-typo-9" in capsys.readouterr().out
+
+    def test_the_report_narrows_too(
+        self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        cmd_worktree_reap(_args(only="agent-clean-1"), run_fn=git)
+        out = capsys.readouterr().out
+        assert "agent-clean-1" in out
+        assert "agent-dirty-2" not in out
 
 
 class TestTheExitCode:

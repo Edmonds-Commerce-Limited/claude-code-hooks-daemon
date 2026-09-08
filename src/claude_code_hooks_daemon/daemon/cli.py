@@ -5206,12 +5206,22 @@ def cmd_worktree_reap(args: argparse.Namespace, *, run_fn: "RunGit | None" = Non
     repo_root = Path(getattr(args, "project_root", None) or get_project_path(None))
     base_branch = getattr(args, "base_branch", None) or "main"
     reap = bool(getattr(args, "reap", False))
+    only = getattr(args, "only", None)
 
     collect_kwargs = {"run_fn": run_fn} if run_fn is not None else {}
     states = collect_worktree_states(repo_root, base_branch, **collect_kwargs)
     if not states:
         print("No agent worktrees found.")
         return 0
+
+    if only:
+        # Naming one narrows the TARGET; it never overrides the predicate, so a
+        # named worktree that is not reapable is still refused below.
+        states = tuple(state for state in states if state.name == only)
+        if not states:
+            # A typo that quietly does nothing reads exactly like success.
+            print(f"No agent worktree named {only!r}. Run without --only to list them.")
+            return 1
 
     refused = 0
     for state in states:
@@ -6740,6 +6750,12 @@ def main() -> int:
         "--reap",
         action="store_true",
         help="Actually remove the worktrees the predicate cleared, and their branches",
+    )
+    parser_worktree_reap.add_argument(
+        "--only",
+        metavar="NAME",
+        default=None,
+        help="Act on this worktree alone (still subject to the same safety checks)",
     )
     parser_worktree_reap.set_defaults(func=cmd_worktree_reap)
 
