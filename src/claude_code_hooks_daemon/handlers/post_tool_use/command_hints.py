@@ -52,7 +52,9 @@ from typing import Any, Final
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.chain import is_restrictive
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.core.side_effect_journal import SideEffectJournal
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
@@ -298,6 +300,10 @@ class CommandHintsHandler(PostToolUseHandlerBase):
 
         # Per (session_id, hint_id) TTL bookkeeping — bounded, FIFO eviction.
         self._fire_state: dict[tuple[str, str], _HintFireState] = {}
+        # Undo journal for _fire_state (Plan 00242 Phase 2): handle() runs
+        # before the chain has decided, so a firing recorded here is rolled
+        # back in commit_side_effects() if the call ends up denied.
+        self._journal = SideEffectJournal()
 
     def _resolve_hints(self) -> list[CommandHint]:
         """Return the merged (default + project, or project-only) hint set, cached."""
@@ -349,6 +355,9 @@ class CommandHintsHandler(PostToolUseHandlerBase):
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Fire any due hints as advisory context. Always ALLOW — never blocks."""
+        # A previous call that was never committed (a caller outside the
+        # chain) counts as accepted; only THIS call's mutations stay undoable.
+        self._journal.commit()
         command = get_bash_command(hook_input) or ""
         session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or "unknown")
 
@@ -368,6 +377,7 @@ class CommandHintsHandler(PostToolUseHandlerBase):
         key = (session_id, hint.id)
         now = time.monotonic()
         state = self._fire_state.get(key)
+        self._journal.snapshot(self._fire_state, key)
 
         if state is None:
             self._record_fire(key, now)
@@ -389,8 +399,17 @@ class CommandHintsHandler(PostToolUseHandlerBase):
     def _record_fire(self, key: tuple[str, str], now: float) -> None:
         """Record a firing for ``key``, bounding the tracked-state map (FIFO eviction)."""
         if key not in self._fire_state and len(self._fire_state) >= _MAX_TRACKED_FIRE_STATES:
-            del self._fire_state[next(iter(self._fire_state))]
+            oldest = next(iter(self._fire_state))
+            self._journal.snapshot(self._fire_state, oldest)
+            del self._fire_state[oldest]
         self._fire_state[key] = _HintFireState(last_fired_monotonic=now, calls_since_fire=0)
+
+    def commit_side_effects(self, hook_input: dict[str, Any], chain_decision: Decision) -> None:
+        """Keep this call's TTL bookkeeping only if the call went ahead."""
+        if is_restrictive(chain_decision):
+            self._journal.rollback()
+        else:
+            self._journal.commit()
 
     @staticmethod
     def _render(hint: CommandHint) -> str:

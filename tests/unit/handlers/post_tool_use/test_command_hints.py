@@ -308,6 +308,67 @@ class TestHandleTtlGating:
         assert result.context == []
 
 
+class TestCooldownIsNotSpentOnADeniedCall:
+    """Plan 00242 Phase 2: the TTL is committed only when the call went ahead.
+
+    ``handle()`` runs before the chain has decided. If another handler then
+    denies the call, ``commit_side_effects(DENY)`` rolls the firing back so
+    the hint fires again on the next real call instead of staying silent for
+    the whole TTL.
+    """
+
+    @pytest.fixture
+    def handler(self) -> CommandHintsHandler:
+        return CommandHintsHandler()
+
+    def test_denied_call_rolls_the_firing_back(self, handler: CommandHintsHandler) -> None:
+        hook_input = _bash("agent-browser --close")
+        assert handler.handle(hook_input).context
+        handler.commit_side_effects(hook_input, Decision.DENY)
+
+        assert handler.handle(hook_input).context, "the cooldown was burnt by a denied call"
+
+    def test_allowed_call_keeps_the_firing(self, handler: CommandHintsHandler) -> None:
+        hook_input = _bash("agent-browser --close")
+        handler.handle(hook_input)
+        handler.commit_side_effects(hook_input, Decision.ALLOW)
+
+        assert handler.handle(hook_input).context == []
+
+    def test_denied_suppressed_call_does_not_count_towards_min_calls(self) -> None:
+        handler = CommandHintsHandler()
+        handler._hints = [
+            {
+                "id": "gated",
+                "pattern": "my-tool",
+                "hint": "gated hint",
+                "ttl_seconds": 0,
+                "min_calls_between": 1,
+            }
+        ]
+        hook_input = _bash("my-tool")
+        assert handler.handle(hook_input).context  # first-ever fire
+        handler.commit_side_effects(hook_input, Decision.ALLOW)
+        assert handler.handle(hook_input).context == []  # 0 calls since fire
+        handler.commit_side_effects(hook_input, Decision.DENY)  # that call never ran
+
+        assert (
+            handler.handle(hook_input).context == []
+        ), "a denied call was counted as a call between fires"
+
+    def test_a_second_handle_without_a_commit_keeps_the_first_firing(
+        self, handler: CommandHintsHandler
+    ) -> None:
+        """Called outside a chain (no commit), consecutive calls behave as before."""
+        hook_input = _bash("agent-browser --close")
+        handler.handle(hook_input)
+        handler.handle(hook_input)
+        handler.commit_side_effects(hook_input, Decision.DENY)
+
+        # Only the SECOND (uncommitted) call's mutations are undone.
+        assert handler.handle(hook_input).context == []
+
+
 class TestMinCallsBetweenSecondaryGate:
     def test_requires_both_ttl_and_call_count(self) -> None:
         handler = CommandHintsHandler()
