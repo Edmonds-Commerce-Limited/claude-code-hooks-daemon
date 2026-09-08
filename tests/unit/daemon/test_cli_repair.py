@@ -11,8 +11,12 @@ Covers:
 
 import argparse
 import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.cli import (
@@ -20,6 +24,7 @@ from claude_code_hooks_daemon.daemon.cli import (
     _VERIFY_IMPORT_TIMEOUT_SECONDS,
     cmd_repair,
 )
+from claude_code_hooks_daemon.daemon.venv_lock import VenvLockTimeout
 
 
 class TestCmdRepair:
@@ -219,6 +224,72 @@ class TestCmdRepair:
         ):
             result = cmd_repair(args)
             assert result == 1
+
+    def test_uv_sync_runs_under_the_venv_build_lock(self, tmp_path: Path) -> None:
+        """Plan 00100 Task 4.3: repair contends on the same lock as ensure_venv.
+
+        The ``uv sync`` must run INSIDE the lock's context — a lock taken and
+        released around nothing would satisfy a call-count assertion and
+        protect nothing.
+        """
+        args = self._make_args(tmp_path)
+        events: list[str] = []
+
+        @contextmanager
+        def fake_lock(project_root: Path, **_kwargs: object) -> Iterator[None]:
+            assert project_root == tmp_path
+            events.append("lock")
+            yield
+            events.append("unlock")
+
+        def fake_run(*_a: object, **_k: object) -> MagicMock:
+            events.append("uv sync" if not events.count("uv sync") else "verify")
+            done = MagicMock()
+            done.returncode = 0
+            done.stderr = ""
+            done.stdout = "OK\n"
+            return done
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_project_path",
+                return_value=tmp_path,
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch("claude_code_hooks_daemon.daemon.cli.venv_lock", fake_lock),
+            patch("subprocess.run", side_effect=fake_run),
+        ):
+            result = cmd_repair(args)
+
+        assert result == 0
+        assert events[0] == "lock" and events[-1] == "unlock", events
+        assert "uv sync" in events[1:-1], f"uv sync must run inside the lock: {events}"
+
+    def test_lock_timeout_is_reported_not_raised(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A held lock past the bound is a clear failure exit, not a traceback."""
+        args = self._make_args(tmp_path)
+
+        @contextmanager
+        def held_lock(_project_root: Path, **_kwargs: object) -> Iterator[None]:
+            raise VenvLockTimeout("gave up waiting for the venv lock after 120s: /x/lock")
+            yield
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_project_path",
+                return_value=tmp_path,
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch("claude_code_hooks_daemon.daemon.cli.venv_lock", held_lock),
+            patch("subprocess.run") as mock_run,
+        ):
+            result = cmd_repair(args)
+
+        assert result == 1
+        mock_run.assert_not_called()
+        assert "gave up waiting for the venv lock" in capsys.readouterr().out
 
     def test_stops_daemon_before_repair(self, tmp_path: Path) -> None:
         """cmd_repair stops running daemon before repairing."""

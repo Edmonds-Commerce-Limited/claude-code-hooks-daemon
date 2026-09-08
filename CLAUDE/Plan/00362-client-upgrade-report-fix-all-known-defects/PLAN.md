@@ -125,9 +125,10 @@ while the detectors silently do not run.
 - [ ] ⬜ **Task 2.9** (D18 — Plan 00330 Task 1.4, MEDIUM): docs QA and plan QA
   honour `daemon.exclude_paths`. Decision: honour it; a fixture tree that
   must keep producing findings is declared explicitly, not by omission.
-- [ ] ⬜ **Task 2.10** (D4 — Plan 00100 Phase 4, HIGH): concurrent venv
+- [x] ✅ **Task 2.10** (D4 — Plan 00100 Phase 4, HIGH): concurrent venv
   mutation is serialised with a lock, after the bind-mount `flock` spike the
-  plan asks for.
+  plan asks for. Spike passed in the CCY container (Podman bind mount);
+  `ensure_venv` and `hooks-daemon repair` share one lock — commit `80417d4b`.
 - [ ] ⬜ **Task 2.11** (R1 — Plan 00327 Phase 1): measure the delta between the
   vendored hook contract and current upstream so a stability release does not
   rest on an unaudited contract; any drifted claim becomes a task here.

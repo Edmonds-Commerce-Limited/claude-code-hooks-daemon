@@ -372,18 +372,18 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 
 ### Phase 4: Concurrency Protection
 
-- [ ] ⬜ **Task 4.0** (NEW in v2): Verify `flock` behaviour under Podman bind-mount
-  - [ ] ⬜ Spike: two processes in the CCY container both calling `flock` on `/workspace/untracked/.venv-bootstrap.lock`
-  - [ ] ⬜ Confirm mutual exclusion holds across bind-mount boundary (host ↔ container, and container ↔ container sharing the mount)
-  - [ ] ⬜ If `flock` fails the spike, switch to PID-file lock with liveness check (write PID, check `kill -0 <pid>` on contention, wait or fail if alive). Document the choice.
-- [ ] ⬜ **Task 4.1**: Write failing test: two processes calling `ensure_venv` simultaneously do not corrupt the venv
-  - [ ] ⬜ Uses `multiprocessing` or `subprocess.Popen` pairs
-  - [ ] ⬜ Asserts second process waits for first, then fast-paths
-- [ ] ⬜ **Task 4.2**: Implement concurrency protection (flock or PID-lock per Task 4.0 outcome) around the mutating section of `ensure_venv()`
-  - [ ] ⬜ Lock file: `{daemon_dir}/untracked/.venv-bootstrap.lock`
-  - [ ] ⬜ Timeout with clear error if lock held > 120s
-- [ ] ⬜ **Task 4.3**: Python-side equivalent for CLI `repair` command
-- [ ] ⬜ **Task 4.4**: Full QA + daemon restart + all prior phase tests
+- [x] ✅ **Task 4.0** (NEW in v2): Verify `flock` behaviour under Podman bind-mount — commit `80417d4b` (Plan 00362 Task 2.10)
+  - [x] ✅ Spike: two processes in the CCY container both calling `flock` on `/workspace/untracked/.venv-bootstrap.lock`. Result (`container=podman`, bind-mounted btrfs): holder A took the lock for 3s; B's `flock -n` was refused while A held it and its `flock -w` acquired only after A released; 20 processes doing read-increment-write under the lock ended at 20. Mutual exclusion holds.
+  - [x] ✅ Confirm mutual exclusion holds across bind-mount boundary: container ↔ container sharing the mount verified by the spike. Host ↔ container is not reachable from inside the container; the `mkdir` fallback below (`HOOKS_DAEMON_VENV_LOCK_BACKEND=mkdir`) is the documented escape if a mount is ever found not to propagate `flock`.
+  - [x] ✅ `flock` passed, so it is the default backend. The fallback is a `mkdir` lock (`.venv-bootstrap.lock.d` + `pid` file) with a stale-age reclaim (`HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS`, 600s) rather than `kill -0`, because a PID is meaningless across a container boundary.
+- [x] ✅ **Task 4.1**: Write failing test: two processes calling `ensure_venv` simultaneously do not corrupt the venv — `tests/integration/test_ensure_venv_lock.py`
+  - [x] ✅ Uses `subprocess.Popen` pairs against a stub `uv` that sleeps (RED: both starters ran `uv sync` into one target)
+  - [x] ✅ Asserts second process waits for first, then fast-paths (one sync, same path from both, "waiting up to" only on the second); 20-iteration gate marked `slow`
+- [x] ✅ **Task 4.2**: Implement concurrency protection (flock, mkdir fallback) around the mutating section of `ensure_venv()` — `acquire_venv_lock`/`release_venv_lock`/`_ensure_venv_build` in `scripts/install/venv.sh`; the fast path stays lock-free and freshness is re-checked under the lock
+  - [x] ✅ Lock file: `{daemon_dir}/untracked/.venv-bootstrap.lock`
+  - [x] ✅ Timeout with clear error if lock held > 120s (`HOOKS_DAEMON_VENV_LOCK_TIMEOUT`; the message names the lock path and the bound)
+- [x] ✅ **Task 4.3**: Python-side equivalent for CLI `repair` command — `src/claude_code_hooks_daemon/daemon/venv_lock.py`, same file, backend and env vars; `cmd_repair` runs `uv sync` inside it
+- [x] ✅ **Task 4.4**: Touched suites, shellcheck, ruff and `mypy --strict` green in the worktree; the daemon restart and full QA run belong to the Plan 00362 merge session
 
 **Success gate**: Concurrency test passes deterministically over 20 iterations. Bind-mount behaviour verified.
 

@@ -87,6 +87,7 @@ from claude_code_hooks_daemon.daemon.validation import (
     is_hooks_daemon_repo,
     is_inside_daemon_directory,
 )
+from claude_code_hooks_daemon.daemon.venv_lock import VenvLockTimeout, venv_lock
 from claude_code_hooks_daemon.docs_qa.comment_finder import DEFAULT_MIN_BLOCK_LINES
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.git_repo import run_git
@@ -1611,40 +1612,15 @@ def cmd_repair(args: argparse.Namespace) -> int:
     env = os.environ.copy()
     env["UV_PROJECT_ENVIRONMENT"] = str(venv_path)
 
+    # Plan 00100 Task 4.3: the sync runs under the same build lock as bash
+    # ensure_venv, so a daemon starting alongside this repair waits for it
+    # and reuses the result instead of rebuilding into the same directory.
     try:
-        result = subprocess.run(  # nosec B603 B607 - uv is trusted tool, no user input
-            ["uv", "sync"],
-            cwd=str(project_root),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=_UV_SYNC_TIMEOUT_SECONDS,
-        )
-        if result.returncode != 0:
-            print(f"ERROR: uv sync failed (exit {result.returncode})")
-            if result.stderr:
-                print(result.stderr)
-            return 1
-
-        print("Venv repaired successfully.")
-
-        # Verify the repair worked
-        venv_python = venv_path / "bin" / "python"
-        verify = subprocess.run(  # nosec B603 - venv python with hardcoded import check
-            [str(venv_python), "-c", "import claude_code_hooks_daemon; print('OK')"],
-            capture_output=True,
-            text=True,
-            timeout=_VERIFY_IMPORT_TIMEOUT_SECONDS,
-        )
-        if verify.returncode == 0:
-            print("Verification: import claude_code_hooks_daemon OK")
-        else:
-            print("WARNING: Venv repaired but import check failed:")
-            print(verify.stderr)
-            return 1
-
-        return 0
-
+        with venv_lock(project_root, on_wait=print):
+            return _repair_venv_locked(project_root, venv_path, env)
+    except VenvLockTimeout as exc:
+        print(f"ERROR: {exc}")
+        return 1
     except FileNotFoundError:
         print(
             "ERROR: 'uv' not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
@@ -1657,6 +1633,40 @@ def cmd_repair(args: argparse.Namespace) -> int:
         timed_out = exc.cmd if isinstance(exc.cmd, str) else " ".join(map(str, exc.cmd))
         print(f"ERROR: command timed out after {exc.timeout} seconds: {timed_out}")
         return 1
+
+
+def _repair_venv_locked(project_root: Path, venv_path: Path, env: dict[str, str]) -> int:
+    """The mutating half of ``cmd_repair``; the caller holds the venv build lock."""
+    result = subprocess.run(  # nosec B603 B607 - uv is trusted tool, no user input
+        ["uv", "sync"],
+        cwd=str(project_root),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=_UV_SYNC_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0:
+        print(f"ERROR: uv sync failed (exit {result.returncode})")
+        if result.stderr:
+            print(result.stderr)
+        return 1
+
+    print("Venv repaired successfully.")
+
+    # Verify the repair worked
+    venv_python = venv_path / "bin" / "python"
+    verify = subprocess.run(  # nosec B603 - venv python with hardcoded import check
+        [str(venv_python), "-c", "import claude_code_hooks_daemon; print('OK')"],
+        capture_output=True,
+        text=True,
+        timeout=_VERIFY_IMPORT_TIMEOUT_SECONDS,
+    )
+    if verify.returncode == 0:
+        print("Verification: import claude_code_hooks_daemon OK")
+        return 0
+    print("WARNING: Venv repaired but import check failed:")
+    print(verify.stderr)
+    return 1
 
 
 # Plan 00099: venv directories that the fingerprint-keyed scheme recognises.
