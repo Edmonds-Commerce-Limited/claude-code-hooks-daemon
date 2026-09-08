@@ -120,20 +120,40 @@ class GhPrCommentsHandler(PreToolUseHandlerBase):
     def _compute_suggested_command(self, command: str) -> str:
         """Compute the suggested corrected command string.
 
+        Scoped to the `gh pr view` SEGMENT (matching `matches()`'s own
+        scoping), not the whole command: a naive whole-command append put
+        `--comments` after a chained command's own trailing arguments
+        (`gh pr view 123 && echo done` -> `... && echo done --comments`,
+        fixing nothing) and a whole-command `--json` search could pick up
+        an unrelated chained command's own `--json` flag.
+
         Args:
             command: Original bash command
 
         Returns:
             Corrected command string with --comments added
         """
-        if "--json" in command:
-            json_match = re.search(r"(--json\s+)([^\s|]+)", command)
-            if json_match:
-                prefix = json_match.group(1)
-                fields = json_match.group(2)
-                new_fields = f"{fields},comments"
-                return command.replace(f"{prefix}{fields}", f"{prefix}{new_fields}", 1)
-        return f"{command} --comments"
+        segment = self._extract_gh_pr_view_segment(command)
+        if segment is None:  # pragma: no cover - handle() only calls this after a match
+            return f"{command} --comments"
+
+        start = command.index(segment)
+        end = start + len(segment)
+
+        json_match = re.search(r"(--json\s+)([^\s|]+)", segment)
+        if json_match:
+            prefix = json_match.group(1)
+            fields = json_match.group(2)
+            new_segment = segment.replace(f"{prefix}{fields}", f"{prefix}{fields},comments", 1)
+        else:
+            # Insert before any trailing whitespace the segment carries (the
+            # gap before a chained "&&"/"||"/";"), so that gap survives the
+            # splice instead of being swallowed by an unconditional rstrip.
+            trimmed = segment.rstrip()
+            trailing_ws = segment[len(trimmed) :]
+            new_segment = f"{trimmed} --comments{trailing_ws}"
+
+        return command[:start] + new_segment + command[end:]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block and suggest adding --comments flag."""
