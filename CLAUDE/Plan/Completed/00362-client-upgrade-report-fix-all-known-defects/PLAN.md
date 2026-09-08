@@ -1,6 +1,6 @@
 # Plan 00362: client upgrade report — fix all known defects
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: High
@@ -137,26 +137,33 @@ while the detectors silently do not run.
   observations Plan 00327 kept (contract_staleness, whether
   `permission_suggestions` is required in the input schema, the refresh
   guide) stay in Plan 00327.
-- [ ] ⬜ **Task 2.12** (D15 — Plan 00242): NOT in this push. A terminal ALLOW
+- [x] ✅ **Task 2.12** (D15 — Plan 00242; answered with a recorded reason): NOT in this push. A terminal ALLOW
   ending the chain is a structural change with a measurement-gated staged
   rollout; it stays in its own plan and is named here so the release notes
   can say so.
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: full QA green on main after every merge; daemon
+- [x] ✅ **Task 3.1**: full QA green on main after every merge; daemon
   restarted and RUNNING; the client-mode smoke (`scripts/dummy-client-repo.sh`)
   exercises the skill wrappers' bootstrap fallback and the tdd mirror root.
+  (Full QA 26/26 after the last merge; the smoke also covered the deployed
+  `echd-capture` path and the staged-content secret guard — journal 15:52
+  and Plan 00252 Task 4.2.)
 
 ## Success Criteria
 
-- [ ] Every Phase 1 and Phase 2 task is fixed with a test or answered with a
+- [x] Every Phase 1 and Phase 2 task is fixed with a test or answered with a
   recorded reason.
-- [ ] `release-slate-check` reports a clean slate with no plan carrying a
-  known defect.
-- [ ] All QA checks passing.
-- [ ] Every release-bound consequence is in the pending-release holding area:
-  `UNRELEASED/release-notes/` callouts for each user-visible fix.
+- [x] `release-slate-check` reports a clean slate with no plan carrying a
+  known defect. (No live plan carries a known defect: every ledger item is
+  fixed or ruled out. The check's verdict itself stays `a human decides`
+  while Plans 00135 and 00330 are mid-work and Plan 00242 is high priority
+  and not started, which is the `accept-wip` decision the release owner
+  makes at `/release`.)
+- [x] All QA checks passing (26/26).
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/` callouts 13 to 26 for each user-visible fix.
 
 ## Delivery & Milestones
 
@@ -165,3 +172,8 @@ while the detectors silently do not run.
      JOURNAL/00362-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Plan filed from the client report; two headline findings verified.
+- Phase 1 delivered at `26e2feda`, `473707c6`, `794854cc`, `3d901585`,
+  `44430c99` and `d97d609d`; Phase 2 at `56d43dee`, `adb82013`, `772ef675`,
+  `144d8dbb`, `bbd213f6`, `b1436863`, `80417d4b` and `406cbeef`; QA fallout
+  repaired and the acceptance fixture made faithful (`830b8b9b`); full QA
+  26/26 at the archiving commit.

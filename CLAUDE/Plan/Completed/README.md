@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00159: Status Writers Thread-Safe Tmp Naming](00159-status-writers-thread-safe-tmp-naming/PLAN.md) - Complete at `144d8dbb` + the archiving commit (all nine pid-keyed atomic temp names replaced by `utils/temp_names.unique_temp_path`, pid + thread ident + random token, with a concurrency test and a grep guard; the supervisor `stdin_fd` narrowing was found already fixed)
+
 - [00333: no writes outside project root](00333-no-writes-outside-project-root/PLAN.md) - Complete at `bfe6e61a`…`75572df4` + the archiving commit (every path guard treated a failed absolute-to-relative conversion as allow, so `/tmp/notes.md` was silently permitted while `/workspace/notes.md` was denied; adds a deny-by-default containment guard over the Write/Edit and Bash surfaces, `untracked/scratch/` as the sanctioned location, and migrates the acceptance-test corpus off `/tmp`)
 
 - [00332: docs qa vendor truth per project](00332-docs-qa-vendor-truth-per-project/PLAN.md) - Complete at `116207c7` + the archiving commit (a monorepo sub-project's `layout.vendor_dirs` never reached docs QA, which was handed one flat set from the ROOT block; the vendored-path predicate is now resolved per-path against the owning project, longest root winning)
