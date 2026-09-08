@@ -1,6 +1,6 @@
 # Plan 00250: CI must actually run the acceptance gates it calls blocking
 
-**Status**: In Progress
+**Status**: In Progress — every success criterion is met and re-verified against green CI run `34215559978`; the plan stays open ONLY for Task 2.4e, a flake that has not recurred (absence is not a diagnosis)
 **Created**: 2026-08-17
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -268,10 +268,18 @@ chose this for `uv`, and the argument is identical.
 
 ## Success Criteria
 
-- [ ] The 16 tests report PASSED in CI on all three interpreters, not skipped
-- [ ] A silent skip of a declared-blocking gate fails the run
-- [ ] The blocking set has one source of truth
-- [ ] Local `llm_qa.py all` still passes
+- [x] The 16 tests report PASSED in CI on all three interpreters, not skipped —
+  re-confirmed on run `34215559978`, which is green and **identical** across
+  3.11/3.12/3.13: `19967 passed, 2 skipped`. Both skips are named and unrelated
+  (`test_config_migrations_integration.py` — no config-changes manifest staged
+  this cycle; `test_config_key_consistency.py` — a design test). Zero skips
+  among the declared-blocking set.
+- [x] A silent skip of a declared-blocking gate fails the run — Task 3.1,
+  proven end-to-end by a nested pytest run.
+- [x] The blocking set has one source of truth — Task 3.2; the guard READS the
+  set off Step 12.0's command line, and parsing raises rather than quietly
+  finding nothing.
+- [x] Local `llm_qa.py all` still passes — 26/26.
 
 ## Risks & Mitigations
 

@@ -4,9 +4,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00356: secret guard bracket glob false positive](00356-secret-guard-bracket-glob-false-positive/PLAN.md) - In Progress (the reported defect is FIXED and shipped: a bracket expression at a token's edge was read as an open wildcard, so an ordinary jq array subscript was denied as a vault-password reference; finite classes are now expanded to the concrete spellings they denote, and the deny message names the matched token. Stays open for one follow-up found while working — `_expand_glob_token` lets a `ValueError` escape its `try` because `Path.glob` is a generator, crashing a security handler on a `***` token)
+- [00356: secret guard bracket glob false positive](00356-secret-guard-bracket-glob-false-positive/PLAN.md) - In Progress; the reported defect is fixed and shipped, and the plan stays open for one unrelated fail-open found while working on it (a bracket expression at a token's edge was read as an open wildcard, so an ordinary jq array subscript was denied)
 
-- [00355: supervisor announces every keystroke it sends](00355-supervisor-announces-every-keystroke-it-sends/PLAN.md) - Not Started (the ccy supervisor arms its status-line audit banner for `/compact`, `/effort` and `/model` only, so the ESC it injects to flush a stalled compaction — 122 of them in this session's log — lands with no notice at all and reads as a random keypress)
+- [00355: supervisor announces every keystroke it sends](00355-supervisor-announces-every-keystroke-it-sends/PLAN.md) - In Progress, shipped and CI-green; only a live observation remains (the ESC injected to flush a stalled compaction — 122 of them in one session — now raises the banner on the tick that sends it, and repeats collapse to a tally like `esc (20), compact (15)`)
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
