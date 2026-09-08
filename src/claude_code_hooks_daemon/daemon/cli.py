@@ -2693,13 +2693,12 @@ def _build_handler_config_mapping(config: Config) -> dict[str, dict[str, Any]]:
     group, which is exactly what made ``handlers.status_line.<name>.enabled:
     false`` inert.
 
-    Caveat (not a total guarantee): the coverage is only as complete as
-    ``HandlersConfig``'s own fields, which today declare a subset of all wired
-    events (the ones with built-in handler directories). An event that gains
-    built-in handlers without a matching ``HandlersConfig`` field would still
-    be dropped here — ``test_cli_handler_config_mapping`` guards that case by
-    asserting every on-disk handler directory appears in this mapping. See
-    Plan 00172 for closing the model-vs-wired-events gap wholesale.
+    ``HandlersConfig`` declares one field per WIRED event and refuses to
+    import otherwise (``_check_wired_event_field_coverage``), so iterating its
+    fields IS iterating the event registry: config under any wired event
+    reaches the registry whether or not a built-in handler directory exists
+    for it yet. ``test_cli_handler_config_mapping`` pins this per wired event
+    (Plan 00362 D2).
 
     Each event's values are ``HandlerConfig`` instances (coerced by the model);
     they are dumped to plain dicts because the registry reads them with

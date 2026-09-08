@@ -24,6 +24,11 @@ from claude_code_hooks_daemon.config.models import (
     VerdictLogConfig,
 )
 from claude_code_hooks_daemon.constants import EventID
+from claude_code_hooks_daemon.constants.events import (
+    EventIDMeta,
+    all_event_metas,
+    wired_event_metas,
+)
 
 
 class TestLogLevel:
@@ -174,6 +179,39 @@ class TestHandlersConfig:
         assert config.subagent_stop == {}
         # Finding #30: status_line must be a declared event-type field (DRY-SSoT).
         assert config.status_line == {}
+
+    @pytest.mark.parametrize("meta", wired_event_metas(), ids=lambda m: m.config_key)
+    def test_every_wired_event_has_a_declared_field(self, meta: EventIDMeta) -> None:
+        """Every wired event is a DECLARED HandlersConfig field (Plan 00362 D2).
+
+        ``_build_handler_config_mapping`` iterates ``model_fields``; an event
+        that is only an ``extra`` is invisible to it, so config under that
+        event is silently dropped -- the ``status_line`` failure mode. This
+        parametrises over the registry so a newly-wired event fails here the
+        moment it is wired, not when a user's ``enabled: false`` goes inert.
+        """
+        assert meta.config_key in HandlersConfig.model_fields
+
+    def test_declared_fields_are_exactly_the_wired_events(self) -> None:
+        """No field is an unwired straggler: fields == wired registry, in order."""
+        assert list(HandlersConfig.model_fields) == [m.config_key for m in wired_event_metas()]
+
+    @pytest.mark.parametrize("meta", wired_event_metas(), ids=lambda m: m.config_key)
+    def test_every_wired_event_coerces_handler_configs(self, meta: EventIDMeta) -> None:
+        """Handler dicts under ANY wired event are coerced to HandlerConfig.
+
+        The ``field_validator("*")`` only runs for declared fields, so an
+        undeclared event's values would stay raw dicts -- proving the field
+        exists AND takes part in coercion.
+        """
+        config = HandlersConfig.model_validate(
+            {meta.config_key: {"some_handler": {"enabled": False, "priority": 7}}}
+        )
+        section = getattr(config, meta.config_key)
+        handler_config = section["some_handler"]
+        assert isinstance(handler_config, HandlerConfig)
+        assert handler_config.enabled is False
+        assert handler_config.priority == 7
 
     def test_status_line_field_accepts_handler_configs(self) -> None:
         """status_line event type coerces handler configs like other event types."""
@@ -398,25 +436,28 @@ class TestPluginConfig:
         assert config.handlers == ["Handler1", "Handler2"]
         assert config.enabled is False
 
-    def test_event_type_valid_values(self) -> None:
-        """event_type accepts all valid event type values."""
-        valid_event_types = [
-            "pre_tool_use",
-            "post_tool_use",
-            "session_start",
-            "session_end",
-            "pre_compact",
-            "user_prompt_submit",
-            "permission_request",
-            "notification",
-            "stop",
-            "subagent_stop",
-            "status_line",
-        ]
+    @pytest.mark.parametrize("meta", wired_event_metas(), ids=lambda m: m.config_key)
+    def test_event_type_accepts_every_wired_event(self, meta: EventIDMeta) -> None:
+        """A plugin may target ANY wired event (Plan 00172 Finding 2 / Plan 00362 D9).
 
-        for event_type in valid_event_types:
-            config = PluginConfig(path="path", event_type=event_type)
-            assert config.event_type == event_type
+        Cross-checked against ``wired_event_metas()`` rather than a mirrored
+        list, so a newly-wired event that the plugin surface silently rejects
+        fails here instead of at a user's config-validate.
+        """
+        config = PluginConfig.model_validate({"path": "path", "event_type": meta.config_key})
+        assert config.event_type == meta.config_key
+
+    @pytest.mark.parametrize(
+        "config_key",
+        [m.config_key for m in all_event_metas() if not m.wired],
+    )
+    def test_event_type_rejects_catalogued_but_unwired_event(self, config_key: str) -> None:
+        """A catalogued event the daemon does not wire yet is not a plugin target.
+
+        Accepting it would register a handler nothing ever dispatches to.
+        """
+        with pytest.raises(ValidationError, match="event_type"):
+            PluginConfig.model_validate({"path": "path", "event_type": config_key})
 
     def test_event_type_invalid_values_rejected(self) -> None:
         """event_type rejects invalid values."""
