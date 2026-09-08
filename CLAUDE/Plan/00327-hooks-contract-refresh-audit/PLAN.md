@@ -1,6 +1,6 @@
 # Plan 00327: hooks contract refresh audit
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-03
 **Owner**: joseph
 **Priority**: Medium
@@ -60,27 +60,32 @@ a tail-end task there.
 
 ### Phase 1: Establish the delta
 
-- [ ] ⬜ **Task 1.1**: Capture the raw markdown and confirm the hash differs
-  from `META.json.docs_sha256`. `remote-docs add --verbatim` (Plan 00326
-  D20) or the documented `curl` both give the response body unchanged. Keep
-  the capture untracked — the procedure deliberately does not vendor it.
-- [ ] ⬜ **Task 1.2**: Diff the new raw text against the last-audited state
-  and write the list of CHANGED sections to a supporting document here, so
-  the audit has a bounded worklist rather than 317 KB to re-read.
+- [x] ✅ **Task 1.1** (`9beec2f9`, under Plan 00362 Task 2.11): Capture the
+  raw markdown and confirm the hash differs from `META.json.docs_sha256`.
+  `remote-docs add --verbatim` (Plan 00326 D20) or the documented `curl`
+  both give the response body unchanged. Keep the capture untracked — the
+  procedure deliberately does not vendor it.
+- [x] ✅ **Task 1.2** (`9beec2f9`): Diff the new raw text against the
+  last-audited state and write the list of CHANGED sections to a supporting
+  document here, so the audit has a bounded worklist rather than 317 KB to
+  re-read: [DELTA-2.1.252-to-2.1.263.md](DELTA-2.1.252-to-2.1.263.md).
 
 ### Phase 2: The verified extraction
 
-- [ ] ⬜ **Task 2.1**: For each changed section, update the affected
-  `<Event>.json`, citing the verbatim supporting sentence in the audit
-  document. Sections whose meaning did not change are recorded as
+- [x] ✅ **Task 2.1** (`9beec2f9`): For each changed section, update the
+  affected `<Event>.json`, citing the verbatim supporting sentence in the
+  audit document. Sections whose meaning did not change are recorded as
   checked-and-unchanged, so a later reader can tell "verified identical"
-  from "not looked at".
-- [ ] ⬜ **Task 2.2**: A newly documented event gets a new `<Event>.json`;
-  the checker treats a documented event missing from the daemon's catalogue
-  as a finding, which is the intended pressure.
-- [ ] ⬜ **Task 2.3**: Re-run the contract QA checks and reconcile every
-  finding — including stale `ALLOWLIST.yaml` / `INPUT-ALLOWLIST.yaml`
-  entries, which fail QA when they no longer match a live finding.
+  from "not looked at". Outcome: four prose hunks, no claim affected; all 33
+  files recorded UNCHANGED in the delta document.
+- [x] ✅ **Task 2.2** (`9beec2f9`): A newly documented event gets a new
+  `<Event>.json`; the checker treats a documented event missing from the
+  daemon's catalogue as a finding, which is the intended pressure. Outcome:
+  the refreshed text documents the same 33 events; nothing to add.
+- [x] ✅ **Task 2.3** (`9beec2f9`): Re-run the contract QA checks and
+  reconcile every finding — including stale `ALLOWLIST.yaml` /
+  `INPUT-ALLOWLIST.yaml` entries, which fail QA when they no longer match a
+  live finding. Outcome: both checks 0 violations, no stale entry.
 
 ### Phase 3: Close the loop
 
@@ -112,6 +117,11 @@ a tail-end task there.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00327-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Milestone A — Phase 1: the delta is known and bounded.
-- Milestone B — Phase 2: the contract matches upstream, verified claim by claim.
+- Milestone A — Phase 1: the delta is known and bounded — `9beec2f9`
+  (four prose hunks between the 2.1.252 and 2.1.263 texts, no claim among
+  them).
+- Milestone B — Phase 2: the contract matches upstream, verified claim by
+  claim — `9beec2f9` (33 UNCHANGED; `META.json` records 2.1.263, which is
+  the file half of Task 3.1 — the fresh-session silence is still to be
+  observed).
 - Milestone C — Phase 3: the advisory is clear, and the next refresh starts from a command.
