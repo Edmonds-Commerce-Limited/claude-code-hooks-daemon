@@ -100,3 +100,27 @@ def test_degrades_gracefully_when_init_sh_missing(debug_info_module, tmp_path: P
     assert "daemon-somehost.sock" in report, "runtime file names must be dumped"
     assert "venv-py311-abc" in report, "venv directory names must be dumped"
     assert "Process State" in report, "degraded report must include process state"
+
+
+def test_blank_python_cmd_is_reported_not_executed(debug_info_module, tmp_path: Path) -> None:
+    """Plan 00353: a blank PYTHON_CMD must be rejected, not handed to subprocess.
+
+    The interpreter guard asked ``Path(python_cmd).exists()``, but ``Path("")``
+    is ``PosixPath('.')`` — the current directory, which always exists. So a
+    blank ``PYTHON_CMD`` sailed past the guard and every section that shells out
+    to the interpreter reported ``[Errno 13] Permission denied: ''`` instead of
+    the real problem.
+    """
+    project = _make_client_project(tmp_path)
+    # An init.sh that resolves no interpreter: the five echoed keys are all
+    # present (so path detection "succeeds") but PYTHON_CMD is empty.
+    (project / ".claude" / "init.sh").write_text('#!/usr/bin/env bash\nPYTHON_CMD=""\n')
+
+    gen = debug_info_module.DebugInfoGenerator(
+        output_file=str(tmp_path / "out.md"), project_root=project
+    )
+    gen.generate()
+    report = "\n".join(gen.output_lines)
+
+    assert "Permission denied" not in report, "a blank interpreter must never be executed"
+    assert "Python venv not found" in report, "the report must name the real problem"

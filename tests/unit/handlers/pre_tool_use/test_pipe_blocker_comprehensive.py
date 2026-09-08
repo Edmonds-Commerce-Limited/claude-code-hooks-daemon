@@ -1,8 +1,26 @@
 """Comprehensive tests for redesigned PipeBlockerHandler (three-tier logic)."""
 
+import inspect
+from typing import Any
+
 import pytest
 
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
+
+
+def _configured(**options: Any) -> PipeBlockerHandler:
+    """Build a handler with options applied the way the REGISTRY applies them.
+
+    The registry constructs handlers bare and then assigns each option to
+    ``self._<option_key>`` holding the raw parsed value. Constructing with an
+    ``options=`` argument instead is a path production never takes, and doing so
+    is what let Plan 00353's defect ship: the constructor compiled the patterns
+    that injection then overwrote with strings.
+    """
+    handler = PipeBlockerHandler()
+    for key, value in options.items():
+        setattr(handler, f"_{key}", value)
+    return handler
 
 
 class TestPipeBlockerHandlerInit:
@@ -46,13 +64,23 @@ class TestPipeBlockerHandlerInit:
         assert hasattr(handler, "_extra_blacklist")
         assert handler._extra_blacklist == []
 
-    def test_init_extra_whitelist_from_options(self) -> None:
-        handler = PipeBlockerHandler(options={"extra_whitelist": [r"^custom-cmd\b"]})
-        assert len(handler._extra_whitelist) == 1
+    def test_init_takes_no_arguments(self) -> None:
+        """The constructor must accept nothing: options arrive by injection only."""
+        parameters = list(inspect.signature(PipeBlockerHandler.__init__).parameters)
 
-    def test_init_extra_blacklist_from_options(self) -> None:
-        handler = PipeBlockerHandler(options={"extra_blacklist": [r"^my_tool\b"]})
+        assert parameters == ["self"]
+
+    def test_configured_patterns_stay_raw_strings(self) -> None:
+        """Injection assigns raw YAML strings, so that is the shape the handler holds.
+
+        Pre-compiling in __init__ put a `list[re.Pattern]` at the address
+        injection overwrites; the consumer then called `.search` on a `str`.
+        """
+        handler = _configured(extra_whitelist=[r"^custom-cmd\b"], extra_blacklist=[r"^my_tool\b"])
+
+        assert handler._extra_whitelist == [r"^custom-cmd\b"]
         assert handler._extra_blacklist == [r"^my_tool\b"]
+        assert handler._matches_whitelist("custom-cmd --flag") is True
 
 
 # ===================================================================================
@@ -453,7 +481,7 @@ class TestPipeBlockerExtraOptions:
     """Tests for extra_whitelist and extra_blacklist options."""
 
     def test_extra_whitelist_allows_custom_command(self) -> None:
-        handler = PipeBlockerHandler(options={"extra_whitelist": [r"^custom-cmd\b"]})
+        handler = _configured(extra_whitelist=[r"^custom-cmd\b"])
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "custom-cmd --flag | tail -n 10"},
@@ -462,7 +490,7 @@ class TestPipeBlockerExtraOptions:
 
     def test_extra_whitelist_does_not_break_universal_whitelist(self) -> None:
         """Adding extra_whitelist does not remove the universal whitelist."""
-        handler = PipeBlockerHandler(options={"extra_whitelist": [r"^custom-cmd\b"]})
+        handler = _configured(extra_whitelist=[r"^custom-cmd\b"])
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "grep pattern file | tail -n 10"},
@@ -471,7 +499,7 @@ class TestPipeBlockerExtraOptions:
 
     def test_extra_blacklist_blocks_custom_command(self) -> None:
         """extra_blacklist adds to the blacklist for handle() differentiation."""
-        handler = PipeBlockerHandler(options={"extra_blacklist": [r"^my_tool\b"]})
+        handler = _configured(extra_blacklist=[r"^my_tool\b"])
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "my_tool --run | tail -n 10"},
@@ -483,7 +511,7 @@ class TestPipeBlockerExtraOptions:
         assert "information" in result.reason.lower()
 
     def test_extra_whitelist_multi_word_command(self) -> None:
-        handler = PipeBlockerHandler(options={"extra_whitelist": [r"^git\s+log\b"]})
+        handler = _configured(extra_whitelist=[r"^git\s+log\b"])
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "git log --oneline | tail -n 10"},
@@ -976,7 +1004,7 @@ class TestPipeBlockerInternalHelpers:
         assert handler._matches_blacklist("find . -name *.py") is False
 
     def test_matches_blacklist_extra_blacklist(self) -> None:
-        handler = PipeBlockerHandler(options={"extra_blacklist": [r"^my_tool\b"]})
+        handler = _configured(extra_blacklist=[r"^my_tool\b"])
         assert handler._matches_blacklist("my_tool --run") is True
 
 

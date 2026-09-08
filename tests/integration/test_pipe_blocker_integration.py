@@ -144,10 +144,19 @@ class TestPipeBlockerIntegration:
         assert result.result.decision == "allow"
 
     def test_extra_whitelist_allows_custom_command(self) -> None:
-        """Test that extra_whitelist config option allows custom commands through router."""
+        """Test that extra_whitelist config option allows custom commands through router.
+
+        The option is applied the way the registry applies it -- assigning the
+        RAW pattern strings to ``_extra_whitelist`` after construction. This
+        test previously passed the option to the constructor, a path production
+        never takes, and so passed throughout the life of Plan 00353's defect.
+        The registry-driven end of this is
+        ``tests/unit/handlers/test_registry_option_injection.py``.
+        """
         router = EventRouter()
         # Configure extra_whitelist to allow 'my_custom_script'
-        handler = PipeBlockerHandler(options={"extra_whitelist": [r"^my_custom_script\b"]})
+        handler = PipeBlockerHandler()
+        handler._extra_whitelist = [r"^my_custom_script\b"]
         router.register(EventType.PRE_TOOL_USE, handler)
 
         hook_input = {
