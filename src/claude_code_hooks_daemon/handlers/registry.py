@@ -528,6 +528,12 @@ class HandlerRegistry:
                                         vendor_scopes=_vendor_scopes_for_policy(
                                             project_registry, project_layout
                                         ),
+                                        # Same argument as the vendor truth
+                                        # (Plan 00362 Task 2.9): docs QA's
+                                        # scope judgement reads the policy,
+                                        # so `_project_exclude_paths` on the
+                                        # instance alone could never reach it.
+                                        exclude_paths=project_exclude_paths,
                                     ),
                                 )
 

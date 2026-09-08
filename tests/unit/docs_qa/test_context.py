@@ -309,3 +309,32 @@ class TestLayoutThreading:
             file_exists_before=False,
         )
         assert context.layout is None
+
+
+class TestProjectExcludePaths:
+    """Plan 00362 Task 2.9: ``policy.exclude_paths`` (the project-wide
+    ``daemon.exclude_paths``) is honoured by the SWEEP walk and the STAGED view."""
+
+    def test_sweep_markdown_paths_drop_excluded_files(self, tmp_path: Path) -> None:
+        (tmp_path / "src" / "fixtures").mkdir(parents=True)
+        (tmp_path / "src" / "NOTES.md").write_text("# notes\n")
+        (tmp_path / "src" / "fixtures" / "BAD.md").write_text("# bad\n")
+        corpus = DocCorpus(project_root=tmp_path, documents={})
+        policy = DocumentationPolicy(exclude_paths=("src/fixtures/**",))
+
+        context = sweep_context(project_root=tmp_path, policy=policy, corpus=corpus)
+
+        assert context.markdown_paths == ("src/NOTES.md",)
+
+    def test_staged_documents_drop_excluded_files(self, tmp_path: Path) -> None:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE" / "fixtures").mkdir(parents=True)
+        (root / "CLAUDE" / "A.md").write_text("# a\n")
+        (root / "CLAUDE" / "fixtures" / "B.md").write_text("# b\n")
+        _git(root, "add", "-A")
+        policy = DocumentationPolicy(exclude_paths=("CLAUDE/fixtures/**",))
+
+        context = staged_context(project_root=root, policy=policy)
+
+        assert context.staged_documents == {"CLAUDE/A.md": "# a\n"}

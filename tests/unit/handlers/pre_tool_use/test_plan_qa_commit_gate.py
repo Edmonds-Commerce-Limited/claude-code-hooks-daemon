@@ -338,3 +338,20 @@ class TestBlockModeDisclosureLadder:
 
         assert "cross-file plan" in first.reason
         assert "cross-file plan" in second.reason
+
+
+class TestProjectExcludePaths:
+    """Plan 00362 Task 2.9: a plan under ``daemon.exclude_paths`` is not gated."""
+
+    def test_terminal_flip_in_excluded_plan_is_silent(self, repo: Path) -> None:
+        plan_md = repo / _PLAN_DIR_REL / "00001-first/PLAN.md"
+        plan_md.write_text("# Plan 00001: first\n\n**Status**: Complete\n")
+        _git(repo, "add", "-A")
+        handler = _handler("block")
+        handler._project_exclude_paths = ["CLAUDE/Plan/00001-first/**"]
+
+        with _patched_root(repo):
+            result = handler.handle(_bash_input('git commit -m "Plan 00001: done"'))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []

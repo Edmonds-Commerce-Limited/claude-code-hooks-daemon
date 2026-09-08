@@ -485,3 +485,25 @@ class TestCheckStagedHelpText:
         help_text = capsys.readouterr().out
         assert "--check-staged" in help_text
         assert "Not implemented" not in help_text
+
+
+class TestProjectExcludePaths:
+    """Plan 00362 Task 2.9: the CLI reads ``daemon.exclude_paths`` from config."""
+
+    def test_sweep_skips_an_excluded_tree(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        (root / "CLAUDE" / "fixtures").mkdir()
+        (root / "CLAUDE" / "fixtures" / "Bad.md").write_text("[dead](Nope.md)\n")
+        assert cmd_docs_qa(_args(root, sweep=True)) == 1
+
+        (root / ".claude" / "hooks-daemon.yaml").write_text(
+            "version: '2.0'\ndaemon:\n  exclude_paths:\n    - 'CLAUDE/fixtures/**'\n"
+        )
+        assert cmd_docs_qa(_args(root, sweep=True)) == 0
+
+    def test_lint_refuses_an_excluded_file(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        (root / ".claude" / "hooks-daemon.yaml").write_text(
+            "version: '2.0'\ndaemon:\n  exclude_paths:\n    - 'CLAUDE/Bar.md'\n"
+        )
+        assert cmd_docs_qa(_args(root, lint=root / "CLAUDE" / "Bar.md")) == 2

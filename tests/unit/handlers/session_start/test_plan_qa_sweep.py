@@ -144,3 +144,30 @@ class TestGuidance:
 
     def test_default_enabled(self) -> None:
         assert PlanQaSweepHandler().get_default_enabled() is True
+
+    def test_get_claude_md_names_the_exclusion(self) -> None:
+        content = PlanQaSweepHandler().get_claude_md()
+        assert content is not None
+        assert "daemon.exclude_paths" in content
+
+
+class TestProjectExcludePaths:
+    """Plan 00362 Task 2.9: a plan folder under ``daemon.exclude_paths`` is not swept."""
+
+    def test_drift_in_an_excluded_folder_is_silent(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        rogue = root / _PLAN_DIR_REL / "00002-rogue"
+        rogue.mkdir()
+        (rogue / "PLAN.md").write_text("# Plan 00002: rogue\n\n**Status**: Complete\n")
+        handler = _handler()
+        handler._project_exclude_paths = ["CLAUDE/Plan/00002-rogue/**"]
+
+        target = (
+            "claude_code_hooks_daemon.handlers.session_start.plan_qa_sweep."
+            "ProjectContext.project_root"
+        )
+        with patch(target, return_value=root):
+            result = handler.handle(_new_session_input())
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []

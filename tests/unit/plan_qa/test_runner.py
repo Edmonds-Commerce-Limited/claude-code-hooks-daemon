@@ -186,3 +186,56 @@ class TestRegistryCatalogue:
                 assert spec.sins == (), f"{spec.check_id} should declare no sins"
                 continue
             assert spec.sins, f"{spec.check_id} declares no sins"
+
+
+_EXCLUDING = ("CLAUDE/Plan/00001-x/**",)
+
+
+def _excluding_context(file_path: Path | None = None) -> CheckContext:
+    return CheckContext(
+        project_root=Path("/tmp/example"),
+        plan_dir_rel="CLAUDE/Plan",
+        exclude_paths=_EXCLUDING,
+        file_path=file_path,
+        file_content=None if file_path is None else "x",
+    )
+
+
+class TestExcludePaths:
+    """Plan 00362 Task 2.9: findings about an excluded path never leave the runner."""
+
+    def test_finding_on_an_excluded_relative_path_is_dropped(self) -> None:
+        kept = Finding("k", Level.BLOCK, "m", "r", path="CLAUDE/Plan/00002-y/PLAN.md")
+        dropped = _finding("d")  # path CLAUDE/Plan/00001-x/PLAN.md
+        registry = (_spec("c", Stage.SWEEP, [kept, dropped]),)
+        assert run_stage(Stage.SWEEP, _excluding_context(), registry=registry) == [kept]
+
+    def test_finding_keyed_by_plan_folder_name_is_dropped(self) -> None:
+        # Tree checks (row-folder-bijection, location-status-coherence) key
+        # their findings on the bare folder name, not a project-relative path.
+        dropped = Finding("d", Level.ADVISE, "m", "r", path="00001-x")
+        kept = Finding("k", Level.ADVISE, "m", "r", path="00002-y")
+        registry = (_spec("c", Stage.SWEEP, [dropped, kept]),)
+        assert run_stage(Stage.SWEEP, _excluding_context(), registry=registry) == [kept]
+
+    def test_finding_without_a_path_is_kept(self) -> None:
+        pathless = Finding("p", Level.ADVISE, "m", "r", path=None)
+        registry = (_spec("c", Stage.SWEEP, [pathless]),)
+        assert run_stage(Stage.SWEEP, _excluding_context(), registry=registry) == [pathless]
+
+    def test_edit_of_an_excluded_file_runs_no_check(self) -> None:
+        calls: list[str] = []
+
+        def run(context: CheckContext) -> list[Finding]:
+            calls.append("ran")
+            return [_finding("d")]
+
+        registry = (CheckSpec("c", Stage.EDIT, Level.BLOCK, ("A1",), run),)
+        context = _excluding_context(Path("/tmp/example/CLAUDE/Plan/00001-x/PLAN.md"))
+        assert run_stage(Stage.EDIT, context, registry=registry) == []
+        assert calls == []
+
+    def test_nothing_configured_changes_nothing(self) -> None:
+        finding = _finding("d")
+        registry = (_spec("c", Stage.SWEEP, [finding]),)
+        assert run_stage(Stage.SWEEP, _context(), registry=registry) == [finding]

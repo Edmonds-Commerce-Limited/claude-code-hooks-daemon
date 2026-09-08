@@ -80,6 +80,15 @@ class DocumentationPolicy:
     vendor_scopes: tuple[VendorScope, ...] = (
         VendorScope(root="", vendor_dirs=CORE_VENDORED_BUILD_DIR_NAMES, vendor_exceptions=()),
     )
+    #: The project-wide ``daemon.exclude_paths`` globs (Plan 00362 Task 2.9),
+    #: in the ``utils.path_exclusion`` dialect every content blocker honours.
+    #: Like ``vendor_scopes`` it has no ``documentation:`` home and travels
+    #: WITH the policy for the same reason: docs QA's scope judgement reads
+    #: the policy, so a value injected only onto the handler instance could
+    #: never reach it. A path matching one of these is invisible to every
+    #: docs QA surface -- a fixture tree that must keep producing findings is
+    #: declared by NOT listing it here, never by omission elsewhere.
+    exclude_paths: tuple[str, ...] = ()
 
 
 class TreesConfigProtocol(Protocol):
@@ -150,11 +159,14 @@ def policy_from_config(
     config: DocumentationConfigProtocol,
     *,
     vendor_scopes: Sequence[VendorScope] | None = None,
+    exclude_paths: Sequence[str] | None = None,
 ) -> DocumentationPolicy:
     """Build a plain-values :class:`DocumentationPolicy` from the typed config.
 
     Args:
         config: The ``documentation:`` block, structurally typed.
+        exclude_paths: The project-wide ``daemon.exclude_paths`` globs, as
+            plain strings. ``None`` (or empty) excludes nothing.
         vendor_scopes: One :class:`~utils.vendor_paths.VendorScope` per
             declared project, ordinarily built from
             ``ProjectRegistry.iter_layouts()``. Each scope's ``vendor_dirs``
@@ -174,6 +186,7 @@ def policy_from_config(
         vendor_scopes=(
             DocumentationPolicy.vendor_scopes if vendor_scopes is None else tuple(vendor_scopes)
         ),
+        exclude_paths=() if exclude_paths is None else tuple(exclude_paths),
         trees=DocumentationTreesPolicy(agent=config.trees.agent, human=config.trees.human),
         qa=DocumentationQaPolicy(
             edit_mode=qa.edit_mode,

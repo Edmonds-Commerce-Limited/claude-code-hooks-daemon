@@ -126,3 +126,23 @@ class TestClaudeMdAndAcceptanceTests:
     def test_get_acceptance_tests_returns_list(self) -> None:
         tests = DocsQaSweepHandler().get_acceptance_tests()
         assert len(tests) >= 1
+
+
+class TestProjectExcludePaths:
+    """Plan 00362 Task 2.9: drift inside ``daemon.exclude_paths`` is not swept."""
+
+    def test_drift_in_an_excluded_file_is_silent(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE" / "fixtures").mkdir(parents=True)
+        (tmp_path / "CLAUDE" / "fixtures" / "X.md").write_text("See [missing](Nope.md).\n")
+        untracked = tmp_path / "untracked"
+        policy = DocumentationPolicy(enabled=True, exclude_paths=("CLAUDE/fixtures/**",))
+        patches = _patched_context(tmp_path, untracked)
+        with patches[0], patches[1]:
+            result = _handler(policy).handle({"source": "startup"})
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_get_claude_md_names_the_exclusion(self) -> None:
+        content = DocsQaSweepHandler().get_claude_md()
+        assert content is not None
+        assert "daemon.exclude_paths" in content

@@ -164,6 +164,13 @@ class CheckContext:
     # consumption refactors are later plan tasks (C1-C8).
     layout: "ProjectLayout | None" = None
 
+    # The project-wide `daemon.exclude_paths` globs (Plan 00362 Task 2.9), in
+    # the `utils.path_exclusion` dialect. Consumed ONLY by the runner: a
+    # finding about an excluded path is dropped, and an EDIT of an excluded
+    # file runs no check. `tree`/`readme` stay complete on purpose -- see
+    # `plan_qa.context._normalised_exclude_paths`.
+    exclude_paths: tuple[str, ...] = ()
+
     @property
     def plan_dir(self) -> Path:
         """Absolute path of the configured plan directory."""

@@ -10,7 +10,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
-- [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
+- [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - In Progress (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
 
 - [00329: post upgrade truth changes report bloat](00329-post-upgrade-truth-changes-report-bloat/PLAN.md) - Not Started (the upgrade flow's truth-changes reconciliation hands the agent up to 89KB / 74 entries with no bound and no supersession collapsing, so superseded truths are replayed and the step is skimmed rather than performed)
 

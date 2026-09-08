@@ -147,3 +147,18 @@ class TestPlainDataclasses:
         policy = DocumentationQaPolicy()
         with pytest.raises(FrozenInstanceError):
             policy.edit_mode = "block"
+
+
+class TestExcludePaths:
+    """Plan 00362 Task 2.9: the project-wide ``daemon.exclude_paths`` travels
+    with the policy, the same way the vendor truth does."""
+
+    def test_defaults_to_nothing_excluded(self) -> None:
+        assert DocumentationPolicy().exclude_paths == ()
+        assert policy_from_config(_FakeDocumentationConfig()).exclude_paths == ()
+
+    def test_supplied_patterns_are_copied_as_a_tuple(self) -> None:
+        policy = policy_from_config(
+            _FakeDocumentationConfig(), exclude_paths=["fixtures/**", "docs/bad/*.md"]
+        )
+        assert policy.exclude_paths == ("fixtures/**", "docs/bad/*.md")

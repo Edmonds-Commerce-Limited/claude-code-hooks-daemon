@@ -524,3 +524,18 @@ class TestBlockModeDisclosureLadder:
             second = _handler().handle(hook_input)
         assert "edit-stage rules" in first.reason
         assert "edit-stage rules" in second.reason
+
+
+class TestProjectExcludePaths:
+    """Plan 00362 Task 2.9: a plan file under ``daemon.exclude_paths`` is not linted."""
+
+    def test_invalid_plan_in_excluded_folder_is_allowed(self, tmp_path: Path) -> None:
+        target = tmp_path / _PLAN_DIR_REL / "fixtures" / "00042-bad" / "PLAN.md"
+        target.parent.mkdir(parents=True)
+        handler = _handler()
+        handler._project_exclude_paths = ["CLAUDE/Plan/fixtures/**"]
+        hook_input = _write_input(target, _NO_STATUS_PLAN)
+        with _patched_root(tmp_path):
+            assert not handler.matches(hook_input)
+            assert _handler().matches(hook_input)
+            assert _handler().handle(hook_input).decision == Decision.DENY

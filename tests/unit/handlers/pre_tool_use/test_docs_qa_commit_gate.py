@@ -285,3 +285,24 @@ class TestBlockModeDisclosureLadder:
 
         assert "STAGED tree" in first.reason
         assert "STAGED tree" in second.reason
+
+
+class TestProjectExcludePaths:
+    """Plan 00362 Task 2.9: a staged file under ``daemon.exclude_paths`` is not gated."""
+
+    def test_broken_link_in_excluded_file_is_silent(self, tmp_path: Path) -> None:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE" / "fixtures").mkdir(parents=True)
+        (root / "CLAUDE" / "fixtures" / "Foo.md").write_text("See [missing](Nope.md).\n")
+        _git(root, "add", "-A")
+        policy = DocumentationPolicy(
+            enabled=True,
+            qa=DocumentationQaPolicy(commit_gate_mode="block"),
+            exclude_paths=("CLAUDE/fixtures/**",),
+        )
+
+        with _patched_root(root):
+            result = _handler(policy).handle(_bash_input("git commit -m 'x'", cwd=str(root)))
+        assert result.decision == Decision.ALLOW
+        assert result.context == []

@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.plan_qa.report import format_advisory, format_bloc
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
 from claude_code_hooks_daemon.plan_qa.types import Finding, Level, Stage
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
+from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 # Single source of truth for the one rule this handler's DENY path enforces
@@ -120,6 +121,12 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
         file_path = hook_input.get(HookInputField.TOOL_INPUT, {}).get(_FIELD_FILE_PATH, "")
         if not file_path or f"/{plan_dir_rel}/" not in file_path:
             return False
+        # The project-wide `daemon.exclude_paths` (Plan 00362 Task 2.9), via
+        # the same matcher every content blocker uses.
+        if handler_excludes_path(
+            file_path, handler_patterns=None, project_patterns=self._project_exclude_paths
+        ):
+            return False
         return self._is_lintable_plan_file(file_path, policy)
 
     def _is_lintable_plan_file(self, file_path: str, policy: Any) -> bool:
@@ -198,6 +205,7 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
             file_exists_before=exists_before,
             file_content_before=content_before,
             today=date.today(),
+            exclude_paths=self._project_exclude_paths,
         )
         findings = run_stage(Stage.EDIT, context)
         if not findings:

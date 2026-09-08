@@ -30,6 +30,8 @@ Every path-based blocking handler accepts gitignore-style glob patterns that exe
 
 The handlers that honour it are deliberately not enumerated here — this list said "three" while six consumed the option, and it has since grown again. To see the current set, grep the source for `handler_excludes_path`, the single shared decision they all call.
 
+**The docs QA and plan QA surfaces honour the project-wide list too** (Plan 00362) — the six handlers (`docs_qa_edit`, `docs_qa_commit_gate`, `docs_qa_sweep`, `plan_qa_edit`, `plan_qa_commit_gate`, `plan_qa_sweep`) and both CLIs (`docs-qa`, `plan-qa`). They are not `handler_excludes_path` callers, so that grep will not list them: docs QA carries the globs on its policy (`DocumentationPolicy.exclude_paths`, alongside its own narrower `documentation.qa.scope_exclude_globs`) and plan QA on its check context, both through the same `utils/path_exclusion` matcher. A matching path is never linted, gated or swept. The consequence to plan for: a fixture tree that MUST keep producing documentation or plan findings is kept out of `daemon.exclude_paths` on purpose — it is declared by not being listed, never exempted by omission.
+
 Globs support `*` (within a segment), `?` (single char), and `**` (zero-or-more path segments). Examples: `**/fixtures/**`, `samples/**/*.py`, `tests/assets/**`.
 
 **Two levels, combined as a union:**
@@ -2002,7 +2004,7 @@ handlers:
 
 **Description:** Lints every Write/Edit of a `PLAN.md` under the plan directory in real time, running the plan QA edit-stage checks against the content the file *would* have after the tool call (for Edit, the old/new replacement is applied to the current file first). Single-file invariants only -- cross-file checks belong to `plan_qa_commit_gate` and `plan_qa_sweep`.
 
-**Fires when:** a Write or Edit targets a file named `PLAN.md` inside the configured plan directory (`plan_workflow.directory`, default `CLAUDE/Plan`), a journal day-file under a plan's `JOURNAL/`, or the plan-index `README.md` at the plan directory root.
+**Fires when:** a Write or Edit targets a file named `PLAN.md` inside the configured plan directory (`plan_workflow.directory`, default `CLAUDE/Plan`), a journal day-file under a plan's `JOURNAL/`, or the plan-index `README.md` at the plan directory root. A path matching the project-wide `daemon.exclude_paths` is never linted (see [Path Exclusion](#path-exclusion-exclude_paths)).
 
 **Enforcement mode:** honours `plan_workflow.qa.edit_mode` (`block` | `warn` | `off`, default `block`). In `block`, block-level findings on new material deny the tool call with the exact remediation; `warn` downgrades everything to advisory context; `off` disables the handler. Plans listed in `legacy_plan_allowlist` only ever advise.
 
@@ -2239,7 +2241,7 @@ handlers:
 
 **Description:** On a `git commit` Bash command, evaluates the *staged* tree against the cross-file plan QA invariants that a single-file edit hook cannot see -- index-at-birth, terminal-state atomicity, number collisions, row/folder bijection, statistics recount, counter sanity, and commit-message hygiene -- at exactly the moment the drift would otherwise become history.
 
-**Fires when:** a Bash command tokenises to a `git commit` (shlex-parsed, so quoted prose like `echo 'git commit'` never false-positives). Commits inside nested/vendor repos or foreign worktrees are exempt, and a missing plan directory degrades to a structural warning rather than crashing the chain.
+**Fires when:** a Bash command tokenises to a `git commit` (shlex-parsed, so quoted prose like `echo 'git commit'` never false-positives). Commits inside nested/vendor repos or foreign worktrees are exempt, and a missing plan directory degrades to a structural warning rather than crashing the chain. Findings about a plan path matching the project-wide `daemon.exclude_paths` are dropped (see [Path Exclusion](#path-exclusion-exclude_paths)); the tree itself is still scanned whole, so index-wide invariants such as `stats-recount` keep seeing every folder.
 
 **Enforcement mode:** honours `plan_workflow.qa.commit_gate_mode` (`block` | `warn` | `off`, default `warn`). In `warn` (the rollout default) findings render as advisory context -- read them and amend the commit content before it lands; `block` denies the commit with a diffable TODO list of what the commit must also contain; `off` disables the gate.
 
@@ -2318,7 +2320,7 @@ handlers:
 
 **Description:** Lints every Write/Edit of a documentation-scoped file in real time, running the docs QA EDIT-stage checks against the content the file *would* have after the tool call. Ships as the write-time half of the documentation SSoT enforcement system (`CLAUDE/DocumentationStrategy.md`); the cross-file half is [`docs_qa_commit_gate`](#docs_qa_commit_gate) and the whole-corpus half is [`docs_qa_sweep`](#docs_qa_sweep).
 
-**Fires when:** a Write/Edit targets a file in-scope for the doc corpus (the two audience trees `documentation.trees.agent`/`documentation.trees.human`, `.claude/rules`, `.claude/skills`, `.claude/agents`, a root-level `.md`, a path declared in `documentation.qa.generated_docs`, or any sub-folder `CLAUDE.md` regardless of tree).
+**Fires when:** a Write/Edit targets a file in-scope for the doc corpus (the two audience trees `documentation.trees.agent`/`documentation.trees.human`, `.claude/rules`, `.claude/skills`, `.claude/agents`, a root-level `.md`, a path declared in `documentation.qa.generated_docs`, or any sub-folder `CLAUDE.md` regardless of tree). A path matching the project-wide `daemon.exclude_paths` is outside that scope entirely, whichever arm would otherwise admit it (see [Path Exclusion](#path-exclusion-exclude_paths)).
 
 **Enforcement mode:** honours `documentation.qa.edit_mode` (`warn` | `block`, default `warn`) as the default for checks without a `check_modes` override.
 
@@ -2375,7 +2377,7 @@ handlers:
 
 **Description:** On a `git commit` Bash command, evaluates the *staged* tree against the cross-file docs QA invariants a single-file edit hook cannot see.
 
-**Fires when:** a Bash command tokenises to a `git commit`. Commits inside nested/vendor repos or foreign worktrees are exempt.
+**Fires when:** a Bash command tokenises to a `git commit`. Commits inside nested/vendor repos or foreign worktrees are exempt. A staged markdown file matching the project-wide `daemon.exclude_paths` never enters the staged view (see [Path Exclusion](#path-exclusion-exclude_paths)).
 
 **Enforcement mode:** honours `documentation.qa.commit_gate_mode` (`warn` | `block`, default `warn`). In `warn` (the rollout default) findings render as advisory context — read them and amend the commit content before it lands; `block` denies the commit.
 
@@ -3195,7 +3197,7 @@ That second half exists because a rule enforced only at write time cannot see wh
 
 `path-existence` is scoped to plans whose work has begun: a `Not Started`, `Blocked` or `Dormant` plan names the files it *intends* to create, so a missing path there is the expected state rather than drift.
 
-**Fires when:** a new (non-resumed) session starts with `plan_workflow.qa.enabled` true and `sweep_mode: advise`. A configured plan directory that does not exist is itself reported as a structural finding.
+**Fires when:** a new (non-resumed) session starts with `plan_workflow.qa.enabled` true and `sweep_mode: advise`. A configured plan directory that does not exist is itself reported as a structural finding. Findings about a plan path matching the project-wide `daemon.exclude_paths` are dropped from the report (see [Path Exclusion](#path-exclusion-exclude_paths)).
 
 **Enforcement mode:** honours `plan_workflow.qa.sweep_mode` (`advise` | `off`, default `advise`). The sweep never blocks -- it only reports drift for you to fix as plan housekeeping.
 
@@ -3232,7 +3234,7 @@ handlers:
 
 The injected report is capped at the first 8 findings, with a trailing `...and N more` line naming the CLI for the rest — the CLI report itself is never capped.
 
-**Fires when:** a new (non-resumed) session starts with `documentation.enabled` true and `sweep_mode: advise`.
+**Fires when:** a new (non-resumed) session starts with `documentation.enabled` true and `sweep_mode: advise`. A markdown file matching the project-wide `daemon.exclude_paths` is outside the corpus and the shared markdown walk alike, so no sweep check sees it (see [Path Exclusion](#path-exclusion-exclude_paths)).
 
 **Enforcement mode:** honours `documentation.qa.sweep_mode` (`advise` | `off`, default `advise`).
 

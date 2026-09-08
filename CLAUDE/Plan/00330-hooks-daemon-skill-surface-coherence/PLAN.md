@@ -1,6 +1,6 @@
 # Plan 00330: hooks daemon skill surface coherence
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-04
 **Owner**: joseph
 **Priority**: High
@@ -77,14 +77,19 @@ this plan generalises.
   list can carry an arbitrary grouping; a derived one needs a rule that
   assigns any new handler to an area without human judgement.
 
-- [ ] ⬜ **Task 1.4**: Decide whether docs QA and plan QA should honour the
-  project-wide `daemon.exclude_paths`. Verified: **zero** references to it in
-  either package, against 12 handler modules that do honour it via
-  `utils/path_exclusion.py`. It matters because the shipped guidance
-  repeatedly offers `daemon.exclude_paths` as the project-wide way to exempt
-  paths, so a user configuring "ignored dirs" through it gets silence from
-  docs QA — the same symptom as the reported `scope_exclude_globs` bug fixed
-  in `0054105b`.
+- [x] ✅ **Task 1.4**: Decide whether docs QA and plan QA should honour the
+  project-wide `daemon.exclude_paths`. **Decided and done in Plan 00362 Task
+  2.9 (commit `406cbeef`)**: honour it; a fixture tree that must keep
+  producing findings is declared by NOT listing it, never exempted by
+  omission. Docs QA carries the globs on `DocumentationPolicy.exclude_paths`,
+  plan QA on `CheckContext.exclude_paths`, both through
+  `utils/path_exclusion`; all six handlers and both CLIs consult it.
+  Original finding: **zero** references to it in either package, against 12
+  handler modules that honoured it via `utils/path_exclusion.py`. It
+  mattered because the shipped guidance repeatedly offers
+  `daemon.exclude_paths` as the project-wide way to exempt paths, so a user
+  configuring "ignored dirs" through it got silence from docs QA — the same
+  symptom as the reported `scope_exclude_globs` bug fixed in `0054105b`.
 
   Mechanically small: `path_exclusion` is pure stdlib (so importing it does
   not break docs_qa's deliberate daemon/pydantic decoupling), and
