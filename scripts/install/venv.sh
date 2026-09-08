@@ -301,6 +301,193 @@ venv_lock_hash_matches() {
     return $rc
 }
 
+# ============================================================
+# Venv build lock (Plan 00100 Phase 4)
+# ============================================================
+#
+# Two daemons starting at once both reach ensure_venv's slow path, and each
+# `rm -rf`s and `uv sync`s the SAME directory; the second's rm lands while
+# the first's sync is mid-copy. The slow path therefore runs under a lock
+# beside the venvs: {daemon_dir}/untracked/.venv-bootstrap.lock. The second
+# starter waits for the first (bounded), then re-checks freshness under the
+# lock and reuses the finished venv instead of rebuilding.
+#
+# Backend: `flock` by default -- Task 4.0's spike showed flock(2) excludes
+# across processes sharing a Podman bind mount. Where flock is not installed,
+# a mkdir lock (.venv-bootstrap.lock.d) with a stale-age check stands in.
+# HOOKS_DAEMON_VENV_LOCK_BACKEND=flock|mkdir forces one, so an operator whose
+# mount misbehaves under flock has a way out without editing this file.
+#
+# The fast path (venv present and fresh) never touches the lock: a starter
+# with nothing to build must not queue behind one that has.
+#
+# Tunables (seconds):
+#   HOOKS_DAEMON_VENV_LOCK_TIMEOUT        wait bound before giving up  (120)
+#   HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS  mkdir lock age presumed dead (600)
+#
+VENV_LOCK_FILE_NAME=".venv-bootstrap.lock"
+VENV_LOCK_TIMEOUT_DEFAULT=120
+VENV_LOCK_STALE_SECONDS_DEFAULT=600
+
+# Set by acquire_venv_lock, consumed by release_venv_lock.
+_VENV_LOCK_BACKEND=""
+_VENV_LOCK_FD=""
+_VENV_LOCK_DIR=""
+
+#
+# _venv_lock_backend() - Echo the lock backend to use: "flock" or "mkdir".
+#
+# Returns 1 (with an error) on an unrecognised HOOKS_DAEMON_VENV_LOCK_BACKEND.
+#
+_venv_lock_backend() {
+    local backend="${HOOKS_DAEMON_VENV_LOCK_BACKEND:-}"
+    if [ -z "$backend" ]; then
+        if command -v flock > /dev/null; then
+            backend="flock"
+        else
+            backend="mkdir"
+        fi
+    fi
+    case "$backend" in
+        flock | mkdir)
+            echo "$backend"
+            return 0
+            ;;
+        *)
+            print_error "ensure_venv: HOOKS_DAEMON_VENV_LOCK_BACKEND must be 'flock' or 'mkdir', got '$backend'"
+            return 1
+            ;;
+    esac
+}
+
+#
+# _venv_lock_dir_mtime() - Epoch mtime of a path (GNU stat, then BSD stat).
+#
+_venv_lock_dir_mtime() {
+    local path="$1" mtime
+    if mtime="$(stat -c %Y "$path" 2>&1)" && [[ "$mtime" =~ ^[0-9]+$ ]]; then
+        echo "$mtime"
+        return 0
+    fi
+    if mtime="$(stat -f %m "$path" 2>&1)" && [[ "$mtime" =~ ^[0-9]+$ ]]; then
+        echo "$mtime"
+        return 0
+    fi
+    return 1
+}
+
+#
+# acquire_venv_lock() - Take the venv build lock for daemon_dir, bounded.
+#
+# Args:
+#   $1 - daemon_dir
+#
+# Returns 0 holding the lock; 1 with a clear message if the wait bound
+# passes or the lock cannot be created. Pair with release_venv_lock.
+#
+acquire_venv_lock() {
+    local daemon_dir="$1"
+    local timeout="${HOOKS_DAEMON_VENV_LOCK_TIMEOUT:-$VENV_LOCK_TIMEOUT_DEFAULT}"
+    local lock_file="$daemon_dir/untracked/$VENV_LOCK_FILE_NAME"
+
+    if [ -z "$daemon_dir" ]; then
+        print_error "acquire_venv_lock: daemon_dir required"
+        return 1
+    fi
+    _VENV_LOCK_BACKEND="$(_venv_lock_backend)" || return 1
+    mkdir -p "$daemon_dir/untracked"
+
+    if [ "$_VENV_LOCK_BACKEND" = "flock" ]; then
+        exec {_VENV_LOCK_FD}>"$lock_file"
+        if flock -n "$_VENV_LOCK_FD"; then
+            return 0
+        fi
+        print_info "ensure_venv: another process holds the venv lock ($lock_file) — waiting up to ${timeout}s for its build to finish"
+        if flock -w "$timeout" "$_VENV_LOCK_FD"; then
+            return 0
+        fi
+        exec {_VENV_LOCK_FD}>&-
+        _VENV_LOCK_FD=""
+        print_error "ensure_venv: gave up waiting for the venv lock after ${timeout}s: $lock_file"
+        print_error "  Another daemon start or 'hooks-daemon repair' is still building the venv, or its holder died. Retry once it has finished."
+        return 1
+    fi
+
+    local lock_dir="$lock_file.d"
+    local stale="${HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS:-$VENV_LOCK_STALE_SECONDS_DEFAULT}"
+    local waited=0 announced=0 mkdir_err mtime age
+    while :; do
+        if mkdir_err="$(mkdir "$lock_dir" 2>&1)"; then
+            echo "$$" > "$lock_dir/pid"
+            _VENV_LOCK_DIR="$lock_dir"
+            return 0
+        fi
+        if [ ! -d "$lock_dir" ]; then
+            print_error "ensure_venv: cannot create venv lock $lock_dir: $mkdir_err"
+            return 1
+        fi
+        if mtime="$(_venv_lock_dir_mtime "$lock_dir")"; then
+            age=$(( $(date +%s) - mtime ))
+            if [ "$age" -ge "$stale" ]; then
+                print_warning "ensure_venv: removing stale venv lock $lock_dir (${age}s old, its holder is presumed dead)"
+                rm -rf "$lock_dir"
+                continue
+            fi
+        fi
+        if [ "$waited" -ge "$timeout" ]; then
+            print_error "ensure_venv: gave up waiting for the venv lock after ${timeout}s: $lock_dir"
+            print_error "  Another daemon start or 'hooks-daemon repair' is still building the venv. If none is running, remove that directory and retry."
+            return 1
+        fi
+        if [ "$announced" = 0 ]; then
+            print_info "ensure_venv: another process holds the venv lock ($lock_dir) — waiting up to ${timeout}s for its build to finish"
+            announced=1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+}
+
+#
+# release_venv_lock() - Release whatever acquire_venv_lock took. Returns 0.
+#
+release_venv_lock() {
+    if [ "$_VENV_LOCK_BACKEND" = "flock" ] && [ -n "$_VENV_LOCK_FD" ]; then
+        exec {_VENV_LOCK_FD}>&-
+        _VENV_LOCK_FD=""
+    elif [ "$_VENV_LOCK_BACKEND" = "mkdir" ] && [ -n "$_VENV_LOCK_DIR" ]; then
+        rm -rf "$_VENV_LOCK_DIR"
+        _VENV_LOCK_DIR=""
+    fi
+    _VENV_LOCK_BACKEND=""
+    return 0
+}
+
+#
+# _venv_is_fresh() - The two fast-path checks ensure_venv runs, in order.
+#
+# Args: $1 daemon_dir, $2 venv_path, $3 target_version. Returns 0 if the
+# venv at venv_path can be reused as-is.
+#
+_venv_is_fresh() {
+    local daemon_dir="$1" venv_path="$2" target_version="$3"
+    [ -d "$venv_path" ] || return 1
+    # Plan 00100 Task 3.7: lock_hash is authoritative. A daemon upgrade or
+    # downgrade with unchanged deps (pyproject.toml + uv.lock) must reuse the
+    # existing venv — the legacy `.daemon-version` SemVer stamp is advisory.
+    if venv_lock_hash_matches "$daemon_dir" "$venv_path"; then
+        print_verbose "ensure_venv: lock_hash unchanged — reusing $venv_path"
+        return 0
+    fi
+    # Fallback: no usable metadata but the legacy stamp matches. Kept for
+    # pre-Phase-3 venvs that predate `.daemon-metadata.json`.
+    if venv_version_matches "$venv_path" "$target_version"; then
+        print_verbose "ensure_venv: venv up-to-date at $venv_path (stamp match)"
+        return 0
+    fi
+    return 1
+}
+
 #
 # ensure_venv() - Auto-bootstrap venv for current Python environment fingerprint
 #
@@ -310,6 +497,9 @@ venv_lock_hash_matches() {
 #   - venv present, stamp missing   -> recreate + stamp (lazy upgrade from pre-stamp builds)
 #   - venv present, stamp mismatch  -> recreate + stamp
 #   - venv present, stamp matches   -> no-op (fast path)
+#
+# The (re)create branches run under the venv build lock (see
+# acquire_venv_lock above): concurrent starters build once and share it.
 #
 # Honors HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 and CI=true to skip entirely
 # (CI environments stub venvs out of band).
@@ -363,24 +553,38 @@ ensure_venv() {
 
     local venv_path="$daemon_dir/untracked/venv-$fingerprint"
 
-    # Plan 00100 Task 3.7: lock_hash is authoritative. A daemon upgrade or
-    # downgrade with unchanged deps (pyproject.toml + uv.lock) must reuse the
-    # existing venv — the legacy `.daemon-version` SemVer stamp is advisory.
-    if [ -d "$venv_path" ] && venv_lock_hash_matches "$daemon_dir" "$venv_path"; then
-        print_verbose "ensure_venv: lock_hash unchanged — reusing $venv_path"
+    # Fast path, lock-free: a fresh venv is reused as-is.
+    if _venv_is_fresh "$daemon_dir" "$venv_path" "$target_version"; then
         echo "$venv_path"
         return 0
     fi
 
-    # Fallback fast path: no usable metadata but legacy stamp matches — no-op.
-    # Kept for pre-Phase-3 venvs that predate `.daemon-metadata.json`.
-    if [ -d "$venv_path" ] && venv_version_matches "$venv_path" "$target_version"; then
-        print_verbose "ensure_venv: venv up-to-date at $venv_path (stamp match)"
+    # Slow path: (re)create under the build lock.
+    acquire_venv_lock "$daemon_dir" || return 1
+    local build_rc=0
+    _ensure_venv_build "$daemon_dir" "$venv_path" "$target_version" "$python_bin" "$fingerprint" || build_rc=$?
+    release_venv_lock
+    return "$build_rc"
+}
+
+#
+# _ensure_venv_build() - The mutating half of ensure_venv; runs under the lock.
+#
+# Args: $1 daemon_dir, $2 venv_path, $3 target_version, $4 python_bin,
+#       $5 fingerprint. Echoes venv_path on success.
+#
+_ensure_venv_build() {
+    local daemon_dir="$1" venv_path="$2" target_version="$3"
+    local python_bin="$4" fingerprint="$5"
+
+    # Re-check under the lock: the process that held it may have built the
+    # very venv this one queued up to build. Reuse it rather than rebuild.
+    if _venv_is_fresh "$daemon_dir" "$venv_path" "$target_version"; then
+        print_verbose "ensure_venv: venv built by another process while waiting — reusing $venv_path"
         echo "$venv_path"
         return 0
     fi
 
-    # Slow path: need to (re)create
     if [ -d "$venv_path" ]; then
         print_info "ensure_venv: stamp mismatch — rebuilding $venv_path"
         rm -rf "$venv_path"
