@@ -139,12 +139,14 @@ class TestSedBlockerHandler:
         """Should NOT match git commit with heredoc mentioning sed."""
         hook_input = {
             "tool_name": "Bash",
-            "tool_input": {"command": """git commit -m "$(cat <<'EOF'
+            "tool_input": {
+                "command": """git commit -m "$(cat <<'EOF'
 Block sed command
 
 sed is dangerous
 EOF
-)"""},
+)"""
+            },
         }
         assert handler.matches(hook_input) is False
 
@@ -808,10 +810,12 @@ EOF
         """Should NOT match gh issue create with sed in body text (documentation)."""
         hook_input = {
             "tool_name": "Bash",
-            "tool_input": {"command": """gh issue create --title "Block sed" --body "$(cat <<'EOF'
+            "tool_input": {
+                "command": """gh issue create --title "Block sed" --body "$(cat <<'EOF'
 sed commands are dangerous
 EOF
-)" """},
+)" """
+            },
         }
         assert handler.matches(hook_input) is False
 
@@ -835,11 +839,13 @@ EOF
         """Should NOT match gh pr comment with sed in heredoc."""
         hook_input = {
             "tool_name": "Bash",
-            "tool_input": {"command": """gh pr comment 456 --body "$(cat <<'EOF'
+            "tool_input": {
+                "command": """gh pr comment 456 --body "$(cat <<'EOF'
 Package.resolved file
 sed commands blocked
 EOF
-)" """},
+)" """
+            },
         }
         assert handler.matches(hook_input) is False
 
@@ -1169,10 +1175,94 @@ class TestGuidanceMatchesBehaviour:
         """A rule stated only by a passing example teaches the wrong boundary."""
         guidance = handler.get_claude_md()
         assert guidance is not None
-        assert (
-            "wc -l" in guidance
-        ), "guidance must give the DENIED counter-example, not only the allowed one"
+        assert "wc -l" in guidance, (
+            "guidance must give the DENIED counter-example, not only the allowed one"
+        )
         assert "grep" in guidance and "echo" in guidance
+
+
+class TestStdoutOnlyFlagDenyIsDeliberate:
+    """A `sed -n` / `sed -e` deny must say it is deliberate and name the substitutes.
+
+    Plan 00362 Task 1.5 (client report section 5): `sed -n '600,640p' file`
+    cannot write a file, and a client read the generic deny as a false
+    positive because the handler documentation said read-only sed was
+    allowed. The rule is NOT weakened -- `-n` and `-i` differ by one
+    character -- but the deny message for a flag cluster that only reads
+    must explain that, and hand over the two working replacements: `Read`
+    with `offset`/`limit`, and `awk 'NR>=a && NR<=b' file`.
+    """
+
+    @pytest.fixture
+    def handler(self):
+        return SedBlockerHandler()
+
+    @staticmethod
+    def _bash(command: str, transcript_path: str | None = None) -> dict:
+        hook_input: dict = {"tool_name": "Bash", "tool_input": {"command": command}}
+        if transcript_path is not None:
+            hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    def test_quiet_flag_deny_says_it_is_deliberate(self, handler):
+        result = handler.handle(self._bash("sed -n '600,640p' /workspace/big.py"))
+
+        assert result.decision == "deny"
+        assert "deliberate" in result.reason.lower()
+        assert "one character" in result.reason
+
+    def test_quiet_flag_deny_names_both_replacements(self, handler):
+        result = handler.handle(self._bash("sed -n '600,640p' /workspace/big.py"))
+
+        assert "Read" in result.reason
+        assert "offset" in result.reason and "limit" in result.reason
+        assert "awk 'NR>=600 && NR<=640'" in result.reason
+
+    def test_script_flag_deny_carries_the_same_note(self, handler):
+        """`sed -e 's/x/y/' file` also only writes to stdout; same note."""
+        result = handler.handle(self._bash("sed -e 's/x/y/' /workspace/big.py"))
+
+        assert "deliberate" in result.reason.lower()
+        assert "awk 'NR>=" in result.reason
+
+    def test_note_survives_the_terse_repeat_fire(self, handler):
+        """The second fire for the same agent is terse, but the note is the
+        part of the message that stops the agent re-trying, so it stays."""
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._bash("sed -n '1,5p' f", transcript_path))
+        result = handler.handle(self._bash("sed -n '1,5p' f", transcript_path))
+
+        assert "WHY BANNED" not in result.reason
+        assert "deliberate" in result.reason.lower()
+        assert "offset" in result.reason
+
+    def test_in_place_flag_deny_does_not_claim_to_be_read_only(self, handler):
+        """`sed -i` really writes; the read-only note would be a lie there."""
+        result = handler.handle(self._bash("sed -i 's/x/y/' /workspace/big.py"))
+
+        assert "deliberate" not in result.reason.lower()
+        assert "awk 'NR>=" not in result.reason
+
+    def test_in_place_with_quiet_flag_is_a_real_write(self, handler):
+        """`sed -ni` rewrites the file; the note is for stdout-only shapes."""
+        result = handler.handle(self._bash("sed -ni 's/x/y/p' /workspace/big.py"))
+
+        assert "awk 'NR>=" not in result.reason
+
+    def test_guidance_names_the_awk_replacement(self, handler):
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "awk 'NR>=" in guidance
+        assert "offset" in guidance
+
+    def test_guidance_and_docstring_do_not_promise_read_only_sed(self, handler):
+        """The class docstring is what a code reader sees; it must not
+        repeat the 'read-only sed is acceptable' claim the report tripped on."""
+        docstring = SedBlockerHandler.__doc__ or ""
+        assert "is acceptable" not in docstring
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "read-only pipelines are allowed" not in guidance.lower()
 
 
 class TestHeredocWrittenShellScripts:
@@ -1205,14 +1295,11 @@ class TestHeredocWrittenShellScripts:
         return {"tool_name": "Bash", "tool_input": {"command": command}}
 
     _FLAGLESS_SCRIPT_HEREDOC = (
-        "cat > deploy.sh <<'EOF'\n"
-        "#!/bin/bash\n"
-        "sed 's/old/new/' input.txt > output.txt\n"
-        "EOF"
+        "cat > deploy.sh <<'EOF'\n#!/bin/bash\nsed 's/old/new/' input.txt > output.txt\nEOF"
     )
 
     _FLAGGED_SCRIPT_HEREDOC = (
-        "cat > deploy.sh <<'EOF'\n" "#!/bin/bash\n" "sed -i 's/old/new/' input.txt\n" "EOF"
+        "cat > deploy.sh <<'EOF'\n#!/bin/bash\nsed -i 's/old/new/' input.txt\nEOF"
     )
 
     _MARKDOWN_HEREDOC = (

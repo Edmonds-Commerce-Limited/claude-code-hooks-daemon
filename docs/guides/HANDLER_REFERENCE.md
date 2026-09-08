@@ -320,22 +320,22 @@ handlers:
 
 **Description:** Blocks `sed` used to **modify files**. Claude frequently gets sed syntax wrong, and a single mistake can silently corrupt hundreds of files with no recovery — especially via `find -exec sed` or `xargs sed -i`. The Edit tool is the safe alternative for file modifications.
 
-This is **not** a blanket ban on the word `sed`: read-only pipelines that only transform stdout are explicitly allowed.
+The rule is **deny-by-default on the word `sed`** in a Bash command, with four narrow exemptions. It is not a list of write-capable shapes, so a sed that only reads is still denied unless an exemption covers it.
 
 **What it blocks (strict mode, default):**
 
-- In-place editing -- `sed -i`, `sed -e` invoked to rewrite a file
-- Mass modification -- `grep -rl X | xargs sed -i ...`
+- Any executed `sed`: at a command head (start, or after `;`, `&&`, `||`), with any flag cluster containing `i`, `e` or `n`, or via `xargs` -- no other part of the command rescues it
+- Any other Bash command carrying the word `sed` that none of the exemptions below covers (`cat f | sed 's/x/y/' | wc -l` is denied)
 - Shell scripts (`.sh`/`.bash`) written via the Write tool that contain `sed`
 
-**What it allows:**
+**The four exemptions (Bash):**
 
-- Read-only pipelines that transform stdout only -- `cat file | sed 's/x/y/' | grep z`
-- Markdown files mentioning sed (documentation)
-- Git commit messages and PR bodies mentioning sed
-- `grep` commands searching for the word "sed"
-- `echo` commands mentioning sed (without sed command patterns)
-- GitHub CLI commands with sed in text content
+1. None apply when sed is executed (above). `sed -n '1,20p' file` prints to stdout and cannot write, and is denied anyway, deliberately: `-n` and `-i` differ by one character. The deny message for that shape says so and names the replacements -- the `Read` tool with `offset`/`limit`, or `awk 'NR>=1 && NR<=20' file`.
+2. A `git commit` message mentioning sed (sed must follow `git commit` with no command separator between)
+3. A `gh` issue/PR/release body mentioning sed (same separator rule)
+4. The command contains a `grep`, or an `echo` that does not itself carry a `sed 's/…'` substitution -- this is why `cat file | sed 's/x/y/' | grep z` passes while the `wc -l` form above does not
+
+**Write tool:** markdown files (`.md`) mentioning sed are always allowed; only `.sh`/`.bash` content is examined.
 
 **Example trigger:**
 
@@ -3684,7 +3684,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | Config Key                     | Event             | Priority | What It Blocks                                                       |
 | ------------------------------ | ----------------- | -------- | -------------------------------------------------------------------- |
 | `destructive_git`              | PreToolUse        | 10       | git reset --hard, clean -f, push --force, branch -D, etc.            |
-| `sed_blocker`                  | PreToolUse        | 10       | sed used to MODIFY files (read-only pipelines are allowed)           |
+| `sed_blocker`                  | PreToolUse        | 10       | the word sed in a Bash command, bar four narrow exemptions           |
 | `curl_pipe_shell`              | PreToolUse        | 10       | curl/wget piped to bash/sh                                           |
 | `lock_file_edit_blocker`       | PreToolUse        | 10       | Direct editing of lock files                                         |
 | `pip_break_system`             | PreToolUse        | 10       | pip --break-system-packages                                          |
