@@ -132,9 +132,13 @@ expensive.
   `tests/unit/test_hermetic_git_environment.py` asserts `git config --get user.name` resolves to nothing and that no config value originates under
   `HOME`; without the fixture it prints the developer's name locally, which
   is the RED that was confirmed before the fixture landed)
-- [ ] ⬜ **Task 2.3**: Consolidate `test_git_repo.py`'s local `_git_init` onto the
-  shared fixture, as a complementary narrowing
-  - [ ] ⬜ Note for the record: `_git_init` PREDATES the fixture (`074b9de1`,
+- [x] ✅ **Task 2.3**: Consolidate `test_git_repo.py`'s local `_git_init` onto the
+  shared fixture, as a complementary narrowing (`7b94bac3` — `_git_init`,
+  `_give_identity` and `_commit_a_file` removed; every test takes `tmp_git_repo`,
+  whose identity + committed `tracked.txt` is exactly what the helpers built; the
+  one nested-repo test keeps a single inline `git init` because a repo INSIDE
+  another is the one shape the fixture cannot give)
+  - [x] ✅ Note for the record: `_git_init` PREDATES the fixture (`074b9de1`,
     Plan 00113) by roughly three months, so it is not a divergence from
     `tmp_git_repo` (`013b48e7`, Plan 00246) — the fixture is the later arrival
     and never displaced it. Treat this as complementary, never as the guard: it
