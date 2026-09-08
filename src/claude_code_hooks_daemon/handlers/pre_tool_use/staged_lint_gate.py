@@ -291,11 +291,13 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         parts[0] = resolved
 
         try:
-            result: subprocess.CompletedProcess[str] | None = subprocess.run(  # nosec B603 - lint tools are trusted, file path from git
-                parts,
-                capture_output=True,
-                text=True,
-                timeout=Timeout.LINT_CHECK,
+            result: subprocess.CompletedProcess[str] | None = (
+                subprocess.run(  # nosec B603 - lint tools are trusted, file path from git
+                    parts,
+                    capture_output=True,
+                    text=True,
+                    timeout=Timeout.LINT_CHECK,
+                )
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             # A missing binary or a timed-out subprocess is feature detection,

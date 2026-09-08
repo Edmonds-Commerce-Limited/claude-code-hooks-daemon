@@ -171,8 +171,13 @@ def vet_probe_commands(
             scratch = project_root.joinpath(*_PROBE_SCRATCH)
             try:
                 inside = resolved.resolve().is_relative_to(scratch.resolve())
-            except OSError:
-                inside = False
+            except OSError as exc:
+                # A path the filesystem cannot resolve is its own refusal, not a
+                # quiet vote for "outside": the two have different remedies, and
+                # a skip that says which one applies is the point of the reason.
+                return RefusedCommands(
+                    reason=f"fixture command path could not be resolved: {command!r} ({exc})"
+                )
             if not inside:
                 return RefusedCommands(
                     reason=f"fixture command acts outside {'/'.join(_PROBE_SCRATCH)}: {command!r}"
