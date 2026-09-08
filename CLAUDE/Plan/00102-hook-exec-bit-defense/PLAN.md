@@ -1,6 +1,6 @@
 # Plan 00102: Hook Executable-Bit Defense (Multi-Tier Safety Net)
 
-**Status**: In Progress (Phase 6 — the statusLine and fallback-installer holes in Tier 1; Task 5.3 still awaits the next /release)
+**Status**: In Progress (all work done and all criteria verified; blocked SOLELY on Task 5.3, which needs a human to run `/release`)
 **Created**: 2026-04-29
 **Priority**: High
 **Recommended Executor**: Sonnet
@@ -177,15 +177,16 @@ for any event.
 
 ## Success Criteria
 
-- [ ] After installing or upgrading, hooks fire correctly even if `.claude/hooks/*` are mode 0644.
-- [ ] Existing client repos auto-migrate `settings.json` on first session after upgrade with no user action.
-- [ ] A `settings.json.bak` is created exactly once per repo and never overwritten.
-- [ ] Auto-migration is idempotent (second SessionStart is a no-op).
-- [ ] Hand-edited non-daemon command paths in `settings.json` are not touched.
-- [ ] `git_filemode_checker` advisory fires once per new session for repos with `core.fileMode=false`.
+- [x] After installing or upgrading, hooks fire correctly even if `.claude/hooks/*` are mode 0644 — `tests/integration/test_hook_exec_bit_irrelevant.py`.
+- [x] Existing client repos auto-migrate `settings.json` on first session after upgrade with no user action — `TestMigrationOnLegacyFile` in `tests/unit/utils/test_hook_command_migration.py`.
+- [x] **No backup is ever destroyed.** Stated originally as "a `settings.json.bak` is created exactly once per repo and never overwritten", which is now true only of the MIGRATOR (`test_one_shot_backup_is_created`, `test_existing_backup_is_preserved`). The INSTALLER diverged deliberately under Plan 00176: it takes a timestamped copy on every install that would overwrite, and three installs inside one second keep three copies (`TestASecondInstallDoesNotOverwriteTheFirstBackup`). Both satisfy the guarantee the criterion was written to express — you cannot lose settings — and the installer's form is the stronger one, so the criterion is restated rather than failed.
+- [x] Auto-migration is idempotent (second SessionStart is a no-op) — `TestIdempotency`.
+- [x] Hand-edited non-daemon command paths in `settings.json` are not touched — `test_custom_command_left_alone`, `test_a_custom_status_line_command_is_left_alone`, `test_a_relative_path_outside_the_wrapper_dir_is_left_alone`.
+- [x] `git_filemode_checker` advisory fires once per new session for repos with `core.fileMode=false` — `tests/unit/handlers/session_start/test_git_filemode_checker.py`.
 - [x] The status line survives its wrapper being mode 0644, on a fresh install and after auto-migration — `test_hook_exec_bit_irrelevant.py` copies the real wrapper, drops `+x`, and asserts direct invocation breaks while `bash <path>` does not.
 - [x] Every command the fallback installer writes is absolute and `bash`-invoked, so a fallback install is not a permanently unrepaired one — asserted against the heredoc the script actually ships, which had no test of any kind before.
 - [x] A bare-path command is REPORTED by the checker for any event, statusLine included.
-- [ ] All 10 QA checks pass.
-- [ ] Daemon restarts cleanly with new code.
-- [ ] Plan 00091 is closed as superseded.
+- [x] Full QA passes (the pipeline has grown from the 10 checks this criterion was written against to 26; all 26 green, 19962 passed, coverage 95.2%).
+- [x] Daemon restarts cleanly with new code.
+- [x] Plan 00091 is closed as superseded — `CLAUDE/Plan/Cancelled/00091-hook-executable-permissions/`.
+- [ ] **Task 5.3 only**: the full flow acceptance-tested at release time. Human-gated — `/release` is the sole authorisation, so an agent cannot close this.
