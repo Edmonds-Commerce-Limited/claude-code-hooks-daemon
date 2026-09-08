@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     path_matches_globs,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.path_predicates import path_exists
 
 logger = logging.getLogger(__name__)
 
@@ -354,8 +355,18 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         # Get multiple candidate test paths (checks mirror, current, fallback)
         candidate_paths = self._get_test_file_paths(source_path, strategy)
 
-        # Check if ANY candidate exists
-        existing_test = next((path for path in candidate_paths if path.exists()), None)
+        # Check if ANY candidate exists.
+        #
+        # An unstattable candidate does not satisfy the gate. Answering True
+        # would accept a path the daemon cannot see as a test that exists,
+        # turning an unreadable tests/ directory into a blanket TDD exemption.
+        # The opposite error -- denying a write whose test is real but
+        # unreadable -- is loud, and the denial below lists every location
+        # searched, so the author can see which one the daemon could not read.
+        existing_test = next(
+            (path for path in candidate_paths if path_exists(path, unreadable_means=False)),
+            None,
+        )
         if existing_test:
             return GatingResult(decision=Decision.ALLOW)
 

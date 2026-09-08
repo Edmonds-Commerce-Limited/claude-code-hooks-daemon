@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.path_predicates import path_exists
 
 logger = logging.getLogger(__name__)
 
@@ -261,8 +262,10 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         # after the write. For Bash it is load-bearing: the target is PREDICTED
         # from the command text, and a command that failed (or was never going to
         # write) leaves nothing on disk. Linting a path that does not exist would
-        # manufacture an error the agent cannot act on.
-        return Path(file_path).exists()
+        # manufacture an error the agent cannot act on -- and so would linting
+        # one the daemon cannot read, which is why an unstattable path takes the
+        # same answer rather than being reported as lintable.
+        return path_exists(file_path, unreadable_means=False)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this event authored a lintable file, via any write route."""
@@ -335,7 +338,11 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         """
         current = Path(file_path).parent
         while current != current.parent:
-            if (current / marker_file).exists():
+            # An ancestor the daemon cannot stat is not a module root it can
+            # claim to have FOUND. Answering True would name that directory and
+            # run the linter from the wrong place, which fails for the wrong
+            # reason -- a denial the author cannot act on. Keep walking up.
+            if path_exists(current / marker_file, unreadable_means=False):
                 return str(current)
             current = current.parent
         return None

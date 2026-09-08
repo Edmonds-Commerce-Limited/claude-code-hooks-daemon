@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     normalise_line_continuations,
 )
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
+from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 logger = logging.getLogger(__name__)
@@ -237,7 +238,10 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
             if not relpath:
                 continue
             abs_path = project_root / relpath
-            if not abs_path.exists():
+            # A staged file the daemon cannot stat is one the linter cannot
+            # read either, so linting it would report a syntax error against
+            # content nobody saw.
+            if not path_exists(abs_path, unreadable_means=False):
                 continue
             # A protected file must never surface in a lint diagnostic -- a
             # syntax-error message can quote the offending source line

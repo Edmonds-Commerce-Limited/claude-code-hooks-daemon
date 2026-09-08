@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     vendored_exclude_globs,
 )
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 if TYPE_CHECKING:
@@ -223,7 +224,14 @@ class CommentSizeHandler(PreToolUseHandlerBase):
         if tool_name == ToolName.EDIT:
             return str(tool_input.get(_FIELD_OLD_STRING, ""))
         path = Path(file_path)
-        if path.is_file():
+        # `False` is right here for a reason, not out of caution. Returning None
+        # from this method means "no prior content", which `handle()` reads as
+        # growth (`chars_before is None or ...`) -- the branch that can DENY. So
+        # the naive fallback biases TOWARD the block here, the opposite risk
+        # profile from write_clobber_guard despite both being `is_file()` on a
+        # PreToolUse DENY handler. Assuming True would also send execution
+        # straight into a `read_text()` that raises the same way.
+        if path_is_file(path, unreadable_means=False):
             # errors="replace", never a bare decode. This reads a file the
             # daemon did not write and has no encoding contract with:
             # latin-1/CP1252 sources are ordinary in PHP and C# trees, both

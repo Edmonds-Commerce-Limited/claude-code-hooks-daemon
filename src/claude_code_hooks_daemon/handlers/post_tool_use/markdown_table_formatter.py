@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Extensions treated as markdown (lowercase match).
@@ -221,7 +222,9 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
             return False
 
         # PostToolUse runs after the write, so the file must exist on disk.
-        return Path(file_path).exists()
+        # A file the daemon cannot stat cannot be read or rewritten either, so
+        # it is out of scope for the same reason a missing one is.
+        return path_exists(file_path, unreadable_means=False)
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Reformat the markdown file in place if its content changes."""
@@ -230,7 +233,10 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
             return BlockingResult(decision=Decision.ALLOW)
 
         path = Path(file_path)
-        if not path.exists():
+        # A second, independent check: `handle()` is reachable without
+        # `matches()` having run first, so guarding only the one above would
+        # leave this raising.
+        if not path_exists(path, unreadable_means=False):
             return BlockingResult(decision=Decision.ALLOW)
 
         try:

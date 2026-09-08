@@ -41,6 +41,7 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     next_plan_number_for_target,
 )
 from claude_code_hooks_daemon.install.plan_workflow import MKPLAN_SCRIPT_NAME
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.quoted_spans import blank_shell_literal_spans
 from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
 
@@ -198,7 +199,11 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         target = Path(os.path.normpath(self._workspace_root / candidate))
         if not target.is_relative_to(self._workspace_root):
             return None
-        if target.is_dir():
+        # A folder that is already there makes this a `-p` re-create, which is
+        # allowed. A folder the daemon cannot STAT is not known to be there, so
+        # answering True would stand the redirect down for exactly the paths it
+        # can see least about.
+        if path_is_dir(target, unreadable_means=False):
             return None
         if not (self._workspace_root / plan_dir / MKPLAN_SCRIPT_NAME).exists():
             return None

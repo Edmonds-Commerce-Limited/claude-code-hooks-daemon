@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -239,7 +240,11 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
                 cwd = hook_input.get(_CWD_FIELD)
                 if isinstance(cwd, str) and cwd:
                     path = Path(cwd) / path
-            if not path.is_file() or not os.access(path, os.R_OK):
+            # `os.access` never raises, so it would have caught an unreadable
+            # file on its own -- but only by correcting a guess `is_file()` had
+            # already crashed on. Stating the answer here keeps the skip
+            # attributable to this line rather than to the next one.
+            if not path_is_file(path, unreadable_means=False) or not os.access(path, os.R_OK):
                 # Missing/unreadable file: the commit itself will fail, and
                 # that failure belongs to git, not to this guard. Checked
                 # up-front rather than caught, so no exception is swallowed.

@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Where a Node workspace keeps its tool binaries. Used as a FALLBACK when the
@@ -225,8 +226,10 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
 
         # File must exist. A formality for Write/Edit; load-bearing for Bash,
         # where the target is PREDICTED from the command and a failed command
-        # leaves nothing behind.
-        return Path(file_path).exists()
+        # leaves nothing behind. An unstattable path takes the same answer:
+        # ESLint cannot read it either, so reporting it as checkable would only
+        # produce a diagnostic about content nobody saw.
+        return path_exists(file_path, unreadable_means=False)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing TypeScript/TSX file that needs validation."""

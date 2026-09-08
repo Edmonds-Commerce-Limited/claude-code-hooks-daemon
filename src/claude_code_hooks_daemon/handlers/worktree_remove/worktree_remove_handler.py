@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.handler_bases import WorktreeRemoveHandlerBase
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.path_predicates import path_exists
 
 _WORKTREE_REMOVE_PRIORITY = 50
 
@@ -54,7 +55,13 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
         cwd = hook_input.get(_KEY_CWD)
         if cwd:
             path = self._extract_path(hook_input)
-            if path is not None and path.exists():
+            # The payload path arrives with no containment check at all, so it
+            # is as unstattable as any other caller-supplied path. This handler
+            # never denies, so the only question is which git command runs:
+            # skipping the optional force-remove leaves the unconditional prune
+            # below to clean up, which is the same route an externally-deleted
+            # worktree already takes.
+            if path is not None and path_exists(path, unreadable_means=False):
                 self._run_git(str(cwd), "worktree", "remove", "--force", str(path))
             # Prune last so registrations for just-removed / externally-deleted
             # worktrees are dropped regardless of how the directory went away.
