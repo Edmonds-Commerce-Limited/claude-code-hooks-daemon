@@ -69,11 +69,15 @@ class _FakeGit:
             ]
             return subprocess.CompletedProcess([], 0, "\n".join(lines), "")
         if args[0] == "for-each-ref":
+            # Full refnames, as `--format=%(refname)` returns them — never the
+            # short form, which a same-named tag turns into `heads/<name>`.
             names = ["main", *self.branches_ahead]
-            return subprocess.CompletedProcess([], 0, "".join(f"{n}\n" for n in names), "")
+            return subprocess.CompletedProcess(
+                [], 0, "".join(f"refs/heads/{n}\n" for n in names), ""
+            )
         if args[0] == "rev-list" and "--count" in args:
             spec = args[-1]
-            branch = spec.split("..", 1)[1]
+            branch = spec.split("..", 1)[1].removeprefix("refs/heads/")
             return subprocess.CompletedProcess([], 0, f"{self.branches_ahead.get(branch, 0)}\n", "")
         return subprocess.CompletedProcess([], 0, "", "")
 

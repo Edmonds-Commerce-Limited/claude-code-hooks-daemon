@@ -12,13 +12,14 @@ item matters is scope, and scope is the human's call.
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - imported for CompletedProcess/SubprocessError types only; nothing is spawned here
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.model import PlanDoc, PlanStatus
+from claude_code_hooks_daemon.utils.git_repo import branch_ref, strip_branch_ref
 
 # A plan that is In Progress ONLY because it is waiting for this very release
 # says so in its status line. Recognising that from its own words is a
@@ -145,16 +146,18 @@ def _head_sha(run_fn: RunGit, repo_root: Path) -> str:
 
 
 def _branches_ahead(run_fn: RunGit, repo_root: Path) -> tuple[BranchAhead, ...]:
-    names = _git_lines(
-        run_fn, repo_root, "for-each-ref", "--format=%(refname:short)", "refs/heads/"
-    )
+    # Full refnames, never `%(refname:short)`: short yields the shortest
+    # UNAMBIGUOUS name, so a branch shadowed by a same-named tag comes back as
+    # `heads/<name>`, which no git command accepts (Plan 00254 measured a
+    # force-delete built from exactly that). Strip the prefix ourselves.
+    refnames = _git_lines(run_fn, repo_root, "for-each-ref", "--format=%(refname)", "refs/heads/")
     found: list[BranchAhead] = []
-    for name in names:
-        name = name.strip()
+    for refname in refnames:
+        name = strip_branch_ref(refname.strip())
         if name == _MAIN_BRANCH:
             continue
         count_lines = _git_lines(
-            run_fn, repo_root, "rev-list", "--count", f"{_MAIN_BRANCH}..{name}"
+            run_fn, repo_root, "rev-list", "--count", f"{branch_ref(_MAIN_BRANCH)}..{branch_ref(name)}"
         )
         ahead = int(count_lines[0]) if count_lines and count_lines[0].strip().isdigit() else 0
         if ahead > 0:

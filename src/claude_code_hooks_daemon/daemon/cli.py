@@ -2931,12 +2931,10 @@ def _gh_ci_lookup(sha: str) -> "CiRunState | None":
     """
     from claude_code_hooks_daemon.core.release_slate import CiRunState
 
-    branch = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
+    branch_result = run_git(Path.cwd(), "rev-parse", "--abbrev-ref", "HEAD")
+    if branch_result.returncode != 0:
+        raise OSError(f"git rev-parse failed: {branch_result.stderr.strip() or 'no output'}")
+    branch = branch_result.stdout.strip()
     listing = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
         [
             "gh",
