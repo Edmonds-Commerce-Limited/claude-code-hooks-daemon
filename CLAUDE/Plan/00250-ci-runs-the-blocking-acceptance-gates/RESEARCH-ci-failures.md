@@ -481,3 +481,38 @@ where the first of those would come from.
 reporting what it OBSERVED can only ever tell you that something is wrong. This
 one had the diagnostic in hand and dropped it, which cost two CI runs and a
 wrong exclusion.
+
+### Probe #144 recurred, and the quoted observation named the cause
+
+Run `34220935600`, Python 3.12 only (3.11 and 3.13 green), the first recurrence
+since `verdict` started quoting what it observed. The quote:
+
+```
+⚠️ Swift lint check timed out after 15s for invalid.swift - the write was
+ALLOWED without this check passing. Raise the budget via
+handlers.post_tool_use.lint_on_edit.options.timeouts.Swift: <seconds> if this
+language's linter is genuinely slower than 15s.
+```
+
+So it IS the timeout branch — the one an earlier revision excluded on the
+grounds that it emits an advisory rather than nothing. It does emit an
+advisory; the harness reads an advisory-on-a-deny-probe as "no decision", and
+that reading is correct.
+
+**Mechanism.** `ubuntu-latest` ships `swiftc`, so probe #144 is not skipped by
+`required_tools`. `swiftc -typecheck` on a COLD toolchain builds the stdlib
+module cache on first invocation, and on a busy runner that first invocation
+can exceed `lint_on_edit`'s 15s budget. Whichever interpreter's job happens to
+run the probe cold and slow is the one that fails — hence "a different single
+interpreter each time", which had read as randomness.
+
+**Fix chosen: warm the toolchain in the workflow**, one `swiftc -typecheck` on
+a one-line file before `Tests + coverage`. This moves the cold start out of the
+timed probe.
+
+**Fix rejected: raising `timeouts.Swift`.** It would make the flake go away and
+would be the wrong lesson. 15s is the right ceiling for a WARM toolchain, the
+budget is a shipped default every client inherits, and widening it here would
+hide a genuinely slow linter from all of them to paper over a runner's cold
+cache. If #144 recurs after the warm-up, the budget becomes an honest question;
+before it, it is not.

@@ -207,6 +207,26 @@ jobs:
       # sat skipped here for want of `uv` on the runner, and adding uv turned
       # them straight into failures. Without -rs the only way to notice the next
       # such skip is to compare totals between two runs by hand.
+      # Plan 00250 Task 2.4e: playbook probe #144 (Swift lint, expected DENY)
+      # flaked to "no decision" on single interpreters across three runs. The
+      # verdict now quotes what it observed, and the quote named the cause:
+      # "Swift lint check timed out after 15s ... the write was ALLOWED
+      # without this check passing". The runner image ships swiftc, and its
+      # FIRST invocation builds the stdlib module cache, which on a busy runner
+      # can exceed lint_on_edit's 15s budget. Warming the toolchain here moves
+      # that cold start out of the timed probe. The budget is deliberately NOT
+      # raised: 15s is the right ceiling for a warm toolchain, and widening it
+      # would hide a genuinely slow linter from every client.
+      - name: Warm the Swift toolchain
+        if: ${{ !cancelled() }}
+        run: |
+          if command -v swiftc >/dev/null 2>&1; then
+            printf 'let warm = 1\n' > "${RUNNER_TEMP}/warm.swift"
+            time swiftc -typecheck "${RUNNER_TEMP}/warm.swift"
+          else
+            echo "swiftc not on this runner; probe #144 will skip via required_tools"
+          fi
+
       - name: Tests + coverage
         if: ${{ !cancelled() }}
         run: >

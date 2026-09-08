@@ -1,6 +1,6 @@
 # Plan 00250: CI must actually run the acceptance gates it calls blocking
 
-**Status**: In Progress — every success criterion is met and re-verified against green CI run `34215559978`; the plan stays open ONLY for Task 2.4e, a flake that has not recurred (absence is not a diagnosis)
+**Status**: In Progress — every success criterion is met; the one open item is Task 2.4e, now DIAGNOSED (a Swift toolchain cold-start timeout) and fixed with a CI warm-up step, awaiting a single green run on all three interpreters to confirm the fix holds
 **Created**: 2026-08-17
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -196,14 +196,19 @@ and tables: [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
   offenders. The baked roots are now an argument
   (`unexpected_absolute_paths`), measured against the real artefact: 27 files
   before, none after.
-- [ ] ⬜ **Task 2.4e**: Playbook probe **#144** (Swift lint) reports "no
-  decision at all". **Flaky, not interpreter-specific** — a different single
-  interpreter in each of two runs. I excluded a timeout on bad grounds: that
-  branch does emit an advisory, but `verdict` **discarded** the observed text
-  here. It now quotes it, so the next CI run names the cause rather than
-  needing a Swift toolchain locally. **Did not recur** in run 34197901092 (all
-  three green) — absence of the flake is not a diagnosis, so this stays open.
-  See [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
+- [ ] 🔄 **Task 2.4e**: Playbook probe **#144** (Swift lint) — **diagnosed on
+  recurrence**, run `34220935600` (3.12 only). Quoting the observed text paid
+  for itself on the first recurrence: *"Swift lint check timed out after 15s …
+  the write was ALLOWED without this check passing"*. It IS the timeout branch
+  I had excluded on bad grounds. Mechanism: `ubuntu-latest` ships `swiftc`, and
+  its first `-typecheck` builds the stdlib module cache, which on a busy runner
+  exceeds the 15s budget — whichever job runs it cold is the one that fails,
+  which is why it looked interpreter-random. Fixed by a **warm-up step** in the
+  workflow before `Tests + coverage`; the budget is deliberately NOT raised, and
+  the reasoning is in [RESEARCH-ci-failures.md](RESEARCH-ci-failures.md).
+  **Stays open until one run is green on all three interpreters with the
+  warm-up in place** — that is the confirmation, and a fix is not confirmed by
+  having been written.
 - [x] ✅ **Task 2.4a**: The two failures that were plain defects rather than
   provisioning gaps — neither needed a daemon at all, and both were fixed with a
   test reproducing the CI condition locally. `test_deployed_skill_trees.py`

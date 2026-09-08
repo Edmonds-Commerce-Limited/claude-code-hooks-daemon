@@ -52,9 +52,7 @@ class TestExitCodeIsTheContract:
         assert code == cli.RELEASE_SLATE_CLEAN
         assert "CLEAN" in capsys.readouterr().out
 
-    def test_in_flight_exits_two_with_the_report(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_in_flight_exits_two_with_the_report(self, capsys: pytest.CaptureFixture[str]) -> None:
         code = cli.cmd_release_slate_check(_args(), collect=lambda: _report(clean=False))
         assert code == cli.RELEASE_SLATE_IN_FLIGHT
         out = capsys.readouterr().out
@@ -66,9 +64,7 @@ class TestExitCodeIsTheContract:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """The decision is the human's; the report is still the record of it."""
-        code = cli.cmd_release_slate_check(
-            _args(accept=True), collect=lambda: _report(clean=False)
-        )
+        code = cli.cmd_release_slate_check(_args(accept=True), collect=lambda: _report(clean=False))
         assert code == cli.RELEASE_SLATE_CLEAN
         out = capsys.readouterr().out
         assert "00001" in out

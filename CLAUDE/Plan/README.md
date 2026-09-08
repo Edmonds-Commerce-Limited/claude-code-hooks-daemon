@@ -38,7 +38,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00252: guards for premises no write-time hook sees](00252-guards-for-premises-no-write-time-hook-sees/PLAN.md) - Not Started (two defects, one argument from Core Standard 15's corollary: the ambient-git-premise class Plan 00245 fixed seven times by hand without a guard, and the fact that no guard inspects STAGED CONTENT for secret-list terms, so a file arriving by `mv` reached a pushed commit)
 
-- [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - In Progress (11 acceptance tests have skipped on every CI run for want of a daemon socket, and the plan also now carries the integration files keeping `Tests + coverage` RED on main)
+- [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - In Progress, every criterion met; open only for probe #144, now diagnosed as a Swift toolchain cold-start timeout and fixed with a CI warm-up step, awaiting one green run to confirm
 
 ### Security / Presentation Audit
 

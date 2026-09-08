@@ -74,9 +74,7 @@ class _FakeGit:
         if args[0] == "rev-list" and "--count" in args:
             spec = args[-1]
             branch = spec.split("..", 1)[1]
-            return subprocess.CompletedProcess(
-                [], 0, f"{self.branches_ahead.get(branch, 0)}\n", ""
-            )
+            return subprocess.CompletedProcess([], 0, f"{self.branches_ahead.get(branch, 0)}\n", "")
         return subprocess.CompletedProcess([], 0, "", "")
 
 

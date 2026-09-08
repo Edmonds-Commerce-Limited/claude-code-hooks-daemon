@@ -145,7 +145,9 @@ def _head_sha(run_fn: RunGit, repo_root: Path) -> str:
 
 
 def _branches_ahead(run_fn: RunGit, repo_root: Path) -> tuple[BranchAhead, ...]:
-    names = _git_lines(run_fn, repo_root, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+    names = _git_lines(
+        run_fn, repo_root, "for-each-ref", "--format=%(refname:short)", "refs/heads/"
+    )
     found: list[BranchAhead] = []
     for name in names:
         name = name.strip()
