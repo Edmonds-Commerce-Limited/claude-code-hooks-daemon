@@ -1,6 +1,6 @@
 # Plan 00356: secret guard bracket glob false positive
 
-**Status**: Complete
+**Status**: In Progress
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Medium
