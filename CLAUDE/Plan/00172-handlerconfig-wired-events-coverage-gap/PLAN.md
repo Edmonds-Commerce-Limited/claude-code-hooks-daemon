@@ -88,22 +88,28 @@ no action beyond a clarifying comment.
 
 ### Phase 1: Decide the model
 
-- [ ] ⬜ **Task 1.1**: Decide whether all wired events should be configurable
+- [x] ✅ **Task 1.1**: Decide whether all wired events should be configurable
   (`HandlersConfig` gains fields for all 31) or whether a subset is
   intentionally non-configurable — and encode that decision as data
   derived from `wired_event_metas()`, not a hand-maintained list.
-- [ ] ⬜ **Task 1.2**: Make the same decision for `PluginConfig.event_type`.
+  Decision: all 31, no exclusion set; the field list is locked to the
+  registry at import time (Plan 00362 Task 2.3, `a22fe679`).
+- [x] ✅ **Task 1.2**: Make the same decision for `PluginConfig.event_type`.
+  Decision: the catalogue-wide `EventKey` Literal, narrowed at validation
+  to the wired subset (`a22fe679`).
 
 ### Phase 2: TDD implementation
 
-- [ ] ⬜ **Task 2.1**: Failing test cross-checking `HandlersConfig` coverage
+- [x] ✅ **Task 2.1**: Failing test cross-checking `HandlersConfig` coverage
   against `wired_event_metas()` (allow an explicit, named exclusion set).
-- [ ] ⬜ **Task 2.2**: Failing test cross-checking `PluginConfig.event_type`
+  (`a22fe679`)
+- [x] ✅ **Task 2.2**: Failing test cross-checking `PluginConfig.event_type`
   against `wired_event_metas()`; replace the mirrored list in
-  `test_models.py`.
-- [ ] ⬜ **Task 2.3**: Strengthen `test_cli_handler_config_mapping` so a wired
-  event with handlers but no model field fails the test.
-- [ ] ⬜ **Task 2.4**: Implement model/plumbing changes to pass the tests.
+  `test_models.py`. (`a22fe679`)
+- [x] ✅ **Task 2.3**: Strengthen `test_cli_handler_config_mapping` so a wired
+  event with handlers but no model field fails the test. (`a22fe679`)
+- [x] ✅ **Task 2.4**: Implement model/plumbing changes to pass the tests.
+  (`a22fe679`)
 
 ### Phase 3: Housekeeping (Findings 3-4)
 
