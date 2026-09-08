@@ -41,6 +41,42 @@ logger = logging.getLogger(__name__)
 _CONFIG_HINT_EXTRA_WHITELIST = "extra_whitelist"
 _CONFIG_YAML_KEY = "pipe_blocker"
 
+# Compiled-pattern cache for the project-configured extra_whitelist /
+# extra_blacklist entries. The same handful of patterns are matched on every
+# piped command, so compiling once is worth it. An uncompilable pattern is
+# cached as None -- a client typo must not be re-attempted per event, and must
+# not take the handler down: a pattern that cannot compile matches nothing, so
+# the command simply falls through to the normal verdict.
+_COMPILED_EXTRA_CACHE: dict[str, "re.Pattern[str] | None"] = {}
+
+
+def _compiled_extra_pattern(pattern: str) -> "re.Pattern[str] | None":
+    """Compile a configured extra_* pattern case-insensitively, caching by source."""
+    if pattern in _COMPILED_EXTRA_CACHE:
+        return _COMPILED_EXTRA_CACHE[pattern]
+    try:
+        compiled: re.Pattern[str] | None = re.compile(pattern, re.IGNORECASE)
+    except re.error as exc:
+        logger.error(
+            "pipe_blocker: ignoring unparseable configured pattern %r (%s). "
+            "Fix it in handlers.pre_tool_use.pipe_blocker.options.",
+            pattern,
+            exc,
+        )
+        compiled = None
+    _COMPILED_EXTRA_CACHE[pattern] = compiled
+    return compiled
+
+
+def _matches_any_configured(patterns: list[str], source_segment: str) -> bool:
+    """True when any configured RAW pattern matches the segment."""
+    for pattern in patterns:
+        compiled = _compiled_extra_pattern(pattern)
+        if compiled is not None and compiled.search(source_segment):
+            return True
+    return False
+
+
 # Default preview line count suggested in the echd-capture recommendation.
 _ECHD_CAPTURE_DEFAULT_LINES = 20
 # Name of the deployed capture helper (Plan 00164 Phase 6) and its location
@@ -315,7 +351,10 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
     Language-specific blacklists are managed by PipeBlockerStrategy implementations
     in the pipe_blocker strategy domain. The handler has zero language awareness.
 
-    Configuration options (set via YAML config):
+    Configuration options (set via YAML config ONLY -- the registry builds this
+    handler with no arguments and then assigns each option to ``self._<key>``
+    as the raw parsed value, so every option below is read at match time and
+    must never be pre-processed in ``__init__``):
         extra_whitelist: list[str] - Additional regex patterns to always allow.
             Example: ["^my_fast_report\\\\b"]  — allows my_fast_report | tail
             (this example used ``^git\\\\s+log\\\\b`` while the guidance below
@@ -327,23 +366,30 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             Universal is always active. If unset, ALL language blacklists are used.
     """
 
-    def __init__(self, options: dict[str, Any] | None = None) -> None:
-        """Initialize with optional per-project extra whitelist/blacklist."""
+    def __init__(self) -> None:
+        """Initialize with an empty extra whitelist/blacklist.
+
+        Takes NO arguments: the registry constructs every handler bare and then
+        injects each configured option as ``self._<option_key>``, so a
+        constructor parameter could only ever be populated by a test.
+        """
         super().__init__(
             handler_id=HandlerID.PIPE_BLOCKER,
             priority=Priority.PIPE_BLOCKER,
             tags=[HandlerTag.SAFETY, HandlerTag.BASH, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
-        options = options or {}
 
         # Strategy registry for language-specific blacklists
         self._registry = PipeBlockerStrategyRegistry.create_default()
 
-        # Project-level extra whitelist/blacklist (from options/config)
-        self._extra_whitelist: list[re.Pattern[str]] = [
-            re.compile(p, re.IGNORECASE) for p in options.get("extra_whitelist", [])
-        ]
-        self._extra_blacklist: list[str] = list(options.get("extra_blacklist", []))
+        # Project-level extra whitelist/blacklist. RAW pattern strings, because
+        # that is the shape config injection puts here; compilation happens at
+        # match time via _compiled_extra_pattern. Storing compiled patterns was
+        # unrecoverable: the injection overwrote them with the YAML strings and
+        # every piped command then raised out of matches(), which -- failing
+        # open -- skipped every one of this handler's protections.
+        self._extra_whitelist: list[str] = []
+        self._extra_blacklist: list[str] = []
 
         # Language filtering (applied lazily on first use)
         self._languages: list[str] | None = None
@@ -682,7 +728,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         for pattern in self._whitelist:
             if pattern.search(source_segment):
                 return True
-        return any(pattern.search(source_segment) for pattern in self._extra_whitelist)
+        return _matches_any_configured(self._extra_whitelist, source_segment)
 
     def _matches_blacklist(self, source_segment: str) -> bool:
         """Check if source segment matches any blacklisted pattern (known expensive)."""
@@ -693,10 +739,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             if re.search(pattern_str, source_segment, re.IGNORECASE):
                 return True
         # Check extra blacklist from config
-        for pattern_str in self._extra_blacklist:
-            if re.search(pattern_str, source_segment, re.IGNORECASE):
-                return True
-        return False
+        return _matches_any_configured(self._extra_blacklist, source_segment)
 
     def _resolve_echd_capture_path(self) -> Path | None:
         """Resolve the deployed ``echd-capture`` helper to an absolute path.

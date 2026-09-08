@@ -243,8 +243,16 @@ class DebugInfoGenerator:
         socket_path = paths.get("SOCKET_PATH", "")
         pid_path = paths.get("PID_PATH", "")
 
-        if not Path(python_cmd).exists():
-            self.output(f"{self.RED}ERROR: Python venv not found at {python_cmd}{self.RESET}")
+        # A blank PYTHON_CMD must be rejected BEFORE the exists() check:
+        # Path("") is PosixPath('.'), the current directory, which always
+        # exists — so a blank value passed the guard and every section below
+        # then ran subprocess.run([""], ...), reporting
+        # "[Errno 13] Permission denied: ''" in place of the real problem.
+        if not python_cmd.strip() or not Path(python_cmd).exists():
+            self.output(
+                f"{self.RED}ERROR: Python venv not found at "
+                f"{python_cmd or '<unset>'}{self.RESET}"
+            )
             self.output()
             self.flush_output()
             return

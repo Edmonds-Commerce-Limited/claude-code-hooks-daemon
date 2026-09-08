@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00353: registry option injection clobbers compiled attributes](00353-registry-option-injection-clobbers-compiled-attributes/PLAN.md) - Not Started (the registry's generic `setattr(instance, f"_{option_key}", ...)` runs after `__init__` and overwrote `pipe_blocker`'s compiled `extra_whitelist` with the raw YAML strings, so `matches()` raised before any verdict and — failing open — silently disabled every one of the handler's protections for as long as the option was set)
+
 - [00352: agent branches outlive their worktrees](00352-agent-branches-outlive-their-worktrees/PLAN.md) - Not Started (`worktree-reap` enumerates from `git worktree list`, so a branch whose worktree has already gone is invisible to it; reaping Plan 00349's 21 left three orphaned `agent-*` branches behind, each 0 commits ahead of `main`)
 
 - [00351: permission test skips everywhere including non root ci](00351-permission-test-skips-everywhere-including-non-root-ci/PLAN.md) - In Progress (a `skipif` guarded on `Path("/").stat().st_uid == 0`, which asks who owns `/` rather than who is running — constant `True`, so the test had never executed anywhere; it now runs on CI and passes)
