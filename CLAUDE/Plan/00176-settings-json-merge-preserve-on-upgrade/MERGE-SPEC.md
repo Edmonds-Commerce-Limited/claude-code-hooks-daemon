@@ -286,11 +286,11 @@ Neither forces it.
 
 ## The decided key-ownership rule
 
-| Class                   | Keys                                                                                | Rule                                                                                                                              |
-| ----------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **Daemon-owned**        | inner hooks under `hooks[event]` whose `command` contains `/.claude/hooks/`         | rebuilt from `HOOK_COMMAND_TEMPLATE`; missing wired events added; **siblings without the fragment never touched**                 |
-| **Recommended default** | `statusLine.command`, `statusLine.refreshInterval`                                  | three-way: user value differing from the OLD default is preserved; user value equal to the old default is upgraded to the new one |
-| **Client-owned**        | `permissions`, `plansDirectory`, `env`, every other top-level key, non-daemon hooks | preserved verbatim, always                                                                                                        |
+| Class                   | Keys                                                                                                                     | Rule                                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| **Daemon-owned**        | inner hooks under `hooks[event]` matching the Q2 discriminator (canonical or legacy command, for a key in the wired set) | rebuilt from `HOOK_COMMAND_TEMPLATE`; missing wired events added; **every unmatched sibling never touched**                       |
+| **Recommended default** | `statusLine.command`, `statusLine.refreshInterval`                                                                       | three-way: user value differing from the OLD default is preserved; user value equal to the old default is upgraded to the new one |
+| **Client-owned**        | `permissions`, `plansDirectory`, `env`, every other top-level key, non-daemon hooks                                      | preserved verbatim, always                                                                                                        |
 
 Two invariants that fall out of it, and that Phase 2's tests should assert
 directly rather than incidentally:

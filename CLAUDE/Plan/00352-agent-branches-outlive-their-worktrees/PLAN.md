@@ -1,6 +1,6 @@
 # Plan 00352: agent branches outlive their worktrees
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Low
@@ -142,7 +142,18 @@ can still misreport as unlanded after a rebase (Plan 00349 Task 1.2).
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: Full QA green, daemon restart RUNNING.
+- [x] ✅ **Task 3.1**: 26/26 QA checks pass (19711 tests, 0 failed, coverage
+  95.3%), daemon restart RUNNING.
+
+  One check had to be earned rather than observed. `semgrep` flagged the branch
+  listing under `short-refname-in-branch-listing`: the first cut asked git for
+  `--format=%(refname:short)`, which yields the shortest UNAMBIGUOUS name — so a
+  branch shadowed by a same-named tag comes back as `heads/<name>`, a string no
+  git command accepts. Every membership test and every `git branch -d` built
+  from that listing would have been wrong for exactly the branch most at risk.
+  Plan 00254 measured that same mistake force-deleting a branch holding the only
+  copy of a file. The listing now asks for `%(refname)` and strips via
+  `git_repo.strip_branch_ref`; the delete addresses `git_repo.branch_ref`.
 
 ## Success Criteria
 
@@ -161,3 +172,6 @@ can still misreport as unlanded after a rebase (Plan 00349 Task 1.2).
 
 - Filed from the verification of Plan 00349 Task 3.3, which measured the gap
   rather than predicting it.
+- `f6f1069c` — `collect_orphaned_branches` + `prune_branch`, wired to
+  `worktree-reap --reap-branches`
+- `f587a7f0` — address branches by full ref, never the short name

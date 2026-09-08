@@ -356,15 +356,25 @@ class ReconcileResult:
     events_added: list[str] = field(default_factory=list)
 
 
-def _build_hook_registration(bash_key: str) -> list[dict[str, Any]]:
-    """Build the settings.json ``hooks[event]`` value for a single forwarder."""
+def canonical_hook_entry(bash_key: str) -> dict[str, Any]:
+    """The one INNER-hook dict every source must emit for a forwarder.
+
+    Public because the settings merge (Plan 00176) REBUILDS a stale entry rather
+    than merely detecting it, and a rebuilt entry has to be indistinguishable
+    from a freshly installed one by construction rather than by review.
+    """
     command: dict[str, Any] = {
         "type": _HOOK_COMMAND_TYPE,
         "command": HOOK_COMMAND_TEMPLATE.format(bash_key=bash_key),
     }
     if bash_key in _BASH_KEYS_WITH_TIMEOUT:
         command["timeout"] = _DEFAULT_HOOK_TIMEOUT_SECONDS
-    return [{"hooks": [command]}]
+    return command
+
+
+def build_hook_registration(bash_key: str) -> list[dict[str, Any]]:
+    """Build the settings.json ``hooks[event]`` value for a single forwarder."""
+    return [{"hooks": [canonical_hook_entry(bash_key)]}]
 
 
 def reconcile_settings_hooks(
@@ -396,7 +406,7 @@ def reconcile_settings_hooks(
     for json_key in sorted(HOOK_EVENTS_IN_SETTINGS.keys()):
         if json_key in new_hooks:
             continue
-        new_hooks[json_key] = _build_hook_registration(HOOK_EVENTS_IN_SETTINGS[json_key])
+        new_hooks[json_key] = build_hook_registration(HOOK_EVENTS_IN_SETTINGS[json_key])
         events_added.append(json_key)
 
     new_settings["hooks"] = new_hooks
