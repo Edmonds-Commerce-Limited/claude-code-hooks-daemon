@@ -195,3 +195,75 @@ class TestStatusMessagePoster:
         # The written file is complete and parseable (no partial write).
         data = json.loads(_message_path(tmp_path).read_text())
         assert data["text"].startswith("msg-")
+
+
+class TestAnInfoMessageYieldsToALiveWarning:
+    """Plan 00319 F9 — the audit banner could clobber a live Ctrl+C hint.
+
+    The finding proposed routing the banner through ``StatusMessagePoster``,
+    but that cannot fix this: the poster's rate limit is a ``threading.Lock``
+    and the two writers are in DIFFERENT PROCESSES — the audit banner is
+    written by ``decide_once`` in the ``--worker`` subprocess, while every
+    keystroke notice is written by the PTY host. A process-local lock
+    serialises neither.
+
+    What does work across processes is the message file itself. Every host
+    notice is WARNING level and the audit banner is the only INFO writer, so
+    the precedence rule is exact: an INFO write never replaces a WARNING that
+    has not yet expired.
+    """
+
+    def test_info_does_not_replace_an_unexpired_warning(self, tmp_path: Path) -> None:
+        write_status_message(
+            tmp_path, text="ctrl+c hint", expires_at=100.0, level=_STATUS_LEVEL_WARNING
+        )
+        result = write_status_message(tmp_path, text="audit banner", expires_at=130.0, now=90.0)
+        assert result is None
+        assert json.loads(_message_path(tmp_path).read_text())["text"] == "ctrl+c hint"
+
+    def test_info_replaces_a_warning_that_has_expired(self, tmp_path: Path) -> None:
+        """Yielding forever would make the banner unreachable after any warning."""
+        write_status_message(
+            tmp_path, text="ctrl+c hint", expires_at=100.0, level=_STATUS_LEVEL_WARNING
+        )
+        result = write_status_message(tmp_path, text="audit banner", expires_at=140.0, now=110.0)
+        assert result is not None
+        assert json.loads(_message_path(tmp_path).read_text())["text"] == "audit banner"
+
+    def test_info_replaces_a_live_info_message(self, tmp_path: Path) -> None:
+        """The rule is about SEVERITY, not about recency."""
+        write_status_message(tmp_path, text="older banner", expires_at=100.0)
+        result = write_status_message(tmp_path, text="newer banner", expires_at=130.0, now=90.0)
+        assert result is not None
+        assert json.loads(_message_path(tmp_path).read_text())["text"] == "newer banner"
+
+    def test_a_warning_always_wins_even_over_a_live_warning(self, tmp_path: Path) -> None:
+        """A keystroke guard must never be silenced by an earlier notice."""
+        write_status_message(tmp_path, text="ctrl+z", expires_at=100.0, level=_STATUS_LEVEL_WARNING)
+        result = write_status_message(
+            tmp_path,
+            text="ctrl+c",
+            expires_at=130.0,
+            level=_STATUS_LEVEL_WARNING,
+            now=90.0,
+        )
+        assert result is not None
+        assert json.loads(_message_path(tmp_path).read_text())["text"] == "ctrl+c"
+
+    def test_an_absent_file_is_not_a_live_warning(self, tmp_path: Path) -> None:
+        result = write_status_message(tmp_path, text="audit banner", expires_at=130.0, now=90.0)
+        assert result is not None
+
+    def test_an_unreadable_file_does_not_block_the_write(self, tmp_path: Path) -> None:
+        """Corrupt state must not wedge the channel shut — it fails OPEN here.
+
+        A message nobody can parse is not one a human is reading, so treating
+        it as a live warning would silence the banner until the TTL of a value
+        we cannot even read elapses.
+        """
+        path = _message_path(tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json", encoding="utf-8")
+        result = write_status_message(tmp_path, text="audit banner", expires_at=130.0, now=90.0)
+        assert result is not None
+        assert json.loads(path.read_text())["text"] == "audit banner"

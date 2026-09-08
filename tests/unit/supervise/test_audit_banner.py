@@ -317,6 +317,33 @@ class TestAKeystrokeFlushesWhenItIsSent:
         assert escape.decision_value == _mod.Decision.WOULD_ESCAPE.value
         assert not (tmp_path / _mod._LOG_SUBDIRECTORY / _mod._STATUS_MESSAGE_FILENAME).exists()
 
+    def test_a_yielded_banner_keeps_its_items_for_the_next_tick(self, tmp_path: Path) -> None:
+        """Plan 00319 F9: yielding to a live Ctrl+C hint must not DROP the audit.
+
+        Clearing on a suppressed write would silently lose the notice — and
+        after Plan 00355 that suppression is routine rather than exceptional,
+        since every escape now writes a banner. Retaining is also what lets a
+        stack accumulate into `esc (20)` instead of vanishing one at a time.
+        """
+        sidecar_dir = tmp_path / "cs"
+        _urgent_sidecar(sidecar_dir, now=1000.0)
+        # A live WARNING (a Ctrl+C hint) is already on screen at tick time.
+        _mod.write_status_message(
+            tmp_path,
+            text="ctrl+c hint",
+            expires_at=2000.0,
+            level=_mod._STATUS_LEVEL_WARNING,
+        )
+        machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+        _tick(machine, sidecar_dir, now=1000.0)
+        escape = _tick(machine, sidecar_dir, now=1061.0)
+
+        assert escape.decision_value == _mod.Decision.WOULD_ESCAPE.value
+        # The keystroke still went out; only its banner was held back.
+        assert escape.payload == _mod._ESC_PAYLOAD
+        assert _banner_payload(tmp_path)["text"] == "ctrl+c hint"
+        assert machine.audit_pending != ()
+
     def test_a_slash_command_still_waits_for_its_sequence_to_finish(self, tmp_path: Path) -> None:
         """00318's batching: an armed /effort must NOT flush on an injection tick."""
         sidecar_dir = tmp_path / "cs"

@@ -1,6 +1,6 @@
 # Plan 00319: supervisor release review followups
 
-**Status**: Not Started
+**Status**: In Progress (F9 shipped — it became urgent when Plan 00355 gave every escape a banner; the other fifteen items are untouched)
 **Created**: 2026-09-02
 **Owner**: joseph
 **Priority**: Medium
@@ -112,10 +112,45 @@ which of them are worth the change.
   because real session ids happen to be stem-safe. A session id that is
   not makes the marker unreadable — a silent miss, not an error. Use the
   same stemming on both sides.
-- [ ] ⬜ **Task 3.2 (F9)**: the audit banner writes the status message
-  directly, bypassing `StatusMessagePoster`'s lock and rate limit, so it
-  can clobber a live Ctrl+C hint. Route it through the poster, or state in
-  the code why the bypass is correct.
+
+- [x] ✅ **Task 3.2 (F9)**: fixed — but NOT by either remedy the finding
+  offered, and the reason matters more than the fix.
+
+  **"Route it through the poster" cannot work.** `StatusMessagePoster`
+  serialises with a `threading.Lock` and rate-limits on an instance attribute,
+  both of which are PROCESS-LOCAL. The two writers are in different processes:
+  the audit banner is written by `decide_once` inside the `--worker`
+  subprocess, while every keystroke notice is written by the PTY host. Giving
+  the worker its own poster would rate-limit the worker against itself and
+  would not touch the host/worker clobber the finding actually names.
+
+  **"State why the bypass is correct" is also wrong**, because it is not
+  correct — the clobber is real, and Plan 00355 made it materially more likely
+  by giving all ~122 escapes per session a banner each.
+
+  **What does arbitrate across processes is the message file itself.** Every
+  host notice posts at WARNING (Ctrl+C, Ctrl+Z, Ctrl+`\`, DROP ANCHOR) and the
+  audit banner is the only INFO writer, so the precedence rule is exact and
+  needs no new state: an INFO write does not replace a WARNING that has not yet
+  expired. `_live_warning_present` reads the file, and fails OPEN — an absent,
+  unreadable or unparseable message is treated as no warning, so corrupt state
+  cannot wedge the channel shut until an unreadable TTL elapses.
+
+  The read-then-write is not atomic across processes, so a race can still
+  clobber. That is worth stating plainly rather than hiding: losing the race
+  reproduces exactly today's behaviour, so the change is strictly an
+  improvement and introduces no new failure mode.
+
+  **A suppressed banner no longer DISCARDS its audit.** The flush previously
+  cleared the pending items unconditionally, which was defensible when a failed
+  write was exceptional; with suppression now routine it would silently lose
+  notices. Items are retained for the next tick — which is also what lets a
+  stack accumulate into Plan 00355's `esc (20)` rather than vanishing one at a
+  time. `arm_audit` caps the list, so this cannot grow without bound.
+
+  Covered by `TestAnInfoMessageYieldsToALiveWarning` (6 tests) and
+  `test_a_yielded_banner_keeps_its_items_for_the_next_tick`.
+
 - [ ] ⬜ **Task 3.3 (F10)**: `_cached_fragment` is mutable state on a
   router-shared handler instance. Handlers are shared across events, so
   per-event state on the instance leaks between events.

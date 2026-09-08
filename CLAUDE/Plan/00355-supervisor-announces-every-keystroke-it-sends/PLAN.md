@@ -40,11 +40,19 @@ from three places only — `/effort`, `/model` and `/compact`. `WOULD_ESCAPE` an
   stalled compaction, they work on the first attempt, and making them rarer is a
   separate question from making them visible. If the stall rate itself is worth
   attacking, that is its own plan with its own measurement.
+
 - **Not** moving the banner onto `StatusMessagePoster`'s lock and rate limit.
   Plan 00319 Task 3.2 (F9) already tracks that the audit banner writes the status
   message directly, bypassing both. This plan increases how often that write
   happens, so it makes F9 more relevant — but fixing it here would fold two
   independent changes into one.
+
+  **Since shipped, under 00319 rather than here** — and the separation paid off:
+  moving onto the poster turned out to be impossible (its lock is process-local
+  and the two writers are in different processes), so F9 needed a different
+  mechanism entirely. Folding it in would have buried that finding inside this
+  plan's diff. See 00319 Task 3.2.
+
 - **Not** announcing anything the supervisor did not do. A dry-run marker is not
   a keystroke and must not be tallied as one.
 

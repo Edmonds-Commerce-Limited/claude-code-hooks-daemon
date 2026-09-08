@@ -1886,6 +1886,36 @@ def _status_message_path(untracked_dir: Path) -> Path:
     return untracked_dir / _LOG_SUBDIRECTORY / _STATUS_MESSAGE_FILENAME
 
 
+def _live_warning_present(message_path: Path, *, now: float) -> bool:
+    """Is a WARNING-level message currently on screen and not yet expired?
+
+    Read from the FILE rather than from any in-process state, because the two
+    writers this arbitrates between are in different PROCESSES (Plan 00319 F9):
+    the audit banner is written by ``decide_once`` in the ``--worker``
+    subprocess, every keystroke notice by the PTY host. The message file is the
+    only thing they share.
+
+    Fails OPEN — an absent, unreadable or unparseable file is reported as "no
+    live warning". A message nobody can parse is not one a human is reading, so
+    treating it as live would wedge the channel shut until the TTL of a value we
+    cannot even read elapsed.
+    """
+    try:
+        raw = message_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload, dict) or payload.get("level") != _STATUS_LEVEL_WARNING:
+        return False
+    expires_at = payload.get("expires_at")
+    if not isinstance(expires_at, (int, float)) or isinstance(expires_at, bool):
+        return False
+    return float(expires_at) > now
+
+
 def write_status_message(
     untracked_dir: Path,
     *,
@@ -1893,6 +1923,7 @@ def write_status_message(
     expires_at: float,
     level: str = _STATUS_LEVEL_INFO,
     countdown: bool = False,
+    now: float | None = None,
 ) -> Path | None:
     """Atomically write a transient supervisor message for the status line.
 
@@ -1914,13 +1945,28 @@ def write_status_message(
     own text already names a window (Ctrl+C's confirm period) would only be
     muddled by a second number.
 
+    PRECEDENCE (Plan 00319 F9): an ``_STATUS_LEVEL_INFO`` write does NOT replace
+    a WARNING that is still live, and returns None instead. Every keystroke
+    guard (Ctrl+C, Ctrl+Z, Ctrl+\\, DROP ANCHOR) posts at WARNING and is
+    time-critical — a Ctrl+C hint names a two-second window — while the only
+    INFO writer is the audit banner, which is a convenience surface whose
+    durable record is decision.log. So the banner yields; nothing else does.
+
+    ``now`` is the wall clock used to judge that liveness, defaulting to
+    ``time.time()``. Callers already holding the tick's clock should pass it,
+    so the decision is made against the same instant as the rest of the tick.
+
     Best-effort: a write failure is reported to stderr and returns None rather
     than disturbing the supervised session.
 
     Returns:
-        The message file path on success, or None on failure.
+        The message file path on success, or None on failure or suppression.
     """
     message_path = _status_message_path(untracked_dir)
+    if level == _STATUS_LEVEL_INFO and _live_warning_present(
+        message_path, now=time.time() if now is None else now
+    ):
+        return None
     payload: dict[str, object] = {"text": text, "expires_at": expires_at, "level": level}
     if countdown:
         # OMITTED when false, never written as `false`: absent is the reader's
@@ -4948,17 +4994,24 @@ def decide_once(
         # what was actually sent.
         pending_items = machine.audit_pending
         flush_reason = f"audit trail flush ({len(pending_items)} item(s))"
-        write_status_message(
+        banner_path = write_status_message(
             sidecar_dir.parent,
             text=_format_audit_banner(pending_items),
             expires_at=facts.now_wall + _AUDIT_BANNER_TTL_SECONDS,
             countdown=True,
+            # The tick's own clock, so the live-warning check is made against
+            # the same instant as every other decision on this tick.
+            now=facts.now_wall,
         )
-        # Cleared at DECISION time (worker-side, hot-reloadable): a failed
-        # banner write then LOSES this audit instead of retrying it —
-        # acceptable, because the notice is a convenience surface and
-        # decision.log (below) keeps the durable record either way.
-        machine.mark_audit_injection()
+        # Cleared at DECISION time (worker-side, hot-reloadable) and ONLY when
+        # the banner actually landed. A write that failed, or that yielded to a
+        # live keystroke warning (Plan 00319 F9), leaves the items pending so
+        # the next tick shows them instead of dropping them — which is also
+        # what makes a stack accumulate into `esc (20)` rather than vanishing
+        # one at a time. `arm_audit` caps the list, so this cannot grow without
+        # bound, and decision.log holds the durable record either way.
+        if banner_path is not None:
+            machine.mark_audit_injection()
         if not keystroke_sent:
             decision_value = Decision.WOULD_AUDIT.value
             reason = flush_reason
