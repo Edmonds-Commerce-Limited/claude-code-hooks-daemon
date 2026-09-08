@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ def _settings_json_enables_lsp(context: RelevanceContext) -> bool:
     advisory input to a report, so it degrades rather than aborts.
     """
     settings = context.project_root / ".claude" / "settings.json"
-    if not settings.is_file():
+    if not path_is_file(settings, unreadable_means=False):
         return False
     try:
         data = json.loads(settings.read_text(encoding="utf-8"))
