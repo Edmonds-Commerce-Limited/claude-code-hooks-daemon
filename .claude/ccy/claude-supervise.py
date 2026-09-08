@@ -4003,13 +4003,36 @@ _AUDIT_BANNER_GLYPH = "🧾"
 _AUDIT_ACTION_EFFORT_GLYPH = "⚙️"
 _AUDIT_ACTION_MODEL_GLYPH = "♻️"
 _AUDIT_ACTION_COMPACT_GLYPH = "🧽"
+_AUDIT_ACTION_KEYSTROKE_GLYPH = "⌨️"
 _AUDIT_ACTION_DEFAULT_GLYPH = "•"
+
+# Labels for the two RAW-KEYSTROKE families (Plan 00355). They carry no slash
+# because they are keys, not slash commands -- and the distinction matters to a
+# reader: `/compact` types a visible line into the transcript, whereas an ESC
+# leaves no trace anywhere but decision.log. That invisibility is exactly why
+# the keystroke families are the ones that most need the banner, and why they
+# were the ones that never had it.
+_ESC_AUDIT_LABEL = "esc"
+_RESUBMIT_AUDIT_LABEL = "enter"
+# Which decisions inject a raw KEY rather than a line of text, and the label
+# each one announces itself under. Keyed on the decision VALUE (the string) so
+# the DROP ANCHOR escalation -- which reaches the escape path by assigning
+# `decision_value` directly, after `_resolve_payload` has already run -- is
+# covered by the same rule as the AWAIT_COMPACTING flush, rather than needing
+# its own arm call that a later branch could forget.
+_KEYSTROKE_AUDIT_LABELS: dict[str, str] = {
+    Decision.WOULD_ESCAPE.value: _ESC_AUDIT_LABEL,
+    Decision.WOULD_RESUBMIT.value: _RESUBMIT_AUDIT_LABEL,
+}
+
 # (command-prefix, glyph) pairs, longest-prefix-first is unnecessary here since
 # the commands share no prefix; a plain first-match scan suffices.
 _AUDIT_ACTION_GLYPHS: tuple[tuple[str, str], ...] = (
     ("/effort", _AUDIT_ACTION_EFFORT_GLYPH),
     ("/model", _AUDIT_ACTION_MODEL_GLYPH),
     ("/compact", _AUDIT_ACTION_COMPACT_GLYPH),
+    (_ESC_AUDIT_LABEL, _AUDIT_ACTION_KEYSTROKE_GLYPH),
+    (_RESUBMIT_AUDIT_LABEL, _AUDIT_ACTION_KEYSTROKE_GLYPH),
 )
 # Plan 00318: the audit trail is a transient STATUS-LINE banner, not a chat
 # injection. A banner is read at a glance mid-render, so it lives longer than a
@@ -4017,7 +4040,6 @@ _AUDIT_ACTION_GLYPHS: tuple[tuple[str, str], ...] = (
 # shows only WHAT was done — the per-item reason and the full record stay in
 # decision.log, which the status line has no room for and no need to repeat.
 _AUDIT_BANNER_TTL_SECONDS = 30.0
-_AUDIT_BANNER_MAX_ITEMS = 3
 # Separator between an audit item's command and its parenthesised reason; the
 # banner keeps only the part before it.
 _AUDIT_ITEM_REASON_SEPARATOR = " ("
@@ -4036,25 +4058,48 @@ def _audit_action_glyph(item: str) -> str:
     return _AUDIT_ACTION_DEFAULT_GLYPH
 
 
+def _audit_action_label(item: str) -> str:
+    """The short action name a banner shows for one pending item.
+
+    Drops the parenthesised reason (it is in decision.log, and repeating it here
+    would push the interesting part off the end of the line) and the leading
+    slash, so a command and a keystroke read the same way: ``compact``,
+    ``effort low``, ``esc``. The ARGUMENT is kept — ``effort low`` and
+    ``effort high`` are different actions and tallying them together would
+    report a number no one can act on.
+    """
+    return item.split(_AUDIT_ITEM_REASON_SEPARATOR)[0].strip().lstrip("/")
+
+
 def _format_audit_banner(items: tuple[str, ...]) -> str:
     """Compose the transient STATUS-LINE form of the audit trail (Plan 00318).
 
-    Same iconography as the chat form, stripped to what a status line can hold:
-    the banner glyph and each action's glyph + command, with the parenthesised
-    reason dropped (it is in decision.log, and repeating it here would push the
-    interesting part off the end of the line). A backlog longer than
-    ``_AUDIT_BANNER_MAX_ITEMS`` is truncated with a remainder count rather than
-    silently losing the tail.
+    A TALLY, not a list (Plan 00355): repeats of one action collapse to
+    ``label (N)`` and the entries are comma-separated, so twenty escapes read as
+    ``esc (20)`` instead of filling the line and truncating everything after
+    them. A count is shown only when an action actually repeated — ``esc (1)``
+    is noise the bare name already says.
+
+    Because a tally is short by construction, nothing is dropped: the previous
+    ``+N more`` truncation existed to bound a list that could not bound itself,
+    and the number of DISTINCT actions is small.
+
+    Insertion order is preserved, so the banner still reads oldest-first — which
+    is the part that tells a human what happened before what.
     """
-    shown = items[:_AUDIT_BANNER_MAX_ITEMS]
-    labelled = "; ".join(
-        f"{_audit_action_glyph(item)} {item.split(_AUDIT_ITEM_REASON_SEPARATOR)[0].strip()}"
-        for item in shown
-    )
-    remainder = len(items) - len(shown)
-    if remainder > 0:
-        labelled = f"{labelled}; +{remainder} more"
-    return f"{_AUDIT_BANNER_GLYPH} {labelled}"
+    counts: dict[str, int] = {}
+    for item in items:
+        label = _audit_action_label(item)
+        if not label:
+            continue
+        counts[label] = counts.get(label, 0) + 1
+
+    glyphs = {_audit_action_label(item): _audit_action_glyph(item) for item in reversed(items)}
+    entries = [
+        f"{glyphs[label]} {label}" + (f" ({count})" if count > 1 else "")
+        for label, count in counts.items()
+    ]
+    return f"{_AUDIT_BANNER_GLYPH} {', '.join(entries)}"
 
 
 _INJECT_SUBMIT = "\r"
@@ -4874,16 +4919,35 @@ def decide_once(
     # neither an idle session nor an empty input box (`can_inject`) — writing
     # a file cannot disturb what the user is typing — so the notice surfaces
     # at once instead of waiting for a quiet moment.
-    if (
-        payload is None
-        and evaluation.decision is Decision.NOOP
-        and signal_path is None
-        and machine.state is SupervisorState.MONITOR
-        and machine.audit_pending
+    #
+    # Plan 00355 — a RAW KEYSTROKE is armed here and flushed on the SAME tick.
+    # `/compact` and `/goal` type visible text, so a human can scroll back and
+    # find them; an ESC types nothing anywhere but decision.log, which is
+    # precisely why 122 of them in one session read as random keypresses. It
+    # cannot use the batching rule above, either: an ESC fires in
+    # AWAIT_COMPACTING, so an escape armed under that rule would surface
+    # minutes later in a state that has nothing to do with it, or never. It is
+    # armed only when the payload is the REAL key -- a dry-run marker is
+    # visible text that changes nothing, and tallying it as a keystroke would
+    # announce an action the supervisor did not take.
+    keystroke_label = None if dry_run else _KEYSTROKE_AUDIT_LABELS.get(decision_value)
+    keystroke_sent = keystroke_label is not None and payload is not None
+    if keystroke_sent:
+        machine.arm_audit(f"{keystroke_label}{_AUDIT_ITEM_REASON_SEPARATOR}{reason})")
+    if machine.audit_pending and (
+        keystroke_sent
+        or (
+            payload is None
+            and evaluation.decision is Decision.NOOP
+            and signal_path is None
+            and machine.state is SupervisorState.MONITOR
+        )
     ):
-        decision_value = Decision.WOULD_AUDIT.value
+        # A keystroke tick keeps its OWN decision: the banner rides along with
+        # the injection rather than replacing it, so decision.log still records
+        # what was actually sent.
         pending_items = machine.audit_pending
-        reason = f"audit trail flush ({len(pending_items)} item(s))"
+        flush_reason = f"audit trail flush ({len(pending_items)} item(s))"
         write_status_message(
             sidecar_dir.parent,
             text=_format_audit_banner(pending_items),
@@ -4895,11 +4959,19 @@ def decide_once(
         # acceptable, because the notice is a convenience surface and
         # decision.log (below) keeps the durable record either way.
         machine.mark_audit_injection()
-        # The log line carries the FULL items (reasons included) — the banner
-        # showed only the short form. A deferral log already in hand wins,
-        # since it describes an injection this tick actually held back.
-        if deferred_log is None:
-            noop_reason_log = f"{reason}: {'; '.join(pending_items)}"
+        if not keystroke_sent:
+            decision_value = Decision.WOULD_AUDIT.value
+            reason = flush_reason
+            # The log line carries the FULL items (reasons included) — the
+            # banner showed only the short form. A deferral log already in hand
+            # wins, since it describes an injection this tick actually held back.
+            if deferred_log is None:
+                noop_reason_log = f"{flush_reason}: {'; '.join(pending_items)}"
+        # On a keystroke tick `reason` and `noop_reason_log` are LEFT ALONE.
+        # They belong to the injection this tick is actually performing, and
+        # decision.log is the durable record the banner is only a convenience
+        # for — overwriting the escape's reason with "audit trail flush" would
+        # destroy the very thing the banner exists to make visible.
     # ── Standing-authorisation reinforcement (Plan 00283) ───────────────────
     # LEAST urgent of every injectable family: a reminder, not an action, so it
     # fires only on a tick that would otherwise NOOP in MONITOR with nothing else
