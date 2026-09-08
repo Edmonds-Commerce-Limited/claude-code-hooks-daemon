@@ -1,6 +1,6 @@
 # Plan 00355: supervisor announces every keystroke it sends
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Medium
@@ -159,17 +159,17 @@ slash-command families, whose sequence genuinely is meaningful.
   is not a deploy time, and testing against a stale worker "verifies" the old
   code.
 
-- [ ] ⬜ **Task 3.3**: Observe a real ESC post-reload and confirm the banner
-  file is written. A watch is armed on `decision.log`; escapes are frequent
-  (123 in this session) but arrive only when a queued `/compact` stalls, so
-  this completes on the next natural occurrence rather than being forced.
+- [x] ✅ **Task 3.3**: Observed on a natural occurrence, not forced: the
+  `decision.log` line `would-escape: queued /compact stalled -> would inject [esc] to flush (1/5); injected '\x1b'` was followed on the same tick by the
+  banner file `{"text": "🧾 ⌨️ esc", "level": "info", "countdown": true}`,
+  with an expiry one TTL after the injection.
 
 ## Success Criteria
 
-- [ ] An injected ESC produces a visible status-line banner naming it
-- [ ] A stack of actions renders as `esc (N), compact (M)`, comma-separated
-- [ ] A `/model` + coupled `/effort` sequence still surfaces as ONE banner
-- [ ] `decision.log` still records every injection regardless of banner outcome
+- [x] An injected ESC produces a visible status-line banner naming it
+- [x] A stack of actions renders as `esc (N), compact (M)`, comma-separated
+- [x] A `/model` + coupled `/effort` sequence still surfaces as ONE banner
+- [x] `decision.log` still records every injection regardless of banner outcome
 
 ## Delivery & Milestones
 
@@ -179,3 +179,6 @@ slash-command families, whose sequence genuinely is meaningful.
 
 - Filed from an owner report, with the 122 escapes measured from
   `decision.log` rather than inferred.
+- Shipped at `e105530e` (keystroke banner + tally), with the flush-reason
+  regression and the INFO-yields-to-WARNING precedence in the follow-on
+  supervisor commits; closed on the first natural post-reload ESC.
