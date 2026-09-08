@@ -294,3 +294,29 @@ class TestResidentGuidance:
 
     def test_acceptance_tests_exist(self, handler: BashSafeModeHandler) -> None:
         assert handler.get_acceptance_tests()
+
+
+class TestAcceptanceTestFixturesMatchThisProjectsRealConfig:
+    """Plan 00295 Task 3.9: this project's own hooks-daemon.yaml configures
+    ``only_with_mutator: true`` -- an acceptance-test fixture with no
+    mutator statement never reaches the advisory branch under that config,
+    so its declared ``expected_message_patterns`` cannot match what a real
+    acceptance run against this repo actually produces.
+    """
+
+    def test_the_advisory_fixture_still_fires_under_only_with_mutator(
+        self, handler: BashSafeModeHandler
+    ) -> None:
+        handler._only_with_mutator = True
+        tests = handler.get_acceptance_tests()
+        fixture = next(t for t in tests if "without a prelude" in t.title)
+
+        result = handler.handle(_bash(fixture.command))
+
+        context_text = "\n".join(result.context or [])
+        for pattern in fixture.expected_message_patterns:
+            assert pattern in context_text, (
+                f"pattern {pattern!r} does not match the reason this project's "
+                f"real only_with_mutator=True config actually produces: "
+                f"{context_text!r}"
+            )

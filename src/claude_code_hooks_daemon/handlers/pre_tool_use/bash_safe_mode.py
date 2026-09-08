@@ -361,28 +361,36 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="Bash safe mode - sequenced statements without a prelude",
-                command="git status --short\ngit log --oneline -n 1",
+                command="git status --short\ngit tag --list",
                 dispatch_as_bash=True,
                 description=(
                     "Two newline-sequenced read-only statements with no `set` "
                     "prelude. Advisory by default: the command runs and the "
-                    "context names the missing flags."
+                    "context names the missing flags. The second statement is "
+                    "shaped like a mutator (`git tag`) so this fixture still "
+                    "fires under this project's own `only_with_mutator: true` "
+                    "configuration -- `--list` keeps it read-only."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"errexit", r"pipefail"],
-                safety_notes="Both statements are read-only git queries.",
+                safety_notes="Both statements are read-only; --list tags nothing.",
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="Bash safe mode - a declared prelude is silent",
-                command="set -euo pipefail\ngit status --short\ngit log --oneline -n 1",
+                command="set -euo pipefail\ngit status --short\ngit tag --list",
                 dispatch_as_bash=True,
-                description="The prelude satisfies the default require list.",
+                description=(
+                    "The prelude satisfies the default require list. Same "
+                    "mutator-shaped second statement as the sibling test above, "
+                    "so this is a genuine test of the prelude being recognised "
+                    "-- not an accidental silence from no mutator being present."
+                ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Both statements are read-only git queries.",
+                safety_notes="Both statements are read-only; --list tags nothing.",
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
