@@ -43,7 +43,8 @@ truth_changes:
       recurring context cost. Journals and the plan-index README.md are exempt
       at any size. Configure under plan_workflow.qa.plan_doc_size.
 
-  - was: >
+  - id: plan-size-remedies
+    was: >
       When a plan gets too long, trim it — remove the older or less relevant
       sections so it stays readable.
     now: >

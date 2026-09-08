@@ -1,6 +1,7 @@
 version: "3.26.0"
 truth_changes:
-  - was: >
+  - id: plan-creation
+    was: >
       To create a new plan, run the deployed scaffolding script
       `CLAUDE/Plan/mkplan.bash "descriptive-kebab-name"`. It is deployed from
       the config single source of truth — whenever `plan_workflow.enabled` is

@@ -10,10 +10,17 @@ is empty).
 Manifest files live at:
   {project_root}/CLAUDE/UPGRADES/truth-changes/v{X.Y.Z}.yaml
 
-The two-key schema (``was`` / ``now``) and consumption flow are documented in
-``CLAUDE/UPGRADES/truth-changes/README.md``. This module mirrors the proven
-``config_migrations`` range-loader pattern, minus the user-config comparison —
-truth-changes are guidance, not compared against anything.
+The schema (``was`` / ``now``, plus an optional ``id`` naming the truth) and the
+consumption flow are documented in ``CLAUDE/UPGRADES/truth-changes/README.md``.
+This module mirrors the proven ``config_migrations`` range-loader pattern, minus
+the user-config comparison — truth-changes are guidance, not compared against
+anything.
+
+A truth revised in several releases is surfaced ONCE, as its highest-version
+entry: entries sharing an ``id`` across manifests form a supersession chain and
+only the last link is emitted, with a "revised in" trail naming the releases it
+replaces. Un-keyed entries are never collapsed. An agent handed every link of
+the chain would assert a claim into the project's docs and then contradict it.
 """
 
 from __future__ import annotations
@@ -39,12 +46,19 @@ _FIELD_VERSION = "version"
 _FIELD_TRUTH_CHANGES = "truth_changes"
 _FIELD_WAS = "was"
 _FIELD_NOW = "now"
+_FIELD_ID = "id"
 
 _FORMAT_TEXT = "text"
 
 _LABEL_NO_CHANGES = "✅ No truth-changes in this range"
 _LABEL_HEADER = "Truth-Changes to reconcile"
+_LABEL_REVISED_IN = "revised in"
 _REMOVAL_INSTRUCTION = "remove all reference to it (no replacement)"
+_TRAIL_INSTRUCTION = (
+    "An entry marked '{label}' is the CURRENT form of a truth that also changed in "
+    "the releases it lists; those earlier forms are deliberately not shown. Reconcile "
+    "any earlier form of that statement in the docs to the same NOW."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -61,10 +75,15 @@ class TruthChange:
             semantically against the project's own docs by the LLM.
         now: The replacement truth, or None to mean "remove all reference;
             there is no replacement".
+        id: Optional stable slug naming the TRUTH (not the release). Entries
+            sharing an id across manifests are one truth revised repeatedly;
+            only the highest-version link is surfaced. None means "stands
+            alone; never collapsed".
     """
 
     was: str
     now: str | None
+    id: str | None = None
 
     @property
     def is_removal(self) -> bool:
@@ -97,13 +116,59 @@ class TruthChangeManifest:
 
         Raises:
             KeyError: If a required field (version, or an entry's was) is missing.
+            ValueError: If an entry's id is blank, or two entries in this one
+                manifest share an id — one release cannot revise a truth twice.
         """
-        version = data[_FIELD_VERSION]
+        version = str(data[_FIELD_VERSION])
         entries = data.get(_FIELD_TRUTH_CHANGES) or []
-        changes = [
-            TruthChange(was=entry[_FIELD_WAS], now=entry.get(_FIELD_NOW)) for entry in entries
-        ]
-        return cls(version=str(version), changes=changes)
+        changes: list[TruthChange] = []
+        seen_ids: set[str] = set()
+        for entry in entries:
+            change_id = _parse_entry_id(entry.get(_FIELD_ID), version)
+            if change_id is not None:
+                if change_id in seen_ids:
+                    raise ValueError(
+                        f"truth-changes v{version}: id {change_id!r} appears twice in one "
+                        "manifest; a release revises a truth at most once"
+                    )
+                seen_ids.add(change_id)
+            changes.append(
+                TruthChange(was=entry[_FIELD_WAS], now=entry.get(_FIELD_NOW), id=change_id)
+            )
+        return cls(version=version, changes=changes)
+
+
+def _parse_entry_id(raw: Any, version: str) -> str | None:
+    """Return the entry's id slug, or None when the entry carries no id.
+
+    Raises:
+        ValueError: If the id is present but blank — an un-keyed entry must be
+            written as an absent key, never as an empty one, so that "stands
+            alone" is always a deliberate choice visible in the manifest.
+    """
+    if raw is None:
+        return None
+    slug = str(raw).strip()
+    if not slug:
+        raise ValueError(f"truth-changes v{version}: an entry's id is blank; omit the key instead")
+    return slug
+
+
+@dataclass
+class SurfacedTruthChange:
+    """One entry of the collapsed report: the current link of a truth's chain.
+
+    Attributes:
+        version: The manifest version the surfaced entry came from.
+        change: The entry itself (highest-version link for a keyed truth).
+        superseded_versions: Earlier manifest versions, oldest first, whose
+            entry for the same id this one replaces. Empty for an un-keyed
+            entry or a keyed entry that changed only once in the range.
+    """
+
+    version: str
+    change: TruthChange
+    superseded_versions: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -225,8 +290,8 @@ def format_truth_changes_for_llm(
     """
     lines: list[str] = [f"{_LABEL_HEADER}: v{from_version} → v{to_version}", ""]
 
-    total = sum(len(m.changes) for m in manifests)
-    if total == 0:
+    surfaced = collapse_superseded(manifests)
+    if not surfaced:
         lines.append(_LABEL_NO_CHANGES)
         lines.append("")
         lines.append("No project-doc reconciliation is needed for this version range.")
@@ -237,19 +302,69 @@ def format_truth_changes_for_llm(
         "AGENTS* — never .claude/hooks-daemon/ internals) for the 'was' statement and "
         "reconcile it. Minimal edits."
     )
+    if any(item.superseded_versions for item in surfaced):
+        lines.append(_TRAIL_INSTRUCTION.format(label=_LABEL_REVISED_IN))
     lines.append("")
 
-    for manifest in manifests:
-        for change in manifest.changes:
-            lines.append(f"• (v{manifest.version}) WAS: {change.was.strip()}")
-            if change.is_removal:
-                lines.append(f"  NOW: {_REMOVAL_INSTRUCTION}")
-            else:
-                now_text = (change.now or "").strip()
-                lines.append(f"  NOW: {now_text}")
-            lines.append("")
+    for item in surfaced:
+        lines.append(f"• {_format_origin(item)} WAS: {item.change.was.strip()}")
+        if item.change.is_removal:
+            lines.append(f"  NOW: {_REMOVAL_INSTRUCTION}")
+        else:
+            now_text = (item.change.now or "").strip()
+            lines.append(f"  NOW: {now_text}")
+        lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _format_origin(item: SurfacedTruthChange) -> str:
+    """Render the bracketed origin of a surfaced entry: version, trail, and id."""
+    origin = f"v{item.version}"
+    if item.superseded_versions:
+        trail = ", ".join(f"v{v}" for v in item.superseded_versions)
+        origin = f"{origin}, {_LABEL_REVISED_IN} {trail}"
+    origin = f"({origin})"
+    if item.change.id is not None:
+        origin = f"{origin} [{item.change.id}]"
+    return origin
+
+
+def collapse_superseded(manifests: list[TruthChangeManifest]) -> list[SurfacedTruthChange]:
+    """Collapse each keyed truth to its highest-version entry, keeping version order.
+
+    Manifests are walked oldest first (the order ``load_truth_changes_between``
+    returns). A later entry with the same id displaces the earlier one and
+    inherits its trail, so the surfaced entry sits at the position of the
+    release that last revised it. Un-keyed entries pass through untouched.
+
+    Args:
+        manifests: Manifests for the range, sorted oldest first.
+
+    Returns:
+        One entry per un-keyed change plus one per distinct id.
+    """
+    ordered = sorted(manifests, key=lambda m: _parse_version(m.version))
+    surfaced: list[SurfacedTruthChange] = []
+    position_by_id: dict[str, int] = {}
+    for manifest in ordered:
+        for change in manifest.changes:
+            trail: list[str] = []
+            if change.id is not None and change.id in position_by_id:
+                removed_at = position_by_id.pop(change.id)
+                earlier = surfaced.pop(removed_at)
+                trail = [*earlier.superseded_versions, earlier.version]
+                for key, idx in position_by_id.items():
+                    if idx > removed_at:
+                        position_by_id[key] = idx - 1
+            surfaced.append(
+                SurfacedTruthChange(
+                    version=manifest.version, change=change, superseded_versions=trail
+                )
+            )
+            if change.id is not None:
+                position_by_id[change.id] = len(surfaced) - 1
+    return surfaced
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +388,9 @@ def run_check_truth_changes(
 
     Returns:
         JSON-serialisable dict. Keys: from_version, to_version, has_changes,
-        changes (list of {version, was, now, is_removal}), and (text format) text.
+        changes (list of {version, was, now, is_removal, id,
+        superseded_versions} — superseded links of a keyed truth are collapsed
+        here too, so both formats surface the same set), and (text format) text.
 
     Raises:
         ValueError: If from_version > to_version.
@@ -284,13 +401,14 @@ def run_check_truth_changes(
 
     changes: list[dict[str, Any]] = [
         {
-            "version": manifest.version,
-            "was": change.was,
-            "now": change.now,
-            "is_removal": change.is_removal,
+            "version": item.version,
+            "was": item.change.was,
+            "now": item.change.now,
+            "is_removal": item.change.is_removal,
+            "id": item.change.id,
+            "superseded_versions": item.superseded_versions,
         }
-        for manifest in manifests
-        for change in manifest.changes
+        for item in collapse_superseded(manifests)
     ]
 
     result: dict[str, Any] = {

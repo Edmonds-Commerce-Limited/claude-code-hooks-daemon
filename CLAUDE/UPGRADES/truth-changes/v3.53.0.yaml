@@ -1,6 +1,7 @@
 version: "3.53.0"
 truth_changes:
-  - was: >
+  - id: plan-size-remedies
+    was: >
       When a PLAN.md grows past the size tiers there are exactly TWO remedies,
       and neither is deletion: RELOCATE the narrative into the plan's JOURNAL/
       day-file, or SPLIT the plan if the task tree itself is the bulk. If

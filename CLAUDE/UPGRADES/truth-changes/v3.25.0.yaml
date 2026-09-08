@@ -1,6 +1,7 @@
 version: "3.25.0"
 truth_changes:
-  - was: >
+  - id: plan-creation
+    was: >
       To create a new plan, run the deployed scaffolding script
       `CLAUDE/Plan/mkplan.bash "descriptive-kebab-name"`. It is distributed by the
       installer (only). Set `PLAN_WORKFLOW=yes` at install time to bootstrap the

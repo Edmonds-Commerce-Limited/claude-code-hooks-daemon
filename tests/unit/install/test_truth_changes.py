@@ -13,13 +13,21 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.install.truth_changes import (
+    SurfacedTruthChange,
     TruthChange,
     TruthChangeManifest,
+    collapse_superseded,
     format_truth_changes_for_llm,
     list_known_truth_change_versions,
     load_truth_changes_between,
     run_check_truth_changes,
 )
+
+_REAL_TRUTH_CHANGES_DIR = (
+    Path(__file__).resolve().parents[3] / "CLAUDE" / "UPGRADES" / "truth-changes"
+)
+_ID_PLAN_CREATION = "plan-creation"
+_ID_PLAN_SIZE_REMEDIES = "plan-size-remedies"
 
 # ---------------------------------------------------------------------------
 # Fixtures — a temp truth-changes directory with a few version files
@@ -182,6 +190,235 @@ class TestFormatTruthChangesForLlm:
 
 
 # ---------------------------------------------------------------------------
+# Supersession — collapse by truth key (Plan 00329 Phase 1, Plan 00362 D13)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def chain_dir(tmp_path: Path) -> Path:
+    """A truth-changes dir where one keyed truth is revised across three releases.
+
+    v3.23.0 / v3.25.0 / v3.26.0 all carry ``id: plan-creation``; v3.24.0 carries
+    an un-keyed entry between them; v3.26.0 also carries a second, unrelated
+    un-keyed entry whose text is a verbatim repeat of v3.24.0's.
+    """
+    d = tmp_path / "truth-changes"
+    _write_manifest(
+        d,
+        "3.23.0",
+        "version: '3.23.0'\n"
+        "truth_changes:\n"
+        f"  - id: {_ID_PLAN_CREATION}\n"
+        "    was: Create the plan folder by hand.\n"
+        "    now: Run mkplan.bash; it is installer-deployed.\n",
+    )
+    _write_manifest(
+        d,
+        "3.24.0",
+        "version: '3.24.0'\n"
+        "truth_changes:\n"
+        "  - was: Untracked memory writes are allowed.\n"
+        "    now: Untracked memory writes are blocked.\n",
+    )
+    _write_manifest(
+        d,
+        "3.25.0",
+        "version: '3.25.0'\n"
+        "truth_changes:\n"
+        f"  - id: {_ID_PLAN_CREATION}\n"
+        "    was: Run mkplan.bash; it is installer-deployed.\n"
+        "    now: Run mkplan.bash; it is deployed from the config SSoT.\n",
+    )
+    _write_manifest(
+        d,
+        "3.26.0",
+        "version: '3.26.0'\n"
+        "truth_changes:\n"
+        f"  - id: {_ID_PLAN_CREATION}\n"
+        "    was: Run mkplan.bash; it is deployed from the config SSoT.\n"
+        "    now: Run mkplan.bash; the plan workflow is opt-in and defaults to false.\n"
+        "  - was: Untracked memory writes are allowed.\n"
+        "    now: Untracked memory writes are blocked.\n",
+    )
+    return d
+
+
+class TestTruthChangeIdParsing:
+    def test_from_dict_parses_optional_id(self) -> None:
+        manifest = TruthChangeManifest.from_dict(
+            {
+                "version": "3.23.0",
+                "truth_changes": [{"id": "plan-creation", "was": "a", "now": "b"}],
+            }
+        )
+        assert manifest.changes[0].id == "plan-creation"
+
+    def test_from_dict_defaults_id_to_none(self) -> None:
+        manifest = TruthChangeManifest.from_dict(
+            {"version": "3.23.0", "truth_changes": [{"was": "a", "now": "b"}]}
+        )
+        assert manifest.changes[0].id is None
+
+    def test_from_dict_rejects_duplicate_id_within_one_manifest(self) -> None:
+        with pytest.raises(ValueError, match="plan-creation"):
+            TruthChangeManifest.from_dict(
+                {
+                    "version": "3.23.0",
+                    "truth_changes": [
+                        {"id": "plan-creation", "was": "a", "now": "b"},
+                        {"id": "plan-creation", "was": "c", "now": "d"},
+                    ],
+                }
+            )
+
+    def test_from_dict_rejects_blank_id(self) -> None:
+        with pytest.raises(ValueError, match="id"):
+            TruthChangeManifest.from_dict(
+                {"version": "3.23.0", "truth_changes": [{"id": "  ", "was": "a", "now": "b"}]}
+            )
+
+
+class TestCollapseSuperseded:
+    def test_keyed_chain_collapses_to_highest_version(self, chain_dir: Path) -> None:
+        manifests = load_truth_changes_between("3.22.0", "3.26.0", truth_changes_dir=chain_dir)
+        surfaced = collapse_superseded(manifests)
+        keyed = [s for s in surfaced if s.change.id == _ID_PLAN_CREATION]
+        assert len(keyed) == 1
+        assert keyed[0].version == "3.26.0"
+        assert keyed[0].change.now is not None
+        assert "opt-in" in keyed[0].change.now
+        assert keyed[0].superseded_versions == ["3.23.0", "3.25.0"]
+
+    def test_unkeyed_entries_are_never_collapsed_even_when_identical(self, chain_dir: Path) -> None:
+        manifests = load_truth_changes_between("3.22.0", "3.26.0", truth_changes_dir=chain_dir)
+        surfaced = collapse_superseded(manifests)
+        unkeyed = [s for s in surfaced if s.change.id is None]
+        assert [s.version for s in unkeyed] == ["3.24.0", "3.26.0"]
+        assert all(s.superseded_versions == [] for s in unkeyed)
+
+    def test_partial_range_surfaces_the_highest_version_in_range(self, chain_dir: Path) -> None:
+        # (3.22.0, 3.25.0] — v3.26.0 is outside the range, so v3.25.0 is current.
+        manifests = load_truth_changes_between("3.22.0", "3.25.0", truth_changes_dir=chain_dir)
+        keyed = [s for s in collapse_superseded(manifests) if s.change.id == _ID_PLAN_CREATION]
+        assert keyed[0].version == "3.25.0"
+        assert keyed[0].superseded_versions == ["3.23.0"]
+
+    def test_single_keyed_entry_has_empty_trail(self, chain_dir: Path) -> None:
+        manifests = load_truth_changes_between("3.25.0", "3.26.0", truth_changes_dir=chain_dir)
+        keyed = [s for s in collapse_superseded(manifests) if s.change.id == _ID_PLAN_CREATION]
+        assert keyed[0].superseded_versions == []
+
+    def test_surfaced_entries_keep_version_order(self, chain_dir: Path) -> None:
+        manifests = load_truth_changes_between("3.22.0", "3.26.0", truth_changes_dir=chain_dir)
+        versions = [s.version for s in collapse_superseded(manifests)]
+        assert versions == sorted(versions, key=lambda v: tuple(int(x) for x in v.split(".")))
+
+    def test_keyed_removal_as_latest_is_surfaced_as_removal(self) -> None:
+        manifests = [
+            TruthChangeManifest("3.1.0", [TruthChange(was="a", now="b", id="k")]),
+            TruthChangeManifest("3.2.0", [TruthChange(was="b", now=None, id="k")]),
+        ]
+        surfaced = collapse_superseded(manifests)
+        assert surfaced == [
+            SurfacedTruthChange(
+                version="3.2.0",
+                change=TruthChange(was="b", now=None, id="k"),
+                superseded_versions=["3.1.0"],
+            )
+        ]
+        assert surfaced[0].change.is_removal is True
+
+
+class TestFormatterSupersession:
+    def test_superseded_now_never_appears_in_text(self, chain_dir: Path) -> None:
+        manifests = load_truth_changes_between("3.22.0", "3.26.0", truth_changes_dir=chain_dir)
+        text = format_truth_changes_for_llm(manifests, "3.22.0", "3.26.0")
+        assert "NOW: Run mkplan.bash; it is installer-deployed." not in text
+        assert "NOW: Run mkplan.bash; it is deployed from the config SSoT." not in text
+        assert "NOW: Run mkplan.bash; the plan workflow is opt-in and defaults to false." in text
+
+    def test_collapsed_entry_carries_revised_in_trail(self, chain_dir: Path) -> None:
+        manifests = load_truth_changes_between("3.22.0", "3.26.0", truth_changes_dir=chain_dir)
+        text = format_truth_changes_for_llm(manifests, "3.22.0", "3.26.0")
+        assert "(v3.26.0, revised in v3.23.0, v3.25.0)" in text
+        assert "(v3.23.0)" not in text
+        assert "(v3.25.0)" not in text
+
+    def test_uncollapsed_entry_carries_no_trail(self, chain_dir: Path) -> None:
+        manifests = load_truth_changes_between("3.22.0", "3.26.0", truth_changes_dir=chain_dir)
+        text = format_truth_changes_for_llm(manifests, "3.22.0", "3.26.0")
+        assert "(v3.24.0) WAS:" in text
+
+    def test_header_explains_the_trail_when_any_entry_collapsed(self, chain_dir: Path) -> None:
+        manifests = load_truth_changes_between("3.22.0", "3.26.0", truth_changes_dir=chain_dir)
+        text = format_truth_changes_for_llm(manifests, "3.22.0", "3.26.0")
+        assert "revised in" in text.split("•")[0]
+
+    def test_json_changes_are_collapsed_and_carry_trail(self, chain_dir: Path) -> None:
+        result = run_check_truth_changes(
+            "3.22.0", "3.26.0", output_format="json", truth_changes_dir=chain_dir
+        )
+        keyed = [c for c in result["changes"] if c["id"] == _ID_PLAN_CREATION]
+        assert len(keyed) == 1
+        assert keyed[0]["version"] == "3.26.0"
+        assert keyed[0]["superseded_versions"] == ["3.23.0", "3.25.0"]
+        assert len(result["changes"]) == 3
+
+
+class TestRealManifestCorpus:
+    """The shipped manifests, not fixtures: the defect was measured on them."""
+
+    def _full_span(self) -> list[TruthChangeManifest]:
+        assert _REAL_TRUTH_CHANGES_DIR.is_dir()
+        return load_truth_changes_between(
+            "0.0.0", "999.0.0", truth_changes_dir=_REAL_TRUTH_CHANGES_DIR
+        )
+
+    def test_no_id_appears_twice_in_surfaced_output(self) -> None:
+        ids = [s.change.id for s in collapse_superseded(self._full_span()) if s.change.id]
+        assert len(ids) == len(set(ids)), sorted(i for i in ids if ids.count(i) > 1)
+
+    def test_no_id_appears_twice_in_text_output(self) -> None:
+        manifests = self._full_span()
+        text = format_truth_changes_for_llm(manifests, "0.0.0", "999.0.0")
+        for manifest in manifests:
+            for change in manifest.changes:
+                if change.id:
+                    assert text.count(f"[{change.id}]") == 1, change.id
+
+    def test_plan_creation_truth_is_surfaced_once_as_v3_26_0(self) -> None:
+        surfaced = [
+            s for s in collapse_superseded(self._full_span()) if s.change.id == _ID_PLAN_CREATION
+        ]
+        assert [s.version for s in surfaced] == ["3.26.0"]
+        assert surfaced[0].superseded_versions == ["3.23.0", "3.25.0"]
+        assert surfaced[0].change.now is not None
+        assert "OPT-IN" in surfaced[0].change.now
+
+    def test_plan_size_remedies_truth_is_surfaced_once_as_v3_53_0(self) -> None:
+        surfaced = [
+            s
+            for s in collapse_superseded(self._full_span())
+            if s.change.id == _ID_PLAN_SIZE_REMEDIES
+        ]
+        assert [s.version for s in surfaced] == ["3.53.0"]
+        assert surfaced[0].superseded_versions == ["3.50.0"]
+
+    def test_superseded_plan_creation_instructions_never_reach_the_text(self) -> None:
+        text = format_truth_changes_for_llm(self._full_span(), "0.0.0", "999.0.0")
+        assert "It is distributed by the installer, takes a" not in text
+        assert "It is now deployed from the config single" not in text
+        assert "Deletion is NOT a remedy" not in text
+
+    def test_every_id_is_a_kebab_case_slug(self) -> None:
+        for manifest in self._full_span():
+            for change in manifest.changes:
+                if change.id is not None:
+                    assert change.id == change.id.strip().lower(), (manifest.version, change.id)
+                    assert " " not in change.id, (manifest.version, change.id)
+
+
+# ---------------------------------------------------------------------------
 # Run-function (CLI entrypoint)
 # ---------------------------------------------------------------------------
 
@@ -207,6 +444,8 @@ class TestRunCheckTruthChanges:
                 "was": "Scan the CLAUDE/Plan folder for the highest NNNNN prefix.",
                 "now": "Read git config --local hooksdaemon.latestPlanNumber and add one.",
                 "is_removal": False,
+                "id": None,
+                "superseded_versions": [],
             }
         ]
 
