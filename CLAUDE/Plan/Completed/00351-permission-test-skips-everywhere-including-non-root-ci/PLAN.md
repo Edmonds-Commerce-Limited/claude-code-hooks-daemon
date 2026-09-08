@@ -1,6 +1,6 @@
 # Plan 00351: permission test skips everywhere including non root ci
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Low
@@ -101,9 +101,13 @@ than fixed in passing.
 
 ## Success Criteria
 
-- [ ] The permission test runs on CI (all three interpreters) rather than
-  skipping
-- [ ] Local `llm_qa.py all` still passes
+- [x] The permission test runs on CI (all three interpreters) rather than
+  skipping — run `34206225173` reports **2 skipped** on each of 3.11, 3.12 and
+  3.13, and this test is neither of them. **The predicted failure did not
+  occur**: Task 1.2 expected the test to fail once it actually ran, on the
+  theory that it might encode an assertion `deploy_skills` had outgrown. It
+  passes.
+- [x] Local `llm_qa.py all` still passes — 26/26
 
 ## Dependencies
 
@@ -126,3 +130,8 @@ than fixed in passing.
 
 - Filed from the CI skip list of run 34192920901, cross-checked against the two
   correct usages already in the repo.
+- `b4a5226b` — ask who is RUNNING, not who owns `/`
+- `6b1da6f1` — check the skip reason against its condition, not for a constant
+- `065f9610` — fix a test that reported the machine rather than the code
+- Closed against CI run `34206225173`: the test runs, and passes, on all three
+  interpreters.

@@ -4,7 +4,15 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00316: manual model choice must win](00316-manual-model-choice-must-win/PLAN.md) - Complete at 07871229 (a typed /model opus was fought by the auto-restore because the 120s manual window expired during a busy spell before the sidecar ever reported the switch; the manual note is now a latch consumed by the first matching reading and the daemon marker is written as soon as a session id exists — live-confirmed: no restore, no downgrade flag)
+
+- [00315: hidden agent budget detection](00315-hidden-agent-budget-detection/PLAN.md) - Complete at 0ee38866 + 74f3405e (BUDGETS.md catalogue of opaque per-session budgets with source-of-truth honesty; generic budget_exhaustion_detector PostToolUse advisory with mandatory prominent user reporting and an untracked occurrence ledger; live dogfood closed a self-feeding-loop false-fire the same day)
+
+- [00314: failsafe cron suppression marker never arms](00314-failsafe-cron-suppression-marker-never-arms/PLAN.md) - Complete at `923fd583` + the archiving commit (marker-write outcome now recorded in stop-events.jsonl, so a non-arm is diagnosable from disk; 16 live `marker_written: true` records closed the dogfood task)
+
 - [00313: venv resolver cross-view reuse](00313-venv-resolver-cross-view-reuse/PLAN.md) - Complete at 3d71ff84, shipped in v3.59.0 (slug-mismatched `venv-*` candidates are now ineligible in the metadata and scan fallback resolution steps, so host and container views of the same repo each build their own venv; bash resolvers inherit via the Python SSOT)
+
+- [00312: supervisor ctrl c double press guard](00312-supervisor-ctrl-c-double-press-guard/PLAN.md) - Complete at 5242b58f (lone 0x03 swallowed with a visible status hint, rapid second press always forwarded; both halves live-confirmed by owner — single accidental press killed nothing, deliberate spam shut the session down)
 
 - [00310: plan readme completed row ageout](00310-plan-readme-completed-row-ageout/PLAN.md) - Complete (Completed rows now age out: main README retains the 30 highest-numbered; older rows archived verbatim in Completed/README.md, enforced by test_plan_index_navigability.py)
 

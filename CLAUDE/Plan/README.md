@@ -4,14 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00352: agent branches outlive their worktrees](00352-agent-branches-outlive-their-worktrees/PLAN.md) - Not Started (`worktree-reap` enumerates from `git worktree list`, so a branch whose worktree has already gone is invisible to it; reaping Plan 00349's 21 left three orphaned `agent-*` branches behind, each 0 commits ahead of `main`)
-
-- [00351: permission test skips everywhere including non root ci](00351-permission-test-skips-everywhere-including-non-root-ci/PLAN.md) - In Progress (a `skipif` guarded on `Path("/").stat().st_uid == 0`, which asks who owns `/` rather than who is running — constant `True`, so the test had never executed anywhere; it now runs on CI and passes)
-
-- [00350: ci builds the relay binary so transport gates run](00350-ci-builds-the-relay-binary-so-transport-gates-run/PLAN.md) - In Progress (14 tests skip in CI because `untracked/bin/hooks-relay` is a gitignored build artefact no runner has; the same wired-in-but-not-load-bearing gate Plan 00250 fixed for the daemon socket, one artefact over — and the path it covers is the relay guard's zero-spawn fail-open)
-
-- [00349: agent worktrees accumulate unreaped](00349-agent-worktrees-accumulate-unreaped/PLAN.md) - In Progress (21 stale `agent-*` worktrees under `.claude/worktrees/`; 15 reaped with their branches, 6 refused because a rebased commit that already landed is indistinguishable from one that did not — and a real dispatch was observed creating a worktree it never disposed of)
-
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
@@ -180,6 +172,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00352: agent branches outlive their worktrees](Completed/00352-agent-branches-outlive-their-worktrees/PLAN.md) - Complete at `f6f1069c`…`f587a7f0` + the archiving commit (a branch whose worktree had already gone was invisible to `worktree-reap`, which enumerates from `git worktree list`; `--reap-branches` reports and prunes them)
+
+- [00351: permission test skips everywhere including non root ci](Completed/00351-permission-test-skips-everywhere-including-non-root-ci/PLAN.md) - Complete at `b4a5226b`…`065f9610` + the archiving commit (a `skipif` guarded on `Path("/").stat().st_uid == 0` asks who OWNS `/` rather than who is running — constant `True`, so the test had never executed anywhere)
+
+- [00350: ci builds the relay binary so transport gates run](Completed/00350-ci-builds-the-relay-binary-so-transport-gates-run/PLAN.md) - Complete at `5dc7bce1` + the archiving commit (14 transport gates skipped in CI because `untracked/bin/hooks-relay` is a gitignored artefact no runner had; CI now builds it, deliberately uncached)
+
+- [00349: agent worktrees accumulate unreaped](Completed/00349-agent-worktrees-accumulate-unreaped/PLAN.md) - Complete at `ae4794a7`…`f2167f20` + the archiving commit (21 stale `agent-*` worktrees; the reap took `git worktree list` from 22 lines to 7, with 6 refused because a rebased commit that already landed is indistinguishable from one that did not)
+
 - [00348: project context leaks across test files](Completed/00348-project-context-leaks-across-test-files/PLAN.md) - Complete at `b8fc7c23`…the fixing commit (four test files patched `ProjectContext.daemon_untracked_dir` while an autouse fixture already had, and the two unwound in the wrong order — leaving the fixture's `tmp_path` on the singleton so an unrelated file failed next, accusing correct code)
 
 - [00347: handlers raise on unstattable paths](Completed/00347-handlers-raise-on-unstattable-paths/PLAN.md) - Complete at `f17fabcd`…`c731add6` + the gate and archiving commit (pathlib does not ignore EACCES, so a caller-supplied path behind an unreadable parent RAISED and the guard silently stopped applying on the client default; the fallback is now a required argument because no single value is safe — `write_clobber_guard` needs `True`, `comment_size` `False`, `plan_qa_edit` `None`)
@@ -199,8 +199,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 - [00341: plan status header rots behind shipped work](Completed/00341-plan-status-header-rots-behind-shipped-work/PLAN.md) - Complete at `9a0bf7a8` + the archiving commit (a single ticked box now falsifies a `Not Started` header, and shipping `src/` code for a plan named in the commit SUBJECT does too; the subject scoping came from a 250-commit replay that exposed a 25% false-positive shape argument had missed)
 
 - [00338: deployed skill tree invisible to review](Completed/00338-deployed-skill-tree-invisible-to-review/PLAN.md) - Complete at the archiving commit (the `.claude/.gitignore` pattern is anchored to `/hooks-daemon/`, so the 21-file deployed skill tree is tracked like its five siblings; both directions pinned by tests, and source-to-deployed drift is now a check rather than an accident)
-
-- [00314: failsafe cron suppression marker never arms](Completed/00314-failsafe-cron-suppression-marker-never-arms/PLAN.md) - Complete at `923fd583` + the archiving commit (marker-write outcome now recorded in stop-events.jsonl, so a non-arm is diagnosable from disk; 16 live `marker_written: true` records closed the dogfood task)
 
 - [00340: release review followups v3621](Completed/00340-release-review-followups-v3621/PLAN.md) - Complete at `6d0aad13`…`c9dfd4a8` + the archiving commit (the v3.62.1 review's non-blocking remainder: a real `/model` picker confirmed the supervisor's blind Enter persists a modal's default, so a resubmit now follows its own escape within 2s)
 
@@ -232,13 +230,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00318: supervisor audit via status line banner](Completed/00318-supervisor-audit-via-status-line-banner/PLAN.md) - Complete at f818727b (the audit trail was an INJECTED chat line costing a model turn and permanent context for a notice only the human needs; it is now a 30s self-counting-down status-line banner that no longer waits for an idle session, with decision.log keeping the full record)
 
-- [00316: manual model choice must win](Completed/00316-manual-model-choice-must-win/PLAN.md) - Complete at 07871229 (a typed /model opus was fought by the auto-restore because the 120s manual window expired during a busy spell before the sidecar ever reported the switch; the manual note is now a latch consumed by the first matching reading and the daemon marker is written as soon as a session id exists — live-confirmed: no restore, no downgrade flag)
-
 - [00317: supervisor host thin shim](Completed/00317-supervisor-host-thin-shim/PLAN.md) - Complete at c3eb83b2 (typed-command recognition moved worker-side via a fail-open RawInputTap; Ctrl+C byte-swallow audited as the one justified host-side stay; hot-reload live-confirmed — a recognition change now ships mid-session via worker reload alone)
-
-- [00312: supervisor ctrl c double press guard](Completed/00312-supervisor-ctrl-c-double-press-guard/PLAN.md) - Complete at 5242b58f (lone 0x03 swallowed with a visible status hint, rapid second press always forwarded; both halves live-confirmed by owner — single accidental press killed nothing, deliberate spam shut the session down)
-
-- [00315: hidden agent budget detection](Completed/00315-hidden-agent-budget-detection/PLAN.md) - Complete at 0ee38866 + 74f3405e (BUDGETS.md catalogue of opaque per-session budgets with source-of-truth honesty; generic budget_exhaustion_detector PostToolUse advisory with mandatory prominent user reporting and an untracked occurrence ledger; live dogfood closed a self-feeding-loop false-fire the same day)
 
 ## Blocked / On Hold Plans
 
@@ -277,37 +269,38 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 348 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 352 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 290 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 294 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 44 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 42 + 290 + 7 = **339 folders**, spanning
-  **336 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 41 + 294 + 7 = **342 folders**, spanning
+  **339 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  349 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  352 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  336 + 13 = 349. ✅
+  339 + 13 = 352. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00351 filing (44 root, 290 `Completed/`,
-  7 `Cancelled/`, 338 distinct numbers against a counter of 351 — 341 folders,
-  three of which share a number with another from before the counter existed:
-  00034, 00039, 00041). Every figure above was recounted from disk rather than
-  incremented. The index carries NO
+- **Last reconciled at**: the archival of Plans 00349–00352 (41 root, 294
+  `Completed/`, 7 `Cancelled/`, 339 distinct numbers against a counter of 352 —
+  342 folders, three of which share a number with another from before the
+  counter existed: 00034, 00039, 00041). Every figure above was recounted from
+  disk rather than incremented; the folderless set was recomputed the same way
+  and is unchanged at 13. The index carries NO
   reconciliation history — it states current truth only; every earlier recount
   is in git, and per-plan narrative belongs in that plan's `JOURNAL/`.
 

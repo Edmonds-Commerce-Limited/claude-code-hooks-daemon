@@ -1,6 +1,6 @@
 # Plan 00349: agent worktrees accumulate unreaped
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Medium
@@ -247,3 +247,9 @@ as [Plan 00352](../00352-agent-branches-outlive-their-worktrees/PLAN.md).
 ## Delivery & Milestones
 
 - Filed from a survey during Plan 00250; no code yet.
+- `ae4794a7` — characterise the 21 worktrees and decide the predicate
+- `6d246ab6` — read worktree state from git, with failures that stay refusals
+- `a303b528` — reap a worktree, with git as the second and third safety net
+- `42788bff` — the `worktree-reap` command
+- `f2167f20` — `--only`, which narrows the target and never the predicate
+- Verified against the real pile on the owner's authorisation: 22 `git worktree list` lines down to 7, 15 worktrees and 15 branches removed, 6 refused.

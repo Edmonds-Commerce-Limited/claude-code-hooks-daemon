@@ -1,6 +1,6 @@
 # Plan 00350: ci builds the relay binary so transport gates run
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-08
 **Owner**: joseph
 **Priority**: Medium
@@ -128,9 +128,13 @@ where a regression is both easy and expensive.
 
 ## Success Criteria
 
-- [ ] The 14 relay-dependent tests report PASSED in CI on all three interpreters
-- [ ] A silent skip of a relay-dependent gate fails the run
-- [ ] Local `llm_qa.py all` still passes
+- [x] The 14 relay-dependent tests report PASSED in CI on all three
+  interpreters — run `34206225173` reports **19716 passed, 2 skipped** on each
+  of 3.11, 3.12 and 3.13, and neither remaining skip is a relay gate (one is a
+  release-cycle manifest, the other a design test)
+- [x] A silent skip of a relay-dependent gate fails the run — the CI-scoped
+  skip guard, itself among the tests that passed above
+- [x] Local `llm_qa.py all` still passes — 26/26
 
 ## Dependencies
 
@@ -159,3 +163,5 @@ where a regression is both easy and expensive.
 
 - Filed from Plan 00250's Task 1.1 measurement; dedupe scout checked 41 live
   plans and found no other coverage.
+- `5dc7bce1` — CI builds the relay, so fourteen transport gates stop skipping
+- Closed against CI run `34206225173`, green on all three interpreters.
