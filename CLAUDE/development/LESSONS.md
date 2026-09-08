@@ -728,15 +728,27 @@ Neither setting is wrong. `cancel-in-progress` is correct — superseded runs
 should not burn runner minutes — and the push cadence is correct. They simply
 interact, and nothing announces it.
 
-The resolution that works:
+The resolution, and the wrong turn worth recording with it:
 
-- **When a run's result is the thing you are waiting for, commit locally and
-  hold the push** until it reports. Minutes, not milestones — this is not the
-  "batch pushes behind long-running checks" the cadence warns against, because
-  pushing actively destroys the evidence you are about to read.
-- **Batch the trailing paperwork.** A journal entry or plan update that
-  accompanies work already pushed should go in the SAME push, not a follow-up
-  one that costs a run.
-- **A cancelled run is not a neutral outcome.** `gh run list` showing
-  `cancelled` looks tidy; it means the same as no run at all. Check for it
-  before concluding anything from CI history.
+- **Keep pushing. Do NOT hold a push to protect a run.** My first instinct was
+  to commit locally and wait, and I drafted this entry recommending exactly
+  that — against the project's standing instruction to never hold pushes behind
+  long checks. The instruction is right and my instinct was wrong, for a reason
+  I had not thought through: **a cancelled run is not a lost result.** The next
+  push re-runs the whole suite against a superset of the same code, so holding
+  buys nothing but latency, while an unpushed commit is genuinely at risk of
+  being lost with the workspace.
+- **Batch instead.** The lever that actually reduces cancellations is fewer,
+  more complete pushes — a journal entry or plan update belonging to work
+  already pushed goes in the SAME logical unit, not a follow-up push. That
+  serves the cadence rather than fighting it.
+- **A cancelled run is not a neutral outcome to READ, though.** `gh run list`
+  showing `cancelled` looks tidy; it means the same as no run at all. Check for
+  it before concluding anything from CI history — the eight above were
+  discovered only when a log that should have existed did not.
+
+The general shape, which is the durable part: when a local inference contradicts
+a standing instruction, the instruction usually encodes a constraint the
+inference has not accounted for. Say the conflict out loud and re-derive, rather
+than quietly following the inference — and never write the inference into a
+lessons file as though the conflict were not there.
