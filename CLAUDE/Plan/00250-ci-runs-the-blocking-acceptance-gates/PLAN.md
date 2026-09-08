@@ -44,6 +44,33 @@ the same decision to the daemon.
 The `Daemon load` job in the same workflow starts a daemon successfully on the
 runner, so this is a provisioning gap rather than a platform limitation.
 
+## The same gap has a louder sibling, and CI is no longer green
+
+**This plan was written from "the first fully green CI run". That premise has
+expired.** `Tests + coverage` is currently RED on `main` and has been for a
+long stretch — 9 failures per interpreter on the latest run, across three
+files, found while regression-testing Plan 00347:
+
+| File                                               | Why it fails on a runner                                                                                                           |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/integration/test_forwarder_socket_stdin.py` | Line 29 is `HOOKS_DIR = Path("/workspace/.claude/hooks")` — this container's absolute path. It also needs a live daemon to answer. |
+| `tests/integration/test_relay_guard_fail_open.py`  | Exercises the `nc` socket-relay rung against a live local socket.                                                                  |
+| `tests/integration/test_deployed_skill_trees.py`   | Asserts `.claude/hooks-daemon` is git-ignored, which depends on the deployed client-install layout.                                |
+
+These are the **same missing dependency** as the 11 skips above, showing up as
+hard failures instead. That difference matters in both directions: a failure is
+louder than a skip, but a run that is *always* red teaches readers to skim it,
+which is how the `Format (black)` breakage in Plan 00346 stayed hidden for
+hours inside the noise. Two different failure modes of one provisioning gap.
+
+**Consequence for this plan**: Task 4.2 ("a green CI run") cannot be met while
+these three files fail, whatever happens to the 11 skips. They are in scope
+here because the fix is the same decision — provision, or skip honestly — not
+because they are acceptance gates.
+
+The hardcoded `/workspace` path is the one part that is separable: it is wrong
+independently of any daemon, and would still be wrong if CI provisioned one.
+
 ## Goals
 
 - The three socket-dependent acceptance files EXECUTE in CI rather than skip.
@@ -97,6 +124,12 @@ have reopened a plan whose success criteria were satisfied.
     regressions — the LESSONS.md entry on waking skipped tests applies directly
 - [ ] ⬜ **Task 2.3**: Verify the CI daemon cannot collide with anything (its own
   `HOSTNAME`-derived socket, per the hostname-isolation design)
+- [ ] ⬜ **Task 2.4**: The three currently-FAILING integration files above.
+  `test_forwarder_socket_stdin.py:29`'s hardcoded `/workspace` path is a plain
+  defect and can be fixed on its own; the daemon-dependence is this plan's
+  Decision 1 applied again. Do NOT resolve it by adding a silent skip — that
+  converts a red gate into an invisible one, which is the defect this plan
+  exists to remove. Phase 3's guard must cover them.
 
 ### Phase 3: Guard the class
 
@@ -109,7 +142,9 @@ have reopened a plan whose success criteria were satisfied.
 
 - [ ] ⬜ **Task 4.1**: Full QA green, daemon restart RUNNING
 - [ ] ⬜ **Task 4.2**: A green CI run in which the 11 tests are reported as
-  PASSED rather than absent
+  PASSED rather than absent — which now also requires the three failing files
+  in Task 2.4, since `main` is currently red and no amount of skip-fixing
+  turns it green on its own
 
 ## Dependencies
 
