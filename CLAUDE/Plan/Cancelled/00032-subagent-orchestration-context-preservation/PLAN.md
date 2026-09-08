@@ -1,6 +1,6 @@
 # Plan 00032: Sub-Agent Orchestration for Context Preservation
 
-**Status**: Blocked (waiting for the upstream Claude Code delegate mode fix)
+**Status**: Cancelled (won't do — the premise is gone: Claude Code no longer has a delegate mode, and the "cascade" it waited on is now documented behaviour)
 **Created**: 2026-02-06
 **Owner**: Main Claude (Orchestrator)
 **Priority**: High (blocked by upstream)
@@ -400,3 +400,17 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 - [#7881](https://github.com/anthropics/claude-code/issues/7881) - Subagent identification in hooks
 
 **Full research document**: [RESEARCH-2026-02-23.md](RESEARCH-2026-02-23.md)
+
+## Closure
+
+Cancelled as won't-do. The hold waited for an upstream fix to delegate mode's
+cascade onto teammates. Checked against Claude Code 2.1.263: the permission
+modes documented are `default`, `acceptEdits`, `plan`, `auto`, `dontAsk` and
+`bypassPermissions` — no delegate mode; the agent-teams page states that
+teammates start with the lead's permission mode and per-teammate modes cannot
+be set at spawn, i.e. the cascade is the design; and the four tracked issues
+(#23447, #24073, #24307, #25037) were auto-closed as stale in Feb–Mar 2026
+without a fix. Agent teams themselves remain experimental behind
+`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. If context-preserving orchestration
+is wanted again, it is a new plan built on today's primitives (a lead in plan
+mode, prompted to wait for teammates), not a resumption of this one.

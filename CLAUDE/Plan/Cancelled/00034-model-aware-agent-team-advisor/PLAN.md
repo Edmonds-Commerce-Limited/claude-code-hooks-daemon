@@ -1,6 +1,6 @@
 # Plan: Update Plan 00032 with Model-Aware Agent Team Advisor Handler
 
-**Status**: Blocked (upstream Claude Code delegate mode fix, GitHub #23447/#25037)
+**Status**: Cancelled (won't do — depended on Plan 00032, which is cancelled because Claude Code no longer has a delegate mode)
 
 ## Context
 
@@ -158,3 +158,9 @@ Add to Plan 00032:
 3. **QA suite**: `./scripts/qa/run_all.sh` (all 7 checks pass)
 4. **Daemon restart**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart` then verify status RUNNING
 5. **Dogfooding**: Handler enabled in project config, dogfooding tests pass
+
+## Closure
+
+Cancelled as won't-do alongside Plan 00032, whose orchestration infrastructure
+this plan depended on. See 00032's Closure section for the evidence that the
+delegate-mode premise no longer exists in Claude Code.

@@ -1,6 +1,6 @@
 # Plan 00131: Block Untracked Claude Memory + Tracked-Docs Progressive Disclosure
 
-**Status**: Dormant (Phases 1–5 shipped in v3.23.0. Of the deferred residue, Plan 00284 — now Complete — DELIVERED the Phase 6 dogfood migration (this repo's doc drift fully migrated, sweep-verified) and the `@`-import audit half of Phase 4 (shipped as the `at-import-census` check + `docs-qa` CLI/agent). Remaining here: only Phase 4's auto-build scaffolding for rules/skills, kept dormant as YAGNI until a client asks for it)
+**Status**: Cancelled (won't do the residue — everything of value shipped in v3.23.0 and via Plan 00284; the one item left, Phase 4's auto-build scaffolding, was kept "until a client asks", and none has. Original note: Phases 1–5 shipped in v3.23.0. Of the deferred residue, Plan 00284 — now Complete — DELIVERED the Phase 6 dogfood migration (this repo's doc drift fully migrated, sweep-verified) and the `@`-import audit half of Phase 4 (shipped as the `at-import-census` check + `docs-qa` CLI/agent). Remaining here: only Phase 4's auto-build scaffolding for rules/skills, kept dormant as YAGNI until a client asks for it)
 **Created**: 2026-06-19
 **Owner**: joseph
 **Priority**: High
@@ -248,3 +248,10 @@ when a project opts in by setting it `false`.
 - **Decisions**: Phase 4 scaffolding skill → follow-up plan (guidance ships now). Phase 6 dogfood
   (activate in THIS repo + migrate MEMORY.md) → deferred follow-up; this repo stays default `true`.
 - Ships bundled with the Plan 00130 `mkplan.bash` work already on `main`.
+
+## Closure
+
+Cancelled as won't-do for the residue. The shipped work (v3.23.0, then Plan
+00284's dogfood migration and `@`-import census) stays; the unticked boxes
+above describe the Phase 4 scaffolding skill that was held as YAGNI and is now
+declined rather than deferred. Re-file if a client asks.
