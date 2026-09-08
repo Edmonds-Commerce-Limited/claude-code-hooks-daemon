@@ -1091,3 +1091,39 @@ RETIRED_HANDLERS: dict[str, str] = {
         "`plan_number_helper` enabled to keep the behaviour."
     ),
 }
+
+
+@dataclass(frozen=True)
+class HandlerRelocation:
+    """Where a retired ``handlers.<event>.<key>`` entry lives now.
+
+    Attributes:
+        pseudo_event: Name under ``pseudo_events:`` that owns the handler now.
+        config_key: The handler's key under ``pseudo_events.<name>.handlers``.
+    """
+
+    pseudo_event: str
+    config_key: str
+
+    @property
+    def target_path(self) -> str:
+        """Dotted config path of the live entry."""
+        return f"pseudo_events.{self.pseudo_event}.handlers.{self.config_key}"
+
+
+# Retired keys whose behaviour did NOT go away but moved to a pseudo-event.
+#
+# A key in RETIRED_HANDLERS is accepted silently at startup, which is right for
+# a handler that is gone, and wrong for one that merely moved: a client who
+# keeps `stop.hedging_language_detector` after the move still has a config that
+# says the detector is on, while nothing runs it (Plan 00362, report §2). Every
+# key here MUST also be in RETIRED_HANDLERS; the audit checks this map first so
+# it can name the new home, and the upgrade merge moves the entry there.
+RELOCATED_HANDLERS: dict[str, HandlerRelocation] = {
+    "hedging_language_detector": HandlerRelocation(
+        pseudo_event="nitpick", config_key="hedging_language"
+    ),
+    "dismissive_language_detector": HandlerRelocation(
+        pseudo_event="nitpick", config_key="dismissive_language"
+    ),
+}

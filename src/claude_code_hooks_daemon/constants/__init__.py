@@ -45,10 +45,12 @@ from claude_code_hooks_daemon.constants.events import (
 )
 from claude_code_hooks_daemon.constants.formatting import FormatLimit
 from claude_code_hooks_daemon.constants.handlers import (
+    RELOCATED_HANDLERS,
     RETIRED_HANDLERS,
     HandlerID,
     HandlerIDMeta,
     HandlerKey,
+    HandlerRelocation,
 )
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
@@ -71,6 +73,7 @@ from claude_code_hooks_daemon.constants.validation import ValidationLimit
 
 __all__ = [
     "CORE_VENDORED_BUILD_DIR_NAMES",
+    "RELOCATED_HANDLERS",
     "RETIRED_HANDLERS",
     "SUBAGENT_DISPATCH_TOOL_NAMES",
     # Config key constants
@@ -89,6 +92,7 @@ __all__ = [
     "HandlerID",
     "HandlerIDMeta",
     "HandlerKey",
+    "HandlerRelocation",
     # Tag constants
     "HandlerTag",
     # Protocol field constants

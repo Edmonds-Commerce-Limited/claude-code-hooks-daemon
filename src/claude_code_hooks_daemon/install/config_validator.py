@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.config.validator import (
     ConfigValidator as _BusinessRuleValidator,
 )
+from claude_code_hooks_daemon.install.handler_key_audit import audit_handler_keys
 
 
 @dataclass
@@ -38,15 +39,17 @@ class ValidationResult:
         Returns:
             Human-readable guidance string, empty if config is valid.
         """
-        if self.valid:
+        if self.valid and not self.warnings:
             return ""
 
         lines: list[str] = []
-        lines.append("Config validation failed. Please fix the following issues:")
-        lines.append("")
-
-        for i, error in enumerate(self.errors, 1):
-            lines.append(f"  {i}. {error}")
+        if self.valid:
+            lines.append("Config is valid, with warnings:")
+        else:
+            lines.append("Config validation failed. Please fix the following issues:")
+            lines.append("")
+            for i, error in enumerate(self.errors, 1):
+                lines.append(f"  {i}. {error}")
 
         if self.warnings:
             lines.append("")
@@ -126,7 +129,23 @@ class ConfigValidator:
         if business_rule_errors:
             return ValidationResult(valid=False, errors=business_rule_errors)
 
-        return ValidationResult(valid=True)
+        # Plan 00362: a key the registry does not know for its event. The
+        # schema allows any key under handlers.<event>, so without this a
+        # config whose handler entry does nothing is reported valid. Split
+        # the way daemon startup splits: a retired or relocated name is
+        # accepted there (warning here), a typo or wrong-event name puts the
+        # daemon into degraded mode there (error here).
+        key_errors: list[str] = []
+        warnings: list[str] = []
+        for finding in audit_handler_keys(config):
+            if finding.kind in ("relocated", "retired"):
+                warnings.append(finding.message)
+            else:
+                key_errors.append(finding.message)
+        if key_errors:
+            return ValidationResult(valid=False, errors=key_errors, warnings=warnings)
+
+        return ValidationResult(valid=True, warnings=warnings)
 
     def _extract_errors(self, validation_error: ValidationError) -> list[str]:
         """Extract human-readable error messages from Pydantic ValidationError.

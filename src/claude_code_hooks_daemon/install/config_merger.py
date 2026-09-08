@@ -12,6 +12,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from claude_code_hooks_daemon.install.config_differ import ConfigDiff
+from claude_code_hooks_daemon.install.handler_key_audit import (
+    HandlerKeyMigration,
+    migrate_relocated_handler_keys,
+    scaffold_pseudo_event_blocks,
+)
 
 # A change descriptor emitted by ConfigDiffer always carries exactly these two
 # keys (the previous default value and the user's new value). Identifying a
@@ -89,6 +94,7 @@ class MergeResult:
 
     merged_config: dict[str, Any]
     conflicts: list[MergeConflict] = field(default_factory=list)
+    handler_key_migrations: list[HandlerKeyMigration] = field(default_factory=list)
 
     @property
     def is_clean(self) -> bool:
@@ -105,6 +111,7 @@ class MergeResult:
             "merged_config": self.merged_config,
             "conflicts": [c.to_dict() for c in self.conflicts],
             "is_clean": self.is_clean,
+            "handler_key_migrations": [m.to_dict() for m in self.handler_key_migrations],
         }
 
 
@@ -146,7 +153,18 @@ class ConfigMerger:
         self._apply_custom_sections(merged, diff)
         self._report_removed_handler_conflicts(merged, diff, conflicts)
 
-        return MergeResult(merged_config=merged, conflicts=conflicts)
+        # Plan 00362: a retired key the user's config re-adds (step 5) whose
+        # behaviour moved to a pseudo-event is moved with it, so the entry the
+        # user has been maintaining keeps doing something after the upgrade.
+        # A block that arrived without `enabled`/`triggers` (the pre-diff
+        # relocation in config_cli leaves them to the new default) is then
+        # completed, because a pseudo-event with no triggers never fires.
+        merged, migrations = migrate_relocated_handler_keys(merged)
+        merged = scaffold_pseudo_event_blocks(merged)
+
+        return MergeResult(
+            merged_config=merged, conflicts=conflicts, handler_key_migrations=migrations
+        )
 
     def _apply_custom_sections(
         self,

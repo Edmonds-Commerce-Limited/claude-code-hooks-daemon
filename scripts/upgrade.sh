@@ -591,6 +591,39 @@ if [ -f "$_metadata_config_backup" ] && [ -f "$_metadata_config_file" ]; then
         _diff_count="$(printf '%s\n' "$_diff_text" | awk '/^[<>]/ {c++} END {print c+0}')"
         _metadata_config_summary="${_diff_count} lines changed"
     fi
+
+    # Plan 00362: name the handler keys the merge moved to a pseudo-event, so
+    # a relocation is recorded in the summary rather than hidden inside a line
+    # count. The audit compares the backup with the written config. It exits
+    # 1 when stale keys REMAIN, which is not a failure here — the JSON is
+    # still complete — so the rc is recorded and only rc 2 (error) skips.
+    if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+        _audit_rc=0
+        _audit_json=""
+        if _audit_json="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
+            audit-handler-keys \
+            --config "$_metadata_config_file" \
+            --migrated-from "$_metadata_config_backup" \
+            --format json)"; then
+            _audit_rc=0
+        else
+            _audit_rc=$?
+        fi
+        if [ "$_audit_rc" -ne 2 ] && [ -n "$_audit_json" ]; then
+            _moved_out=""
+            if _moved_out="$(printf '%s' "$_audit_json" | "$_metadata_venv_python" -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+print('; '.join(m['summary'] for m in data.get('applied_migrations', [])))
+")"; then
+                if [ -n "$_moved_out" ]; then
+                    _metadata_config_summary="${_metadata_config_summary}; moved: ${_moved_out}"
+                fi
+            else
+                _warn "Could not read the handler-key audit output; summary omits moved keys."
+            fi
+        fi
+    fi
 fi
 
 # ------------------------------------------------------------

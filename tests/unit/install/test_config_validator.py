@@ -277,3 +277,66 @@ class TestConfigValidatorEdgeCases:
         ]
         result = validator._extract_errors(mock_error)
         assert result == ["value is required (type: missing)"]
+
+
+class TestHandlerKeyAudit:
+    """Plan 00362: config-validate reports handler keys the registry does not know."""
+
+    @staticmethod
+    def _config(handlers: dict[str, Any]) -> dict[str, Any]:
+        return {"version": "2.0", "daemon": {"log_level": "INFO"}, "handlers": handlers}
+
+    def test_relocated_key_is_a_warning_naming_the_new_home(self) -> None:
+        result = ConfigValidator().validate(
+            self._config({"stop": {"hedging_language_detector": {"enabled": True}}})
+        )
+        assert result.valid is True
+        assert result.errors == []
+        assert len(result.warnings) == 1
+        assert "pseudo_events.nitpick.handlers.hedging_language" in result.warnings[0]
+
+    def test_retired_key_is_a_warning_saying_no_longer_exists(self) -> None:
+        result = ConfigValidator().validate(
+            self._config({"notification": {"notification_logger": {"enabled": True}}})
+        )
+        assert result.valid is True
+        assert any("no longer exists" in w for w in result.warnings)
+
+    def test_wrong_event_key_is_an_error_naming_the_right_event(self) -> None:
+        """The daemon refuses to start on this, so valid must be False."""
+        result = ConfigValidator().validate(
+            self._config({"stop": {"pipe_blocker": {"enabled": True}}})
+        )
+        assert result.valid is False
+        assert any("handlers.pre_tool_use.pipe_blocker" in e for e in result.errors)
+
+    def test_unknown_key_is_an_error(self) -> None:
+        result = ConfigValidator().validate(
+            self._config({"pre_tool_use": {"no_such_handler_xyz": {"enabled": True}}})
+        )
+        assert result.valid is False
+        assert any("no_such_handler_xyz" in e for e in result.errors)
+
+    def test_registered_keys_produce_nothing(self) -> None:
+        result = ConfigValidator().validate(
+            self._config(
+                {
+                    "pre_tool_use": {"destructive_git": {"enabled": True, "priority": 10}},
+                    "stop": {"auto_continue_stop": {"enabled": True}},
+                }
+            )
+        )
+        assert result.valid is True
+        assert result.warnings == []
+
+    def test_guidance_lists_warnings_when_valid(self) -> None:
+        result = ConfigValidator().validate(
+            self._config({"stop": {"hedging_language_detector": {"enabled": True}}})
+        )
+        assert result.valid is True
+        assert "hedging_language_detector" in result.guidance
+        assert result.to_dict()["guidance"] == result.guidance
+
+    def test_guidance_empty_when_nothing_to_say(self) -> None:
+        result = ConfigValidator().validate(self._config({}))
+        assert result.guidance == ""

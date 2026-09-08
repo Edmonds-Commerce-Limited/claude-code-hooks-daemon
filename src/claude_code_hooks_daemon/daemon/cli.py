@@ -3121,6 +3121,44 @@ def cmd_check_config_migrations(args: argparse.Namespace) -> int:
     return 1 if has_issues else 0
 
 
+def cmd_audit_handler_keys(args: argparse.Namespace) -> int:
+    """Report handler keys the registry does not know for their event (Plan 00362).
+
+    Not version-gated: a key is stale against the code that is installed, not
+    against a release manifest. Reports only — the upgrade merge is what moves
+    a relocated key, and this command's ``--migrated-from`` lists what it moved.
+
+    Args:
+        args: Parsed CLI arguments with config, format and optional
+              migrated_from
+
+    Returns:
+        0 if every key is registered for its event, 1 if findings, 2 on error
+    """
+    from claude_code_hooks_daemon.install.config_cli import run_audit_handler_keys
+
+    output_format: str = args.format
+    if args.config:
+        config_path = Path(args.config)
+    else:
+        project_path = get_project_path(getattr(args, "project_root", None))
+        config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    migrated_from = Path(args.migrated_from) if args.migrated_from else None
+
+    try:
+        result = run_audit_handler_keys(config_path=config_path, migrated_from=migrated_from)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
+    if output_format == "json":
+        print(json.dumps(result, indent=2))
+    else:
+        print(result.get("text", ""))
+
+    return 1 if result["has_findings"] else 0
+
+
 def cmd_check_worktree_seed(args: argparse.Namespace) -> int:
     """Report worktree seed config drift against the project's repository.
 
@@ -6644,6 +6682,32 @@ def main() -> int:
         help="Override manifest directory (for testing)",
     )
     parser_check_migrations.set_defaults(func=cmd_check_config_migrations)
+
+    # audit-handler-keys command (Plan 00362)
+    parser_audit_keys = subparsers.add_parser(
+        "audit-handler-keys",
+        help="Report handlers.<event>.<key> entries the registry does not know for that event",
+    )
+    parser_audit_keys.add_argument(
+        "--config",
+        metavar="PATH",
+        default=None,
+        help="Path to hooks-daemon.yaml (default: auto-detect from project root)",
+    )
+    parser_audit_keys.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    parser_audit_keys.add_argument(
+        "--migrated-from",
+        dest="migrated_from",
+        metavar="PATH",
+        default=None,
+        help="Pre-upgrade copy of the config; lists the relocations the upgrade applied",
+    )
+    parser_audit_keys.set_defaults(func=cmd_audit_handler_keys)
 
     # check-worktree-seed command
     parser_check_worktree_seed = subparsers.add_parser(

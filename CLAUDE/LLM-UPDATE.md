@@ -320,6 +320,14 @@ NEW_VERSION="2.15.2"
   the key in your config to adopt it. If a recommendation carries a migration
   **Note**, perform that migration first.
 - Options under **💡 New Options Available** are informational — adopt if useful.
+- Entries under **⚠️ Stale handler keys** are `handlers.<event>.<key>` lines
+  the installed daemon does not register for that event (Plan 00362). Each
+  says where the handler lives now (another event, or a pseudo-event such as
+  `pseudo_events.nitpick.handlers`) or that it no longer exists. This check is
+  not version-gated; `hooks-daemon audit-handler-keys` runs it alone. The
+  upgrade merge moves a RELOCATED key (the two nitpick detectors) to its new
+  home itself, keeping `enabled`/`priority`, and names the move in
+  `config_diff_summary`.
 
 Example output:
 
