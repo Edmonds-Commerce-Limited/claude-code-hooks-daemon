@@ -206,7 +206,43 @@ Rules:
 
 ### 1. Pre-Release Validation
 
-Agent verifies: clean git state, all QA passes, version consistency across files (pyproject.toml, version.py, README.md), no existing tag, gh CLI authenticated. (`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a version-bump target.)
+**1a. Slate-clean gate (Plan 00359) — runs FIRST, before any agent is spawned.**
+
+Every other gate in this pipeline looks at the CODE. This one looks at the
+state of the WORK around it, because a release can otherwise begin on a HEAD
+that CI never passed, over plans mid-work, with unlanded branches and live
+worktrees — and every code gate would pass.
+
+```bash
+bin/hooks-daemon release-slate-check
+```
+
+| Exit | Meaning                                                                                                    | Pipeline                                         |
+| ---- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `0`  | Clean: HEAD's exact sha has a completed, successful CI run; no plan mid-work; no branch ahead; no worktree | Proceeds exactly as before — no prompt, no pause |
+| `2`  | Something is in flight. The report names every item                                                        | **STOP.** A human decides                        |
+| `1`  | The check could not be made (no `gh`, not a repo, lookup failed)                                           | **ABORT.** Never treated as clean                |
+
+What the report shows, and how each is read:
+
+- **HEAD CI** — the run for the EXACT HEAD sha, not "a recent green run".
+  `in_progress`, `cancelled` and *absent* are all not green.
+- **In flight** — plans with `**Status**: In Progress`. These block.
+- **Waiting for this release** — In Progress plans whose status line names
+  `/release` as what they are waiting on. Shown, never blocking: they are the
+  opposite of a blocker.
+- **High priority, not started** — surfaced for attention, never blocking.
+  Whether a filed-but-unfixed finding should hold a release is a question of
+  SCOPE, and scope is the human's call.
+- **Branches ahead of main / live worktrees** — listed, never touched.
+
+**Proceeding over in-flight work is an explicit act**: re-invoke as
+`/release <version> accept-wip`, which passes `--accept`. The report still
+prints and the exit becomes `0`, so the decision is in the invocation record.
+`--accept` does NOT rescue exit `1` — acknowledging WIP is not acknowledging
+blindness.
+
+**1b. Agent validation.** Agent verifies: clean git state, all QA passes, version consistency across files (pyproject.toml, version.py, README.md), no existing tag, gh CLI authenticated. (`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a version-bump target.)
 
 **ANY failure = IMMEDIATE ABORT. NO auto-fixing.**
 

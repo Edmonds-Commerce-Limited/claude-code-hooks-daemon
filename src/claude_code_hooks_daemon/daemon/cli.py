@@ -104,8 +104,13 @@ from claude_code_hooks_daemon.utils.settings_repair import repair_settings_regis
 from .init_config import generate_config
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
+    from claude_code_hooks_daemon.core.release_slate import (
+        CiRunState,
+        PlanSummary,
+        SlateReport,
+    )
     from claude_code_hooks_daemon.core.worktree_reaping import RunGit
     from claude_code_hooks_daemon.daemon.branch_safety import BranchClassification
     from claude_code_hooks_daemon.daemon.controller import DaemonController
@@ -2905,6 +2910,128 @@ def cmd_settings_merge(args: argparse.Namespace) -> int:
             if keys:
                 print(f"settings.json: {label} {', '.join(keys)}")
     return 0
+
+
+# Plan 00359: the exit code IS the contract the release skill consumes. 1 is
+# deliberately "could not determine" and never "clean" — a check that cannot be
+# made must not read as one that passed. 2 is reserved for the in-flight case so
+# the calling script can tell "a human decides" apart from "abort".
+RELEASE_SLATE_CLEAN = 0
+RELEASE_SLATE_UNDETERMINED = 1
+RELEASE_SLATE_IN_FLIGHT = 2
+_GH_RUN_LIST_LIMIT = "30"
+
+
+def _gh_ci_lookup(sha: str) -> "CiRunState | None":
+    """CI state for the exact ``sha`` on the current branch, via ``gh``.
+
+    "A recent green run" is not the bar — the run that mattered when this was
+    filed was green on a sha three commits behind HEAD. Only a run whose
+    ``headSha`` IS the given sha counts; absent means None.
+    """
+    from claude_code_hooks_daemon.core.release_slate import CiRunState
+
+    branch = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    listing = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+        [
+            "gh",
+            "run",
+            "list",
+            "--branch",
+            branch,
+            "--limit",
+            _GH_RUN_LIST_LIMIT,
+            "--json",
+            "headSha,status,conclusion",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    for run in json.loads(listing):
+        if run.get("headSha") == sha:
+            return CiRunState(sha=sha, status=run.get("status"), conclusion=run.get("conclusion"))
+    return None
+
+
+def _collect_release_slate() -> "SlateReport":
+    """Gather the slate for THIS repository, using the configured plan layout."""
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.core.release_slate import collect_slate
+    from claude_code_hooks_daemon.utils.git_repo import run_git
+
+    project_root = Path.cwd()
+    config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+    plan_cfg = config.plan_workflow
+    # cancelled_dir is None when cancelled plans share completed_dir; the set
+    # collapses that case rather than growing a "None" folder name.
+    archive = {plan_cfg.qa.completed_dir, plan_cfg.qa.cancelled_dir or plan_cfg.qa.completed_dir}
+    return collect_slate(
+        repo_root=project_root,
+        plan_root=project_root / plan_cfg.directory,
+        archive_dir_names=frozenset(archive),
+        run_fn=run_git,
+        ci_lookup=_gh_ci_lookup,
+    )
+
+
+def cmd_release_slate_check(
+    args: argparse.Namespace,
+    *,
+    collect: "Callable[[], SlateReport] | None" = None,
+) -> int:
+    """Report everything in flight before a release begins (Plan 00359).
+
+    Returns ``RELEASE_SLATE_CLEAN`` when nothing needs a decision,
+    ``RELEASE_SLATE_IN_FLIGHT`` when something does (``--accept`` turns this
+    into CLEAN while still printing the report, so the decision is on record),
+    and ``RELEASE_SLATE_UNDETERMINED`` when the check itself could not be made
+    — which ``--accept`` deliberately does NOT rescue: acknowledging WIP is not
+    acknowledging blindness.
+    """
+    try:
+        report = (collect or _collect_release_slate)()
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        print(f"release-slate-check: could not determine the slate: {exc}", file=sys.stderr)
+        return RELEASE_SLATE_UNDETERMINED
+
+    if getattr(args, "json", False):
+        print(json.dumps(_slate_as_json(report), indent=2))
+    else:
+        print(report.render())
+
+    if report.is_clean:
+        return RELEASE_SLATE_CLEAN
+    if getattr(args, "accept", False):
+        print("\nIn-flight work ACCEPTED by explicit --accept; proceeding.")
+        return RELEASE_SLATE_CLEAN
+    return RELEASE_SLATE_IN_FLIGHT
+
+
+def _slate_as_json(report: "SlateReport") -> dict[str, Any]:
+    def plans(items: "tuple[PlanSummary, ...]") -> list[dict[str, Any]]:
+        return [{"number": p.number, "title": p.title, "status": p.status_raw} for p in items]
+
+    return {
+        "clean": report.is_clean,
+        "head_sha": report.head_sha,
+        "head_ci": {
+            "green": report.head_ci.is_green,
+            "status": report.head_ci.status,
+            "conclusion": report.head_ci.conclusion,
+            "problem": report.head_ci.problem,
+        },
+        "in_flight_plans": plans(report.in_flight_plans),
+        "release_gated_plans": plans(report.release_gated_plans),
+        "attention_plans": plans(report.attention_plans),
+        "branches_ahead": [{"name": b.name, "ahead": b.ahead} for b in report.branches_ahead],
+        "worktrees": [str(p) for p in report.worktrees],
+    }
 
 
 def cmd_config_validate(args: argparse.Namespace) -> int:
@@ -6417,6 +6544,28 @@ def main() -> int:
         ),
     )
     parser_settings_merge.set_defaults(func=cmd_settings_merge)
+
+    # Plan 00359: the release pipeline's slate-clean gate.
+    parser_release_slate = subparsers.add_parser(
+        "release-slate-check",
+        help=(
+            "Report everything in flight before a release: HEAD's CI state, plans "
+            "mid-work, branches ahead of main, live worktrees. Exit 0 clean, 2 in "
+            "flight (a human decides), 1 could not determine."
+        ),
+    )
+    parser_release_slate.add_argument(
+        "--accept",
+        action="store_true",
+        help=(
+            "The human has seen the in-flight report and decided to proceed: the report "
+            "still prints, but exit 2 becomes 0. Does NOT rescue exit 1."
+        ),
+    )
+    parser_release_slate.add_argument(
+        "--json", action="store_true", help="Emit the report as JSON instead of text"
+    )
+    parser_release_slate.set_defaults(func=cmd_release_slate_check)
 
     # config-validate command
     parser_config_validate = subparsers.add_parser(

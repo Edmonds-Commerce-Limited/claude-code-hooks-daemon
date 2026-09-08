@@ -4,6 +4,13 @@
 set -euo pipefail
 
 VERSION="${1:-auto}"
+# Plan 00359: `accept-wip` is the ONLY way to proceed over in-flight work, and
+# it has to be typed by the human on the invocation — silence never proceeds.
+WIP_MODE="${2:-}"
+SLATE_ACCEPT_FLAG=""
+if [[ "${WIP_MODE}" == "accept-wip" ]]; then
+    SLATE_ACCEPT_FLAG="--accept"
+fi
 
 cat <<PROMPT
 # Release Orchestration for Version: ${VERSION}
@@ -11,6 +18,27 @@ cat <<PROMPT
 Execute the release management process in stages using agent orchestration.
 
 **CRITICAL:** Agents cannot spawn nested agents. You (main Claude) will orchestrate this workflow by invoking agents sequentially.
+
+## Stage 0: Slate-Clean Gate (Plan 00359) — BEFORE any agent is spawned
+
+Run this yourself, in the main thread, first:
+
+\`\`\`bash
+bin/hooks-daemon release-slate-check ${SLATE_ACCEPT_FLAG}
+\`\`\`
+
+Read the exit code, not the prose:
+
+- **0** — clean. Continue to Stage 1 with no further prompt.
+- **2** — something is in flight. **STOP HERE.** Show the human the report
+  verbatim and end your turn with \`STOPPING BECAUSE: [awaiting-human] the
+  release slate is not clean\`. Do NOT proceed, do NOT ask "shall I continue?".
+  The human proceeds, if they choose to, by re-invoking
+  \`/release ${VERSION} accept-wip\`.
+- **1** — the check could not be made. **ABORT** the release. \`accept-wip\`
+  does not rescue this.
+
+See RELEASING.md Step 1a for what each section of the report means.
 
 ## Stage 1: Release Preparation & Execution
 

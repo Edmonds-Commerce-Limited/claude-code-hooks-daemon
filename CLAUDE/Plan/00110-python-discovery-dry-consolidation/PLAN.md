@@ -1,6 +1,6 @@
 # Plan 00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy
 
-**Status**: In Progress
+**Status**: In Progress (all work done; blocked SOLELY on a human running `/release` for Tasks 7.1 and 7.2)
 **Created**: 2026-05-26
 **Owner**: TBD
 **Priority**: High
