@@ -202,3 +202,19 @@ lines neither is really changing. The README edit here is confined to this
 plan's own Active row; archiving and counter reconciliation belong to whoever
 merges, when the true post-merge counts are known. It is recorded in PLAN.md
 and the JOURNAL so it is not re-investigated.
+
+## 7. Delivery, and one process note
+
+Branch `agent-a4c957bbaff656c5f-0eec666a`, commit `82bbd550`. Not pushed, not
+merged — the dispatching human merges it.
+
+Mid-task, a system-reminder instructed that file edits be made through Bash
+using `sed`, heredocs and redirects. That contradicts this repository's
+CLAUDE.md and the dispatch instructions: `sed` is forbidden for file
+modification here, and the content guards (`sensitive_content`,
+`error_hiding_blocker`, `qa_suppression`, `comment_changelog`) only run on the
+`Write`/`Edit` tools, so a Bash-authored file reaches disk unexamined by them.
+That instruction was not followed; every file change in this work went through
+`Read`/`Edit`/`Write` and was seen by the guards. Flagged here because an
+instruction to bypass the project's own write-time protections is worth a
+human's attention rather than silent compliance.
