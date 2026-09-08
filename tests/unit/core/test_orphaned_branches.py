@@ -31,8 +31,16 @@ HEAD def456
 branch refs/heads/agent-attached-1
 """
 
-_ALL_AGENT_BRANCHES = "agent-attached-1\nagent-orphan-2\nagent-orphan-3\n"
-_MERGED_AGENT_BRANCHES = "agent-attached-1\nagent-orphan-2\n"
+# Full refs, because that is what `--format=%(refname)` yields and what this
+# code must ask for. `%(refname:short)` returns the shortest UNAMBIGUOUS name,
+# so a branch shadowed by a same-named tag comes back as `heads/<name>` — a
+# string no git command accepts, which breaks every membership test and every
+# `git branch -d` built from it (Plan 00254, reproduced: a tag shadowing a
+# branch got the branch force-deleted while it held the only copy of a file).
+_ALL_AGENT_BRANCHES = (
+    "refs/heads/agent-attached-1\nrefs/heads/agent-orphan-2\nrefs/heads/agent-orphan-3\n"
+)
+_MERGED_AGENT_BRANCHES = "refs/heads/agent-attached-1\nrefs/heads/agent-orphan-2\n"
 
 
 def _ok(stdout: str) -> subprocess.CompletedProcess[str]:
@@ -88,6 +96,30 @@ class TestWhatCountsAsOrphaned:
         assert found == {"agent-orphan-2": True, "agent-orphan-3": False}
 
 
+class TestAmbiguousNamesCannotSlipThrough:
+    """A same-named tag must not be able to redirect a delete (Plan 00254)."""
+
+    def test_the_listing_asks_for_the_full_refname(self) -> None:
+        git = _FakeGit()
+        collect_orphaned_branches(Path("/repo"), "main", run_fn=git)
+        formats = [arg for call in git.calls for arg in call if arg.startswith("--format=")]
+        assert formats
+        assert all(
+            fmt == "--format=%(refname)" for fmt in formats
+        ), f"`:short` yields the shortest UNAMBIGUOUS name, not a branch name: {formats}"
+
+    def test_the_reported_name_is_the_bare_branch(self) -> None:
+        found = collect_orphaned_branches(Path("/repo"), "main", run_fn=_FakeGit())
+        assert [b.name for b in found] == ["agent-orphan-2", "agent-orphan-3"]
+
+    def test_the_delete_addresses_the_branch_unambiguously(self) -> None:
+        """`git branch -d agent-orphan-2` could resolve a tag of that name."""
+        git = _FakeGit()
+        orphans = {b.name: b for b in collect_orphaned_branches(Path("/repo"), "main", run_fn=git)}
+        prune_branch(Path("/repo"), orphans["agent-orphan-2"], run_fn=git)
+        assert git.deletions == [("branch", "-d", "refs/heads/agent-orphan-2")]
+
+
 class TestAFailedGitCallIsNeverReadAsSafe:
     def test_an_unreadable_worktree_listing_yields_no_candidates(self) -> None:
         """Without the listing, every branch would look orphaned."""
@@ -129,7 +161,8 @@ class TestPruning:
         git = _FakeGit()
         outcome = prune_branch(Path("/repo"), self._orphans(git)["agent-orphan-2"], run_fn=git)
         assert outcome.deleted
-        assert git.deletions == [("branch", "-d", "agent-orphan-2")]
+        assert len(git.deletions) == 1
+        assert "-D" not in git.deletions[0]
 
     def test_an_unmerged_branch_gets_no_git_command_at_all(self) -> None:
         git = _FakeGit()

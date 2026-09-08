@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Protocol
 
 from claude_code_hooks_daemon.core.worktree_paths import WORKTREE_DIR_PATTERNS
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
 
 
 class GitResult(Protocol):
@@ -285,7 +285,13 @@ def reap_worktree(
 AGENT_BRANCH_GLOB = "agent-*"
 
 _BRANCH_LINE_PREFIX = "branch refs/heads/"
-_BRANCH_FORMAT = "--format=%(refname:short)"
+#: List with the FULL refname and strip it. `%(refname:short)` yields the
+#: shortest UNAMBIGUOUS name, so a branch sharing its name with a tag comes back
+#: as `heads/<name>` — a string no git command accepts, which silently breaks
+#: every membership test and every `git branch -d` built from it. Plan 00254
+#: reproduced the cost: a tag patch-equivalent to a protected ref got a branch
+#: holding the only copy of a file force-deleted.
+_BRANCH_FORMAT = "--format=%(refname)"
 
 
 @dataclass(frozen=True)
@@ -304,10 +310,10 @@ class OrphanedBranch:
 
 
 def _branch_names(result: GitResult) -> list[str] | None:
-    """Branch names from a `--format=%(refname:short)` listing, or None on failure."""
+    """Bare branch names from a `--format=%(refname)` listing, or None on failure."""
     if result.returncode != 0:
         return None
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return [strip_branch_ref(line.strip()) for line in result.stdout.splitlines() if line.strip()]
 
 
 def _attached_branches(listing: str) -> set[str]:
@@ -406,7 +412,10 @@ def prune_branch(
     if dry_run:
         return PruneOutcome(branch.name, deleted=False, detail=f"would delete branch {branch.name}")
 
-    result = run_fn(repo_root, "branch", "-d", branch.name)
+    # Addressed by FULL ref: `git branch -d <bare name>` can resolve a same-named
+    # tag ahead of the branch, so the bare form risks acting on something other
+    # than what the predicate just cleared.
+    result = run_fn(repo_root, "branch", "-d", branch_ref(branch.name))
     if result.returncode != 0:
         return PruneOutcome(
             branch.name,

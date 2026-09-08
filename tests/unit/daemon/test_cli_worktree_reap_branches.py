@@ -27,8 +27,13 @@ HEAD bbb
 branch refs/heads/agent-attached-1
 """
 
-_ALL_BRANCHES = "agent-attached-1\nagent-orphan-2\nagent-orphan-3\n"
-_MERGED_BRANCHES = "agent-attached-1\nagent-orphan-2\n"
+# Full refs, matching the `--format=%(refname)` the listing asks for. `:short`
+# would yield `heads/<name>` for a branch shadowed by a same-named tag — a string
+# no git command accepts (Plan 00254).
+_ALL_BRANCHES = (
+    "refs/heads/agent-attached-1\nrefs/heads/agent-orphan-2\nrefs/heads/agent-orphan-3\n"
+)
+_MERGED_BRANCHES = "refs/heads/agent-attached-1\nrefs/heads/agent-orphan-2\n"
 
 
 class _FakeGit:
@@ -108,8 +113,7 @@ class TestReapDoesNotTouchBranches:
         """Widening --reap would change what an existing caller does."""
         cmd_worktree_reap(_args(reap=True), run_fn=git)
         deleted = [call[2] for call in git.branch_deletions]
-        assert "agent-orphan-2" not in deleted
-        assert "agent-orphan-3" not in deleted
+        assert not any("agent-orphan" in target for target in deleted)
 
 
 class TestActingOnBranchesNeedsItsOwnFlag:
@@ -117,13 +121,13 @@ class TestActingOnBranchesNeedsItsOwnFlag:
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
         cmd_worktree_reap(_args(reap_branches=True), run_fn=git)
-        assert ("branch", "-d", "agent-orphan-2") in git.branch_deletions
+        assert ("branch", "-d", "refs/heads/agent-orphan-2") in git.branch_deletions
 
     def test_the_unmerged_orphan_gets_no_git_command(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
         cmd_worktree_reap(_args(reap_branches=True), run_fn=git)
-        assert ("branch", "-d", "agent-orphan-3") not in git.branch_deletions
+        assert not any("agent-orphan-3" in call[2] for call in git.branch_deletions)
 
     def test_no_branch_is_ever_deleted_with_capital_d(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
