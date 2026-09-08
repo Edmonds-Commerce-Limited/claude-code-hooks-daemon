@@ -23,8 +23,16 @@ All three files need a live daemon socket and skip cleanly without one. CI never
 starts a daemon in the QA job, so all 11 have skipped on every run since they
 were written.
 
-`CLAUDE/development/RELEASING.md` Step 12.0 names all three files as BLOCKING
-acceptance gates, and about one of them says explicitly:
+`CLAUDE/development/RELEASING.md` Step 12.0 names ~~all three~~ **two** of the
+three as BLOCKING acceptance gates — `test_stop_hook_hard_block.py` and
+`test_tool_use_error_recovery.py`. **`test_absolute_path_socket_deny.py`, which
+accounts for 6 of the 11 skips, is not mentioned in that file at all.** It is
+therefore not covered by Phase 3's "a skip of a declared-blocking gate fails the
+run" guard, and Phase 1 has to settle whether it belongs in the blocking set or
+is genuinely optional — a guard keyed on a declaration cannot protect a file the
+declaration omits.
+
+About one of the two it does name, Step 12.0 says explicitly:
 
 > The test skips cleanly when no daemon is running locally; under H-1 the daemon
 > is always started before this step, **so a skip there is itself an abort
@@ -120,12 +128,34 @@ have reopened a plan whose success criteria were satisfied.
 
 - [ ] ⬜ **Task 1.1**: Pin the current behaviour — a run with no daemon skips
   exactly these 11 tests, and nothing reports it
+
   - [ ] ⬜ Reproduce locally with the daemon stopped, so the count and the skip
     reasons are observed rather than read off a CI log
-- [ ] ⬜ **Task 1.2**: Establish where the blocking set is declared, and whether
-  `RELEASING.md` Step 12.0's list can be read mechanically or must be restated
-  - [ ] ⬜ If it must be restated, that duplication is itself the defect to fix
-    first — a second copy is the one that goes stale
+
+- [x] ✅ **Task 1.2**: The blocking set is declared as **one hardcoded `pytest`
+  invocation inside a fenced bash block** at `RELEASING.md` Step 12.0, naming
+  six files:
+
+  ```
+  test_diagnostic_scripts.py  test_install_sh_end_to_end.py
+  test_tool_use_error_recovery.py  test_stop_hook_hard_block.py
+  test_skill_install_python_discovery.py  test_playbook_harness.py
+  ```
+
+  **It CAN be read mechanically** — a stable single-line command whose
+  `tests/acceptance/*.py` arguments a parser can lift — so Phase 3's guard does
+  not need a second copy, and must not make one.
+
+  Two things found while establishing that, both of which change later phases:
+
+  - **`test_absolute_path_socket_deny.py` is not in the set**, though it is 6
+    of the 11 skips. A declaration-keyed guard cannot cover it; decide whether
+    it belongs in the set.
+  - **The expected COUNTS beside that command are already a second copy** —
+    `combined: 27 passed, 1 skipped`, restated per-file above it. Plan 00110
+    hit exactly this: a criterion phrased as a gate count was stale twice over
+    because other plans kept moving the number. Whatever Phase 3 builds should
+    read the file list and NOT the counts.
 
 ### Phase 2: Make the gates run
 
