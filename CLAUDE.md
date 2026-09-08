@@ -565,14 +565,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths
 
-<!-- handler: tool-disable-advisor -->
-
-- tool_disable_advisor — declared never-want tools are checked at session start
-
-<!-- handler: model-fallback-detector -->
-
-- model_fallback_detector — silent model substitution is surfaced
-
 <!-- handler: docs-qa-sweep -->
 
 - docs_qa_sweep — documentation drift report at session start
@@ -581,13 +573,21 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - plan_qa_sweep — plan-tree drift report at session start
 
-<!-- handler: idle-housekeeping-advisory -->
+<!-- handler: model-fallback-detector -->
 
-- idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
+- model_fallback_detector — silent model substitution is surfaced
+
+<!-- handler: tool-disable-advisor -->
+
+- tool_disable_advisor — declared never-want tools are checked at session start
 
 <!-- handler: standing-authorisations -->
 
 - standing_authorisations — a project can record a standing request
+
+<!-- handler: idle-housekeeping-advisory -->
+
+- idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 
 <!-- handler: auto-approve-reads -->
 
