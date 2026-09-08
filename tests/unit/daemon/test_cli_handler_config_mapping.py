@@ -10,8 +10,12 @@ mapping to the model's own event-type fields so it can never drift again.
 
 from pathlib import Path
 
+import pytest
+import yaml
+
 import claude_code_hooks_daemon.handlers as handlers_pkg
 from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.constants.events import EventIDMeta, wired_event_metas
 from claude_code_hooks_daemon.daemon.cli import _build_handler_config_mapping
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
 
@@ -20,6 +24,41 @@ def test_mapping_includes_status_line() -> None:
     """status_line must be present in the handler_config mapping."""
     mapping = _build_handler_config_mapping(Config())
     assert "status_line" in mapping
+
+
+@pytest.mark.parametrize("meta", wired_event_metas(), ids=lambda m: m.config_key)
+def test_mapping_covers_every_wired_event(meta: EventIDMeta) -> None:
+    """Every WIRED event reaches the mapping, handler directory or not (Plan 00362 D2).
+
+    ``test_mapping_covers_every_handler_directory`` only sees an event once it
+    has an on-disk handler directory, so it cannot catch a wired event lacking
+    both a directory and a model field. Parametrising over the registry does.
+    """
+    mapping = _build_handler_config_mapping(Config())
+    assert meta.config_key in mapping, f"handler_config mapping missing '{meta.config_key}'"
+
+
+@pytest.mark.parametrize("meta", wired_event_metas(), ids=lambda m: m.config_key)
+def test_disabled_flag_under_any_wired_event_survives_file_load(
+    meta: EventIDMeta, tmp_path: Path
+) -> None:
+    """End to end: a YAML file disabling a handler under ANY wired event is honoured.
+
+    Pins the loader -> ``HandlersConfig`` -> mapping path for every wired event,
+    including the ones that previously had no model field (``post_compact``,
+    ``elicitation``, ...) and whose config was therefore silently dropped.
+    """
+    config_path = tmp_path / "hooks-daemon.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "version": "1.0",
+                "handlers": {meta.config_key: {"some_handler": {"enabled": False}}},
+            }
+        )
+    )
+    mapping = _build_handler_config_mapping(Config.load(config_path))
+    assert mapping[meta.config_key]["some_handler"]["enabled"] is False
 
 
 def test_mapping_covers_every_handler_directory() -> None:

@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from claude_code_hooks_daemon.constants import wired_event_metas
+from claude_code_hooks_daemon.constants import EventKey, wired_event_metas
 from claude_code_hooks_daemon.utils.repo_relative_path import (
     normalise_repo_relative_path as _normalise_repo_relative_path,
 )
@@ -114,22 +114,43 @@ class HandlersConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    # One declared field per WIRED event, in ``wired_event_metas()`` order.
+    # Declared statically because pydantic/mypy need real annotations, and
+    # locked to the registry by ``_check_wired_event_field_coverage`` below
+    # (import-time) and ``tests/config/test_models.py`` — an undeclared event
+    # is only an ``extra``, which ``_build_handler_config_mapping`` never
+    # iterates, so its config was silently dropped (Plan 00362 D2).
     pre_tool_use: dict[str, Any] = Field(default_factory=dict)
     post_tool_use: dict[str, Any] = Field(default_factory=dict)
     session_start: dict[str, Any] = Field(default_factory=dict)
     session_end: dict[str, Any] = Field(default_factory=dict)
-    pre_compact: dict[str, Any] = Field(default_factory=dict)
-    user_prompt_submit: dict[str, Any] = Field(default_factory=dict)
-    permission_request: dict[str, Any] = Field(default_factory=dict)
-    notification: dict[str, Any] = Field(default_factory=dict)
     stop: dict[str, Any] = Field(default_factory=dict)
     subagent_stop: dict[str, Any] = Field(default_factory=dict)
+    user_prompt_submit: dict[str, Any] = Field(default_factory=dict)
+    pre_compact: dict[str, Any] = Field(default_factory=dict)
+    notification: dict[str, Any] = Field(default_factory=dict)
+    permission_request: dict[str, Any] = Field(default_factory=dict)
     status_line: dict[str, Any] = Field(default_factory=dict)
-    # Worktree lifecycle events with built-in handlers (Plan 00188). Declared so
-    # _build_handler_config_mapping covers them and handlers.worktree_*.enabled
-    # is honoured (an undeclared field would silently fall back to enabled=True).
+    setup: dict[str, Any] = Field(default_factory=dict)
+    user_prompt_expansion: dict[str, Any] = Field(default_factory=dict)
+    permission_denied: dict[str, Any] = Field(default_factory=dict)
+    post_tool_use_failure: dict[str, Any] = Field(default_factory=dict)
+    post_tool_batch: dict[str, Any] = Field(default_factory=dict)
+    message_display: dict[str, Any] = Field(default_factory=dict)
+    subagent_start: dict[str, Any] = Field(default_factory=dict)
+    task_created: dict[str, Any] = Field(default_factory=dict)
+    task_completed: dict[str, Any] = Field(default_factory=dict)
+    stop_failure: dict[str, Any] = Field(default_factory=dict)
+    teammate_idle: dict[str, Any] = Field(default_factory=dict)
+    instructions_loaded: dict[str, Any] = Field(default_factory=dict)
+    config_change: dict[str, Any] = Field(default_factory=dict)
+    cwd_changed: dict[str, Any] = Field(default_factory=dict)
+    file_changed: dict[str, Any] = Field(default_factory=dict)
     worktree_create: dict[str, Any] = Field(default_factory=dict)
     worktree_remove: dict[str, Any] = Field(default_factory=dict)
+    post_compact: dict[str, Any] = Field(default_factory=dict)
+    elicitation: dict[str, Any] = Field(default_factory=dict)
+    elicitation_result: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_handler_dependencies(self) -> Self:
@@ -300,6 +321,27 @@ class HandlersConfig(BaseModel):
         return HandlerConfig()
 
 
+def _check_wired_event_field_coverage() -> None:
+    """Fail import if ``HandlersConfig`` does not declare every wired event.
+
+    The registry (``wired_event_metas()``) is the single source of truth; the
+    field list above is its static mirror. Drift must fail loudly at import,
+    because the alternative is what Plan 00362 D2 fixed: config for the
+    undeclared event silently discarded at daemon start.
+    """
+    declared = tuple(HandlersConfig.model_fields)
+    if declared != _EVENT_TYPE_CONFIG_KEYS:
+        missing = [k for k in _EVENT_TYPE_CONFIG_KEYS if k not in declared]
+        stray = [k for k in declared if k not in _EVENT_TYPE_CONFIG_KEYS]
+        raise RuntimeError(
+            "HandlersConfig fields must be exactly the wired events in registry "
+            f"order (constants/events.py). missing={missing} stray={stray}"
+        )
+
+
+_check_wired_event_field_coverage()
+
+
 class PluginConfig(BaseModel):
     """Configuration for a plugin.
 
@@ -325,21 +367,24 @@ class PluginConfig(BaseModel):
             "genuine absolute path when the plugin ships inside the repo."
         )
     )
-    event_type: Literal[
-        "pre_tool_use",
-        "post_tool_use",
-        "session_start",
-        "session_end",
-        "pre_compact",
-        "user_prompt_submit",
-        "permission_request",
-        "notification",
-        "stop",
-        "subagent_stop",
-        "status_line",
-    ] = Field(description="Event type this plugin handles")
+    # ``EventKey`` is the catalogue-wide Literal (static, for mypy); the
+    # validator below narrows it to the WIRED subset at runtime, derived from
+    # the registry, so a plugin can target any wired event -- worktree events
+    # included (Plan 00362 D9) -- and never a catalogued-but-unwired one.
+    event_type: EventKey = Field(description="Event type this plugin handles")
     handlers: list[str] | None = Field(default=None, description="Handler classes to load")
     enabled: bool = Field(default=True, description="Whether plugin is enabled")
+
+    @field_validator("event_type")
+    @classmethod
+    def event_type_must_be_wired(cls, v: EventKey) -> EventKey:
+        """Reject a catalogued event the daemon does not dispatch yet."""
+        if v not in _EVENT_TYPE_CONFIG_KEYS:
+            raise ValueError(
+                f"event_type '{v}' is catalogued but not wired; a plugin may target "
+                f"one of: {', '.join(_EVENT_TYPE_CONFIG_KEYS)}"
+            )
+        return v
 
     @field_validator("path")
     @classmethod
