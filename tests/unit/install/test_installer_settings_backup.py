@@ -65,7 +65,20 @@ class TestAnExistingFileIsAlwaysCopiedFirst:
         _installer()(project_root)
         written = json.loads((project_root / ".claude" / "settings.json").read_text())
         assert "hooks" in written
-        assert written["statusLine"]["command"] != "mine"
+        assert "PreToolUse" in written["hooks"]
+
+    def test_the_clients_own_keys_come_through_it(self, tmp_path: Path) -> None:
+        """The backup is the last resort, not the mechanism (Plan 00176 Q6).
+
+        This once asserted the client's `statusLine` was REPLACED, which was an
+        accurate description of a defect: a reinstall discarded their settings
+        deterministically and the copy beside it was the only trace.
+        """
+        project_root = _project(tmp_path, existing=_CLIENT)
+        _installer()(project_root)
+        written = json.loads((project_root / ".claude" / "settings.json").read_text())
+        assert written["statusLine"]["command"] == "mine"
+        assert written["permissions"] == {"allow": ["Bash"]}
 
 
 class TestNothingToCopy:

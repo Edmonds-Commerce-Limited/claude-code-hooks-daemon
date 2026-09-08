@@ -400,6 +400,7 @@ def run_settings_merge(
             client_path,
             merged,
             (f"The merged settings did not validate: {'; '.join(problems)}.",),
+            client,
         )
 
     if not report.changed:
@@ -418,12 +419,35 @@ def run_settings_merge(
     return MergeOutcome(status=MergeStatus.MERGED, report=report)
 
 
+def _top_level_diff(client: Mapping[str, Any], proposal: Mapping[str, Any]) -> tuple[str, ...]:
+    """Which top-level keys the proposal would have changed, added or removed.
+
+    Bounded on purpose: the full text of both documents is already on disk at
+    the two paths the escalation names, and a warning nobody finishes reading
+    is the thing this whole escalation path exists to avoid.
+    """
+    lines: list[str] = []
+    for key in sorted(set(client) | set(proposal)):
+        if key not in proposal:
+            lines.append(f"  - {key} (would be removed)")
+        elif key not in client:
+            lines.append(f"  + {key} (would be added)")
+        elif client[key] != proposal[key]:
+            lines.append(f"  ~ {key} (would change)")
+    return tuple(lines)
+
+
 def _escalate(
-    client_path: Path, proposal: Mapping[str, Any], reasons: tuple[str, ...]
+    client_path: Path,
+    proposal: Mapping[str, Any],
+    reasons: tuple[str, ...],
+    client: Mapping[str, Any] | None = None,
 ) -> MergeOutcome:
     """Write the merge we would have made, change nothing, and say both paths."""
     proposal_path = client_path.with_name(client_path.name + PROPOSAL_SUFFIX)
     proposal_path.write_text(_serialise(proposal), encoding="utf-8")
+
+    diff = _top_level_diff(client, proposal) if client is not None else ()
     return MergeOutcome(
         status=MergeStatus.ESCALATED,
         proposal_path=proposal_path,
@@ -431,6 +455,8 @@ def _escalate(
             *reasons,
             f"Your settings are unchanged at {client_path}.",
             f"The merge we would have applied is at {proposal_path}.",
-            "Compare them and apply what you want by hand.",
+            *(("It would have differed at these top-level keys:",) if diff else ()),
+            *diff,
+            "Compare the two files and apply what you want by hand.",
         ),
     )

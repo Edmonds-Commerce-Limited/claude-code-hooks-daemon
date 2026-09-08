@@ -701,6 +701,20 @@ def _free_backup_path(preferred: Path) -> Path:
     return candidate
 
 
+def _readable_settings(settings_file: Path) -> dict[str, Any]:
+    """The client's current settings, or an empty dict if there is nothing usable.
+
+    An unreadable or non-object document is treated as absent rather than as an
+    error: the backup already holds it verbatim, and the install still has to
+    produce a working settings.json.
+    """
+    try:
+        parsed = json.loads(settings_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def create_settings_json(project_root: Path) -> None:
     """Create .claude/settings.json registering all hooks.
 
@@ -709,6 +723,21 @@ def create_settings_json(project_root: Path) -> None:
     ever skipped the backup.
     """
     settings_file = project_root / ".claude" / "settings.json"
+
+    # Read BEFORE the backup rename moves the file out from under us. Emitting a
+    # fresh document instead discards a client's `permissions`, `plansDirectory`
+    # and anything else they keep here — deterministically, on every reinstall,
+    # with no concurrency involved (Plan 00176 Q6). Two of those keys are
+    # security controls, so the backup being recoverable is not good enough.
+    #
+    # This is the merge's safety property without the merge: start from the
+    # CLIENT's document and edit the daemon-owned parts of it. It is not the
+    # real merge, and cannot be — install.py runs before any venv exists and so
+    # cannot import the daemon. The limit that buys: a client hook sharing an
+    # array with a daemon forwarder is not preserved here, because separating
+    # them needs the command discriminator, and this file already carries a
+    # hand-kept copy of the wired set. The upgrade routes do preserve it.
+    settings: dict[str, Any] = _readable_settings(settings_file)
 
     # Back up an existing settings.json, INCLUDING under --force. Backing up
     # only when NOT forcing had it exactly backwards: --force reinstalls over an
@@ -736,20 +765,24 @@ def create_settings_json(project_root: Path) -> None:
     # Derive every hook registration from the single forwarder SSoT so a
     # newly-wired event needs no edit here (Plan 00170). PreToolUse/PostToolUse
     # carry an explicit timeout; all others use the default.
-    hooks_section: dict[str, Any] = {}
+    # Seeded from the client's own hooks block, so an event the daemon does not
+    # wire is carried through rather than dropped.
+    existing_hooks = settings.get("hooks")
+    hooks_section: dict[str, Any] = dict(existing_hooks) if isinstance(existing_hooks, dict) else {}
     for bash_key, json_key in _DAEMON_FORWARDER_HOOKS.items():
         command: dict[str, Any] = {"type": "command", "command": _hook_cmd(bash_key)}
         if bash_key in _HOOKS_WITH_TIMEOUT:
             command["timeout"] = 60
         hooks_section[json_key] = [{"hooks": [command]}]
 
-    settings = {
-        "statusLine": {
+    # The status line is a RECOMMENDED default, not a daemon-owned one: supplied
+    # when the client has expressed no opinion, never overwritten when they have.
+    if "statusLine" not in settings:
+        settings["statusLine"] = {
             "type": "command",
             "command": _hook_cmd(_STATUS_LINE_BASH_KEY),
-        },
-        "hooks": hooks_section,
-    }
+        }
+    settings["hooks"] = hooks_section
 
     settings_file.write_text(json.dumps(settings, indent=2) + "\n")
     print(f"✅ Created {settings_file.relative_to(project_root)}")

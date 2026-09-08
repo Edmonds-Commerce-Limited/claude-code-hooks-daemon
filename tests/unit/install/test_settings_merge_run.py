@@ -178,3 +178,20 @@ class TestTheMergedResultIsValidatedBeforeItLands:
         assert outcome.status is MergeStatus.ESCALATED
         assert paths["client"].read_text(encoding="utf-8") == original
         assert any("missing: PreToolUse" in message for message in outcome.messages)
+
+    def test_it_says_which_top_level_keys_would_have_changed(
+        self, paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Naming the paths alone leaves a human diffing two files by hand."""
+        import claude_code_hooks_daemon.install.settings_merge as module
+
+        monkeypatch.setattr(module, "validate_settings_hooks", lambda _s: ["nope"])
+        paths["client"].write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+        outcome = run_settings_merge(paths["client"], paths["new_default"])
+        assert any("hooks" in message and "~" in message for message in outcome.messages)
+
+    def test_an_unparseable_client_gets_no_fabricated_diff(self, paths: dict[str, Path]) -> None:
+        """There is nothing to compare against, so claiming a diff would lie."""
+        paths["client"].write_text("{ broken", encoding="utf-8")
+        outcome = run_settings_merge(paths["client"], paths["new_default"])
+        assert not any("would change" in message for message in outcome.messages)

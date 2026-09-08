@@ -9,105 +9,28 @@
 
 ## Overview
 
-The installer and upgrader deploy the daemon's own `.claude/settings.json` into
-client projects by **verbatim copy**, never a merge. On a fresh install the
-client's existing file is backed up then overwritten
-(`scripts/install_version.sh:383-391`); on **every upgrade** it is overwritten
-again (`scripts/upgrade_version.sh:864-867`, Step 9 "Redeploying settings.json").
-(Both citations re-checked and updated — the originals, `:357-363` and
-`:663-665`, had drifted onto unrelated code.)
-The config-preservation machinery that survives client customizations
-(`scripts/install/config_preserve.sh` → `preserve_config_for_upgrade`) operates
-**only on `hooks-daemon.yaml`** — `settings.json` gets no merge at all.
+The installer and upgrader deployed the daemon's own `.claude/settings.json`
+into client projects by **verbatim copy**, never a merge, from **three** routes:
+`install_version.sh`, `upgrade_version.sh` Step 9, and `install.py` on every
+invocation. So any customisation a client made — their own `statusLine`, an
+extra hook, a `permissions` block, a deliberately-chosen `refreshInterval`, any
+additional key — was silently reset to the daemon's values on every upgrade.
 
-The consequence: any customization a client makes to `.claude/settings.json` —
-their own `statusLine` command, an extra hook they registered, a `permissions`
-block, a deliberately-chosen `refreshInterval`, or any additional key — is
-**silently clobbered on every upgrade** and reset to the daemon's values. This is
-the footgun surfaced while shipping Plan 00175's `refreshInterval: 1` default:
-that default rolls out *because* we overwrite, but the same mechanism means a
-client can never keep a value of their own.
+The surprise that shaped the design: a recoverable copy DID exist for the
+upgrade route (Step 3's rollback snapshot), so the missing piece was never "back
+it up first". A snapshot is a rollback artefact restored only on FAILURE; on a
+successful upgrade the customisations were discarded, nobody was told, and the
+copy expires after three more upgrades. Full measurements, the corrected backup
+table and the `install.py` worked example are in
+**[EVIDENCE.md](EVIDENCE.md)**.
 
-**A third clobber route, found by Plan 00250 and not in the two scripts above:**
-`install.py`, on **every** invocation. `create_settings_json`
-(`install.py:690`) and `create_daemon_config` (`install.py:768`) both open with
-`if <file>.exists() and not force:` — but that is **not** an early return. The
-body renames the existing file to `.bak` and then writes the default template
-unconditionally:
-
-```python
-if <file>.exists() and not force:
-    backup_file = ...
-    <file>.rename(backup_file)
-# ... default template written here regardless
-```
-
-So `force` only decides whether a **backup is taken**. There is no invocation
-that preserves an existing config. Confirmed on a GitHub runner, which printed
-`✅ Backed up existing hooks-daemon.yaml…` / `✅ Created .claude/hooks-daemon.yaml`
-from a plain `install.py --self-install` with no flag. The `/hooks-daemon install` skill documents `--force` only as "Force reinstall over existing",
-which reads as though omitting it is safe.
-
-Measured against this repository, that drops `plansDirectory` (whose absence
-trips `R-MARKDOWN-PLAN-SYNC`), a `permissions.deny` block guarding `/tmp`,
-`/var/tmp` and `/dev/shm`, `enableArtifact: false`, and the statusLine
-`refreshInterval` — then replaces 1188 lines of `hooks-daemon.yaml` carrying 128
-enabled handlers. **And the replacement does not work**: the daemon refused to
-start on that config with `Unknown field 'min_confidence_score' at: handlers.session_start.min_confidence_score`, because the template still
-configures `yolo_container_detection`, a handler with no module left in `src/`.
-Worked example and evidence in
-[Plan 00250's RESEARCH-ci-install.md](../00250-ci-runs-the-blocking-acceptance-gates/RESEARCH-ci-install.md).
-
-**Where the backup actually is** — the answer inverts what you would hope for.
-Of the three routes, the one that repeats is the one with no backup:
-
-| Route                                        | Backup before overwrite   |
-| -------------------------------------------- | ------------------------- |
-| `install_version.sh:385-387` (fresh install) | yes — `.bak-<timestamp>`  |
-| `upgrade_version.sh:865` (every upgrade)     | yes — the Step 3 snapshot |
-| `install.py` without `--force`               | yes — `.bak`              |
-| `install.py --force`                         | **no**                    |
-
-**Correction (verified, and it changes the cheap mitigation).** The upgrade row
-previously read "**no** — bare `cp`", reasoning from the copy alone. The copy
-does take no adjacent backup, but `upgrade_version.sh:544` creates a full state
-snapshot at **Step 3**, long before Step 9, and `install/rollback.sh:162`
-captures `settings.json` in it. `cleanup_old_snapshots "$DAEMON_DIR" 3` at
-`:1192` keeps the three most recent, so the copy survives a *successful*
-upgrade.
-
-So a recoverable copy does exist, and "back it up first" would have added a
-second one. What is actually missing is different, and worse in a quieter way:
-
-- **The snapshot is a rollback artefact, not a preservation mechanism.** It is
-  restored only by `cleanup_on_failure`. On a *successful* upgrade the client's
-  customizations are silently discarded and nothing puts them back.
-- **Nobody is told.** Step 9 prints `Redeployed settings.json` — a success
-  message for an operation that may have just dropped their `statusLine`,
-  their `permissions` block and their `plansDirectory`.
-- **It expires.** Three more upgrades and the last copy is gone.
-- **It is best-effort.** Snapshot creation failure only warns
-  (`:549`) and the upgrade proceeds anyway.
-
-The cheap mitigation is therefore **not** an extra backup but a truthful
-message: when the deployed file differs from the one already there, say so and
-name the snapshot path. Small, independent of the merge design, and it converts
-a silent loss into a recoverable one.
-
-**The two installers already disagree, and one of them is right.** For
-`hooks-daemon.yaml`, `install_version.sh:434` KEEPS an existing config and
-deploys the tracked `.yaml.example` only when there is none — exactly what this
-plan wants. `install.py` embedded its own template and replaced the config every
-time, and that copy had drifted far enough to generate a config the daemon
-refused to load. Fixed, with a round-trip test through the real validator. A
-single source for the default config would have made it impossible.
-
-This plan designs and builds a **structured merge** for `settings.json` that
-mirrors what already exists for `hooks-daemon.yaml`: the daemon keeps ownership
-of the authoritative wired-hook forwarder set (Plan 00170) and ships recommended
+This plan builds a **structured merge** for `settings.json` mirroring what
+already exists for `hooks-daemon.yaml`: the daemon keeps ownership of the
+authoritative wired-hook forwarder set (Plan 00170) and ships recommended
 defaults, while client-owned keys and deliberate overrides are preserved across
-upgrades — with an **agent-assisted diff** path for the cases a purely mechanical
-merge cannot resolve safely.
+upgrades — with an **agent-assisted diff** path for the cases a purely
+mechanical merge cannot resolve safely. The rules are decided in
+**[MERGE-SPEC.md](MERGE-SPEC.md)**.
 
 ## Goals
 
@@ -243,20 +166,46 @@ should build on the `src/` pair, since it runs inside the daemon and
 
 ### Phase 2: TDD implementation
 
-- [ ] ⬜ **Task 2.1**: RED — tests for the JSON three-way settings merge: client
-  extra hook survives; custom `statusLine` survives; `permissions` survives;
-  stale old-default `refreshInterval` upgrades; deliberate override preserved;
-  daemon wired-hook set always complete after merge.
+- [x] ✅ **Task 2.1**: RED — every listed case plus the two invariants the
+  ownership table implies. The discriminator rows are tested as the audit's
+  probe stated them, including the ones a substring test got backwards: a
+  client's `.claude/hooks/my-secret-scan`, a chained command, and a
+  `$HOME/dotfiles/.claude/hooks/lint` are all left alone, while the relative
+  legacy shape IS rebuilt anchored.
 
-- [ ] ⬜ **Task 2.2**: GREEN — implement the settings-merge core (pure module,
-  daemon CLI subcommand) with the key-ownership rules.
+- [x] ✅ **Task 2.2**: GREEN — `install/settings_merge.py`. `merge_settings` is
+  pure and deep-copies the CLIENT document; `run_settings_merge` is the file
+  layer; `settings-merge` is the CLI the shell calls.
 
-- [ ] ⬜ **Task 2.3**: Wire it into `install_version.sh` (Step 5) and both
-  `upgrade_version.sh` deploy paths (Step 9), replacing the verbatim `cp` with
-  a backup-then-merge; keep shellcheck clean.
+  `_build_hook_registration` became public `build_hook_registration` /
+  `canonical_hook_entry`, so a rebuilt entry is byte-identical to a freshly
+  installed one by construction rather than by review.
 
-- [ ] ⬜ **Task 2.4**: Agent-assisted diff path — on ambiguity/validation
-  failure, emit the diff + guidance and preserve the client file (fail safe).
+- [x] ✅ **Task 2.3**: All three routes go through it, and Layer 1 captures the
+  Q2b baseline before its checkout. Two decisions worth carrying:
+
+  With no interpreter the deploy **refuses** rather than falling back to the
+  copy — that fallback is precisely the data loss this task removes. An
+  identical file returns before that check, so the commonest case of all does
+  not escalate for want of a tool it never needed.
+
+  **`install.py` cannot use the merge** — it runs before any venv exists. It
+  gets the safety PROPERTY instead: read the client document first, then edit
+  the daemon-owned parts. The stated limit is that a client hook sharing an
+  array with a daemon forwarder is not preserved there, since separating them
+  needs the discriminator and that file already hand-keeps a copy of the wired
+  set. Recorded in its code and tests, not left to be found.
+
+- [x] ✅ **Task 2.4**: On an unreadable client file or a merged result that
+  fails validation: nothing is written, the proposal goes to a
+  `.merge-proposal` sibling, and the warning names both paths plus the
+  top-level keys that would have changed. An unparseable client gets NO diff
+  rather than a fabricated one, and the diff is bounded to top-level keys
+  because a warning nobody finishes reading is what this path exists to avoid.
+
+  Exit code `3`, never `1`: a 1 means abort to the calling scripts, and
+  aborting the fast path leaves new forwarders over old settings with no
+  snapshot to roll back to.
 
 - [x] ✅ **Task 2.0b** (the same defect on the third route): `install.py`'s
   `create_settings_json` backed up under `if settings_file.exists() and not force` — so **`--force` overwrote an existing settings.json with no copy and
