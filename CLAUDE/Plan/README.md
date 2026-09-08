@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00346: pin qa toolchain versions](00346-pin-qa-toolchain-versions/PLAN.md) - Not Started (every QA tool is declared with a lower bound only and all have drifted past a major; the formatter is the sharp case because its QA step AUTO-FIXES, so a black release rewrites the tree and reports success rather than failing — the same shape ruff 0.14 already produced, answered then with ignores rather than a pin)
+
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Not Started (the skill is the human-touching surface and has drifted: `optimise` scores 21 of 110 configurable handlers from a hardcoded list, so it cannot be current by construction; adds a registry-derived checklist, a single housekeeping command, and a release gate)
@@ -30,7 +32,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Not Started (Plan 00245's `-rs` flag named 11 acceptance tests that have skipped on every CI run for want of a daemon socket, three of the files being ones `RELEASING.md` Step 12.0 declares BLOCKING)
 
-- [00345: harness payloads for shell and call syntax tests](00345-harness-payloads-for-shell-and-call-syntax-tests/PLAN.md) - Not Started (Plan 00243's harness runs 94 of 228 dispatchable blocks; 107 more are convertible and were left behind by a scoping number computed for PROSE tests and carried unexamined into a phase that changed the constraints — 10 of them are a `Write(...)` grammar the audit's five never named)
+- [00345: harness payloads for shell and call syntax tests](00345-harness-payloads-for-shell-and-call-syntax-tests/PLAN.md) - In Progress, 187 of 228 dispatchable blocks now run automatically, up from 94 (Plan 00243's scoping number was computed for PROSE tests and carried unexamined into a phase that changed the constraints; the harness also dispatched every probe with the wrong `cwd`, which 00243 measured as harmless across 94 probes that were all structurally incapable of noticing it)
 
 ### Security / Presentation Audit
 
