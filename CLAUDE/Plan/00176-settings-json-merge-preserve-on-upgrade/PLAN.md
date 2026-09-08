@@ -224,15 +224,22 @@ should build on the `src/` pair, since it runs inside the daemon and
   `/.claude/hooks/` substring failing in both directions — including a false
   NEGATIVE on the relative legacy shape the rule existed to repair.
 
-- [ ] ⬜ **Task 1.4**: Four audit findings remain open, all design-level and all
-  shaping Phase 2 rather than any shipped code. Detail and evidence in the
-  report; the headlines are: **no old-default baseline exists** for
-  `settings.json`, so "did the user change this?" is unanswerable as stated;
-  **preserving client-owned keys preserves their ABSENCE**, which would stop an
-  existing project receiving new recommended defaults it gets today; **the
-  headless abort has no rollback on the fast path**; and **four unsynchronised
-  writers with no lock**, one of which (`install.py`) rewrites the whole
-  document and would undo a merge.
+- [ ] ⬜ **Task 1.4**: Audit findings still shaping Phase 2. Detail and evidence
+  in the report.
+
+  **Resolved — the missing baseline** ([MERGE-SPEC.md](MERGE-SPEC.md) Q2b).
+  Verified: there is no `settings.json.example`, so the three-way rule had no
+  old default to compare against. The daemon's own `.claude/settings.json` IS
+  its shipped default, so Layer 1 copying that pre-checkout and exporting it
+  gives the baseline — an extension of the handover `config_preserve.sh` already
+  uses for YAML. With no baseline available the class degrades to *preserve
+  every client value, upgrade none*, and must never guess one.
+
+  **Still open**: preserving client-owned keys preserves their ABSENCE, which
+  would stop an existing project receiving new recommended defaults it gets
+  today; the headless abort has no rollback on the fast path; and four
+  unsynchronised writers with no lock, one of which (`install.py`) rewrites the
+  whole document and would undo a merge.
 
 ### Phase 2: TDD implementation
 
@@ -251,20 +258,15 @@ should build on the `src/` pair, since it runs inside the daemon and
 - [ ] ⬜ **Task 2.4**: Agent-assisted diff path — on ambiguity/validation
   failure, emit the diff + guidance and preserve the client file (fail safe).
 
-- [x] ✅ **Task 2.0b** (the same defect on the third route, found while wiring
-  Task 2.3): `install.py`'s `create_settings_json` backed up under
-  `if settings_file.exists() and not force` — so **`--force` overwrote an
-  existing settings.json with no copy and no warning**, and a fresh install,
-  where there is usually nothing to lose, got the backup instead. The condition
-  was simply inverted, and the branch was untested: every existing test passed
-  `force=True` into an empty directory, so no test ever reached the backup.
+- [x] ✅ **Task 2.0b** (the same defect on the third route): `install.py`'s
+  `create_settings_json` backed up under `if settings_file.exists() and not force` — so **`--force` overwrote an existing settings.json with no copy and
+  no warning**, while a fresh install with nothing to lose got the backup. The
+  branch was untested: every existing test passed `force=True` into an empty
+  directory, so none ever reached it.
 
-  The flag is **removed**, not corrected: the daemon rewrites this file every
-  invocation, so forcing never changed what was written — its sole effect was to
-  skip the safety step. `--force` still drives `create_daemon_config`. A test
-  asserts the parameter is absent so it cannot come back quietly. Backup naming
-  is collision-proof too, since a second-resolution timestamp let two installs
-  in one second resolve to a single name.
+  The flag is **removed**, not corrected — the daemon rewrites this file every
+  invocation, so forcing only ever skipped the safety step. A test asserts the
+  parameter is absent. Backup naming is collision-proof now too.
 
 - [x] ✅ **Task 2.0** (shipped ahead of the merge):
   `scripts/install/settings_deploy.sh`, called from both `upgrade_version.sh`

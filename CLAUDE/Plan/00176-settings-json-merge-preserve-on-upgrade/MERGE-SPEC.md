@@ -100,6 +100,35 @@ forwarder survives, as the plan's ownership table commits to.
 byte-identical command; the merge becomes a fourth caller, so a rebuilt entry is
 identical to a freshly installed one by construction rather than by review.
 
+## Q2b — Where the old-default baseline comes from
+
+The audit's first critical finding: the three-way rule below assumes an
+old-default baseline, and **for `settings.json` none exists**. Verified — the
+repo ships `.claude/hooks-daemon.yaml.example` but there is no
+`settings.json.example`, and by the time either deploy site runs, the daemon's
+own `.claude/settings.json` is already the NEW default.
+
+The mechanism to mirror is `config_preserve.sh:166` `resolve_old_default_config`,
+which resolves the YAML baseline in two steps: an exported handover
+(`HOOKS_DAEMON_OLD_DEFAULT_CONFIG`) captured by Layer 1 **before the checkout**,
+falling back to the on-disk `.example`.
+
+Settings differs in one way that makes this simpler, not harder: the daemon's
+own `.claude/settings.json` **IS** its shipped default, so there is no
+`.example` to invent — Layer 1 need only copy that file pre-checkout and export
+it as `HOOKS_DAEMON_OLD_DEFAULT_SETTINGS`. Layer 1 currently hands over the YAML
+baseline alone, so this is an extension of a working path rather than a new one.
+
+**When no baseline is available** — a fresh install, or Layer 2 invoked directly
+— the recommended-default class degrades to: **preserve every client value,
+upgrade none.** Without the old default there is no way to tell an accepted
+default from a deliberate override, and of the two possible errors only one
+destroys anything. A stale `refreshInterval` costs a slow status line; a
+stomped one costs a customisation the client chose. There must be **no
+fallback that guesses the baseline** — the existing YAML resolver's stale-
+handover warning exists precisely because a plausible-but-wrong baseline
+misclassifies silently.
+
 ## Q3 — When does the merge escalate to an agent-assisted diff?
 
 **On genuine conflict or validation failure only — never as routine narration.**
