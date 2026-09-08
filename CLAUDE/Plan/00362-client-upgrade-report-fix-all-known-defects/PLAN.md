@@ -91,12 +91,14 @@ while the detectors silently do not run.
   tree (D5, D6, D16, D17, D20 and D22 are Phase 1's §1, §2, §4, §6, §8 and
   §3), two risks, eleven already-fixed items listed so nobody re-does them,
   and thirteen plans with no defect left.
-- [ ] ⬜ **Task 2.2** (D3, D11, D12 — Plan 00291 Tasks 1.1, 2.1, 2.2, HIGH):
+- [x] ✅ **Task 2.2** (D3, D11, D12 — Plan 00291 Tasks 1.1, 2.1, 2.2, HIGH;
+  merged at `56d43dee`^, shared `install/version_parse.py`):
   the documented fresh-clone upgrade aborts into rollback
   (`upgrade_version.sh` calling `stop_daemon_safe` with an empty venv
   python); `truth_changes._parse_version` rejects the `v` prefix every doc
   produces; an old-format config is retained silently on install.
-- [ ] ⬜ **Task 2.3** (D2, D9 — Plan 00172 Findings 1 and 2, HIGH): config
+- [x] ✅ **Task 2.3** (D2, D9 — Plan 00172 Findings 1 and 2, HIGH; merged at
+  `56d43dee`, `HandlersConfig` derived from the wired-event registry): config
   for 20 of 31 wired events is silently dropped because `HandlersConfig`
   declares 11 event fields; `PluginConfig.event_type` omits the worktree
   events.
