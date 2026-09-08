@@ -351,10 +351,22 @@ def tmp_git_repo(tmp_path: Path) -> Path:
 #: (see CLAUDE.md, "Environment Overrides"). Because they win unconditionally,
 #: a developer or CI runner that happens to export one silently changes what
 #: the path-generation tests compute.
+#:
+#: The venv-resolution pair belongs here for the same reason (Plan 00250).
+#: ``resolve_venv.sh`` and ``paths.py`` both consult them BEFORE the
+#: fingerprint-keyed ``untracked/venv-*/`` glob, so an exported value makes a
+#: venv appear where a test has deliberately arranged for none to exist —
+#: ``test_legacy_path_used_only_as_final_fallback`` builds an empty project and
+#: asserts validation FAILS, which it cannot do if the environment supplies an
+#: interpreter. CI now exports ``HOOKS_DAEMON_VENV_PATH`` for the whole QA job
+#: (the acceptance gates need a daemon, and its venv is not at the fingerprint
+#: path), so this is no longer only a stray-developer-shell problem.
 _DAEMON_PATH_OVERRIDE_VARS = (
     "CLAUDE_HOOKS_SOCKET_PATH",
     "CLAUDE_HOOKS_PID_PATH",
     "CLAUDE_HOOKS_LOG_PATH",
+    "HOOKS_DAEMON_VENV_PATH",
+    "HOOKS_DAEMON_PYTHON",
 )
 
 
