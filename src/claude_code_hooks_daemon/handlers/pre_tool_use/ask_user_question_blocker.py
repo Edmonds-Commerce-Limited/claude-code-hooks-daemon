@@ -13,12 +13,14 @@ Two modes:
   * ``advisory``: ALLOW with a context warning so projects can dogfood the
     convention before turning on hard blocking.
 
-Disabled by default. Enable in ``hooks-daemon.yaml``::
+Enabled by default (Plan 00117; opt-out — on unless a project explicitly
+disables it). Disable in ``hooks-daemon.yaml`` for a fully unattended
+workflow that needs every question auto-dismissed::
 
     pre_tool_use:
       handlers:
         ask_user_question_blocker:
-          enabled: true
+          enabled: false
           options:
             mode: strict             # or "advisory"
             required_prefix: "ASKING BECAUSE:"

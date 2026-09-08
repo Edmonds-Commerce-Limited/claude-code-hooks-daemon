@@ -121,6 +121,12 @@ class ConfigTemplate:
             "    sudo_pip: {enabled: true, priority: 10}          # Block sudo pip\n"
             "    curl_pipe_shell: {enabled: true, priority: 10}   # Block curl | bash patterns\n"
             "    lock_file_edit_blocker: {enabled: true, priority: 10}  # Block direct editing of package manager lock files\n"
+            # On by default (Plan 00117): prefix-positive gate on AskUserQuestion
+            # (Plan 00108) -- pausing the session is a privilege that must carry
+            # a declared reason. Disable via enabled: false for fully unattended
+            # workflows that need every question auto-dismissed.
+            "    ask_user_question_blocker: {enabled: true, priority: 10}  "
+            "# Block AskUserQuestion unless every question is `ASKING BECAUSE:`-prefixed\n"
             "    absolute_path: {enabled: true, priority: 12}     # Require absolute paths\n"
             "    error_hiding_blocker: {enabled: true, priority: 13}  # Block error-hiding patterns (|| true, except: pass, catch(e){})\n"
             "    security_antipattern: {enabled: true, priority: 15}  # Block hardcoded secrets and injection patterns\n"

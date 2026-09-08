@@ -59,6 +59,17 @@ class TestAskUserQuestionBlockerHandler:
     def test_init_is_terminal(self, handler):
         assert handler.terminal is True
 
+    def test_default_enabled_is_true(self, handler):
+        """Plan 00117: opt-out (on unless a project explicitly disables it).
+
+        Pins the handler's own override (none — it inherits the Handler
+        base's ``True``) directly, alongside the generic cross-handler
+        drift guard in test_default_enabled_template_consistency.py, so a
+        regression here fails with an unambiguous message naming this
+        handler rather than a set-difference across every handler.
+        """
+        assert handler.get_default_enabled() is True
+
     # ------------------------------------------------------------------
     # matches()
     # ------------------------------------------------------------------
