@@ -40,11 +40,14 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["BlockSummary", "BlockUsage", "analyse_transcripts", "transcripts_root_for"]
 
-# A transcript line longer than this is skipped without parsing — mirrors
-# tool_report/analyser.py's MAX_LINE_BYTES: real deny records are far
+# A transcript line longer than this (in decoded characters, not raw bytes
+# -- the file is opened in text mode) is skipped without parsing — mirrors
+# tool_report/analyser.py's MAX_LINE_CHARS. This bounds json.loads() PARSE
+# COST, not read-time memory: the line iterator has already buffered the
+# whole line into a str before this check runs. Real deny records are far
 # smaller, and multi-megabyte lines are file bodies this analyser has no
 # business loading.
-MAX_LINE_BYTES = 4_000_000
+MAX_LINE_CHARS = 4_000_000
 
 # The only toolDenialKind value that means "a hook denied this call".
 _HOOK_DENY_KIND = "permission-rule"
@@ -99,7 +102,7 @@ def _iter_deny_events(transcript: Path) -> tuple[list[_DenyEvent], int]:
     malformed = 0
     with transcript.open("r", encoding="utf-8", errors="replace") as handle:
         for line in handle:
-            if len(line) > MAX_LINE_BYTES:
+            if len(line) > MAX_LINE_CHARS:
                 continue
             stripped = line.strip()
             if not stripped:
