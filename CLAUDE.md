@@ -237,13 +237,18 @@ Creating a production source file with `Write` is blocked until a corresponding 
 
 **The deny message lists every location it searched.** If your project's real test directory is not in that list, no amount of retrying will satisfy the gate — the project needs to DECLARE the directory (below), not move the test.
 
-**A layout the resolvers cannot infer is declarable** via `handlers.pre_tool_use.tdd_enforcement.options.test_path_map` — a list of `{source_glob, test_dir}` entries. `test_dir` is repository-root-relative (an absolute path is rejected) and FLAT: the test filename is placed directly in it, not mirrored under it. This keeps enforcement ON and is the preferred fix, because a test that exists is worth more than an exemption:
+**A layout the resolvers cannot infer is declarable** via `handlers.pre_tool_use.tdd_enforcement.options.test_path_map` — a list of `{source_glob, test_dir, mirror?}` entries. `test_dir` is repository-root-relative (an absolute path is rejected). By default it is FLAT: the test filename is placed directly in it. With `mirror: true` the source's directory path after the glob's literal root (`src` for `src/**`) is reproduced under it, which is how a nested size-suite layout (`tests/Small/<mirror>`, `tests/Large/<mirror>`) is declared. Every declared root is searched and listed. This keeps enforcement ON and is the preferred fix, because a test that exists is worth more than an exemption:
 
 ```yaml
 test_path_map:
   - source_glob: "**/qaConfig/PHPStan/Rules/**"
     test_dir: "apps/app/qaConfig/Tests"
+  - source_glob: "src/**"
+    test_dir: "tests/Small"
+    mirror: true
 ```
+
+**A nested `layout.test_dirs` entry is a mirror root already.** `layout.test_dirs: ["tests/Small", "tests/Large"]` makes the gate search `tests/Small/<mirror after src/>/<TestName>` (and Large) with no `test_path_map` entry at all; a bare name such as `e2e` only classifies.
 
 **A path can also be exempted entirely** via that handler's `exclude_paths` option or the project-wide `daemon.exclude_paths` — additive gitignore-style globs. Prefer `test_path_map`: excluding turns the gate OFF for those files.
 
