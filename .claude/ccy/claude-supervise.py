@@ -217,6 +217,35 @@ _LOG_FILENAME = "decision.log"
 # supervisor cannot import daemon modules.
 _DECISION_LOG_MAX_BYTES = 4 * 1024 * 1024
 _DECISION_LOG_RETAIN_BYTES = 2 * 1024 * 1024
+
+
+def _front_truncate_file(path: Path, *, max_bytes: int, retain_bytes: int) -> None:
+    """Drop the oldest bytes of ``path`` so only the newest ``retain_bytes`` survive.
+
+    No-op below ``max_bytes``. ``retain_bytes`` should be < ``max_bytes`` for
+    hysteresis, so a file sitting at the ceiling is not rewritten on every
+    single append. Drops the (now partial) leading line so the kept content
+    starts on a line boundary. Shared by every on-disk log this standalone
+    supervisor caps (Plan 00181 decision.log; Plan 00319 F4 the worker error
+    log) so the bound has exactly one implementation.
+
+    Raises:
+        OSError: If the file cannot be read/replaced. Callers decide how loud
+            to report a capping failure for their own log.
+    """
+    size = path.stat().st_size
+    if size <= max_bytes:
+        return
+    with path.open("rb") as handle:
+        handle.seek(max(0, size - retain_bytes))
+        tail = handle.read()
+    newline = tail.find(b"\n")
+    kept = tail[newline + 1 :] if newline != -1 else tail
+    tmp = path.with_name(path.name + ".retain.tmp")
+    tmp.write_bytes(kept)
+    tmp.replace(path)
+
+
 # Runtime identity file the running supervisor writes for staleness detection
 # (Plan 00164 Phase 3). Lives in the same 'supervise' subdir as the decision log.
 _SUPERVISOR_STATUS_FILENAME = "supervisor-status.json"
@@ -245,6 +274,17 @@ _WORKER_READ_TIMEOUT_SECONDS = 2.0
 # How often the host re-checks the on-disk supervisor fingerprint to hot-reload
 # the worker (cheap mtime pre-check gates the hash).
 _WORKER_RELOAD_CHECK_SECONDS = 5.0
+# Plan 00319 F8: the worker's HumanInputLine buffer lives in the subprocess, so
+# swapping it (reload or dead-worker restart) resets it -- any partially-typed
+# `/compact`/`/effort` line the human has not yet submitted is gone. Dropping it
+# may be correct (there is nowhere to recover the bytes from); doing so with no
+# trace is not, hence this diagnostic. ``{trigger}`` names which of the two swap
+# paths fired.
+_WORKER_SWAP_DROPPED_LINE_TRACE = (
+    "worker {trigger} while the human's input box was non-empty -- the "
+    "recognizer's buffer was reset, so a partially-typed /compact or /effort "
+    "command may have been lost"
+)
 
 # ─── DOGFOODING: EDITING THIS FILE DOES NOT TAKE EFFECT UNTIL THE WORKER RELOADS ───
 # Every injection decision runs in the `--worker` SUBPROCESS, not the running
@@ -901,21 +941,11 @@ class DecisionLog:
         the newest ``_DECISION_LOG_RETAIN_BYTES`` of WHOLE lines remain.
         """
         try:
-            size = self._path.stat().st_size
-        except OSError:
-            return
-        if size <= _DECISION_LOG_MAX_BYTES:
-            return
-        try:
-            with self._path.open("rb") as handle:
-                handle.seek(max(0, size - _DECISION_LOG_RETAIN_BYTES))
-                tail = handle.read()
-            # Drop the partial first line so the file starts on a line boundary.
-            newline = tail.find(b"\n")
-            kept = tail[newline + 1 :] if newline != -1 else tail
-            tmp = self._path.with_name(self._path.name + ".retain.tmp")
-            tmp.write_bytes(kept)
-            tmp.replace(self._path)
+            _front_truncate_file(
+                self._path,
+                max_bytes=_DECISION_LOG_MAX_BYTES,
+                retain_bytes=_DECISION_LOG_RETAIN_BYTES,
+            )
         except OSError as exc:
             # FAIL LOUD but not FATAL: surface the cap failure without aborting
             # the supervision loop (the appended line is already safely on disk).
@@ -1640,6 +1670,14 @@ class TickOutcome:
     # injection only -- a failed PTY write must not update the guard while
     # the signal survives for retry.
     goal_line: str | None = None
+    # Plan 00319 F3: the audit flush's decision.log line, carried SEPARATELY
+    # from `noop_reason_log`/`reason` so a same-tick standing-auth injection
+    # (the only later block that can claim the primary decision) does not
+    # silently erase the record that the flush also happened. None when the
+    # flush's line already reached `noop_reason_log` unclobbered, or when no
+    # flush happened this tick. `_apply_decision` writes it as an ADDITIONAL
+    # decision.log line, never a substitute for the primary one.
+    audit_flush_log: str | None = None
 
 
 def _coerce_float(value: object) -> float:
@@ -1692,6 +1730,13 @@ def _daemon_untracked_dir() -> Path:
 
 
 _WORKER_ERROR_LOG_NAME = "claude-supervise-worker.err.log"
+# Plan 00319 F4: a red-but-not-recognised session can append a diagnostic line
+# every tick indefinitely, so this log was an unbounded disk time-bomb the same
+# way decision.log was before Plan 00181 -- same shape, same fix. RETAIN < MAX
+# for the same hysteresis reason; a smaller ceiling than decision.log's because
+# this is a secondary diagnostic log, not the primary audit trail.
+_WORKER_ERROR_LOG_MAX_BYTES = 1 * 1024 * 1024
+_WORKER_ERROR_LOG_RETAIN_BYTES = 512 * 1024
 
 
 def worker_error_log_path() -> Path:
@@ -1729,15 +1774,31 @@ def append_worker_error(message: str) -> None:
     Best-effort file logging that must itself NEVER raise or write to the PTY —
     it is the safety net's own logger, so a failure here has nowhere left to go
     and is intentionally dropped (see error_hiding exclusion).
+
+    Plan 00319 F4: a red-but-not-recognised session can tick indefinitely, each
+    tick potentially appending a diagnostic line, so this log is capped the
+    same way decision.log is (Plan 00181) -- best-effort, after the append that
+    matters has already landed on disk.
     """
     stamp = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
+    path = worker_error_log_path()
     try:
-        with worker_error_log_path().open("a", encoding="utf-8") as handle:
+        with path.open("a", encoding="utf-8") as handle:
             handle.write(f"[{stamp}] {message}\n")
     except OSError:
         # Deliberate last-resort drop: the error logger cannot log its own
         # failure anywhere safe (writing to stderr would flood the PTY, which
         # is the very bug this safety net exists to prevent).
+        return
+    try:
+        _front_truncate_file(
+            path,
+            max_bytes=_WORKER_ERROR_LOG_MAX_BYTES,
+            retain_bytes=_WORKER_ERROR_LOG_RETAIN_BYTES,
+        )
+    except OSError:
+        # Same last-resort drop as above: the file we'd report a capping
+        # failure to IS this log, and it may be the reason capping just failed.
         return
 
 
@@ -4980,6 +5041,13 @@ def decide_once(
     keystroke_sent = keystroke_label is not None and payload is not None
     if keystroke_sent:
         machine.arm_audit(f"{keystroke_label}{_AUDIT_ITEM_REASON_SEPARATOR}{reason})")
+    # Plan 00319 F3: the audit flush's own decision.log line, held here
+    # SEPARATELY from `noop_reason_log` so a later same-tick block (only
+    # standing-auth, below, can) is free to claim the primary decision without
+    # erasing the record that the flush ALSO happened this tick. Surfaced on
+    # the returned TickOutcome only when something later did overwrite the
+    # primary slot -- see the `audit_flush_log=` line below.
+    audit_flush_log_line: str | None = None
     if machine.audit_pending and (
         keystroke_sent
         or (
@@ -5020,6 +5088,7 @@ def decide_once(
             # wins, since it describes an injection this tick actually held back.
             if deferred_log is None:
                 noop_reason_log = f"{flush_reason}: {'; '.join(pending_items)}"
+                audit_flush_log_line = noop_reason_log
         # On a keystroke tick `reason` and `noop_reason_log` are LEFT ALONE.
         # They belong to the injection this tick is actually performing, and
         # decision.log is the durable record the banner is only a convenience
@@ -5098,6 +5167,12 @@ def decide_once(
         is_anchor_injection=is_anchor_injection,
         is_anchor_escape=is_anchor_escape,
         goal_line=goal_line_for_hash,
+        # None when the flush's own line already made it into `noop_reason_log`
+        # (no clobber -- the normal case) or when the flush never happened this
+        # tick -- either way `_apply_decision` would write a duplicate.
+        audit_flush_log=(
+            audit_flush_log_line if decision_value != Decision.WOULD_AUDIT.value else None
+        ),
     )
 
 
@@ -5135,6 +5210,13 @@ def _apply_decision(
         if log is not None:
             log.write_noop("noop: stale /compact suppressed (host already awaiting compaction)")
         return False
+    # Plan 00319 F3: an audit flush that happened this tick but lost the
+    # primary decision slot to a same-tick standing-auth injection still gets
+    # its own decision.log line -- written FIRST (the flush is logically the
+    # earlier event in `decide_once`'s cascade), never in place of whatever
+    # follows.
+    if log is not None and outcome.audit_flush_log is not None:
+        log.write_noop(outcome.audit_flush_log)
     if outcome.payload is not None:
         _perform_injection(
             master_writer,
@@ -5353,6 +5435,7 @@ def _outcome_to_json(outcome: TickOutcome) -> str:
             "is_flag_compact": outcome.is_flag_compact,
             "is_anchor_injection": outcome.is_anchor_injection,
             "is_anchor_escape": outcome.is_anchor_escape,
+            "audit_flush_log": outcome.audit_flush_log,
         }
     )
 
@@ -5376,7 +5459,20 @@ def _outcome_from_json(line: str) -> TickOutcome:
         is_flag_compact=bool(data.get("is_flag_compact", False)),
         is_anchor_injection=bool(data.get("is_anchor_injection", False)),
         is_anchor_escape=bool(data.get("is_anchor_escape", False)),
+        audit_flush_log=data.get("audit_flush_log"),
     )
+
+
+def _slash_diagnostic_command(typed_slash: str) -> str:
+    """The command TOKEN of a submitted slash line, never its argument.
+
+    Plan 00319 F4: a recognition-miss diagnostic needs to know WHICH command
+    family the human typed (``/model``, ``/effort``, ...), not what they typed
+    after it -- an argument can carry a model id, a pasted secret, or anything
+    else, into a log with no other guard on its contents (only, as of Plan
+    00319 F4, its size).
+    """
+    return typed_slash.split(None, 1)[0]
 
 
 def run_worker(
@@ -5436,14 +5532,16 @@ def run_worker(
             input_line_empty=facts.input_line_empty and line_recognizer.is_empty,
         )
         for typed_slash in line_recognizer.take_slash_submitted():
-            # Recognition-miss observability: what the human's submitted
-            # slash line actually contained at the byte level, so a MISS
-            # (e.g. autocomplete inserting text the PTY never carries) is
-            # diagnosable from the field.
+            # Recognition-miss observability: WHICH command family the human's
+            # submitted slash line named, so a MISS (e.g. autocomplete
+            # inserting text the PTY never carries) is diagnosable from the
+            # field. Never the argument -- see `_slash_diagnostic_command`.
             append_worker_error(
-                f"diagnostic typed-slash observed: {typed_slash!r} "
+                f"diagnostic typed-slash observed: "
+                f"command={_slash_diagnostic_command(typed_slash)!r} "
+                f"len={len(typed_slash)} "
                 f"(recognised compact={facts.human_compact_submitted!r} "
-                f"effort={facts.human_effort_command!r})"
+                f"effort_recognised={facts.human_effort_command is not None!r})"
             )
         try:
             outcome = decide_once(
@@ -5854,7 +5952,15 @@ def supervise(
     # Plan 00317: fed the same forwarded bytes as `activity`, drained once per
     # tick into TickFacts.human_raw_input for the worker's own recognizer.
     raw_tap = RawInputTap()
-    stdin_fd = stdin_fd if stdin_fd is not None else sys.stdin.fileno()
+    # Plan 00295 Task 3.8: kept as a SEPARATE, never-reassigned `int`-typed name
+    # rather than narrowing the `int | None` parameter in place. `_on_winch`
+    # below is registered as a real SIGWINCH handler, so a type checker cannot
+    # prove it never runs before this point -- once a variable is captured by
+    # a nested function, narrowing on the OUTER (parameter) name is unsound and
+    # a static checker must fall back to its declared type everywhere in the
+    # enclosing scope, not just inside the closure. A variable whose ONLY
+    # assignment is this one, of type `int`, carries no such ambiguity.
+    resolved_stdin_fd: int = stdin_fd if stdin_fd is not None else sys.stdin.fileno()
     sidecar_dir = sidecar_dir if sidecar_dir is not None else _default_sidecar_dir()
     policy = policy if policy is not None else CompactPolicy()
     machine = CompactStateMachine(policy)
@@ -5899,16 +6005,16 @@ def supervise(
     if spinner is not None:
         spinner.stop()
 
-    _set_winsize(master_fd, stdin_fd)
+    _set_winsize(master_fd, resolved_stdin_fd)
 
     old_termios: list[int | list[bytes | int]] | None = None
-    stdin_is_tty = os.isatty(stdin_fd)
+    stdin_is_tty = os.isatty(resolved_stdin_fd)
     if stdin_is_tty:
-        old_termios = termios.tcgetattr(stdin_fd)
-        tty.setraw(stdin_fd)
+        old_termios = termios.tcgetattr(resolved_stdin_fd)
+        tty.setraw(resolved_stdin_fd)
 
     def _on_winch(_signum: int, _frame: FrameType | None) -> None:
-        _set_winsize(master_fd, stdin_fd)
+        _set_winsize(master_fd, resolved_stdin_fd)
 
     def _write_master(data: bytes) -> None:
         os.write(master_fd, data)
@@ -6049,7 +6155,7 @@ def supervise(
 
     try:
         _forward_io(
-            stdin_fd,
+            resolved_stdin_fd,
             master_fd,
             activity,
             poll_seconds=poll_seconds,
@@ -6067,7 +6173,7 @@ def supervise(
             signal.signal(guarded_signal, prior_handler)
         signal.signal(signal.SIGWINCH, previous_handler)
         if old_termios is not None:
-            termios.tcsetattr(stdin_fd, termios.TCSAFLUSH, old_termios)
+            termios.tcsetattr(resolved_stdin_fd, termios.TCSAFLUSH, old_termios)
 
     _pid, status = os.waitpid(pid, 0)
     exit_code = _exit_code_from_status(status)
@@ -6276,9 +6382,15 @@ def _make_worker_decider(worker: PolicyWorker) -> Callable[[TickFacts], TickOutc
     def _decide(facts: TickFacts) -> TickOutcome | None:
         if facts.now_wall - last_reload_check[0] >= _WORKER_RELOAD_CHECK_SECONDS:
             last_reload_check[0] = facts.now_wall
-            worker.reload_if_stale()
+            if worker.reload_if_stale() and not facts.input_line_empty:
+                append_worker_error(
+                    _WORKER_SWAP_DROPPED_LINE_TRACE.format(trigger="reloaded (stale code)")
+                )
         if not worker.alive():
-            worker.restart()
+            if worker.restart() and not facts.input_line_empty:
+                append_worker_error(
+                    _WORKER_SWAP_DROPPED_LINE_TRACE.format(trigger="restarted (was not alive)")
+                )
         return worker.decide(facts)
 
     return _decide

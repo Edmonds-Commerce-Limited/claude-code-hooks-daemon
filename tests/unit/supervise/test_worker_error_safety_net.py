@@ -12,6 +12,7 @@ tracebacks. Two guarantees are enforced here:
    host still gets a reply (``run_worker`` per-tick guard).
 """
 
+import base64
 import io
 import json
 import subprocess
@@ -36,6 +37,18 @@ def _tick_line() -> str:
         input_line_empty=True,
         human_compact_submitted=False,
         work_idle=True,
+    )
+    return _mod._facts_to_json(facts) + "\n"
+
+
+def _tick_line_with_raw_input(raw: bytes) -> str:
+    facts = _mod.TickFacts(
+        now_wall=_NOW,
+        idle=True,
+        input_line_empty=True,
+        human_compact_submitted=False,
+        work_idle=True,
+        human_raw_input=base64.b64encode(raw).decode("ascii"),
     )
     return _mod._facts_to_json(facts) + "\n"
 
@@ -104,6 +117,78 @@ class TestWorkerErrorLog:
         )
         # Must not raise -- last-resort logger silently drops.
         _mod.append_worker_error("this cannot be written")
+
+
+# ── Plan 00319 F4: the worker error log is uncapped and echoes typed content ─
+
+
+class TestWorkerErrorLogIsBounded:
+    """The log grows with every tick's diagnostic; nothing ever reaped it."""
+
+    def test_append_caps_the_log_once_it_exceeds_the_ceiling(
+        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+    ) -> None:
+        errlog = tmp_path / "worker.err.log"
+        monkeypatch.setattr(_mod, "worker_error_log_path", lambda: errlog)
+        monkeypatch.setattr(_mod, "_WORKER_ERROR_LOG_MAX_BYTES", 2_000)
+        monkeypatch.setattr(_mod, "_WORKER_ERROR_LOG_RETAIN_BYTES", 1_000)
+
+        for n in range(200):
+            _mod.append_worker_error(f"diagnostic line number {n} " + ("x" * 40))
+
+        size = errlog.stat().st_size
+        # Capped near the retain ceiling, nowhere near the ~9KB it would be
+        # uncapped (200 lines * ~65 bytes).
+        assert size < 2_000
+
+
+class TestTypedSlashDiagnosticNeverEchoesTheArgument:
+    """Plan 00319 F4: the recognition-miss diagnostic must name WHICH command
+    family was typed, never the argument -- an argument can carry a model id,
+    a pasted secret, or anything else the human typed after the slash, into a
+    file with no other guard on it."""
+
+    def test_the_argument_text_never_reaches_the_log(
+        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+    ) -> None:
+        errlog = tmp_path / "worker.err.log"
+        monkeypatch.setattr(_mod, "worker_error_log_path", lambda: errlog)
+        monkeypatch.setattr(_mod, "cached_own_session_ids", lambda *a, **k: frozenset({"s"}))
+
+        out = io.StringIO()
+        _mod.run_worker(
+            io.StringIO(_tick_line_with_raw_input(b"/model super-secret-argument\r")),
+            out,
+            dry_run=True,
+            sidecar_dir=tmp_path,
+            policy=_mod.CompactPolicy(),
+        )
+
+        text = errlog.read_text(encoding="utf-8")
+        assert "diagnostic typed-slash observed" in text
+        assert "/model" in text
+        assert "super-secret-argument" not in text
+
+    def test_the_command_token_still_reaches_the_log(
+        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+    ) -> None:
+        """The command FAMILY is still diagnosable -- only the argument is gone."""
+        errlog = tmp_path / "worker.err.log"
+        monkeypatch.setattr(_mod, "worker_error_log_path", lambda: errlog)
+        monkeypatch.setattr(_mod, "cached_own_session_ids", lambda *a, **k: frozenset({"s"}))
+
+        out = io.StringIO()
+        _mod.run_worker(
+            io.StringIO(_tick_line_with_raw_input(b"/effort medium\r")),
+            out,
+            dry_run=True,
+            sidecar_dir=tmp_path,
+            policy=_mod.CompactPolicy(),
+        )
+
+        text = errlog.read_text(encoding="utf-8")
+        assert "/effort" in text
+        assert "medium" not in text
 
 
 # ── NOOP fallback ────────────────────────────────────────────────────────────

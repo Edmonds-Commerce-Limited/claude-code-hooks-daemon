@@ -376,6 +376,95 @@ def test_worker_decider_restarts_dead_worker() -> None:
     worker.restart.assert_called_once()
 
 
+# ── Plan 00319 F8: a worker restart/reload mid-line must trace, not vanish ───
+#
+# The recognizer's buffer (HumanInputLine) lives inside the worker subprocess.
+# A hot-reload or a dead-worker restart replaces that subprocess, so any
+# partially-typed `/compact` or `/effort` sitting in the OLD buffer is gone --
+# the new worker starts with an empty one. Dropping it may be correct
+# (there is nowhere to recover the bytes from); doing so with no trace is not.
+
+
+def _nonempty_facts(now: float = 1000.0) -> object:
+    return _mod.TickFacts(
+        now_wall=now,
+        idle=True,
+        input_line_empty=False,
+        human_compact_submitted=False,
+        work_idle=True,
+    )
+
+
+def test_reload_while_line_nonempty_is_traced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    errlog = tmp_path / "worker.err.log"
+    monkeypatch.setattr(_mod, "worker_error_log_path", lambda: errlog)
+    worker = MagicMock()
+    worker.alive.return_value = True
+    worker.reload_if_stale.return_value = True
+    worker.decide.return_value = None
+
+    decider = _mod._make_worker_decider(worker)
+    decider(_nonempty_facts())
+
+    assert errlog.exists()
+    text = errlog.read_text(encoding="utf-8")
+    assert "reload" in text
+    assert "non-empty" in text
+
+
+def test_reload_while_line_empty_is_not_traced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing was in the box, so nothing could have been dropped -- silent."""
+    errlog = tmp_path / "worker.err.log"
+    monkeypatch.setattr(_mod, "worker_error_log_path", lambda: errlog)
+    worker = MagicMock()
+    worker.alive.return_value = True
+    worker.reload_if_stale.return_value = True
+    worker.decide.return_value = None
+
+    decider = _mod._make_worker_decider(worker)
+    decider(_idle_facts())
+
+    assert not errlog.exists()
+
+
+def test_no_reload_is_not_traced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tick that did not actually reload must not falsely claim one did."""
+    errlog = tmp_path / "worker.err.log"
+    monkeypatch.setattr(_mod, "worker_error_log_path", lambda: errlog)
+    worker = MagicMock()
+    worker.alive.return_value = True
+    worker.reload_if_stale.return_value = False
+    worker.decide.return_value = None
+
+    decider = _mod._make_worker_decider(worker)
+    decider(_nonempty_facts())
+
+    assert not errlog.exists()
+
+
+def test_restart_of_dead_worker_while_line_nonempty_is_traced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    errlog = tmp_path / "worker.err.log"
+    monkeypatch.setattr(_mod, "worker_error_log_path", lambda: errlog)
+    worker = MagicMock()
+    worker.alive.return_value = False
+    worker.restart.return_value = True
+    worker.decide.return_value = None
+
+    decider = _mod._make_worker_decider(worker)
+    decider(_nonempty_facts())
+
+    assert errlog.exists()
+    text = errlog.read_text(encoding="utf-8")
+    assert "restart" in text
+    assert "non-empty" in text
+
+
 # ── Mid-session reload picks up changed recognition (Plan 00317 Task 2.3) ────
 
 
