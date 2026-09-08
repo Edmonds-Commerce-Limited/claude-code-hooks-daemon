@@ -28,10 +28,11 @@ entries:
     link: "CLAUDE/Plan/00273-hook-input-payload-validation/PLAN.md"
   - id: "unknown-input-field:PreToolUse:scratchpad_dir"
     reason: >-
-      Read by handlers/pre_tool_use/project_containment.py (Plan 00362 Task
-      1.4): the harness names its per-session scratchpad directory in the
-      PreToolUse payload, and a write there is an allowed target. The vendored
-      input examples predate the field (they are captured from the upstream
-      docs, which do not list it), so the read is deliberate and the field is
-      absent from every example by construction until the docs catch up.
+      Deliberate read in handlers/pre_tool_use/project_containment.py of the
+      per-session scratchpad directory the harness names on live PreToolUse
+      payloads. The field appears nowhere in the upstream hooks.md (verified
+      against the 2.1.263 raw text under Plan 00327), so it is a docs-gap
+      observation rather than a contract claim, and no input_example may
+      carry it until upstream documents it. The read fails closed: a payload
+      without the field grants nothing.
     link: "CLAUDE/Plan/00362-client-upgrade-report-fix-all-known-defects/PLAN.md"

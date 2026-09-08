@@ -1,6 +1,6 @@
 # Plan 00327: hooks contract refresh audit
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-03
 **Owner**: joseph
 **Priority**: Medium
@@ -89,27 +89,40 @@ a tail-end task there.
 
 ### Phase 3: Close the loop
 
-- [ ] ⬜ **Task 3.1**: Update `META.json`; confirm `contract_staleness` goes
-  silent on a fresh session.
-- [ ] ⬜ **Task 3.2**: Add a `contract-status` CLI command — raw-fetch the
+- [x] ✅ **Task 3.1** (`8246f7f0`): Update `META.json`; confirm `contract_staleness` goes
+  silent on a fresh session. Outcome: `TestVendoredMetaIsCurrent` drives the
+  handler against the REAL vendored `META.json` with the installed version
+  pinned to the audited 2.1.263 and asserts an empty context on a `startup`
+  session; the maintainer advisory now names `contract-status` as its first
+  step.
+- [x] ✅ **Task 3.2** (`8246f7f0`): Add a `contract-status` CLI command — raw-fetch the
   documented URL, compare its sha256 with `META.json.docs_sha256`, report
   unchanged/changed with an exit code. That is steps 1–2 of the procedure,
   which are pure mechanism; the extraction steps stay prose because they are
-  judgement.
-- [ ] ⬜ **Task 3.3**: Trim `HOOK-CONTRACT-REFRESH.md` to what remains
+  judgement. Outcome: `daemon/contract_status.py` + `cmd_contract_status`,
+  exit 0/1/2, `--save` keeps the raw body, fetcher injected under test. Its
+  first real run caught upstream 18 bytes past the morning capture (hunk 5,
+  a ConfigChange link retarget, no claim); `META.json` re-pinned to
+  `ac2f68e8…`.
+- [x] ✅ **Task 3.3** (`8246f7f0`): Trim `HOOK-CONTRACT-REFRESH.md` to what remains
   genuinely manual, pointing at the new command for the rest. The
   RAW-fetch-only rule and its motivating incident stay verbatim — that is
   the part nobody may skim.
 
 ## Success Criteria
 
-- [ ] `META.json.docs_sha256` matches the current upstream document.
-- [ ] Every changed contract claim is traceable to a verbatim upstream
-  sentence recorded in this plan's audit document.
-- [ ] The contract QA checks pass with no stale allowlist entries.
-- [ ] `contract_staleness` is silent on a new session.
-- [ ] `hooks-daemon contract-status` reports the verdict without a manual
+- [x] ✅ (`8246f7f0`) `META.json.docs_sha256` matches the current upstream document
+  (`contract-status` exit 0 after the re-pin).
+- [x] ✅ (`9beec2f9`, `8246f7f0`) Every changed contract claim is traceable to a verbatim upstream
+  sentence recorded in this plan's audit document (five hunks, none a claim).
+- [x] ✅ (`8246f7f0`) The contract QA checks pass with no stale allowlist entries
+  (`hook_contract` 0/30 allowlisted, `input_contract` 0/4 allowlisted — the
+  fourth records Plan 00362's `scratchpad_dir` read as a docs gap).
+- [x] ✅ (`8246f7f0`) `contract_staleness` is silent on a new session.
+- [x] ✅ (`8246f7f0`) `hooks-daemon contract-status` reports the verdict without a manual
   `curl` + `sha256sum`.
+- [x] ✅ (`8246f7f0`) Every release-bound consequence is in the pending-release
+  holding area: `UNRELEASED/release-notes/27-contract-status-verb.md`.
 
 ## Delivery & Milestones
 
@@ -124,4 +137,7 @@ a tail-end task there.
   claim — `9beec2f9` (33 UNCHANGED; `META.json` records 2.1.263, which is
   the file half of Task 3.1 — the fresh-session silence is still to be
   observed).
-- Milestone C — Phase 3: the advisory is clear, and the next refresh starts from a command.
+- Milestone C — Phase 3: the advisory is clear, and the next refresh starts
+  from a command — `8246f7f0` (`contract-status` exit 0 against the re-pinned
+  `META.json`; its first run had already earned its keep by catching an
+  18-byte upstream move the morning capture missed).

@@ -400,8 +400,8 @@ class TestMetaProvenance:
 
     CONTRACT_DIR = REPO_ROOT / "contracts" / "claude-code-hooks"
     AUDITED_VERSION = "2.1.263"
-    AUDITED_SHA256 = "c30a50b8192dadf4e6ba016e451685f57a6d1d2c360d268887a9a94022d29f3e"
-    AUDITED_BYTES = 317632
+    AUDITED_SHA256 = "ac2f68e8221903ea4e3fc9e287959da2e979c0e7da95681c34cf5f8d7b36d28a"
+    AUDITED_BYTES = 317650
 
     def _meta(self) -> dict[str, object]:
         meta: dict[str, object] = json.loads(

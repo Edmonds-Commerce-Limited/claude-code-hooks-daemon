@@ -8,10 +8,11 @@ schemas claims against the refreshed text.
 
 ## Capture provenance
 
-| State        | `docs_sha256`                                                      | Bytes   | Claude Code |
-| ------------ | ------------------------------------------------------------------ | ------- | ----------- |
-| Last audited | `d514bf57cec0424a8aa06b4fd4172ccd256a8cd0d8ed6144a4a61908ab901a6e` | 316 963 | 2.1.252     |
-| This audit   | `c30a50b8192dadf4e6ba016e451685f57a6d1d2c360d268887a9a94022d29f3e` | 317 632 | 2.1.263     |
+| State            | `docs_sha256`                                                      | Bytes   | Claude Code |
+| ---------------- | ------------------------------------------------------------------ | ------- | ----------- |
+| Last audited     | `d514bf57cec0424a8aa06b4fd4172ccd256a8cd0d8ed6144a4a61908ab901a6e` | 316 963 | 2.1.252     |
+| This audit       | `c30a50b8192dadf4e6ba016e451685f57a6d1d2c360d268887a9a94022d29f3e` | 317 632 | 2.1.263     |
+| Phase 3 re-check | `ac2f68e8221903ea4e3fc9e287959da2e979c0e7da95681c34cf5f8d7b36d28a` | 317 650 | 2.1.263     |
 
 The refreshed text was captured with
 `bin/hooks-daemon remote-docs add <url> --verbatim` (`fidelity: verbatim`,
@@ -25,6 +26,12 @@ A `diff -u` of the two raw texts is 42 lines: four prose hunks, no heading
 added or removed, and no change to the `#### Decision control` table or to
 any event's decision-control / output section.
 
+The third row is what `hooks-daemon contract-status` (Task 3.2) found on its
+first real run, later the same day: upstream had moved 18 bytes past the
+`c30a50b8…` capture. The whole delta is hunk 5 below — one link retargeted in
+ConfigChange prose — so `META.json` carries the `ac2f68e8…` hash and the
+version stays 2.1.263, which is still the installed Claude Code.
+
 ## Changed sections
 
 | #   | Upstream section                                 | Change (verbatim upstream text where the claim is affected)                                                                                                                                                                                                                                                                            | Contract effect                                                                             |
@@ -33,8 +40,9 @@ any event's decision-control / output section.
 | 2   | PermissionRequest `setMode` note                 | Reworded: bypass availability now cites "user, `--settings`, or managed settings" for `permissions.defaultMode`; the `disableBypassPermissionsMode` / restricted-mode no-op is now its own sentence; "`bypassPermissions` is never persisted as `defaultMode`" is unchanged.                                                           | none — no schema claims a `setMode` semantics                                               |
 | 3   | PermissionRequest `updatedPermissions` paragraph | Now: "A hook can echo one of the `permission_suggestions` it received as its own `updatedPermissions` output." The trailing "which is equivalent to the user selecting that 'always allow' option in the dialog" was removed.                                                                                                          | none — `updatedPermissions` remains `allow only`                                            |
 | 4   | `### DirectoryAdded`, "does not fire" list       | Now: "You add a directory that is already a working directory or inside one". Previously: "You add a directory that is already a working directory; the add fails with an error".                                                                                                                                                      | none — the schema's note ("the add has already completed when the hook runs") still holds   |
+| 5   | `### ConfigChange`, WSL paragraph                | Link target only: "On WSL with [`wslInheritsWindowsSettings`](/docs/en/settings-reference#wslinheritswindowssettings), it also applies a changed Windows-side managed settings file on its policy poll without running them." Previously linked `/docs/en/settings#available-settings`; the sentence text is unchanged.                | none — no schema claims a settings-reference anchor                                         |
 
-None of the four hunks touches a sentence any vendored claim was derived from.
+None of the five hunks touches a sentence any vendored claim was derived from.
 Hunks 1–3 narrow what a consumer may INFER about the permission dialog from
 `permission_suggestions`; the daemon's only consumer (`auto_approve_reads`)
 reads the array's shape and does not reason about the dialog.
@@ -49,7 +57,7 @@ enums), `discarded_fields`, and the `input_example`.
 
 | Event                 | Block mechanism              | Blocks | Ask | Decision enum | Hook-specific output fields                                                                          | Discarded                                                     | Verdict                                                         |
 | --------------------- | ---------------------------- | ------ | --- | ------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------- |
-| `ConfigChange`        | top-level-decision           | yes    | no  | block         | none                                                                                                 | systemMessage, continue                                       | UNCHANGED                                                       |
+| `ConfigChange`        | top-level-decision           | yes    | no  | block         | none                                                                                                 | systemMessage, continue                                       | UNCHANGED (section prose changed, hunk 5; no claim affected)    |
 | `CwdChanged`          | none                         | no     | no  | —             | watchPaths                                                                                           | continue                                                      | UNCHANGED                                                       |
 | `DirectoryAdded`      | none                         | no     | no  | —             | none                                                                                                 | continue                                                      | UNCHANGED (section prose changed, hunk 4; no claim affected)    |
 | `Elicitation`         | hook-specific-action         | yes    | no  | —             | action, content                                                                                      | systemMessage, continue                                       | UNCHANGED                                                       |
@@ -84,7 +92,7 @@ enums), `discarded_fields`, and the `input_example`.
 | `WorktreeRemove`      | none                         | no     | no  | —             | none                                                                                                 | systemMessage, continue                                       | UNCHANGED                                                       |
 
 The verdict basis for a row not named in a hunk is the diff itself: an
-unchanged section cannot have changed a claim derived from it. The two rows
+unchanged section cannot have changed a claim derived from it. The three rows
 whose sections did change were re-read in full against their JSON.
 
 ## QA state after the refresh
