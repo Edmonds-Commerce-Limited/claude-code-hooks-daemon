@@ -1,0 +1,143 @@
+# settings.json merge spec (Plan 00176 Task 1.1)
+
+The decided answer to the five open design questions in `PLAN.md`, plus the
+key-ownership rule the implementation phases build against. Every claim here
+was read out of the code rather than assumed; where the code already answers a
+question, that is said outright rather than re-designed.
+
+## Q1 — Reuse the YAML merge, or a dedicated command?
+
+**A dedicated `settings-merge`, reusing the three-way *shape* and nothing else.**
+
+`install/config_cli.py` is YAML-bound at the load boundary (`_load_yaml`, and
+yaml referenced throughout), so `run_config_merge` would need its loader
+parameterised at minimum. That alone would be a weak reason to split — a loader
+is easy to inject.
+
+The real reason is that the merge RULE differs, not just the parser. The YAML
+merge answers one question uniformly across every key: *did the user change this
+away from the old default?* `settings.json` has three ownership classes with
+three different answers (below), and one of them — the `hooks` block — must be
+force-refreshed **against** the user's copy, which is the exact inverse of what
+`preserve_config_for_upgrade` exists to do. Threading that through the YAML path
+would put a second, contradictory mode inside a function whose whole contract is
+"preserve what the user changed".
+
+What IS worth reusing is the three-way input shape (old-default, new-default,
+user) and the workflow around it: back up, merge, validate, report
+incompatibilities. `config_preserve.sh` is the model to mirror, not the code to
+extend.
+
+## Q2 — `hooks`-block strategy
+
+**Match-and-replace per inner hook, keyed on the daemon-wrapper fragment. Not a
+whole-block replace, and not the additive-only behaviour that exists today.**
+
+This question is half-answered by code already in the tree, and the half that is
+missing is precisely the gap the plan's Goals name.
+
+`utils/hook_registration.py` has `reconcile_settings_hooks`, whose docstring is
+explicit that it is **additive only**: *"Present events — including any
+client-added custom entries — are left untouched."* It walks
+`HOOK_EVENTS_IN_SETTINGS` (the wired-event SSoT, built from `EventID` with
+`wired=True`, StatusLine excluded because it registers top-level) and adds any
+event key that is absent.
+
+So today:
+
+| Situation                                   | Current behaviour     | Wanted             |
+| ------------------------------------------- | --------------------- | ------------------ |
+| Wired event missing from `hooks`            | added ✅              | added              |
+| Wired event present, daemon entry correct   | untouched ✅          | untouched          |
+| Wired event present, daemon entry **stale** | **untouched ❌**      | **refreshed**      |
+| Client's own extra hook in the same array   | untouched ✅          | untouched          |
+| `hooks` not a dict                          | replaced wholesale ✅ | replaced wholesale |
+
+Row three is the gap: an upgrade cannot currently repair a forwarder entry that
+exists but is wrong (an outdated command shape, a missing `timeout`, a
+relative path), because the event key is present and presence is all that is
+checked. That is exactly "an upgrade must never leave a client with a stale or
+incomplete `hooks` block" failing.
+
+The discriminator needed for a safe replace is **already in the same module**:
+`_DAEMON_WRAPPER_FRAGMENT = "/.claude/hooks/"`, which `detect_legacy_hook_commands`
+uses to tell a daemon forwarder from a client's own inline hook. An inner hook
+whose `command` contains that fragment is ours and may be rebuilt from
+`HOOK_COMMAND_TEMPLATE`; one that does not is the client's and is never touched.
+This is why per-hook matching beats whole-block replace — a client hook sitting
+in the same event array as a daemon forwarder survives, and the plan's
+Context table already commits to that ("a client cannot drop or break a
+forwarder, but MAY add sibling hooks").
+
+`HOOK_COMMAND_TEMPLATE` is public precisely so several places render a
+byte-identical command; the merge becomes a fourth caller, so a rebuilt entry is
+identical to a freshly installed one by construction rather than by review.
+
+## Q3 — When does the merge escalate to an agent-assisted diff?
+
+**On genuine conflict or validation failure only — never as routine narration.**
+
+Presenting a summary on every upgrade is the `settings.json` version of a
+warning that fires every time, which trains people to skip it (the same
+reasoning that made Task 2.0's helper stay silent when the file is unchanged).
+The escalation is worth something only if it is rare.
+
+Escalate when, and only when:
+
+1. the merged result fails validation, or
+2. a client value and a new daemon default conflict in a way the ownership
+   rules below do not resolve.
+
+**Non-interactive fallback (CI, headless) is: change nothing, and say so.** Keep
+the client's file exactly as it is, write the proposed merge alongside it, and
+report a non-zero status naming both paths. That fails toward not destroying
+client data, which is the Goal's stated tiebreak. It must never silently pick
+either side — an unattended run that guesses is how a customisation disappears
+with nobody watching.
+
+## Q4 — Backup retention
+
+**Already shipped, by Task 2.0 — nothing further is owed here.**
+
+`scripts/install/settings_deploy.sh` is the single deploy path for both the
+idempotent fast path and Step 9. It acts only when the files differ, takes a
+timestamped `.bak-` when no rollback snapshot covers the copy, points at the
+snapshot when one does, and — the property that matters — **returns non-zero
+without overwriting if the backup itself fails**. The merge should call it
+rather than re-implement backup handling.
+
+The original question assumed Step 9 was the unprotected site. It is the
+opposite: Step 9 runs after Step 3's snapshot, while the fast path `exit 0`s
+before Step 3 ever runs and used to copy silently. That correction is recorded
+in `PLAN.md` Task 2.0.
+
+## Q5 — Interaction with Plan 00175's validator
+
+**Moot: `statusline_refresh_checker` does not exist.** The only statusline
+handler in `handlers/session_start/` is `suggest_statusline.py`. The question was
+written conditionally ("if built"), and the condition is false, so there is no
+division of labour to confirm and nothing to build against.
+
+If it is built later the division is the obvious one, and it follows from the
+ownership table rather than needing its own decision: the merge PRESERVES a
+client's deliberate `refreshInterval`, and the advisory may NUDGE about it.
+Neither forces it.
+
+## The decided key-ownership rule
+
+| Class                   | Keys                                                                                | Rule                                                                                                                              |
+| ----------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **Daemon-owned**        | inner hooks under `hooks[event]` whose `command` contains `/.claude/hooks/`         | rebuilt from `HOOK_COMMAND_TEMPLATE`; missing wired events added; **siblings without the fragment never touched**                 |
+| **Recommended default** | `statusLine.command`, `statusLine.refreshInterval`                                  | three-way: user value differing from the OLD default is preserved; user value equal to the old default is upgraded to the new one |
+| **Client-owned**        | `permissions`, `plansDirectory`, `env`, every other top-level key, non-daemon hooks | preserved verbatim, always                                                                                                        |
+
+Two invariants that fall out of it, and that Phase 2's tests should assert
+directly rather than incidentally:
+
+- **No client-owned key is ever read.** The merge cannot lose what it does not
+  look at, so the implementation should copy the client document and edit the
+  daemon-owned parts of it — not build a daemon document and graft client keys
+  on. The direction of the copy is the safety property.
+- **A daemon forwarder is identified by its command, not by its position.** An
+  array index or an entry count is not identity; reordering a client's hooks
+  must not change which entry is treated as ours.

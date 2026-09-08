@@ -160,14 +160,10 @@ merge cannot resolve safely.
 
 ## Context & Background
 
-Key ownership is the crux. `settings.json` keys fall into three classes, and the
-merge must treat them differently:
-
-| Class                   | Examples                                                                                             | Merge rule                                                                                                                                                                  |
-| ----------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Daemon-owned**        | the `hooks` forwarder set (Plan 00170 wired events)                                                  | daemon is authoritative — always deliver the current wired set; a client cannot drop or break a forwarder, but MAY add sibling hooks                                        |
-| **Recommended default** | `statusLine.refreshInterval`, the default `statusLine.command`                                       | daemon ships a default; a client override (differs from the *old* default) is preserved (three-way merge); a client still on the old default is upgraded to the new default |
-| **Client-owned**        | `permissions`, `plansDirectory` overrides, any extra top-level key, extra hooks beyond the wired set | always preserved verbatim                                                                                                                                                   |
+Key ownership is the crux: `settings.json` keys fall into three classes —
+daemon-owned, recommended-default and client-owned — and the merge must treat
+each differently. The decided table, with the exact keys and the rule for each,
+is in [MERGE-SPEC.md](MERGE-SPEC.md).
 
 Existing machinery to reuse / mirror:
 
@@ -178,37 +174,50 @@ Existing machinery to reuse / mirror:
   key-ownership rules above, plus (unlike YAML) a notion of the daemon-owned
   `hooks` block that is force-refreshed while sibling additions survive.
 
-Open design questions to resolve during refine:
+The five open design questions this plan was filed with — reuse-vs-new,
+`hooks`-block strategy, the agent-diff trigger, backup retention, and the Plan
+00175 validator — are answered in **[MERGE-SPEC.md](MERGE-SPEC.md)**, which also
+carries the decided key-ownership table Phase 2 builds against.
 
-1. **Reuse vs new**: extend the `config-merge` CLI to a JSON/settings mode, or a
-   dedicated `settings-merge` command? (YAML-merge assumptions may not port.)
-2. **`hooks`-block strategy**: force-replace the daemon-owned forwarder entries
-   by matching on the forwarder command basename (so client-added hooks in the
-   same event array survive), vs. whole-block replace (simpler, loses sibling
-   hooks). The Plan 00170 `_DAEMON_FORWARDER_HOOKS` SSoT is the authority for
-   "which entries are ours".
-3. **Agent-assisted diff trigger**: when does the merge escalate to a
-   human/agent diff — only on validation failure / genuine conflict, or always
-   present a summary of what changed? What is the non-interactive-install
-   fallback (CI, headless)? Default must be *preserve, don't destroy*.
-4. **Backup retention**: today install writes a timestamped `.bak`; upgrade
-   Step 9 does a bare `cp` — confirm/likely add a pre-merge backup + rollback
-   snapshot coverage (`scripts/install/rollback.sh` already snapshots
-   settings.json).
-5. **Interaction with Plan 00175's validator**: once overrides are preserved, the
-   `statusline_refresh_checker` advisory (if built) becomes the right nudge for a
-   client who kept a high value — warn, never force. Confirm the division of
-   labour.
+One correction worth keeping here, because it was wrong in this document and
+the wrong version is the one a reader would otherwise trust: the SSoT for "which
+hook entries are ours" is **not** `_DAEMON_FORWARDER_HOOKS` — no such symbol
+exists. It is `HOOK_EVENTS_IN_SETTINGS` for the wired event set, and
+`_DAEMON_WRAPPER_FRAGMENT` for telling a daemon forwarder from a client's own
+hook, both in `utils/hook_registration.py`.
 
 ## Tasks
 
 ### Phase 1: Design & refine (looped audit)
 
-- [ ] ⬜ **Task 1.1**: Resolve the five open design questions above; produce a
-  decided key-ownership merge spec (which keys are daemon-owned / default /
-  client-owned, and the `hooks`-block match-and-replace rule).
-- [ ] ⬜ **Task 1.2**: Decide reuse-vs-new for the merge CLI and the
-  agent-assisted-diff escalation contract (trigger + non-interactive fallback).
+- [x] ✅ **Task 1.1**: All five decided in **[MERGE-SPEC.md](MERGE-SPEC.md)**,
+  read out of the code rather than assumed. Two of the questions turned out to
+  be partly answered already:
+
+  **Q2 is half-built.** `reconcile_settings_hooks` exists and is **additive
+  only** — its docstring says present events are left untouched — so it adds a
+  missing wired event but cannot repair one that is present and *stale*. That
+  single row is the plan's "never leave a client with a stale or incomplete
+  `hooks` block" goal failing today. The discriminator the replace needs is in
+  the same module: `_DAEMON_WRAPPER_FRAGMENT` (`/.claude/hooks/`), already used
+  to tell a daemon forwarder from a client's own hook.
+
+  **Q4 is closed** by Task 2.0, and **Q5 is moot** — `statusline_refresh_checker`
+  does not exist, so there is no division of labour to confirm.
+
+- [x] ✅ **Task 1.2**: **Dedicated `settings-merge`**, not an extension of
+  `config-merge`. The YAML path being YAML-bound is the weak reason; the strong
+  one is that the merge RULE differs. `preserve_config_for_upgrade` answers one
+  question uniformly ("did the user change this from the old default?"), whereas
+  the `hooks` block must be force-refreshed *against* the user's copy — the
+  exact inverse. That would be a second, contradictory mode inside a function
+  whose contract is to preserve.
+
+  Escalation contract: diff only on validation failure or genuine conflict,
+  never as routine narration — an escalation shown every upgrade gets skipped.
+  Headless fallback is **change nothing and say so**: keep the client file,
+  write the proposed merge beside it, exit non-zero naming both.
+
 - [ ] ⬜ **Task 1.3**: Adversarial audit/refine pass (mirror Plan 00174's looped
   review) focused on data-loss safety and the shared-daemon / headless-install
   edge cases.
