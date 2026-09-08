@@ -316,9 +316,7 @@ class TestBashGlobTokenExpansion:
         """The escape's real cost: a malformed glob EARLIER in the command
         aborted matching before a literal protected token was ever reached."""
         monkeypatch.chdir(tmp_path)
-        payload = _hook_input(
-            "Bash", {"command": "cat docs/a**b.md topic-opus-security-DETAIL.md"}
-        )
+        payload = _hook_input("Bash", {"command": "cat docs/a**b.md topic-opus-security-DETAIL.md"})
         assert handler.matches(payload) is True
 
     def test_literal_detail_artefact_token_still_matches_without_filesystem(
