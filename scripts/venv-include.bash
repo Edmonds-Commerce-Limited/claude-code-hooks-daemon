@@ -137,15 +137,50 @@ install_deps() {
 
     echo -e "${YELLOW}→${NC} Installing dependencies..."
 
-    # Install in editable mode with dev dependencies. Plan 00104 Phase 4
-    # Task 3.2 fix: explicit ``|| return $?`` because the file no longer
-    # enables errexit at top level (so we don't poison the caller's
-    # shell). Without this propagation, a pip failure would silently
-    # report "Dependencies installed".
-    if [[ "${force_reinstall}" == "true" ]]; then
-        "${VENV_PIP}" install -e ".[dev]" --force-reinstall --quiet || return $?
+    # Install from uv.lock, NOT by resolving pyproject.toml (Plan 00346).
+    #
+    # `pip install -e ".[dev]"` never reads the lockfile: it resolves the
+    # lower bounds in pyproject.toml against PyPI, so the toolchain deciding
+    # whether QA passes is whatever was newest the day the venv happened to be
+    # built. That is a SECOND version source alongside uv.lock, and this
+    # repository has already paid for one: .pre-commit-config.yaml's header
+    # records mirror-repo pins drifting from the lock for two years, fixed by
+    # deleting the second source rather than synchronising it.
+    #
+    # `--frozen` is the load-bearing flag. A bare `uv sync` UPDATES the lock to
+    # satisfy pyproject when the two disagree, which re-resolves against PyPI
+    # and reintroduces exactly the drift this removes.
+    #
+    # Plan 00104 Phase 4 Task 3.2 fix: explicit ``|| return $?`` because the
+    # file no longer enables errexit at top level (so we don't poison the
+    # caller's shell). Without this propagation, a failed install would
+    # silently report "Dependencies installed".
+    if command -v uv > /dev/null; then
+        local uv_args=(sync --frozen --all-extras --project "${PROJECT_ROOT}")
+        if [[ "${force_reinstall}" == "true" ]]; then
+            uv_args+=(--reinstall)
+        fi
+        UV_PROJECT_ENVIRONMENT="${VENV_DIR}" uv "${uv_args[@]}" --quiet || return $?
+    elif [[ "${HOOKS_DAEMON_ALLOW_UNLOCKED_VENV:-}" == "1" ]]; then
+        # Deliberate opt-out, and it says what it costs. Never the default:
+        # a silent fallback here would restore the bypass in full while
+        # looking like it had been fixed.
+        echo -e "${YELLOW}⚠${NC}  uv not found — installing WITHOUT the lockfile." >&2
+        echo "    Tool versions will be resolved from pyproject.toml bounds," >&2
+        echo "    so this venv may not match uv.lock and QA may behave" >&2
+        echo "    differently here than on a locked environment." >&2
+        if [[ "${force_reinstall}" == "true" ]]; then
+            "${VENV_PIP}" install -e ".[dev]" --force-reinstall --quiet || return $?
+        else
+            "${VENV_PIP}" install -e ".[dev]" --quiet || return $?
+        fi
     else
-        "${VENV_PIP}" install -e ".[dev]" --quiet || return $?
+        echo -e "${RED}✗${NC} uv is required to provision this venv from uv.lock." >&2
+        echo "    Install uv (https://docs.astral.sh/uv/), then retry." >&2
+        echo "    To install from pyproject.toml bounds instead — accepting a" >&2
+        echo "    toolchain that may not match the lockfile — set:" >&2
+        echo "        HOOKS_DAEMON_ALLOW_UNLOCKED_VENV=1" >&2
+        return 1
     fi
 
     echo -e "${GREEN}✓${NC} Dependencies installed" >&2
