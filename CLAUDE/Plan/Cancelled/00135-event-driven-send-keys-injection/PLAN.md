@@ -1,6 +1,6 @@
 # Plan 00135: Event-Driven `send-keys` Injection
 
-**Status**: In Progress — architecture decided: ARCH-B (PTY supervisor), CCY-first for dogfooding. See `plan-audit-fable-1.md` and Decision G.
+**Status**: Superseded — by the ccy supervisor workstream (Plans 00147 to 00339 in `Completed/`), which delivered the ARCH-B PTY supervisor Decision G chose; this folder is the design record, and the ARCH-A revival note lives in `ARCH-A-SUPERSEDED.md`.
 **Created**: 2026-06-22
 **Owner**: joseph
 **Priority**: High
@@ -439,6 +439,9 @@ definition of Decision H's "MONITOR: pct ≥ threshold" row.
 - Related: research-note.md (source), `context.md` (framing).
 
 ## Success Criteria
+
+- [x] This plan has no release-bound consequences: every shipped piece of
+  the supervisor carried its own plan and callout; nothing ships from here.
 
 - [ ] Capability is **opt-in** — every new handler `get_default_enabled()` →
   `False`; default config behaviour is completely unchanged.
