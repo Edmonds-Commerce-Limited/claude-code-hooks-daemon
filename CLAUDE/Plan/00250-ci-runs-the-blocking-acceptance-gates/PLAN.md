@@ -32,7 +32,7 @@ first counted.
 `CLAUDE/development/RELEASING.md` Step 12.0 names ~~all three~~ **two** of the
 three as BLOCKING acceptance gates — `test_stop_hook_hard_block.py` and
 `test_tool_use_error_recovery.py`. **`test_absolute_path_socket_deny.py`, which
-accounts for 6 of the 11 skips, is not mentioned in that file at all.** It is
+accounts for 6 of the 16 skips, is not mentioned in that file at all.** It is
 therefore not covered by Phase 3's "a skip of a declared-blocking gate fails the
 run" guard, and Phase 1 has to settle whether it belongs in the blocking set or
 is genuinely optional — a guard keyed on a declaration cannot protect a file the
@@ -179,7 +179,7 @@ have reopened a plan whose success criteria were satisfied.
   Two things found while establishing that, both of which change later phases:
 
   - **`test_absolute_path_socket_deny.py` is not in the set**, though it is 6
-    of the 11 skips. A declaration-keyed guard cannot cover it; decide whether
+    of the 16 skips. A declaration-keyed guard cannot cover it; decide whether
     it belongs in the set.
   - **The expected COUNTS beside that command are already a second copy** —
     `combined: 27 passed, 1 skipped`, restated per-file above it. Plan 00110
@@ -220,7 +220,7 @@ have reopened a plan whose success criteria were satisfied.
     So `init.sh`'s CI passthrough mode (documented in `test_ci_passthrough.py`,
     active under `GITHUB_ACTIONS=true`) governs the forwarder path only and does
     not interfere with them.
-- [ ] ⬜ **Task 2.2**: Confirm all 11 tests EXECUTE on all three interpreters
+- [ ] ⬜ **Task 2.2**: Confirm all 16 tests EXECUTE on all three interpreters
   - [ ] ⬜ Expect first-run failures and treat them as long-standing, not as
     regressions — the LESSONS.md entry on waking skipped tests applies directly
 - [ ] ⬜ **Task 2.3**: Verify the CI daemon cannot collide with anything (its own
@@ -266,7 +266,7 @@ have reopened a plan whose success criteria were satisfied.
 ### Phase 4: Verify
 
 - [ ] ⬜ **Task 4.1**: Full QA green, daemon restart RUNNING
-- [ ] ⬜ **Task 4.2**: A green CI run in which the 11 tests are reported as
+- [ ] ⬜ **Task 4.2**: A green CI run in which the 16 tests are reported as
   PASSED rather than absent — which now also requires the three failing files
   in Task 2.4, since `main` is currently red and no amount of skip-fixing
   turns it green on its own
@@ -296,7 +296,7 @@ chose this for `uv`, and the argument is identical.
 
 ## Success Criteria
 
-- [ ] The 11 tests report PASSED in CI on all three interpreters, not skipped
+- [ ] The 16 tests report PASSED in CI on all three interpreters, not skipped
 - [ ] A silent skip of a declared-blocking gate fails the run
 - [ ] The blocking set has one source of truth
 - [ ] Local `llm_qa.py all` still passes
@@ -305,7 +305,7 @@ chose this for `uv`, and the argument is identical.
 
 | Risk                                                        | Impact | Probability | Mitigation                                                                                     |
 | ----------------------------------------------------------- | ------ | ----------- | ---------------------------------------------------------------------------------------------- |
-| The 11 tests fail on a runner for reasons unrelated to this | Medium | High        | Expected — Plan 00245's Phase 3 was exactly this work; treat as long-standing, fix root causes |
+| The 16 tests fail on a runner for reasons unrelated to this | Medium | High        | Expected — Plan 00245's Phase 3 was exactly this work; treat as long-standing, fix root causes |
 | A CI daemon interferes with another job                     | Medium | Low         | Hostname-based isolation already gives each environment its own socket/PID path                |
 | Guarding the blocking set duplicates `RELEASING.md`         | Medium | Medium      | Task 1.2 settles the single source of truth BEFORE the guard is written                        |
 
