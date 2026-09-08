@@ -176,14 +176,23 @@ which of them are worth the change.
 
 ### Phase 4: Non-blocking observations from the v3.60.0 acceptance run
 
-- [ ] ⬜ **Task 4.1**: `bin/hooks-daemon secret-meta <path> | head -20` is
+4.1 to 4.4 and 4.6 fixed with tests in one worktree pass (`079904fb`,
+`c5daeda1`, `cbe66c39`, `ab5fb4d5`), merged at `1c00aced`. 4.6 is the
+substantial one: `AcceptanceTest` gained a structured `hook_input` payload,
+and `tests/integration/test_acceptance_contract.py` drives every BLOCKING
+acceptance test's declared input through a real handler and asserts each
+declared pattern matches the reason produced — 170 of 170 covered, with no
+ratchet allowlist, so a handler declaring a pattern its deny text cannot
+produce now fails CI rather than a release gate.
+
+- [x] ✅ **Task 4.1**: `bin/hooks-daemon secret-meta <path> | head -20` is
   DENIED by `pipe_blocker`, while the unpiped command passes. The
   `secret-meta` helper is the documented alternative offered by the
   secret-file guard's own deny message, so having it blocked when piped
   is a sharp edge in the recommended recovery path. Decide whether
   `secret-meta` belongs in `pipe_blocker`'s whitelist.
 
-- [ ] ⬜ **Task 4.2**: acceptance Tests 66 and 67 share one disclosure budget
+- [x] ✅ **Task 4.2**: acceptance Tests 66 and 67 share one disclosure budget
   and therefore cannot both pass as declared. `sensitive_content` emits its
   verbose rationale once per transcript; Test 66 spends it, so Test 67 —
   which declares the verbose-only pattern `deliberately not shown` —
@@ -194,7 +203,7 @@ which of them are worth the change.
   cite only an index, leak neither the term nor the raw command line) was
   met in full during the v3.60.0 run.
 
-- [ ] ⬜ **Task 4.3**: `pipe_blocker` labels the producer of
+- [x] ✅ **Task 4.3**: `pipe_blocker` labels the producer of
   `python -m pytest ... | tail` as "python is expensive", while the
   project's own CLAUDE.md states it "names `pytest` as its producer,
   because `-m` there means module". The REMEDIATION it prints does name
@@ -202,7 +211,7 @@ which of them are worth the change.
   disagrees. Cosmetic, but it made an acceptance runner report a false
   FAIL, so either the label or the doc sentence should move.
 
-- [ ] ⬜ **Task 4.4**: `Type: CLI Feature` tests carry no
+- [x] ✅ **Task 4.4**: `Type: CLI Feature` tests carry no
   `Requires Main Thread` field, so a runner that routes by that field —
   which is exactly what RELEASING.md Step 12.4 instructs — silently drops
   them into neither the delegable batches nor the main-thread set. Three
@@ -252,7 +261,7 @@ which of them are worth the change.
   the user something. Write the approach down and get it agreed before
   implementing.
 
-- [ ] ⬜ **Task 4.6**: FOUR handlers were found declaring acceptance patterns
+- [x] ✅ **Task 4.6**: FOUR handlers were found declaring acceptance patterns
   their own deny reasons cannot produce — `quarantine_artefact_read_guard`
   and `sensitive_content` (stale `RuleFormatter`-era headers),
   `sed_blocker` (declares "forbidden", a word that appears only in

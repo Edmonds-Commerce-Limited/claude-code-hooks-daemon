@@ -32,7 +32,7 @@ several are fail-open correctness gaps worth fixing promptly (marked HIGH).
 
 ### Phase 1: HIGH — fail-open correctness gaps
 
-- [ ] ⬜ **Task 1.1**: `matches_skip_path` is still a bare substring test while
+- [x] ✅ **Task 1.1**: `matches_skip_path` is still a bare substring test while
   a new comment claims slash-bounded containment
   (`strategies/lint/common.py:19-29`, `validate_eslint_on_write.py:88-94`).
   `src/rebuild/x.py`, `src/myvenv/x.py`, `app/prebuild/y.ts` are all wrongly
@@ -68,50 +68,54 @@ several are fail-open correctness gaps worth fixing promptly (marked HIGH).
 
 ### Phase 2: MEDIUM — behaviour and API hygiene
 
-- [ ] ⬜ **Task 2.1**: injected `docs_qa_sweep` guidance says
+All eleven fixed with tests in one worktree pass (`b7b6cd44`), merged at
+`265ba433`; 2.8's injector half was already fixed pre-release
+(`core/claude_md_injector.py` fallthrough, pinned in its test).
+
+- [x] ✅ **Task 2.1**: injected `docs_qa_sweep` guidance says
   source-tree-markdown "stays silent when no `layout:` dirs are declared"
   (`handlers/session_start/docs_qa_sweep.py:127-128`) but the
   COMMON_TEST_DIRECTORIES fallback makes it always-on for test dirs. Fix the
   injected text to match the check's (accurate) module docstring.
-- [ ] ⬜ **Task 2.2**: `tdd_enforcement` facade adoption widened test-path
+- [x] ✅ **Task 2.2**: `tdd_enforcement` facade adoption widened test-path
   matching (built-in `('tests','test','__tests__','spec')` short-circuits
   before `strategy.is_test_file()`, `tdd_enforcement.py:288-297`) — the
   comment implies a byte-identical no-op. Decide the intended semantics and
   pin with a test + honest comment.
-- [ ] ⬜ **Task 2.3**: relay/build.sh:16 defaults RUSTC to
+- [x] ✅ **Task 2.3**: relay/build.sh:16 defaults RUSTC to
   `$HOME/.cargo/bin/rustc` while `check_musl_toolchain` prefers
   `shutil.which("rustc")` — pass the resolved RUSTC into the env from
   `deploy_relay_from_build` like RELAY_TARGET already is.
-- [ ] ⬜ **Task 2.4**: nothing writes `relay/SHA256SUMS.released`, so
+- [x] ✅ **Task 2.4**: nothing writes `relay/SHA256SUMS.released`, so
   transport-probe's digest row permanently reads "unknown (no manifest)"
   (`transport_probe.py:134,189`); `deploy_relay_from_download` holds the
   verified digest (`relay_deploy.py:285`) — record it alongside the `.route`
   marker.
-- [ ] ⬜ **Task 2.5**: init.sh:906 builds the nc rung's socket path ignoring
+- [x] ✅ **Task 2.5**: init.sh:906 builds the nc rung's socket path ignoring
   `HOOKS_DAEMON_EVENTS_DIR` and the AF_UNIX-overflow fallback — on deep
   client layouts the nc rung silently never engages. Honour both, matching
   daemon and relay guard.
-- [ ] ⬜ **Task 2.6**: daemon/server.py events-dir handling: log rmtree
+- [x] ✅ **Task 2.6**: daemon/server.py events-dir handling: log rmtree
   failures instead of `ignore_errors=True`, and refuse to bind when
   events_dir is a pre-existing symlink (predictable /tmp fallback path can be
   redirected by a pre-planted symlink).
-- [ ] ⬜ **Task 2.7**: block-report/promotion config duplication —
+- [x] ✅ **Task 2.7**: block-report/promotion config duplication —
   `block_report/report.py:49-50` re-declares min_blocks/min_sessions defaults
   that PromotionConfig owns; make the parameters required.
-- [ ] ⬜ **Task 2.8**: `claude_md_injector.py` promoted-handler-without-prose
+- [x] ✅ **Task 2.8**: `claude_md_injector.py` promoted-handler-without-prose
   fallback and the STOP_GOAL_LEDGER dead-verbose duplication
   (`auto_continue_stop.py:120-132` vs `_GOAL_LEDGER_CHALLENGE_TEMPLATE:191`;
   docstrings at :577/:925 still say five rules where six exist) — single
   prose source per message; correct the counts. (The lost-rules half of the
   injector issue was fixed pre-release; verify and close.)
-- [ ] ⬜ **Task 2.9**: artifact_publish_blocker `source_disable` hygiene:
+- [x] ✅ **Task 2.9**: artifact_publish_blocker `source_disable` hygiene:
   `matches()` performs a filesystem write; `_source_disable_checked` set
   before the attempt makes a transient failure permanent until restart; temp
   file leaks if copymode/replace fails; `getattr(self, "_source_disable", False)` guards an attribute `__init__` always sets.
-- [ ] ⬜ **Task 2.10**: `core/project_layout.py:43` imports the vendored-dir
+- [x] ✅ **Task 2.10**: `core/project_layout.py:43` imports the vendored-dir
   constant via `docs_qa.corpus`, pulling docs_qa (and transitively plan_qa)
   into core import time — import from `constants.layout` directly.
-- [ ] ⬜ **Task 2.11**: tool_disable_advisor re-loads config up to three times
+- [x] ✅ **Task 2.11**: tool_disable_advisor re-loads config up to three times
   per event (`tool_disable_advisor.py:60-106`) — use the already-loaded
   config; add the missing try/except symmetry in
   `_blocker_source_disable_on`.
