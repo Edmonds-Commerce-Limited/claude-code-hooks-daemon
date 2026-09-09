@@ -2753,7 +2753,9 @@ def _build_handler_config_mapping(config: Config) -> dict[str, dict[str, Any]]:
     return mapping
 
 
-def _build_initialised_controller(config: Config, project_path: Path) -> "DaemonController":
+def _build_initialised_controller(
+    config: Config, project_path: Path, *, write_claude_md_in_linked_worktree: bool = False
+) -> "DaemonController":
     """Build and fully initialise a DaemonController from a loaded config.
 
     Single source of truth for the per-event handler_config mapping and the
@@ -2765,6 +2767,10 @@ def _build_initialised_controller(config: Config, project_path: Path) -> "Daemon
     Args:
         config: Loaded daemon configuration.
         project_path: Project root (workspace) the controller serves.
+        write_claude_md_in_linked_worktree: Regenerate the block even in a
+            linked git worktree. Startup leaves it False so the worktree's
+            branch never carries an auto-committed block that conflicts with
+            main's on merge; the explicit ``regenerate-docs`` passes True.
 
     Returns:
         The initialised DaemonController.
@@ -2790,6 +2796,7 @@ def _build_initialised_controller(config: Config, project_path: Path) -> "Daemon
         project_registry=ProjectRegistry.from_config(config, project_path),
         claude_md=config.claude_md,
         chain=config.daemon.chain,
+        write_claude_md_in_linked_worktree=write_claude_md_in_linked_worktree,
     )
     return controller
 
@@ -2827,7 +2834,9 @@ def cmd_regenerate_docs(args: argparse.Namespace) -> int:
     config_path = project_path / ".claude" / "hooks-daemon.yaml"
     try:
         config = Config.load(config_path)
-        _build_initialised_controller(config, project_path)
+        # Explicit request: write even in a linked worktree, which daemon
+        # startup deliberately leaves alone (see ClaudeMdInjector).
+        _build_initialised_controller(config, project_path, write_claude_md_in_linked_worktree=True)
         print(f"Regenerated <hooksdaemon> block in: {project_path / 'CLAUDE.md'}")
         return 0
     except Exception as e:

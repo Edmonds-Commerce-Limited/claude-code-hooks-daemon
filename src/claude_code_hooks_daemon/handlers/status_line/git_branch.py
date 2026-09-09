@@ -18,7 +18,7 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, Timeout
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree, run_git
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +39,6 @@ _ICON_CONFLICTS = "✖"
 _ICON_UNTRACKED = "…"
 _ICON_STASHED = "⚑"
 _ICON_WORKTREE = "🌳"
-
-# Linked-worktree detection (filesystem-only, no subprocess on the render path).
-# A linked worktree's top-level ``.git`` is a FILE containing
-# ``gitdir: <main>/.git/worktrees/<name>``; the main worktree has a ``.git``
-# DIRECTORY, and a submodule's ``.git`` file points at ``.../modules/<name>``.
-_GIT_DIR_ENTRY = ".git"
-_GIT_FILE_GITDIR_PREFIX = "gitdir:"
-_WORKTREE_GITDIR_MARKER = "/worktrees/"
 
 _PORCELAIN_BRANCH_AB_PREFIX = "# branch.ab "
 # ``--branch`` emits the current branch here, so the status call already
@@ -265,32 +257,13 @@ class GitBranchHandler(StatusLineHandlerBase):
     def _is_linked_worktree(self, repo_toplevel: str) -> bool:
         """Return True when ``repo_toplevel`` is a git *linked* worktree.
 
-        Git stores a linked worktree (created via ``git worktree add``) with a
-        top-level ``.git`` FILE whose ``gitdir:`` line points into
-        ``<main>/.git/worktrees/<name>``. The main worktree has a ``.git``
-        DIRECTORY, and a submodule's ``.git`` file points at
-        ``.../modules/<name>`` instead — so matching the ``/worktrees/`` marker
-        in the gitdir target distinguishes a worktree from both.
-
-        This is a filesystem probe (``.git`` stat + a small text read), never a
-        subprocess, so it adds nothing to the render's git-fork budget. Any
-        failure (missing/unreadable ``.git``, a non-str toplevel under a mocked
-        render) fails safe to ``False`` — the status line must never crash.
+        Delegates to the shared :func:`is_linked_worktree` probe (a ``.git``
+        stat plus a small text read, never a subprocess, so it adds nothing to
+        the render's git-fork budget). Any failure — including a non-str
+        toplevel under a mocked render — fails safe to ``False``: the status
+        line must never crash.
         """
-        try:
-            git_path = Path(repo_toplevel) / _GIT_DIR_ENTRY
-            if not git_path.is_file():
-                return False
-            content = git_path.read_text(encoding="utf-8", errors="replace")
-        except (OSError, ValueError, TypeError) as e:
-            logger.debug("Worktree detection failed for %r: %s", repo_toplevel, e)
-            return False
-        for line in content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith(_GIT_FILE_GITDIR_PREFIX):
-                target = stripped[len(_GIT_FILE_GITDIR_PREFIX) :].strip()
-                return _WORKTREE_GITDIR_MARKER in target
-        return False
+        return is_linked_worktree(Path(str(repo_toplevel)))
 
     def _resolve_default_branch(self, repo_toplevel: str, cwd: str) -> str | None:
         """Return the cached default branch for a repo, detecting it once per repo.

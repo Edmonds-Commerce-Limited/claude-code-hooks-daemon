@@ -17,6 +17,7 @@ SOLID:
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
 from collections.abc import Mapping
@@ -25,6 +26,8 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+
+logger = logging.getLogger(__name__)
 
 #: ``git status`` is not a read. It refreshes the index and writes it back,
 #: which acquires ``.git/index.lock`` — so a daemon merely ASKING whether a file
@@ -127,6 +130,43 @@ def run_git(
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return subprocess.CompletedProcess(argv, _GIT_UNAVAILABLE, "", str(exc))
+
+
+_GIT_DIR_ENTRY: Final[str] = ".git"
+_GIT_FILE_GITDIR_PREFIX: Final[str] = "gitdir:"
+_WORKTREE_GITDIR_MARKER: Final[str] = "/worktrees/"
+
+
+def is_linked_worktree(checkout: Path) -> bool:
+    """Return True when ``checkout`` is a git *linked* worktree.
+
+    Git stores a linked worktree (created via ``git worktree add``) with a
+    top-level ``.git`` FILE whose ``gitdir:`` line points into
+    ``<main>/.git/worktrees/<name>``. The main worktree has a ``.git``
+    DIRECTORY, and a submodule's ``.git`` file points at ``.../modules/<name>``
+    instead — so matching the ``/worktrees/`` marker in the gitdir target
+    distinguishes a worktree from both.
+
+    A filesystem probe (``.git`` stat + a small text read), never a subprocess,
+    so it is safe on the status-line render budget and on daemon startup. Any
+    failure (missing or unreadable ``.git``) is ``False``: the callers treat
+    "is a worktree" as the reason to hold back, and holding back on a guess
+    would be the wrong default.
+    """
+    try:
+        git_path = Path(checkout) / _GIT_DIR_ENTRY
+        if not git_path.is_file():
+            return False
+        content = git_path.read_text(encoding="utf-8", errors="replace")
+    except (OSError, ValueError, TypeError) as exc:
+        logger.debug("Worktree detection failed for %r: %s", checkout, exc)
+        return False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(_GIT_FILE_GITDIR_PREFIX):
+            target = stripped[len(_GIT_FILE_GITDIR_PREFIX) :].strip()
+            return _WORKTREE_GITDIR_MARKER in target
+    return False
 
 
 def _git_output(cwd: Path, *args: str) -> str | None:

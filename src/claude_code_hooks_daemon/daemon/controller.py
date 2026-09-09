@@ -184,6 +184,7 @@ class DaemonController:
         project_registry: "ProjectRegistry | None" = None,
         claude_md: "ClaudeMdConfig | None" = None,
         chain: "ChainConfig | None" = None,
+        write_claude_md_in_linked_worktree: bool = False,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -213,6 +214,11 @@ class DaemonController:
                 (pure progressive disclosure).
             chain: Optional ChainConfig (Plan 00242) — ``daemon.chain``.
                 None keeps the default: a terminal deny short-circuits.
+            write_claude_md_in_linked_worktree: Regenerate the CLAUDE.md
+                block even when ``workspace_root`` is a linked git worktree.
+                Daemon startup leaves it False, so a worktree's branch never
+                carries an auto-committed regeneration that conflicts with
+                main's on merge; ``regenerate-docs`` passes True.
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -301,6 +307,7 @@ class DaemonController:
             workspace_root=workspace_root,
             handlers=all_handlers,
             promoted_handlers=promoted_handlers,
+            write_in_linked_worktree=write_claude_md_in_linked_worktree,
         ).inject()
 
         # Validate configuration at startup (fail-open: degraded mode on errors)
@@ -718,7 +725,7 @@ class DaemonController:
             self._degraded = True
             self._config_errors = [f"Config validator error: {type(e).__name__}: {e}"]
             logger.warning(
-                "Configuration validator crashed: %s. " "Daemon is running in DEGRADED mode.",
+                "Configuration validator crashed: %s. Daemon is running in DEGRADED mode.",
                 e,
             )
 

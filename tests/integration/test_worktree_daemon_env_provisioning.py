@@ -128,12 +128,12 @@ class TestTheSetupScriptProvisionsADevVenv:
             for line in script.splitlines()
             if "uv sync" in line and not line.lstrip().startswith("#")
         ]
-        assert sync_lines, (
-            "setup_worktree.sh must run `uv sync` for the dev extras after ensure_venv"
-        )
-        assert all("--frozen" in line and "--all-extras" in line for line in sync_lines), (
-            f"the dev sync must be `--frozen --all-extras` so the worktree matches uv.lock: {sync_lines}"
-        )
+        assert (
+            sync_lines
+        ), "setup_worktree.sh must run `uv sync` for the dev extras after ensure_venv"
+        assert all(
+            "--frozen" in line and "--all-extras" in line for line in sync_lines
+        ), f"the dev sync must be `--frozen --all-extras` so the worktree matches uv.lock: {sync_lines}"
 
     def test_it_proves_pytest_imports_before_declaring_the_worktree_ready(self) -> None:
         script = _SETUP_WORKTREE.read_text()

@@ -196,9 +196,7 @@ class TestClaudeMdInjectorCreateSection:
         """Overwrites existing <hooksdaemon> section with fresh content."""
         from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 
-        old_content = (
-            "# Project\n\n" f"{_OPEN_TAG}\nOLD CONTENT HERE\n{_CLOSE_TAG}\n\nOther stuff.\n"
-        )
+        old_content = f"# Project\n\n{_OPEN_TAG}\nOLD CONTENT HERE\n{_CLOSE_TAG}\n\nOther stuff.\n"
         claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text(old_content)
 
@@ -1001,9 +999,9 @@ class TestAutoCommitDoesNotFightTheAgentForTheIndexLock:
 
         warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
         assert warnings, "lock contention produced no WARNING"
-        assert any("index.lock" in r.getMessage() for r in warnings), (
-            f"the WARNING did not carry git's own reason: " f"{[r.getMessage() for r in warnings]}"
-        )
+        assert any(
+            "index.lock" in r.getMessage() for r in warnings
+        ), f"the WARNING did not carry git's own reason: {[r.getMessage() for r in warnings]}"
 
 
 class TestClaudeMdInjectorFormatting:
@@ -1413,7 +1411,7 @@ class TestTwoTierPromotedBlock:
         assert len(row_lines) == 2, (
             "table rows are not contiguous under the single header+delimiter -- "
             f"only found {row_lines!r} directly beneath it; full table region: "
-            f"{lines[delimiter_idx:delimiter_idx + 8]!r}"
+            f"{lines[delimiter_idx : delimiter_idx + 8]!r}"
         )
         assert "R-A" in "\n".join(row_lines)
         assert "R-B" in "\n".join(row_lines)
@@ -1462,3 +1460,77 @@ class TestTwoTierPromotedBlock:
         content = claude_md.read_text()
         assert "Must not be resident with the default (no promotion arg)." not in content
         assert "R-SED-EXEC" in content
+
+
+def _add_linked_worktree(main: Path, name: str) -> Path:
+    """``git worktree add`` a sibling checkout of ``main`` on a new branch."""
+    linked = main.parent / name
+    subprocess.run(
+        ["git", "worktree", "add", str(linked), "-b", name],
+        cwd=main,
+        capture_output=True,
+        check=True,
+    )
+    return linked
+
+
+class TestALinkedWorktreeIsNotRegeneratedAtStartup:
+    """The startup regeneration stays out of linked worktrees.
+
+    Every daemon restart rewrites the ``<hooksdaemon>`` block and auto-commits
+    it. In a ``git worktree add`` checkout that commit lands on the worktree's
+    branch while the main checkout's own restarts land theirs on main, so the
+    two generated blocks conflict on every merge back — three agents in one
+    session hit it. The worktree's branch should carry only the work done
+    there; the block is regenerated on main after the merge, for the merged
+    code. The explicit ``regenerate-docs`` command still writes anywhere.
+    """
+
+    def test_it_leaves_claude_md_untouched_and_makes_no_commit(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        main = tmp_path / "main"
+        main.mkdir()
+        _init_git_repo(main)
+        linked = _add_linked_worktree(main, "worktree-x")
+        before = (linked / "CLAUDE.md").read_text(encoding="utf-8")
+        head_before = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=linked, capture_output=True, text=True, check=True
+        ).stdout
+
+        ClaudeMdInjector(workspace_root=linked, handlers=[_StubHandler("h", "## H\n\nX.")]).inject()
+
+        assert (linked / "CLAUDE.md").read_text(encoding="utf-8") == before
+        head_after = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=linked, capture_output=True, text=True, check=True
+        ).stdout
+        assert head_after == head_before
+        assert not (linked / ".CLAUDE.md.pre-inject").exists()
+
+    def test_the_main_checkout_is_still_regenerated(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        main = tmp_path / "main"
+        main.mkdir()
+        _init_git_repo(main)
+        _add_linked_worktree(main, "worktree-x")
+
+        ClaudeMdInjector(workspace_root=main, handlers=[_StubHandler("h", "## H\n\nX.")]).inject()
+
+        assert "<hooksdaemon>" in (main / "CLAUDE.md").read_text(encoding="utf-8")
+
+    def test_an_explicit_regeneration_writes_in_a_worktree_too(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        main = tmp_path / "main"
+        main.mkdir()
+        _init_git_repo(main)
+        linked = _add_linked_worktree(main, "worktree-x")
+
+        ClaudeMdInjector(
+            workspace_root=linked,
+            handlers=[_StubHandler("h", "## H\n\nX.")],
+            write_in_linked_worktree=True,
+        ).inject()
+
+        assert "<hooksdaemon>" in (linked / "CLAUDE.md").read_text(encoding="utf-8")

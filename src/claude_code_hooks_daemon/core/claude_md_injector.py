@@ -19,7 +19,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree, run_git
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ _FALLBACK_TIER_HEADING = (
     "Full text: `bin/hooks-daemon explain-handler <name>`.\n"
 )
 
-_RULE_TABLE_HEADER = "| ID | Blocked | Why | Fix |\n" "| --- | --- | --- | --- |"
+_RULE_TABLE_HEADER = "| ID | Blocked | Why | Fix |\n| --- | --- | --- | --- |"
 
 # Provenance marker emitted before each handler's guidance (DBF, Core
 # Standard 15). The injector holds `handler.name` while assembling the block;
@@ -235,6 +235,7 @@ class ClaudeMdInjector:
         workspace_root: Path,
         handlers: list[Any],
         promoted_handlers: list[str] | None = None,
+        write_in_linked_worktree: bool = False,
     ) -> None:
         """Initialise injector.
 
@@ -247,10 +248,22 @@ class ClaudeMdInjector:
                 block. ``None``/empty means pure progressive disclosure —
                 every handler with declared ``get_rules()`` is reduced to
                 rule-table rows.
+            write_in_linked_worktree: Regenerate even when ``workspace_root``
+                is a ``git worktree add`` checkout. Off (the daemon startup
+                path) the injector leaves a linked worktree alone: the
+                regeneration is auto-committed, so in a worktree it lands on
+                the worktree's branch while the main checkout's restarts
+                land theirs on main, and the two generated blocks conflict
+                on every merge back. The block is regenerated on main after
+                the merge, for the merged code. The explicit
+                ``regenerate-docs`` command passes True — it is the
+                documented way to recover a conflict-marked block, wherever
+                that block is.
         """
         self._workspace_root = workspace_root
         self._handlers = handlers
         self._promoted_handlers = frozenset(promoted_handlers or [])
+        self._write_in_linked_worktree = write_in_linked_worktree
 
     def inject(self) -> None:
         """Collect handler guidance and update CLAUDE.md.
@@ -288,6 +301,16 @@ class ClaudeMdInjector:
         if not self._workspace_root.exists():
             logger.warning(
                 "ClaudeMdInjector: workspace_root does not exist: %s", self._workspace_root
+            )
+            return
+
+        if not self._write_in_linked_worktree and is_linked_worktree(self._workspace_root):
+            logger.info(
+                "ClaudeMdInjector: %s is a linked git worktree — leaving %s as its branch has "
+                "it, so the auto-committed regeneration cannot conflict with the main "
+                "checkout's on merge. `bin/hooks-daemon regenerate-docs` writes it on request.",
+                self._workspace_root,
+                claude_md_path,
             )
             return
 

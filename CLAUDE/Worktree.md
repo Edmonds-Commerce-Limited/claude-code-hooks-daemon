@@ -88,6 +88,16 @@ printf '{"tool_name":"Bash","tool_input":{"command":"true"},"hook_event_name":"P
 A not-installed answer names the checkout it is answering for, so an answer
 about another checkout is visible in the response itself.
 
+**The worktree's daemon does not regenerate `CLAUDE.md` on restart.** In the
+main checkout every restart rewrites the `<hooksdaemon>` block and
+auto-commits it. In a linked worktree that commit would land on the worktree's
+branch while main's restarts land theirs on main, so the two generated blocks
+conflicted on every merge back. The startup injection therefore skips a linked
+worktree (it logs why), and the branch carries only the work done there; the
+block is regenerated on main, for the merged code, on the first restart after
+the merge. `./bin/hooks-daemon regenerate-docs` still writes it in a worktree
+when asked.
+
 **Never hand-build the venv** (e.g. `python3 -m venv untracked/venv`): that
 produces the retired pre-v3.7.0 layout, and the fingerprint-aware venv
 resolver refuses it — every `bin/hooks-daemon` call then exits telling you to

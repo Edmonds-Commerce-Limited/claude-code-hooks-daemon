@@ -120,3 +120,44 @@ class TestCmdRegenerateDocs:
         result = cmd_regenerate_docs(_regen_args(tmp_path))
 
         assert result == 1
+
+
+class TestRegenerateDocsInALinkedWorktree:
+    def test_the_explicit_command_writes_the_block_in_a_worktree(self, tmp_path: Path) -> None:
+        """Startup skips a linked worktree; the explicit command must not.
+
+        The skip exists so a worktree's branch does not carry a generated
+        block that conflicts with main's on merge. Someone running
+        ``regenerate-docs`` there has asked for exactly that write — it is
+        the documented way to recover a conflict-marked block.
+        """
+        main = tmp_path / "main"
+        main.mkdir()
+        project = _scaffold_project(main)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=project,
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"], cwd=project, capture_output=True, check=True
+        )
+        subprocess.run(["git", "add", "-A"], cwd=project, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "seed"], cwd=project, capture_output=True, check=True
+        )
+        linked = tmp_path / "linked"
+        subprocess.run(
+            ["git", "worktree", "add", str(linked), "-b", "worktree-x"],
+            cwd=project,
+            capture_output=True,
+            check=True,
+        )
+        # An empty directory is not tracked, so the worktree has to recreate it.
+        (linked / ".claude" / "hooks-daemon").mkdir()
+        (linked / "CLAUDE.md").write_text("# My Project\n")
+
+        assert cmd_regenerate_docs(_regen_args(linked)) == 0
+
+        assert "<hooksdaemon>" in (linked / "CLAUDE.md").read_text()

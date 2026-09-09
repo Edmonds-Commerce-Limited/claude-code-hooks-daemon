@@ -41,6 +41,17 @@ def _nested_repo(outer: Path) -> Path:
     return inner
 
 
+def _git_init(root: Path) -> None:
+    """Init a repo at ``root`` with an identity, so it can commit."""
+    subprocess.run(["git", "init", str(root)], capture_output=True, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"], cwd=root, capture_output=True, check=True
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"], cwd=root, capture_output=True, check=True
+    )
+
+
 class TestResolveFor:
     def test_resolves_repo_for_path_inside(self, tmp_git_repo: Path) -> None:
         resolved = GitRepo.resolve_for(tmp_git_repo / "src" / "x.py")
@@ -357,3 +368,52 @@ class TestCallerSuppliedEnvironment:
             "a caller overrode the declined index lock, so the runner no longer "
             "guarantees the property it exists for"
         )
+
+
+class TestIsLinkedWorktree:
+    """``is_linked_worktree`` tells a ``git worktree add`` checkout from the main one.
+
+    The daemon regenerates CLAUDE.md on every restart and auto-commits it; in
+    a linked worktree that commit lands on the worktree's branch, and the main
+    checkout's own regeneration lands on main, so the two blocks conflict on
+    every merge back. Both the injector and the status line need the same
+    filesystem probe, so it lives here.
+    """
+
+    def test_main_checkout_is_not_a_linked_worktree(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree
+
+        _git_init(tmp_path)
+        assert is_linked_worktree(tmp_path) is False
+
+    def test_a_git_worktree_add_checkout_is(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree
+
+        main = tmp_path / "main"
+        main.mkdir()
+        _git_init(main)
+        (main / "seed.txt").write_text("seed\n")
+        subprocess.run(["git", "add", "seed.txt"], cwd=main, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "seed"], cwd=main, capture_output=True, check=True)
+        linked = tmp_path / "linked"
+        subprocess.run(
+            ["git", "worktree", "add", str(linked), "-b", "worktree-x"],
+            cwd=main,
+            capture_output=True,
+            check=True,
+        )
+
+        assert is_linked_worktree(linked) is True
+        assert is_linked_worktree(main) is False
+
+    def test_not_a_repo_at_all_is_not(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree
+
+        assert is_linked_worktree(tmp_path) is False
+
+    def test_a_submodule_style_gitdir_file_is_not(self, tmp_path: Path) -> None:
+        """A submodule's ``.git`` is also a file, pointing at ``modules/`` not ``worktrees/``."""
+        from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree
+
+        (tmp_path / ".git").write_text("gitdir: ../.git/modules/sub\n")
+        assert is_linked_worktree(tmp_path) is False

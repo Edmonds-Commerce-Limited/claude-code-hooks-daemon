@@ -42,11 +42,6 @@ _ALLOWED_DIRECT_READS: dict[str, str] = {
         "bounded by the number of live sessions (normally one), not by the "
         "render rate."
     ),
-    "git_branch.py": (
-        "Reads the top-level `.git` FILE only when one exists (linked-worktree "
-        "detection), and the whole probe already sits behind this handler's "
-        "render TTL — so it is paid per cache miss, not per render."
-    ),
     "supervisor_indicator.py": (
         "Reads the ccy supervisor's transient message file, whose entire "
         "purpose is to be fresh — caching it would defeat the feature — plus "

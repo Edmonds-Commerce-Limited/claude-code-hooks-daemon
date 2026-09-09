@@ -1,7 +1,7 @@
 # Callout: `setup_worktree.sh` runs to the end, and its venv can run QA
 
-**Plan**: 00364, 00365
-**Audience**: contributors using worktrees
+**Plan**: 00364
+**Audience**: everyone
 
 Two defects in `scripts/setup_worktree.sh`, both of which every worktree agent
 had been working around by hand.
