@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00365: markdown_organization — a declared project at any depth](00365-markdown-organization-nested-vendor-and-existing-file-edits/PLAN.md) - In Progress (field report: an `Edit` of an existing `.md` two `vendor/` levels deep is denied and neither a `projects:` declaration nor `extra_allowed_markdown_paths` rescues it; ruling: a `projects:` entry naming the directory as it is, at any depth, must simply work)
+
 - [00364: v3.63.0 release review follow-ups](00364-release-review-followups-v3630/PLAN.md) - In Progress (every non-blocking finding from the four Step 10 review reports — venv-lock misreport, slate check reading git failure as clean, plan-QA commit gate spawning one `git diff` per plan, bracket-range cost, dead pipe_blocker tests — plus the worktree hook wrapper relaying to the main repo's daemon and the priority-20 project-handler collision)
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
@@ -232,11 +234,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 364 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 365 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 323 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 18 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 19 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
