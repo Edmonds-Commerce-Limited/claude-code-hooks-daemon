@@ -1,6 +1,7 @@
 version: "3.40.0"
 truth_changes:
-  - was: >
+  - topic: plan-workflow
+    was: >
       A plan's blow-by-blow activity stream (findings, dead-ends, in-flight
       decisions, hand-off state) is captured informally in a free-form
       "## Notes & Updates" section at the bottom of PLAN.md, and the plan

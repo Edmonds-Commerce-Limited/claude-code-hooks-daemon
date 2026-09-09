@@ -21,6 +21,16 @@ entry: entries sharing an ``id`` across manifests form a supersession chain and
 only the last link is emitted, with a "revised in" trail naming the releases it
 replaces. Un-keyed entries are never collapsed. An agent handed every link of
 the chain would assert a claim into the project's docs and then contradict it.
+
+The report is then OFFLOADED (Plan 00329): the full text and one file per
+topic chunk go under a report directory, and stdout carries a summary bounded
+by ``report_offload.SUMMARY_MAX_BYTES``. A Bash result that exits 1 — which
+this command does whenever there is work — is delivered head-and-tail with the
+middle dropped past roughly 10,000 characters, so an unbounded report loses
+most of its entries before the agent sees them. Chunks are keyed by the
+entry's ``topic`` (falling back to its ``id``), are built AFTER collapsing so
+no two chunks carry contradictory instructions, and are meant to be delegated
+one per subagent that returns what it CHANGED, not what it read.
 """
 
 from __future__ import annotations
@@ -32,6 +42,11 @@ from typing import Any
 
 import yaml
 
+from claude_code_hooks_daemon.install.report_offload import (
+    SUMMARY_MAX_BYTES,
+    bound_summary,
+    write_offloaded_report,
+)
 from claude_code_hooks_daemon.install.version_parse import parse_version_tuple
 
 # ---------------------------------------------------------------------------
@@ -49,8 +64,16 @@ _FIELD_TRUTH_CHANGES = "truth_changes"
 _FIELD_WAS = "was"
 _FIELD_NOW = "now"
 _FIELD_ID = "id"
+_FIELD_TOPIC = "topic"
 
 _FORMAT_TEXT = "text"
+
+UNASSIGNED_CHUNK_KEY = "unassigned"
+_REPORT_FILENAME = "REPORT.md"
+_CHUNK_FILENAME_PREFIX = "chunk-"
+_CHUNK_FILENAME_SUFFIX = ".md"
+_LABEL_SEQUENTIAL = "SEQUENTIAL"
+_LABEL_CHUNK_HEADER = "Truth-Changes chunk"
 
 _LABEL_NO_CHANGES = "✅ No truth-changes in this range"
 _LABEL_HEADER = "Truth-Changes to reconcile"
@@ -60,6 +83,30 @@ _TRAIL_INSTRUCTION = (
     "An entry marked '{label}' is the CURRENT form of a truth that also changed in "
     "the releases it lists; those earlier forms are deliberately not shown. Reconcile "
     "any earlier form of that statement in the docs to the same NOW."
+)
+_RULES_INSTRUCTION = (
+    "For each entry below, scan the PROJECT'S OWN docs (CLAUDE/, docs/, README*, "
+    "AGENTS* — never .claude/hooks-daemon/ internals) for the 'was' statement and "
+    "reconcile it. Minimal edits."
+)
+_SEQUENTIAL_CHUNK_INSTRUCTION = (
+    f"This chunk is {_LABEL_SEQUENTIAL}: its entries carry no topic, so the documents "
+    "they touch are unknown. Run it alone, after every topic chunk has returned — "
+    "never in parallel with them."
+)
+_RETURN_CONTRACT = (
+    "When you finish, return ONLY the files you changed, one line each "
+    "(path — what changed), plus one line saying which entries no project doc "
+    "asserted — not the entries you read. The coordinator holds paths and "
+    "counts, never the report."
+)
+_DISPATCH_INSTRUCTION = (
+    "Each subagent reads its chunk file, reconciles the project's own docs, and "
+    "returns ONLY the files it changed (one line each) — not the entries it read."
+)
+_CHUNKS_HEADING = (
+    "Chunks — dispatch each as its own subagent, in parallel; the documents one "
+    "chunk touches are disjoint from every other chunk's:"
 )
 
 
@@ -81,11 +128,16 @@ class TruthChange:
             sharing an id across manifests are one truth revised repeatedly;
             only the highest-version link is surfaced. None means "stands
             alone; never collapsed".
+        topic: Optional slug naming the DOCUMENT AREA the truth lives in.
+            Entries sharing a topic are chunked together for delegation;
+            two truths that could edit the same document must share one.
+            Never collapses anything. None means "no area declared".
     """
 
     was: str
     now: str | None
     id: str | None = None
+    topic: str | None = None
 
     @property
     def is_removal(self) -> bool:
@@ -118,15 +170,16 @@ class TruthChangeManifest:
 
         Raises:
             KeyError: If a required field (version, or an entry's was) is missing.
-            ValueError: If an entry's id is blank, or two entries in this one
-                manifest share an id — one release cannot revise a truth twice.
+            ValueError: If an entry's id or topic is blank, or two entries in
+                this one manifest share an id — one release cannot revise a
+                truth twice.
         """
         version = str(data[_FIELD_VERSION])
         entries = data.get(_FIELD_TRUTH_CHANGES) or []
         changes: list[TruthChange] = []
         seen_ids: set[str] = set()
         for entry in entries:
-            change_id = _parse_entry_id(entry.get(_FIELD_ID), version)
+            change_id = _parse_entry_slug(entry.get(_FIELD_ID), version, _FIELD_ID)
             if change_id is not None:
                 if change_id in seen_ids:
                     raise ValueError(
@@ -135,24 +188,31 @@ class TruthChangeManifest:
                     )
                 seen_ids.add(change_id)
             changes.append(
-                TruthChange(was=entry[_FIELD_WAS], now=entry.get(_FIELD_NOW), id=change_id)
+                TruthChange(
+                    was=entry[_FIELD_WAS],
+                    now=entry.get(_FIELD_NOW),
+                    id=change_id,
+                    topic=_parse_entry_slug(entry.get(_FIELD_TOPIC), version, _FIELD_TOPIC),
+                )
             )
         return cls(version=version, changes=changes)
 
 
-def _parse_entry_id(raw: Any, version: str) -> str | None:
-    """Return the entry's id slug, or None when the entry carries no id.
+def _parse_entry_slug(raw: Any, version: str, field: str) -> str | None:
+    """Return the entry's ``field`` slug, or None when the entry carries none.
 
     Raises:
-        ValueError: If the id is present but blank — an un-keyed entry must be
+        ValueError: If the key is present but blank — an un-keyed entry must be
             written as an absent key, never as an empty one, so that "stands
-            alone" is always a deliberate choice visible in the manifest.
+            alone" / "no area declared" is always a deliberate, visible choice.
     """
     if raw is None:
         return None
     slug = str(raw).strip()
     if not slug:
-        raise ValueError(f"truth-changes v{version}: an entry's id is blank; omit the key instead")
+        raise ValueError(
+            f"truth-changes v{version}: an entry's {field} is blank; omit the key instead"
+        )
     return slug
 
 
@@ -171,6 +231,45 @@ class SurfacedTruthChange:
     version: str
     change: TruthChange
     superseded_versions: list[str]
+
+    @property
+    def chunk_key(self) -> str:
+        """The chunk this entry belongs to: its topic, else its id, else unassigned."""
+        if self.change.topic is not None:
+            return self.change.topic
+        if self.change.id is not None:
+            return self.change.id
+        return UNASSIGNED_CHUNK_KEY
+
+
+@dataclass
+class ReportChunk:
+    """One delegable unit of reconciliation work.
+
+    Attributes:
+        key: The topic (or bare id) every entry in the chunk shares.
+        entries: The surfaced entries, in version order.
+        sequential: True for the chunk of entries with no topic and no id —
+            the documents it touches are unknown, so it must run alone after
+            the topic chunks return, never in parallel with them.
+    """
+
+    key: str
+    entries: list[SurfacedTruthChange]
+    sequential: bool
+
+
+@dataclass
+class TruthChangesReportFiles:
+    """Where an offloaded report was written.
+
+    Attributes:
+        report_path: The full report (the same text the inline form prints).
+        chunk_paths: Each chunk with the file holding its subagent brief.
+    """
+
+    report_path: Path
+    chunk_paths: list[tuple[ReportChunk, Path]]
 
 
 # ---------------------------------------------------------------------------
@@ -296,15 +395,24 @@ def format_truth_changes_for_llm(
         lines.append("No project-doc reconciliation is needed for this version range.")
         return "\n".join(lines)
 
-    lines.append(
-        "For each entry below, scan the PROJECT'S OWN docs (CLAUDE/, docs/, README*, "
-        "AGENTS* — never .claude/hooks-daemon/ internals) for the 'was' statement and "
-        "reconcile it. Minimal edits."
-    )
+    lines.extend(_rules_lines(surfaced))
+    lines.append("")
+    lines.extend(_entry_lines(surfaced))
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _rules_lines(surfaced: list[SurfacedTruthChange]) -> list[str]:
+    """The reconciliation rules, plus the trail rule when any entry collapsed."""
+    lines = [_RULES_INSTRUCTION]
     if any(item.superseded_versions for item in surfaced):
         lines.append(_TRAIL_INSTRUCTION.format(label=_LABEL_REVISED_IN))
-    lines.append("")
+    return lines
 
+
+def _entry_lines(surfaced: list[SurfacedTruthChange]) -> list[str]:
+    """Render each surfaced entry as a WAS/NOW bullet followed by a blank line."""
+    lines: list[str] = []
     for item in surfaced:
         lines.append(f"• {_format_origin(item)} WAS: {item.change.was.strip()}")
         if item.change.is_removal:
@@ -313,8 +421,7 @@ def format_truth_changes_for_llm(
             now_text = (item.change.now or "").strip()
             lines.append(f"  NOW: {now_text}")
         lines.append("")
-
-    return "\n".join(lines).rstrip() + "\n"
+    return lines
 
 
 def _format_origin(item: SurfacedTruthChange) -> str:
@@ -367,6 +474,173 @@ def collapse_superseded(manifests: list[TruthChangeManifest]) -> list[SurfacedTr
 
 
 # ---------------------------------------------------------------------------
+# Topic chunks and file offload (Plan 00329)
+# ---------------------------------------------------------------------------
+
+
+def chunk_by_topic(surfaced: list[SurfacedTruthChange]) -> list[ReportChunk]:
+    """Partition the collapsed entries into chunks keyed by topic.
+
+    Must be fed the output of ``collapse_superseded``: chunking an uncollapsed
+    report would let two chunks carry contradictory instructions about one
+    document, and parallel subagents would then race for it.
+
+    Chunks appear in first-appearance order (which is version order), except
+    the unassigned chunk — entries with neither topic nor id — which is always
+    last and marked sequential.
+
+    Args:
+        surfaced: Collapsed entries, oldest first.
+
+    Returns:
+        One chunk per distinct key; every entry lands in exactly one chunk.
+    """
+    by_key: dict[str, list[SurfacedTruthChange]] = {}
+    for item in surfaced:
+        by_key.setdefault(item.chunk_key, []).append(item)
+    unassigned = by_key.pop(UNASSIGNED_CHUNK_KEY, None)
+    chunks = [
+        ReportChunk(key=key, entries=items, sequential=False) for key, items in by_key.items()
+    ]
+    if unassigned:
+        chunks.append(ReportChunk(key=UNASSIGNED_CHUNK_KEY, entries=unassigned, sequential=True))
+    return chunks
+
+
+def format_chunk_for_subagent(chunk: ReportChunk, from_version: str, to_version: str) -> str:
+    """Render one chunk as a self-contained brief for a subagent.
+
+    Carries the same reconciliation rules as the full report, this chunk's
+    entries only, and the return contract — the subagent reports what it
+    changed, never the entries it read, or the coordinator re-accumulates
+    the bulk the chunking removed.
+    """
+    lines: list[str] = [
+        f"{_LABEL_CHUNK_HEADER} [{chunk.key}]: v{from_version} → v{to_version} "
+        f"({len(chunk.entries)} {_plural(len(chunk.entries), 'truth')})",
+        "",
+    ]
+    lines.extend(_rules_lines(chunk.entries))
+    if chunk.sequential:
+        lines.append(_SEQUENTIAL_CHUNK_INSTRUCTION)
+    lines.append("")
+    lines.extend(_entry_lines(chunk.entries))
+    lines.append(_RETURN_CONTRACT)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_truth_changes_report(
+    manifests: list[TruthChangeManifest],
+    from_version: str,
+    to_version: str,
+    report_dir: Path,
+) -> TruthChangesReportFiles:
+    """Write the full report and one file per chunk under ``report_dir``.
+
+    Files go in ``report_dir/v{from}-to-v{to}/``: ``REPORT.md`` (a chunk index
+    followed by the same text the inline form prints) and
+    ``chunk-NN-<key>.md``. Chunk files left by an earlier run over the same
+    range are removed first, so the directory never lists a chunk that the
+    current corpus does not produce.
+
+    Raises:
+        OSError: If the directory or a file cannot be written.
+    """
+    target = report_dir / _range_dirname(from_version, to_version)
+    target.mkdir(parents=True, exist_ok=True)
+    for stale in target.glob(f"{_CHUNK_FILENAME_PREFIX}*{_CHUNK_FILENAME_SUFFIX}"):
+        stale.unlink()
+
+    chunks = chunk_by_topic(collapse_superseded(manifests))
+    chunk_paths: list[tuple[ReportChunk, Path]] = []
+    for number, chunk in enumerate(chunks, start=1):
+        name = f"{_CHUNK_FILENAME_PREFIX}{number:02d}-{chunk.key}{_CHUNK_FILENAME_SUFFIX}"
+        path = write_offloaded_report(
+            target, name, format_chunk_for_subagent(chunk, from_version, to_version)
+        )
+        chunk_paths.append((chunk, path))
+
+    index_lines = [
+        f"# Truth-changes report: v{from_version} → v{to_version}",
+        "",
+        "Chunk files (one subagent brief each; dispatch rules are in the command's summary):",
+    ]
+    index_lines.extend(_chunk_index_line(chunk, path) for chunk, path in chunk_paths)
+    index_lines.append("")
+    full_text = (
+        "\n".join(index_lines)
+        + "\n"
+        + format_truth_changes_for_llm(manifests, from_version, to_version)
+    )
+    report_path = write_offloaded_report(target, _REPORT_FILENAME, full_text)
+    return TruthChangesReportFiles(report_path=report_path, chunk_paths=chunk_paths)
+
+
+def format_bounded_summary(
+    manifests: list[TruthChangeManifest],
+    from_version: str,
+    to_version: str,
+    files: TruthChangesReportFiles,
+) -> str:
+    """The stdout form: counts, the report path, the chunk list — never an entry.
+
+    Bounded by ``SUMMARY_MAX_BYTES``; when the chunk list would breach it, the
+    tail of the list is replaced by a line naming how many more chunks
+    ``REPORT.md`` indexes.
+    """
+    surfaced = collapse_superseded(manifests)
+    raw_count = sum(len(manifest.changes) for manifest in manifests)
+    collapsed = raw_count - len(surfaced)
+    head = [
+        f"{_LABEL_HEADER}: v{from_version} → v{to_version}",
+        "",
+        f"{len(surfaced)} {_plural(len(surfaced), 'truth')} to reconcile "
+        f"({raw_count} {_plural(raw_count, 'entry', 'entries')} across "
+        f"{len(manifests)} {_plural(len(manifests), 'release')}; "
+        f"{collapsed} superseded {_plural(collapsed, 'link')} collapsed).",
+        f"Full report: {files.report_path}",
+        _CHUNKS_HEADING,
+    ]
+    items = [
+        f"  {number}. {_chunk_summary_line(chunk, path)}"
+        for number, (chunk, path) in enumerate(files.chunk_paths, start=1)
+    ]
+    tail = [_DISPATCH_INSTRUCTION]
+    return bound_summary(
+        head=head,
+        items=items,
+        tail=tail,
+        max_bytes=SUMMARY_MAX_BYTES,
+        overflow=lambda n: f"  ... {n} more chunks, all indexed in {files.report_path.name}",
+    )
+
+
+def _chunk_summary_line(chunk: ReportChunk, path: Path) -> str:
+    count = f"{len(chunk.entries)} {_plural(len(chunk.entries), 'truth')}"
+    if chunk.sequential:
+        return (
+            f"{chunk.key} — {count} — {_LABEL_SEQUENTIAL}: run alone, after the others "
+            f"return — {path}"
+        )
+    return f"{chunk.key} — {count} — {path}"
+
+
+def _chunk_index_line(chunk: ReportChunk, path: Path) -> str:
+    marker = f" ({_LABEL_SEQUENTIAL})" if chunk.sequential else ""
+    return f"- {path.name}{marker} — {len(chunk.entries)} {_plural(len(chunk.entries), 'entry', 'entries')} — {path}"
+
+
+def _range_dirname(from_version: str, to_version: str) -> str:
+    return f"v{from_version.lstrip('v')}-to-v{to_version.lstrip('v')}"
+
+
+def _plural(count: int, singular: str, plural: str | None = None) -> str:
+    if count == 1:
+        return singular
+    return plural if plural is not None else f"{singular}s"
+
+
+# ---------------------------------------------------------------------------
 # Run-function (CLI entrypoint)
 # ---------------------------------------------------------------------------
 
@@ -376,6 +650,7 @@ def run_check_truth_changes(
     to_version: str,
     output_format: str = _FORMAT_TEXT,
     truth_changes_dir: Path | None = None,
+    report_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Load and format truth-changes for a version range.
 
@@ -384,15 +659,21 @@ def run_check_truth_changes(
         to_version: Version being upgraded to (included in range).
         output_format: 'text' for LLM-readable instructions, 'json' for machine.
         truth_changes_dir: Override the manifest directory (for testing).
+        report_dir: When given and there are changes, the full report and the
+            chunk files are written under it and the text form is the bounded
+            summary. None keeps the whole report inline (``--full``).
 
     Returns:
         JSON-serialisable dict. Keys: from_version, to_version, has_changes,
-        changes (list of {version, was, now, is_removal, id,
+        changes (list of {version, was, now, is_removal, id, topic,
         superseded_versions} — superseded links of a keyed truth are collapsed
-        here too, so both formats surface the same set), and (text format) text.
+        here too, so both formats surface the same set), report_path and
+        chunks (each {key, path, entry_count, sequential}; None / empty when
+        nothing was offloaded), and (text format) text.
 
     Raises:
         ValueError: If from_version > to_version.
+        OSError: If report_dir was given and cannot be written.
     """
     manifests = load_truth_changes_between(
         from_version, to_version, truth_changes_dir=truth_changes_dir
@@ -405,6 +686,7 @@ def run_check_truth_changes(
             "now": item.change.now,
             "is_removal": item.change.is_removal,
             "id": item.change.id,
+            "topic": item.change.topic,
             "superseded_versions": item.superseded_versions,
         }
         for item in collapse_superseded(manifests)
@@ -415,9 +697,28 @@ def run_check_truth_changes(
         "to_version": to_version,
         "has_changes": bool(changes),
         "changes": changes,
+        "report_path": None,
+        "chunks": [],
     }
 
+    files: TruthChangesReportFiles | None = None
+    if changes and report_dir is not None:
+        files = write_truth_changes_report(manifests, from_version, to_version, report_dir)
+        result["report_path"] = str(files.report_path)
+        result["chunks"] = [
+            {
+                "key": chunk.key,
+                "path": str(path),
+                "entry_count": len(chunk.entries),
+                "sequential": chunk.sequential,
+            }
+            for chunk, path in files.chunk_paths
+        ]
+
     if output_format == _FORMAT_TEXT:
-        result["text"] = format_truth_changes_for_llm(manifests, from_version, to_version)
+        if files is not None:
+            result["text"] = format_bounded_summary(manifests, from_version, to_version, files)
+        else:
+            result["text"] = format_truth_changes_for_llm(manifests, from_version, to_version)
 
     return result

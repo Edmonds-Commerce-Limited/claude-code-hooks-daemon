@@ -1,6 +1,7 @@
 version: "3.53.1"
 truth_changes:
-  - was: >
+  - topic: daemon-cli
+    was: >
       The daemon-CLI commands quoted in the generated <hooksdaemon> section of
       your CLAUDE.md are absolute paths, so you can copy one out of that section
       and run it from any working directory. The same is true of the
@@ -27,7 +28,8 @@ truth_changes:
       are still absolute and still copy-paste runnable from any cwd, which is
       what Plan 00192 made them for. The two destinations have opposite
       requirements, and only the tracked one moved.
-  - was: >
+  - topic: blocking-handlers
+    was: >
       When absolute_path blocks a relative path, the worked example it gives you
       names the directory to prepend. When root_recursion_guard blocks a
       filesystem-wide scan, its "DO THIS INSTEAD" example names a project-scoped

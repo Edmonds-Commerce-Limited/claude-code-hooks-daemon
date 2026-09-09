@@ -1,6 +1,7 @@
 version: "3.16.0"
 truth_changes:
-  - was: >
+  - topic: plan-workflow
+    was: >
       To find the next plan number, scan the CLAUDE/Plan/ folder for the highest
       NNNNN- prefix (e.g. with ls / find / a glob pipeline) and add one.
     now: >

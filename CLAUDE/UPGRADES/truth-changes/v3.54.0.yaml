@@ -1,6 +1,7 @@
 version: "3.54.0"
 truth_changes:
-  - was: >
+  - topic: git-safety
+    was: >
       `hooks-daemon delete-branch` classifies every branch into one of FOUR
       tiers, evaluated cheapest-first: merged (the tip is an ancestor of the
       protected ref), patch-equivalent (every commit is already upstream by
@@ -30,7 +31,8 @@ truth_changes:
       `merged` verdict means git will accept the delete, that inference no
       longer holds -- the tier names now tell you which of the three merged
       shapes you have.
-  - was: >
+  - topic: git-safety
+    was: >
       delete-branch refuses by default and deletes only what it can positively
       prove is recoverable. Once a branch is proved safe by a tier, the command
       deletes it: the tier IS the verdict, and a refusal always means the proof
@@ -49,7 +51,8 @@ truth_changes:
       say a proved branch is always deleted, or that every refusal names files
       holding unique content, add this second refusal shape: it names shas, not
       files, and re-running is the whole remedy.
-  - was: >
+  - topic: blocking-handlers
+    was: >
       `daemon.exclude_paths` is the project-wide exemption list for the
       CONTENT-SCANNING blockers -- security_antipattern, qa_suppression,
       error_hiding_blocker, sensitive_content. Putting a glob there exempts a

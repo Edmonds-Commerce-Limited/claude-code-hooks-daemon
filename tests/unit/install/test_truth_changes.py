@@ -12,15 +12,22 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.install.report_offload import SUMMARY_MAX_BYTES
 from claude_code_hooks_daemon.install.truth_changes import (
+    UNASSIGNED_CHUNK_KEY,
+    ReportChunk,
     SurfacedTruthChange,
     TruthChange,
     TruthChangeManifest,
+    chunk_by_topic,
     collapse_superseded,
+    format_bounded_summary,
+    format_chunk_for_subagent,
     format_truth_changes_for_llm,
     list_known_truth_change_versions,
     load_truth_changes_between,
     run_check_truth_changes,
+    write_truth_changes_report,
 )
 
 _REAL_TRUTH_CHANGES_DIR = (
@@ -445,6 +452,7 @@ class TestRunCheckTruthChanges:
                 "now": "Read git config --local hooksdaemon.latestPlanNumber and add one.",
                 "is_removal": False,
                 "id": None,
+                "topic": None,
                 "superseded_versions": [],
             }
         ]
@@ -461,3 +469,364 @@ class TestRunCheckTruthChanges:
             run_check_truth_changes(
                 "3.18.0", "3.16.0", output_format="text", truth_changes_dir=truth_dir
             )
+
+
+# ---------------------------------------------------------------------------
+# Plan 00329: topic chunks, file offload, and the stdout bound
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def topic_dir(tmp_path: Path) -> Path:
+    """Entries across two releases carrying topics, a bare id, and nothing.
+
+    v3.30.0: two ``plan-workflow`` entries and one bare-``id`` entry.
+    v3.31.0: one ``daemon-cli`` entry, one more ``plan-workflow`` entry, one
+    entry with neither key, and a second link of the bare-id chain.
+    """
+    d = tmp_path / "truth-changes"
+    _write_manifest(
+        d,
+        "3.30.0",
+        "version: '3.30.0'\n"
+        "truth_changes:\n"
+        "  - topic: plan-workflow\n"
+        "    was: Plans are numbered by scanning the folder.\n"
+        "    now: Plans are numbered from the git counter.\n"
+        "  - topic: plan-workflow\n"
+        "    was: Notes go in a Notes section.\n"
+        "    now: Notes go in JOURNAL/.\n"
+        "  - id: venv-layout\n"
+        "    was: The venv lives at untracked/venv/.\n"
+        "    now: The venv is fingerprint-keyed.\n",
+    )
+    _write_manifest(
+        d,
+        "3.31.0",
+        "version: '3.31.0'\n"
+        "truth_changes:\n"
+        "  - topic: daemon-cli\n"
+        "    was: Run the CLI via $PYTHON.\n"
+        "    now: Run the CLI via bin/hooks-daemon.\n"
+        "  - topic: plan-workflow\n"
+        "    was: Time estimates are allowed in plans.\n"
+        "    now: Time estimates are blocked in plans.\n"
+        "  - was: A truth with neither key.\n"
+        "    now: Its replacement.\n"
+        "  - id: venv-layout\n"
+        "    was: The venv is fingerprint-keyed.\n"
+        "    now: The venv is fingerprint-keyed under the daemon dir.\n",
+    )
+    return d
+
+
+class TestTopicParsing:
+    def test_from_dict_parses_optional_topic(self) -> None:
+        manifest = TruthChangeManifest.from_dict(
+            {
+                "version": "3.30.0",
+                "truth_changes": [{"topic": "plan-workflow", "was": "a", "now": "b"}],
+            }
+        )
+        assert manifest.changes[0].topic == "plan-workflow"
+
+    def test_from_dict_defaults_topic_to_none(self) -> None:
+        manifest = TruthChangeManifest.from_dict(
+            {"version": "3.30.0", "truth_changes": [{"was": "a", "now": "b"}]}
+        )
+        assert manifest.changes[0].topic is None
+
+    def test_from_dict_rejects_blank_topic(self) -> None:
+        with pytest.raises(ValueError, match="topic"):
+            TruthChangeManifest.from_dict(
+                {"version": "3.30.0", "truth_changes": [{"topic": "  ", "was": "a", "now": "b"}]}
+            )
+
+    def test_topic_and_id_may_coexist(self) -> None:
+        manifest = TruthChangeManifest.from_dict(
+            {
+                "version": "3.30.0",
+                "truth_changes": [{"topic": "t", "id": "i", "was": "a", "now": "b"}],
+            }
+        )
+        assert (manifest.changes[0].topic, manifest.changes[0].id) == ("t", "i")
+
+
+class TestChunkByTopic:
+    def _chunks(self, topic_dir: Path) -> list[ReportChunk]:
+        manifests = load_truth_changes_between("3.29.0", "3.31.0", truth_changes_dir=topic_dir)
+        return chunk_by_topic(collapse_superseded(manifests))
+
+    def test_every_surfaced_entry_lands_in_exactly_one_chunk(self, topic_dir: Path) -> None:
+        manifests = load_truth_changes_between("3.29.0", "3.31.0", truth_changes_dir=topic_dir)
+        surfaced = collapse_superseded(manifests)
+        chunks = chunk_by_topic(surfaced)
+        placed = [entry for chunk in chunks for entry in chunk.entries]
+        assert sorted(e.change.was for e in placed) == sorted(e.change.was for e in surfaced)
+        assert len(placed) == len(surfaced)
+
+    def test_chunk_keys_are_unique(self, topic_dir: Path) -> None:
+        keys = [chunk.key for chunk in self._chunks(topic_dir)]
+        assert len(keys) == len(set(keys))
+
+    def test_entries_sharing_a_topic_share_one_chunk_across_releases(self, topic_dir: Path) -> None:
+        by_key = {chunk.key: chunk for chunk in self._chunks(topic_dir)}
+        assert [e.version for e in by_key["plan-workflow"].entries] == [
+            "3.30.0",
+            "3.30.0",
+            "3.31.0",
+        ]
+
+    def test_keyed_entry_without_topic_is_its_own_chunk_keyed_by_id(self, topic_dir: Path) -> None:
+        by_key = {chunk.key: chunk for chunk in self._chunks(topic_dir)}
+        assert [e.change.id for e in by_key["venv-layout"].entries] == ["venv-layout"]
+        assert by_key["venv-layout"].sequential is False
+
+    def test_chunking_happens_after_collapsing(self, topic_dir: Path) -> None:
+        by_key = {chunk.key: chunk for chunk in self._chunks(topic_dir)}
+        links = by_key["venv-layout"].entries
+        assert [e.version for e in links] == ["3.31.0"]
+        assert links[0].superseded_versions == ["3.30.0"]
+
+    def test_entry_with_neither_key_goes_to_the_sequential_chunk_last(
+        self, topic_dir: Path
+    ) -> None:
+        chunks = self._chunks(topic_dir)
+        assert chunks[-1].key == UNASSIGNED_CHUNK_KEY
+        assert chunks[-1].sequential is True
+        assert [e.change.was for e in chunks[-1].entries] == ["A truth with neither key."]
+        assert all(chunk.sequential is False for chunk in chunks[:-1])
+
+    def test_chunk_order_is_first_appearance_in_version_order(self, topic_dir: Path) -> None:
+        # The collapsed venv-layout chain sits where its LAST link was, so it
+        # appears after daemon-cli, which v3.31.0 lists first.
+        assert [c.key for c in self._chunks(topic_dir)] == [
+            "plan-workflow",
+            "daemon-cli",
+            "venv-layout",
+            UNASSIGNED_CHUNK_KEY,
+        ]
+
+    def test_no_entries_means_no_chunks(self) -> None:
+        assert chunk_by_topic([]) == []
+
+
+class TestFormatChunkForSubagent:
+    def test_chunk_text_is_self_contained(self, topic_dir: Path) -> None:
+        manifests = load_truth_changes_between("3.29.0", "3.31.0", truth_changes_dir=topic_dir)
+        chunks = chunk_by_topic(collapse_superseded(manifests))
+        text = format_chunk_for_subagent(chunks[0], "3.29.0", "3.31.0")
+        # names itself, carries the rules, its entries, and the return contract
+        assert "plan-workflow" in text
+        assert "never .claude/hooks-daemon/" in text
+        assert "Plans are numbered from the git counter." in text
+        assert "Time estimates are blocked in plans." in text
+        assert "Run the CLI via bin/hooks-daemon." not in text
+        assert "files you changed" in text
+        assert "not the entries" in text
+
+    def test_sequential_chunk_says_why_it_runs_alone(self, topic_dir: Path) -> None:
+        manifests = load_truth_changes_between("3.29.0", "3.31.0", truth_changes_dir=topic_dir)
+        chunks = chunk_by_topic(collapse_superseded(manifests))
+        text = format_chunk_for_subagent(chunks[-1], "3.29.0", "3.31.0")
+        assert "SEQUENTIAL" in text
+        assert "after" in text
+
+
+class TestWriteTruthChangesReport:
+    def test_writes_full_report_and_one_file_per_chunk(
+        self, topic_dir: Path, tmp_path: Path
+    ) -> None:
+        manifests = load_truth_changes_between("3.29.0", "3.31.0", truth_changes_dir=topic_dir)
+        files = write_truth_changes_report(manifests, "3.29.0", "3.31.0", tmp_path / "out")
+        assert files.report_path == tmp_path / "out" / "v3.29.0-to-v3.31.0" / "REPORT.md"
+        full = files.report_path.read_text(encoding="utf-8")
+        assert format_truth_changes_for_llm(manifests, "3.29.0", "3.31.0") in full
+        assert [p.name for _, p in files.chunk_paths] == [
+            "chunk-01-plan-workflow.md",
+            "chunk-02-daemon-cli.md",
+            "chunk-03-venv-layout.md",
+            f"chunk-04-{UNASSIGNED_CHUNK_KEY}.md",
+        ]
+        for chunk, path in files.chunk_paths:
+            assert path.read_text(encoding="utf-8") == format_chunk_for_subagent(
+                chunk, "3.29.0", "3.31.0"
+            )
+
+    def test_full_report_indexes_the_chunk_files(self, topic_dir: Path, tmp_path: Path) -> None:
+        manifests = load_truth_changes_between("3.29.0", "3.31.0", truth_changes_dir=topic_dir)
+        files = write_truth_changes_report(manifests, "3.29.0", "3.31.0", tmp_path)
+        full = files.report_path.read_text(encoding="utf-8")
+        for _, path in files.chunk_paths:
+            assert str(path) in full
+
+    def test_stale_chunk_files_from_a_previous_run_are_removed(
+        self, topic_dir: Path, tmp_path: Path
+    ) -> None:
+        target = tmp_path / "v3.29.0-to-v3.31.0"
+        target.mkdir()
+        stale = target / "chunk-09-gone.md"
+        stale.write_text("stale")
+        manifests = load_truth_changes_between("3.29.0", "3.31.0", truth_changes_dir=topic_dir)
+        write_truth_changes_report(manifests, "3.29.0", "3.31.0", tmp_path)
+        assert not stale.exists()
+
+
+class TestBoundedSummary:
+    def _summary(self, truth_changes_dir: Path, out: Path, frm: str, to: str) -> str:
+        manifests = load_truth_changes_between(frm, to, truth_changes_dir=truth_changes_dir)
+        files = write_truth_changes_report(manifests, frm, to, out)
+        return format_bounded_summary(manifests, frm, to, files)
+
+    def test_summary_names_counts_report_path_and_every_chunk(
+        self, topic_dir: Path, tmp_path: Path
+    ) -> None:
+        text = self._summary(topic_dir, tmp_path, "3.29.0", "3.31.0")
+        assert "Truth-Changes to reconcile: v3.29.0 → v3.31.0" in text
+        assert "6 truths" in text  # 7 raw entries, one superseded link collapsed
+        assert "7 entries" in text
+        assert str(tmp_path / "v3.29.0-to-v3.31.0" / "REPORT.md") in text
+        assert "chunk-01-plan-workflow.md" in text
+        assert f"chunk-04-{UNASSIGNED_CHUNK_KEY}.md" in text
+        assert "SEQUENTIAL" in text
+        assert "files it changed" in text
+
+    def test_summary_carries_no_entry_text(self, topic_dir: Path, tmp_path: Path) -> None:
+        text = self._summary(topic_dir, tmp_path, "3.29.0", "3.31.0")
+        assert "Plans are numbered from the git counter." not in text
+        assert "WAS:" not in text
+
+    def test_full_span_of_the_real_corpus_is_under_the_bound(self, tmp_path: Path) -> None:
+        text = self._summary(_REAL_TRUTH_CHANGES_DIR, tmp_path, "0.0.0", "999.0.0")
+        assert len(text.encode("utf-8")) <= SUMMARY_MAX_BYTES
+
+    def test_bound_holds_when_a_new_manifest_is_added_to_the_corpus(self, tmp_path: Path) -> None:
+        # Task 4.1: the regression that lets this defect return is a release
+        # quietly adding entries. Copy the real corpus, add a release with
+        # forty entries over forty NEW topics, and the summary still fits.
+        corpus = tmp_path / "corpus"
+        corpus.mkdir()
+        for manifest_file in _REAL_TRUTH_CHANGES_DIR.glob("v*.yaml"):
+            (corpus / manifest_file.name).write_text(manifest_file.read_text(encoding="utf-8"))
+        entries = "".join(
+            f"  - topic: new-area-{i:02d}\n    was: Old truth {i}.\n    now: New truth {i}.\n"
+            for i in range(40)
+        )
+        _write_manifest(corpus, "999.0.0", f"version: '999.0.0'\ntruth_changes:\n{entries}")
+        text = self._summary(corpus, tmp_path / "out", "0.0.0", "999.0.0")
+        assert len(text.encode("utf-8")) <= SUMMARY_MAX_BYTES
+        assert "New truth 0." not in text
+
+    def test_bound_holds_for_an_absurd_number_of_topics(self, tmp_path: Path) -> None:
+        d = tmp_path / "truth-changes"
+        entries = "".join(
+            f"  - topic: topic-{i:03d}\n    was: Old {i}.\n    now: New {i}.\n" for i in range(400)
+        )
+        _write_manifest(d, "9.0.0", f"version: '9.0.0'\ntruth_changes:\n{entries}")
+        text = self._summary(d, tmp_path / "out", "8.0.0", "9.0.0")
+        assert len(text.encode("utf-8")) <= SUMMARY_MAX_BYTES
+        assert "more chunks" in text
+        assert "REPORT.md" in text
+
+
+class TestRealCorpusTopics:
+    """Every shipped entry is assigned, so parallel dispatch is real, not a fallback."""
+
+    def _chunks(self) -> list[ReportChunk]:
+        manifests = load_truth_changes_between(
+            "0.0.0", "999.0.0", truth_changes_dir=_REAL_TRUTH_CHANGES_DIR
+        )
+        return chunk_by_topic(collapse_superseded(manifests))
+
+    def test_no_entry_is_unassigned(self) -> None:
+        keys = [chunk.key for chunk in self._chunks()]
+        assert UNASSIGNED_CHUNK_KEY not in keys
+
+    def test_chunks_partition_the_surfaced_entries(self) -> None:
+        manifests = load_truth_changes_between(
+            "0.0.0", "999.0.0", truth_changes_dir=_REAL_TRUTH_CHANGES_DIR
+        )
+        surfaced = collapse_superseded(manifests)
+        chunks = self._chunks()
+        assert sum(len(c.entries) for c in chunks) == len(surfaced)
+        assert len({c.key for c in chunks}) == len(chunks)
+
+    def test_every_topic_is_a_kebab_case_slug(self) -> None:
+        for chunk in self._chunks():
+            assert chunk.key == chunk.key.strip().lower(), chunk.key
+            assert " " not in chunk.key and "_" not in chunk.key, chunk.key
+
+    def test_keyed_truths_carry_a_topic_so_a_chain_is_not_its_own_chunk(self) -> None:
+        for chunk in self._chunks():
+            for entry in chunk.entries:
+                if entry.change.id is not None:
+                    assert entry.change.topic is not None, entry.change.id
+
+
+class TestRunCheckTruthChangesOffload:
+    def test_report_dir_bounds_the_text_and_returns_the_paths(
+        self, topic_dir: Path, tmp_path: Path
+    ) -> None:
+        result = run_check_truth_changes(
+            "3.29.0",
+            "3.31.0",
+            output_format="text",
+            truth_changes_dir=topic_dir,
+            report_dir=tmp_path / "reports",
+        )
+        assert result["has_changes"] is True
+        assert len(result["text"].encode("utf-8")) <= SUMMARY_MAX_BYTES
+        assert "WAS:" not in result["text"]
+        report_path = Path(result["report_path"])
+        assert report_path.is_file()
+        assert [c["key"] for c in result["chunks"]] == [
+            "plan-workflow",
+            "daemon-cli",
+            "venv-layout",
+            UNASSIGNED_CHUNK_KEY,
+        ]
+        assert [c["entry_count"] for c in result["chunks"]] == [3, 1, 1, 1]
+        assert [c["sequential"] for c in result["chunks"]] == [False, False, False, True]
+        assert all(Path(c["path"]).is_file() for c in result["chunks"])
+
+    def test_json_format_also_writes_the_files(self, topic_dir: Path, tmp_path: Path) -> None:
+        result = run_check_truth_changes(
+            "3.29.0",
+            "3.31.0",
+            output_format="json",
+            truth_changes_dir=topic_dir,
+            report_dir=tmp_path,
+        )
+        assert Path(result["report_path"]).is_file()
+        assert len(result["changes"]) == 6
+        assert "text" not in result
+
+    def test_without_report_dir_the_full_report_is_the_text(
+        self, topic_dir: Path, tmp_path: Path
+    ) -> None:
+        result = run_check_truth_changes(
+            "3.29.0", "3.31.0", output_format="text", truth_changes_dir=topic_dir
+        )
+        assert "WAS:" in result["text"]
+        assert result["report_path"] is None
+        assert result["chunks"] == []
+        assert not list(tmp_path.glob("**/v3.29.0-to-v3.31.0"))
+
+    def test_no_changes_writes_nothing(self, topic_dir: Path, tmp_path: Path) -> None:
+        result = run_check_truth_changes(
+            "3.31.0",
+            "3.31.0",
+            output_format="text",
+            truth_changes_dir=topic_dir,
+            report_dir=tmp_path / "reports",
+        )
+        assert result["has_changes"] is False
+        assert result["report_path"] is None
+        assert not (tmp_path / "reports").exists()
+
+    def test_json_changes_carry_topic(self, topic_dir: Path) -> None:
+        result = run_check_truth_changes(
+            "3.29.0", "3.30.0", output_format="json", truth_changes_dir=topic_dir
+        )
+        assert result["changes"][0]["topic"] == "plan-workflow"
+        assert result["changes"][2]["topic"] is None

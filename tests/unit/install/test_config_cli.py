@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.install.config_cli import (
     run_config_merge,
     run_config_validate,
 )
+from claude_code_hooks_daemon.install.report_offload import SUMMARY_MAX_BYTES
 
 
 @pytest.fixture()
@@ -587,3 +588,129 @@ class TestHandlerKeyAuditInCli:
             "handlers.stop.hedging_language_detector -> "
             "pseudo_events.nitpick.handlers.hedging_language"
         ]
+
+
+_MANIFEST_WITH_RENAMED = """\
+version: "2.13.0"
+date: "2026-02-17"
+breaking: false
+config_changes:
+  added: []
+  renamed:
+    - old_key: daemon.old_name
+      new_key: daemon.new_name
+      description: "Renamed for clarity"
+  removed: []
+  changed: []
+"""
+
+
+class TestRunCheckConfigMigrationsOffload:
+    """Plan 00329: the advisory is offloaded to a file and stdout stays bounded."""
+
+    def _write_config(self, path: Path, config: dict[str, Any]) -> Path:
+        p = path / "hooks-daemon.yaml"
+        p.write_text(yaml.dump(config))
+        return p
+
+    def _manifests(self, tmp_path: Path) -> Path:
+        md = tmp_path / "manifests"
+        md.mkdir()
+        (md / "v2.13.0.yaml").write_text(_MANIFEST_WITH_RECOMMENDED)
+        (md / "v2.14.0.yaml").write_text(_MANIFEST_WITH_ADDED.replace("2.13.0", "2.14.0"))
+        return md
+
+    def test_report_dir_bounds_the_text_and_writes_the_full_advisory(self, tmp_path: Path) -> None:
+        md = self._manifests(tmp_path)
+        cfg = self._write_config(tmp_path, {"handlers": {}, "daemon": {}})
+        result = run_check_config_migrations(
+            from_version="2.12.0",
+            to_version="2.14.0",
+            user_config_path=cfg,
+            output_format="text",
+            manifests_dir=md,
+            report_dir=tmp_path / "reports",
+        )
+        report_path = Path(result["report_path"])
+        assert report_path == tmp_path / "reports" / "v2.12.0-to-v2.14.0" / "ADVISORY.md"
+        full = report_path.read_text(encoding="utf-8")
+        assert "Prevents multiple daemon instances" in full
+        text = result["text"]
+        assert len(text.encode("utf-8")) <= SUMMARY_MAX_BYTES
+        assert str(report_path) in text
+        # the actionable line survives inline, the informational prose does not
+        assert "recovery_cron_advisor.enabled" in text
+        assert "recovery_cron_advisor.enabled = true" in text
+        assert "Prevents multiple daemon instances" not in text
+        assert "1 informational" in text
+
+    def test_warnings_and_stale_keys_stay_inline(self, tmp_path: Path) -> None:
+        md = tmp_path / "manifests"
+        md.mkdir()
+        (md / "v2.13.0.yaml").write_text(_MANIFEST_WITH_RENAMED)
+        cfg = self._write_config(tmp_path, {"handlers": {}, "daemon": {"old_name": 1}})
+        result = run_check_config_migrations(
+            from_version="2.12.0",
+            to_version="2.13.0",
+            user_config_path=cfg,
+            output_format="text",
+            manifests_dir=md,
+            report_dir=tmp_path / "reports",
+        )
+        assert result["has_warnings"] is True
+        assert "daemon.old_name" in result["text"]
+        assert "daemon.new_name" in result["text"]
+
+    def test_without_report_dir_the_full_advisory_is_the_text(self, tmp_path: Path) -> None:
+        md = self._manifests(tmp_path)
+        cfg = self._write_config(tmp_path, {"handlers": {}, "daemon": {}})
+        result = run_check_config_migrations(
+            from_version="2.12.0",
+            to_version="2.14.0",
+            user_config_path=cfg,
+            output_format="text",
+            manifests_dir=md,
+        )
+        assert "Prevents multiple daemon instances" in result["text"]
+        assert result["report_path"] is None
+
+    def test_nothing_to_report_writes_nothing(self, tmp_path: Path) -> None:
+        md = tmp_path / "manifests"
+        md.mkdir()
+        cfg = self._write_config(tmp_path, {"handlers": {}, "daemon": {}})
+        result = run_check_config_migrations(
+            from_version="2.12.0",
+            to_version="2.13.0",
+            user_config_path=cfg,
+            output_format="text",
+            manifests_dir=md,
+            report_dir=tmp_path / "reports",
+        )
+        assert result["report_path"] is None
+        assert not (tmp_path / "reports").exists()
+        assert "No Changes Needed" in result["text"]
+
+    def test_bound_holds_for_hundreds_of_new_options(self, tmp_path: Path) -> None:
+        md = tmp_path / "manifests"
+        md.mkdir()
+        added = "".join(
+            f'    - key: handlers.pre_tool_use.h{i:03d}.enabled\n      description: "opt {i}"\n'
+            f"      recommended: true\n      recommended_value: true\n"
+            for i in range(300)
+        )
+        (md / "v2.13.0.yaml").write_text(
+            'version: "2.13.0"\ndate: "2026-02-17"\nbreaking: false\nconfig_changes:\n'
+            f"  added:\n{added}  renamed: []\n  removed: []\n  changed: []\n"
+        )
+        cfg = self._write_config(tmp_path, {"handlers": {}, "daemon": {}})
+        result = run_check_config_migrations(
+            from_version="2.12.0",
+            to_version="2.13.0",
+            user_config_path=cfg,
+            output_format="text",
+            manifests_dir=md,
+            report_dir=tmp_path / "reports",
+        )
+        assert len(result["text"].encode("utf-8")) <= SUMMARY_MAX_BYTES
+        assert "more" in result["text"]
+        assert "ADVISORY.md" in result["text"]

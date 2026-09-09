@@ -1,6 +1,7 @@
 version: "3.32.0"
 truth_changes:
-  - was: >
+  - topic: plan-workflow
+    was: >
       mkplan.bash scaffolds each new plan's PLAN.md from a skeleton template
       hard-coded inside the script itself; customising the plan template means
       editing the daemon-owned script (which is overwritten on every upgrade).
@@ -14,7 +15,8 @@ truth_changes:
       daemon-owned `.plan-template-default.md` snapshot) so you can adopt
       upstream improvements deliberately. The script's built-in skeleton
       remains only as a fallback when no _TEMPLATE_.md exists.
-  - was: >
+  - topic: plan-workflow
+    was: >
       Plan document hygiene (status headers, index rows, archive placement,
       statistics) is enforced only by convention and periodic manual audits;
       nothing stops a PLAN.md being written without a status header or a plan

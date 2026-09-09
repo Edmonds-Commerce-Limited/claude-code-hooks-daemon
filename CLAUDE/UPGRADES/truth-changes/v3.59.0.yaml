@@ -1,6 +1,7 @@
 version: "3.59.0"
 truth_changes:
-  - was: >
+  - topic: plan-workflow
+    was: >
       `CLAUDE/Plan/README.md` lists every completed plan row — a project doc
       or agent asserting "the plan index lists every completed plan" was
       accurate.
@@ -12,7 +13,8 @@ truth_changes:
       the top-level README is a complete completed-plan listing is now
       false — check `Completed/README.md` too when an older plan is not
       found in the top-level index.
-  - was: >
+  - topic: tool-controls
+    was: >
       A dispatched subagent's final message is returned inline to the
       coordinator with no size contract — a subagent could reply with its
       full report content directly in its stop message.

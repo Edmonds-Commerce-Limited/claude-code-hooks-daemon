@@ -1,6 +1,7 @@
 version: "3.12.0"
 truth_changes:
-  - was: >
+  - topic: plan-workflow
+    was: >
       When a plan is completed, record its completion date in the plan index
       (e.g. CLAUDE/Plan/README.md) and in the plan's status header — dated entries
       such as "Completed: 2026-02-10".

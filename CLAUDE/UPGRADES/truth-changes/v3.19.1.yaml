@@ -1,6 +1,7 @@
 version: "3.19.1"
 truth_changes:
-  - was: >
+  - topic: daemon-cli
+    was: >
       The daemon's fingerprint-keyed virtual environment lives at
       `untracked/venv-py{MM}-{fingerprint}/`, where the fingerprint is
       md5(sys.version | sys.base_prefix | platform.machine())[:8].

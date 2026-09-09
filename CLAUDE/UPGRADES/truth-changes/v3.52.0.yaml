@@ -1,6 +1,7 @@
 version: "3.52.0"
 truth_changes:
-  - was: >
+  - topic: install-and-upgrade
+    was: >
       The upstream history of this repository is append-only. Your clone's
       commits, and the tags you already have, will always be ancestors of what
       you fetch. A divergence between your clone and origin means someone
@@ -28,7 +29,8 @@ truth_changes:
       divergence whose two sides are patch-identical) and suppresses its normal
       "run git pull" advice, telling you to realign instead. If you see that
       advisory, believe it -- do not work around it by pulling.
-  - was: >
+  - topic: blocking-handlers
+    was: >
       A blocking safety handler matches the command you typed. Spelling the
       same command a different way -- naming the binary by path, putting git's
       global options before the subcommand, adding sudo's own flags, or
@@ -61,7 +63,8 @@ truth_changes:
       rather than a flag. Both predate this release and neither is a regression,
       but do not read "respelling is blocked" as covering them.
 
-  - was: >
+  - topic: blocking-handlers
+    was: >
       The "security_antipattern" handler blocks OWASP security antipatterns
       including SQL injection, weak cryptography and path traversal. Its
       resident CLAUDE.md guidance says so, so a write that passes it has been
@@ -83,7 +86,8 @@ truth_changes:
       this release -- only the claim. Coverage also varies by language, which
       the guidance now states: a construct blocked in one language is not
       necessarily blocked in another. Implementation is tracked in Plan 00204.
-  - was: >
+  - topic: blocking-handlers
+    was: >
       The "lint_on_edit" handler only runs a linter that is on your PATH. If it
       reports "lint tool not found (ruff) - install to enable lint checking",
       the tool is missing and the remedy is to install it. A project can treat
@@ -107,7 +111,8 @@ truth_changes:
       resolution deliberately happens before execution so that "tool absent"
       cannot be mistaken for "tool found problems".
 
-  - was: >
+  - topic: git-safety
+    was: >
       Deleting a local branch that git considers unmerged requires the force
       flag, which destructive_git blocks unconditionally. The only route is to
       ask a human to run it manually, so an agent that needs a stale branch
