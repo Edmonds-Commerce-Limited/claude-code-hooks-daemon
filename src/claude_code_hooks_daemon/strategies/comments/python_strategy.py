@@ -55,7 +55,7 @@ class PythonCommentStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "example.py")),
+                "file_path": scratch_path(_FIXTURE_DIR, "example.py"),
                 "content": (
                     'VERSION = "3.27.0"  #'
                     " Prior 3.26.2: fixed timing bug. Prior 3.26.1: attempted a "

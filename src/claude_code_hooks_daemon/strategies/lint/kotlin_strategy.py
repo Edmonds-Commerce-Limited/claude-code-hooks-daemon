@@ -66,14 +66,14 @@ class KotlinLintStrategy:
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.kt")),
+                "file_path": scratch_path(_FIXTURE_DIR, "valid.kt"),
                 "content": 'fun main() { println("hello") }',
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.kt")),
+                "file_path": scratch_path(_FIXTURE_DIR, "invalid.kt"),
                 "content": 'fun main( { println("hello") }',
             },
         )

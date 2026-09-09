@@ -56,14 +56,14 @@ class PhpLintStrategy:
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.php")),
+                "file_path": scratch_path(_FIXTURE_DIR, "valid.php"),
                 "content": "<?php echo 'hello'; ?>",
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.php")),
+                "file_path": scratch_path(_FIXTURE_DIR, "invalid.php"),
                 "content": "<?php\necho 'hello'\necho 'world';",
             },
         )

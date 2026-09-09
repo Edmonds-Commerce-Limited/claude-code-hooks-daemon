@@ -242,14 +242,14 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
         write_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "package-lock.json")),
+                "file_path": scratch_path(_FIXTURE_DIR, "package-lock.json"),
                 "content": "{}",
             },
         )
         edit_probe = ToolPayload(
             tool_name=ToolName.EDIT,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "Cargo.lock")),
+                "file_path": scratch_path(_FIXTURE_DIR, "Cargo.lock"),
                 "old_string": "old",
                 "new_string": "new",
             },

@@ -78,14 +78,14 @@ class GoLintStrategy:
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.go")),
+                "file_path": scratch_path(_FIXTURE_DIR, "valid.go"),
                 "content": "package main\nfunc main() {}",
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.go")),
+                "file_path": scratch_path(_FIXTURE_DIR, "invalid.go"),
                 "content": 'package main\nfunc main() {\n    x := "unclosed',
             },
         )

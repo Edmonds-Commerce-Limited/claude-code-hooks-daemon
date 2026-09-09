@@ -67,7 +67,7 @@ class DartSecurityStrategy:
         process_run_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.dart")),
+                "file_path": scratch_path(_FIXTURE_DIR, "test_security.dart"),
                 "content": "await Process.run('ls', ['-la']);",
             },
         )

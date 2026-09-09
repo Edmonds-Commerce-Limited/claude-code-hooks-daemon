@@ -51,7 +51,7 @@ class GoCommentStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "example.go")),
+                "file_path": scratch_path(_FIXTURE_DIR, "example.go"),
                 "content": (
                     'const Version = "0.9.3" // Prior 0.9.2: fixed a race. Prior '
                     "0.9.1: original broken behaviour.\n"

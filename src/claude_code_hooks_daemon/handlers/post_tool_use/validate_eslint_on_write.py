@@ -429,7 +429,7 @@ is not evidence that a `.ts` file is clean."""
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "test.ts")),
+                "file_path": scratch_path(_FIXTURE_DIR, "test.ts"),
                 "content": "const x = 1;",
             },
         )

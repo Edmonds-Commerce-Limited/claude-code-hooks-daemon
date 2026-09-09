@@ -67,9 +67,7 @@ class DartTddStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(
-                    scratch_path(_FIXTURE_DIR, "lib", "widgets", "custom_widget.dart")
-                ),
+                "file_path": scratch_path(_FIXTURE_DIR, "lib", "widgets", "custom_widget.dart"),
                 "content": "class CustomWidget {}",
             },
         )

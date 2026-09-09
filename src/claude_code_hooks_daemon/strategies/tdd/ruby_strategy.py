@@ -68,7 +68,7 @@ class RubyTddStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "lib", "services", "user_service.rb")),
+                "file_path": scratch_path(_FIXTURE_DIR, "lib", "services", "user_service.rb"),
                 "content": "class UserService\nend",
             },
         )

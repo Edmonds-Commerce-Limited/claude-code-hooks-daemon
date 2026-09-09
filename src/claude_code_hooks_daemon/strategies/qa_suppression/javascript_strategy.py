@@ -74,7 +74,7 @@ class JavaScriptQaSuppressionStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "example.ts")),
+                "file_path": scratch_path(_FIXTURE_DIR, "example.ts"),
                 "content": "// eslint-" + "disable" + " no-console\nconst x = 1;",
             },
         )

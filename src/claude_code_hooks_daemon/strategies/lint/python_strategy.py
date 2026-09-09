@@ -58,14 +58,14 @@ class PythonLintStrategy:
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.py")),
+                "file_path": scratch_path(_FIXTURE_DIR, "valid.py"),
                 "content": "def hello():\n    print('hello')\n",
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.py")),
+                "file_path": scratch_path(_FIXTURE_DIR, "invalid.py"),
                 "content": "def hello(\n    print('hello')",
             },
         )

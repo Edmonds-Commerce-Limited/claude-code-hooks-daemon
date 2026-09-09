@@ -68,7 +68,7 @@ class RustTddStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "src", "parser.rs")),
+                "file_path": scratch_path(_FIXTURE_DIR, "src", "parser.rs"),
                 "content": "pub fn parse() {}",
             },
         )

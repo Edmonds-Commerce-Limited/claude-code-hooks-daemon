@@ -81,21 +81,21 @@ class PhpQaSuppressionStrategy:
         probe_ignore_next_line = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "phpstan-next-line.php")),
+                "file_path": scratch_path(_FIXTURE_DIR, "phpstan-next-line.php"),
                 "content": "<?php /** @phpstan-" + "ignore-next-line" + " */ $x = 1;",
             },
         )
         probe_ignore = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "phpstan-ignore.php")),
+                "file_path": scratch_path(_FIXTURE_DIR, "phpstan-ignore.php"),
                 "content": "<?php /** @phpstan-" + "ignore" + " argument.type */ $x = 1;",
             },
         )
         probe_phpcs_disable = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "phpcs-disable.php")),
+                "file_path": scratch_path(_FIXTURE_DIR, "phpcs-disable.php"),
                 "content": "<?php // phpcs:" + "disable" + "\n$x = 1;",
             },
         )

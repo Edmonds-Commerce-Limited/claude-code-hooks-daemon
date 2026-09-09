@@ -56,7 +56,7 @@ class RustCommentStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "example.rs")),
+                "file_path": scratch_path(_FIXTURE_DIR, "example.rs"),
                 "content": (
                     'const VERSION: &str = "1.74.3"; // Prior 1.74.2: fixed a race. '
                     "Prior 1.74.1: original broken behaviour.\n"

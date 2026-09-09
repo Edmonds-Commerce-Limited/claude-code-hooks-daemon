@@ -66,7 +66,7 @@ class RustQaSuppressionStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "example.rs")),
+                "file_path": scratch_path(_FIXTURE_DIR, "example.rs"),
                 "content": "#[" + "allow(" + "unused_variables)]\nfn main() {}",
             },
         )

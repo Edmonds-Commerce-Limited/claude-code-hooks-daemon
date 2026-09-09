@@ -67,7 +67,7 @@ class DartQaSuppressionStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "example.dart")),
+                "file_path": scratch_path(_FIXTURE_DIR, "example.dart"),
                 "content": "// " + "ignore:" + " unused_local_variable\nvar x = 1;",
             },
         )

@@ -643,9 +643,7 @@ class TestPipeBlockerAggregatesItsStrategiesAcceptanceTests:
                     f"is not reachable from the handler, so nothing runs it"
                 )
 
-    def test_the_handlers_own_tests_survive_aggregation(
-        self, handler: PipeBlockerHandler
-    ) -> None:
+    def test_the_handlers_own_tests_survive_aggregation(self, handler: PipeBlockerHandler) -> None:
         titles = {test.title for test in handler.get_acceptance_tests()}
         assert "npm test piped to tail (blacklisted — expensive path)" in titles
 

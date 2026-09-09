@@ -76,7 +76,7 @@ class PythonTddStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "src", "mypkg", "utils", "helper.py")),
+                "file_path": scratch_path(_FIXTURE_DIR, "src", "mypkg", "utils", "helper.py"),
                 "content": "def helper():\n    pass",
             },
         )

@@ -219,7 +219,7 @@ class BritishEnglishHandler(PreToolUseHandlerBase):
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "docs", "style-guide.md")),
+                "file_path": scratch_path(_FIXTURE_DIR, "docs", "style-guide.md"),
                 "content": "The color of the organization logo should favor readability.",
             },
         )

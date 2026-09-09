@@ -67,7 +67,7 @@ class GoQaSuppressionStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "example.go")),
+                "file_path": scratch_path(_FIXTURE_DIR, "example.go"),
                 "content": "package main // no" + "lint",
             },
         )

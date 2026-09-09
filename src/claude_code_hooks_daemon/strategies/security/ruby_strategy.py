@@ -91,7 +91,7 @@ class RubySecurityStrategy:
         eval_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.rb")),
+                "file_path": scratch_path(_FIXTURE_DIR, "test_security.rb"),
                 "content": "eval(user_input)",
             },
         )

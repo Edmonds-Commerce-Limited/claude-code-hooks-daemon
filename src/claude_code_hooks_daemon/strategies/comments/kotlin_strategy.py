@@ -51,7 +51,7 @@ class KotlinCommentStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "Example.kt")),
+                "file_path": scratch_path(_FIXTURE_DIR, "Example.kt"),
                 "content": (
                     'const val VERSION = "1.9.3" // Prior 1.9.2: fixed a race. '
                     "Prior 1.9.1: original broken behaviour.\n"

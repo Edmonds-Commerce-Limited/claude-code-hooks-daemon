@@ -56,14 +56,14 @@ class RubyLintStrategy:
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.rb")),
+                "file_path": scratch_path(_FIXTURE_DIR, "valid.rb"),
                 "content": "puts 'hello'",
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.rb")),
+                "file_path": scratch_path(_FIXTURE_DIR, "invalid.rb"),
                 "content": "def hello\n  puts 'missing end'",
             },
         )

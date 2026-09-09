@@ -56,14 +56,14 @@ class DartLintStrategy:
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.dart")),
+                "file_path": scratch_path(_FIXTURE_DIR, "valid.dart"),
                 "content": "void main() { print('hello'); }",
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.dart")),
+                "file_path": scratch_path(_FIXTURE_DIR, "invalid.dart"),
                 "content": "void main( { print('hello'); }",
             },
         )

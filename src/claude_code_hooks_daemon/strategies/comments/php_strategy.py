@@ -51,7 +51,7 @@ class PhpCommentStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "example.php")),
+                "file_path": scratch_path(_FIXTURE_DIR, "example.php"),
                 "content": (
                     "$version = '7.4.3'; // Prior 7.4.2: fixed a race. Prior "
                     "7.4.1: original broken behaviour.\n"

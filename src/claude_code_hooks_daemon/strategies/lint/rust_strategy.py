@@ -26,6 +26,8 @@ _CRATE_FRAMING_TEMPLATE = "--edition 2021 --crate-type lib --emit=metadata --out
 def _crate_framing() -> str:
     """The framing both commands share, with the output directory resolved."""
     return _CRATE_FRAMING_TEMPLATE.format(out_dir=lint_output_dir())
+
+
 # rustup ships a `clippy-driver` SHIM on PATH even when the `clippy` component
 # is not installed. The shim resolves and runs (so it never raises
 # FileNotFoundError, the handler's usual "tool absent" signal) but exits
@@ -94,14 +96,14 @@ class RustLintStrategy:
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.rs")),
+                "file_path": scratch_path(_FIXTURE_DIR, "valid.rs"),
                 "content": "pub fn hello() {}",
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.rs")),
+                "file_path": scratch_path(_FIXTURE_DIR, "invalid.rs"),
                 "content": "pub fn hello( {}",
             },
         )

@@ -153,14 +153,14 @@ class AnsibleLintStrategy:
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "playbooks", "valid.yml")),
+                "file_path": scratch_path(_FIXTURE_DIR, "playbooks", "valid.yml"),
                 "content": "---\n- hosts: all\n  tasks: []\n",
             },
         )
         probe_broken = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "playbooks", "broken.yml")),
+                "file_path": scratch_path(_FIXTURE_DIR, "playbooks", "broken.yml"),
                 "content": (
                     "---\n- hosts: all\n  tasks:\n    - name: report\n"
                     '      ansible.builtin.shell: echo "it is broken\n'
@@ -170,7 +170,7 @@ class AnsibleLintStrategy:
         probe_workflow = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, ".github", "workflows", "ci.yml")),
+                "file_path": scratch_path(_FIXTURE_DIR, ".github", "workflows", "ci.yml"),
                 "content": "---\non:\n  push:\njobs: {}\n",
             },
         )

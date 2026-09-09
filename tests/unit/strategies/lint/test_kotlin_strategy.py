@@ -25,9 +25,7 @@ class TestProperties:
         assert strategy.extensions == (".kt",)
 
     def test_default_lint_command(self, strategy: KotlinLintStrategy) -> None:
-        assert strategy.default_lint_command == (
-            f"kotlinc -nowarn -d {lint_output_dir()} {{file}}"
-        )
+        assert strategy.default_lint_command == f"kotlinc -nowarn -d {lint_output_dir()} {{file}}"
 
     def test_default_lint_command_sends_output_to_the_shared_scratch_dir(
         self, strategy: KotlinLintStrategy

@@ -56,14 +56,14 @@ class SwiftLintStrategy:
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.swift")),
+                "file_path": scratch_path(_FIXTURE_DIR, "valid.swift"),
                 "content": 'print("hello")',
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.swift")),
+                "file_path": scratch_path(_FIXTURE_DIR, "invalid.swift"),
                 "content": 'print("hello',
             },
         )

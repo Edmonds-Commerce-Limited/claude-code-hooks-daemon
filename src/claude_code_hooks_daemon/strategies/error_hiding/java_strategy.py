@@ -56,14 +56,14 @@ class JavaErrorHidingStrategy:
         bad_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "Bad.java")),
+                "file_path": scratch_path(_FIXTURE_DIR, "Bad.java"),
                 "content": "class Bad { void m() { try { } catch (Exception e) {} } }",
             },
         )
         good_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "Good.java")),
+                "file_path": scratch_path(_FIXTURE_DIR, "Good.java"),
                 "content": (
                     "class Good { void m() { try { } "
                     "catch (Exception e) { log.error(e.getMessage()); throw e; } } }"

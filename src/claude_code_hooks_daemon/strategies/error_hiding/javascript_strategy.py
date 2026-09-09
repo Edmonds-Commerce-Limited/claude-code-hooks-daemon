@@ -62,14 +62,14 @@ class JavaScriptErrorHidingStrategy:
         bad_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "bad.js")),
+                "file_path": scratch_path(_FIXTURE_DIR, "bad.js"),
                 "content": "try { doSomething(); } catch (e) {}",
             },
         )
         good_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "good.js")),
+                "file_path": scratch_path(_FIXTURE_DIR, "good.js"),
                 "content": "try { doSomething(); } catch (e) { console.error(e); throw e; }",
             },
         )

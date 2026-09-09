@@ -68,7 +68,7 @@ class CSharpQaSuppressionStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "Example.cs")),
+                "file_path": scratch_path(_FIXTURE_DIR, "Example.cs"),
                 "content": "#pragma warning " + "disable" + " CS0168\npublic class Example {}",
             },
         )
