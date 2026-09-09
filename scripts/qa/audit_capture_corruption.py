@@ -643,8 +643,18 @@ _EXCLUDE_DIR_PARTS = {
 }
 
 
-def _is_excluded(path: Path) -> bool:
-    return any(part in _EXCLUDE_DIR_PARTS for part in path.parts)
+def _is_excluded(path: Path, root: Path) -> bool:
+    """Is ``path`` inside an excluded directory of the tree rooted at ``root``?
+
+    The names above are directories to skip INSIDE a scanned tree, so the test
+    is made on the path relative to that root. Testing every component of the
+    ABSOLUTE path excluded whole checkouts by where they happen to live: a
+    worktree at ``untracked/worktrees/<branch>/`` (this project's own
+    sanctioned layout) matched on ``untracked`` and yielded an empty file list,
+    which the audit then reported as "no violations" (Plan 00364 Task 5.4).
+    """
+    relative = path.relative_to(root) if path.is_relative_to(root) else path
+    return any(part in _EXCLUDE_DIR_PARTS for part in relative.parts)
 
 
 def _collect_shell_files(roots: list[Path]) -> list[Path]:
@@ -655,7 +665,7 @@ def _collect_shell_files(roots: list[Path]) -> list[Path]:
             continue
         for pattern in ("*.sh", "*.bash"):
             for script in sorted(root.rglob(pattern)):
-                if _is_excluded(script):
+                if _is_excluded(script, root):
                     continue
                 resolved = script.resolve()
                 if resolved in seen:
