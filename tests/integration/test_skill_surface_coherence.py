@@ -348,7 +348,9 @@ def _routing_block() -> str:
 
 def _report_arm() -> str:
     """Return just the ``report)`` arm of the routing block."""
-    match = re.search(r"^    report\)\n(.*?)^        ;;", _routing_block(), re.DOTALL | re.MULTILINE)
+    match = re.search(
+        r"^    report\)\n(.*?)^        ;;", _routing_block(), re.DOTALL | re.MULTILINE
+    )
     assert match is not None, "SKILL.md no longer routes a `report` subcommand"
     return match.group(1)
 
