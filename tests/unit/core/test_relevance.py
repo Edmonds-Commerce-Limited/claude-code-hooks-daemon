@@ -13,11 +13,52 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.core.relevance import (
+    _LANGUAGE_MARKERS,
     Relevance,
     RelevanceContext,
     detect_languages,
 )
+
+
+def _declared_tag_values() -> set[str]:
+    """Every tag string the catalogue declares."""
+    return {
+        value
+        for name, value in vars(HandlerTag).items()
+        if not name.startswith("_") and isinstance(value, str)
+    }
+
+
+class TestLanguagesAreNamedByTheTagCatalogue:
+    """The marker keys ARE ``HandlerTag`` language spellings, not copies of them.
+
+    A copy does not fail when the catalogue is renamed: the dict simply stops
+    matching, and a handler is silently classified as irrelevant. Nothing
+    raises, so nothing tells anyone.
+    """
+
+    def test_every_marker_key_is_a_declared_tag(self) -> None:
+        assert set(_LANGUAGE_MARKERS) <= _declared_tag_values()
+
+    def test_the_language_tags_are_the_ones_detected(self) -> None:
+        assert set(_LANGUAGE_MARKERS) == {
+            HandlerTag.PYTHON,
+            HandlerTag.JAVASCRIPT,
+            HandlerTag.TYPESCRIPT,
+            HandlerTag.PHP,
+            HandlerTag.GO,
+            HandlerTag.RUST,
+            HandlerTag.JAVA,
+        }
+
+    def test_a_detected_language_answers_to_its_tag(self, tmp_path: Path) -> None:
+        """The point of the shared spelling: a handler asks with its own tag."""
+        (tmp_path / "go.mod").write_text("module x\n")
+        context = RelevanceContext.probe(tmp_path)
+        assert context.uses_any_language(HandlerTag.GO) is True
+        assert context.uses_any_language(HandlerTag.RUST) is False
 
 
 class TestRelevance:
