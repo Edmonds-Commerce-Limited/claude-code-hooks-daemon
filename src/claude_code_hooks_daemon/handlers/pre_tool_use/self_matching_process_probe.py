@@ -18,9 +18,13 @@ which is why a self-match is refused wherever it appears rather than only
 inside a loop. The one-shot form is the same lie with a shorter fuse: the
 report's own timeline has the agent believing a hand-run ``pgrep -f`` twice.
 
-Three rules, one family — a liveness signal that cannot be trusted:
+Four rules, one family — a liveness signal that cannot be trusted:
 
 * ``R-PGREP-SELF-MATCH`` (deny) — the pattern matches this command's argv.
+* ``R-WAIT-ON-WRAPPER-PID`` (deny for ``setsid``, else advise) — ``$!`` after a
+  wrapper that forks names the WRAPPER. The same report's first waiter died of
+  this: ``setsid``'s parent exits at once, so ``kill -0 $!`` reported the job
+  finished while it was in its fourth minute.
 * ``R-UNBOUNDED-LIVENESS-LOOP`` (advise) — a ``while``/``until`` wait on a
   process, with a sleep-only body and nothing capping it. The Bash tool caps a
   FOREGROUND call at ten minutes; ``run_in_background`` has no cap, and that is
@@ -62,14 +66,17 @@ from claude_code_hooks_daemon.utils.process_probe import (
     ProbeVerdict,
     ProcessProbe,
     WaitConstruct,
+    WrapperPidWait,
     classify_liveness_loops,
     classify_process_probes,
+    classify_wrapper_pid_waits,
 )
 
 #: Cheap pre-filter. A command naming none of these words cannot carry a probe,
 #: and that is nearly all of them. Word-anchored so `https` does not read as
-#: `ps`, which a substring test would.
-_PROBE_WORDS: Final[re.Pattern[str]] = re.compile(r"\b(?:pgrep|pkill|ps|kill)\b")
+#: `ps`, which a substring test would — except for `$!`, which is punctuation
+#: and has no word boundary to anchor on.
+_PROBE_WORDS: Final[re.Pattern[str]] = re.compile(r"\b(?:pgrep|pkill|ps|kill|wait)\b|\$!")
 
 #: Why each probe shape cannot answer honestly about itself.
 _KIND_HAZARDS: Final[dict[ProbeKind, str]] = {
@@ -134,6 +141,53 @@ _ALTERNATIVES: Final = (
 
 _REWRITE_LABEL: Final = "REWRITE THIS COMMAND AS: "
 
+#: Why a wrapper's pid may not be the job's. Two hazards, because the
+#: difference decides the verdict: `setsid` ALWAYS abandons the pid, while for
+#: the others it depends on what the wrapper was handed.
+_DETACHING_HAZARD: Final = (
+    "`$!` is the pid of `{wrapper}`, not of the job. `setsid` forks when it is "
+    "not already a process-group leader, and its parent exits AT ONCE — so "
+    "that pid is gone in milliseconds while the job runs on under a different "
+    "one. The wait ends on its first pass and reports the job finished."
+)
+
+_FORKING_HAZARD: Final = (
+    "`$!` is the pid of `{wrapper}`, and the wrapper is not the job. Whether "
+    "that pid gets handed on or kept depends on what the wrapper was asked to "
+    "run — `timeout` keeps it, to enforce its own deadline, and `sh -c` execs "
+    "a single simple command but forks for anything longer. Advisory rather "
+    "than denied because the command text alone does not say which you have."
+)
+
+#: Where a wrapper-pid wait sits. Separate from `_LOCATION_PHRASES`, whose
+#: "the wait can never end" is the opposite of this fault: a detached pid ends
+#: the wait immediately.
+_WRAPPER_PLACEMENTS: Final[dict[WaitConstruct, str]] = {
+    WaitConstruct.LOOP: "as a loop condition",
+    WaitConstruct.WATCH: "under `watch`",
+    WaitConstruct.TIMEOUT: "inside a timed wait",
+}
+
+#: The remedies the incident report asks for, in the order it puts them.
+_WRAPPER_REMEDIES: Final = (
+    "SAFE ALTERNATIVES, best first:\n"
+    "  1. Wait on the ARTEFACT, not on a pid:\n"
+    '       until grep -q "MARKER" run.log; do sleep 10; done\n'
+    "     A terminal marker in the log outlives every wrapper that wrote it.\n"
+    "  2. Better still, do not poll: a task started with run_in_background is "
+    "tracked by the harness, which notifies you when it finishes.\n"
+    "  3. Have the JOB record its own pid, inside the same `sh -c`:\n"
+    "       nohup sh -c './job.bash > run.log 2>&1 & echo $! > job.pid' &\n"
+    "     `$(cat job.pid)` is then the job's pid, not a wrapper's.\n"
+    "  4. Resolve the child ONCE from the wrapper's pid: "
+    "`pgrep -P <wrapper-pid>`. Do it immediately — after `setsid` the parent "
+    "is already gone and there is nothing left to ask.\n"
+    "  5. `setsid -w ./job.bash &` also keeps `$!` honest: `-w` makes the "
+    "wrapper wait for the job, so the pid lives exactly as long as the job "
+    "does. The job still gets its own session; only the wrapper stays in the "
+    "process tree."
+)
+
 
 @dataclass(frozen=True, slots=True)
 class _Finding:
@@ -175,6 +229,19 @@ def _probe_detail(probe: ProcessProbe) -> str:
     if rewrite is not None:
         lines.append(f"{_REWRITE_LABEL}{rewrite}")
     return "\n".join(lines)
+
+
+def _wrapper_detail(wait: WrapperPidWait) -> str:
+    """The per-site half of the wrapper-pid message, deny or advisory alike."""
+    hazard = _DETACHING_HAZARD if wait.detaching else _FORKING_HAZARD
+    placement = (
+        "" if wait.wait_construct is None else f" {_WRAPPER_PLACEMENTS[wait.wait_construct]}"
+    )
+    return (
+        f"Backgrounded: `{wait.job}`\n"
+        f"Waiting on `{wait.reference}` in `{wait.site.strip()}`{placement}\n"
+        f"WHY: {hazard.format(wrapper=wait.wrapper)}"
+    )
 
 
 def _loop_detail(loop: LivenessLoop) -> str:
@@ -263,6 +330,40 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
                 "recommended shape."
             ),
         )
+        self._wrapper_rule = Rule(
+            rule_id=RuleID.WAIT_ON_WRAPPER_PID,
+            blocked=(
+                "a wait on `$!` when the backgrounded command starts with a "
+                "wrapper that forks — denied for `setsid`, advisory for "
+                "`nohup sh -c`, `timeout` and `env`"
+            ),
+            why=(
+                "`$!` is the wrapper's pid, and setsid's parent exits at once, "
+                "so the wait ends immediately and reports success"
+            ),
+            fix=(
+                "Let the job write its own pidfile, resolve the child with "
+                "`pgrep -P`, or wait on a log marker"
+            ),
+            verbose=(
+                "`$!` holds the pid of the last command the shell "
+                "BACKGROUNDED, which is the wrapper — not the job the wrapper "
+                "goes on to run.\n\n"
+                "The field incident's FIRST waiter:\n"
+                "  setsid nohup ./job.bash > run.log 2>&1 &\n"
+                "  until ! kill -0 $!; do sleep 15; done\n"
+                "`setsid` forks and its parent exits at once, so that pid died "
+                "in milliseconds while the real run continued under the next "
+                'one. The waiter announced "finished" with the job in its '
+                "fourth minute; a truncated log was the only clue.\n\n"
+                "`setsid` is denied because it is unambiguous: its parent "
+                "always exits. `nohup sh -c`, `nohup bash -c`, `timeout` and "
+                "`env` only advise — some of them exec in place and hand the "
+                "pid straight on, and which you get depends on what you asked "
+                "them to run.\n\n"
+                f"{_WRAPPER_REMEDIES}"
+            ),
+        )
         self._unresolved_rule = Rule(
             rule_id=RuleID.PGREP_UNRESOLVED_PATTERN,
             blocked="a process probe whose pattern is built by expansion, inside a wait or a kill",
@@ -292,8 +393,8 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
         return bool(denials or advisories)
 
     def get_rules(self) -> list[Rule]:
-        """The blocking self-match rule, and the two advisory rules beside it."""
-        return [self._deny_rule, self._loop_rule, self._unresolved_rule]
+        """Every rule in the family, blocking and advisory alike."""
+        return [self._deny_rule, self._wrapper_rule, self._loop_rule, self._unresolved_rule]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny a self-match; advise on an uncapped wait or an unreadable pattern."""
@@ -324,6 +425,13 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
                 denials.append(_Finding(self._deny_rule, _probe_detail(probe)))
             elif _worth_a_word(probe):
                 advisories.append(_Finding(self._unresolved_rule, _probe_detail(probe)))
+
+        # A detaching wrapper is a denial; the rest advise. Reported AFTER the
+        # self-match so that, when a command carries both, the denial the
+        # reader gets is the one that names a concrete rewrite.
+        for wait in classify_wrapper_pid_waits(command):
+            finding = _Finding(self._wrapper_rule, _wrapper_detail(wait))
+            (denials if wait.detaching else advisories).append(finding)
 
         for loop in classify_liveness_loops(command):
             if loop.is_unbounded_liveness_wait:
@@ -396,6 +504,18 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             "after `setsid` is the wrapper's pid, not the job's.\n"
             "- `ps aux | grep foo | grep -v grep` — the filter excludes its own "
             "line.\n\n"
+            "**Also blocked — waiting on a WRAPPER's `$!`** "
+            "(`R-WAIT-ON-WRAPPER-PID`). `setsid nohup ./job.bash &` makes `$!` "
+            "the pid of `setsid`, which forks and whose parent exits at once, "
+            "so `kill -0 $!` says the job finished while it is still running — "
+            "the same incident's FIRST waiter. Denied for `setsid`; advisory "
+            "for `nohup sh -c`, `timeout` and `env`, where whether the pid is "
+            "the job's turns on what the wrapper was asked to run. Fix: let "
+            "the job record its own pid "
+            "(`nohup sh -c './job.bash > run.log 2>&1 & echo $! > job.pid' &`), "
+            "resolve the child once with `pgrep -P <wrapper-pid>`, or wait on "
+            "the log marker. A plain `./job.bash & pid=$!` needs none of this: "
+            "with no wrapper, `$!` already is the job.\n\n"
             "**Advisory, never blocking**: a `while`/`until` wait on a process "
             "with a sleep-only body and no cap (`run_in_background` has no time "
             'limit), and a pattern built by expansion (`pgrep -f "$job"`), which '
@@ -475,6 +595,69 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
                     "read-only and the pattern names nothing real."
                 ),
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="Waiting on a setsid wrapper's $! is blocked",
+                command="false && setsid ./probe-demo-job.bash & wait $!",
+                dispatch_as_bash=True,
+                description=(
+                    "The incident's FIRST waiter: `$!` is `setsid`'s pid, and "
+                    "setsid's parent exits at once, so the wait ends before "
+                    "the job has started."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"BLOCKED",
+                    RuleID.WAIT_ON_WRAPPER_PID,
+                    r"setsid",
+                    r"job\.pid",
+                    r"pgrep -P",
+                ],
+                safety_notes=(
+                    "'false &&' short-circuits, so the backgrounded list exits "
+                    "immediately and `wait` returns at once — it cannot hang. "
+                    "The job name points at nothing real. Detection happens at "
+                    "the PreToolUse hook before any shell starts."
+                ),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="Waiting on a timeout wrapper's $! is advisory",
+                command="false && timeout 600 ./probe-demo-job.bash & wait $!",
+                dispatch_as_bash=True,
+                description=(
+                    "`timeout` stays alive beside the job, so the pid is the "
+                    "wrong one rather than a dead one — worth a word, not a "
+                    "denial."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[RuleID.WAIT_ON_WRAPPER_PID],
+                safety_notes=(
+                    "'false &&' short-circuits, so nothing is launched and "
+                    "`wait` returns immediately on an already-exited shell."
+                ),
+                test_type=TestType.ADVISORY,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="Waiting on an unwrapped job's $! is allowed",
+                command="false && ./probe-demo-job.bash & wait $!",
+                dispatch_as_bash=True,
+                description=(
+                    "The near-miss ALLOW: same wait, no wrapper, so `$!` "
+                    "really is the job's pid and there is nothing to say."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes=(
+                    "'false &&' short-circuits, so nothing runs and `wait` " "returns immediately."
+                ),
+                test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

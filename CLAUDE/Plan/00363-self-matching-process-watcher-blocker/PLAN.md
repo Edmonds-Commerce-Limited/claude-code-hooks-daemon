@@ -92,7 +92,7 @@ deny for `setsid`, advise otherwise), Rule C (unbounded liveness loop, advise).
 
 ### Phase 3: Wrapper-pid wait (Rule B)
 
-- [ ] ⬜ **Task 3.1**: Detect `kill -0 $!` / `wait $!` / a loop keyed on `$!`
+- [x] ✅ **Task 3.1**: Detect `kill -0 $!` / `wait $!` / a loop keyed on `$!`
   when the backgrounded command in the same invocation starts with `setsid`,
   `nohup sh -c`, `nohup bash -c`, `timeout` or `env`; deny for `setsid`
   (the parent exits at once), advise for the others; the message names the
@@ -115,7 +115,9 @@ deny for `setsid`, advise otherwise), Rule C (unbounded liveness loop, advise).
   and C, v3.63.0 gates).
 - [x] ✅ The release-notes callout is in the UNRELEASED holding area (folded
   into v3.63.0's release notes at release time).
-- [ ] ⬜ Rule B (Phase 3) ships with its own callout in the holding area.
+- [x] ✅ Rule B (Phase 3) ships with its own callout in the holding area
+  (`01-wait-on-wrapper-pid.md`): `setsid ./job & kill -0 $!` is denied,
+  `timeout`/`env`/`nohup sh -c` advise, and `./job & pid=$!` stays silent.
 
 ## Delivery & Milestones
 
@@ -124,4 +126,8 @@ deny for `setsid`, advise otherwise), Rule C (unbounded liveness loop, advise).
   release commit `3cdc2e11`): the `self_matching_process_probe` handler with
   `R-PGREP-SELF-MATCH` (deny), `R-UNBOUNDED-LIVENESS-LOOP` and
   `R-PGREP-UNRESOLVED-PATTERN` (advisory).
-- Rule B (wrapper-pid wait, Phase 3) outstanding for the next release.
+- Rule B (wrapper-pid wait, Phase 3) built on the
+  `agent-ab2da8fe312aa481b-9a2cd3ca` worktree branch: `R-WAIT-ON-WRAPPER-PID`
+  in the same handler, denying for `setsid` and advising for `nohup sh -c`,
+  `nohup bash -c`, `timeout` and `env`. Ships in the next release; the main
+  thread merges and closes the plan.

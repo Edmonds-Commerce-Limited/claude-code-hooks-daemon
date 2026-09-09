@@ -291,6 +291,106 @@ class TestAdvises:
         assert result.guidance.count(RuleID.UNBOUNDED_LIVENESS_LOOP) == 1
 
 
+class TestWrapperPidWaits:
+    """Rule B: `$!` after a forking wrapper names the wrapper, not the job.
+
+    The incident's FIRST waiter, which fired immediately and reported the job
+    finished while it was in its fourth minute. `setsid` denies: its parent
+    exits at once, so the wait is over before it starts. The rest advise —
+    whether they hand the pid on or keep it turns on what they were asked to
+    run, and the command text does not say which.
+    """
+
+    _SETSID = (
+        "setsid nohup ./job.bash > j.log 2>&1 & sleep 1; " "until ! kill -0 $! ; do sleep 5; done"
+    )
+
+    def test_the_setsid_waiter_is_denied(self, handler: SelfMatchingProcessProbeHandler) -> None:
+        assert handler.handle(_bash(self._SETSID)).decision == Decision.DENY
+
+    def test_the_setsid_waiter_matches(self, handler: SelfMatchingProcessProbeHandler) -> None:
+        assert handler.matches(_bash(self._SETSID)) is True
+
+    def test_the_deny_names_the_rule_and_the_wrapper(
+        self, handler: SelfMatchingProcessProbeHandler
+    ) -> None:
+        result = handler.handle(_bash(self._SETSID))
+        assert result.reason is not None
+        assert RuleID.WAIT_ON_WRAPPER_PID in result.reason
+        assert "setsid" in result.reason
+
+    @pytest.mark.parametrize(
+        "expected",
+        ["echo $! > job.pid", "pgrep -P", "MARKER", "run_in_background"],
+    )
+    def test_the_deny_names_every_remedy(
+        self, handler: SelfMatchingProcessProbeHandler, expected: str
+    ) -> None:
+        result = handler.handle(_bash(self._SETSID))
+        assert result.reason is not None
+        assert expected in result.reason
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "nohup sh -c './job.bash > j.log 2>&1' & wait $!",
+            "nohup bash -c './job.bash' & wait $!",
+            "timeout 600 ./job.bash & wait $!",
+            "env FOO=1 ./job.bash & wait $!",
+        ],
+    )
+    def test_a_non_detaching_wrapper_advises_rather_than_denies(
+        self, handler: SelfMatchingProcessProbeHandler, command: str
+    ) -> None:
+        result = handler.handle(_bash(command))
+        assert result.decision == Decision.ALLOW
+        assert any(RuleID.WAIT_ON_WRAPPER_PID in entry for entry in result.context)
+
+    def test_the_advisory_teaches_the_remedies_too(
+        self, handler: SelfMatchingProcessProbeHandler
+    ) -> None:
+        result = handler.handle(_bash("timeout 600 ./job.bash & wait $!"))
+        assert result.guidance is not None
+        assert "pgrep -P" in result.guidance
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # The allow corpus: no wrapper, so `$!` is the job's own pid.
+            './job.bash > j.log 2>&1 & pid=$!; until ! kill -0 "$pid"; do sleep 5; done',
+            # `nohup` handed a command execs in place and keeps the pid.
+            "nohup ./job.bash & pid=$!",
+            # `setsid -w` waits for its child, so the wrapper outlives the job.
+            "setsid -w ./job.bash & wait $!",
+        ],
+    )
+    def test_a_pid_that_really_is_the_job_is_never_flagged_by_rule_b(
+        self, handler: SelfMatchingProcessProbeHandler, command: str
+    ) -> None:
+        result = handler.handle(_bash(command))
+        assert result.decision == Decision.ALLOW
+        assert not any(RuleID.WAIT_ON_WRAPPER_PID in entry for entry in result.context or [])
+
+    def test_a_captured_wrapper_pid_is_followed_through_its_variable(
+        self, handler: SelfMatchingProcessProbeHandler
+    ) -> None:
+        command = 'setsid ./job.bash & pid=$!; until ! kill -0 "$pid"; do sleep 5; done'
+        result = handler.handle(_bash(command))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "$pid" in result.reason
+
+    def test_the_self_match_deny_still_wins_when_both_fire(
+        self, handler: SelfMatchingProcessProbeHandler
+    ) -> None:
+        """Rule A names a concrete rewrite, so it is the more useful denial."""
+        command = "setsid ./job.bash & pgrep -f job.bash; kill -0 $!"
+        result = handler.handle(_bash(command))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert RuleID.PGREP_SELF_MATCH in result.reason
+
+
 class TestAllows:
     @pytest.mark.parametrize("command", _ALLOW_CORPUS)
     def test_the_allow_corpus_is_allowed_silently(
@@ -310,7 +410,7 @@ class TestAllows:
 
 
 class TestDeclaredSurface:
-    def test_get_rules_declares_all_three_rule_ids(
+    def test_get_rules_declares_every_rule_id(
         self, handler: SelfMatchingProcessProbeHandler
     ) -> None:
         rules = handler.get_rules()
@@ -319,7 +419,16 @@ class TestDeclaredSurface:
             RuleID.PGREP_SELF_MATCH,
             RuleID.UNBOUNDED_LIVENESS_LOOP,
             RuleID.PGREP_UNRESOLVED_PATTERN,
+            RuleID.WAIT_ON_WRAPPER_PID,
         }
+
+    def test_claude_md_guidance_teaches_the_wrapper_pid_trap(
+        self, handler: SelfMatchingProcessProbeHandler
+    ) -> None:
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "setsid" in guidance
+        assert "job.pid" in guidance
 
     def test_claude_md_guidance_teaches_the_bracket_trick(
         self, handler: SelfMatchingProcessProbeHandler

@@ -492,6 +492,11 @@ class RuleID:
     #: A `while`/`until` liveness loop with a sleep-only body and no cap.
     UNBOUNDED_LIVENESS_LOOP: str = "R-UNBOUNDED-LIVENESS-LOOP"
 
+    #: A wait on `$!` when the backgrounded command is a wrapper that forks:
+    #: the pid names the wrapper, not the job. Denies for `setsid` (whose
+    #: parent exits at once) and advises for the wrappers that stay alive.
+    WAIT_ON_WRAPPER_PID: str = "R-WAIT-ON-WRAPPER-PID"
+
     # ------------------------------------------------------------------
     # failsafe_cron_blockage_suppressor handler (Plan 00298)
     # ------------------------------------------------------------------

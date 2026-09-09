@@ -22,9 +22,11 @@ from claude_code_hooks_daemon.utils.process_probe import (
     ProbeVerdict,
     ProcessProbe,
     WaitConstruct,
+    WrapperPidWait,
     bracket_trick,
     classify_liveness_loops,
     classify_process_probes,
+    classify_wrapper_pid_waits,
 )
 
 # The verbatim incident command from the field report.
@@ -557,3 +559,146 @@ class TestLivenessLoops:
         )
         loops = classify_liveness_loops(command)
         assert [loop.is_unbounded_liveness_wait for loop in loops] == [True, False]
+
+
+class TestWrapperPidWaits:
+    """`$!` after a wrapper names the WRAPPER, not the job (Rule B).
+
+    The incident's first waiter. `setsid nohup ./job … &` makes `$!` the pid of
+    `setsid`, which forks and whose parent exits in milliseconds — so
+    `kill -0 $!` reported "finished" while the job was in its fourth minute.
+    """
+
+    _SETSID = (
+        "setsid nohup ./job.bash > j.log 2>&1 & sleep 1; " "until ! kill -0 $! ; do sleep 5; done"
+    )
+
+    def _only(self, command: str) -> WrapperPidWait:
+        waits = classify_wrapper_pid_waits(command)
+        assert len(waits) == 1, f"expected exactly one wait in {command!r}, got {waits!r}"
+        return waits[0]
+
+    def test_the_incident_waiter_names_setsid(self) -> None:
+        wait = self._only(self._SETSID)
+        assert wait.wrapper == "setsid"
+        assert wait.reference == "$!"
+
+    def test_setsid_detaches_so_the_pid_is_already_gone(self) -> None:
+        assert self._only(self._SETSID).detaching is True
+
+    def test_the_incident_waiter_sits_inside_a_loop(self) -> None:
+        assert self._only(self._SETSID).wait_construct is WaitConstruct.LOOP
+
+    def test_the_job_text_is_reported_back(self) -> None:
+        assert self._only(self._SETSID).job.startswith("setsid nohup ./job.bash")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # The allow corpus: no wrapper at all, so `$!` IS the job's pid.
+            './job.bash > j.log 2>&1 & pid=$!; until ! kill -0 "$pid"; do sleep 5; done',
+            # `nohup` execs in place when it is handed a command rather than a
+            # shell script, so the pid it was given is the pid that runs.
+            "nohup ./job.bash & pid=$!",
+            "nohup ./job.bash > j.log 2>&1 & until ! kill -0 $!; do sleep 5; done",
+            # `setsid -w` waits for its child, so the wrapper outlives the job
+            # and `$!` tracks it honestly.
+            "setsid -w ./job.bash & wait $!",
+            "setsid --wait ./job.bash & wait $!",
+            # No background job in this command, so `$!` binds to nothing here.
+            "wait $!",
+            "kill -0 $!",
+            # The reference comes BEFORE the job it would have to name.
+            "wait $!; setsid ./job.bash &",
+            # Prose: one quoted argument, so bash never sees a `&` operator.
+            'echo "setsid ./job.bash & kill -0 $!"',
+        ],
+    )
+    def test_shapes_with_no_wrapper_pid_hazard(self, command: str) -> None:
+        assert classify_wrapper_pid_waits(command) == ()
+
+    @pytest.mark.parametrize(
+        ("command", "wrapper"),
+        [
+            ("nohup sh -c './job.bash > j.log 2>&1' & wait $!", "nohup sh -c"),
+            ("nohup bash -c './job.bash' & wait $!", "nohup bash -c"),
+            ("timeout 600 ./job.bash & wait $!", "timeout"),
+            ("env FOO=1 ./job.bash & wait $!", "env"),
+        ],
+    )
+    def test_a_forking_wrapper_is_named_but_does_not_detach(
+        self, command: str, wrapper: str
+    ) -> None:
+        wait = self._only(command)
+        assert wait.wrapper == wrapper
+        assert wait.detaching is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "env FOO=1 setsid ./job.bash & wait $!",
+            "nohup setsid ./job.bash & wait $!",
+            "timeout 600 setsid ./job.bash & wait $!",
+        ],
+    )
+    def test_setsid_behind_another_wrapper_still_decides(self, command: str) -> None:
+        wait = self._only(command)
+        assert wait.wrapper == "setsid"
+        assert wait.detaching is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "setsid ./job.bash & wait $!",
+            "setsid ./job.bash & kill -0 $!",
+            "setsid ./job.bash & ps -p $!",
+            'setsid ./job.bash & ps -o pid= -p "$!"',
+        ],
+    )
+    def test_every_probe_command_is_a_use_site(self, command: str) -> None:
+        assert self._only(command).detaching is True
+
+    def test_a_captured_pid_is_followed_through_its_variable(self) -> None:
+        command = 'setsid ./job.bash & pid=$!; until ! kill -0 "$pid"; do sleep 5; done'
+        wait = self._only(command)
+        assert wait.reference == "$pid"
+        assert wait.wait_construct is WaitConstruct.LOOP
+
+    def test_a_braced_reference_is_followed_too(self) -> None:
+        command = "setsid ./job.bash & job_pid=$!; wait ${job_pid}"
+        assert self._only(command).reference == "$job_pid"
+
+    def test_an_unrelated_variable_is_not_followed(self) -> None:
+        """`$other` was never assigned from `$!`, so it names nothing here."""
+        assert classify_wrapper_pid_waits('setsid ./job.bash & kill -0 "$other"') == ()
+
+    def test_a_loop_keyed_on_the_pid_counts_without_a_probe_command(self) -> None:
+        """`a loop keyed on $!` is the shape, whatever the condition runs."""
+        command = "setsid ./job.bash & while [ -d /proc/$! ]; do sleep 5; done"
+        wait = self._only(command)
+        assert wait.wait_construct is WaitConstruct.LOOP
+        assert wait.reference == "$!"
+
+    def test_a_probe_inside_a_loop_is_reported_once(self) -> None:
+        """The span pass and the loop pass must not both claim the same site."""
+        command = "setsid ./job.bash & until ! kill -0 $!; do sleep 5; done"
+        assert len(classify_wrapper_pid_waits(command)) == 1
+
+    def test_two_uses_are_both_reported(self) -> None:
+        command = "setsid ./job.bash & pid=$!; kill -0 $pid; wait $pid"
+        waits = classify_wrapper_pid_waits(command)
+        assert [wait.reference for wait in waits] == ["$pid", "$pid"]
+
+    def test_a_later_job_owns_a_later_reference(self) -> None:
+        """`$!` names the MOST RECENT background job, so the second one wins."""
+        command = "./safe.bash & wait $!; setsid ./job.bash & wait $!"
+        waits = classify_wrapper_pid_waits(command)
+        assert len(waits) == 1
+        assert waits[0].wrapper == "setsid"
+
+    def test_a_one_shot_use_records_no_wait_construct(self) -> None:
+        assert self._only("setsid ./job.bash & wait $!").wait_construct is None
+
+    def test_an_empty_command_reports_nothing(self) -> None:
+        assert classify_wrapper_pid_waits("") == ()
+        assert classify_wrapper_pid_waits("   ") == ()

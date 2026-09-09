@@ -35,6 +35,19 @@ describes those separately, because a loop waiting on an ARTEFACT
 (``until grep -q "PLAY RECAP" run.log``) is the recommended remedy and must
 never be confused with the defect.
 
+The report's FIRST waiter failed a third way, before the pattern was ever
+involved::
+
+    setsid nohup ./job.bash > run.log 2>&1 &
+    until ! kill -0 $!; do sleep 15; done
+
+``$!`` is the pid of ``setsid``, not of the job. ``setsid`` forks when it is
+not already a process-group leader and its parent exits at once, so that pid
+was gone in milliseconds and the waiter announced "finished" while the job was
+in its fourth minute. :func:`classify_wrapper_pid_waits` reports that shape:
+which wrapper stands between ``$!`` and the job, and whether the wrapper
+outlives the job or abandons it.
+
 Deliberately a classifier, not a shell parser. It reports; the handler decides.
 """
 
@@ -43,7 +56,7 @@ from __future__ import annotations
 import re
 import shlex
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Final
 
@@ -205,6 +218,40 @@ class LivenessLoop:
         return bool(self.probes) and self.body_only_sleeps and not self.bounded
 
 
+@dataclass(frozen=True, slots=True)
+class WrapperPidWait:
+    """One wait on ``$!`` whose pid belongs to a wrapper, not to the job.
+
+    ``$!`` holds the pid of the last command the shell BACKGROUNDED. When that
+    command is a wrapper — ``setsid``, ``nohup sh -c``, ``timeout``, ``env`` —
+    the pid is the one the WRAPPER was given, and every question asked of it
+    may be a question about the wrapper's lifetime rather than the job's.
+
+    Attributes:
+        wrapper: The wrapper that was handed the pid, as it is spoken about in
+            a message (``setsid``, ``nohup sh -c``, ``timeout``, ``env``).
+        detaching: Whether that wrapper's parent exits AT ONCE, leaving ``$!``
+            naming a pid that is already gone. True for ``setsid``, which is
+            the unambiguous case: the wait ends immediately and reports
+            success. False for the rest, where whether the pid is handed on or
+            kept turns on what the wrapper was asked to run — which the
+            command text does not say, and which is why a caller must not deny
+            on them.
+        reference: How the pid is spelt at this site — ``$!``, or ``$pid``
+            when it was captured into a variable first.
+        site: The command text doing the waiting.
+        job: The backgrounded command text, as written.
+        wait_construct: The waiting construct the site sits inside, if any.
+    """
+
+    wrapper: str
+    detaching: bool
+    reference: str
+    site: str
+    job: str
+    wait_construct: WaitConstruct | None
+
+
 def classify_process_probes(command: str) -> tuple[ProcessProbe, ...]:
     """Classify every process probe in ``command``, in the order they appear.
 
@@ -243,6 +290,30 @@ def classify_liveness_loops(command: str) -> tuple[LivenessLoop, ...]:
     normalised = _normalise(command)
     words = _scan_words(normalised)
     return tuple(_describe_loop(structure, normalised) for structure in _loop_structures(words))
+
+
+def classify_wrapper_pid_waits(command: str) -> tuple[WrapperPidWait, ...]:
+    """Report every wait on a ``$!`` that names a wrapper rather than the job.
+
+    Nothing is reported unless the SAME command both backgrounds a job behind a
+    forking wrapper and then asks about ``$!``. A command that only does one of
+    those two things is not judged: ``$!`` inherited from an earlier Bash call
+    is meaningless anyway, and a backgrounded job nobody waits on has no bug.
+
+    Args:
+        command: The raw Bash command string.
+
+    Returns:
+        One :class:`WrapperPidWait` per waiting site, in the order they appear.
+    """
+    if not command.strip():
+        return ()
+    normalised = _normalise(command)
+    words = _scan_words(normalised)
+    jobs = _background_jobs(words, normalised)
+    if not jobs:
+        return ()
+    return tuple(_wrapper_pid_waits(words, normalised, jobs))
 
 
 def _normalise(command: str) -> str:
@@ -1135,3 +1206,347 @@ _PROBE_BUILDERS: Final[dict[str, _ProbeBuilder]] = {
     _PS: _build_ps,
     _KILL: _build_kill,
 }
+
+
+# --------------------------------------------------------------------------
+# Wrapper-pid waits
+# --------------------------------------------------------------------------
+
+_BACKGROUND: Final = "&"
+
+#: The shell parameter holding the pid of the last BACKGROUNDED command —
+#: which is the wrapper's, whenever a wrapper is what got backgrounded.
+_LAST_BACKGROUND_PID: Final = "$!"
+
+#: Commands that ask a question of a pid. ``wait`` blocks on it, ``kill -0``
+#: and ``ps -p`` test it; all three answer about whichever process owns it.
+_PID_WAIT_COMMANDS: Final[frozenset[str]] = frozenset({"kill", "wait", _PS})
+
+#: ``NAME=$!`` — the capture that lets a pid outlive the next background job.
+_PID_CAPTURE: Final[re.Pattern[str]] = re.compile(r'^(\w+)=(["\']?)\$!\2$')
+
+
+@dataclass(frozen=True, slots=True)
+class _WrapperPidSpec:
+    """A wrapper that comes between ``$!`` and the job it was asked about.
+
+    Attributes:
+        value_flags: Flags whose following token is a value, not the command.
+        positional_operands: Positional tokens consumed before the wrapped
+            command starts — ``timeout``'s DURATION.
+        detaching: Whether this wrapper's parent exits at once, so ``$!`` names
+            a pid that is already dead rather than merely the wrong one.
+        transparent_flags: Flags that make the wrapper WAIT for its child, so
+            the pid tracks the job honestly and there is nothing to report.
+        needs_a_shell: Whether this wrapper only stands in the way once it is
+            handed a shell script. ``nohup`` execs in place when it is given a
+            command, so its pid IS the job's; ``nohup sh -c '…'`` does not.
+    """
+
+    value_flags: frozenset[str] = frozenset()
+    positional_operands: int = 0
+    detaching: bool = False
+    transparent_flags: frozenset[str] = frozenset()
+    needs_a_shell: bool = False
+
+
+#: The wrappers a ``$!`` can be about — exactly the shapes the field report
+#: names, and no more. ``sudo``, ``nice`` and ``stdbuf`` are absent because
+#: nothing reported a wait going wrong behind them; the entries here that also
+#: usually exec in place earn an ADVISORY rather than a denial for that reason.
+_WRAPPER_PID_SPECS: Final[dict[str, _WrapperPidSpec]] = {
+    "setsid": _WrapperPidSpec(
+        detaching=True,
+        transparent_flags=frozenset({"-w", "--wait"}),
+    ),
+    "nohup": _WrapperPidSpec(needs_a_shell=True),
+    "timeout": _WrapperPidSpec(
+        value_flags=frozenset({"-s", "--signal", "-k", "--kill-after"}),
+        positional_operands=1,
+    ),
+    "env": _WrapperPidSpec(value_flags=frozenset({"-u", "--unset"})),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _WrapperChain:
+    """What the wrappers in front of a backgrounded command amount to."""
+
+    wrapper: str | None
+    detaching: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _BackgroundJob:
+    """One ``… &``, and what its ``$!`` would actually name."""
+
+    offset: int
+    text: str
+    chain: _WrapperChain
+
+
+@dataclass(frozen=True, slots=True)
+class _PidReference:
+    """One mention of a backgrounded pid, and where it was mentioned.
+
+    ``wrapper`` is carried alongside ``job`` rather than read back off it: a
+    reference is only ever built once a wrapper has been found, so recording
+    the name here keeps that guarantee in the type instead of leaving every
+    reader to re-derive it from an optional field.
+    """
+
+    word: _Word
+    reference: str
+    job: _BackgroundJob
+    wrapper: str
+    head: str | None
+    site: str
+
+
+def _background_jobs(words: list[_Word], text: str) -> list[_BackgroundJob]:
+    """Every backgrounded command, in order, with its wrapper chain resolved."""
+    jobs: list[_BackgroundJob] = []
+    for position, word in enumerate(words):
+        if word.text != _BACKGROUND:
+            continue
+        start = _statement_start(words, position)
+        if start >= position:
+            continue
+        jobs.append(
+            _BackgroundJob(
+                offset=word.start,
+                text=text[words[start].start : word.start].strip(),
+                chain=_wrapper_chain(words[start:position]),
+            )
+        )
+    return jobs
+
+
+def _statement_start(words: list[_Word], position: int) -> int:
+    """Index of the first word of the simple command ending at ``position``.
+
+    Walks back to whatever last put the shell in command position, so a
+    pipeline yields its LAST stage — which is the process ``$!`` names.
+    """
+    index = position
+    while index > 0 and words[index - 1].text not in _COMMAND_POSITION_MARKERS:
+        index -= 1
+    return index
+
+
+def _wrapper_chain(words: list[_Word]) -> _WrapperChain:
+    """Peel the wrappers off a backgrounded command and name the decisive one.
+
+    ``setsid`` wins wherever it appears in the chain, because abandoning the
+    pid outright is a worse fault than merely owning the wrong one. Otherwise
+    the OUTERMOST wrapper is named: that is the process ``$!`` points at.
+    """
+    index = _skip_assignments(words, 0)
+    label: str | None = None
+
+    while index < len(words):
+        name = _basename(words[index].text)
+        spec = _WRAPPER_PID_SPECS.get(name)
+        if spec is None:
+            break
+        index, transparent = _skip_wrapper_operands(words, index + 1, spec)
+        if transparent:
+            continue
+        if spec.detaching:
+            return _WrapperChain(wrapper=name, detaching=True)
+        if spec.needs_a_shell:
+            shell = _shell_script_head(words, index)
+            if shell is None:
+                continue
+            return _WrapperChain(
+                wrapper=label or f"{name} {shell} {_INTERPRETER_SCRIPT_FLAG}",
+                detaching=False,
+            )
+        label = label or name
+
+    return _WrapperChain(wrapper=label, detaching=False)
+
+
+def _skip_assignments(words: list[_Word], index: int) -> int:
+    """Step over the ``VAR=value`` prefix that precedes a command."""
+    while index < len(words) and _ASSIGNMENT.match(words[index].text):
+        index += 1
+    return index
+
+
+def _skip_wrapper_operands(
+    words: list[_Word], index: int, spec: _WrapperPidSpec
+) -> tuple[int, bool]:
+    """Step over one wrapper's own flags and operands.
+
+    Returns the index of the command it runs, and whether a flag was seen that
+    makes the wrapper wait for that command rather than abandon it.
+    """
+    transparent = False
+    positionals = spec.positional_operands
+
+    while index < len(words):
+        argument = words[index].text
+        if argument == _END_OF_OPTIONS:
+            index += 1
+            continue
+        if argument.startswith(_DASH) and argument != _LONE_DASH:
+            transparent = transparent or argument in spec.transparent_flags
+            index += 2 if argument in spec.value_flags else 1
+            continue
+        if _ASSIGNMENT.match(argument):
+            index += 1
+            continue
+        if positionals > 0:
+            index += 1
+            positionals -= 1
+            continue
+        break
+
+    return index, transparent
+
+
+def _shell_script_head(words: list[_Word], index: int) -> str | None:
+    """The interpreter name when ``words[index:]`` runs ``sh -c '<script>'``."""
+    if index >= len(words):
+        return None
+    name = _basename(words[index].text)
+    if name not in _INTERPRETERS:
+        return None
+    for word in words[index + 1 :]:
+        if not word.text.startswith(_DASH):
+            return None
+        if word.text == _INTERPRETER_SCRIPT_FLAG or (
+            _SHORT_CLUSTER.match(word.text) is not None
+            and _INTERPRETER_SCRIPT_FLAG[1] in word.text[1:]
+        ):
+            return name
+    return None
+
+
+def _wrapper_pid_waits(
+    words: list[_Word], text: str, jobs: list[_BackgroundJob]
+) -> Iterator[WrapperPidWait]:
+    """Yield one wait per site that asks about a wrapper-owned pid."""
+    references = _pid_references(words, text, jobs)
+    if not references:
+        return
+    regions = _wait_regions(words, len(text))
+    probed = [item for item in references if item.head in _PID_WAIT_COMMANDS]
+
+    for item in sorted(
+        [*probed, *_loop_keyed_references(words, text, references, probed)],
+        key=lambda item: item.word.start,
+    ):
+        yield WrapperPidWait(
+            wrapper=item.wrapper,
+            detaching=item.job.chain.detaching,
+            reference=item.reference,
+            site=item.site,
+            job=item.job.text,
+            wait_construct=_construct_at(regions, item.word.start),
+        )
+
+
+def _pid_references(
+    words: list[_Word], text: str, jobs: list[_BackgroundJob]
+) -> list[_PidReference]:
+    """Every mention of a backgrounded pid, whether spelt ``$!`` or captured.
+
+    Walked in source order because a capture (``pid=$!``) binds the job that
+    was backgrounded BEFORE it, and a later background job rebinds ``$!``
+    without touching the variable.
+    """
+    captured: dict[str, _BackgroundJob] = {}
+    found: list[_PidReference] = []
+
+    for span in _spans(words):
+        head = _span_head(span)
+        site = text[span.start : _span_end(span)]
+        for word in span.words:
+            capture = _PID_CAPTURE.match(word.text)
+            if capture is not None:
+                job = _job_before(jobs, word.start)
+                if job is not None:
+                    captured[capture.group(1)] = job
+                continue
+            resolved = _resolve_reference(word.text, captured)
+            if resolved is None:
+                continue
+            reference, job = resolved
+            if job is None:
+                job = _job_before(jobs, word.start)
+            if job is None:
+                continue
+            wrapper = job.chain.wrapper
+            if wrapper is None:
+                continue
+            found.append(
+                _PidReference(
+                    word=word,
+                    reference=reference,
+                    job=job,
+                    wrapper=wrapper,
+                    head=head,
+                    site=site,
+                )
+            )
+
+    return found
+
+
+def _resolve_reference(
+    word: str, captured: dict[str, _BackgroundJob]
+) -> tuple[str, _BackgroundJob | None] | None:
+    """The pid this word mentions: ``$!`` itself, or a variable holding one."""
+    if _LAST_BACKGROUND_PID in word:
+        return _LAST_BACKGROUND_PID, None
+    for name, job in captured.items():
+        if re.search(rf"\$\{{?{re.escape(name)}\}}?(?!\w)", word) is not None:
+            return f"${name}", job
+    return None
+
+
+def _span_head(span: _Span) -> str | None:
+    """The command name a span runs, ignoring its assignment prefix."""
+    for word in span.words:
+        if _ASSIGNMENT.match(word.text):
+            continue
+        return _basename(word.text)
+    return None
+
+
+def _job_before(jobs: list[_BackgroundJob], offset: int) -> _BackgroundJob | None:
+    """The most recent background job started before ``offset``, if any."""
+    return next((job for job in reversed(jobs) if job.offset < offset), None)
+
+
+def _loop_keyed_references(
+    words: list[_Word],
+    text: str,
+    references: list[_PidReference],
+    probed: list[_PidReference],
+) -> list[_PidReference]:
+    """The loop conditions keyed on a wrapper pid that no probe already covers.
+
+    ``while [ -d /proc/$! ]`` waits on the wrapper exactly as ``kill -0 $!``
+    does, without naming a command this module recognises. Reported once per
+    loop, and never when a probe inside the same condition was already
+    reported — that would bill the same site twice.
+    """
+    claimed: list[_PidReference] = []
+    for structure in _loop_structures(words):
+        if not structure.condition:
+            continue
+        start = structure.condition[0].start
+        end = structure.condition[-1].end
+        if any(start <= item.word.start < end for item in probed):
+            continue
+        inside = next(
+            (item for item in references if start <= item.word.start < end),
+            None,
+        )
+        if inside is not None:
+            site = f"{structure.keyword.text} {text[start:end]}"
+            claimed.append(replace(inside, site=site))
+    return claimed
