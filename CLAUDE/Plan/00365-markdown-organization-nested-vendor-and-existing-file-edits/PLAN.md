@@ -68,18 +68,18 @@ an earlier allowed write), and editing it moves nothing.
 
 ### Phase 1: reproduce and fix
 
-- [ ] ⬜ **Task 1.1**: Regression tests (RED) for the three path defects and
+- [x] ✅ **Task 1.1**: Regression tests (RED) for the three path defects and
   the existing-file case, using the report's shape with neutral names
   (`vendor/org-a/pkg-a/vendor/org-b/pkg-b/docs/guide.md`), including a
   `projects:` entry whose root is that nested clone.
-- [ ] ⬜ **Task 1.2**: Declared `projects:` resolution runs FIRST in
+- [x] ✅ **Task 1.2**: Declared `projects:` resolution runs FIRST in
   `matches()`; a declared root anywhere wins over dependency inference. The
   deny message for a dependency-directory path points at `projects:`.
-- [ ] ⬜ **Task 1.3**: Dependency-prefix stripping repeats until no
+- [x] ✅ **Task 1.3**: Dependency-prefix stripping repeats until no
   `vendor/`/`node_modules/` prefix remains.
-- [ ] ⬜ **Task 1.4**: `_matches_extra_allowed` is tried on the repo-relative
+- [x] ✅ **Task 1.4**: `_matches_extra_allowed` is tried on the repo-relative
   path as well as the project-relative one.
-- [ ] ⬜ **Task 1.5**: A `.md` that already exists at the target path is not
+- [x] ✅ **Task 1.5**: A `.md` that already exists at the target path is not
   a location violation for `Edit` or `Write`; the acceptance playbook and
   `get_claude_md()` guidance say so.
 
