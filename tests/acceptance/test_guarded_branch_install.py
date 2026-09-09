@@ -166,13 +166,17 @@ def test_guarded_branch_install_is_stamped_and_flagged_everywhere(tmp_path: Path
         metadata = json.loads((venv_path / ".daemon-metadata.json").read_text())
         assert metadata["daemon_version"] == expected_stamp
 
-        pid_files = sorted((daemon_dir / "untracked").glob("daemon-*.pid"))
-        assert pid_files, (
+        # A long project path moves the socket and PID file into the runtime
+        # dir and leaves a discovery file behind; a short one keeps all three
+        # here. Either way the daemon's runtime files are keyed to THIS
+        # project's daemon dir and never to the caller's cwd.
+        runtime_files = sorted((daemon_dir / "untracked").glob("daemon-*"))
+        assert runtime_files, (
             "the upgrade started no daemon for THIS project: driven from a foreign "
             "cwd it must still anchor to PROJECT_ROOT"
         )
         assert not list(
-            foreign_cwd.rglob("daemon-*.pid")
+            foreign_cwd.rglob("daemon-*")
         ), "the upgrade wrote daemon runtime files into the caller's cwd"
 
         cli = [str(venv_python), "-m", "claude_code_hooks_daemon.daemon.cli"]
