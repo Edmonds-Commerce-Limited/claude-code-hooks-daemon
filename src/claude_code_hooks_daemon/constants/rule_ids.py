@@ -478,6 +478,21 @@ class RuleID:
     VERIFICATION_RESULT_NOT_CONSUMED: str = "R-VERIFICATION-RESULT-NOT-CONSUMED"
 
     # ------------------------------------------------------------------
+    # self_matching_process_probe handler (Plan 00363)
+    # ------------------------------------------------------------------
+
+    #: A `pgrep -f`/`pkill -f`/`ps | grep` whose literal pattern matches the
+    #: argv of the shell running it, so the probe always counts itself.
+    PGREP_SELF_MATCH: str = "R-PGREP-SELF-MATCH"
+
+    #: The same probe with a pattern built by expansion: unjudgeable, so
+    #: advisory only.
+    PGREP_UNRESOLVED_PATTERN: str = "R-PGREP-UNRESOLVED-PATTERN"
+
+    #: A `while`/`until` liveness loop with a sleep-only body and no cap.
+    UNBOUNDED_LIVENESS_LOOP: str = "R-UNBOUNDED-LIVENESS-LOOP"
+
+    # ------------------------------------------------------------------
     # failsafe_cron_blockage_suppressor handler (Plan 00298)
     # ------------------------------------------------------------------
 

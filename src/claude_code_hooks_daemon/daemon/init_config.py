@@ -175,6 +175,13 @@ class ConfigTemplate:
             # contract under bypassPermissions. New files are never blocked.
             "    write_clobber_guard: {enabled: true, priority: 16}  # Block Write to an existing file not read this session\n"
             "    root_recursion_guard: {enabled: true, priority: 16}  # Block recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME\n"
+            # Plan 00363: the Bash tool runs every command through
+            # `bash -c "<command>"`, so a `pgrep -f` pattern is always in the
+            # calling shell's own argv and the probe finds itself. A reported
+            # waiter idled a whole night on exactly that. Denies rather than
+            # advises -- an advisory in a background waiter is read by nobody.
+            "    self_matching_process_probe: {enabled: true, priority: 17}  "
+            "# Block a pgrep/pkill/ps|grep probe that matches the calling shell's own argv\n"
             "    pipe_blocker: {enabled: true, priority: 15}      # Block dangerous pipe patterns\n"
             "    worktree_file_copy: {enabled: true, priority: 15}  # Prevent worktree file copies\n"
             # Plan 00333: an out-of-root path escapes every other path rule at

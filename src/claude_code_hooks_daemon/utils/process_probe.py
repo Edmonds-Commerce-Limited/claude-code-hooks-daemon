@@ -27,6 +27,14 @@ documented remedy without enumerating them — ``[r]un_02`` no longer matches it
 own spelling, ``run_0[3-9]`` never did, and ``pgrep -x`` compares the whole
 line rather than searching within it.
 
+The same report records a second, compounding shape: the loop itself. A
+``while``/``until`` whose condition is a process probe and whose body is only
+``sleep`` has nothing that can stop it but the probe changing its answer, and
+the Bash tool caps only FOREGROUND calls. :func:`classify_liveness_loops`
+describes those separately, because a loop waiting on an ARTEFACT
+(``until grep -q "PLAY RECAP" run.log``) is the recommended remedy and must
+never be confused with the defect.
+
 Deliberately a classifier, not a shell parser. It reports; the handler decides.
 """
 
@@ -105,8 +113,10 @@ class ProcessProbe:
         pattern: The pattern operand as bash would pass it (quotes removed),
             or None when the probe names a PID or carries no pattern.
         verdict: Whether the pattern can match the probing shell.
-        lethal: True when acting on a self-match would signal the caller —
-            ``pkill -f`` and ``pgrep -f … | xargs kill``.
+        signals: Whether a match is SIGNALLED rather than reported —
+            ``pkill`` always, and ``pgrep … | xargs kill`` by another route.
+            Recorded independently of the verdict so a caller can warn about
+            an unresolvable pattern that would kill whatever it does match.
         wait_construct: The waiting construct the probe sits inside, if any.
     """
 
@@ -114,13 +124,18 @@ class ProcessProbe:
     text: str
     pattern: str | None
     verdict: ProbeVerdict
-    lethal: bool
+    signals: bool
     wait_construct: WaitConstruct | None
 
     @property
     def is_self_matching(self) -> bool:
         """Whether this probe's pattern matches its own command line."""
         return self.verdict is ProbeVerdict.SELF_MATCHING
+
+    @property
+    def lethal(self) -> bool:
+        """Whether acting on this probe's match would signal the caller itself."""
+        return self.signals and self.is_self_matching
 
     @property
     def safe_rewrite(self) -> str | None:
@@ -153,6 +168,43 @@ def bracket_trick(pattern: str) -> str | None:
     return f"[{first}]{pattern[1:]}"
 
 
+@dataclass(frozen=True, slots=True)
+class LivenessLoop:
+    """One ``while``/``until`` loop, and whether it can ever stop.
+
+    The incident's second failure mode. A loop whose CONDITION is a process
+    probe and whose BODY is nothing but ``sleep`` has no way to stop except by
+    the probe changing its answer — so when the probe is wrong, the loop is a
+    silent, unbounded wait. The Bash tool caps a FOREGROUND call at ten
+    minutes; a ``run_in_background`` call has no cap, which is where the
+    reported night went.
+
+    Attributes:
+        keyword: ``while`` or ``until``.
+        text: The loop as written, opener to ``done``.
+        condition: The text between the keyword and ``do``.
+        body: The text between ``do`` and ``done``.
+        probes: The process probes in the CONDITION. Empty when the loop waits
+            on something else — an artefact (``until grep -q MARKER log``),
+            which is the remedy and must never be flagged.
+        body_only_sleeps: Whether the body does nothing but idle.
+        bounded: Whether something caps the iterations.
+    """
+
+    keyword: str
+    text: str
+    condition: str
+    body: str
+    probes: tuple[ProcessProbe, ...]
+    body_only_sleeps: bool
+    bounded: bool
+
+    @property
+    def is_unbounded_liveness_wait(self) -> bool:
+        """Whether this loop waits on a process, idly, with nothing to stop it."""
+        return bool(self.probes) and self.body_only_sleeps and not self.bounded
+
+
 def classify_process_probes(command: str) -> tuple[ProcessProbe, ...]:
     """Classify every process probe in ``command``, in the order they appear.
 
@@ -166,8 +218,36 @@ def classify_process_probes(command: str) -> tuple[ProcessProbe, ...]:
     """
     if not command.strip():
         return ()
-    normalised = strip_quoted_heredoc_bodies(normalise_line_continuations(command))
+    normalised = _normalise(command)
     return tuple(_analyse(normalised, subject=normalised, inherited=None))
+
+
+def classify_liveness_loops(command: str) -> tuple[LivenessLoop, ...]:
+    """Describe every ``while``/``until`` loop in ``command``.
+
+    A loop written inside a quoted ``bash -c`` script is deliberately NOT
+    reported. That is not a gap being tolerated, it is the answer: the shapes
+    that hide a loop in a quoted argument are the ones that BOUND it
+    (``timeout 3600 bash -c '…'``), so reporting them would advise against the
+    fix. Probes inside such a script are still classified — see
+    :func:`classify_process_probes`, which does recurse.
+
+    Args:
+        command: The raw Bash command string.
+
+    Returns:
+        One :class:`LivenessLoop` per loop, in the order they appear.
+    """
+    if not command.strip():
+        return ()
+    normalised = _normalise(command)
+    words = _scan_words(normalised)
+    return tuple(_describe_loop(structure, normalised) for structure in _loop_structures(words))
+
+
+def _normalise(command: str) -> str:
+    """Join line continuations and blank literal heredoc bodies, once."""
+    return strip_quoted_heredoc_bodies(normalise_line_continuations(command))
 
 
 # --------------------------------------------------------------------------
@@ -229,6 +309,10 @@ _STATEMENT_SEPARATORS: Final[frozenset[str]] = frozenset({"&&", "||", ";", ";;",
 
 _PIPE: Final = "|"
 _LOOP_OPENERS: Final[frozenset[str]] = frozenset({"while", "until", "for"})
+
+#: The loops whose iteration count is decided by a CONDITION rather than by a
+#: fixed list, so they are the ones that can spin for ever.
+_CONDITIONAL_LOOP_OPENERS: Final[frozenset[str]] = frozenset({"while", "until"})
 _LOOP_CLOSER: Final = "done"
 
 
@@ -358,7 +442,11 @@ def _wait_regions(words: list[_Word], end: int) -> list[_Region]:
     at_command_position = True
 
     for position, word in enumerate(words):
-        if word.text == _LOOP_CLOSER and open_loops:
+        # `done` closes a loop only in COMMAND position. As an ARGUMENT it is
+        # an ordinary word, and `grep -q done run.log` inside a wait loop is
+        # exactly the artefact-polling shape the report recommends — closing
+        # the loop there would lose the loop that is actually open.
+        if at_command_position and word.text == _LOOP_CLOSER and open_loops:
             regions.append(_Region(open_loops.pop(), word.end, WaitConstruct.LOOP))
         elif at_command_position and word.text in _LOOP_OPENERS:
             open_loops.append(word.start)
@@ -381,6 +469,104 @@ def _statement_end(words: list[_Word], position: int, end: int) -> int:
         if word.text in _STATEMENT_SEPARATORS:
             return word.start
     return end
+
+
+_LOOP_BODY_OPENER: Final = "do"
+
+#: Commands a loop body may run while still counting as "doing nothing but
+#: waiting". A body that acts on anything is not an idle spin, however long it
+#: sleeps, so it is out of scope for the unbounded-wait advisory.
+_IDLE_BODY_COMMANDS: Final[frozenset[str]] = frozenset(
+    {"sleep", "echo", "printf", "date", "true", ":"}
+)
+_SLEEP: Final = "sleep"
+
+#: Text that proves the author already bounded the loop themselves. An
+#: arithmetic expansion is the counter idiom (``i=$((i+1))``) and a numeric
+#: test is the cap that reads it, so either one stands the advisory down.
+_COUNTER_MARKERS: Final[tuple[str, ...]] = ("((", "-lt", "-le", "-gt", "-ge")
+
+
+@dataclass(frozen=True, slots=True)
+class _LoopStructure:
+    """The three word ranges a shell loop is made of."""
+
+    keyword: _Word
+    condition: list[_Word]
+    body: list[_Word]
+    end: int
+
+
+def _loop_structures(words: list[_Word]) -> list[_LoopStructure]:
+    """Locate each ``while``/``until`` loop's condition and body word ranges.
+
+    ``for`` is deliberately excluded: its "condition" is a fixed list, so it
+    iterates a known number of times and cannot be an unbounded wait.
+    """
+    structures: list[_LoopStructure] = []
+    stack: list[list[int]] = []
+    at_command_position = True
+
+    for position, word in enumerate(words):
+        if at_command_position and word.text == _LOOP_CLOSER and stack:
+            opener, body_start = stack.pop()
+            if body_start >= 0:
+                structures.append(
+                    _LoopStructure(
+                        keyword=words[opener],
+                        condition=words[opener + 1 : body_start],
+                        body=words[body_start + 1 : position],
+                        end=word.end,
+                    )
+                )
+        elif at_command_position and word.text in _CONDITIONAL_LOOP_OPENERS:
+            stack.append([position, -1])
+        elif word.text == _LOOP_BODY_OPENER and stack and stack[-1][1] < 0:
+            stack[-1][1] = position
+        at_command_position = word.text in _COMMAND_POSITION_MARKERS
+
+    return structures
+
+
+def _describe_loop(structure: _LoopStructure, text: str) -> LivenessLoop:
+    """Classify one loop: what it waits on, and whether anything caps it."""
+    condition = _slice(text, _trim_separators(structure.condition))
+    body = _slice(text, _trim_separators(structure.body))
+    return LivenessLoop(
+        keyword=structure.keyword.text,
+        text=text[structure.keyword.start : structure.end],
+        condition=condition,
+        body=body,
+        probes=tuple(_analyse(condition, subject=text, inherited=None)),
+        body_only_sleeps=_body_only_sleeps(body),
+        bounded=any(marker in condition or marker in body for marker in _COUNTER_MARKERS),
+    )
+
+
+def _slice(text: str, words: list[_Word]) -> str:
+    """The source text spanned by ``words``."""
+    return text[words[0].start : words[-1].end] if words else ""
+
+
+def _trim_separators(words: list[_Word]) -> list[_Word]:
+    """Drop the statement separators bracketing a condition or body.
+
+    The ``;`` before ``done`` belongs to the loop's syntax, not to its body,
+    and leaving it in makes the reported text read as an unfinished command.
+    """
+    start = 0
+    end = len(words)
+    while start < end and words[start].text in _STATEMENT_SEPARATORS:
+        start += 1
+    while end > start and words[end - 1].text in _STATEMENT_SEPARATORS:
+        end -= 1
+    return words[start:end]
+
+
+def _body_only_sleeps(body: str) -> bool:
+    """Whether every command in ``body`` idles, and at least one sleeps."""
+    names = [_basename(span.words[0].text) for span in _spans(_scan_words(body)) if span.words]
+    return bool(names) and _SLEEP in names and all(name in _IDLE_BODY_COMMANDS for name in names)
 
 
 def _construct_at(regions: list[_Region], offset: int) -> WaitConstruct | None:
@@ -831,7 +1017,7 @@ def _build_pgrep(context: _ProbeContext) -> ProcessProbe | None:
         text=context.span_text,
         pattern=pattern,
         verdict=verdict,
-        lethal=verdict is ProbeVerdict.SELF_MATCHING and _pipeline_kills(context.downstream),
+        signals=_pipeline_kills(context.downstream),
         wait_construct=context.construct,
     )
 
@@ -844,7 +1030,7 @@ def _build_pkill(context: _ProbeContext) -> ProcessProbe | None:
         text=context.span_text,
         pattern=pattern,
         verdict=verdict,
-        lethal=verdict is ProbeVerdict.SELF_MATCHING,
+        signals=True,
         wait_construct=context.construct,
     )
 
@@ -860,7 +1046,7 @@ def _build_ps(context: _ProbeContext) -> ProcessProbe | None:
             text=context.span_text,
             pattern=None,
             verdict=ProbeVerdict.SAFE,
-            lethal=False,
+            signals=False,
             wait_construct=context.construct,
         )
     pattern, verdict = _grep_verdict(filters)
@@ -869,7 +1055,7 @@ def _build_ps(context: _ProbeContext) -> ProcessProbe | None:
         text=context.span_text,
         pattern=pattern,
         verdict=verdict,
-        lethal=False,
+        signals=False,
         wait_construct=context.construct,
     )
 
@@ -913,7 +1099,7 @@ def _build_kill(context: _ProbeContext) -> ProcessProbe | None:
         text=context.span_text,
         pattern=None,
         verdict=ProbeVerdict.SAFE,
-        lethal=False,
+        signals=False,
         wait_construct=context.construct,
     )
 

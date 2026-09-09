@@ -308,6 +308,14 @@ handlers:
       enabled: true
       priority: 15
 
+    # Plan 00363: a `pgrep -f`/`pkill -f`/`ps | grep` whose literal pattern is
+    # in the calling shell's own argv always finds itself, so a waiter never
+    # returns. Sits beside root_recursion_guard: both deny a Bash shape whose
+    # cost is unbounded session time rather than broken state.
+    self_matching_process_probe:
+      enabled: true
+      priority: 17
+
     worktree_file_copy:    # Prevents copying files between git worktrees
       enabled: true
       priority: 15

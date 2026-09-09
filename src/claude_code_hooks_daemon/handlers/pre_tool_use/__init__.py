@@ -31,6 +31,7 @@ from .remote_docs_routing import RemoteDocsRoutingHandler
 from .root_recursion_guard import RootRecursionGuardHandler
 from .security_antipattern import SecurityAntipatternHandler
 from .sed_blocker import SedBlockerHandler
+from .self_matching_process_probe import SelfMatchingProcessProbeHandler
 from .staged_lint_gate import StagedLintGateHandler
 from .tdd_enforcement import TddEnforcementHandler
 from .validate_instruction_content import ValidateInstructionContentHandler
@@ -70,6 +71,7 @@ __all__ = [
     "RootRecursionGuardHandler",
     "SecurityAntipatternHandler",
     "SedBlockerHandler",
+    "SelfMatchingProcessProbeHandler",
     "StagedLintGateHandler",
     "TddEnforcementHandler",
     "ValidateInstructionContentHandler",

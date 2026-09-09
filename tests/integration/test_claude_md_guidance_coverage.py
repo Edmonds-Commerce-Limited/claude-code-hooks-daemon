@@ -108,6 +108,9 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "checks the vendored corpus before fetching a URL at all"
     ),
     "RootRecursionGuardHandler": "T1 denies recursive scanners rooted at /",
+    "SelfMatchingProcessProbeHandler": (
+        "T1 denies a process probe that matches the calling shell's own argv"
+    ),
     "SecurityAntipatternHandler": "T1 denies known-dangerous constructs",
     "SedBlockerHandler": "T1 denies sed used to modify files",
     "SensitiveContentHandler": "T1 denies blocked terms in content and git metadata",

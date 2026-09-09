@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.utils.process_probe import (
     ProcessProbe,
     WaitConstruct,
     bracket_trick,
+    classify_liveness_loops,
     classify_process_probes,
 )
 
@@ -237,6 +238,16 @@ class TestPgrepPipedToAKiller:
         probes = classify_process_probes('pgrep -f "[r]un_02" | xargs kill')
         assert [probe.lethal for probe in probes if probe.kind is ProbeKind.PGREP] == [False]
 
+    def test_signalling_is_recorded_apart_from_the_verdict(self) -> None:
+        """A caller warning about an unresolvable pattern needs this separately."""
+        probe = _only('pgrep -f "$JOB" | xargs kill')
+        assert probe.signals is True
+        assert probe.verdict is ProbeVerdict.UNRESOLVED
+        assert probe.lethal is False
+
+    def test_a_reporting_probe_does_not_signal(self) -> None:
+        assert _only("pgrep -f run_02").signals is False
+
 
 class TestPsPipedToGrep:
     """`ps … | grep <pattern>` matches the grep's own line in ps output."""
@@ -416,3 +427,118 @@ class TestBracketTrick:
     )
     def test_refuses_patterns_it_cannot_safely_rewrite(self, pattern: str) -> None:
         assert bracket_trick(pattern) is None
+
+
+class TestIncidentCorpus:
+    """The exact deny/allow corpus from the imported incident report."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'until ! pgrep -f "provision.bash target-host" >/dev/null; do sleep 20; done',
+            "while pgrep -af 'provisioner playbooks/' ; do sleep 5; done",
+            'pkill -f "my-long-job"',
+            'ps aux | grep "provisioner" | wc -l',
+        ],
+    )
+    def test_the_deny_corpus_is_self_matching(self, command: str) -> None:
+        probes = classify_process_probes(command)
+        assert probes
+        assert any(probe.is_self_matching for probe in probes)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "pgrep -f '[p]rovision.bash'",
+            'pgrep -f -- "[p]rovision.bash"',
+            "pgrep -x provisioner",
+            "ps aux | grep '[p]rovision'",
+            "ps aux | grep provision | grep -v grep",
+            './job.bash > j.log 2>&1 & pid=$!; until ! kill -0 "$pid"; do sleep 5; done',
+            'until grep -q "PLAY RECAP" run.log; do sleep 10; done',
+        ],
+    )
+    def test_the_allow_corpus_is_never_self_matching(self, command: str) -> None:
+        assert not any(probe.is_self_matching for probe in classify_process_probes(command))
+
+    def test_a_variable_pattern_is_unresolved_not_self_matching(self) -> None:
+        probes = classify_process_probes('pgrep -f "$pattern"')
+        assert [probe.verdict for probe in probes] == [ProbeVerdict.UNRESOLVED]
+
+    def test_the_reported_rewrite_is_the_one_offered(self) -> None:
+        probe = _only('until ! pgrep -f "provision.bash target-host" >/dev/null; do sleep 20; done')
+        assert probe.safe_rewrite == 'pgrep -f "[p]rovision.bash target-host"'
+
+
+class TestLivenessLoops:
+    """A wait loop is a second thing that can lie, independently of the probe."""
+
+    def test_no_loop_means_no_report(self) -> None:
+        assert classify_liveness_loops("pgrep -f run_02") == ()
+        assert classify_liveness_loops("") == ()
+
+    def test_a_for_loop_is_not_a_liveness_wait(self) -> None:
+        """Its iteration count is a fixed list, so it cannot spin for ever."""
+        assert classify_liveness_loops("for i in 1 2 3; do sleep 1; done") == ()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            _INCIDENT,
+            'until ! pgrep -f "provision.bash target-host" >/dev/null; do sleep 20; done',
+            "while pgrep -af 'provisioner playbooks/' ; do sleep 5; done",
+            # A PID probe is honest, but the loop around it is still uncapped.
+            './job.bash > j.log 2>&1 & pid=$!; until ! kill -0 "$pid"; do sleep 5; done',
+        ],
+    )
+    def test_a_probe_conditioned_sleep_loop_is_unbounded(self, command: str) -> None:
+        loops = classify_liveness_loops(command)
+        assert len(loops) == 1
+        assert loops[0].is_unbounded_liveness_wait is True
+
+    def test_waiting_on_an_artefact_is_never_flagged(self) -> None:
+        """This is the remedy the report recommends; flagging it would be wrong."""
+        loops = classify_liveness_loops('until grep -q "PLAY RECAP" run.log; do sleep 10; done')
+        assert len(loops) == 1
+        assert loops[0].probes == ()
+        assert loops[0].is_unbounded_liveness_wait is False
+
+    def test_a_counter_in_the_body_bounds_the_loop(self) -> None:
+        command = "until ! pgrep -f run_02; do sleep 5; i=$((i+1)); done"
+        loops = classify_liveness_loops(command)
+        assert loops[0].bounded is True
+        assert loops[0].is_unbounded_liveness_wait is False
+
+    def test_a_numeric_cap_in_the_condition_bounds_the_loop(self) -> None:
+        command = 'while pgrep -f run_02 && [ "$i" -lt 60 ]; do sleep 5; done'
+        assert classify_liveness_loops(command)[0].bounded is True
+
+    def test_a_working_body_is_not_an_idle_spin(self) -> None:
+        command = "until ! pgrep -f run_02; do sleep 5; ./collect-metrics.sh; done"
+        loops = classify_liveness_loops(command)
+        assert loops[0].body_only_sleeps is False
+        assert loops[0].is_unbounded_liveness_wait is False
+
+    def test_an_echo_beside_the_sleep_still_counts_as_idle(self) -> None:
+        command = "until ! pgrep -f run_02; do echo waiting; sleep 5; done"
+        assert classify_liveness_loops(command)[0].body_only_sleeps is True
+
+    def test_the_loop_records_its_own_parts(self) -> None:
+        loops = classify_liveness_loops(_INCIDENT)
+        assert loops[0].keyword == "until"
+        assert "pgrep" in loops[0].condition
+        assert loops[0].body.strip() == "sleep 30"
+        assert loops[0].text == _INCIDENT
+
+    def test_a_loop_hidden_in_a_quoted_script_is_not_reported(self) -> None:
+        """Those shapes are the BOUNDED ones, so reporting them advises against the fix."""
+        command = "timeout 3600 bash -c 'until ! pgrep -f run_02; do sleep 5; done'"
+        assert classify_liveness_loops(command) == ()
+
+    def test_two_loops_are_both_described(self) -> None:
+        command = (
+            "until ! pgrep -f run_01; do sleep 5; done; "
+            "until grep -q done run.log; do sleep 5; done"
+        )
+        loops = classify_liveness_loops(command)
+        assert [loop.is_unbounded_liveness_wait for loop in loops] == [True, False]

@@ -88,6 +88,12 @@ class Priority:
     # happened, so it must not be recorded as knowledge of the file.
     WRITE_CLOBBER_GUARD = 16
 
+    # Plan 00363: safety band, beside root_recursion_guard (16) -- both deny a
+    # Bash command shape that costs the session unbounded time rather than
+    # breaking anything. Sits one slot later so a probe inside a catastrophic
+    # recursive scan is reported as the scan first, which is the larger hazard.
+    SELF_MATCHING_PROCESS_PROBE = 17
+
     TDD_ENFORCEMENT = 15
     DANGEROUS_PERMISSIONS = 15
     AUTO_CONTINUE_STOP = 15
