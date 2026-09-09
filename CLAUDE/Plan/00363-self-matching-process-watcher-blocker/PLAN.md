@@ -42,6 +42,11 @@ the loop is never armed.
 - Acceptance tests (blocking and advisory) via `get_acceptance_tests()`;
   CLAUDE.md guidance via `get_claude_md()`; rule IDs in `constants/rule_ids.py`.
 
+The full incident, the three rules it argues for and the deny/allow corpus are
+in [INCIDENT-REPORT.md](INCIDENT-REPORT.md): Rule A (self-matching process
+search, deny), Rule B (waiting on a wrapper's `$!` after `setsid`/`nohup sh -c`,
+deny for `setsid`, advise otherwise), Rule C (unbounded liveness loop, advise).
+
 ## Non-Goals
 
 - Detecting a loop that never ends for any other reason (wrong file path,
@@ -77,6 +82,18 @@ the loop is never armed.
   manifest entry, release-notes callout in
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`, `HANDLER_DEVELOPMENT.md`
   family list updated.
+
+### Phase 3: Wrapper-pid wait (Rule B)
+
+- [ ] ⬜ **Task 3.1**: Detect `kill -0 $!` / `wait $!` / a loop keyed on `$!`
+  when the backgrounded command in the same invocation starts with `setsid`,
+  `nohup sh -c`, `nohup bash -c`, `timeout` or `env`; deny for `setsid`
+  (the parent exits at once), advise for the others; the message names the
+  pidfile-written-by-the-job, `pgrep -P <wrapper-pid>` and wait-on-the-artefact
+  remedies. Rule ID `R-WAIT-ON-WRAPPER-PID`.
+- [ ] ⬜ **Task 3.2**: Rule C advisory: an `until`/`while` whose body is only
+  `sleep` and whose condition is a process probe, with no `timeout` wrapper or
+  iteration cap — suggest `timeout 3600 bash -c '…'` or a counter.
 
 ## Success Criteria
 
