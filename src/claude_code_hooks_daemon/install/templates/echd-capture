@@ -9,7 +9,7 @@
 # anyway — which is net token bloat.
 #
 # This helper does the intended thing in one short command: it reads stdin,
-# tees the FULL stream to a capture file, and prints only a bounded PREVIEW
+# writes the FULL stream to a capture file, and prints only a bounded PREVIEW
 # (the last N lines by default, or the first N with --head) followed by the
 # absolute path to the full capture for follow-up reading.
 #
@@ -30,7 +30,7 @@
 # Capture directory precedence:
 #   1. $ECHD_CAPTURE_DIR                      (explicit override)
 #   2. $CLAUDE_PROJECT_DIR/untracked/captures (inside a daemon project)
-#   3. ${TMPDIR:-/tmp}/echd-captures          (last resort)
+#   3. a fresh private dir under ${TMPDIR:-/tmp} (last resort, via mktemp -d)
 
 set -uo pipefail
 
@@ -48,7 +48,10 @@ while [ $# -gt 0 ]; do
             shift 2
             ;;
         -h | --help)
-            grep '^#' "$0" | cut -c3-
+            # The header block only: stop at the first line that is not a
+            # comment. Printing every comment in the file trailed the usage
+            # text off into the implementation's own inline rationale.
+            awk 'NR == 1 && /^#!/ { next } /^#/ { print substr($0, 3); next } { exit }' "$0"
             exit 0
             ;;
         '' | *[!0-9]*)
@@ -68,7 +71,15 @@ if [ -n "${ECHD_CAPTURE_DIR:-}" ]; then
 elif [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
     _dir="$CLAUDE_PROJECT_DIR/untracked/captures"
 else
-    _dir="${TMPDIR:-/tmp}/echd-captures"
+    # Last resort, and the only rung in a world-writable directory. A FIXED
+    # name there is a redirect target: `mkdir -p` follows a pre-existing
+    # symlink, so whoever creates the name first owns every later capture.
+    # mktemp makes the name unpredictable and the directory private (0700),
+    # which closes that without needing an ownership check.
+    if ! _dir="$(mktemp -d "${TMPDIR:-/tmp}/echd-captures-XXXXXX")"; then
+        echo "echd-capture: cannot create a capture dir under ${TMPDIR:-/tmp} — passing output through unchanged" >&2
+        exec cat
+    fi
 fi
 # A capture directory that cannot be created must NEVER cost the caller their
 # output: this helper is what pipe_blocker names as the alternative to a
