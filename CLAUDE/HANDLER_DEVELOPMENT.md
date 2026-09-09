@@ -535,6 +535,13 @@ every result most-restrictive-wins:
 - **The FIRST restrictive handler owns the response**: its reason is shown
   and the `To disable:` footer names its config key, whether it is terminal
   or not, so the two can never disagree (Task 3.3).
+- **`guidance`, `updated_input` and `worktree_path` accumulate like
+  `context`.** They carry information rather than a decision, so whichever
+  result wins the decision keeps the ones it set itself and inherits the rest
+  from the first matched handler that set them. A handler whose broad
+  `matches()` returns a contentless ALLOW therefore cannot swallow a later
+  handler's remedy text or input rewrite. `reason` is never merged this way —
+  it belongs to the deciding handler alone.
 - **One exception, per event**: the PermissionRequest chain is built with
   `allow_is_final=True`, so `auto_approve_reads`' ALLOW concludes the
   request — approving a permission IS the answer. That is an event-level

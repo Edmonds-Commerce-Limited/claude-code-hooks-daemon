@@ -21,7 +21,7 @@ owns both the reason shown and the ``To disable:`` attribution (Task 3.3).
 
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -44,6 +44,51 @@ _RESTRICTIVE_DECISIONS: frozenset[Decision] = frozenset(
 def is_restrictive(decision: Decision | str | None) -> bool:
     """True when ``decision`` restricts the tool call (deny/ask/defer)."""
     return decision in _RESTRICTIVE_DECISIONS
+
+
+# Result fields that carry INFORMATION rather than a decision, and so travel
+# like ``context``: whichever result wins the decision, the first handler to
+# set one of these owns it. Without this merge a contentless early ALLOW —
+# the shape produced by a deliberately broad matches() whose handle() finds
+# nothing — becomes the incumbent under most-restrictive-wins and every later
+# handler's remedy text and input rewrite is dropped from the response.
+_ACCUMULATED_RESULT_FIELDS: tuple[str, ...] = ("guidance", "updated_input", "worktree_path")
+
+
+def carry_accumulated_fields(winner: HookResult, results: Sequence[HookResult]) -> None:
+    """Merge every matched result's information fields onto the winning result.
+
+    ``guidance``, ``updated_input`` and ``worktree_path`` are accumulated
+    information, not a decision. The winner's own value always takes
+    precedence — an ALLOW's guidance never displaces a DENY's, and nothing
+    here touches ``reason`` — and any of the three the winner leaves unset is
+    filled from the FIRST matched result that set it, the same first-wins rule
+    the reason and the ``To disable:`` footer already follow.
+
+    ``rule`` is deliberately treated differently: it sub-classifies the ONE
+    decision that produced it, so it is only carried between results that
+    agree on restrictiveness. An advisory's rule must never be reported as
+    the rule that denied a call.
+
+    Args:
+        winner: The merged result the chain will return; mutated in place.
+        results: Every matched handler's result, in chain order.
+    """
+    for field_name in _ACCUMULATED_RESULT_FIELDS:
+        if getattr(winner, field_name) is not None:
+            continue
+        for result in results:
+            value = getattr(result, field_name)
+            if value is not None:
+                setattr(winner, field_name, value)
+                break
+
+    if winner.rule is None:
+        winner_restrictive = is_restrictive(winner.decision)
+        for result in results:
+            if result.rule is not None and is_restrictive(result.decision) == winner_restrictive:
+                winner.rule = result.rule
+                break
 
 
 # Collect-all response bounds (Plan 00242 Task 3.4). The lead deny is never
@@ -336,6 +381,9 @@ class HandlerChain:
         terminated_by: str | None = None
         decided_by: str | None = None
         decisions: list[HandlerVerdict] = []
+        # Every matched handler's result, in chain order, so the ALLOW-only
+        # information fields can be merged onto the winner afterwards.
+        matched_results: list[HookResult] = []
         # Collect-all bookkeeping: every restrictive result and every
         # advisory (non-restrictive result that carried context), in order.
         denials: list[tuple[str, HookResult]] = []
@@ -356,6 +404,7 @@ class HandlerChain:
                     )
                     handlers_executed.append(handler.name)
                     executed_handlers.append(handler)
+                    matched_results.append(result)
                     result.add_handler(handler.name)
 
                     # Record THIS handler's own verdict now, before any later
@@ -438,6 +487,12 @@ class HandlerChain:
         # chain order — the winning result's own lines are already among them.
         if final_result.context != accumulated_context:
             final_result.context = list(accumulated_context)
+
+        # ...and, on the same principle, every matched handler's guidance,
+        # input rewrite and worktree path. The decision stays
+        # most-restrictive-wins; these fields are information, so the winner
+        # only owns the ones it set itself.
+        carry_accumulated_fields(final_result, matched_results)
 
         # Record all matched handlers
         for h in handlers_matched:
