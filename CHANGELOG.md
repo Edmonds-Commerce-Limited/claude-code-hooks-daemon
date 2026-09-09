@@ -17,6 +17,18 @@ a work area, not as the origin of every fix in it._
 
 ### Added
 
+- **A wait loop can no longer watch for itself (Plan 00363).** The new
+  `self_matching_process_probe` handler (PreToolUse, on by default, priority
+  17\) denies `pgrep -f`, `pkill -f` and `ps … | grep` whose literal pattern
+  is on the calling shell's own command line — the Bash tool runs every
+  command through `bash -c`, so such a probe always finds itself and reports
+  "still running" for ever. The block message gives the bracket-trick rewrite
+  for the pattern actually typed, plus `pgrep -x`, a captured pid, and
+  waiting on an artefact. Two advisories ship beside it: an uncapped
+  `while`/`until` wait on a process (`R-UNBOUNDED-LIVENESS-LOOP`) and a
+  pattern built by expansion that the daemon cannot read
+  (`R-PGREP-UNRESOLVED-PATTERN`). The wrapper-pid rule (waiting on `$!`
+  after `setsid …&`) is filed for a later release.
 - **`/release` opens with a slate-clean gate (Plan 00359).**
   `hooks-daemon release-slate-check` confirms HEAD's exact sha is CI-green
   and lists mid-work plans, branches ahead of main and live worktrees before
