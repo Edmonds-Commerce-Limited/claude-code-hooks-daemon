@@ -1,6 +1,7 @@
 version: "3.23.0"
 truth_changes:
-  - id: plan-creation
+  - topic: plan-workflow
+    id: plan-creation
     was: >
       To create a new plan, read the authoritative git counter
       `hooksdaemon.latestPlanNumber` and add 1 (zero-padded to 5 digits), then

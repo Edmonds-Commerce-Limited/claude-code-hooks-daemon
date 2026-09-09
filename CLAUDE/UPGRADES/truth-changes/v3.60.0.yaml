@@ -1,6 +1,7 @@
 version: "3.60.0"
 truth_changes:
-  - was: >
+  - topic: ccy-supervisor
+    was: >
       In the ccy supervisor's two-tier design, only the injection DECISION
       ran in the hot-reloadable `--worker` subprocess. RECOGNITION of a
       human-typed slash command (`/compact`, `/model <x>`, `/effort <x>`)
@@ -19,7 +20,8 @@ truth_changes:
       Only byte-level primitives that must act on a byte BEFORE it reaches
       the child remain host-side by design — the Ctrl+C double-press swallow
       and the Ctrl+Z (SUSP) strip.
-  - was: >
+  - topic: ccy-supervisor
+    was: >
       The ccy supervisor flushed its audit trail as a visible, bot-prefixed
       message INJECTED INTO THE CHAT transcript, so a record of what the
       supervisor did (`/model`, `/effort`, `/compact`, goal) appeared in the

@@ -1,6 +1,7 @@
 version: "3.19.0"
 truth_changes:
-  - was: >
+  - topic: markdown-organization
+    was: >
       To allow markdown files in an extra location, set `allowed_markdown_paths`
       in the markdown_organization handler config — a list of regex patterns that
       replaces the built-in allowed locations (so you must redeclare CLAUDE/, docs/,
@@ -11,7 +12,8 @@ truth_changes:
       extras and keep all upstream defaults automatically. `allowed_markdown_paths`
       still exists as a full override, but is discouraged for simple additions and
       should only be used to deliberately FORBID a built-in default location.
-  - was: >
+  - topic: markdown-organization
+    was: >
       Only `SKILL.md` inside `.claude/skills/` is allowed everywhere; other markdown
       a skill ships (reference/usage docs) is blocked by markdown_organization.
     now: >

@@ -1,6 +1,7 @@
 version: "3.55.0"
 truth_changes:
-  - was: >
+  - topic: git-safety
+    was: >
       A closing keyword followed by an issue reference in a git commit
       message — "Fixes #123", "closes octo-org/octo-repo#42",
       "Resolved GH-7" — was an ordinary, documented way to auto-close an
@@ -29,7 +30,8 @@ truth_changes:
       switches it to advisory-only
       (`handlers.pre_tool_use.github_auto_close_keywords.options.mode: warn`).
       An agent should not hunt for a way around the block; ask the user.
-  - was: >
+  - topic: blocking-handlers
+    was: >
       When `sensitive_content` denied a write with "entry N of M in the
       secret word list", the documented remediation was to OPEN the secret
       word list file (if you have access) to see what matched. Reading a
@@ -53,7 +55,8 @@ truth_changes:
       them to use `secret-meta` or to ask the user. There is deliberately NO
       agent-side escape hatch; a HUMAN edits
       `handlers.pre_tool_use.secret_file_guard` to lift protection.
-  - was: >
+  - topic: tool-controls
+    was: >
       Publishing an artefact is an ordinary step an agent can take on its own
       initiative. A project's own documentation and skills could instruct an
       agent to render a report as an artefact and hand the user the resulting
@@ -94,7 +97,8 @@ truth_changes:
       This has no effect on a human publishing through the claude.ai UI. The
       daemon sees tool calls, not browser clicks — the same honest limitation
       `ancestry_preserving_merge` records about the GitHub merge button.
-  - was: >
+  - topic: blocking-handlers
+    was: >
       `Write` is the tool for putting content into a file, and using it on an
       existing path simply replaces that file. A project's own docs, skills or
       agent instructions could tell an agent to "write the updated file" without
@@ -128,7 +132,8 @@ truth_changes:
 
       Not covered: Bash-mediated writes (`>`, `>>`, `tee`, heredoc). Those
       bypass every Write/Edit-keyed handler and are tracked separately.
-  - was: >
+  - topic: blocking-handlers
+    was: >
       A file written through Bash was covered by the same guards as one written
       with `Write` or `Edit`. Handler guidance said so directly — eight sections
       opened with an unqualified "Writing X is blocked" — so a `>`, `>>`, `tee`
@@ -159,7 +164,8 @@ truth_changes:
       dedicated Read, Edit, or Write tools". The daemon cannot suppress that
       instruction, so for a project where `bypassPermissions` is permanent this
       is a standing condition of every session, not an edge case.
-  - was: >
+  - topic: claude-memory
+    was: >
       With `allow_untracked_claude_memory: false`, the bash side-door to Claude
       auto-memory paths was closed. In practice only two spellings were
       detected — a `>`/`>>` redirect and the FIRST `tee` operand — so a command
@@ -190,7 +196,8 @@ truth_changes:
       The wider resolver is available to other handlers as
       `get_bash_write_targets()`. The two linters now use it as well — see the
       next entry, which covers the denial surface that creates.
-  - was: >
+  - topic: blocking-handlers
+    was: >
       A source file written through Bash was never linted. `cat > x.py <<'EOF'`
       put unparseable Python on disk in silence, while the identical content
       through `Write` was denied by `lint_on_edit` — so the route that appeared
@@ -230,7 +237,8 @@ truth_changes:
       Heredoc BODIES are not scanned for nested targets either, because that
       mode yields occasional phantom paths from prose and a DENYING handler
       must never act on a file the command did not write.
-  - was: >
+  - topic: generated-docs
+    was: >
       The Behaviour column in the generated `.claude/HOOKS-DAEMON.md` could be
       read as describing what a handler does, so a row saying ADVISORY or
       NON-TERMINAL meant that handler would warn rather than stop a tool call.
@@ -263,7 +271,8 @@ truth_changes:
       `validate_eslint_on_write` (both inert without `llm:` scripts in
       package.json). Calling those BLOCKING would overstate what a default
       installation does, which is the same untruth pointed the other way.
-  - was: >
+  - topic: handler-development
+    was: >
       A handler subclasses `Handler` and returns `HookResult`, one
       event-agnostic type shared by all 31 wired events. Nothing at the type
       level tied a handler to the decisions its event can actually deliver, so
@@ -295,7 +304,8 @@ truth_changes:
       its decision is delivered under whichever real event triggered it, and
       triggers are per-project config — so those stay on plain `Handler` and
       are clamped at merge time instead.
-  - was: >
+  - topic: handler-development
+    was: >
       `hooks-daemon validate-project-handlers` reported a handler returning a
       decision its event cannot deliver. In practice it only recognised the
       decision written as `Decision.DENY`, so a handler refusing through the
@@ -317,7 +327,8 @@ truth_changes:
       exactly one refused invisibly — and it cost nothing only because it sits
       on `PreToolUse`, which can deny. The population this actually protects is
       project handlers, which no test in the daemon repository can see.
-  - was: >
+  - topic: handler-development
+    was: >
       `merge_pseudo_results(real, pseudo_results)` took two arguments and
       merged a pseudo-event's decision into the real chain result unchanged.
     now: >
@@ -332,7 +343,8 @@ truth_changes:
       project is unlikely to call it. It is recorded because the symbol is
       exported from `claude_code_hooks_daemon.core`: if you do call it, add the
       event name.
-  - was: >
+  - topic: blocking-handlers
+    was: >
       `lint_on_edit` covered Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin
       and Dart. A `.yml`/`.yaml` file was never linted on write, so an Ansible
       playbook that would not even LOAD — an unbalanced quote inside a
@@ -362,7 +374,8 @@ truth_changes:
       syntax check only with `command_overrides: {Ansible: {extended: null}}`
       — the extended tier is NOT opt-in and runs whenever ansible-lint is
       installed, as for every other language.
-  - was: >
+  - topic: handler-development
+    was: >
       Several documented Claude Code hook capabilities were inexpressible or
       wrongly claimed by the daemon (Plan 00271 audit): a project handler on
       UserPromptSubmit, PreCompact, UserPromptExpansion, PostToolUseFailure,

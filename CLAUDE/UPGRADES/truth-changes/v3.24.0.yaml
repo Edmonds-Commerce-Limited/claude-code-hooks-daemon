@@ -1,6 +1,7 @@
 version: "3.24.0"
 truth_changes:
-  - was: >
+  - topic: claude-memory
+    was: >
       Untracked Claude auto-memory writes (~/.claude/projects/*/memory/*.md) are
       allowed by default; durable knowledge can be saved to Claude memory.
     now: >

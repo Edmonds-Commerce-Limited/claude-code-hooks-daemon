@@ -255,8 +255,14 @@ def _run_check_config_cli(
     from_version: str,
     to_version: str,
     config_path: Path,
+    *extra_args: str,
 ) -> subprocess.CompletedProcess[str]:
-    """Run check-config-migrations CLI in a subprocess against the project root."""
+    """Run check-config-migrations CLI in a subprocess against the project root.
+
+    The full advisory is offloaded next to the config under test rather than
+    into the repository's own untracked/ (Plan 00329); pass ``--full`` to
+    read the whole advisory from stdout instead.
+    """
     return subprocess.run(
         [
             _PYTHON,
@@ -269,6 +275,9 @@ def _run_check_config_cli(
             to_version,
             "--config",
             str(config_path),
+            "--report-dir",
+            str(config_path.parent / "reports"),
+            *extra_args,
         ],
         capture_output=True,
         text=True,
@@ -305,13 +314,26 @@ class TestCheckConfigMigrationsCLI:
         ), f"Version range not in output: {combined}"
 
     def test_cli_output_contains_suggestion_for_new_handler(self, tmp_path: Path) -> None:
-        """Output should name the new option added in the version range."""
+        """The full advisory names the new option added in the version range."""
         config = tmp_path / "hooks-daemon.yaml"
         config.write_text("handlers: {}\ndaemon: {}\n")
-        result = _run_check_config_cli("2.8.0", "2.9.0", config)
+        result = _run_check_config_cli("2.8.0", "2.9.0", config, "--full")
         assert (
             "qa_suppression" in result.stdout or "qa_suppression" in result.stderr
         ), f"qa_suppression not found in output:\n{result.stdout}\n{result.stderr}"
+
+    def test_cli_default_output_is_a_bounded_summary_naming_the_advisory_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Without --full, stdout is the summary and the advisory is on disk."""
+        config = tmp_path / "hooks-daemon.yaml"
+        config.write_text("handlers: {}\ndaemon: {}\n")
+        result = _run_check_config_cli("2.8.0", "2.9.0", config)
+        assert result.returncode == 1, f"stderr: {result.stderr}"
+        assert "ADVISORY.md" in result.stdout
+        advisory = tmp_path / "reports" / "v2.8.0-to-v2.9.0" / "ADVISORY.md"
+        assert advisory.is_file(), result.stdout
+        assert "qa_suppression" in advisory.read_text(encoding="utf-8")
 
     def test_cli_does_not_crash_for_late_patch_range(self, tmp_path: Path) -> None:
         """CLI should exit cleanly for any valid version range."""
