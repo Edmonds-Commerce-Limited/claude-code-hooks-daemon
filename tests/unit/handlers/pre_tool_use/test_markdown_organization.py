@@ -2537,3 +2537,133 @@ class TestMarkdownOrganizationDisclosureLadder:
 
         assert result.reason.startswith(f"BLOCKED [{RuleID.MARKDOWN_UNTRACKED_MEMORY}]")
         assert "READING memory is still allowed" in result.reason
+
+
+class TestNestedDependencyTreesAndDeclaredProjectsAtAnyDepth:
+    """Plan 00365: a field report — an `Edit` of an EXISTING `.md` inside a
+    first-party clone vendored two `vendor/` levels deep was denied, and
+    neither a `projects:` declaration nor `extra_allowed_markdown_paths`
+    rescued it. The owner's ruling: a `projects:` entry naming the directory
+    as it is, at ANY depth, must simply work — and beats the built-in
+    dependency-directory inference.
+    """
+
+    NESTED_PKG = "vendor/org-a/pkg-a/vendor/org-b/pkg-b"
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> MarkdownOrganizationHandler:
+        handler = MarkdownOrganizationHandler()
+        handler._workspace_root = tmp_path
+        return handler
+
+    @staticmethod
+    def _edit(path: str) -> dict[str, Any]:
+        return {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": path, "old_string": "a", "new_string": "b"},
+        }
+
+    @staticmethod
+    def _declare(tmp_path: Path, *roots: str) -> ProjectRegistry:
+        return ProjectRegistry.from_config(
+            Config.model_validate({"projects": [{"name": r, "root": r} for r in roots]}),
+            tmp_path,
+        )
+
+    # ── dependency inference applies at every nesting level ──
+
+    def test_docs_inside_vendor_inside_vendor_is_allowed(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """The report's exact shape: `vendor/a/b/vendor/c/d/docs/x.md`."""
+        assert handler.matches(self._edit(f"{self.NESTED_PKG}/docs/upgrading.md")) is False
+
+    def test_misplaced_new_file_inside_vendor_inside_vendor_is_still_blocked(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Nesting does not turn the inner package into a free-for-all."""
+        assert handler.matches(self._edit(f"{self.NESTED_PKG}/random/notes.md")) is True
+
+    def test_three_levels_of_node_modules_and_vendor_mixed(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        path = "node_modules/@scope/pkg/vendor/org/lib/node_modules/dep/docs/api.md"
+        assert handler.matches(self._edit(path)) is False
+
+    # ── a declared project at any depth beats the inference ──
+
+    def test_declared_project_under_vendor_wins_over_inference(
+        self, handler: MarkdownOrganizationHandler, tmp_path: Path
+    ) -> None:
+        """A declared root that is NOT on the Composer package boundary: the
+        inference alone strips to `tools/qa/docs/guide.md` and blocks it; the
+        declaration resolves it to `docs/guide.md` and allows it."""
+        root = "vendor/org-a/pkg-a/tools/qa"
+        assert handler.matches(self._edit(f"{root}/docs/guide.md")) is True  # inference alone
+        handler._project_registry = self._declare(tmp_path, root)
+        assert handler.matches(self._edit(f"{root}/docs/guide.md")) is False
+
+    def test_declared_nested_clone_resolves_its_own_docs(
+        self, handler: MarkdownOrganizationHandler, tmp_path: Path
+    ) -> None:
+        handler._project_registry = self._declare(tmp_path, self.NESTED_PKG)
+        assert handler.matches(self._edit(f"{self.NESTED_PKG}/RELEASES/v1.md")) is False
+        assert handler.matches(self._edit(f"{self.NESTED_PKG}/random/notes.md")) is True
+
+    # ── extra_allowed_markdown_paths sees the repo-relative path too ──
+
+    def test_extra_allowed_pattern_anchored_at_repo_root_matches(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        handler._extra_allowed_markdown_paths = [f"^{self.NESTED_PKG}/"]
+        assert handler.matches(self._edit(f"{self.NESTED_PKG}/random/notes.md")) is False
+
+    def test_extra_allowed_pattern_anchored_at_package_still_matches(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """The pre-existing contract — a package-relative pattern — is kept."""
+        handler._extra_allowed_markdown_paths = ["^random/"]
+        assert handler.matches(self._edit("vendor/acme/package/random/notes.md")) is False
+
+    # ── a file that already exists is not a LOCATION violation ──
+
+    def test_edit_of_existing_misplaced_file_is_not_a_location_violation(
+        self, handler: MarkdownOrganizationHandler, tmp_path: Path
+    ) -> None:
+        existing = tmp_path / "stray" / "notes.md"
+        existing.parent.mkdir(parents=True)
+        existing.write_text("# notes\n", encoding="utf-8")
+        assert handler.matches(self._edit("stray/notes.md")) is False
+
+    def test_write_over_existing_misplaced_file_is_not_a_location_violation(
+        self, handler: MarkdownOrganizationHandler, tmp_path: Path
+    ) -> None:
+        existing = tmp_path / "stray" / "notes.md"
+        existing.parent.mkdir(parents=True)
+        existing.write_text("# notes\n", encoding="utf-8")
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "stray/notes.md", "content": "# rewritten\n"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_new_misplaced_file_is_still_blocked(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert handler.matches(self._edit("stray/notes.md")) is True
+
+    # ── the deny message names the declaration as the fix ──
+
+    def test_deny_message_names_projects_declaration(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "stray/notes.md", "content": "x"},
+            "transcript_path": "/tmp/agent-00365/transcript.jsonl",
+        }
+        verbose = handler.handle(hook_input)
+        terse = handler.handle(hook_input)
+        assert verbose.decision == Decision.DENY
+        assert "projects:" in verbose.reason
+        assert "projects:" in terse.reason
