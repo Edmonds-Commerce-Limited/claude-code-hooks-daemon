@@ -112,8 +112,13 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
     # with a `refs/heads/` target (PLAN.md Risks & Mitigations): creating or
     # moving a ref (no `-d`), and deleting a non-branch ref (e.g.
     # `refs/remotes/...`), stay untouched.
+    #
+    # `[^;&|]*?` for the same reason as the push-force sibling above: a `.*`
+    # spans a separator, so `git update-ref refs/heads/backup HEAD; echo -d
+    # refs/heads/backup` — a ref CREATE plus unrelated text — was denied under
+    # a rule neither statement matches.
     (
-        rf"{_GIT_INVOCATION}update-ref\s+.*-d\s+refs/heads/\S+",
+        rf"{_GIT_INVOCATION}update-ref\s+[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?-d\s+refs/heads/\S+",
         "git update-ref -d refs/heads/<name> force-deletes a branch ref with no "
         "merge check — the plumbing equivalent of git branch -D",
     ),
