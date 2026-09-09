@@ -36,6 +36,7 @@ last two part of this ONE guard rather than a sibling):
 import logging
 import re
 import shlex
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, ClassVar, Final, NamedTuple
 
@@ -193,6 +194,36 @@ _DIFF_ADDED_PREFIX: Final[str] = "+"
 _DIFF_FILE_HEADER_PREFIX: Final[str] = "+++ "
 _DIFF_PATH_PREFIX: Final[str] = "b/"
 
+# `git diff --numstat -z`: one `<added>\t<deleted>\t<path>\0` record per path,
+# line counts only and no content at all. This is the SIZING question the
+# bounds above are decided from, asked before any file's text is fetched.
+_NUMSTAT_FLAG: Final[str] = "--numstat"
+_NUL_TERMINATED_FLAG: Final[str] = "-z"
+_NUMSTAT_FIELD_SEPARATOR: Final[str] = "\t"
+_NUMSTAT_FIELD_COUNT: Final[int] = 3
+_NUL: Final[str] = "\0"
+_UNIFIED_ZERO_FLAG: Final[str] = "--unified=0"
+
+# A staged path is handed straight back to git as a pathspec, so git must not
+# read any of it as pathspec MAGIC: a file genuinely named `:(icase)x` or
+# `*.log` is a name, not a pattern.
+_LITERAL_PATHSPECS_FLAG: Final[str] = "--literal-pathspecs"
+
+# One diff invocation can only carry so many pathspecs before the kernel
+# refuses the exec, and `run_git` reports that as a non-zero return code --
+# which this handler reads as "no staged diff". Chunking keeps every call far
+# inside any ARG_MAX, so a commit staging thousands of files is judged rather
+# than silently standing the guard down.
+_MAX_PATHSPEC_ARGV_BYTES: Final[int] = 64 * 1024
+
+# `run_git` decodes git's output with ``errors="replace"``, so a path carrying
+# a byte that is not valid UTF-8 comes back bearing this character and can no
+# longer be handed to git as a pathspec — it would match nothing, and the file
+# would go unscanned with no record. Narrowing the question is an
+# optimisation; the guard is not, so such a commit asks the unrestricted
+# question instead.
+_REPLACEMENT_CHARACTER: Final[str] = "�"
+
 # The C escapes git writes when it quotes a path (`quote_c_style`), plus its
 # three-digit octal form for any byte outside printable ASCII. Decoding is a
 # byte operation: `\303\251` is ONE character in UTF-8, not two.
@@ -255,6 +286,25 @@ class _DispatchKey(NamedTuple):
     tool_name: str
     subject: str
     body: str
+
+
+class _StagedSelection(NamedTuple):
+    """Which staged paths are worth fetching, decided from line counts alone.
+
+    ``stood_down_at`` is the first path a bound kept out of the fetch, so the
+    scan can report ONE stand-down naming the first file it did not judge --
+    whether the sizing pass or the exact byte count is what stopped it.
+
+    ``narrowable`` is False when some selected path cannot be handed back to
+    git as a pathspec, in which case the whole diff is fetched and filtered
+    here instead. That costs the peak this selection exists to bound, and is
+    the deliberate trade: a narrower question is an optimisation, judging
+    every staged path is not.
+    """
+
+    paths: list[str]
+    stood_down_at: str | None
+    narrowable: bool
 
 
 class _Haystack(NamedTuple):
@@ -423,6 +473,68 @@ def _added_lines_by_path(diff_output: str) -> dict[str, str]:
         if current is not None and line.startswith(_DIFF_ADDED_PREFIX):
             added[current] += line[len(_DIFF_ADDED_PREFIX) :] + "\n"
     return added
+
+
+def _numstat_added_lines(numstat_output: str) -> dict[str, int]:
+    """Map each path in a ``--numstat -z`` diff to its ADDED-LINE count.
+
+    ``-z`` writes ``<added>\\t<deleted>\\t<path>\\0`` and never quotes the
+    path, which is exactly what makes the name usable as a pathspec
+    afterwards -- the C-quoting :func:`_unquote_diff_path` has to undo in the
+    patch format never appears here.
+
+    A rename or copy leaves the path field EMPTY and appends two further
+    NUL-terminated fields, source then destination; only the destination
+    carries content. Reading straight through would take the source for a
+    whole record and mis-frame every record after it.
+
+    A binary blob reports ``-`` for both counts and is dropped, the same skip
+    the patch parser gets for free from a blob printing no ``+`` lines.
+    """
+    added: dict[str, int] = {}
+    fields = numstat_output.split(_NUL)
+    index = 0
+    while index < len(fields):
+        record = fields[index]
+        index += 1
+        parts = record.split(_NUMSTAT_FIELD_SEPARATOR, _NUMSTAT_FIELD_COUNT - 1)
+        if len(parts) != _NUMSTAT_FIELD_COUNT:
+            continue
+        count, _deleted, path = parts
+        if not path:
+            if index + 1 >= len(fields):
+                break
+            path = fields[index + 1]
+            index += 2
+        if count.isdigit():
+            added[path] = int(count)
+    return added
+
+
+def _pathspec_chunks(paths: list[str], *, narrowable: bool) -> Iterator[list[str]]:
+    """``paths`` split into pathspec runs that fit comfortably in one argv.
+
+    An EMPTY chunk means "ask about every path", which is what a name git
+    cannot be given back forces. No paths at all means there is no question
+    worth asking, so no chunk is yielded and no subprocess is spawned.
+    """
+    if not paths:
+        return
+    if not narrowable:
+        yield []
+        return
+    chunk: list[str] = []
+    used = 0
+    for path in paths:
+        cost = len(path.encode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS)) + 1
+        if chunk and used + cost > _MAX_PATHSPEC_ARGV_BYTES:
+            yield chunk
+            chunk = []
+            used = 0
+        chunk.append(path)
+        used += cost
+    if chunk:
+        yield chunk
 
 
 # Compiled-pattern cache: the same handful of client public_patterns are
@@ -723,25 +835,114 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         the project root), so a worktree or nested repo judges its own index.
         No repository, or a git failure, means nothing to judge -- git owns
         that failure.
+
+        Two questions, cheapest first. ``--numstat`` returns one line count
+        per path and no content whatever, which is enough to drop a binary
+        blob, an excluded path and anything the bounds already exclude BEFORE
+        git is asked for a byte of it. The patch call then names only the
+        survivors, so ``MAX_STAGED_FILE_BYTES``/``MAX_STAGED_TOTAL_BYTES``
+        bound what this process HOLDS and not merely what it searches.
         """
         repo_root = self._commit_repo_root(hook_input)
         if repo_root is None:
             return []
-        diff_args = ["diff", "--no-color", "--unified=0", f"--diff-filter={_DIFF_FILTER}"]
-        diff_args.append("HEAD" if commits_all else "--cached")
-        diff = run_git(repo_root, *diff_args)
-        if diff.returncode != 0:
-            _LOGGER.debug("sensitive_content: staged diff unavailable in %s", repo_root)
-            return []
+        target = "HEAD" if commits_all else "--cached"
+        return self._scan_staged_paths(
+            repo_root, target, self._select_staged_paths(repo_root, target)
+        )
 
-        haystacks: list[_Haystack] = []
-        total = 0
-        for relpath, added in _added_lines_by_path(diff.stdout).items():
-            if not added:
+    def _select_staged_paths(self, repo_root: Path, target: str) -> _StagedSelection:
+        """The staged paths worth fetching, from ``--numstat`` line counts.
+
+        An added line costs at least the newline that ends it, so a line COUNT
+        already past a BYTE bound settles the question: that file cannot fit,
+        and git is never asked for it. The counts only ever UNDER-state bytes,
+        so everything surviving here is still measured exactly in
+        :meth:`_scan_staged_paths` once its text is in hand -- this pass can
+        drop a file early, never admit one the bounds exclude.
+        """
+        result = run_git(
+            repo_root,
+            "diff",
+            "--no-color",
+            _NUMSTAT_FLAG,
+            _NUL_TERMINATED_FLAG,
+            f"--diff-filter={_DIFF_FILTER}",
+            target,
+        )
+        if result.returncode != 0:
+            _LOGGER.debug("sensitive_content: staged diff unavailable in %s", repo_root)
+            return _StagedSelection(paths=[], stood_down_at=None, narrowable=True)
+
+        paths: list[str] = []
+        narrowable = True
+        budget = 0
+        for relpath, lines in _numstat_added_lines(result.stdout).items():
+            if lines <= 0:
                 continue
             abs_path = str(repo_root / relpath)
             if self._is_excluded(abs_path) or self._is_secret_list_itself(abs_path):
                 continue
+            if lines > MAX_STAGED_FILE_BYTES:
+                _LOGGER.info(
+                    "sensitive_content: staged %s exceeds the per-file bound; not scanned",
+                    relpath,
+                )
+                continue
+            if budget + lines > MAX_STAGED_TOTAL_BYTES:
+                return _StagedSelection(paths=paths, stood_down_at=relpath, narrowable=narrowable)
+            budget += lines
+            narrowable = narrowable and _REPLACEMENT_CHARACTER not in relpath
+            paths.append(relpath)
+        return _StagedSelection(paths=paths, stood_down_at=None, narrowable=narrowable)
+
+    def _staged_added_lines(
+        self, repo_root: Path, target: str, selection: _StagedSelection
+    ) -> Iterator[tuple[str, str]]:
+        """Yield ``(path, added lines)`` for the selected paths, chunk by chunk.
+
+        Lazily, so the whole-commit bound can stop the walk BEFORE the next
+        git call is made rather than after its output is already in hand. A
+        chunk can report a path the selection dropped, so each one is checked
+        against the selection: restricting the pathspec also restricts what
+        git can pair for rename detection, and an unpaired destination is
+        reported as an ordinary addition.
+        """
+        wanted = set(selection.paths)
+        for chunk in _pathspec_chunks(selection.paths, narrowable=selection.narrowable):
+            args = [
+                _LITERAL_PATHSPECS_FLAG,
+                "diff",
+                "--no-color",
+                _UNIFIED_ZERO_FLAG,
+                f"--diff-filter={_DIFF_FILTER}",
+                target,
+            ]
+            if chunk:
+                args += [_END_OF_OPTIONS, *chunk]
+            result = run_git(repo_root, *args)
+            if result.returncode != 0:
+                _LOGGER.debug("sensitive_content: staged diff unavailable in %s", repo_root)
+                return
+            for relpath, added in _added_lines_by_path(result.stdout).items():
+                if added and relpath in wanted:
+                    yield relpath, added
+
+    def _scan_staged_paths(
+        self, repo_root: Path, target: str, selection: _StagedSelection
+    ) -> list[_Haystack]:
+        """Measure each fetched file exactly, stopping at the whole-commit bound.
+
+        Neither bound is applied partially: either a file was judged in full
+        or the stand-down line says it was not. That line fires once, naming
+        the first path left unjudged -- the sizing pass and this exact count
+        can each be what stopped the walk, and reporting both would name two
+        files for one truncation.
+        """
+        haystacks: list[_Haystack] = []
+        total = 0
+        stood_down_at = selection.stood_down_at
+        for relpath, added in self._staged_added_lines(repo_root, target, selection):
             size = len(added.encode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS))
             if size > MAX_STAGED_FILE_BYTES:
                 _LOGGER.info(
@@ -750,14 +951,16 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 )
                 continue
             if total + size > MAX_STAGED_TOTAL_BYTES:
-                _LOGGER.info(
-                    "sensitive_content: staged content past %s exceeds the commit bound; "
-                    "remaining files not scanned",
-                    relpath,
-                )
+                stood_down_at = relpath
                 break
             total += size
             haystacks.append(_Haystack(subject=f"staged content of {relpath}", text=added))
+        if stood_down_at is not None:
+            _LOGGER.info(
+                "sensitive_content: staged content past %s exceeds the commit bound; "
+                "remaining files not scanned",
+                stood_down_at,
+            )
         return haystacks
 
     @staticmethod

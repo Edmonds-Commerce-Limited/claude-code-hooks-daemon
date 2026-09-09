@@ -128,13 +128,14 @@ lives in so each phase can go to one worktree agent.
 
 ### Phase 4: handlers residue (review-handlers suggestions 1 and 3)
 
-- [ ] ⬜ **Task 4.1**: `sensitive_content._staged_content_haystacks` bounds
+- [x] ✅ **Task 4.1**: `sensitive_content._staged_content_haystacks` bounds
   BEFORE materialising: ask git for `--numstat` first and skip oversized
   paths, so `MAX_STAGED_*` bound the peak, not just the scan.
-- [ ] ⬜ **Task 4.2**: Release-notes callout in the holding area for
+- [x] ✅ **Task 4.2**: Release-notes callout in the holding area for
   `suggest_statusline` recommending `refreshInterval: 1` (tenfold subprocess
   cadence every client is advised to adopt) — if the v3.63.0 notes already
-  say it, record that and close.
+  say it, record that and close. Closed as already-said: `RELEASES/v3.63.0.md`,
+  `CHANGELOG.md` and UPGRADES release-note 22 all carry it; no callout added.
 
 ### Phase 5: worktree relay and project-handler priority
 

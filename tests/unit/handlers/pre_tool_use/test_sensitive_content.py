@@ -7,6 +7,7 @@ hence meaningless-without-it) file.
 """
 
 import logging
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -27,6 +28,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
     SensitiveContentHandler,
 )
 from claude_code_hooks_daemon.utils import secret_redaction as sr
+from claude_code_hooks_daemon.utils.git_repo import run_git as unpatched_run_git
 
 
 @pytest.fixture(autouse=True)
@@ -762,19 +764,292 @@ class TestStagedContentSurface:
 
     def test_matches_and_handle_agree_on_one_diff_read(self, repo: Path, tmp_path: Path) -> None:
         """``matches()`` and ``handle()`` see the same hook_input; the diff is
-        read ONCE per dispatch, so the two can never disagree."""
+        read ONCE per dispatch, so the two can never disagree.
+
+        One dispatch asks git two questions -- the ``--numstat`` sizing pass
+        and the patch call restricted to what survived it -- so the bridge is
+        proven by each being asked exactly once, not by a single call.
+        """
         handler = _wordlist(tmp_path, "alpha-term")
         _stage(repo, "notes/report.md", "alpha-term\n")
         hook_input = _commit_input(repo)
 
+        spy = _GitSpy()
         with patch(
             "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.run_git",
-            wraps=sensitive_content_module.run_git,
-        ) as spy:
+            new=spy,
+        ):
             assert handler.matches(hook_input) is True
             assert handler.handle(hook_input).decision == Decision.DENY
-        diff_calls = [c for c in spy.call_args_list if "diff" in c.args]
-        assert len(diff_calls) == 1
+
+        assert len(spy.sizing_calls) == 1
+        assert len(spy.content_calls) == 1
+
+
+class _GitSpy:
+    """Records every git invocation this handler makes, and what it pulled in.
+
+    ``call_args_list`` alone cannot answer the question this task is about:
+    whether an oversized path's CONTENT ever entered the process. Summing the
+    stdout each call actually returned answers it directly, and the recorded
+    argv says which paths were asked for.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[tuple[str, ...], int]] = []
+
+    def __call__(self, cwd: Path, *args: str, **kwargs: Any) -> Any:
+        result = unpatched_run_git(cwd, *args, **kwargs)
+        self.calls.append((args, len(result.stdout)))
+        return result
+
+    @property
+    def sizing_calls(self) -> list[tuple[str, ...]]:
+        """Argv of every ``--numstat`` question (line counts, no content)."""
+        return [args for args, _ in self.calls if "--numstat" in args]
+
+    @property
+    def content_calls(self) -> list[tuple[str, ...]]:
+        """Argv of every patch call (the ones that carry added lines back)."""
+        return [args for args, _ in self.calls if "--unified=0" in args]
+
+    @property
+    def output_bytes(self) -> int:
+        """Total stdout, over every call, that git handed back."""
+        return sum(size for _, size in self.calls)
+
+    def requested(self, relpath: str) -> bool:
+        """True when some patch call named ``relpath`` as a pathspec."""
+        return any(relpath in args for args in self.content_calls)
+
+
+class TestStagedContentIsBoundedBeforeItIsRead:
+    """Plan 00364 Task 4.1: the bounds cap what is HELD, not just what is scanned.
+
+    ``MAX_STAGED_FILE_BYTES``/``MAX_STAGED_TOTAL_BYTES`` were applied per entry
+    of an already-materialised map, so a commit staging a generated artefact
+    pulled the whole thing into the daemon and only then decided it was too big
+    to look at -- the constants bounded the SCAN and not the peak their comment
+    claims to bound. git is now asked the cheap question first (``--numstat``:
+    one line count per path, no content at all), and the patch call that
+    follows carries only the paths that survived.
+    """
+
+    def test_the_sizing_pass_comes_before_any_content(self, repo: Path, tmp_path: Path) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/report.md", "alpha-term\n")
+
+        spy = _GitSpy()
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.run_git",
+            new=spy,
+        ):
+            assert handler.matches(_commit_input(repo)) is True
+
+        diff_calls = [args for args, _ in spy.calls if "diff" in args]
+        assert "--numstat" in diff_calls[0]
+        assert "--unified=0" in diff_calls[1]
+        assert spy.requested("notes/report.md") is True
+
+    def test_an_oversized_path_is_never_requested_from_git(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """The headline property, against the REAL constant.
+
+        An added line costs at least its own newline, so a line COUNT past the
+        byte bound settles the question without a byte of the file being
+        fetched. The clean small file beside it is still judged, which is what
+        stops this passing vacuously.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        oversized = "y\n" * (sensitive_content_module.MAX_STAGED_FILE_BYTES + 2)
+        _stage(repo, "big.txt", oversized)
+        _stage(repo, "small.txt", "alpha-term\n")
+
+        spy = _GitSpy()
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.run_git",
+            new=spy,
+        ):
+            assert handler.matches(_commit_input(repo)) is True
+
+        assert spy.requested("big.txt") is False
+        assert spy.requested("small.txt") is True
+        assert spy.output_bytes < len(oversized)
+
+    def test_the_per_file_stand_down_is_still_logged_by_path(
+        self, repo: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Either a file was judged in full or the log says it was not."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        with patch.object(sensitive_content_module, "MAX_STAGED_FILE_BYTES", 2):
+            _stage(repo, "big.txt", "one\ntwo\nthree\n")
+            with caplog.at_level(logging.INFO, logger=sensitive_content_module.__name__):
+                assert handler.matches(_commit_input(repo)) is False
+
+        assert "big.txt" in caplog.text
+        assert "per-file bound" in caplog.text
+
+    def test_an_excluded_path_is_never_requested_from_git(self, repo: Path, tmp_path: Path) -> None:
+        """An exemption should cost nothing, not cost a fetch and then a skip."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        handler._exclude_paths = ["tests/fixtures/**"]
+        _stage(repo, "tests/fixtures/sample.txt", "alpha-term\n")
+        _stage(repo, "notes/clean.md", "nothing to see\n")
+
+        spy = _GitSpy()
+        with (
+            patch(
+                "claude_code_hooks_daemon.utils.path_exclusion.resolve_project_root",
+                return_value=str(repo),
+            ),
+            patch(
+                "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.run_git",
+                new=spy,
+            ),
+        ):
+            assert handler.matches(_commit_input(repo)) is False
+
+        assert spy.requested("tests/fixtures/sample.txt") is False
+        assert spy.requested("notes/clean.md") is True
+
+    def test_a_binary_blob_is_never_requested_from_git(self, repo: Path, tmp_path: Path) -> None:
+        """``--numstat`` reports ``-`` for a binary path, which settles it."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "blob.bin", b"\x00\x01alpha-term\x00\xff")
+        _stage(repo, "notes/clean.md", "nothing to see\n")
+
+        spy = _GitSpy()
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.run_git",
+            new=spy,
+        ):
+            assert handler.matches(_commit_input(repo)) is False
+
+        assert spy.requested("blob.bin") is False
+        assert spy.requested("notes/clean.md") is True
+
+    def test_the_commit_bound_stops_fetching_and_names_the_first_unscanned_path(
+        self, repo: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Past the whole-commit bound nothing further is fetched at all.
+
+        ``a.txt`` fits both bounds and is fetched; ``b.txt``'s line count alone
+        passes what is left of the budget, so it is stood down before git is
+        asked for it, and the ONE stand-down line names it.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "a.txt", "1\n2\n3\n")
+        _stage(repo, "b.txt", "alpha-term\n" * 8)
+
+        spy = _GitSpy()
+        with (
+            patch.object(sensitive_content_module, "MAX_STAGED_TOTAL_BYTES", 10),
+            patch(
+                "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.run_git",
+                new=spy,
+            ),
+            caplog.at_level(logging.INFO, logger=sensitive_content_module.__name__),
+        ):
+            assert handler.matches(_commit_input(repo)) is False
+
+        assert spy.requested("a.txt") is True
+        assert spy.requested("b.txt") is False
+        assert caplog.text.count("exceeds the commit bound") == 1
+        assert "past b.txt" in caplog.text
+
+    def test_a_large_selection_is_chunked_rather_than_one_giant_argv(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """A commit staging thousands of files must not build an argv the
+        kernel refuses -- ``run_git`` reports that as a non-zero return code,
+        which reads as "no staged diff" and stands the guard down silently."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        for index in range(4):
+            _stage(repo, f"file{index}.txt", "clean\n")
+        _stage(repo, "file9.txt", "alpha-term\n")
+
+        spy = _GitSpy()
+        with (
+            patch.object(sensitive_content_module, "_MAX_PATHSPEC_ARGV_BYTES", 8),
+            patch(
+                "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.run_git",
+                new=spy,
+            ),
+        ):
+            assert handler.matches(_commit_input(repo)) is True
+
+        assert len(spy.content_calls) > 1
+
+    def test_a_name_git_cannot_be_given_back_falls_back_to_the_whole_diff(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """A path that does not survive the round trip is still scanned.
+
+        ``run_git`` decodes git's output with ``errors="replace"``, so a name
+        carrying a byte that is not valid UTF-8 comes back with a replacement
+        character that git will not match as a pathspec. Narrowing the
+        question is an optimisation; the guard is not. Such a commit asks the
+        unrestricted question and every staged path is judged.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        undecodable = repo / os.fsdecode(b"bad\xffname.md")
+        undecodable.write_bytes(b"alpha-term\n")
+        _git(repo, "add", "-A")
+
+        spy = _GitSpy()
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.run_git",
+            new=spy,
+        ):
+            assert handler.matches(_commit_input(repo)) is True
+
+        assert spy.content_calls
+        assert all("--" not in args for args in spy.content_calls)
+
+
+class TestNumstatParsing:
+    """``--numstat -z`` is the sizing question, and its record shape differs
+    from the patch format in three ways that all have to be handled.
+
+    ``-z`` writes ``<added>\\t<deleted>\\t<path>\\0`` and never quotes the path,
+    which is exactly what makes the name usable as a pathspec afterwards. A
+    rename or copy leaves the path field EMPTY and appends two more
+    NUL-terminated fields; a binary blob reports ``-`` for both counts.
+    """
+
+    def test_each_record_maps_a_path_to_its_added_line_count(self) -> None:
+        output = "1\t0\tone.txt\x002\t3\tsub/two.txt\x00"
+
+        assert sensitive_content_module._numstat_added_lines(output) == {
+            "one.txt": 1,
+            "sub/two.txt": 2,
+        }
+
+    def test_a_non_ascii_path_arrives_unquoted(self) -> None:
+        """The property the patch parser has to undo, and this one never sees."""
+        output = "1\t0\tnotes/café.md\x00"
+
+        assert sensitive_content_module._numstat_added_lines(output) == {"notes/café.md": 1}
+
+    def test_a_binary_blob_reports_no_added_lines(self) -> None:
+        output = "-\t-\tblob.bin\x001\t0\tone.txt\x00"
+
+        assert sensitive_content_module._numstat_added_lines(output) == {"one.txt": 1}
+
+    def test_a_rename_record_is_read_from_its_destination(self) -> None:
+        """The empty path field means two more fields follow: source, then
+        destination. Reading straight through takes the source for a path and
+        then mis-frames every record after it."""
+        output = "0\t0\t\x00old.txt\x00renamed.txt\x001\t0\tone.txt\x00"
+
+        assert sensitive_content_module._numstat_added_lines(output) == {
+            "renamed.txt": 0,
+            "one.txt": 1,
+        }
+
+    def test_empty_output_is_no_paths(self) -> None:
+        assert sensitive_content_module._numstat_added_lines("") == {}
 
 
 class TestQuotedDiffPathParsing:
@@ -1096,23 +1371,27 @@ class TestPerDispatchHaystackCache:
     def test_handle_reuses_the_cache_for_the_call_matches_just_judged(
         self, repo: Path, tmp_path: Path
     ) -> None:
-        """The bridge still works: one staged-diff subprocess per dispatch.
+        """The bridge still works: one staged-diff read per dispatch.
 
         Same guarantee as ``test_matches_and_handle_agree_on_one_diff_read``,
         asserted here on the ALLOW path -- a clean commit must not pay for the
-        diff twice either.
+        diff twice either. One dispatch asks the sizing question once and the
+        patch question once.
         """
         handler = _wordlist(tmp_path, "alpha-term")
         _stage(repo, "notes/clean.md", "nothing to see\n")
         hook_input = _commit_input(repo)
 
+        spy = _GitSpy()
         with patch(
             "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.run_git",
-            wraps=sensitive_content_module.run_git,
-        ) as spy:
+            new=spy,
+        ):
             assert handler.matches(hook_input) is False
             assert handler.handle(hook_input).decision == Decision.ALLOW
-        assert len([call for call in spy.call_args_list if "diff" in call.args]) == 1
+
+        assert len(spy.sizing_calls) == 1
+        assert len(spy.content_calls) == 1
 
     def test_commit_side_effects_drops_the_retained_text(self, repo: Path, tmp_path: Path) -> None:
         """Nothing a call introduced is kept on the shared instance afterwards.
