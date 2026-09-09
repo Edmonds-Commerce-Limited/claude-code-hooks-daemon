@@ -656,15 +656,17 @@ automatic — see there for the split between what it owns and what a human
 still runs. A skip here means no daemon was running, which under H-1 is itself
 an abort condition.
 
-**The one expected skip is `test_tool_use_error_recovery_branch_skipped_on_success`,
-and ONLY while a release is in flight.** This repository's own terminal
+**There is no expected skip.** `test_tool_use_error_recovery_branch_skipped_on_success`
+used to skip while a release was in flight — this repository's own terminal
 `release_blocker` project handler sits at priority 8, ahead of
 `auto_continue_stop` at 10, so during a release it answers first and the
-default branch's wording cannot be observed over the socket. The test's real
-assertion — Branch 2.5 must not fire on a clean turn — still executes; only the
-question of which branch answered instead is unobservable. Its skip message
-names the release explicitly, so read it rather than assuming: a skip here for
-any OTHER reason is an abort condition (see below).
+default branch's wording cannot be observed over the socket. Because this file
+is a blocking gate that turns a skip into a failure, and the release guard
+answers precisely while the gate runs, that skip could only ever fail. The
+test now PASSES in that case: its real assertion — Branch 2.5 must not fire on
+a clean turn — executes either way, and when the release guard answered it
+additionally checks the guard named the state file. Any skip in this block is
+an abort condition (see below).
 
 ANY failure in any file = ABORT release. The 2026-05-01 field report
 (Issues #1, #4, #6) escaped because the v3.9.0 acceptance suite never invoked
