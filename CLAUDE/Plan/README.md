@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00364: v3.63.0 release review follow-ups](00364-release-review-followups-v3630/PLAN.md) - In Progress (every non-blocking finding from the four Step 10 review reports — venv-lock misreport, slate check reading git failure as clean, plan-QA commit gate spawning one `git diff` per plan, bracket-range cost, dead pipe_blocker tests — plus the worktree hook wrapper relaying to the main repo's daemon and the priority-20 project-handler collision)
+
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00329: post upgrade truth changes report bloat](00329-post-upgrade-truth-changes-report-bloat/PLAN.md) - Not Started (the upgrade flow's truth-changes reconciliation hands the agent up to 89KB / 74 entries with no bound and no supersession collapsing, so superseded truths are replayed and the step is skimmed rather than performed)
@@ -230,11 +232,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 363 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 364 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 323 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 17 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 18 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
