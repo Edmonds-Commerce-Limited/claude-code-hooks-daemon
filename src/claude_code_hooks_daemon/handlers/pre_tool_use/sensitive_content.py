@@ -193,6 +193,23 @@ _DIFF_ADDED_PREFIX: Final[str] = "+"
 _DIFF_FILE_HEADER_PREFIX: Final[str] = "+++ "
 _DIFF_PATH_PREFIX: Final[str] = "b/"
 
+# The C escapes git writes when it quotes a path (`quote_c_style`), plus its
+# three-digit octal form for any byte outside printable ASCII. Decoding is a
+# byte operation: `\303\251` is ONE character in UTF-8, not two.
+_C_QUOTE_ESCAPES: Final[dict[str, int]] = {
+    "a": 0x07,
+    "b": 0x08,
+    "f": 0x0C,
+    "n": 0x0A,
+    "r": 0x0D,
+    "t": 0x09,
+    "v": 0x0B,
+    "\\": 0x5C,
+    '"': 0x22,
+}
+_OCTAL_ESCAPE_DIGITS: Final[int] = 3
+_OCTAL_DIGITS: Final[str] = "01234567"
+
 # `gh` subcommands that PUBLISH a body to GitHub. `view`/`list`/`checkout`
 # read; `gh api` is deliberately outside this surface (its `-F` means a
 # field, and a body there is one generic parameter among many), so it is
@@ -338,6 +355,53 @@ def _is_git_commit(command: str) -> tuple[bool, bool]:
     return False, False
 
 
+def _is_octal_escape(text: str) -> bool:
+    """True when ``text`` is a complete three-digit octal escape body."""
+    return len(text) == _OCTAL_ESCAPE_DIGITS and all(digit in _OCTAL_DIGITS for digit in text)
+
+
+def _unquote_diff_path(raw: str) -> str:
+    """Decode git's C-quoted header path back to the real name.
+
+    ``core.quotePath`` defaults to true, so a path carrying a non-ASCII byte,
+    a quote, a backslash or a tab arrives as ``"b/caf\\303\\251.md"``: octal
+    escapes, and the ``b/`` prefix INSIDE the quotes where ``removeprefix``
+    cannot reach it. An undecoded key then matches no exclude glob and no
+    secret-list path, so an allowlist stops working on a file-name property
+    nobody would connect to it.
+
+    An unquoted path is returned untouched: a backslash there is a literal
+    character of the name, not an escape.
+    """
+    if len(raw) < 2 or not raw.startswith('"') or not raw.endswith('"'):
+        return raw
+    body = raw[1:-1]
+    decoded = bytearray()
+    index = 0
+    while index < len(body):
+        char = body[index]
+        index += 1
+        if char != "\\":
+            decoded.extend(char.encode(_BODY_FILE_ENCODING))
+            continue
+        if index >= len(body):
+            # A trailing lone backslash is not an escape git would emit.
+            decoded.extend(b"\\")
+            break
+        escape = body[index]
+        octal = body[index : index + _OCTAL_ESCAPE_DIGITS]
+        if escape in _C_QUOTE_ESCAPES:
+            decoded.append(_C_QUOTE_ESCAPES[escape])
+            index += 1
+        elif _is_octal_escape(octal):
+            decoded.append(int(octal, 8))
+            index += _OCTAL_ESCAPE_DIGITS
+        else:
+            decoded.extend(f"\\{escape}".encode(_BODY_FILE_ENCODING))
+            index += 1
+    return decoded.decode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS)
+
+
 def _added_lines_by_path(diff_output: str) -> dict[str, str]:
     """Map each path in a ``--unified=0`` diff to its ADDED lines only.
 
@@ -353,7 +417,7 @@ def _added_lines_by_path(diff_output: str) -> dict[str, str]:
             continue
         if line.startswith(_DIFF_FILE_HEADER_PREFIX):
             target = line[len(_DIFF_FILE_HEADER_PREFIX) :].strip()
-            current = target.removeprefix(_DIFF_PATH_PREFIX)
+            current = _unquote_diff_path(target).removeprefix(_DIFF_PATH_PREFIX)
             added.setdefault(current, "")
             continue
         if current is not None and line.startswith(_DIFF_ADDED_PREFIX):

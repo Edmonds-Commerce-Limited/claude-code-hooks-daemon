@@ -702,6 +702,40 @@ class TestStagedContentSurface:
 
         assert handler.matches(_commit_input(repo)) is False
 
+    def test_a_non_ascii_staged_path_is_named_by_its_real_name(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """``core.quotePath`` defaults to true, so git C-quotes such a path."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/café.md", "alpha-term\n")
+
+        result = handler.handle(_commit_input(repo))
+
+        assert result.decision == Decision.DENY
+        assert "notes/café.md" in (result.reason or "")
+        assert "\\303" not in (result.reason or "")
+
+    def test_an_excluded_non_ascii_path_is_still_excluded(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """The consequence of leaving the path encoded, and the reason it matters.
+
+        The map key becomes ``repo_root / relpath``, so a key that kept its
+        quotes and its ``b/`` prefix matches no exclude glob and no secret-list
+        path: a project that exempted a fixture tree has that exemption
+        silently bypassed for exactly the files whose NAMES carry a non-ASCII
+        byte -- a property nobody would connect to an allowlist.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        handler._exclude_paths = ["tests/fixtures/café.md"]
+        _stage(repo, "tests/fixtures/café.md", "alpha-term\n")
+
+        with patch(
+            "claude_code_hooks_daemon.utils.path_exclusion.resolve_project_root",
+            return_value=str(repo),
+        ):
+            assert handler.matches(_commit_input(repo)) is False
+
     def test_excluded_path_is_not_inspected(self, repo: Path, tmp_path: Path) -> None:
         handler = _wordlist(tmp_path, "alpha-term")
         handler._exclude_paths = ["tests/fixtures/**"]
@@ -742,6 +776,50 @@ class TestStagedContentSurface:
             assert handler.handle(hook_input).decision == Decision.DENY
         diff_calls = [c for c in spy.call_args_list if "diff" in c.args]
         assert len(diff_calls) == 1
+
+
+class TestQuotedDiffPathParsing:
+    """git C-quotes a diff header path, and the quotes swallow the ``b/`` prefix.
+
+    ``core.quotePath`` defaults to true, so any path with a non-ASCII byte, a
+    quote, a backslash or a tab arrives as ``"b/caf\\303\\251.md"``.
+    ``removeprefix("b/")`` cannot strip a prefix that sits INSIDE the opening
+    quote, so the map key kept both -- and every path-based check downstream
+    (exclusions, the secret-list self-exemption) stopped matching.
+    """
+
+    def test_a_non_ascii_path_is_decoded_back_to_the_real_name(self) -> None:
+        diff = (
+            'diff --git "a/caf\\303\\251.md" "b/caf\\303\\251.md"\n'
+            "new file mode 100644\n"
+            "--- /dev/null\n"
+            '+++ "b/caf\\303\\251.md"\n'
+            "@@ -0,0 +1 @@\n"
+            "+alpha-term\n"
+        )
+
+        assert sensitive_content_module._added_lines_by_path(diff) == {"café.md": "alpha-term\n"}
+
+    @pytest.mark.parametrize(
+        ("quoted", "expected"),
+        [
+            ('"b/plain.md"', "plain.md"),
+            ('"b/two\\twords.md"', "two\twords.md"),
+            ('"b/say \\"hi\\".md"', 'say "hi".md'),
+            ('"b/back\\\\slash.md"', "back\\slash.md"),
+            ("b/unquoted.md", "unquoted.md"),
+        ],
+    )
+    def test_each_escape_git_emits_is_decoded(self, quoted: str, expected: str) -> None:
+        diff = f"diff --git x y\n+++ {quoted}\n@@ -0,0 +1 @@\n+line\n"
+
+        assert list(sensitive_content_module._added_lines_by_path(diff)) == [expected]
+
+    def test_an_unquoted_path_is_left_alone(self) -> None:
+        """A backslash in an UNQUOTED header is a literal, not an escape."""
+        diff = "diff --git x y\n+++ b/a\\tb.md\n@@ -0,0 +1 @@\n+line\n"
+
+        assert list(sensitive_content_module._added_lines_by_path(diff)) == ["a\\tb.md"]
 
 
 class TestCommitAllFlagParsing:
