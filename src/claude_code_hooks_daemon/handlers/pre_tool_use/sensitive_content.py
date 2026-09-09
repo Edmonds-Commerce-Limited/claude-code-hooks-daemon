@@ -35,6 +35,7 @@ last two part of this ONE guard rather than a sibling):
 
 import logging
 import re
+import shlex
 from pathlib import Path
 from typing import Any, ClassVar, Final, NamedTuple
 
@@ -141,6 +142,36 @@ _GIT_COMMIT_SUBCOMMAND: Final[str] = "commit"
 _COMMIT_ALL_LONG_FLAG: Final[str] = "--all"
 _COMMIT_ALL_SHORT_LETTER: Final[str] = "a"
 
+# Everything after `--` is an operand, so a pathspec named `-a` is a file.
+_END_OF_OPTIONS: Final[str] = "--"
+
+# Short options of `git commit` that CONSUME a value: the letters after one of
+# these inside a cluster belong to that value, not to another flag, so
+# `-mall day` is a message and not `--all`. The first set's value is REQUIRED,
+# so a cluster ending there takes the next token too (`-m msg`); `-S`/`-u`
+# take an optional value, which git accepts only attached.
+_COMMIT_SHORT_FLAGS_WITH_REQUIRED_VALUE: Final[str] = "mcCFt"
+_COMMIT_SHORT_FLAGS_WITH_OPTIONAL_VALUE: Final[str] = "Su"
+
+# Long options of `git commit` whose value is a SEPARATE token: the only
+# places a leading dash can appear without being a flag of its own.
+_COMMIT_LONG_FLAGS_WITH_VALUE: Final[frozenset[str]] = frozenset(
+    {
+        "--message",
+        "--file",
+        "--template",
+        "--author",
+        "--date",
+        "--cleanup",
+        "--reuse-message",
+        "--reedit-message",
+        "--fixup",
+        "--squash",
+        "--trailer",
+        "--pathspec-from-file",
+    }
+)
+
 # Staged-content bounds (Plan 00252 Task 3.2: decide the limit here rather
 # than meet it as a timeout in the field). A single file whose ADDED lines
 # exceed the per-file bound is stood down and logged by path; once the
@@ -223,30 +254,87 @@ class _Haystack(NamedTuple):
     text: str
 
 
+def _shell_tokens(command: str) -> list[str]:
+    """Shell tokens of ``command``, falling back to whitespace splitting.
+
+    An unbalanced quote is not something the shell would run either, so
+    ``shlex`` raising means there is no correct tokenisation to be had. The
+    naive split still locates the subcommand, and reading an extra flag out of
+    it scans MORE than the commit records rather than less -- the safe
+    direction for a guard.
+    """
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return command.split()
+
+
+def _read_short_cluster(letters: str) -> tuple[bool, bool]:
+    """``(cluster carries -a, cluster consumes the next token)``.
+
+    A short cluster ends at the first letter that takes a value: everything
+    after it is that value. Reading straight through instead is how a
+    ``-m``-attached message was mined for flags.
+    """
+    for position, letter in enumerate(letters):
+        if letter == _COMMIT_ALL_SHORT_LETTER:
+            return True, False
+        if letter in _COMMIT_SHORT_FLAGS_WITH_OPTIONAL_VALUE:
+            return False, False
+        if letter in _COMMIT_SHORT_FLAGS_WITH_REQUIRED_VALUE:
+            return False, position == len(letters) - 1
+    return False, False
+
+
+def _commits_working_tree(options: list[str]) -> bool:
+    """True when this ``git commit`` option run carries ``-a``/``--all``.
+
+    Walks the options rather than testing each token independently, because
+    whether a token IS an option depends on what came before it: an option's
+    value, and anything after ``--``, are operands.
+    """
+    index = 0
+    while index < len(options):
+        option = options[index]
+        index += 1
+        if option == _END_OF_OPTIONS:
+            return False
+        if option == _COMMIT_ALL_LONG_FLAG:
+            return True
+        if option.startswith("--"):
+            if option in _COMMIT_LONG_FLAGS_WITH_VALUE:
+                index += 1
+            continue
+        if len(option) < 2 or not option.startswith("-"):
+            continue
+        carries_all, consumes_next = _read_short_cluster(option[1:])
+        if carries_all:
+            return True
+        if consumes_next:
+            index += 1
+    return False
+
+
 def _is_git_commit(command: str) -> tuple[bool, bool]:
     """``(is a git commit, commits the working tree via -a/--all)``.
 
-    The same token walk as :meth:`SensitiveContentHandler._writes_git_metadata`
-    so the two can never disagree about where the subcommand sits.
+    Locates the subcommand exactly as
+    :meth:`SensitiveContentHandler._writes_git_metadata` does, but over SHELL
+    tokens: this function also reads option VALUES, and a value is only
+    distinguishable from a flag once quoting is applied. Splitting on
+    whitespace made every dashed word of a quoted message an option, so
+    ``git commit -m 'fix the -a flag handling'`` diffed the whole dirty
+    working tree and let an UNSTAGED file deny a commit that never included
+    it.
     """
-    tokens = command.split()
+    tokens = _shell_tokens(command)
     for position, token in enumerate(tokens[:-1]):
         if token != _GIT_EXECUTABLE and not token.endswith(f"/{_GIT_EXECUTABLE}"):
             continue
         subcommand_index = git_subcommand_index(tokens, position)
         if subcommand_index is None or tokens[subcommand_index] != _GIT_COMMIT_SUBCOMMAND:
             continue
-        options = tokens[subcommand_index + 1 :]
-        commits_all = any(
-            option == _COMMIT_ALL_LONG_FLAG
-            or (
-                option.startswith("-")
-                and not option.startswith("--")
-                and _COMMIT_ALL_SHORT_LETTER in option[1:]
-            )
-            for option in options
-        )
-        return True, commits_all
+        return True, _commits_working_tree(tokens[subcommand_index + 1 :])
     return False, False
 
 

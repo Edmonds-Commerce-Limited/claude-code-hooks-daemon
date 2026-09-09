@@ -671,6 +671,21 @@ class TestStagedContentSurface:
         assert handler.matches(_commit_input(repo, 'git commit -am "x"')) is True
         assert handler.matches(_commit_input(repo, 'git commit --all -m "x"')) is True
 
+    def test_a_short_flag_quoted_in_the_message_does_not_diff_the_working_tree(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """A message is a VALUE, not the flags it happens to quote.
+
+        Reading ``-a`` out of the message diffs against HEAD -- the whole
+        dirty working tree -- so an UNSTAGED file denies a commit that never
+        included it, naming a path the author cannot find in the index.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        (repo / "README.md").write_text("# repo\nalpha-term\n")
+
+        command = "git commit -m 'fix the -a flag handling'"
+        assert handler.matches(_commit_input(repo, command)) is False
+
     def test_binary_blob_is_skipped(self, repo: Path, tmp_path: Path) -> None:
         handler = _wordlist(tmp_path, "alpha-term")
         _stage(repo, "blob.bin", b"\x00\x01alpha-term\x00\xff")
@@ -727,6 +742,64 @@ class TestStagedContentSurface:
             assert handler.handle(hook_input).decision == Decision.DENY
         diff_calls = [c for c in spy.call_args_list if "diff" in c.args]
         assert len(diff_calls) == 1
+
+
+class TestCommitAllFlagParsing:
+    """``_is_git_commit`` decides WHAT a commit would record, so it must read
+    the command the way the shell does.
+
+    ``-a``/``--all`` switches the staged-content scan from ``--cached`` (the
+    index) to ``HEAD`` (the whole dirty working tree). A bare ``str.split()``
+    cannot see quoting, so every whitespace-delimited word of a quoted message
+    was read as an option: any word starting with one dash and containing an
+    ``a`` turned the scan onto files the commit was never going to record.
+    """
+
+    @pytest.mark.parametrize(
+        ("command", "expected_all"),
+        [
+            ("git commit -m 'fix the -a flag handling'", False),
+            ('git commit -m "document -a and -am shorthands"', False),
+            ("git commit -m 'plain message'", False),
+            # A sticky short-option value: `-mall-fixed` is a MESSAGE, and the
+            # letters after the `m` belong to it, not to another flag.
+            ("git commit -m'add auth to the api'", False),
+            ("git commit --message='refactor -a handling'", False),
+            ("git commit -am 'genuine all'", True),
+            ("git commit -a -m 'genuine all'", True),
+            ("git commit --all -m 'genuine all'", True),
+            # The flag can also FOLLOW the message, so the walk cannot simply
+            # stop at the first `-m` and call the rest a value.
+            ("git commit -m 'genuine all' -a", True),
+            ("git -C /srv/project commit -am 'global option first'", True),
+        ],
+    )
+    def test_commits_all_is_read_from_options_only(
+        self, command: str, expected_all: bool
+    ) -> None:
+        is_commit, commits_all = sensitive_content_module._is_git_commit(command)
+        assert is_commit is True
+        assert commits_all is expected_all
+
+    def test_unbalanced_quote_falls_back_to_whitespace_splitting(self) -> None:
+        """A command the shell itself would reject still has to be judged.
+
+        ``shlex`` raises on an unterminated quote; standing down entirely
+        would drop the staged-content surface for it, so the naive split is
+        the fallback -- over-reading a flag is the safe direction.
+        """
+        is_commit, _ = sensitive_content_module._is_git_commit("git commit -m 'unterminated")
+        assert is_commit is True
+
+    def test_a_non_commit_subcommand_is_not_a_commit(self) -> None:
+        assert sensitive_content_module._is_git_commit("git tag -a v1 -m 'note'") == (False, False)
+
+    def test_pathspecs_after_the_end_of_options_marker_are_not_flags(self) -> None:
+        """After ``--`` git reads operands, so a file called ``-a`` is a file."""
+        is_commit, commits_all = sensitive_content_module._is_git_commit(
+            "git commit -m 'msg' -- -a"
+        )
+        assert (is_commit, commits_all) == (True, False)
 
 
 class TestGhBodySurface:
