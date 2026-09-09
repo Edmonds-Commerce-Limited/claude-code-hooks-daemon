@@ -1,6 +1,6 @@
 # Plan 00365: markdown_organization — a declared project at any depth, nested vendor trees, existing-file edits
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-09
 **Owner**: joseph
 **Priority**: High
@@ -85,18 +85,22 @@ an earlier allowed write), and editing it moves nothing.
 
 ### Phase 2: closure
 
-- [ ] ⬜ **Task 2.1**: Full QA 26/26; daemon restart; release-notes callout;
+- [x] ✅ **Task 2.1**: Full QA 26/26; daemon restart; release-notes callout;
   `CLAUDE/Code/WorkspaceResolution.md` names `markdown_organization` as
   rewired; plan archived.
 
 ## Success Criteria
 
-- [ ] The report's `Edit` is allowed with the declaration alone, and also
+- [x] The report's `Edit` is allowed with the declaration alone, and also
   with the regex alone, and also with no config at all (existing file).
-- [ ] `vendor/a/b/random/notes.md` (a genuinely new misplaced file, no
+- [x] `vendor/a/b/random/notes.md` (a genuinely new misplaced file, no
   declaration) is still blocked, and the message names `projects:`.
-- [ ] `./scripts/qa/llm_qa.py all` green.
+- [x] `./scripts/qa/llm_qa.py all` green (26/26 from inside the worktree,
+  21,538 tests, coverage 95.4%).
+- [x] Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/10-a-declared-project-wins-at-any-depth.md`
 
 ## Delivery & Milestones
 
 - Filed from the field report the day after v3.63.0 shipped.
+- Fix at `a8111e72`; merged to main at `84c623ae`.
