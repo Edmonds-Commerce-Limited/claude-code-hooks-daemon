@@ -529,6 +529,107 @@ def test_nc_enabled_deep_path_is_still_idempotent() -> None:
     assert once.count('"pre-tool-use"') == 1
 
 
+# ---------------------------------------------------------------------------
+# Idempotency against a PREVIOUS release's generated form. `transport relay
+# on|off` calls regenerate_deployed_hooks over already-deployed files with no
+# preceding re-copy from source, so the input can be output an older daemon
+# wrote — a three-argument call carrying the bash_key but no events-dir arg.
+# Appending to that shape hands the bash_key to send_request_stdin as an
+# events directory, so the nc rung looks for a relative socket path.
+# ---------------------------------------------------------------------------
+
+
+def _call_line(content: str) -> str:
+    """Return the single transport call line a forwarder ends with."""
+    for line in content.splitlines():
+        if line.startswith(("send_request_stdin ", "forward_stop_event ")):
+            return line
+    raise AssertionError(f"No transport call line found in:\n{content}")
+
+
+def _source_with_call(call_line: str) -> str:
+    return _SAMPLE_SOURCE.replace('send_request_stdin "PreToolUse"', call_line)
+
+
+def test_nc_enabled_is_idempotent_against_previous_release_three_arg_form() -> None:
+    """A forwarder generated before the events-dir arg existed must not grow
+    a second copy of its bash_key."""
+    legacy = _source_with_call('send_request_stdin "PreToolUse" "" "pre-tool-use"')
+    transport = TransportConfig(nc_enabled=True)
+
+    result = generate_forwarder_content(legacy, "pre-tool-use", transport, Path("/proj/untracked"))
+
+    assert _call_line(result) == 'send_request_stdin "PreToolUse" "" "pre-tool-use" ""'
+    assert result.count('"pre-tool-use"') == 1
+
+
+def test_nc_enabled_is_idempotent_against_previous_release_stop_form() -> None:
+    """`forward_stop_event` carries the bash_key one position earlier."""
+    legacy = _source_with_call('forward_stop_event "Stop" "stop"')
+    transport = TransportConfig(nc_enabled=True)
+
+    result = generate_forwarder_content(legacy, "stop", transport, Path("/proj/untracked"))
+
+    assert _call_line(result) == 'forward_stop_event "Stop" "stop" ""'
+    assert result.count('"stop"') == 1
+
+
+def test_nc_enabled_is_idempotent_against_previous_release_status_form() -> None:
+    """A non-empty response_mode does not shift the bash_key's position."""
+    legacy = _source_with_call('send_request_stdin "Status" "status" "status-line"')
+    transport = TransportConfig(nc_enabled=True)
+
+    result = generate_forwarder_content(legacy, "status-line", transport, Path("/proj/untracked"))
+
+    assert _call_line(result) == 'send_request_stdin "Status" "status" "status-line" ""'
+    assert result.count('"status-line"') == 1
+
+
+def test_nc_enabled_repairs_a_doubled_call_site() -> None:
+    """A forwarder already corrupted by the double-append is repaired, not
+    extended again — the toggle is the only thing that will ever revisit it."""
+    doubled = _source_with_call(
+        'send_request_stdin "PreToolUse" "" "pre-tool-use" "pre-tool-use" ""'
+    )
+    transport = TransportConfig(nc_enabled=True)
+
+    result = generate_forwarder_content(doubled, "pre-tool-use", transport, Path("/proj/untracked"))
+
+    assert _call_line(result) == 'send_request_stdin "PreToolUse" "" "pre-tool-use" ""'
+
+
+def test_previous_release_form_gains_the_events_dir_override_on_a_deep_path() -> None:
+    """Re-generating a legacy call site still bakes the overflow fallback."""
+    from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir_from_untracked
+
+    deep_untracked_dir = Path("/" + "a" * 90 + "/untracked")
+    expected_fallback = str(get_event_socket_dir_from_untracked(deep_untracked_dir))
+    legacy = _source_with_call('send_request_stdin "PreToolUse" "" "pre-tool-use"')
+    transport = TransportConfig(nc_enabled=True)
+
+    result = generate_forwarder_content(legacy, "pre-tool-use", transport, deep_untracked_dir)
+
+    assert (
+        _call_line(result)
+        == f'send_request_stdin "PreToolUse" "" "pre-tool-use" "{expected_fallback}"'
+    )
+
+
+def test_previous_release_form_still_generates_valid_bash() -> None:
+    legacy = _source_with_call('send_request_stdin "PreToolUse" "" "pre-tool-use"')
+    transport = TransportConfig(nc_enabled=True)
+
+    content = generate_forwarder_content(legacy, "pre-tool-use", transport, Path("/proj/untracked"))
+
+    result = subprocess.run(
+        ["bash", "-n", "-c", content],
+        capture_output=True,
+        text=True,
+        timeout=Timeout.VALIDATION_CHECK,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     "hook_file",
     sorted(p.name for p in _HOOKS_DIR.iterdir() if p.is_file() and p.name != "README.md"),

@@ -416,8 +416,14 @@ def append_nc_socket_arg(source_content: str, event_file_name: str, untracked_di
     A missing existing ``response_mode`` argument is filled with an empty
     string placeholder so the new arguments always land in a fixed position
     (args 3-4 for ``send_request_stdin``, args 2-3 for ``forward_stop_event``).
-    Idempotent: a call line whose second-to-last argument already matches
-    ``event_file_name`` is left untouched.
+
+    Idempotent by POSITION, not by distance from the end: the bash_key always
+    lands at a fixed index, so a call line already carrying it there keeps its
+    prefix and has everything after it re-baked. Anything else is a stale bake
+    (an older daemon appended the key with no events-dir arg beside it, or a
+    forwarder was copied from another event) — same strip-then-reapply
+    discipline the relay guard uses, and the reason a `transport relay on|off`
+    toggle over already-deployed files converges instead of accumulating.
     """
     baked_events_dir = (
         str(get_event_socket_dir_from_untracked(untracked_dir))
@@ -428,13 +434,17 @@ def append_nc_socket_arg(source_content: str, event_file_name: str, untracked_di
     def _augment(match: re.Match[str]) -> str:
         func = match.group(1)
         existing_args = re.findall(r'"([^"]*)"', match.group(2))
-        if len(existing_args) >= 2 and existing_args[-2] == event_file_name:
-            return match.group(0)
-        if func == "send_request_stdin" and len(existing_args) < 2:
-            existing_args.append("")
-        existing_args.append(event_file_name)
-        existing_args.append(baked_events_dir)
-        rendered = " ".join(f'"{arg}"' for arg in existing_args)
+        # send_request_stdin takes (event, response_mode, bash_key, events_dir);
+        # forward_stop_event takes (event, bash_key, events_dir) — it has no
+        # response_mode of its own, it passes "" through to send_request_stdin.
+        key_index = 2 if func == "send_request_stdin" else 1
+        if len(existing_args) > key_index and existing_args[key_index] == event_file_name:
+            kept = existing_args[: key_index + 1]
+        else:
+            kept = existing_args[:key_index]
+            kept.extend([""] * (key_index - len(kept)))
+            kept.append(event_file_name)
+        rendered = " ".join(f'"{arg}"' for arg in [*kept, baked_events_dir])
         return f"{func} {rendered}"
 
     return _TRANSPORT_CALL_PATTERN.sub(_augment, source_content, count=1)
