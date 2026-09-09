@@ -289,6 +289,13 @@ if [ ! -d "$DAEMON_DIR" ]; then
     fail_fast "Daemon directory does not exist: $DAEMON_DIR"
 fi
 
+# Run AT the project root: the daemon-control helpers invoke daemon.cli with
+# no --project-root, and the CLI resolves the project it manages from the
+# current working directory. Same anchor as upgrade_version.sh, same reason.
+PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)"
+DAEMON_DIR="$(cd "$DAEMON_DIR" && pwd)"
+cd "$PROJECT_ROOT"
+
 # Derived paths — VENV_PYTHON populated after ensure_venv returns the real path
 VENV_PYTHON=""
 EXAMPLE_CONFIG="$DAEMON_DIR/.claude/hooks-daemon.yaml.example"

@@ -83,6 +83,17 @@ if [ ! -d "$DAEMON_DIR" ]; then
     fail_fast "Daemon directory does not exist: $DAEMON_DIR"
 fi
 
+# Run AT the project root. The daemon-control helpers invoke daemon.cli
+# start/stop/status with no --project-root, and the CLI resolves the project
+# it manages from the current working directory -- so an upgrade driven from
+# anywhere else started and "verified" a daemon for the caller's own project,
+# wrote its socket and PID file there, and reported success for a client it
+# never touched (Plan 00291 canary re-run). Both arguments are made absolute
+# first so a relative DAEMON_DIR keeps pointing at the same directory.
+PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)"
+DAEMON_DIR="$(cd "$DAEMON_DIR" && pwd)"
+cd "$PROJECT_ROOT"
+
 # Plan 00291: the guarded branch-install gate (see install/branch_install.sh).
 # Evaluated here, before anything is touched: a half-armed gate is refused
 # outright. When armed, INSTALL_STAMP becomes vX.Y.Z+<ref>.<sha> for the

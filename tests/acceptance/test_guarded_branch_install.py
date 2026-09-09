@@ -135,13 +135,19 @@ def test_guarded_branch_install_is_stamped_and_flagged_everywhere(tmp_path: Path
     env["HOOKS_DAEMON_UNSAFE_TRACK_REF"] = _REF
     env["HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE"] = _REASON
 
+    # A foreign cwd: the upgrade must anchor itself to PROJECT_ROOT. Driven
+    # from elsewhere it used to start a daemon for the cwd's project instead
+    # and write that daemon's runtime files there (the canary re-run finding).
+    foreign_cwd = tmp_path / "somewhere-else"
+    foreign_cwd.mkdir()
+
     venv_python: Path | None = None
     try:
         # Layer 1 hands Layer 2 the resolved commit; the clone already sits on
         # it, which is the state every Layer-1-driven upgrade arrives in.
         result = _run(
             [BASH, str(UPGRADE_VERSION_SH), str(project_root), str(daemon_dir), short_sha],
-            cwd=project_root,
+            cwd=foreign_cwd,
             env=env,
         )
         assert result.returncode == 0, (
@@ -159,6 +165,15 @@ def test_guarded_branch_install_is_stamped_and_flagged_everywhere(tmp_path: Path
         assert (venv_path / ".daemon-version").read_text().strip() == expected_stamp
         metadata = json.loads((venv_path / ".daemon-metadata.json").read_text())
         assert metadata["daemon_version"] == expected_stamp
+
+        pid_files = sorted((daemon_dir / "untracked").glob("daemon-*.pid"))
+        assert pid_files, (
+            "the upgrade started no daemon for THIS project: driven from a foreign "
+            "cwd it must still anchor to PROJECT_ROOT"
+        )
+        assert not list(
+            foreign_cwd.rglob("daemon-*.pid")
+        ), "the upgrade wrote daemon runtime files into the caller's cwd"
 
         cli = [str(venv_python), "-m", "claude_code_hooks_daemon.daemon.cli"]
         status = _run([*cli, "status"], cwd=project_root, env=env)
