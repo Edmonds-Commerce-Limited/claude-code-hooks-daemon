@@ -139,6 +139,19 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             f"git -C {_SAFE_PATH} checkout -b fix-{_SENTINEL}",
         ),
     ),
+    "SelfMatchingProcessProbeHandler": (
+        "pgrep -f run_02",
+        (
+            "/usr/bin/pgrep -f run_02",
+            '"pgrep" -f run_02',
+            # A backslash suppresses alias expansion; bash still runs pgrep.
+            "\\pgrep -f run_02",
+            "env pgrep -f run_02",
+            "PATTERN=x pgrep -f run_02",
+            "pgrep \\\n  -f run_02",
+            "sudo pkill -f run_02",
+        ),
+    ),
     "SudoPipHandler": (
         "sudo pip install requests",
         (
@@ -284,6 +297,15 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
         f"git log --grep={_SENTINEL}",
         f"grep -r {_SENTINEL} src/",
         f"git branch --list {_SENTINEL}",
+    ),
+    "SelfMatchingProcessProbeHandler": (
+        # The near-misses are the REMEDIES the deny message asks for; blocking
+        # one of them would leave an agent with nowhere to go.
+        "pgrep -x provisioner",
+        "pgrep -f '[p]rovision.bash'",
+        "ps aux | grep provision | grep -v grep",
+        'until grep -q "PLAY RECAP" run.log; do sleep 10; done',
+        'echo "pgrep -f run_02"',
     ),
     "SudoPipHandler": (
         # The near-miss: an optional `sudo` matches all of these.

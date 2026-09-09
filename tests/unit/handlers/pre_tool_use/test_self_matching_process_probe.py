@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, ToolName
 from claude_code_hooks_daemon.constants.priority import PriorityRange
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, TestType
@@ -62,7 +62,7 @@ def handler() -> SelfMatchingProcessProbeHandler:
 
 
 def _bash(command: str, transcript_path: str | None = None) -> dict[str, Any]:
-    hook_input: dict[str, Any] = {"tool_name": "Bash", "tool_input": {"command": command}}
+    hook_input: dict[str, Any] = {"tool_name": ToolName.BASH, "tool_input": {"command": command}}
     if transcript_path is not None:
         hook_input["transcript_path"] = transcript_path
     return hook_input
@@ -352,7 +352,7 @@ class TestDeclaredSurface:
     ) -> None:
         for test in handler.get_acceptance_tests():
             assert test.tool_payload is not None
-            assert test.tool_payload.tool_name == "Bash"
+            assert test.tool_payload.tool_name == ToolName.BASH
 
     def test_every_acceptance_test_produces_its_declared_verdict(
         self, handler: SelfMatchingProcessProbeHandler

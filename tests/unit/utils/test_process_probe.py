@@ -118,6 +118,21 @@ class TestPgrepFullMatch:
         assert probe.verdict is ProbeVerdict.SELF_MATCHING
         assert probe.pattern == "run_02"
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "/usr/bin/pgrep -f run_02",
+            '"pgrep" -f run_02',
+            # A backslash suppresses alias expansion; bash still runs pgrep.
+            "\\pgrep -f run_02",
+            "env pgrep -f run_02",
+            "PATTERN=x pgrep -f run_02",
+            "pgrep \\\n  -f run_02",
+        ],
+    )
+    def test_respelling_the_command_name_does_not_hide_it(self, command: str) -> None:
+        assert _only(command).verdict is ProbeVerdict.SELF_MATCHING
+
     def test_one_shot_probe_has_no_wait_construct(self) -> None:
         assert _only("pgrep -f run_02").wait_construct is None
 

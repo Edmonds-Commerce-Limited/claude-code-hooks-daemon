@@ -677,11 +677,23 @@ _OWN_PID: Final = "$$"
 
 _SHORT_CLUSTER: Final[re.Pattern[str]] = re.compile(r"^-[A-Za-z0-9]+$")
 _END_OF_OPTIONS: Final = "--"
+_DASH: Final = "-"
+#: A lone dash is an OPERAND meaning stdin, never a flag.
+_LONE_DASH: Final = "-"
+
+
+#: Punctuation bash strips off the front of a command word while deciding what
+#: command it names: grouping, substitution openers and the escape that
+#: suppresses alias expansion. ``\pgrep``, ``(pgrep`` and ``"pgrep"`` all
+#: invoke pgrep, so a guard comparing names has to compare what bash resolves.
+#: Same rule as ``shell_segmentation._command_word``.
+_WORD_GROUPING_PREFIXES: Final = "(){}`\\$"
 
 
 def _basename(text: str) -> str:
     """The command name bash resolves ``text`` to, quoting and path removed."""
-    return text.replace(_DOUBLE_QUOTE, "").replace(_SINGLE_QUOTE, "").rsplit("/", 1)[-1]
+    unquoted = text.replace(_DOUBLE_QUOTE, "").replace(_SINGLE_QUOTE, "")
+    return unquoted.lstrip(_WORD_GROUPING_PREFIXES).rsplit("/", 1)[-1]
 
 
 def _is_quoted_script(text: str) -> bool:
@@ -746,10 +758,10 @@ def _strip_wrappers(words: list[_Word]) -> tuple[list[_Word], WaitConstruct | No
         remaining.pop(0)
         positionals = wrapper.positional_operands
         while remaining:
-            token = remaining[0].text
-            if token.startswith("-") and token not in ("-", _END_OF_OPTIONS):
+            argument = remaining[0].text
+            if argument.startswith(_DASH) and argument not in (_LONE_DASH, _END_OF_OPTIONS):
                 remaining.pop(0)
-                if token in wrapper.value_flags and remaining:
+                if argument in wrapper.value_flags and remaining:
                     remaining.pop(0)
                 continue
             if positionals > 0:
@@ -772,28 +784,28 @@ def _resolve(span: _Span) -> tuple[list[_Word], _Invocation] | None:
     operands: list[str] = []
     raw_operands: list[str] = []
     index = 1
-    tokens = [word.text for word in words]
-    while index < len(tokens):
-        token = tokens[index]
-        if _is_redirect(token):
-            index += 2 if _is_bare_redirect(token) else 1
+    argv = [word.text for word in words]
+    while index < len(argv):
+        argument = argv[index]
+        if _is_redirect(argument):
+            index += 2 if _is_bare_redirect(argument) else 1
             continue
-        if token == _END_OF_OPTIONS:
+        if argument == _END_OF_OPTIONS:
             index += 1
             continue
-        if token.startswith("-") and token != "-":
-            flags.append(token)
-            if _takes_a_value(token):
+        if argument.startswith(_DASH) and argument != _LONE_DASH:
+            flags.append(argument)
+            if _takes_a_value(argument):
                 index += 2
                 continue
             index += 1
             continue
-        raw_operands.append(token)
-        operands.append(_unquote(token))
+        raw_operands.append(argument)
+        operands.append(_unquote(argument))
         index += 1
 
     return words, _Invocation(
-        name=_basename(tokens[0]),
+        name=_basename(argv[0]),
         flags=tuple(flags),
         operands=tuple(operands),
         raw_operands=tuple(raw_operands),
@@ -801,13 +813,13 @@ def _resolve(span: _Span) -> tuple[list[_Word], _Invocation] | None:
     )
 
 
-def _takes_a_value(token: str) -> bool:
-    """Whether ``token``'s following word is this flag's value."""
-    if token in _SELECTOR_VALUE_FLAGS:
+def _takes_a_value(flag: str) -> bool:
+    """Whether ``flag``'s following word is this flag's value."""
+    if flag in _SELECTOR_VALUE_FLAGS:
         return True
-    if _SHORT_CLUSTER.match(token) is None:
+    if _SHORT_CLUSTER.match(flag) is None:
         return False
-    return token[-1] in _SELECTOR_VALUE_LETTERS
+    return flag[-1] in _SELECTOR_VALUE_LETTERS
 
 
 def _has_flag(invocation: _Invocation, names: frozenset[str], letter: str | None = None) -> bool:

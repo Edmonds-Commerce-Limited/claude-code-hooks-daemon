@@ -439,7 +439,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="pkill -f on a literal pattern is blocked",
-                command="false && pkill -f acceptance_probe_demo",
+                command="false && pkill -f probe-demo-job",
                 dispatch_as_bash=True,
                 description=(
                     "`pkill -f` signals every match, and the pattern is on this "
@@ -449,7 +449,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
                 expected_message_patterns=[
                     r"BLOCKED",
                     r"kill the shell running it",
-                    r"\[a\]cceptance_probe_demo",
+                    r"\[p\]robe-demo-job",
                 ],
                 safety_notes=(
                     "'false &&' short-circuits so pkill never runs. The pattern "
@@ -462,7 +462,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="ps piped to grep with no self-exclusion is blocked",
-                command='false && ps aux | grep "acceptance_probe_demo" | wc -l',
+                command='false && ps aux | grep "probe-demo-job" | wc -l',
                 dispatch_as_bash=True,
                 description=(
                     "The grep's own line appears in the ps output it filters, so "
@@ -499,8 +499,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="A bracket-tricked pattern is allowed inside a loop",
                 command=(
-                    'false && until ! pgrep -f "[a]cceptance_probe_demo" >/dev/null; '
-                    "do sleep 1; done"
+                    'false && until ! pgrep -f "[p]robe-demo-job" >/dev/null; do sleep 1; done'
                 ),
                 dispatch_as_bash=True,
                 description=(
@@ -520,7 +519,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="pgrep -x is allowed",
-                command="pgrep -x acceptance_probe_demo",
+                command="pgrep -x probe-demo-job",
                 dispatch_as_bash=True,
                 description=(
                     "Name mode compares against `comm`, which for this shell is "
@@ -538,7 +537,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="ps piped to grep with a self-exclusion is allowed",
-                command="ps aux | grep acceptance_probe_demo | grep -v grep",
+                command="ps aux | grep probe-demo-job | grep -v grep",
                 dispatch_as_bash=True,
                 description=(
                     "`grep -v grep` removes the filter's own line from the ps "
@@ -548,7 +547,11 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
                 expected_message_patterns=[],
                 safety_notes=(
                     "Read-only. grep is on pipe_blocker's cheap-filter whitelist, "
-                    "so the pipeline is not truncating anything."
+                    "so the pipeline is not truncating anything. The pattern is "
+                    "HYPHENATED on purpose: an identifier-shaped one such as "
+                    "`probe_demo_job` reads as a class/function name to "
+                    "lsp_enforcement, which denies the first symbol-lookup grep "
+                    "of a session and would fail this ALLOW case in a live run."
                 ),
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,

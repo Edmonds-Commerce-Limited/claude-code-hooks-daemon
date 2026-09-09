@@ -1,6 +1,6 @@
 # Plan 00363: self-matching process watcher blocker
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-09
 **Owner**: joseph
 **Priority**: High
@@ -32,9 +32,10 @@ the loop is never armed.
   own command line: `pgrep -f`/`pkill -f` whose pattern is a literal that also
   appears in the command, and `ps ... | grep <pattern>` with no self-exclusion
   (`grep -v grep`, `grep -v $$`, `[p]attern` bracket trick, `pgrep -x`).
-- Treat the shape as BLOCKING when it sits inside a `while`/`until`/`for`
-  loop, a `watch`, or a `&&`-gated sequence that waits on it (a never-ending
-  wait), and ADVISORY when it is a one-shot probe (a wrong answer, not a hang).
+- DENY the self-match wherever it appears, loop or not. The one-shot form was
+  going to be advisory; the incident report settles it the other way — an
+  advisory inside a background waiter is read by nobody, and the report's own
+  timeline has the agent believing a hand-run `pgrep -f` twice in one night.
 - The deny message shows the exact safe rewrite: `pgrep -f "[r]un_02"`,
   `pgrep -x <name>`, `ps -o pid= -p <pid>` with a captured PID, or the
   harness-tracked `run_in_background` completion notification that makes the
@@ -60,28 +61,34 @@ deny for `setsid`, advise otherwise), Rule C (unbounded liveness loop, advise).
 
 ### Phase 1: Detection library
 
-- [ ] ⬜ **Task 1.1**: `utils/process_probe.py` — parse a Bash command into
-  probe sites (`pgrep`, `pkill`, `ps | grep`) using the existing
-  `shell_segmentation` helpers; for each, classify self-matching vs safe, and
-  whether it sits inside a loop/wait construct. Pure functions, TDD first.
-- [ ] ⬜ **Task 1.2**: Corpus test: the real incident command and its safe
-  rewrites; `[p]attern`, `grep -v grep`, `pgrep -x`, `pgrep -u`, `$$`
-  exclusion, variable patterns, `pgrep -f` outside a loop.
+- [x] ✅ **Task 1.1**: `utils/process_probe.py` — parse a Bash command into
+  probe sites (`pgrep`, `pkill`, `ps | grep`, `ps -p`, `kill -0`); for each,
+  classify self-matching vs safe, whether a match is signalled, and whether it
+  sits inside a loop/`watch`/`timeout … bash -c` wait. The test applied is the
+  tool's own semantics — does the pattern, read as an ERE, match the text of
+  the probe's own command line — not a pattern list. Pure functions, TDD first.
+- [x] ✅ **Task 1.2**: Corpus test: the incident report's deny and allow
+  corpora verbatim, plus `[p]attern`, `grep -v grep`, `pgrep -x`, `pgrep -u`,
+  `$$` exclusion, variable patterns, command-name respellings
+  (`/usr/bin/pgrep`, `\pgrep`, `env pgrep`, line continuations).
 
 ### Phase 2: Handler
 
-- [ ] ⬜ **Task 2.1**: `handlers/pre_tool_use/self_matching_process_probe.py`
-  in the safety priority range; DENY for loop/wait shapes, advisory for
-  one-shot; registered in `constants/handlers.py`, rule IDs
-  `R-PROCESS-PROBE-SELF-MATCH` (deny) and `R-PROCESS-PROBE-ONE-SHOT`
-  (advisory) with `explain-rule` text.
-- [ ] ⬜ **Task 2.2**: `get_acceptance_tests()` covering deny, advisory and
-  the safe forms; `get_claude_md()` guidance with the safe rewrites; handler
-  relevance (`get_relevance`) so `optimise` recommends it everywhere.
-- [ ] ⬜ **Task 2.3**: Default-enabled in the shipped config, config-changes
-  manifest entry, release-notes callout in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`, `HANDLER_DEVELOPMENT.md`
-  family list updated.
+- [x] ✅ **Task 2.1**: `handlers/pre_tool_use/self_matching_process_probe.py`
+  at priority 17 (safety band); DENY on every self-match; registered in
+  `constants/handlers.py`; rule IDs `R-PGREP-SELF-MATCH` (deny),
+  `R-UNBOUNDED-LIVENESS-LOOP` and `R-PGREP-UNRESOLVED-PATTERN` (advisory),
+  each with `explain-rule` text.
+- [x] ✅ **Task 2.2**: `get_acceptance_tests()` covering deny, advisory and
+  the safe forms; `get_claude_md()` guidance with the safe rewrites;
+  `get_relevance` left at the base `Relevance.always()` — every project runs
+  Bash through the same `bash -c` wrapper, so nothing could make it
+  inapplicable.
+- [x] ✅ **Task 2.3**: Default-enabled in the shipped config template, this
+  repo's config and `.claude/hooks-daemon.yaml.example`; config-changes
+  manifest entry; release-notes callout in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`; `HANDLER_REFERENCE.md` section
+  and summary row (the canonical per-handler list, per `docs/CLAUDE.md`).
 
 ### Phase 3: Wrapper-pid wait (Rule B)
 
@@ -91,21 +98,21 @@ deny for `setsid`, advise otherwise), Rule C (unbounded liveness loop, advise).
   (the parent exits at once), advise for the others; the message names the
   pidfile-written-by-the-job, `pgrep -P <wrapper-pid>` and wait-on-the-artefact
   remedies. Rule ID `R-WAIT-ON-WRAPPER-PID`.
-- [ ] ⬜ **Task 3.2**: Rule C advisory: an `until`/`while` whose body is only
-  `sleep` and whose condition is a process probe, with no `timeout` wrapper or
-  iteration cap — suggest `timeout 3600 bash -c '…'` or a counter.
+- [x] ✅ **Task 3.2**: Rule C advisory: an `until`/`while` whose body is only
+  `sleep` and whose condition is a process probe, with no iteration cap —
+  suggests `timeout 3600 bash -c '…'` or a counter. A loop waiting on an
+  ARTEFACT (`until grep -q "PLAY RECAP" run.log`) is never flagged: that is
+  the remedy the deny message asks for.
 
 ## Success Criteria
 
-- [ ] The incident command (`until ! pgrep -f "run_02"; do sleep 30; done`)
-  is denied in the main thread with a message that names the `[r]un_02`
-  rewrite, and the rewritten command is allowed.
-- [ ] `pkill -f <literal>` is denied (would kill the calling shell).
-- [ ] `ps aux | grep foo | grep -v grep` and `pgrep -x foo` are allowed with
-  no advisory.
-- [ ] Full QA passes; acceptance tests pass in the main thread.
-- [ ] The release-notes callout is in the UNRELEASED holding area when the
-  plan is marked Complete.
+- [x] ✅ The incident command (`until ! pgrep -f "provision.bash target-host"; do sleep 20; done`) is denied with a message naming the
+  `[p]rovision.bash target-host` rewrite, and the rewritten command is allowed.
+- [x] ✅ `pkill -f <literal>` is denied (would kill the calling shell).
+- [x] ✅ `ps aux | grep foo | grep -v grep` and `pgrep -x foo` are allowed with
+  no advisory; so is `until grep -q MARKER log; do sleep 10; done`.
+- [ ] ⬜ Full QA passes; acceptance tests pass in the main thread.
+- [x] ✅ The release-notes callout is in the UNRELEASED holding area.
 
 ## Delivery & Milestones
 
