@@ -1,4 +1,4 @@
-# Post-Upgrade Tasks — [vX.Y → vX.Z]
+# Post-Upgrade Tasks — v3.62.1 → v3.63.0
 
 > Convention and schema live in `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/README.md`. This file is the **per-release index** — populate it with the tasks that ship for this specific upgrade.
 
@@ -12,9 +12,9 @@ If no post-upgrade tasks apply to this release, delete this directory entirely b
 
 <!-- BEGIN TASK INDEX — populate with the tasks moved in from UNRELEASED/ at release time -->
 
-| File                 | Type                                                                                    | Severity                            | Applies to              | One-line summary  |
-| -------------------- | --------------------------------------------------------------------------------------- | ----------------------------------- | ----------------------- | ----------------- |
-| `NN-example-task.md` | audit \| config-migration \| data-migration \| workflow-change \| notification \| other | critical \| recommended \| optional | e.g. `≤vX.Y.Z` or `all` | Short description |
+| File                                        | Type             | Severity | Applies to | One-line summary                                                                                                                                                           |
+| ------------------------------------------- | ---------------- | -------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `01-drop-hooks-daemon-python-workaround.md` | config-migration | optional | all        | Interpreter discovery now picks the highest qualifying `python3.NN` on `PATH`; drop a `HOOKS_DAEMON_PYTHON` override that only worked around the old fixed candidate list. |
 
 <!-- END TASK INDEX -->
 

@@ -7,29 +7,330 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.63.0] - 2026-09-09
+
+_A stability push: the client-upgrade-report defect ledger (Plan 00362, 26
+tasks) worked to zero, both v3.57.0 and v3.60.0 release-review ledgers worked
+to zero, and the failsafe-cron/Stop-hook subsystem retuned after a live
+dogfooding incident. Attribution below cites a plan as the TRACKING plan for
+a work area, not as the origin of every fix in it._
+
+### Added
+
+- **`/release` opens with a slate-clean gate (Plan 00359).**
+  `hooks-daemon release-slate-check` confirms HEAD's exact sha is CI-green
+  and lists mid-work plans, branches ahead of main and live worktrees before
+  anything else runs; anything in flight stops the release for a human
+  decision, and `/release accept-wip` proceeds with the report printed.
+- **A plan now leaves a release-notes callout when it closes (Plan 00360).**
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` holds one short callout per
+  plan, in the author's own words; `release-slate-check` lists pending
+  callout titles under "This release will say", and the release pipeline
+  folds them into the release notes and moves them into the version's
+  upgrade folder, aborting if any are left behind.
+- **A hook script that loses its executable bit is detected and repaired
+  (Plan 00102).** `git_filemode_checker` reports the condition at session
+  start and the existing auto-fixer repairs git hooks in place, closing a
+  silent-failure route where a checkout or copy that ignores file modes took
+  the hook's protection with it.
+- **The ccy supervisor's decision worker now says when it dies (Plan
+  00361).** `decision.log` carries `worker died (exit N, source <hash>) -> respawned`, a `worker crash-looping on source <hash>` line (with a
+  ten-second backoff) if the same source dies again, `worker recovered`, and
+  the two edges of a stretch the worker did not answer. Previously a dead
+  worker was silently respawned every tick with the host deciding in-process
+  on its own, older code.
+- **`daemon.chain.collect_all_violations` (off by default, Plan 00242).**
+  When true, the handler chain keeps running after a deny and returns one
+  merged response — the first deny leading and owning the `To disable:`
+  footer, the rest as bounded excerpts, advisories in one table — instead of
+  stopping at the first deny.
+- **`handlers.pre_tool_use.tdd_enforcement.options.test_path_map[].mirror`
+  (Plan 00362).** Reproduces the source's directory path under `test_dir`
+  instead of a flat layout, so a nested mirror test tree
+  (`tests/Small/<mirror of src>/FooTest.php`) can keep `tdd_enforcement`
+  enabled; a nested `layout.test_dirs` entry is now searched as a mirror
+  root with no map entry needed at all.
+- **`sensitive_content` now scans staged git-commit content and `gh` issue/PR
+  bodies (Plan 00362).** A `git commit` is denied when the ADDED lines of any
+  staged file (the working tree for `-a`) carry a secret-list term or public
+  pattern — closing the route where a file arrives by `mv`/`cp`/redirect and
+  reaches history unexamined — and a `gh issue|pr comment|create|edit` body,
+  inline or from `--body-file`/`-F`, is judged the same way a commit message
+  already was.
+- **Retired, relocated and wrong-event `handlers.<event>.<key>` entries are
+  now audited (Plan 00362).** `config-validate`, `check-config-migrations`
+  and the new `hooks-daemon audit-handler-keys` check every configured key
+  against the handler registry and name what to do; the upgrade
+  auto-migrates `stop.hedging_language_detector` and
+  `stop.dismissive_language_detector` into `pseudo_events.nitpick.handlers`
+  for you (see config-changes below).
+- **`hooks-daemon contract-status` (Plan 00327).** Raw-fetches the upstream
+  Claude Code hooks documentation the vendored contract was audited against,
+  compares its sha256 against `contracts/claude-code-hooks/META.json`, and
+  reports the verdict as its exit code — replacing a manual `curl` +
+  `sha256sum` opening step.
+- **`hooks-daemon optimise-checklist` and registry-derived `optimise` (Plan
+  00330).** `/hooks-daemon optimise` no longer works from a hand-written list
+  of 22 handlers — the checklist walks the full handler registry (116
+  handlers), and each handler declares its own relevance via
+  `Handler.get_relevance()`, so a default-off handler whose precondition
+  holds is recommended and one whose precondition is missing is reported
+  "not applicable here" instead of as a shortfall.
+- **`hooks-daemon housekeeping` (Plan 00330).** Runs the whole housekeeping
+  pass in one go — plan QA, docs QA, the daemon's own audits, the
+  formatters, and `optimise` to close — with report-only steps first and
+  mutating steps gated behind `--apply <step>` (bar `format-markdown` and
+  `regenerate-docs`, which act on their own).
+- **The `[awaiting-human]` `STOPPING BECAUSE:` token (Plan 00337).** Replaces
+  four hardcoded phrase matches that no agent-facing document ever named, and
+  which a live dogfooding session showed four consecutive hourly
+  failsafe-cron ticks failing to arm. Declaring the token suppresses the next
+  failsafe-cron tick at zero token cost until the next real user message.
+  Phase 4 also adds a middle setting between "always tick" and "never tick":
+  a session that is producing nothing but has declared nothing now gets
+  failsafe-cron ticks progressively less often (doubling up to a four-hour
+  cap) rather than every hour forever, surfaced to the session as
+  `R-FAILSAFE-CRON-BACKED-OFF`.
+- **Plan QA's `header-body-coherence` check now catches a stale `Not Started`/`In Progress` header sitting behind already-ticked or already-
+  shipped work (Plan 00341),** not only a header that undersells a
+  fully-ticked plan. A commit that ships code for a plan is now itself
+  evidence the header must move.
+- **`model_downgrade_recorder`, a new default-on handler (Plan 00328).**
+  Reads Claude Code's own transcript record of an automatic safety-classifier
+  model substitution (`fable` -> `opus`) and publishes it as a per-session
+  signal file, so the ccy supervisor can tell a machine-driven downgrade from
+  a human's own `/model` choice — a human change produces no such record.
+  Never blocks and never speaks; the value is entirely in the file.
+- **`hooks-daemon worktree-reap` (Plans 00349, 00352).** Reports stale agent
+  worktrees whose commits are already on the base branch and removes nothing
+  unless `--reap` is given; `--only NAME` scopes it to one worktree, and
+  removing a worktree's attached branch is a separate, explicit choice from
+  removing the worktree itself. Resolves each worktree's real path and
+  attached branch from git rather than guessing `.claude/worktrees/<name>`.
+
+### Changed
+
+- **Upgrading now merges `.claude/settings.json` instead of overwriting it
+  (Plan 00176).** The daemon owns the wired-hook block under `hooks` and
+  refreshes it — including repairing an entry that exists but is stale —
+  while everything else in the file (your own `statusLine`, an extra hook
+  you registered, a `permissions` block, `plansDirectory`, ...) is preserved,
+  including the ABSENCE of a key you deliberately removed. A recommended
+  default you never expressed an opinion about (currently
+  `statusLine.command` and `statusLine.refreshInterval`) is upgraded to the
+  new one, told apart from a value you actually chose by comparing against
+  the settings the PREVIOUS version shipped, captured before checkout; when
+  that baseline is unavailable nothing is guessed, and every value of yours
+  is preserved. If a merge cannot complete safely (your file is not readable
+  as JSON, or the merged result does not validate), nothing changes and the
+  upgrade still finishes: your file is left exactly as it is, the merge it
+  would have applied is written beside it as `settings.json.merge-proposal`
+  for you to compare and apply by hand, and the warning names both paths
+  plus the top-level keys that would have changed. There is nothing to back
+  up first and nothing to restore afterwards — a runbook step that still
+  says otherwise can go. The `install.py` bootstrap preserves your top-level
+  keys too, with one stated limit: it runs before any interpreter exists, so
+  it cannot separate your hook from ours inside a wired event's array, and
+  replaces that array.
+- **An ALLOW never ends the handler dispatch chain (Plan 00242).**
+  Terminality is now a property of the DECISION, not of the handler: a DENY
+  (or ASK/DEFER) from a `terminal=True` handler still ends the chain, but an
+  ALLOW from any handler — terminal or not — now continues to the next
+  handler with its context kept. This closes, by invariant rather than by
+  patching instances, the defect class where a terminal handler's advisory
+  ALLOW silently disabled every handler behind it. The one exception is the
+  PermissionRequest chain, where `auto_approve_reads`' approval is
+  conclusive. `Handler.commit_side_effects()` additionally hears the chain's
+  final decision so a rate-limited advisory (`command_hints`,
+  `recovery_cron_advisor`) no longer spends its cooldown on a tool call that
+  ended up denied. An early handler's contentless ALLOW no longer drops a
+  later handler's accumulated guidance, `updated_input` or `worktree_path`
+  as the chain and the front controller hand off between handlers — a defect
+  in this same new continue-past-ALLOW behaviour, fixed before this release
+  tagged.
+- **The ccy supervisor announces every keystroke it injects (Plan 00355).**
+  Every key the supervisor sends (an escape to flush a stalled compaction, an
+  Enter to resubmit) raises the status-line banner on the tick that sends it,
+  with repeats collapsed to a tally such as `esc (20), compact (15)` — the
+  "random ESC presses" some operators saw were these flushes, now visible.
+- **`worktree_create` guidance now says how to get a working venv (Plan
+  00358).** A fresh worktree has no Python venv of its own; the injected
+  guidance now says to build one with the project's setup script rather than
+  symlinking the main checkout's, which silently ran the worktree's tests
+  against the main checkout's source.
+- **`check-truth-changes` shows each revised truth once, not once per release
+  it changed in (Plan 00362).** Entries sharing an `id` across releases are
+  one truth revised repeatedly and now render as the current form, marked
+  `(vX.Y.Z, revised in v..., v...)`, so a doc-reconciliation pass is never
+  told to write a claim and then contradict it twice.
+- **`sed_blocker`'s read-only deny explains itself (Plan 00362).**
+  `sed -n 'N,Mp' file` is still denied — `-n` and `-i` differ by one
+  character — but the message now says so and names the two working
+  replacements (`Read` with `offset`/`limit`, `awk`). `hooks-daemon validate-config` is now accepted as an alias of `config-validate`, and the
+  config path defaults to the project's `.claude/hooks-daemon.yaml` when
+  omitted.
+- **Status-line refresh-interval suggestion, temp-file naming, and
+  `debug_info.py` reporting (Plan 00362).** The session-start suggestion and
+  the installer's no-venv fallback now recommend `refreshInterval: 1`, the
+  value the daemon has shipped since Plan 00175; every atomic file writer
+  builds its temp filename from one helper carrying the thread and a random
+  token, so two writers in one process can no longer collide; and a blank
+  interpreter path in `debug_info.py`'s "Daemon Status"/"Installed Handlers"
+  sections is now named as the problem instead of executed and reported as
+  `[Errno 13] Permission denied`.
+
 ### Fixed
 
-- **`budget_exhaustion_detector` no longer self-triggers on its own ledger,
-  and no longer fires on text that merely quotes a budget message rather
-  than delivering one (Plan 00319 F2 / Task 4.5).** The prior guard keyed on
-  two literal strings (the handler name, the ledger filename), so `cat untracked/*.jsonl`, `jq . untracked/budget*.jsonl` and `tail -n 20 "$LEDGER"` -- none of which spells the filename -- re-fired the detector
-  on its own recorded `matched_fragment`, and a generated playbook's `grep`
-  output quoting the Test 187 fixture false-fired during the v3.60.0 gate.
-  Fixed structurally rather than by growing the marker list: `Task`/`Agent`
-  join the default-excluded tools (a dispatched sub-agent's `tool_response`
-  is composed prose, not a field the tool machinery populates from a live
-  budget check); a Bash `tool_response` is excluded when every pipeline
-  stage's leading verb is a content-passthrough utility (`cat`, `grep`,
-  `jq`, `tail`, ...) that can only reproduce or reformat bytes already on
-  disk; and any span of the response that parses as a JSON object carrying
-  the ledger's own record key set is stripped before matching, which
-  survives `jq .`'s pretty-printing. `"matched_fragment"` was also added to
-  the literal marker list as a zero-risk addition. None of this narrows the
-  pinned web-search fixture or the generic Bash "budget exhausted"/"quota
-  exceeded" shapes, which invoke no passthrough verb and carry no ledger
-  JSON shape. Design rationale (including two options the owner explicitly
-  rejected) recorded in
+- **A malformed recursive glob (`a**b.md`) no longer skips the quarantine
+  artefact guard for the whole call (Plan 00357).** The daemon's fail-open
+  policy used to catch the raised exception and skip
+  `quarantine_artefact_read_guard` entirely; the expansion is now guarded
+  where it actually runs.
+- **A bracket expression at a token's edge is no longer read as a wildcard
+  by the secret-file guard (Plan 00356).** An ordinary `jq '.[0]'` subscript
+  was denied as an open wildcard; finite bracket forms are now expanded and
+  matched literally, while `.vault-p*`-style globs and `[Vv]ault_pass`
+  remain denied.
+- **`git rm --cached --pathspec-from-file=<protected file>` closed as a
+  secret-disclosure route (Plan 00311).** Git echoes the protected file's
+  own lines back in its error text for this flag, so the `git rm --cached`
+  hygiene exemption no longer applies when `--pathspec-from-file` is
+  present; the exemption also now skips a leading global git flag (`-C`,
+  `-c`), and `dispatch_declaration`'s advisory honours a non-default
+  `plans_directory`.
+- **Two plumbing synonyms for already-blocked destructive git commands are
+  closed (Plan 00205).** A `+`-prefixed refspec (`git push origin +main:main`) and `git update-ref -d refs/heads/<name>` are now denied
+  under the same rule IDs as `git push --force` and `git branch -D`. The
+  `update-ref` pattern no longer spans a command separator, so an unrelated
+  command chained after it with `;`/`&&`/`||` is no longer swept into the
+  same match.
+- **The v3.57.0 release-review ledger worked to zero (Plan 00295):** lint and
+  ESLint skip-paths now match on path segments (`src/rebuild/x.py` is no
+  longer skipped as `build/`); a symlinked file no longer crashes a docs QA
+  check; `layout.source_dirs`/`layout.test_dirs` match paths and globs as
+  documented; a timed-out transport probe kills what it started instead of
+  orphaning a forwarder; `explain-handler --list` surfaces advisory handlers
+  that carry no rule ID; `transport-probe` reports the relay digest it
+  actually verified; the `nc` relay rung honours
+  `HOOKS_DAEMON_EVENTS_DIR` on deep client layouts; and the acceptance
+  playbook probes for `llm:lint` before emitting ESLint tests.
+- **The supervisor release-review ledger worked to zero (Plan 00319):** the
+  budget-exhaustion detector no longer fires on a quoted budget message (a
+  sub-agent report, a passthrough Bash command, a ledger record being
+  written) — only on one actually delivered to the session; the audit banner
+  no longer clobbers a live Ctrl+C hint; the worker error log is capped like
+  `decision.log`; a worker swap that drops a half-typed slash command now
+  leaves a trace; `pipe_blocker` names the real producer of a piped `python -m pytest`; and every blocking acceptance test now carries a structured
+  payload the integration suite drives through the real handler.
+- **The self-trigger fix is structural, not a growing marker list (Plan
+  00319 F2 / Task 4.5).** `Task`/`Agent` join the default-excluded tools; a
+  Bash `tool_response` is excluded when every pipeline stage's leading verb
+  is a content-passthrough utility (`cat`, `grep`, `jq`, `tail`, ...); and
+  any span of the response that parses as a JSON object carrying the
+  ledger's own record key set is stripped before matching. Design rationale
+  (including two options the owner explicitly rejected) recorded in
   `CLAUDE/Plan/00319-supervisor-release-review-followups/BUDGET-DETECTOR-DESIGN.md`.
+- **`pipe_blocker`'s configured `extra_whitelist`/`extra_blacklist` options
+  took no effect (Plan 00353).** `PipeBlockerHandler.__init__` compiled them
+  once, then the handler registry's option injection overwrote the compiled
+  attribute with the raw parsed list straight after — so a project's
+  configured whitelist entry, including the one this project's own
+  `CLAUDE.md` tells users to add, silently did nothing. Every option is now
+  read at match time instead of pre-processed in `__init__`.
+- **`project_containment` allows the per-session scratchpad Claude Code's own
+  system prompt names (Plan 00362).** Every write there used to be denied,
+  burning a blocked call on the contradiction; the handler now allows
+  exactly the directory named in the hook payload (`scratchpad_dir`) and
+  nothing else under the temp directory.
+- **`sensitive_content` follow-up fixes to the staged-commit and `gh`-body
+  scanning added in this release (Plan 00362).** A content-keyed haystack
+  cache stops the same file body being re-scanned on every pattern; a quoted
+  `-a` (e.g. inside a commit message argument) is no longer misread as `git commit -a`; a git-quoted ("C-quoted") staged path with escaped characters
+  is now unquoted before it is read from disk; and an unreadable
+  `--body-file` is logged and skipped rather than crashing the scan.
+- **`/hooks-daemon optimise` resolves config-changes manifests on a client
+  install (Plan 00362).** Previously it looked inside the daemon-repo layout
+  only, so the "new since vX" recommendations silently never surfaced on any
+  client install; the upgrade summary also flags a pre-v3.40
+  `handlers.status_line.daemon_stats.enabled: true` override as stale.
+- **`echd-capture` is deployed to clients (Plan 00362).** The output-capture
+  helper `pipe_blocker` recommends instead of `| tail` is now installed and
+  upgraded into `.claude/hooks-daemon/bin/echd-capture`, closing an `echd-capture: command not found` a client hit; guidance names the helper only
+  when it is actually present, and the post-install validator warns when it
+  is missing. When its capture directory cannot be created, it now passes
+  the output through unchanged with a warning instead of silently discarding
+  the stream and exiting 0.
+- **A fresh-clone upgrade (config and forwarders present, no venv yet) no
+  longer rolls back at the daemon-stop step (Plan 00362).** With no venv
+  there is no daemon to stop; the upgrade now says so and moves on. Every
+  truth-changes/config-migrations/release-notes version check now accepts
+  both `v3.62.0` and `3.62.0`.
+- **The config model now covers every wired event, not 13 of 31 (Plan
+  00362).** A `handlers.<event>:` section for any of the 31 wired events
+  (`post_compact`, `subagent_start`, `elicitation`, ...) is now honoured
+  instead of silently discarded at daemon start; a plugin may also target
+  `worktree_create`/`worktree_remove`, which `config-validate` used to
+  reject.
+- **A worktree hook with the daemon down no longer hands Claude Code a JSON
+  blob as the path (Plan 00362, completes Plan 00189).** `WorktreeCreate`'s
+  daemon-down branch used to print its JSON error object to stdout with exit
+  0, and Claude Code reads that hook's stdout as the created worktree's raw
+  path; the forwarder now prints nothing to stdout, sends the diagnostic to
+  stderr, and exits non-zero, generalised via a per-event `daemon_down_stdout`
+  catalogue entry so any future raw-stdout event inherits it.
+- **Two daemons starting at once no longer rebuild the same venv (Plan
+  00362).** A venv build now runs under a lock beside the venv (`flock`, with
+  a `mkdir` fallback), so a second concurrent start waits for the first build
+  and reuses it instead of deleting it mid-copy.
+- **Docs QA and plan QA now honour `daemon.exclude_paths` (Plan 00362).**
+  `docs_qa_edit`, `docs_qa_commit_gate`, `docs_qa_sweep`, `plan_qa_edit`,
+  `plan_qa_commit_gate`, `plan_qa_sweep` and the `docs-qa`/`plan-qa` CLIs
+  previously ignored the project-wide exclude list entirely; a matching
+  markdown or plan path is now skipped by all of them, the same way content
+  blockers already skip it.
+- **The supervisor's resubmit Enter is now paced behind its own escape (Plan
+  00340 Phase 1).** Reproduced against a real Claude Code v2.1.263 over a
+  PTY: a blind Enter confirms a modal dialog's highlighted default (e.g. the
+  `/model` picker's "set as default"), and the previous `escape_after_seconds`
+  mitigation left a window of up to 60 seconds where a dialog that appeared
+  *after* the escape was still on screen when the resubmit Enter fired.
+  `_RESUBMIT_FOLLOW_SECONDS` (2.0s) now keeps an Enter always closely preceded
+  by a dismissing escape.
+- **`_walk_into` deduplicated to one shared tree-walker for docs QA (Plan
+  00340 Phase 2),** fixing a `repo_hygiene` false positive that flagged a
+  gitignored `__pycache__/*.pyc` byte-compiled from a plan's probe script as
+  a silently-ignored plan document.
+- **`config_preserve.sh` robustness (Plan 00340 Phase 3):** early-exit
+  cleanup between Steps 5 and 10 no longer deletes Layer 1's handover file
+  (ownership is now explicit, and each layer removes only its own path from
+  its own EXIT trap); a stale config-preservation baseline is stamped with
+  its owning PID rather than a version, since a version cannot be checked
+  post-checkout; and captured CLI diagnostics now keep stdout and stderr
+  apart so a warning on stderr can no longer corrupt a JSON payload on
+  stdout.
+- **A heredoc whose redirect follows the delimiter is now recognised, and the
+  redirect stays visible to guards that judge it (Plan 00340 Phase 4).** The
+  opener line may carry anything after the delimiter, and a punctuated
+  delimiter (`<<'EOF-1'`, `<<'END.MD'`) is now recognised; the blanking
+  rewrite that hides a heredoc body from content scanners now re-emits the
+  opener line's trailing redirect instead of dropping it, which would have
+  hidden `cat <<'EOF' > /etc/hosts` from `project_containment`.
+- **The failsafe-cron human-input suppression marker now arms reliably (Plan
+  00314).** Two independent write-path bugs from a live dogfooding
+  observation (four hourly ticks reaching the model as full turns on a
+  session verifiably blocked only on human input) are both fixed.
+- **The prose-guard that stops a handler from matching its own trigger
+  vocabulary in ordinary text now reaches Stop handlers, not only PreToolUse
+  (Plan 00342).** `AutoContinueStopHandler` now matches the `[awaiting-human]`
+  token and the human-blocked phrases the same guarded way `pipe_blocker` and
+  other PreToolUse handlers already do, closing the class of bug the
+  PreToolUse-only guard could not see.
+- **`.claude/skills/hooks-daemon/`, the deployed hooks-daemon skill tree, is
+  no longer invisible to `git status` in this repository (Plan 00338).** An
+  unanchored `.gitignore` pattern meant for the cloned daemon checkout also
+  matched the deployed skill tree at any depth, so drift between the skill's
+  source and its deployed copy went unnoticed; local to this repo's own
+  `.gitignore`, no installer change needed.
 
 ## [3.62.1] - 2026-09-07
 

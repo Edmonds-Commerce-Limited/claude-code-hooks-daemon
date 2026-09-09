@@ -1,5 +1,5 @@
 version: "3.63.0"
-date: "UNRELEASED"
+date: "2026-09-09"
 breaking: false
 config_changes:
   added:
@@ -42,3 +42,17 @@ config_changes:
         No action needed. Enable it if you would rather see all of a tool
         call's violations at once than one per retry; the blocked path then
         runs every matching handler (measured in the plan's MEASUREMENTS.md).
+  renamed:
+    - old_key: handlers.stop.hedging_language_detector
+      new_key: pseudo_events.nitpick.handlers.hedging_language
+      migration_note: >-
+        Plan 00362 §2: a config carrying the old key silently ran neither
+        detector, and `config-validate` called it valid. `upgrade.sh` /
+        `upgrade_version.sh` now move the key (and its `enabled`/`priority`)
+        for you; `hooks-daemon audit-handler-keys` finds a config that still
+        carries the old key by hand.
+    - old_key: handlers.stop.dismissive_language_detector
+      new_key: pseudo_events.nitpick.handlers.dismissive_language
+      migration_note: >-
+        Plan 00362 §2: same silent-loss failure and the same automatic
+        migration as `hedging_language_detector` above.
