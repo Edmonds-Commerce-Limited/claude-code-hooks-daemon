@@ -186,6 +186,29 @@ _PATTERN_KEY_PATTERN: Final[str] = "pattern"
 _PATTERN_KEY_DESCRIPTION: Final[str] = "description"
 
 
+class _DispatchKey(NamedTuple):
+    """What tells one tool call's haystacks apart from another's.
+
+    Derived from the call's own CONTENT, never from the address of the dict
+    carrying it. ``id()`` is unique only among LIVE objects, and the daemon
+    frees each event's dict when its dispatch ends -- so a later dict
+    allocated at that address compares equal to an address-derived key and
+    the handler answers the new event from the previous event's text. The
+    daemon also dispatches on a thread pool, so one handler instance is
+    genuinely shared between concurrently allocating events.
+
+    ``cwd`` is part of the key because the staged-diff surface belongs to a
+    REPOSITORY: the same commit command in another worktree is a different
+    call with different content.
+    """
+
+    session_id: str
+    cwd: str
+    tool_name: str
+    subject: str
+    body: str
+
+
 class _Haystack(NamedTuple):
     """One piece of text a tool call would introduce, and what to call it.
 
@@ -310,11 +333,12 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         self._public_patterns: list[dict[str, str]] = []
         self._secret_word_list_path: str | None = None
         self._exclude_paths: list[str] | None = None
-        # Per-dispatch cache: matches() and handle() see the same hook_input,
-        # so the staged diff is read ONCE and a body file is read ONCE. Keyed
-        # on the hook_input object itself -- a fresh dispatch is a fresh dict.
-        self._cached_input_id: int | None = None
-        self._cached_haystacks: list[_Haystack] = []
+        # Per-dispatch bridge: matches() and handle() see the same call, so
+        # the staged diff costs ONE subprocess and a body file ONE read. Key
+        # and value live in a SINGLE attribute so a concurrent dispatch can
+        # never pair one call's key with another call's haystacks -- one
+        # assignment is atomic, two are not.
+        self._cached_dispatch: tuple[_DispatchKey, list[_Haystack]] | None = None
 
     def _get_content(self, hook_input: dict[str, Any]) -> str:
         """Content to check: full content for Write, only the ADDED text for Edit.
@@ -380,7 +404,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        haystacks = self._haystacks_for(hook_input)
+        haystacks = self._compute_and_cache(hook_input)
         if not haystacks:
             return False
 
@@ -390,21 +414,57 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         terms = self._secret_terms()
         return any(sr.find_first_match_index(hay.text, terms) is not None for hay in haystacks)
 
-    def _haystacks_for(self, hook_input: dict[str, Any]) -> list[_Haystack]:
-        """Every piece of text this tool call would introduce, or ``[]``.
+    def _dispatch_key(self, hook_input: dict[str, Any]) -> _DispatchKey:
+        """Identify this tool call by what it carries, never by where it lives."""
+        tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
+        command = str(tool_input.get(_FIELD_COMMAND, ""))
+        return _DispatchKey(
+            session_id=str(hook_input.get(HookInputField.SESSION_ID, "")),
+            cwd=str(hook_input.get(HookInputField.CWD, "")),
+            tool_name=str(hook_input.get(HookInputField.TOOL_NAME, "")),
+            subject=command or str(tool_input.get(_FIELD_FILE_PATH, "")),
+            body=self._get_content(hook_input),
+        )
 
-        The one place tool dispatch happens, so ``matches()`` and ``handle()``
-        can never disagree about what was inspected — a divergence there would
-        deny with a reason derived from text the match was not based on. The
-        result is cached per dispatch because two of the surfaces cost a
-        subprocess or a file read.
+    def _compute_and_cache(self, hook_input: dict[str, Any]) -> list[_Haystack]:
+        """Compute this call's haystacks, leaving them for its own ``handle()``.
+
+        Deliberately never READS the cache. The entry is a one-shot bridge
+        across a single dispatch, not a memo across calls: the index can be
+        restaged between two textually identical commit commands, so a second
+        dispatch pays for its own diff rather than inheriting a stale one.
         """
-        if self._cached_input_id == id(hook_input):
-            return self._cached_haystacks
         haystacks = self._compute_haystacks(hook_input)
-        self._cached_input_id = id(hook_input)
-        self._cached_haystacks = haystacks
+        self._cached_dispatch = (self._dispatch_key(hook_input), haystacks)
         return haystacks
+
+    def _take_cached_haystacks(self, hook_input: dict[str, Any]) -> list[_Haystack]:
+        """The haystacks ``matches()`` computed for THIS call, else fresh ones.
+
+        ``matches()`` and ``handle()`` must never disagree about what was
+        inspected — a divergence there denies with a reason derived from text
+        the match was not based on — but agreement is only worth having when
+        the two are looking at the SAME call, which is what the key check
+        establishes. Reading the entry consumes it: ``handle()`` is its last
+        reader, and the text it holds (staged file content, a body file) is
+        exactly what this handler exists to keep out of sight.
+        """
+        cached = self._cached_dispatch
+        if cached is not None and cached[0] == self._dispatch_key(hook_input):
+            self._cached_dispatch = None
+            return cached[1]
+        return self._compute_haystacks(hook_input)
+
+    def commit_side_effects(self, hook_input: dict[str, Any], chain_decision: Decision) -> None:
+        """Release the text this call introduced, whatever the chain decided.
+
+        ``matches()`` can be the last method a dispatch calls here — another
+        terminal handler denies first, so ``handle()`` never runs and never
+        consumes the entry. The chain's post-decision hook is then the only
+        place that retained content is dropped from an instance that lives
+        for the whole daemon process.
+        """
+        self._cached_dispatch = None
 
     def _compute_haystacks(self, hook_input: dict[str, Any]) -> list[_Haystack]:
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
@@ -660,7 +720,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return [_RULE_PUBLIC_PATTERN, _RULE_SECRET_TERM]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        haystacks = self._haystacks_for(hook_input)
+        haystacks = self._take_cached_haystacks(hook_input)
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
 
         for hay in haystacks:

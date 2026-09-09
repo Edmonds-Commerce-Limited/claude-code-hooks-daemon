@@ -825,6 +825,125 @@ class TestGhBodySurface:
         assert handler.matches(_bash_input("gh issue comment 12 --body-file -")) is False
 
 
+class TestPerDispatchHaystackCache:
+    """The ``matches()``->``handle()`` bridge must never answer one call from another's text.
+
+    The cache exists so a staged diff (a subprocess) and a body file (a read)
+    are paid for ONCE per dispatch. Keying it on ``id(hook_input)`` was wrong:
+    ``id`` is unique only among LIVE objects, and the daemon frees each
+    event's dict when the dispatch ends -- so a later dict allocated at that
+    address compares EQUAL to the cached key and the handler answers the NEW
+    event from the PREVIOUS event's haystacks. The daemon also dispatches on
+    a thread pool, so one handler instance really is shared across
+    concurrently allocating events.
+
+    The failure is silent and bidirectional: a clean call denied on another
+    call's match, or a dirty call allowed on another call's clean text. Every
+    test here forces the address collision deterministically rather than
+    waiting for the allocator to produce one.
+    """
+
+    @staticmethod
+    def _force_one_address(monkeypatch: pytest.MonkeyPatch) -> None:
+        """Make every ``id()`` in the handler module answer the same address.
+
+        Shadowing the builtin in the module namespace reproduces an address
+        collision exactly, with no dependence on CPython's allocator. Once
+        the cache key is content-derived nothing in the module calls ``id``
+        at all, which is precisely what these tests assert.
+        """
+        monkeypatch.setattr(sensitive_content_module, "id", lambda _object: 1, raising=False)
+
+    def test_a_new_input_at_the_same_address_is_judged_on_its_own_text(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        self._force_one_address(monkeypatch)
+
+        assert handler.matches(_bash_input('git tag -m "alpha-term" v1')) is True
+        assert handler.matches(_bash_input('git tag -m "ordinary release note" v2')) is False
+
+    def test_handle_does_not_deny_a_clean_call_on_the_previous_calls_match(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Direction one: a clean commit denied, naming another call's pattern."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        self._force_one_address(monkeypatch)
+
+        assert handler.matches(_bash_input('git tag -m "alpha-term" v1')) is True
+        assert handler.handle(_bash_input('git tag -m "ordinary note" v2')).decision == (
+            Decision.ALLOW
+        )
+
+    def test_a_term_is_not_waved_through_on_a_previous_clean_dispatch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Direction two -- the one that matters: the term reaching the commit."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        self._force_one_address(monkeypatch)
+
+        assert handler.matches(_bash_input('git tag -m "ordinary note" v1')) is False
+        dirty = _bash_input('git tag -m "alpha-term" v2')
+        assert handler.matches(dirty) is True
+        assert handler.handle(dirty).decision == Decision.DENY
+
+    def test_the_same_command_in_another_repo_is_judged_against_that_repo(
+        self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The staged diff belongs to a repository, so ``cwd`` disambiguates too."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/report.md", "alpha-term\n")
+        clean_repo = tmp_path / "clean-repo"
+        clean_repo.mkdir()
+        _git(clean_repo, "init", "-q")
+        _git(clean_repo, "config", "user.email", "t@example.com")
+        _git(clean_repo, "config", "user.name", "T")
+        self._force_one_address(monkeypatch)
+
+        assert handler.matches(_commit_input(repo)) is True
+        assert handler.matches(_commit_input(clean_repo)) is False
+
+    def test_handle_reuses_the_cache_for_the_call_matches_just_judged(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """The bridge still works: one staged-diff subprocess per dispatch.
+
+        Same guarantee as ``test_matches_and_handle_agree_on_one_diff_read``,
+        asserted here on the ALLOW path -- a clean commit must not pay for the
+        diff twice either.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/clean.md", "nothing to see\n")
+        hook_input = _commit_input(repo)
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.run_git",
+            wraps=sensitive_content_module.run_git,
+        ) as spy:
+            assert handler.matches(hook_input) is False
+            assert handler.handle(hook_input).decision == Decision.ALLOW
+        assert len([call for call in spy.call_args_list if "diff" in call.args]) == 1
+
+    def test_commit_side_effects_drops_the_retained_text(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """Nothing a call introduced is kept on the shared instance afterwards.
+
+        ``matches()`` can be the last method a dispatch calls (another
+        terminal handler denies first), so the chain's post-decision hook is
+        where the retained staged content -- which is exactly the text this
+        handler exists to keep out of sight -- is released.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/report.md", "alpha-term\n")
+        hook_input = _commit_input(repo)
+        assert handler.matches(hook_input) is True
+
+        handler.commit_side_effects(hook_input, Decision.DENY)
+
+        assert handler._cached_dispatch is None
+
+
 class TestGetClaudeMd:
     def test_guidance_names_the_staged_content_and_gh_body_surfaces(self) -> None:
         text = SensitiveContentHandler().get_claude_md() or ""
