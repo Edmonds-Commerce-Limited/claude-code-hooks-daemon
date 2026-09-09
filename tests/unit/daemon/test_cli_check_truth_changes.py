@@ -162,9 +162,7 @@ class TestReportOffloadHonoursGlobalProjectRoot:
         assert len(seen) == 1
         return seen[0]
 
-    def test_global_project_root_is_not_clobbered_by_the_subcommand(
-        self, tmp_path: Path
-    ) -> None:
+    def test_global_project_root_is_not_clobbered_by_the_subcommand(self, tmp_path: Path) -> None:
         args = self._namespace_for(
             ["--project-root", str(tmp_path), "check-truth-changes", "--from", "1", "--to", "2"]
         )
