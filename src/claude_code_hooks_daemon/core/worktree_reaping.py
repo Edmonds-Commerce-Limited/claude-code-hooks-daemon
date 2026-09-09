@@ -26,7 +26,7 @@ destroys work that exists nowhere else.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -58,6 +58,12 @@ UNKNOWN_COUNT = -1
 #: space (`A  path`, `?? path`).
 _STATUS_PREFIX_WIDTH = 3
 
+#: The two `git worktree list --porcelain` lines this module reads. Each record
+#: opens with `worktree <path>` and, unless the worktree is detached, carries a
+#: `branch refs/heads/<name>` line naming what it has checked out.
+_WORKTREE_LINE_PREFIX = "worktree "
+_BRANCH_LINE_PREFIX = "branch refs/heads/"
+
 RunGit = Callable[..., GitResult]
 
 
@@ -70,6 +76,15 @@ class WorktreeState:
 
     Attributes:
         name: The worktree's directory name, used in the refusal message.
+        path: Where git says the worktree is. Carried rather than rebuilt from
+            `name`: BOTH `.claude/worktrees/` and `untracked/worktrees/` are
+            sanctioned roots (`core.worktree_paths.WORKTREE_DIR_PATTERNS`), so
+            a caller reconstructing the path has to pick one and is wrong about
+            the other half of them.
+        branch: The branch the worktree has checked out, bare, or None when it
+            is detached. Also carried rather than assumed equal to `name`: git
+            names the directory and the branch separately and nothing keeps
+            them in step, so acting on `name` can address an unrelated branch.
         uncommitted_paths: Paths `git status --porcelain` reports — staged,
             unstaged or untracked, all treated alike.
         commits_ahead_of_base: `git rev-list --count <base>..HEAD`.
@@ -80,6 +95,8 @@ class WorktreeState:
     """
 
     name: str
+    path: Path
+    branch: str | None
     uncommitted_paths: tuple[str, ...]
     commits_ahead_of_base: int
     unlanded_patches: int
@@ -122,22 +139,45 @@ def is_reapable(state: WorktreeState) -> bool:
     return reap_refusal_reason(state) is None
 
 
-def _worktree_paths(listing: str, repo_root: Path) -> list[Path]:
+@dataclass(frozen=True)
+class _WorktreeEntry:
+    """One `git worktree list --porcelain` record, as far as this module reads it."""
+
+    path: Path
+    branch: str | None
+
+
+def _worktree_entries(listing: str, repo_root: Path) -> list[_WorktreeEntry]:
     """The agent worktrees in `git worktree list --porcelain` output.
 
     The main checkout appears in that listing too and must never become a reap
-    candidate, so paths are kept only when they sit under one of the sanctioned
-    worktree directories — the same tuple the path-classifying helpers use.
+    candidate, so records are kept only when their path sits under one of the
+    sanctioned worktree directories — the same tuple the path-classifying
+    helpers use.
+
+    The path and the branch are both taken from the listing rather than derived
+    from the directory name afterwards. Git already answered both questions
+    here; re-deriving either is a guess, and each has a wrong answer available
+    (the other sanctioned root, and a same-named branch that is not this
+    worktree's).
     """
-    paths = []
+    entries: list[_WorktreeEntry] = []
+    # Every line after a `worktree` line belongs to THAT record, so a branch
+    # line must be ignored entirely while the record it describes is one this
+    # collector skipped — otherwise the main checkout's `refs/heads/main` would
+    # attach itself to whichever agent worktree happened to precede it.
+    collecting = False
     for line in listing.splitlines():
-        if not line.startswith("worktree "):
-            continue
-        candidate = line.split(" ", 1)[1].strip()
-        relative = candidate[len(str(repo_root)) :].lstrip("/")
-        if any(relative.startswith(pattern) for pattern in WORKTREE_DIR_PATTERNS):
-            paths.append(Path(candidate))
-    return paths
+        if line.startswith(_WORKTREE_LINE_PREFIX):
+            candidate = line[len(_WORKTREE_LINE_PREFIX) :].strip()
+            relative = candidate[len(str(repo_root)) :].lstrip("/")
+            collecting = any(relative.startswith(pattern) for pattern in WORKTREE_DIR_PATTERNS)
+            if collecting:
+                entries.append(_WorktreeEntry(path=Path(candidate), branch=None))
+        elif collecting and line.startswith(_BRANCH_LINE_PREFIX):
+            branch = line[len(_BRANCH_LINE_PREFIX) :].strip()
+            entries[-1] = replace(entries[-1], branch=branch)
+    return entries
 
 
 def _count(result: GitResult) -> int:
@@ -182,7 +222,8 @@ def collect_worktree_states(
         return ()
 
     states = []
-    for path in _worktree_paths(listing.stdout, repo_root):
+    for entry in _worktree_entries(listing.stdout, repo_root):
+        path = entry.path
         status = run_fn(path, "status", "--porcelain")
         uncommitted = (
             tuple(line[_STATUS_PREFIX_WIDTH:] for line in status.stdout.splitlines() if line)
@@ -194,6 +235,8 @@ def collect_worktree_states(
         states.append(
             WorktreeState(
                 name=path.name,
+                path=path,
+                branch=entry.branch,
                 uncommitted_paths=uncommitted,
                 commits_ahead_of_base=_count(
                     run_fn(path, "rev-list", "--count", f"{base_branch}..HEAD")
@@ -217,7 +260,6 @@ class ReapOutcome:
 def reap_worktree(
     repo_root: Path,
     state: WorktreeState,
-    path: Path,
     *,
     run_fn: RunGit = run_git,
     dry_run: bool = False,
@@ -234,6 +276,10 @@ def reap_worktree(
 
     A git refusal is REPORTED, never retried with force. That is the whole
     value of asking.
+
+    Both the worktree and the branch are addressed with what the collector read
+    out of git, never with anything rebuilt from the directory name — see
+    :class:`WorktreeState`.
     """
     refusal = reap_refusal_reason(state)
     if refusal is not None:
@@ -244,10 +290,14 @@ def reap_worktree(
             state.name,
             removed=False,
             branch_removed=False,
-            detail=f"would remove {path} and its branch {state.name}",
+            detail=(
+                f"would remove {state.path} and its branch {state.branch}"
+                if state.branch is not None
+                else f"would remove {state.path}, which has no branch attached"
+            ),
         )
 
-    removal = run_fn(repo_root, "worktree", "remove", str(path))
+    removal = run_fn(repo_root, "worktree", "remove", str(state.path))
     if removal.returncode != 0:
         # git overruled the predicate. Leaving the branch alone is deliberate:
         # a branch whose worktree still exists is not clutter, it is in use.
@@ -255,19 +305,32 @@ def reap_worktree(
             state.name,
             removed=False,
             branch_removed=False,
-            detail=f"git refused to remove {path}: {removal.stderr.strip()}",
+            detail=f"git refused to remove {state.path}: {removal.stderr.strip()}",
+        )
+
+    if state.branch is None:
+        # A detached worktree has no branch to delete, and deleting one named
+        # after its directory would act on a ref the predicate never cleared.
+        return ReapOutcome(
+            state.name,
+            removed=True,
+            branch_removed=False,
+            detail=f"removed {state.path}; it had no branch attached, so none was deleted",
         )
 
     # Task 2.3: a removed worktree that leaves its branch behind has only moved
-    # the clutter from `git worktree list` to `git branch`.
-    branch = run_fn(repo_root, "branch", "-d", state.name)
+    # the clutter from `git worktree list` to `git branch`. Addressed by FULL
+    # ref for the reason `prune_branch` states: a bare name lets git resolve a
+    # same-named tag ahead of the branch (Plan 00254).
+    branch = run_fn(repo_root, "branch", "-d", branch_ref(state.branch))
     if branch.returncode != 0:
         return ReapOutcome(
             state.name,
             removed=True,
             branch_removed=False,
             detail=(
-                f"removed {path}, but git kept the branch {state.name}: {branch.stderr.strip()}"
+                f"removed {state.path}, but git kept the branch {state.branch}: "
+                f"{branch.stderr.strip()}"
             ),
         )
 
@@ -275,7 +338,7 @@ def reap_worktree(
         state.name,
         removed=True,
         branch_removed=True,
-        detail=f"removed {path} and its branch {state.name}",
+        detail=f"removed {state.path} and its branch {state.branch}",
     )
 
 
@@ -284,7 +347,6 @@ def reap_worktree(
 #: policy, and Plan 00352 inherits that boundary rather than widening it.
 AGENT_BRANCH_GLOB = "agent-*"
 
-_BRANCH_LINE_PREFIX = "branch refs/heads/"
 #: List with the FULL refname and strip it. `%(refname:short)` yields the
 #: shortest UNAMBIGUOUS name, so a branch sharing its name with a tag comes back
 #: as `heads/<name>` — a string no git command accepts, which silently breaks

@@ -18,26 +18,41 @@ from claude_code_hooks_daemon.daemon.cli import cmd_worktree_reap
 
 _LISTING = """worktree /repo
 HEAD aaa
+branch refs/heads/main
 
 worktree /repo/.claude/worktrees/agent-clean-1
 HEAD bbb
+branch refs/heads/agent-clean-1
 
 worktree /repo/.claude/worktrees/agent-dirty-2
 HEAD ccc
+branch refs/heads/agent-dirty-2
+"""
+
+#: The second sanctioned root (`core/worktree_paths.WORKTREE_DIR_PATTERNS`),
+#: with a branch whose name does not match its directory.
+_UNTRACKED_ROOT_LISTING = """worktree /repo
+HEAD aaa
+branch refs/heads/main
+
+worktree /repo/untracked/worktrees/agent-clean-1
+HEAD bbb
+branch refs/heads/wip/renamed-branch
 """
 
 
 class _FakeGit:
     """A repo with one reapable worktree and one the predicate refuses."""
 
-    def __init__(self) -> None:
+    def __init__(self, listing: str = _LISTING) -> None:
         self.calls: list[tuple[str, ...]] = []
+        self._listing = listing
 
     def __call__(self, cwd: Path, *args: str, **_: object) -> subprocess.CompletedProcess[str]:
         self.calls.append(args)
         dirty = "agent-dirty-2" in str(cwd)
         if args[0] == "worktree" and args[1] == "list":
-            return subprocess.CompletedProcess([], 0, _LISTING, "")
+            return subprocess.CompletedProcess([], 0, self._listing, "")
         if args[0] == "status":
             return subprocess.CompletedProcess([], 0, "A  x.py\n" if dirty else "", "")
         if args[0] == "rev-list":
@@ -123,6 +138,35 @@ class TestActingRequiresTheFlag:
     def test_its_branch_goes_too(self, git: _FakeGit, capsys: pytest.CaptureFixture[str]) -> None:
         cmd_worktree_reap(_args(reap=True), run_fn=git)
         assert any(call[0] == "branch" and "-d" in call for call in git.mutations)
+
+
+class TestTheWorktreeIsAddressedWhereGitSaidItIs:
+    """`untracked/worktrees/` is sanctioned too, so the root cannot be assumed."""
+
+    def test_a_worktree_under_the_untracked_root_is_removed_by_its_real_path(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        git = _FakeGit(listing=_UNTRACKED_ROOT_LISTING)
+        cmd_worktree_reap(_args(reap=True), run_fn=git)
+        removed = [call for call in git.mutations if call[0] == "worktree"]
+        assert [call[2] for call in removed] == ["/repo/untracked/worktrees/agent-clean-1"]
+
+    def test_the_dry_run_report_names_the_path_that_exists(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A report naming a path that is not there reads as a failed reap."""
+        cmd_worktree_reap(_args(), run_fn=_FakeGit(listing=_UNTRACKED_ROOT_LISTING))
+        out = capsys.readouterr().out
+        assert "/repo/untracked/worktrees/agent-clean-1" in out
+        assert "/repo/.claude/worktrees/agent-clean-1" not in out
+
+    def test_the_branch_deleted_is_the_one_the_worktree_had_checked_out(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        git = _FakeGit(listing=_UNTRACKED_ROOT_LISTING)
+        cmd_worktree_reap(_args(reap=True), run_fn=git)
+        deleted = [call for call in git.mutations if call[0] == "branch"]
+        assert [call[-1] for call in deleted] == ["refs/heads/wip/renamed-branch"]
 
 
 class TestARepositoryWithNoAgentWorktrees:
