@@ -278,3 +278,73 @@ class TestACommitIsAnswerableOnlyForThePlansItTouches:
 
         assert findings
         assert all(f.level == Level.BLOCK for f in findings)
+
+
+class TestTheCommitGateSpawnsGitOnce:
+    """Plan 00364 Task 2.1.
+
+    This check runs inside the ``git commit`` PreToolUse gate, and the
+    blame question it asks per folder went to git every time. Cost scaled
+    with plan count, so it grew for exactly the projects that use the plan
+    workflow most: 363 spawns measured against one on a real tree.
+
+    Two changes hold the property, and each is pinned below: the facts are
+    read once per instance, and the blame question is asked only when there
+    is a finding to attach it to.
+    """
+
+    @staticmethod
+    def _populate(repo: Path, count: int) -> None:
+        """Add ``count`` clean, correctly-indexed plan folders to ``repo``."""
+        plan_root = repo / _PLAN_DIR_REL
+        rows = ["## Active Plans\n", "\n- [00001: Alpha](00001-alpha/PLAN.md) - In Progress\n"]
+        for number in range(2, count + 2):
+            name = f"{number:05d}-plan"
+            _make_folder(plan_root, name)
+            rows.append(f"- [{number:05d}: Plan](" + name + "/PLAN.md) - In Progress\n")
+        (plan_root / "README.md").write_text("".join(rows))
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "a tree of clean plans")
+
+    def test_a_clean_tree_of_many_folders_costs_one_diff(
+        self, repo: Path, git_diff_spawns: list[tuple[str, ...]]
+    ) -> None:
+        """No findings at all, so nothing needs the blame question asked."""
+        self._populate(repo, 25)
+        (repo / "src" / "thing.py").write_text("x = 1\n")
+        _git(repo, "add", "-A")
+
+        commit_spec, _sweep_spec = CHECKS
+        assert commit_spec.run(_commit_context(repo)) == []
+        assert len(git_diff_spawns) <= 1
+
+    def test_a_tree_with_findings_still_costs_one_diff(
+        self, repo: Path, git_diff_spawns: list[tuple[str, ...]]
+    ) -> None:
+        """The blame question IS asked here, and still reads one memoised diff."""
+        self._populate(repo, 25)
+        _make_folder(repo / _PLAN_DIR_REL, "00900-unindexed")
+        _git(repo, "add", "-A")
+
+        commit_spec, _sweep_spec = CHECKS
+        findings = commit_spec.run(_commit_context(repo))
+        assert [f.level for f in findings] == [Level.BLOCK]
+        assert len(git_diff_spawns) == 1
+
+    def test_the_verdict_is_unchanged_by_the_lazy_blame_question(self, repo: Path) -> None:
+        """Deferring ``_level`` must not move a level, only the work.
+
+        A folder the commit did not touch still advises; one it created
+        still blocks. Both verdicts are computed AFTER the finding exists.
+        """
+        _make_folder(repo / _PLAN_DIR_REL, "00901-stale")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "leave an unindexed folder behind")
+        _make_folder(repo / _PLAN_DIR_REL, "00902-fresh")
+        _git(repo, "add", "-A")
+
+        commit_spec, _sweep_spec = CHECKS
+        findings = commit_spec.run(_commit_context(repo))
+        by_folder = {f.path: f.level for f in findings}
+        assert by_folder["00901-stale"] == Level.ADVISE
+        assert by_folder["00902-fresh"] == Level.BLOCK

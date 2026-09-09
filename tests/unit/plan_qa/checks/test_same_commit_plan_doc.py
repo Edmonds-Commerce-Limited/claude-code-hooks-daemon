@@ -241,3 +241,39 @@ class TestStatusStillNotStarted:
         findings = CHECK.run(_context(repo, "Plan 00099: implement thing"))
 
         assert not [f for f in findings if f.level == Level.BLOCK]
+
+
+class TestAnUnreadablePlanDocIsNotAnException:
+    """An unreadable ``PLAN.md`` reads as "no status", not as a crash.
+
+    Plan 00364 Task 2.4. Only ``OSError`` was caught, so a non-UTF-8
+    ``PLAN.md`` raised ``UnicodeDecodeError`` -- a ``ValueError``, outside
+    that clause -- straight out of the commit gate. Elsewhere in this
+    codebase the two are caught together, which is the behaviour the
+    surrounding docstring already promises: a document that cannot be read
+    cannot have a status.
+    """
+
+    def test_a_non_utf8_plan_doc_does_not_propagate(self, repo: Path) -> None:
+        plan_md = repo / "CLAUDE" / "Plan" / "00042-widget" / "PLAN.md"
+        # A lone 0x80 continuation byte is valid latin-1 and invalid UTF-8.
+        plan_md.write_bytes(b"# Plan 00042: Widget\n\n**Status**: \x80Not Started\n")
+        (repo / "src" / "thing.py").write_text("x = 1\n")
+        _git(repo, "add", "-A", "src/thing.py")
+
+        findings = CHECK.run(_context(repo, "Plan 00042: implement thing"))
+
+        assert not [f for f in findings if f.level == Level.BLOCK]
+
+    def test_an_unreadable_plan_doc_does_not_propagate(self, repo: Path) -> None:
+        """The ``OSError`` half of the pair still behaves as it did."""
+        plan_dir = repo / "CLAUDE" / "Plan" / "00042-widget"
+        (plan_dir / "PLAN.md").unlink()
+        # A directory where the file should be: read_text raises IsADirectoryError.
+        (plan_dir / "PLAN.md").mkdir()
+        (repo / "src" / "thing.py").write_text("x = 1\n")
+        _git(repo, "add", "-A", "src/thing.py")
+
+        findings = CHECK.run(_context(repo, "Plan 00042: implement thing"))
+
+        assert not [f for f in findings if f.level == Level.BLOCK]

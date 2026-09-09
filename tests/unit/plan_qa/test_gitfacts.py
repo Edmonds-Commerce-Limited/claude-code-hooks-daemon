@@ -166,3 +166,67 @@ class TestCounterAndDates:
 
     def test_last_commit_date_for_unknown_path_is_none(self, repo: Path) -> None:
         assert GitFacts(repo).last_commit_date("CLAUDE/Plan/00099-ghost") is None
+
+
+class TestStagedChangesIsMemoised:
+    """One ``git diff`` per instance, however many callers ask.
+
+    Plan 00364 Task 2.1. The commit gate asks this question once per plan
+    folder in the tree, so an unmemoised call spawns a subprocess per folder
+    inside the PreToolUse budget of every ``git commit`` -- measured at 363
+    spawns against one.
+    """
+
+    def test_repeated_calls_spawn_git_once(
+        self, repo: Path, git_diff_spawns: list[tuple[str, ...]]
+    ) -> None:
+        facts = GitFacts(repo)
+
+        assert facts.staged_changes() == facts.staged_changes()
+        assert len(git_diff_spawns) == 1
+
+    def test_memoised_answer_matches_the_uncached_one(self, repo: Path) -> None:
+        new_plan = repo / "CLAUDE/Plan/00002-second"
+        new_plan.mkdir()
+        (new_plan / "PLAN.md").write_text("# Plan 00002: second\n")
+        _git(repo, "add", "-A")
+
+        facts = GitFacts(repo)
+        first = facts.staged_changes()
+        assert first == GitFacts(repo).staged_changes()
+        assert facts.staged_changes() == first
+
+    def test_memoisation_is_per_instance_not_global(
+        self, repo: Path, git_diff_spawns: list[tuple[str, ...]]
+    ) -> None:
+        """A later instance re-reads git, so a fresh context sees fresh facts."""
+        assert GitFacts(repo).staged_changes() == ()
+
+        new_plan = repo / "CLAUDE/Plan/00002-second"
+        new_plan.mkdir()
+        (new_plan / "PLAN.md").write_text("# Plan 00002: second\n")
+        _git(repo, "add", "-A")
+
+        later = GitFacts(repo).staged_changes()
+        assert [change.path for change in later] == ["CLAUDE/Plan/00002-second/PLAN.md"]
+        assert len(git_diff_spawns) == 2
+
+    def test_pathspec_scoped_instance_is_memoised_too(
+        self, repo: Path, git_diff_spawns: list[tuple[str, ...]]
+    ) -> None:
+        facts = GitFacts(repo, pathspecs=["CLAUDE/Plan"])
+
+        facts.staged_changes()
+        facts.staged_changes()
+        assert len(git_diff_spawns) == 1
+
+    def test_derived_readers_share_the_one_spawn(
+        self, repo: Path, git_diff_spawns: list[tuple[str, ...]]
+    ) -> None:
+        """``staged_paths_under`` reads the memoised list rather than re-diffing."""
+        facts = GitFacts(repo)
+
+        facts.staged_changes()
+        facts.staged_paths_under("CLAUDE/Plan")
+        facts.staged_paths_under("src")
+        assert len(git_diff_spawns) == 1
