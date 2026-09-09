@@ -27,12 +27,12 @@ from __future__ import annotations
 import json
 import logging
 import os
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.permissions import FileMode
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +78,12 @@ def write_cadence(path: Path, state: CadenceState) -> bool:
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        # uuid suffix, not pid: hook events dispatch on concurrent threads of
-        # the one daemon process (same rationale as blockage_marker.write).
-        tmp_path = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
+        # The name comes from the shared helper, which carries pid AND thread
+        # ident -- hook events dispatch on concurrent threads of the one daemon
+        # process, so a pid alone would not separate two writers here.
+        # The restrictive O_EXCL open stays: the helper owns the NAME, not the
+        # mode this file is created with.
+        tmp_path = unique_temp_path(path)
         fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, FileMode.PRIVATE_FILE)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(json.dumps(payload))

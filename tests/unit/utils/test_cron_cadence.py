@@ -9,8 +9,14 @@ silently disable session recovery -- the worst failure this subsystem has,
 since its symptom is nothing happening.
 """
 
+import os
+import stat
+import threading
 from pathlib import Path
 
+import pytest
+
+from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.utils.cron_cadence import (
     CADENCE_FILENAME,
     MAX_CADENCE_HOURS,
@@ -79,6 +85,59 @@ class TestRoundTrip:
         blocker = tmp_path / "blocker"
         blocker.write_text("x", encoding="utf-8")
         assert write_cadence(blocker / CADENCE_FILENAME, CadenceState("s", 0, 1)) is False
+
+
+class TestTheTempNameComesFromTheSharedHelper:
+    """``utils/temp_names.py`` owns this spelling (Plan 00364 Task 3.4).
+
+    The helper exists because the count of hand-rolled ``.{stem}.{token}.tmp``
+    names had grown to nine before anything centralised it. This module
+    hand-rolled a tenth with ``uuid4``, in the same release that added the
+    helper and that converted the sibling ``model_downgrade_signal`` onto it.
+
+    The names are not merely different spellings of the same idea:
+    ``unique_temp_path`` carries the pid and thread ident, so a leftover from
+    a crashed writer is attributable, and the uuid form is anonymous.
+    """
+
+    def test_write_asks_the_helper_for_the_temp_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.utils import cron_cadence
+
+        asked_for: list[Path] = []
+        real = cron_cadence.unique_temp_path
+
+        def spy(final_path: Path) -> Path:
+            asked_for.append(final_path)
+            return real(final_path)
+
+        monkeypatch.setattr(cron_cadence, "unique_temp_path", spy)
+        path = tmp_path / CADENCE_FILENAME
+        assert write_cadence(path, CadenceState("sess-1", 0, 1)) is True
+        assert asked_for == [path]
+
+    def test_the_temp_name_is_attributable_to_its_writer(self, tmp_path: Path) -> None:
+        """The property the uuid spelling did not have.
+
+        Observed on the temp file itself: ``write_cadence`` renames it away on
+        success, so the name is captured while the write is in flight.
+        """
+        from claude_code_hooks_daemon.utils import cron_cadence
+
+        assert str(os.getpid()) in cron_cadence.unique_temp_path(tmp_path / "x").name
+        assert str(threading.get_ident()) in cron_cadence.unique_temp_path(tmp_path / "x").name
+
+    def test_the_written_file_is_still_private(self, tmp_path: Path) -> None:
+        """The restrictive ``O_EXCL`` open is the part that must NOT change."""
+        path = tmp_path / CADENCE_FILENAME
+        write_cadence(path, CadenceState("sess-1", 0, 1))
+        assert stat.S_IMODE(path.stat().st_mode) == FileMode.PRIVATE_FILE
+
+    def test_no_temp_file_is_left_behind(self, tmp_path: Path) -> None:
+        path = tmp_path / CADENCE_FILENAME
+        write_cadence(path, CadenceState("sess-1", 0, 1))
+        assert [entry.name for entry in tmp_path.iterdir()] == [CADENCE_FILENAME]
 
 
 class TestDecision:
