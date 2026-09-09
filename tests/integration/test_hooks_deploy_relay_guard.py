@@ -156,7 +156,10 @@ def _seed_contaminated_daemon_dir(daemon_dir: Path, foreign_untracked_dir: str) 
     for name in ("pre-tool-use", "post-tool-use", "status-line"):
         plain = (_SOURCE_HOOKS_DIR / name).read_text()
         guard = build_relay_guard_block(
-            name, TransportConfig(relay_enabled=True), Path(foreign_untracked_dir)
+            name,
+            TransportConfig(relay_enabled=True),
+            Path(foreign_untracked_dir),
+            Path(foreign_untracked_dir).parent,
         )
         contaminated = plain.replace(INIT_SH_ANCHOR, guard + INIT_SH_ANCHOR)
         (source_hooks / name).write_text(contaminated)

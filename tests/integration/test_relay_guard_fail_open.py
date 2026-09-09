@@ -140,7 +140,12 @@ def _write_generated_forwarder(
     template: str = _FORWARDER_TEMPLATE,
 ) -> Path:
     source = template.format(event_pascal=event_pascal)
-    content = generate_forwarder_content(source, event_file_name, transport, untracked_dir)
+    # `tmp_path` is both the checkout the forwarder is generated for and the
+    # one it runs from, so the guard's checkout test passes and these probes
+    # exercise the relay branch (Plan 00364 Task 5.1).
+    content = generate_forwarder_content(
+        source, event_file_name, transport, untracked_dir, tmp_path
+    )
     hooks_dir = tmp_path / ".claude" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
     (hooks_dir / "init.sh").parent.mkdir(parents=True, exist_ok=True)

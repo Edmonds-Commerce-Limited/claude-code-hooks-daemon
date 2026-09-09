@@ -50,6 +50,11 @@ emit_hook_error() {
     local error_type="${2:-unknown_error}"
     local error_details="${3:-No details available}"
 
+    # The checkout this answer is about. PROJECT_PATH is assigned at source
+    # time, below this function's definition, so the `:-` default covers the
+    # one caller that runs before it (the init_path_error branch) under set -u.
+    local _hooks_daemon_checkout="${PROJECT_PATH:-unknown checkout}"
+
     # Log to stderr for debugging (agent won't see this)
     echo "HOOKS DAEMON ERROR [$error_type]: $error_details" >&2
 
@@ -73,11 +78,18 @@ emit_hook_error() {
             "DO NOT continue working without the daemon.")
     elif [[ "$_HOOKS_DAEMON_NOT_INSTALLED" == "true" ]]; then
         # NOT INSTALLED: Guide to install guide — project was cloned but daemon never set up
-        context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+        #
+        # The checkout is named because this answer is most often seen in a
+        # checkout the reader did not expect: a git worktree has no
+        # (gitignored) .claude/hooks-daemon.env, so it never enters
+        # self-install mode and EVERY wrapper in it lands here, while the main
+        # checkout beside it is fully protected.
+        context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
             "HOOKS DAEMON: Not installed" \
             "" \
             "This project uses the Claude Code Hooks Daemon for safety enforcement," \
             "but the daemon is not installed in this environment." \
+            "Checkout: $_hooks_daemon_checkout" \
             "" \
             "ALL safety handlers, code quality checks, and workflow enforcement are INACTIVE." \
             "" \
@@ -127,9 +139,13 @@ emit_hook_error() {
                     '{"hookSpecificOutput": {"hookEventName": $event, "additionalContext": $context}}'
             fi
         elif [[ "$_HOOKS_DAEMON_NOT_INSTALLED" == "true" ]]; then
-            # Not installed: Stop/SubagentStop block, others fail-open with install guidance
+            # Not installed: Stop/SubagentStop block, others fail-open with install guidance.
+            # The block reason names the checkout: this response is shaped
+            # exactly like a WORKING stop gate's, so without the path there is
+            # nothing to tell "the gate ran" from "no gate ran here".
             if [[ "$event_name" == "Stop" || "$event_name" == "SubagentStop" ]]; then
-                jq -n --arg reason "Hooks daemon not installed - protection not active" \
+                jq -n --arg reason \
+                    "Hooks daemon not installed at $_hooks_daemon_checkout - protection not active" \
                     '{"decision": "block", "reason": $reason}'
             else
                 jq -n --arg event "$event_name" --arg context "$context_msg" \
@@ -158,7 +174,7 @@ emit_hook_error() {
 import json
 import sys
 
-event_name, context_msg, ci_enforced, not_installed = sys.argv[1:5]
+event_name, context_msg, ci_enforced, not_installed, checkout = sys.argv[1:6]
 stop_events = ("Stop", "SubagentStop")
 
 if ci_enforced == "true":
@@ -170,7 +186,10 @@ if ci_enforced == "true":
         resp = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context_msg}}
 elif not_installed == "true":
     if event_name in stop_events:
-        resp = {"decision": "block", "reason": "Hooks daemon not installed - protection not active"}
+        resp = {
+            "decision": "block",
+            "reason": f"Hooks daemon not installed at {checkout} - protection not active",
+        }
     else:
         resp = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context_msg}}
 else:
@@ -180,7 +199,8 @@ else:
         resp = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context_msg}}
 
 print(json.dumps(resp))
-' "$event_name" "$context_msg" "$_HOOKS_DAEMON_CI_ENFORCED" "$_HOOKS_DAEMON_NOT_INSTALLED"
+' "$event_name" "$context_msg" "$_HOOKS_DAEMON_CI_ENFORCED" "$_HOOKS_DAEMON_NOT_INSTALLED" \
+            "$_hooks_daemon_checkout"
     fi
 }
 
