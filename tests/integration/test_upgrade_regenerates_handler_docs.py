@@ -38,7 +38,8 @@ GENERATE_DOCS = "generate-docs"
 
 #: Start of the idempotent fast path — the branch every Layer 1 upgrade takes,
 #: because Layer 1 checks the target out before invoking this script.
-FAST_PATH_GUARD = 'if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ]; then'
+# The guard also accepts commit equality (Plan 00291), so only its head is pinned.
+FAST_PATH_GUARD = 'if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ]'
 
 
 def _split_paths(content: str) -> tuple[str, str]:

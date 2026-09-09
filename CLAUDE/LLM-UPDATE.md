@@ -39,6 +39,19 @@ cd ../..
 | `src/claude_code_hooks_daemon/` exists | Inside hooks-daemon | Run `cd ../..` first     |
 | Neither exists                         | Wrong directory     | Navigate to project root |
 
+### Existing config but no daemon checkout (a fresh clone of a client repository)
+
+A project that has `.claude/hooks-daemon.yaml` but no `.claude/hooks-daemon/`
+directory (it is gitignored, so a teammate's fresh clone never has it) and no
+venv is an **existing install**, not a green-field one. **Use this update
+guide, not the install guide, and run exactly the same upgrade command** as
+for a live install. The upgrade script clones the daemon into
+`.claude/hooks-daemon/` for you, reads the previous version from the
+committed `.claude/HOOKS-DAEMON.md`, skips the daemon stop (there is nothing
+to stop) and builds the venv. Never run `install_version.sh` on a project
+that already has a config: it treats the project as new and reports no
+migration advisories for the versions the config predates.
+
 ---
 
 ## CRITICAL REQUIREMENTS

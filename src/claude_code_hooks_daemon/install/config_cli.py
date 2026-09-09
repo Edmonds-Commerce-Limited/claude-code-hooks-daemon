@@ -160,6 +160,7 @@ def run_check_config_migrations(
     user_config_path: Path,
     output_format: str = "text",
     manifests_dir: Path | None = None,
+    include_unreleased: bool | None = None,
 ) -> dict[str, Any]:
     """Generate config migration advisory between two daemon versions.
 
@@ -173,6 +174,8 @@ def run_check_config_migrations(
         user_config_path: Path to user's hooks-daemon.yaml
         output_format: 'text' for human-readable, 'json' for machine-readable
         manifests_dir: Override manifest directory (for testing)
+        include_unreleased: Also read the UNRELEASED staging manifests; ``None``
+            includes them exactly when the running install is a branch install
 
     Returns:
         Dictionary with advisory results (JSON-serializable).
@@ -191,6 +194,7 @@ def run_check_config_migrations(
         to_version=to_version,
         user_config_path=user_config_path,
         manifests_dir=manifests_dir,
+        include_unreleased=include_unreleased,
     )
 
     result: dict[str, Any] = {
@@ -230,16 +234,21 @@ def run_check_config_migrations(
     return result
 
 
-def list_known_versions(manifests_dir: Path | None = None) -> list[str]:
+def list_known_versions(
+    manifests_dir: Path | None = None,
+    include_unreleased: bool | None = None,
+) -> list[str]:
     """Return sorted list of versions with available manifests.
 
     Args:
         manifests_dir: Override manifest directory (for testing)
+        include_unreleased: Also list the UNRELEASED staging manifests; ``None``
+            includes them exactly when the running install is a branch install
 
     Returns:
         Sorted list of version strings (oldest first)
     """
-    return _list_known_versions(manifests_dir=manifests_dir)
+    return _list_known_versions(manifests_dir=manifests_dir, include_unreleased=include_unreleased)
 
 
 def run_check_worktree_seed(

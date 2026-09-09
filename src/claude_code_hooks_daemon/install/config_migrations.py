@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.install.handler_key_audit import (
     HandlerKeyFinding,
     audit_handler_keys,
 )
+from claude_code_hooks_daemon.install.install_stamp import is_branch_install
 from claude_code_hooks_daemon.install.version_parse import parse_version_tuple
 
 # ---------------------------------------------------------------------------
@@ -32,6 +33,7 @@ from claude_code_hooks_daemon.install.version_parse import parse_version_tuple
 # ---------------------------------------------------------------------------
 
 _MANIFESTS_SUBPATH = Path("CLAUDE") / "UPGRADES" / "config-changes"
+_UNRELEASED_DIRNAME = "UNRELEASED"
 _MANIFEST_PREFIX = "v"
 _MANIFEST_SUFFIX = ".yaml"
 _KEY_SEPARATOR = "."
@@ -375,6 +377,44 @@ def _default_manifests_dir() -> Path:
     return project_root / _MANIFESTS_SUBPATH
 
 
+def unreleased_manifests_dir(manifests_dir: Path) -> Path:
+    """Return the UNRELEASED staging twin of a released manifest directory.
+
+    ``CLAUDE/UPGRADES/config-changes`` stages at
+    ``CLAUDE/UPGRADES/UNRELEASED/config-changes``; the rule is the same for a
+    test override, so an override carries its own staging directory.
+    """
+    return manifests_dir.parent / _UNRELEASED_DIRNAME / manifests_dir.name
+
+
+def _manifest_dirs(base_dir: Path, include_unreleased: bool | None) -> list[Path]:
+    """The directories a loader reads: the released one, plus staging when due.
+
+    Plan 00291 Task 2.3: ``include_unreleased`` left as ``None`` means "ask the
+    install stamp" -- a branch install is ahead of the last release, so the
+    manifests it is ahead on are the staged ones. A release install never
+    sees them.
+    """
+    if include_unreleased is None:
+        include_unreleased = is_branch_install()
+    dirs = [base_dir]
+    if include_unreleased:
+        dirs.append(unreleased_manifests_dir(base_dir))
+    return [d for d in dirs if d.exists()]
+
+
+def _manifest_files(base_dir: Path, include_unreleased: bool | None) -> list[tuple[str, Path]]:
+    """Every ``v{X.Y.Z}.yaml`` in the directories a loader reads, as (version, path)."""
+    found: list[tuple[str, Path]] = []
+    for directory in _manifest_dirs(base_dir, include_unreleased):
+        for yaml_file in directory.glob(f"{_MANIFEST_PREFIX}*{_MANIFEST_SUFFIX}"):
+            version_str = yaml_file.stem[len(_MANIFEST_PREFIX) :]
+            if not _VERSION_PATTERN.match(version_str):
+                continue
+            found.append((version_str, yaml_file))
+    return found
+
+
 # ---------------------------------------------------------------------------
 # Public API — Manifest loading
 # ---------------------------------------------------------------------------
@@ -410,6 +450,7 @@ def load_manifests_between(
     from_version: str,
     to_version: str,
     manifests_dir: Path | None = None,
+    include_unreleased: bool | None = None,
 ) -> list[ConfigMigrationManifest]:
     """Load all manifests for versions strictly after from_version up to to_version.
 
@@ -420,6 +461,9 @@ def load_manifests_between(
         from_version: Start of range (exclusive) — the version being upgraded from
         to_version: End of range (inclusive) — the version being upgraded to
         manifests_dir: Override default manifest directory (for testing)
+        include_unreleased: Also read the UNRELEASED staging directory. ``None``
+            (the default) includes it exactly when the running install is a
+            branch install.
 
     Returns:
         List of manifests sorted by version (oldest first)
@@ -438,19 +482,9 @@ def load_manifests_between(
 
     base_dir = manifests_dir if manifests_dir is not None else _default_manifests_dir()
 
-    if not base_dir.exists():
-        return []
-
     manifests: list[ConfigMigrationManifest] = []
 
-    for yaml_file in base_dir.glob(f"{_MANIFEST_PREFIX}*{_MANIFEST_SUFFIX}"):
-        # Strip 'v' prefix to get version string (glob ensures files start with 'v')
-        version_str = yaml_file.stem[len(_MANIFEST_PREFIX) :]
-
-        # Skip files that don't match v{N}.{N}.{N} pattern (e.g. vnot-a-version.yaml)
-        if not _VERSION_PATTERN.match(version_str):
-            continue
-
+    for version_str, yaml_file in _manifest_files(base_dir, include_unreleased):
         v = _parse_version(version_str)
 
         if from_v < v <= to_v:
@@ -510,6 +544,7 @@ def generate_migration_advisory(
     to_version: str,
     user_config_path: Path,
     manifests_dir: Path | None = None,
+    include_unreleased: bool | None = None,
 ) -> MigrationAdvisory:
     """Generate a config migration advisory for the given version range.
 
@@ -523,6 +558,7 @@ def generate_migration_advisory(
         to_version: Version user is upgrading to (included in range)
         user_config_path: Path to user's hooks-daemon.yaml
         manifests_dir: Override default manifest directory (for testing)
+        include_unreleased: Passed through to :func:`load_manifests_between`.
 
     Returns:
         MigrationAdvisory with warnings and suggestions
@@ -530,7 +566,12 @@ def generate_migration_advisory(
     with user_config_path.open() as f:
         user_config: dict[str, Any] = yaml.safe_load(f) or {}
 
-    manifests = load_manifests_between(from_version, to_version, manifests_dir=manifests_dir)
+    manifests = load_manifests_between(
+        from_version,
+        to_version,
+        manifests_dir=manifests_dir,
+        include_unreleased=include_unreleased,
+    )
 
     warnings: list[AdvisoryWarning] = []
     suggestions: list[AdvisorySuggestion] = []
@@ -607,29 +648,23 @@ def generate_migration_advisory(
 # ---------------------------------------------------------------------------
 
 
-def list_known_versions(manifests_dir: Path | None = None) -> list[str]:
+def list_known_versions(
+    manifests_dir: Path | None = None,
+    include_unreleased: bool | None = None,
+) -> list[str]:
     """Return sorted list of versions that have manifest files.
 
     Args:
         manifests_dir: Override default manifest directory (for testing)
+        include_unreleased: Also list the UNRELEASED staging directory; ``None``
+            asks the install stamp, as in :func:`load_manifests_between`.
 
     Returns:
         Sorted list of version strings (oldest first)
     """
     base_dir = manifests_dir if manifests_dir is not None else _default_manifests_dir()
 
-    if not base_dir.exists():
-        return []
-
-    versions: list[str] = []
-    for yaml_file in base_dir.glob(f"{_MANIFEST_PREFIX}*{_MANIFEST_SUFFIX}"):
-        # Strip 'v' prefix to get version string (glob ensures files start with 'v')
-        version_str = yaml_file.stem[len(_MANIFEST_PREFIX) :]
-        # Skip files that don't match v{N}.{N}.{N} pattern (e.g. vnot-a-version.yaml)
-        if not _VERSION_PATTERN.match(version_str):
-            continue
-        versions.append(version_str)
-
+    versions = [version for version, _ in _manifest_files(base_dir, include_unreleased)]
     versions.sort(key=_parse_version)
     return versions
 
