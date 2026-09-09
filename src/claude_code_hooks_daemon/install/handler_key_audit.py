@@ -180,7 +180,7 @@ def _classify(
             message=f"{path}: '{key}' no longer exists — {retired_reason}",
         )
 
-    similar = ConfigValidator._find_similar_names(key, by_event.get(event, set()))
+    similar = ConfigValidator.find_similar_names(key, by_event.get(event, set()))
     hint = f" Did you mean: {', '.join(similar)}?" if similar else ""
     return HandlerKeyFinding(
         path=path,
@@ -316,8 +316,26 @@ def _ensure_pseudo_event_handlers(
 
 
 def _fill_block_defaults(block: dict[str, Any], name: str) -> None:
-    """Add ``enabled``/``triggers`` a pseudo-event block lacks; keep what it has."""
-    for key, value in _DEFAULT_PSEUDO_EVENT_BLOCKS.get(name, {_ENABLED: True}).items():
+    """Add ``enabled``/``triggers`` a pseudo-event block lacks; keep what it has.
+
+    Raises:
+        ValueError: when ``name`` has no entry in
+            :data:`_DEFAULT_PSEUDO_EVENT_BLOCKS`. The old fallback wrote
+            ``{enabled: True}`` and no triggers, and a block with handlers
+            but no triggers never fires -- so a relocation aimed at an
+            unknown pseudo-event would silently retire the handler a second
+            time, which is the failure this whole module exists to stop.
+            Failing during the upgrade says so; an enabled empty block does
+            not (Plan 00364 Task 2.3).
+    """
+    defaults = _DEFAULT_PSEUDO_EVENT_BLOCKS.get(name)
+    if defaults is None:
+        raise ValueError(
+            f"pseudo-event '{name}' has no default block, so scaffolding it would "
+            f"produce an enabled block with no triggers, which never fires. Add an "
+            f"entry to _DEFAULT_PSEUDO_EVENT_BLOCKS matching the reference config."
+        )
+    for key, value in defaults.items():
         block.setdefault(key, copy.deepcopy(value))
 
 
@@ -328,18 +346,24 @@ def scaffold_pseudo_event_blocks(config: dict[str, Any]) -> dict[str, Any]:
     handlers but no triggers never fires; both are the moved handler retired a
     second time. Existing keys are kept as written.
 
+    A block this module has no defaults for is left exactly as the user wrote
+    it: there is nothing to complete it FROM, and inventing an ``enabled: true``
+    with no triggers would assert a block fires when it cannot. Unlike the
+    relocation path, an unknown name here is not a bug -- a project may
+    configure a pseudo-event this constant never had to scaffold.
+
     Args:
         config: Parsed hooks-daemon.yaml. Not mutated.
 
     Returns:
-        A copy with every ``pseudo_events.<name>`` mapping completed.
+        A copy with every KNOWN ``pseudo_events.<name>`` mapping completed.
     """
     result = copy.deepcopy(config)
     pseudo_events = result.get(_PSEUDO_EVENTS)
     if not isinstance(pseudo_events, dict):
         return result
     for name, block in pseudo_events.items():
-        if isinstance(block, dict):
+        if isinstance(block, dict) and name in _DEFAULT_PSEUDO_EVENT_BLOCKS:
             _fill_block_defaults(block, name)
     return result
 

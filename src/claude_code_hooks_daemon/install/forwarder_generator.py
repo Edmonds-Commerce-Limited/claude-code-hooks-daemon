@@ -25,10 +25,12 @@ import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Final
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config, TransportConfig
 from claude_code_hooks_daemon.constants.events import (
+    EventIDMeta,
     raw_stdout_bash_keys,
     relay_ineligible_bash_keys,
     wired_event_metas,
@@ -69,6 +71,36 @@ RAW_STDOUT_EVENT_FILE_NAMES: frozenset[str] = raw_stdout_bash_keys()
 
 logger = logging.getLogger(__name__)
 
+#: Every wired event's metadata, indexed by ``bash_key``. Built once at import
+#: rather than per render: the catalogue is a module constant, and rebuilding
+#: the index inside the renderer walked it again for every generated forwarder.
+_METAS_BY_BASH_KEY: Final[dict[str, EventIDMeta]] = {m.bash_key: m for m in wired_event_metas()}
+
+#: Characters that mean something to bash inside a double-quoted string. The
+#: backslash is escaped FIRST, so the escapes added for the others are not
+#: themselves re-escaped.
+_SHELL_DOUBLE_QUOTE_ESCAPES: Final[tuple[tuple[str, str], ...]] = (
+    ("\\", "\\\\"),
+    ('"', '\\"'),
+    ("$", "\\$"),
+    ("`", "\\`"),
+)
+
+
+def _escape_for_double_quotes(value: str) -> str:
+    """Render ``value`` safe to interpolate into a double-quoted shell string.
+
+    The catalogue is an internal constant, so nothing here is hostile input.
+    It is escaped anyway because the failure would be silent and remote: an
+    entry gaining a quote emits a forwarder that does not parse, and one
+    gaining a backtick or ``$`` emits a forwarder that runs a command
+    substitution every time the daemon is down (Plan 00364 Task 2.5).
+    """
+    for raw, escaped in _SHELL_DOUBLE_QUOTE_ESCAPES:
+        value = value.replace(raw, escaped)
+    return value
+
+
 #: The daemon-down stanza every forwarder opens with. Matches the whole
 #: ``if ! ensure_daemon; then ... fi`` block (its body is whatever the source
 #: carries — the legacy ``emit_hook_error ...; exit 0`` stanza, or an earlier
@@ -89,12 +121,11 @@ def _render_raw_stdout_daemon_down_block(event_file_name: str) -> str:
     ERROR [type]`` line ``emit_hook_error`` logs) and the exit is non-zero, so
     the hook is "not handled" rather than answered with a JSON object.
     """
-    metas_by_bash_key = {m.bash_key: m for m in wired_event_metas()}
-    meta = metas_by_bash_key[event_file_name]
+    meta = _METAS_BY_BASH_KEY[event_file_name]
     if meta.daemon_down_stdout:
         stdout_lines = (
             "    # This stdout is a DISPLAY line, so the outage stays visible.\n"
-            f'    echo "{meta.daemon_down_stdout}"\n'
+            f'    echo "{_escape_for_double_quotes(meta.daemon_down_stdout)}"\n'
         )
     else:
         stdout_lines = "    # This stdout is parsed as a VALUE, so nothing may be printed.\n"

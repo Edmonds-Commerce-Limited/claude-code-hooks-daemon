@@ -290,6 +290,19 @@ def probe_stop_hard_block(hooks_dir: Path) -> ProbeResult:
                 f"{returncode}, no block decision in the response) -- no "
                 "blocking Stop handler is active for this client, skipping",
             )
+        if _DAEMON_ERROR_MARKER in err:
+            # Plan 00364 Task 2.6: the daemon being DOWN wears the same
+            # clothes as a broken translation. `emit_hook_error` (init.sh)
+            # writes its own `decision: block` body to stdout and exits 0,
+            # so the branch below would send the operator to inspect
+            # exit-code translation logic that is working perfectly. The
+            # marker on stderr is what tells the two apart.
+            return ProbeResult(
+                name,
+                False,
+                "the daemon is not answering, so the forwarder emitted its own "
+                f"error response: {_snippet(err)}",
+            )
         return ProbeResult(
             name,
             False,

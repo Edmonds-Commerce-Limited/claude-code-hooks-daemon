@@ -23,6 +23,7 @@ reaches stdout, not about the text of the script.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import subprocess
 from pathlib import Path
@@ -36,6 +37,7 @@ from claude_code_hooks_daemon.constants.events import (
     wired_event_metas,
 )
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.install import forwarder_generator
 from claude_code_hooks_daemon.install.forwarder_generator import (
     apply_raw_stdout_daemon_down,
     generate_forwarder_content,
@@ -206,3 +208,81 @@ def test_tracked_raw_stdout_forwarders_are_already_in_generated_form(
     """
     source = (_HOOKS_DIR / event_file_name).read_text()
     assert apply_raw_stdout_daemon_down(source, event_file_name) == source
+
+
+# ---------------------------------------------------------------------------
+# Plan 00364 Task 2.5: the catalogue text is DATA, and the lookup is hoisted
+# ---------------------------------------------------------------------------
+
+_HOSTILE_STDOUT = 'a "quoted" $HOME `whoami` \\ marker'
+
+
+def _with_daemon_down_stdout(text: str) -> dict[str, object]:
+    """The module's meta lookup, with ``status-line``'s stdout text replaced."""
+    status_line = next(m for m in wired_event_metas() if m.bash_key == "status-line")
+    replaced = dataclasses.replace(status_line, daemon_down_stdout=text)
+    return {**forwarder_generator._METAS_BY_BASH_KEY, "status-line": replaced}
+
+
+class TestDaemonDownStdoutIsEscaped:
+    """A catalogue string reaches the forwarder as TEXT, never as shell syntax.
+
+    The value is interpolated into a double-quoted ``echo``. Nothing in the
+    catalogue is hostile today -- it is an internal constant -- but an entry
+    carrying a quote, a dollar sign or a backtick would emit a forwarder that
+    is broken, or one that runs a command substitution on every daemon-down
+    status line. Escaping is cheaper than remembering.
+    """
+
+    def test_the_rendered_block_neutralises_shell_metacharacters(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            forwarder_generator,
+            "_METAS_BY_BASH_KEY",
+            _with_daemon_down_stdout(_HOSTILE_STDOUT),
+        )
+        block = forwarder_generator._render_raw_stdout_daemon_down_block("status-line")
+
+        assert '\\"quoted\\"' in block
+        assert "\\$HOME" in block
+        assert "\\`whoami\\`" in block
+
+    def test_bash_prints_the_text_verbatim(self, tmp_path: Path, monkeypatch) -> None:
+        """The property that matters, measured by running the thing."""
+        monkeypatch.setattr(
+            forwarder_generator,
+            "_METAS_BY_BASH_KEY",
+            _with_daemon_down_stdout(_HOSTILE_STDOUT),
+        )
+        monkeypatch.setenv("HOME", "/should-not-be-expanded")
+
+        result = _run_generated_forwarder(tmp_path, "status-line")
+
+        assert result.stdout.strip() == _HOSTILE_STDOUT
+        assert result.returncode == 1
+
+    def test_the_shipped_text_is_unaffected_by_escaping(self, tmp_path: Path) -> None:
+        """No catalogue entry needs escaping today, and the output is unchanged."""
+        result = _run_generated_forwarder(tmp_path, "status-line")
+        assert result.stdout.strip() == EventID.STATUS_LINE.daemon_down_stdout
+
+
+class TestTheMetaLookupIsHoisted:
+    """Rebuilding the whole catalogue index per call is per-forwarder work.
+
+    ``_render_raw_stdout_daemon_down_block`` walked ``wired_event_metas()``
+    and built a fresh dict every time it ran -- once per generated forwarder.
+    The catalogue is a module constant, so the index is built once at import.
+    """
+
+    def test_rendering_does_not_walk_the_catalogue(self, monkeypatch) -> None:
+        def refuse() -> tuple[object, ...]:
+            raise AssertionError("wired_event_metas() must not be called per render")
+
+        monkeypatch.setattr(forwarder_generator, "wired_event_metas", refuse)
+
+        block = forwarder_generator._render_raw_stdout_daemon_down_block("status-line")
+        assert "if ! ensure_daemon; then" in block
+
+    def test_the_hoisted_index_covers_every_wired_event(self) -> None:
+        expected = {m.bash_key: m for m in wired_event_metas()}
+        assert forwarder_generator._METAS_BY_BASH_KEY == expected

@@ -225,8 +225,13 @@ class ConfigValidator:
         return snake
 
     @staticmethod
-    def _find_similar_names(name: str, valid_names: set[str], threshold: float = 0.6) -> list[str]:
+    def find_similar_names(name: str, valid_names: set[str], threshold: float = 0.6) -> list[str]:
         """Find similar handler names using fuzzy matching.
+
+        Public because two modules need it: this validator's own unknown-handler
+        message and :mod:`install.handler_key_audit`'s "did you mean" hint. The
+        audit reached across for the private form, which declares no contract
+        and would break silently on a rename (Plan 00364 Task 2.3).
 
         Args:
             name: The typo'd handler name
@@ -481,7 +486,7 @@ class ConfigValidator:
                     # through the upgrade manifests instead. Unknown names that
                     # are NOT retired are still hard errors — that is the point.
                     # Find similar names to suggest
-                    similar = ConfigValidator._find_similar_names(handler_name, available_handlers)
+                    similar = ConfigValidator.find_similar_names(handler_name, available_handlers)
 
                     if similar:
                         suggestion = f"Did you mean: {', '.join(similar)}"

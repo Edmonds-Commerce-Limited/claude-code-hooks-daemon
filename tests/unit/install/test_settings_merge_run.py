@@ -265,3 +265,53 @@ class TestTheMergedResultIsValidatedBeforeItLands:
         paths["client"].write_text("{ broken", encoding="utf-8")
         outcome = run_settings_merge(paths["client"], paths["new_default"])
         assert not any("would change" in message for message in outcome.messages)
+
+
+class TestTheWriteIsActuallyAtomic:
+    """The comment claimed atomicity; now the code has it.
+
+    Plan 00364 Task 2.7. Four writers share this file with no lock between
+    them, and the module reasons that the worst case is a LOST UPDATE rather
+    than corruption -- which only holds if each writer is atomic.
+    ``write_text`` truncates first, so an interruption left a half-written
+    ``settings.json``: a file Claude Code cannot parse, and every hook with
+    it.
+    """
+
+    def _fail_the_rename(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def refuse(self: Path, target: Path) -> Path:
+            raise OSError("simulated interruption at the rename")
+
+        monkeypatch.setattr(Path, "replace", refuse)
+
+    def test_an_interrupted_write_leaves_the_original_intact(
+        self, paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original = json.dumps({"hooks": {}, "permissions": {"deny": ["Bash(rm:*)"]}})
+        paths["client"].write_text(original, encoding="utf-8")
+        self._fail_the_rename(monkeypatch)
+
+        with pytest.raises(OSError, match="simulated interruption"):
+            run_settings_merge(paths["client"], paths["new_default"])
+
+        assert paths["client"].read_text(encoding="utf-8") == original
+
+    def test_a_fresh_install_is_written_the_same_way(
+        self, paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The absent-file branch writes the whole file too, so it counts."""
+        self._fail_the_rename(monkeypatch)
+
+        with pytest.raises(OSError, match="simulated interruption"):
+            run_settings_merge(paths["client"], paths["new_default"])
+
+        assert not paths["client"].exists()
+
+    def test_a_successful_merge_leaves_no_temp_file_behind(self, paths: dict[str, Path]) -> None:
+        paths["client"].write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+
+        run_settings_merge(paths["client"], paths["new_default"])
+
+        siblings = {path.name for path in paths["root"].iterdir()}
+        assert siblings == {"settings.json", "new-default.json"}
+        assert json.loads(paths["client"].read_text(encoding="utf-8"))

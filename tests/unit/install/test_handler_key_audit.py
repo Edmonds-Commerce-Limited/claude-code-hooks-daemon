@@ -13,14 +13,20 @@ two relocated keys automatically.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+import pytest
+import yaml
+
+from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.constants.handlers import (
     RELOCATED_HANDLERS,
     RETIRED_HANDLERS,
     HandlerRelocation,
 )
 from claude_code_hooks_daemon.install.handler_key_audit import (
+    _DEFAULT_PSEUDO_EVENT_BLOCKS,
     HandlerKeyFinding,
     HandlerKeyMigration,
     applied_relocations,
@@ -29,6 +35,18 @@ from claude_code_hooks_daemon.install.handler_key_audit import (
     migrate_relocated_handler_keys,
     scaffold_pseudo_event_blocks,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+#: The template a new project starts from -- what a scaffolded block must agree
+#: with, since that is the block every other install ends up carrying.
+EXAMPLE_CONFIG = REPO_ROOT / ".claude" / "hooks-daemon.yaml.example"
+
+
+def _shipped_pseudo_events() -> dict[str, Any]:
+    """The ``pseudo_events`` section of the shipped example config."""
+    loaded = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+    return loaded["pseudo_events"]
 
 
 def _config(handlers: dict[str, Any], **extra: Any) -> dict[str, Any]:
@@ -317,3 +335,82 @@ class TestAppliedRelocations:
         before = _config({"stop": {"hedging_language_detector": {"enabled": True}}})
         after = _config({"stop": {}})
         assert applied_relocations(before, after) == []
+
+
+class TestDefaultBlocksMatchTheShippedConfig:
+    """The scaffolded triggers are the shipped ones, pinned rather than claimed.
+
+    Plan 00364 Task 2.3. The constant's comment says "Triggers match the
+    reference config" and nothing checked it. A scaffolded block whose
+    triggers drifted from what the daemon ships fires on a different cadence
+    than every other install, which is the relocated handler half-retired
+    again -- the exact failure this module exists to prevent.
+    """
+
+    def test_every_default_block_matches_the_example_config(self) -> None:
+        shipped = _shipped_pseudo_events()
+        for name, block in _DEFAULT_PSEUDO_EVENT_BLOCKS.items():
+            assert name in shipped, f"{name} is scaffolded but the example config has no block"
+            assert block["triggers"] == shipped[name]["triggers"]
+            assert block["enabled"] == shipped[name]["enabled"]
+
+    def test_every_relocation_target_has_a_default_block(self) -> None:
+        """Otherwise the migration lands the handler under a block that never fires."""
+        targets = {relocation.pseudo_event for relocation in RELOCATED_HANDLERS.values()}
+        assert targets <= set(_DEFAULT_PSEUDO_EVENT_BLOCKS)
+
+
+class TestTheSuggestionHelperIsADeclaredDependency:
+    """The audit's "did you mean" hint comes from a PUBLIC helper.
+
+    Plan 00364 Task 2.3. It called ``ConfigValidator._find_similar_names``,
+    a private method of another class: a dependency nothing declared, which a
+    rename inside the validator would have broken from across the package.
+    """
+
+    def test_the_helper_is_public(self) -> None:
+        assert hasattr(ConfigValidator, "find_similar_names")
+        assert not hasattr(ConfigValidator, "_find_similar_names")
+
+    def test_the_audit_hint_uses_it(self) -> None:
+        findings = audit_handler_keys(_config({"stop": {"auto_continue_stopp": True}}))
+        assert len(findings) == 1
+        assert "Did you mean: auto_continue_stop?" in findings[0].message
+
+    def test_no_close_match_yields_no_hint(self) -> None:
+        findings = audit_handler_keys(_config({"stop": {"zzzzzzzzzz": True}}))
+        assert len(findings) == 1
+        assert "Did you mean" not in findings[0].message
+
+
+class TestAnUnknownRelocationTargetIsRefused:
+    """A relocation target with no default block raises rather than half-landing.
+
+    Plan 00364 Task 2.3. The fallback wrote ``{enabled: True}`` with no
+    triggers, and this module's own docstring says a block with handlers but
+    no triggers never fires. Silently enabling nothing is the moved handler
+    retired a second time; failing loudly during the upgrade is not.
+    """
+
+    def test_migrating_to_a_target_without_defaults_raises(self, monkeypatch) -> None:
+        monkeypatch.setitem(
+            RELOCATED_HANDLERS,
+            "auto_continue_stop",
+            HandlerRelocation(pseudo_event="no_such_pseudo_event", config_key="moved"),
+        )
+        config = _config({"stop": {"auto_continue_stop": {"enabled": True}}})
+
+        with pytest.raises(ValueError, match="no_such_pseudo_event"):
+            migrate_relocated_handler_keys(config)
+
+    def test_the_sweep_leaves_an_unknown_block_exactly_as_written(self) -> None:
+        """``scaffold_pseudo_event_blocks`` walks blocks it has no defaults for.
+
+        It must not raise for them, and must not invent an ``enabled`` key
+        either -- there is nothing to fill it from.
+        """
+        config = _config({}, pseudo_events={"some_other_event": {"handlers": {}}})
+
+        scaffolded = scaffold_pseudo_event_blocks(config)
+
+        assert scaffolded["pseudo_events"]["some_other_event"] == {"handlers": {}}
