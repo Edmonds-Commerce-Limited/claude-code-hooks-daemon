@@ -6,6 +6,7 @@ NEVER appear in the deny reason — only a 1-based index into the (gitignored,
 hence meaningless-without-it) file.
 """
 
+import logging
 import re
 import subprocess
 from pathlib import Path
@@ -974,6 +975,48 @@ class TestGhBodySurface:
         handler = _wordlist(tmp_path, "alpha-term")
 
         assert handler.matches(_bash_input("gh issue comment 12 --body-file -")) is False
+
+    @pytest.mark.parametrize("failure", [PermissionError, FileNotFoundError])
+    def test_a_body_file_that_cannot_be_read_is_skipped_and_logged(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        failure: type[OSError],
+    ) -> None:
+        """Statting a file is not reading it, and the gap raises.
+
+        ``path_is_file(unreadable_means=False)`` answers False only when the
+        STAT fails; a file whose own mode denies read stats perfectly well, and
+        so does one unlinked between the check and the read. The raise escapes
+        ``matches()``, where the chain catching it does not rescue this guard:
+        with ``strict_mode: false`` it silently stops applying, and with
+        ``strict_mode: true`` it denies legitimate work.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        handler._secret_terms()  # cache the word list before read_bytes is broken
+        body = tmp_path / "body.md"
+        body.write_text("alpha-term\n")
+        hook_input = _bash_input(f"gh issue comment 12 --body-file {body}")
+
+        with caplog.at_level(logging.DEBUG, logger=sensitive_content_module.__name__):
+            with patch.object(Path, "read_bytes", side_effect=failure(13, "denied")):
+                assert handler.matches(hook_input) is False
+
+        assert str(body) in caplog.text
+
+    def test_an_unreadable_body_file_does_not_disarm_the_rest_of_the_command(
+        self, tmp_path: Path
+    ) -> None:
+        """The whole guard used to stand down, because ``_compute_haystacks``
+        never returned -- so the INLINE body went unjudged too."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        handler._secret_terms()
+        body = tmp_path / "body.md"
+        body.write_text("nothing to see\n")
+        command = f"gh issue comment 12 --body 'alpha-term' --body-file {body}"
+
+        with patch.object(Path, "read_bytes", side_effect=PermissionError(13, "denied")):
+            assert handler.matches(_bash_input(command)) is True
 
 
 class TestPerDispatchHaystackCache:

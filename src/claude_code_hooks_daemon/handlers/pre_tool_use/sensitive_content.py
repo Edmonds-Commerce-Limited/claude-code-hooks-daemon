@@ -681,12 +681,33 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             if not path_is_file(path, unreadable_means=False):
                 _LOGGER.debug("sensitive_content: skipping unreadable gh body file %s", path)
                 continue
+            body = self._read_body_file(path)
+            if body is None:
+                continue
+            haystacks.append(_Haystack(subject=f"gh body file {path}", text=body))
+        return haystacks
+
+    @staticmethod
+    def _read_body_file(path: Path) -> str | None:
+        """Text of ``path``, or None when it cannot be read or is too big.
+
+        ``path_is_file(unreadable_means=False)`` answers False only when the
+        STAT fails, and statting a file is not reading it: a file whose own
+        mode denies read stats perfectly well, and so does one unlinked
+        between that check and this read. Letting either raise takes the
+        WHOLE guard down for the command -- ``_compute_haystacks`` never
+        returns, so the inline ``--body`` goes unjudged too -- which is why
+        this degrades per file, the way a non-zero ``git diff`` already does.
+        """
+        try:
             if path.stat().st_size > _MAX_BODY_FILE_BYTES:
                 _LOGGER.info("sensitive_content: gh body file %s exceeds the size bound", path)
-                continue
-            text = path.read_bytes().decode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS)
-            haystacks.append(_Haystack(subject=f"gh body file {path}", text=text))
-        return haystacks
+                return None
+            raw = path.read_bytes()
+        except OSError as error:
+            _LOGGER.debug("sensitive_content: gh body file %s could not be read: %s", path, error)
+            return None
+        return raw.decode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS)
 
     def _staged_content_haystacks(
         self, hook_input: dict[str, Any], commits_all: bool
