@@ -20,6 +20,7 @@ because the whole point is exclusion against ``ensure_venv``.
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import subprocess
@@ -147,6 +148,58 @@ class TestMkdirBackend:
         monkeypatch.setenv("HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS", "5")
         with venv_lock(tmp_path, timeout_seconds=1, backend="mkdir"):
             pass
+
+
+class TestMkdirBackendRacesTheHolder:
+    """The contention window the lock exists for is the one that raced it.
+
+    ``mkdir`` failing and ``stat`` succeeding are two syscalls with a gap
+    between them, and the holder's ``rmtree`` lands in that gap exactly when
+    two daemons — or a daemon and a repair — contend. The ``stat`` then
+    raises ``FileNotFoundError``, which must be read as "the lock just became
+    free", not allowed to escape the lock layer entirely.
+    """
+
+    def test_a_holder_releasing_between_mkdir_and_stat_is_retaken(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        lock_dir = tmp_path / "untracked" / f"{VENV_LOCK_FILE_NAME}.d"
+        lock_dir.mkdir(parents=True)
+        real_stat = Path.stat
+        raced = {"done": False}
+
+        def releasing_stat(self: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+            if self == lock_dir and not raced["done"]:
+                raced["done"] = True
+                # The holder's rmtree, landing in the gap.
+                shutil.rmtree(lock_dir)
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(self))
+            return real_stat(self, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(Path, "stat", releasing_stat)
+        with venv_lock(tmp_path, timeout_seconds=5, backend="mkdir"):
+            assert (lock_dir / "pid").read_text().strip() == str(os.getpid())
+        assert raced["done"], "the race must actually have been exercised"
+
+    def test_a_permanently_unstattable_lock_still_ends_in_the_bounded_timeout(
+        self, tmp_path: Path
+    ) -> None:
+        """A dangling symlink at the lock name: mkdir refuses it, stat cannot read it.
+
+        The retry must stay bounded by the same wait, so the failure is the
+        lock's own timeout rather than a spin or a leaked OSError.
+        """
+        untracked = tmp_path / "untracked"
+        untracked.mkdir(parents=True)
+        lock_dir = untracked / f"{VENV_LOCK_FILE_NAME}.d"
+        lock_dir.symlink_to(tmp_path / "never-created")
+
+        started = time.monotonic()
+        with pytest.raises(VenvLockTimeout) as excinfo:
+            with venv_lock(tmp_path, timeout_seconds=1, backend="mkdir"):
+                pytest.fail("must not enter while the lock name is unusable")
+        assert time.monotonic() - started < 10
+        assert str(lock_dir) in str(excinfo.value)
 
 
 class TestBackendSelection:

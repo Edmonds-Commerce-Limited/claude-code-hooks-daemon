@@ -246,6 +246,80 @@ class TestTheVerdict:
         assert [p.number for p in report.attention_plans] == [3]
 
 
+class _FailingGit(_FakeGit):
+    """A repo whose ``failing`` git subcommand exits non-zero."""
+
+    def __init__(
+        self,
+        failing: str,
+        *,
+        branches_ahead: dict[str, int] | None = None,
+        worktrees: int = 0,
+    ) -> None:
+        super().__init__(branches_ahead=branches_ahead, worktrees=worktrees)
+        self.failing = failing
+
+    def __call__(self, cwd: Path, *args: str, **kw: object) -> subprocess.CompletedProcess[str]:
+        if args[0] == self.failing:
+            return subprocess.CompletedProcess([], 128, "", "fatal: not a git repository\n")
+        return super().__call__(cwd, *args, **kw)
+
+
+class TestAGitFailureIsNeverReadAsNothingInFlight:
+    """`is_clean` reads "no branches, no worktrees" as clean.
+
+    So a failing `git worktree list` returned as an empty listing CONTRIBUTES
+    to a clean verdict — while the module's own rule for CI, applied two
+    functions away, is that a lookup failure must never read as clean. The
+    CLI reserves exit 1 for "could not determine" precisely for this.
+    """
+
+    def test_a_failing_worktree_listing_is_reported_not_swallowed(self, tmp_path: Path) -> None:
+        report = _collect(tmp_path, git=_FailingGit("worktree"))
+        assert report.undetermined_reason
+        assert "worktree" in report.undetermined_reason
+
+    def test_a_failing_branch_listing_is_reported_not_swallowed(self, tmp_path: Path) -> None:
+        report = _collect(tmp_path, git=_FailingGit("for-each-ref"))
+        assert "for-each-ref" in report.undetermined_reason
+
+    def test_a_failing_rev_parse_is_reported(self, tmp_path: Path) -> None:
+        report = _collect(tmp_path, git=_FailingGit("rev-parse"))
+        assert "rev-parse" in report.undetermined_reason
+
+    def test_an_undetermined_slate_is_never_clean(self, tmp_path: Path) -> None:
+        root = tmp_path / "CLAUDE" / "Plan"
+        root.mkdir(parents=True)
+        report = collect_slate(
+            repo_root=tmp_path,
+            plan_root=root,
+            archive_dir_names=frozenset(),
+            run_fn=_FailingGit("worktree"),
+            ci_lookup=_green,
+        )
+        # Everything else about this repo says clean: no plans, no branches.
+        assert report.in_flight_plans == ()
+        assert report.branches_ahead == ()
+        assert report.is_clean is False
+
+    def test_a_healthy_repo_carries_no_reason(self, tmp_path: Path) -> None:
+        assert _collect(tmp_path).undetermined_reason == ""
+
+    def test_the_render_says_undetermined_rather_than_clean(self, tmp_path: Path) -> None:
+        root = tmp_path / "CLAUDE" / "Plan"
+        root.mkdir(parents=True)
+        report = collect_slate(
+            repo_root=tmp_path,
+            plan_root=root,
+            archive_dir_names=frozenset(),
+            run_fn=_FailingGit("worktree"),
+            ci_lookup=_green,
+        )
+        text = report.render()
+        assert "UNDETERMINED" in text
+        assert "Slate: CLEAN" not in text
+
+
 class TestTheReportReadsAsAReportNotAQuestion:
     def test_a_clean_slate_renders_without_a_question_mark(self, tmp_path: Path) -> None:
         root = tmp_path / "CLAUDE" / "Plan"

@@ -233,7 +233,7 @@ bin/hooks-daemon release-slate-check
 | ---- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
 | `0`  | Clean: HEAD's exact sha has a completed, successful CI run; no plan mid-work; no branch ahead; no worktree | Proceeds exactly as before — no prompt, no pause |
 | `2`  | Something is in flight. The report names every item                                                        | **STOP.** A human decides                        |
-| `1`  | The check could not be made (no `gh`, not a repo, lookup failed)                                           | **ABORT.** Never treated as clean                |
+| `1`  | The check could not be made (no `gh`, not a repo, a lookup or a git listing failed)                        | **ABORT.** Never treated as clean                |
 
 What the report shows, and how each is read:
 

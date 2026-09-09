@@ -41,6 +41,20 @@ def _report(*, clean: bool) -> SlateReport:
     )
 
 
+def _undetermined_report() -> SlateReport:
+    """Collection completed, but one of its git reads failed."""
+    return SlateReport(
+        head_sha=_HEAD,
+        head_ci=CiRunState(sha=_HEAD, status="completed", conclusion="success"),
+        in_flight_plans=(),
+        release_gated_plans=(),
+        attention_plans=(),
+        branches_ahead=(),
+        worktrees=(),
+        undetermined_reason="git worktree list --porcelain failed (exit 128)",
+    )
+
+
 def _args(**overrides: object) -> argparse.Namespace:
     values: dict[str, object] = {"accept": False, "json": False}
     values.update(overrides)
@@ -88,6 +102,25 @@ class TestExitCodeIsTheContract:
             raise OSError("boom")
 
         code = cli.cmd_release_slate_check(_args(accept=True), collect=broken)
+        assert code == cli.RELEASE_SLATE_UNDETERMINED
+
+    def test_a_report_that_collected_but_could_not_determine_exits_one(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A git listing that FAILED is not a listing that was empty.
+
+        Collection completes — there is a report to print — but part of it is
+        blind, so the exit is UNDETERMINED rather than CLEAN.
+        """
+        code = cli.cmd_release_slate_check(_args(), collect=lambda: _undetermined_report())
+        assert code == cli.RELEASE_SLATE_UNDETERMINED
+        out = capsys.readouterr().out
+        assert "git worktree list --porcelain failed" in out
+
+    def test_accept_does_not_rescue_an_undetermined_report_either(self) -> None:
+        code = cli.cmd_release_slate_check(
+            _args(accept=True), collect=lambda: _undetermined_report()
+        )
         assert code == cli.RELEASE_SLATE_UNDETERMINED
 
 

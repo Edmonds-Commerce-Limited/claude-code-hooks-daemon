@@ -96,10 +96,18 @@ class SlateReport:
     # Titles of the callouts waiting in the release-notes holding area. What
     # the release will say, listed for the human; never part of the verdict.
     pending_release_notes: tuple[str, ...] = ()
+    # Why part of this slate could not be read. Non-empty means the report is
+    # BLIND somewhere, which is a different thing from finding nothing: the
+    # CLI turns it into exit 1, which `--accept` deliberately cannot rescue.
+    undetermined_reason: str = ""
 
     @property
     def is_clean(self) -> bool:
         """Nothing for a human to decide.
+
+        A slate that could not be fully read is never clean — the same rule
+        ``_head_ci`` applies to a CI lookup failure, and the reason
+        ``_git_lines`` refuses to hand a failed listing back as an empty one.
 
         Attention plans and pending release notes do not count: both are
         surfaced, but whether a high-priority unstarted plan should hold a
@@ -107,7 +115,8 @@ class SlateReport:
         input rather than anything in flight.
         """
         return (
-            self.head_ci.is_green
+            not self.undetermined_reason
+            and self.head_ci.is_green
             and not self.in_flight_plans
             and not self.branches_ahead
             and not self.worktrees
@@ -132,7 +141,10 @@ class SlateReport:
         lines.append(_section("Live worktrees", [str(p) for p in self.worktrees]))
         lines.append(_section("This release will say", list(self.pending_release_notes)))
         lines.append("")
-        lines.append("Slate: CLEAN" if self.is_clean else "Slate: NOT CLEAN — a human decides")
+        if self.undetermined_reason:
+            lines.append(f"Slate: UNDETERMINED — {self.undetermined_reason}")
+        else:
+            lines.append("Slate: CLEAN" if self.is_clean else "Slate: NOT CLEAN — a human decides")
         return "\n".join(lines)
 
 
@@ -147,32 +159,64 @@ def _plan_lines(plans: tuple[PlanSummary, ...]) -> list[str]:
     return [f"{p.number:05d} {p.title} — {p.status_raw}" for p in plans]
 
 
-def _git_lines(run_fn: RunGit, repo_root: Path, *args: str) -> list[str]:
+def _git_lines(run_fn: RunGit, repo_root: Path, *args: str) -> list[str] | None:
+    """The command's non-blank output lines, or None when git itself failed.
+
+    None is deliberately not ``[]``. ``is_clean`` reads "no branches, no
+    worktrees" as clean, so handing a FAILED listing back as an empty one
+    makes a broken probe contribute to a clean verdict. Only the caller can
+    say what a failure means, so it must be able to tell the two apart.
+    """
     result = run_fn(repo_root, *args)
     if result.returncode != 0:
-        return []
+        return None
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
-def _head_sha(run_fn: RunGit, repo_root: Path) -> str:
-    lines = _git_lines(run_fn, repo_root, "rev-parse", "HEAD")
+class _GitReads:
+    """Every git read for one slate, and whether any of them failed.
+
+    The failures are collected rather than raised because the rest of the
+    report is still worth printing: a human reading a slate with one blind
+    section is better served than one reading a traceback.
+    """
+
+    def __init__(self, run_fn: RunGit, repo_root: Path) -> None:
+        self._run_fn = run_fn
+        self._repo_root = repo_root
+        self._failures: list[str] = []
+
+    def lines(self, *args: str) -> list[str]:
+        """Output lines; a failure is recorded and reads as no output."""
+        found = _git_lines(self._run_fn, self._repo_root, *args)
+        if found is None:
+            self._failures.append(f"git {' '.join(args)} failed")
+            return []
+        return found
+
+    @property
+    def problem(self) -> str:
+        """Every failed read, or "" when all of them succeeded."""
+        return "; ".join(self._failures)
+
+
+def _head_sha(reads: _GitReads) -> str:
+    lines = reads.lines("rev-parse", "HEAD")
     return lines[0].strip() if lines else ""
 
 
-def _branches_ahead(run_fn: RunGit, repo_root: Path) -> tuple[BranchAhead, ...]:
+def _branches_ahead(reads: _GitReads) -> tuple[BranchAhead, ...]:
     # Full refnames, never `%(refname:short)`: short yields the shortest
     # UNAMBIGUOUS name, so a branch shadowed by a same-named tag comes back as
     # `heads/<name>`, which no git command accepts (Plan 00254 measured a
     # force-delete built from exactly that). Strip the prefix ourselves.
-    refnames = _git_lines(run_fn, repo_root, "for-each-ref", "--format=%(refname)", "refs/heads/")
+    refnames = reads.lines("for-each-ref", "--format=%(refname)", "refs/heads/")
     found: list[BranchAhead] = []
     for refname in refnames:
         name = strip_branch_ref(refname.strip())
         if name == _MAIN_BRANCH:
             continue
-        count_lines = _git_lines(
-            run_fn,
-            repo_root,
+        count_lines = reads.lines(
             "rev-list",
             "--count",
             f"{branch_ref(_MAIN_BRANCH)}..{branch_ref(name)}",
@@ -183,8 +227,8 @@ def _branches_ahead(run_fn: RunGit, repo_root: Path) -> tuple[BranchAhead, ...]:
     return tuple(found)
 
 
-def _worktrees(run_fn: RunGit, repo_root: Path) -> tuple[Path, ...]:
-    listing = _git_lines(run_fn, repo_root, "worktree", "list", "--porcelain")
+def _worktrees(reads: _GitReads, repo_root: Path) -> tuple[Path, ...]:
+    listing = reads.lines("worktree", "list", "--porcelain")
     paths: list[Path] = []
     for line in listing:
         if line.startswith("worktree "):
@@ -287,15 +331,21 @@ def collect_slate(
     ``release_notes_root`` is the pending release-notes holding area
     (Plan 00360); None, or a missing directory, lists nothing.
     """
-    head = _head_sha(run_fn, repo_root)
+    reads = _GitReads(run_fn, repo_root)
+    head = _head_sha(reads)
     in_flight, release_gated, attention = _classify_plans(plan_root, archive_dir_names)
+    # Every read completes BEFORE the report is built, so `problem` names all
+    # of them: reading it inline would capture only the failures seen so far.
+    branches = _branches_ahead(reads)
+    worktrees = _worktrees(reads, repo_root)
     return SlateReport(
         head_sha=head,
         head_ci=_head_ci(ci_lookup, head),
         in_flight_plans=in_flight,
         release_gated_plans=release_gated,
         attention_plans=attention,
-        branches_ahead=_branches_ahead(run_fn, repo_root),
-        worktrees=_worktrees(run_fn, repo_root),
+        branches_ahead=branches,
+        worktrees=worktrees,
         pending_release_notes=_pending_release_notes(release_notes_root),
+        undetermined_reason=reads.problem,
     )

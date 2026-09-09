@@ -153,8 +153,8 @@ class TestCmdRepair:
             result = cmd_repair(args)
             assert result == 0
 
-    def test_uv_not_found(self, tmp_path: Path) -> None:
-        """cmd_repair returns 1 when uv is not installed."""
+    def test_uv_not_found(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """cmd_repair returns 1, and names uv, when uv is not installed."""
         args = self._make_args(tmp_path)
 
         with (
@@ -167,6 +167,42 @@ class TestCmdRepair:
         ):
             result = cmd_repair(args)
             assert result == 1
+        assert "'uv' not found" in capsys.readouterr().out
+
+    def test_a_lock_layer_file_not_found_is_not_reported_as_a_missing_uv(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Only the uv SPAWN can mean a missing toolchain.
+
+        A FileNotFoundError raised anywhere else — the venv lock is the one
+        that races, by construction — is a different fault, and printing
+        "install uv" for it sends the reader to fix something that is not
+        broken.
+        """
+        args = self._make_args(tmp_path)
+        lock_path = tmp_path / "untracked" / ".venv-bootstrap.lock.d"
+
+        @contextmanager
+        def broken_lock(_project_root: Path, **_kwargs: object) -> Iterator[None]:
+            raise FileNotFoundError(2, "No such file or directory", str(lock_path))
+            yield
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_project_path",
+                return_value=tmp_path,
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch("claude_code_hooks_daemon.daemon.cli.venv_lock", broken_lock),
+            patch("subprocess.run") as mock_run,
+        ):
+            result = cmd_repair(args)
+
+        assert result == 1
+        mock_run.assert_not_called()
+        out = capsys.readouterr().out
+        assert "'uv' not found" not in out
+        assert ".venv-bootstrap.lock" in out
 
     def test_uv_sync_failure(self, tmp_path: Path) -> None:
         """cmd_repair returns 1 when uv sync fails."""
