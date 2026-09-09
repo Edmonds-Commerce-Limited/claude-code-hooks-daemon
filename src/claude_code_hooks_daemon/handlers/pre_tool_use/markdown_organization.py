@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     next_plan_number_for_target,
     record_plan_allocation,
 )
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.scratch_dir import project_dir_path
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,10 @@ _RULE_WRONG_LOCATION = Rule(
     rule_id=RuleID.MARKDOWN_WRONG_LOCATION,
     blocked="MARKDOWN FILE IN WRONG LOCATION — a new `.md` file written to an unrecognised location",
     why="Markdown files must follow project organization rules",
-    fix="Move it into an allowed location, or configure `extra_allowed_markdown_paths`",
+    fix=(
+        "Move it into an allowed location, declare its sub-project under `projects:`, "
+        "or configure `extra_allowed_markdown_paths`"
+    ),
     verbose=(
         "This location is NOT allowed. Markdown files can only be written to:\n\n"
         "1. ./CLAUDE/ - All LLM documentation and subdirectories\n"
@@ -428,6 +432,12 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         - node_modules/{package}/     (npm — one level)
         - node_modules/@{scope}/{package}/  (npm scoped — two levels)
 
+        A dependency can itself carry a dependency directory (a Composer
+        source install of a package that has its own ``vendor/``), so the
+        stripping repeats until the remainder no longer starts inside one:
+        ``vendor/a/b/vendor/c/d/docs/x.md`` resolves to ``docs/x.md``, not to
+        ``vendor/c/d/docs/x.md`` judged as a plain repository path.
+
         Args:
             lowered_path: Lowercased, slash-normalized path (no leading slash)
 
@@ -450,11 +460,13 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
                 # npm unscoped: node_modules/{package}/{rest}
                 match = re.match(r"^[^/]+/(.+)$", after_prefix)
 
-            if match:
-                return match.group(1)
+            if not match:
+                # Path is at the package root level (no file inside) — not actionable
+                return None
 
-            # Path is at the package root level (no file inside) — not actionable
-            return None
+            package_relative = match.group(1)
+            nested = MarkdownOrganizationHandler._strip_dependency_prefix(package_relative)
+            return nested if nested is not None else package_relative
 
         return None
 
@@ -1015,33 +1027,52 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         if self.is_page_colocated_file(file_path):
             return False
 
-        # Third-party dependency directories act as implicit monorepos.
-        # Each package inside is a sub-project — apply normal rules within it.
-        # Must check the raw path because normalize_path strips to project
-        # markers (e.g. vendor/x/docs/y.md → docs/y.md).
-        raw_lower = file_path.lstrip("/").lower()
+        # This rule is about where NEW markdown lands. A file that already
+        # exists at the path has had its location accepted — by a commit, a
+        # vendor install, or an earlier allowed write — and editing it, or
+        # rewriting it in place, moves nothing. An unstattable path reads as
+        # absent so the location is still judged (fail closed).
+        if path_is_file(self._candidate_on_disk(file_path), unreadable_means=False):
+            return False
+
+        # The repository-relative path, as the config author sees it. Judged
+        # by the raw path because normalize_path strips to project markers
+        # (e.g. vendor/x/docs/y.md → docs/y.md), and a declared root or an
+        # anchored pattern can only ever match the unstripped spelling.
+        repo_relative = file_path.lstrip("/")
         # Also strip workspace/ prefix for absolute test paths
         for ws_prefix in ("workspace/", "workspace\\"):
-            if raw_lower.startswith(ws_prefix):
-                raw_lower = raw_lower[len(ws_prefix) :]
+            if repo_relative.lower().startswith(ws_prefix):
+                repo_relative = repo_relative[len(ws_prefix) :]
                 break
+        raw_lower = repo_relative.lower()
+
+        # A DECLARED `projects:` entry is consulted FIRST and wins outright:
+        # it may name any directory at any depth — under vendor/, under
+        # node_modules/, inside another declared project — and the owner's
+        # ruling (Plan 00365) is that the declaration is THE mechanism, so
+        # the built-in dependency inference must never pre-empt it. `projects:`
+        # is also the ONLY sub-project mechanism (Plan 00300 hard cutover
+        # removed the monorepo_subproject_patterns regex alias).
+        subproject_relative = self._declared_subproject_relative(repo_relative)
+        if subproject_relative is not None:
+            return self._is_invalid_location(subproject_relative, repo_relative=raw_lower)
+
+        # Third-party dependency directories act as implicit monorepos.
+        # Each package inside is a sub-project — apply normal rules within it.
         dep_relative = self._strip_dependency_prefix(raw_lower)
         if dep_relative is not None:
-            return self._is_invalid_location(dep_relative)
-
-        # Check sub-project paths: declared `projects:` config (Plan 00296)
-        # is the ONLY sub-project resolution mechanism (Plan 00300 hard
-        # cutover removed the monorepo_subproject_patterns regex alias).
-        subproject_relative = self._declared_subproject_relative(normalized)
-        if subproject_relative is not None:
-            # Path is within a declared or pattern-configured sub-project.
-            # Apply the same organization rules to the sub-project-relative path.
-            return self._is_invalid_location(subproject_relative)
+            return self._is_invalid_location(dep_relative, repo_relative=raw_lower)
 
         # For root-level paths, apply organization rules directly
         return self._is_invalid_location(normalized)
 
-    def _is_invalid_location(self, normalized: str) -> bool:
+    def _candidate_on_disk(self, file_path: str) -> Path:
+        """The on-disk path a Write/Edit names: absolute as given, else under the workspace."""
+        candidate = Path(file_path)
+        return candidate if candidate.is_absolute() else self._workspace_root / candidate
+
+    def _is_invalid_location(self, normalized: str, *, repo_relative: str | None = None) -> bool:
         """Check if a normalized path is in an invalid markdown location.
 
         Applies organization rules to a path that is already relative to
@@ -1054,10 +1085,16 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         When _extra_allowed_markdown_paths is configured, those regex patterns
         are ADDITIVE: a path the base check (built-in OR override) would block is
         rescued (allowed) if it matches at least one extra pattern. This lets a
-        project add locations without redeclaring the entire default set.
+        project add locations without redeclaring the entire default set. The
+        patterns are tried against the project-relative path AND, when the
+        path was re-rooted to a sub-project, against the repository-relative
+        one: a config author anchoring at ``^vendor/org/pkg/`` is naming the
+        path as they see it in the repository, and that spelling must match.
 
         Args:
             normalized: Project-relative normalized path
+            repo_relative: The same path relative to the repository root, when
+                ``normalized`` was re-rooted to a sub-project
 
         Returns:
             True if the location is INVALID (should be blocked)
@@ -1071,6 +1108,12 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         # Additive extra paths rescue a blocked location (layered on top of base)
         if base_invalid and self._matches_extra_allowed(normalized):
             return False  # Allowed via extra_allowed_markdown_paths
+        if (
+            base_invalid
+            and repo_relative is not None
+            and self._matches_extra_allowed(repo_relative)
+        ):
+            return False  # Allowed via a pattern spelled from the repository root
 
         return base_invalid
 
@@ -1322,14 +1365,24 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             )
         return (
             "## markdown_organization — markdown files must go in allowed locations\n\n"
-            "Writing a new `.md` file to an unrecognised location is blocked. "
-            "Markdown files must be placed in project-configured allowed paths.\n\n"
+            "Writing a NEW `.md` file to an unrecognised location is blocked. "
+            "Markdown files must be placed in project-configured allowed paths. "
+            "A `.md` file that ALREADY EXISTS at the path is never a location violation — "
+            "editing it, or rewriting it in place, moves nothing — so an `Edit` of a vendored "
+            "or otherwise inherited document is allowed wherever it sits.\n\n"
             "**Common allowed locations**: `CLAUDE/`, `docs/`, `RELEASES/`, `CLAUDE/Plan/`, "
             "root-level `README.md`, or any path matching the `allowed_markdown_paths` config.\n\n"
             "**Dependency directories**: `vendor/` (PHP) and `node_modules/` (JS) are treated "
             "as implicit monorepos — each package is a sub-project where normal markdown rules "
             "apply (e.g. `vendor/acme/lib/docs/guide.md` is allowed, "
-            "`vendor/acme/lib/random/notes.md` is blocked).\n\n"
+            "`vendor/acme/lib/random/notes.md` is blocked), at every nesting level "
+            "(`vendor/a/b/vendor/c/d/docs/x.md` is judged as `docs/x.md`).\n\n"
+            "**A declared project wins.** A `projects:` entry may name ANY directory as its "
+            "`root` — under `vendor/`, inside another declared project, at any depth — and is "
+            "consulted before the dependency inference, so a first-party clone that Composer "
+            "installed from source is declared exactly as it sits. An "
+            "`extra_allowed_markdown_paths` pattern may be spelled from the repository root "
+            "(`^vendor/org/pkg/`) or from the sub-project root; both are tried.\n\n"
             "**Plan file redirection**: when `track_plans_in_project` is enabled, Claude Code "
             "planning mode writes are automatically redirected to the project's `CLAUDE/Plan/` "
             "directory. Plan folders must follow the `NNNN-description/` naming convention.\n\n"

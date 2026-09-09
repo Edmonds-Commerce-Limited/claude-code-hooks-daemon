@@ -133,13 +133,22 @@ if [[ -z "${WT_VENV_PATH}" ]] || [[ ! -x "${WT_VENV_PATH}/bin/python" ]]; then
     echo -e "${RED}✗${NC} Failed to create venv via ensure_venv"
     exit 1
 fi
-WT_VENV_PIP="${WT_VENV_PATH}/bin/pip"
 echo -e "${GREEN}✓${NC} Venv created at ${WT_VENV_PATH}"
 
-# Step 5: Verify editable install points to correct source
+# Step 5: Verify editable install points to correct source.
 # uv sync already installed the package editable via pyproject; just verify.
-EDITABLE_LOCATION=$("${WT_VENV_PIP}" show claude-code-hooks-daemon 2>/dev/null | grep "Editable project location" | cut -d' ' -f4-)
-if [[ "${EDITABLE_LOCATION}" == "${WORKTREE_DIR}" ]]; then
+# Asked of the interpreter, not of pip: a uv-managed venv ships no pip, and a
+# missing binary inside a $(...) assignment under `set -e` aborts the whole
+# script silently, before the steps below ever run.
+EDITABLE_LOCATION=$("${WT_VENV_PATH}/bin/python" - <<'PY'
+import claude_code_hooks_daemon
+from pathlib import Path
+
+# <checkout>/src/claude_code_hooks_daemon/__init__.py -> <checkout>
+print(Path(claude_code_hooks_daemon.__file__).resolve().parents[2])
+PY
+)
+if [[ "${EDITABLE_LOCATION}" == "$(cd "${WORKTREE_DIR}" && pwd -P)" ]]; then
     echo -e "${GREEN}✓${NC} Editable install points to worktree source: ${EDITABLE_LOCATION}"
 else
     echo -e "${RED}✗${NC} Editable install points to WRONG location: ${EDITABLE_LOCATION}"
