@@ -21,21 +21,6 @@ jobs:
         # pyproject declares requires-python = ">=3.11".
         python-version: ["3.11", "3.12", "3.13"]
 
-    # Plan 00250: job-scoped, not step-scoped, because the tests SPAWN the CLI.
-    # `test_playbook_harness.py` runs `bin/hooks-daemon generate-playbook` as a
-    # subprocess, which resolves the venv itself and cannot see a variable set
-    # only on the daemon-start step — it failed with "no usable venv found"
-    # while the daemon it was talking to had started fine.
-    #
-    # resolve_venv.sh checks this BEFORE its untracked/venv-*/ fingerprint glob.
-    # `uv sync` builds .venv at the repo root, which that glob cannot see.
-    #
-    # Scoping it here was measured, not assumed: the venv-resolution suites
-    # (test_init_sh_venv_resolution, test_paths_resolve_*, python_discovery_bash
-    # — 83 tests) all pass with it set, as does a full local QA run.
-    env:
-      HOOKS_DAEMON_VENV_PATH: ${{ github.workspace }}/.venv
-
     steps:
       # fetch-depth: 0 (full history AND tags) is required, not a nicety.
       # tests/acceptance/conftest.py makes a local clone of this checkout and
@@ -88,14 +73,35 @@ jobs:
       # installed, not the bare version string, so uv pins the matrix entry
       # rather than downloading a managed interpreter that merely matches it.
       #
-      # Adding .venv/bin to GITHUB_PATH is what carries the locked toolchain
-      # into every later step: they invoke black/ruff/mypy/pytest/bandit/deptry
-      # directly (see the note below), so PATH is the only thing that decides
-      # which copy of each they get.
+      # The venv is built AT THE FINGERPRINT PATH the resolver globs for
+      # (untracked/venv-<slug>-py<MM>-<hash>/), not at .venv, and no
+      # HOOKS_DAEMON_VENV_PATH is exported. Plan 00250 exported that variable
+      # job-wide so the CLI the tests spawn could find .venv — but the test
+      # suite's autouse `isolate_daemon_path_overrides` fixture UNSETS it for
+      # every test, so every spawned `bin/hooks-daemon` found no venv and
+      # auto-bootstrapped one with the runner's system python3: the 3.11 job
+      # ran its CLI subprocesses under a py312 venv, paid a uv sync inside the
+      # test run to do it, and the two resolutions disagreed. A venv where the
+      # resolver looks needs no variable, so nothing a test strips can hide it.
+      #
+      # HOOKS_DAEMON_PYTHON is set for the ONE command that computes the
+      # target: the fingerprint is derived from the interpreter that runs
+      # paths.py, and without it the bootstrap path would discover the newest
+      # python on the runner rather than the matrix entry.
+      #
+      # Adding the venv's bin to GITHUB_PATH is what carries the locked
+      # toolchain into every later step: they invoke
+      # black/ruff/mypy/pytest/bandit/deptry directly (see the note below), so
+      # PATH is the only thing that decides which copy of each they get.
       - name: Install
         run: |
-          uv sync --frozen --all-extras --python "$(command -v python)"
-          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
+            bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
+          echo "venv: $VENV_DIR"
+          UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
+            uv sync --frozen --all-extras --python "$(command -v python)"
+          test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
+          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
 
       # The tools are invoked directly rather than through scripts/qa/run_all.sh.
       # That script resolves its interpreter via the daemon's fingerprint-keyed
@@ -148,8 +154,9 @@ jobs:
       # (init.sh:246-264) accepts on mere existence. It is gitignored
       # (.claude/.gitignore:16), so writing it leaves the tree clean.
       #
-      # HOOKS_DAEMON_VENV_PATH is set at JOB level above, not here — the tests
-      # spawn the CLI as a subprocess and need it too.
+      # No venv variable is needed here or anywhere: the Install step built
+      # the venv at the fingerprint path the CLI resolves on its own, which is
+      # also what the CLI the tests spawn (with a stripped environment) finds.
       #
       # Full evidence: CLAUDE/Plan/00250-*/RESEARCH-ci-install.md
       - name: Start daemon (for the acceptance gates)

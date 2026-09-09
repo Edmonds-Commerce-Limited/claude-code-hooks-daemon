@@ -445,9 +445,10 @@ def hermetic_git_environment(
 #: venv appear where a test has deliberately arranged for none to exist —
 #: ``test_legacy_path_used_only_as_final_fallback`` builds an empty project and
 #: asserts validation FAILS, which it cannot do if the environment supplies an
-#: interpreter. CI now exports ``HOOKS_DAEMON_VENV_PATH`` for the whole QA job
-#: (the acceptance gates need a daemon, and its venv is not at the fingerprint
-#: path), so this is no longer only a stray-developer-shell problem.
+#: interpreter. The unset is inherited by every subprocess a test spawns,
+#: which is why CI builds its venv AT the fingerprint path rather than
+#: exporting this variable: a spawned ``bin/hooks-daemon`` that cannot see the
+#: venv bootstraps one of its own, with whatever python3 the runner has.
 _DAEMON_PATH_OVERRIDE_VARS = (
     "CLAUDE_HOOKS_SOCKET_PATH",
     "CLAUDE_HOOKS_PID_PATH",

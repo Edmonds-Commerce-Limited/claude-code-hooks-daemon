@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import fcntl
+import functools
 import json
 import os
 import re
@@ -92,13 +93,24 @@ def resolve_venv_python(project_root: Path = PROJECT_ROOT) -> Path:
     )
 
 
-try:
-    VENV_PYTHON = resolve_venv_python()
-except VenvResolutionError as exc:
-    # TOOL_REGISTRY below bakes this interpreter into every command, so an
-    # unresolvable venv means no tool can run: report it as the message it is
-    # rather than as an import traceback.
-    raise SystemExit(f"llm_qa: {exc}") from exc
+@functools.cache
+def venv_python() -> Path:
+    """The interpreter the tools run under, resolved once, on first use.
+
+    Resolved at RUN time, not import time. Importing this module to inspect
+    ``TOOL_REGISTRY`` (the wiring tests do) must not depend on the shell it is
+    imported in: on CI the venv is ``.venv``, visible to the resolver only
+    through ``HOOKS_DAEMON_VENV_PATH``, and the test suite unsets that for
+    every test — so an import-time resolution raised ``SystemExit`` in a test
+    about registry wiring. A tool that RUNS still needs the interpreter, and
+    :func:`main` reports the same failure before running anything.
+    """
+    return resolve_venv_python(PROJECT_ROOT)
+
+
+# Stands in for the venv interpreter inside every ``_python(...)`` command
+# until the tool runs; :func:`resolved_command` swaps in :func:`venv_python`.
+VENV_PYTHON_PLACEHOLDER: Final[str] = "<venv-python>"
 
 # Exit codes. 2 is deliberately skipped: the sibling run_all.sh already uses it
 # for "cannot run" (venv resolver missing), and the two entry points must not
@@ -255,7 +267,7 @@ def _python(script: str, *args: str) -> list[str]:
     ``_python("check_x.py", "--json")`` rather than concatenating a list onto
     the result.
     """
-    return [str(VENV_PYTHON), str(SCRIPTS_DIR / script), *args]
+    return [VENV_PYTHON_PLACEHOLDER, str(SCRIPTS_DIR / script), *args]
 
 
 def _bash(script: str) -> list[str]:
@@ -466,10 +478,7 @@ def _summarize_tests(data: QaReport) -> str:
     errors = s.get("errors", 0)
     cov = data.get("coverage", {}).get("percent_covered", 0)
     error_part = f", {errors} errored" if errors else ""
-    line = (
-        f"{passed} passed, {failed} failed{error_part}, "
-        f"{skipped} skipped | coverage: {cov:.1f}%"
-    )
+    line = f"{passed} passed, {failed} failed{error_part}, {skipped} skipped | coverage: {cov:.1f}%"
 
     # Name the failures (Plan 00226). A count alone forces a full re-run to
     # find out what broke, and a re-run may not reproduce an order-dependent
@@ -738,11 +747,23 @@ def _is_passed(data: QaReport) -> bool:
     return bool(summary.get("passed", False))
 
 
+def resolved_command(config: ToolConfig) -> list[str]:
+    """``config.command`` with the venv interpreter placeholder filled in.
+
+    Raises:
+        VenvResolutionError: when the command needs the interpreter and none
+            can be resolved for this checkout.
+    """
+    return [
+        str(venv_python()) if part == VENV_PYTHON_PLACEHOLDER else part for part in config.command
+    ]
+
+
 def run_tool(name: str) -> int:
     """Run a QA tool, suppressing its stdout/stderr. Returns exit code."""
     config = TOOL_REGISTRY[name]
     result = subprocess.run(
-        config.command,
+        resolved_command(config),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         cwd=str(PROJECT_ROOT),
@@ -849,6 +870,15 @@ def main() -> int:
     # diagnostic during the one situation the diagnostic is for.
     if read_only:
         return _run_tools(tools, read_only=True)
+
+    # Every ``_python(...)`` tool needs the interpreter, so an unresolvable
+    # venv means the run cannot happen: report it as the message it is, before
+    # any tool starts, rather than as a traceback from the first one.
+    try:
+        venv_python()
+    except VenvResolutionError as exc:
+        print(f"llm_qa: {exc}", file=sys.stderr)
+        return EXIT_FAILURE
 
     lock_file = run_lock_path()
     if not try_acquire_run_lock(str(lock_file)):

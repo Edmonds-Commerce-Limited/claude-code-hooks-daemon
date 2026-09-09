@@ -22,6 +22,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import stat
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,18 @@ from typing import Any
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+# Captured at import, BEFORE the autouse `isolate_daemon_path_overrides`
+# fixture unsets them for every test. `TestThisCheckoutResolves` asks whether
+# the runner resolves an interpreter when invoked from the shell it was
+# invoked from, and on CI that shell supplies the venv (`.venv`, via
+# HOOKS_DAEMON_VENV_PATH) — the fingerprint glob cannot see it. Restoring the
+# ambient values is the honest question; asking with them stripped is not.
+_AMBIENT_VENV_ENV = {
+    key: value
+    for key, value in os.environ.items()
+    if key in ("HOOKS_DAEMON_VENV_PATH", "HOOKS_DAEMON_PYTHON")
+}
 
 
 def _load_llm_qa() -> Any:
@@ -51,7 +64,7 @@ def _fake_resolver(root: Path, *, answer: str, exit_code: int = 0, stderr: str =
     resolver = root / "scripts" / "lib" / "resolve_venv.sh"
     resolver.parent.mkdir(parents=True, exist_ok=True)
     resolver.write_text(
-        "#!/bin/bash\n" f'printf "%s" "{stderr}" >&2\n' f'echo "{answer}"\n' f"exit {exit_code}\n"
+        f'#!/bin/bash\nprintf "%s" "{stderr}" >&2\necho "{answer}"\nexit {exit_code}\n'
     )
     resolver.chmod(resolver.stat().st_mode | stat.S_IXUSR)
     return resolver
@@ -103,11 +116,75 @@ class TestTheLegacyPathIsTheDeploymentGapFallback:
 class TestThisCheckoutResolves:
     """The defect itself: a worktree has no `untracked/venv`, only `venv-*`."""
 
+    @pytest.fixture(autouse=True)
+    def _ambient_venv_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key, value in _AMBIENT_VENV_ENV.items():
+            monkeypatch.setenv(key, value)
+
     def test_the_resolved_interpreter_exists_and_is_executable(self) -> None:
         resolved = llm_qa.resolve_venv_python(PROJECT_ROOT)
         assert resolved.is_file(), f"resolved interpreter does not exist: {resolved}"
         assert os.access(resolved, os.X_OK), f"resolved interpreter is not executable: {resolved}"
 
-    def test_the_module_constant_agrees_with_the_resolver(self) -> None:
-        """`TOOL_REGISTRY` is built at import, so the constant is what runs."""
-        assert llm_qa.VENV_PYTHON == llm_qa.resolve_venv_python(PROJECT_ROOT)
+    def test_the_interpreter_the_tools_run_under_is_the_resolvers(self) -> None:
+        """`venv_python()` is what every `_python(...)` command runs under."""
+        assert llm_qa.venv_python() == llm_qa.resolve_venv_python(PROJECT_ROOT)
+        command = llm_qa.resolved_command(llm_qa.TOOL_REGISTRY["magic_values"])
+        assert command[0] == str(llm_qa.venv_python())
+        assert llm_qa.VENV_PYTHON_PLACEHOLDER not in command
+
+
+class TestImportingTheRunnerNeedsNoInterpreter:
+    """Importing `llm_qa` must not depend on the environment it is imported in.
+
+    The interpreter was resolved at import and baked into `TOOL_REGISTRY`, so
+    a test that imported the module to inspect the registry inherited the
+    shell's venv resolution. On CI the venv is `.venv`, visible only through
+    HOOKS_DAEMON_VENV_PATH, and the autouse fixture unsets that for every
+    test: the import raised `SystemExit` and a wiring test failed for a reason
+    that had nothing to do with wiring. Resolution now happens when a tool
+    RUNS, and the failure is reported then, by the same message.
+    """
+
+    def test_the_import_runs_no_resolver(self) -> None:
+        """A subprocess call during import would be the resolver; forbid all of them."""
+        snippet = (
+            "import subprocess\n"
+            "def boom(*args, **kwargs):\n"
+            "    raise AssertionError('resolver ran at import: %r' % (args,))\n"
+            "subprocess.run = boom\n"
+            "import llm_qa\n"
+            "print(llm_qa.TOOL_REGISTRY['magic_values'].command[0])\n"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", snippet],
+            cwd=PROJECT_ROOT / "scripts" / "qa",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stdout.strip() == llm_qa.VENV_PYTHON_PLACEHOLDER
+
+    @pytest.fixture
+    def unresolvable(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+        """A fresh module whose checkout has a resolver that fails."""
+        _fake_resolver(tmp_path, answer="", exit_code=5, stderr="no usable venv found")
+        module = _load_llm_qa()
+        monkeypatch.setattr(module, "PROJECT_ROOT", tmp_path)
+        return module
+
+    def test_resolution_fails_at_run_time_with_the_same_message(self, unresolvable: Any) -> None:
+        with pytest.raises(unresolvable.VenvResolutionError) as excinfo:
+            unresolvable.resolved_command(unresolvable.TOOL_REGISTRY["magic_values"])
+        assert "resolve_venv.sh" in str(excinfo.value)
+        assert "no usable venv found" in str(excinfo.value)
+
+    def test_main_reports_it_before_running_anything(
+        self, unresolvable: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["llm_qa.py", "magic_values"])
+        assert unresolvable.main() == unresolvable.EXIT_FAILURE
+        captured = capsys.readouterr()
+        assert "llm_qa: no QA interpreter" in captured.err
+        assert "QA:" not in captured.out, "no tool may have run"
