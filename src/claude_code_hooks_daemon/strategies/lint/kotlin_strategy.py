@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
+from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS, lint_output_dir
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Language-specific constants
@@ -15,8 +15,10 @@ _EXTENSIONS: tuple[str, ...] = (".kt",)
 #: it as a literal argument. Both defects were invisible on a box without
 #: `kotlinc`, where the absent tool produced the ALLOW the command could not.
 #: `-d` keeps the emitted classes out of the user's directory, as the Rust
-#: strategy does with `--out-dir`.
-_DEFAULT_LINT_COMMAND = "kotlinc -nowarn -d /tmp/claude-hooks-daemon-kotlin-lint {file}"
+#: strategy does with `--out-dir`; the destination comes from
+#: :func:`lint_output_dir` rather than a literal, so it is unguessable and
+#: private to this process.
+_DEFAULT_LINT_COMMAND_TEMPLATE = "kotlinc -nowarn -d {out_dir} {{file}}"
 _EXTENDED_LINT_COMMAND = "ktlint {file}"
 #: Acceptance-test fixture directory, below the sanctioned scratch root.
 _FIXTURE_DIR = "acceptance-test-lint-kotlin"
@@ -25,7 +27,7 @@ _FIXTURE_DIR = "acceptance-test-lint-kotlin"
 class KotlinLintStrategy:
     """Lint enforcement strategy for Kotlin files.
 
-    Default: kotlinc -script (compilation check)
+    Default: kotlinc (compilation check, class files discarded)
     Extended: ktlint (style and error detection)
     """
 
@@ -39,7 +41,7 @@ class KotlinLintStrategy:
 
     @property
     def default_lint_command(self) -> str:
-        return _DEFAULT_LINT_COMMAND
+        return _DEFAULT_LINT_COMMAND_TEMPLATE.format(out_dir=lint_output_dir())
 
     @property
     def extended_lint_command(self) -> str | None:

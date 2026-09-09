@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
+from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS, lint_output_dir
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Language-specific constants
@@ -16,12 +16,16 @@ _FIXTURE_DIR = "acceptance-test-lint-rust"
 #: passes" probe. Only a machine with the clippy component genuinely installed
 #: ever sees it, which is why a rustup-shim box (and so this project's CI until
 #: Plan 00250 gave it a daemon) reported the command working.
-_CRATE_FRAMING = (
-    "--edition 2021 --crate-type lib --emit=metadata "
-    "--out-dir /tmp/claude-hooks-daemon-rust-lint"
-)
-_DEFAULT_LINT_COMMAND = f"rustc {_CRATE_FRAMING} {{file}}"
-_EXTENDED_LINT_COMMAND = f"clippy-driver {_CRATE_FRAMING} {{file}}"
+#: `--out-dir` takes the shared per-process destination from
+#: :func:`lint_output_dir` rather than a literal path in the temp directory,
+#: which was predictable enough for another user on a shared host to
+#: pre-create as a symlink.
+_CRATE_FRAMING_TEMPLATE = "--edition 2021 --crate-type lib --emit=metadata --out-dir {out_dir}"
+
+
+def _crate_framing() -> str:
+    """The framing both commands share, with the output directory resolved."""
+    return _CRATE_FRAMING_TEMPLATE.format(out_dir=lint_output_dir())
 # rustup ships a `clippy-driver` SHIM on PATH even when the `clippy` component
 # is not installed. The shim resolves and runs (so it never raises
 # FileNotFoundError, the handler's usual "tool absent" signal) but exits
@@ -53,11 +57,11 @@ class RustLintStrategy:
 
     @property
     def default_lint_command(self) -> str:
-        return _DEFAULT_LINT_COMMAND
+        return f"rustc {_crate_framing()} {{file}}"
 
     @property
     def extended_lint_command(self) -> str | None:
-        return _EXTENDED_LINT_COMMAND
+        return f"clippy-driver {_crate_framing()} {{file}}"
 
     @property
     def skip_paths(self) -> tuple[str, ...]:

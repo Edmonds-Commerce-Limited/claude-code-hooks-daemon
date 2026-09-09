@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.strategies.lint.common import lint_output_dir
 from claude_code_hooks_daemon.strategies.lint.protocol import (
     ClassifiesToolUnavailable,
     LintStrategy,
@@ -41,8 +42,17 @@ class TestProperties:
         # performs the same syntax/type check and works on stable rustc.
         assert strategy.default_lint_command == (
             "rustc --edition 2021 --crate-type lib --emit=metadata "
-            "--out-dir /tmp/claude-hooks-daemon-rust-lint {file}"
+            f"--out-dir {lint_output_dir()} {{file}}"
         )
+
+    def test_both_commands_share_the_kotlin_strategys_output_dir(
+        self, strategy: RustLintStrategy
+    ) -> None:
+        """One helper owns the destination, so there cannot be a third copy."""
+        extended = strategy.extended_lint_command
+        assert extended is not None
+        assert lint_output_dir() in strategy.default_lint_command
+        assert lint_output_dir() in extended
 
     def test_default_lint_command_does_not_use_nightly_only_flag(
         self, strategy: RustLintStrategy
@@ -52,7 +62,7 @@ class TestProperties:
     def test_extended_lint_command(self, strategy: RustLintStrategy) -> None:
         assert strategy.extended_lint_command == (
             "clippy-driver --edition 2021 --crate-type lib --emit=metadata "
-            "--out-dir /tmp/claude-hooks-daemon-rust-lint {file}"
+            f"--out-dir {lint_output_dir()} {{file}}"
         )
 
     def test_skip_paths_contains_target(self, strategy: RustLintStrategy) -> None:
