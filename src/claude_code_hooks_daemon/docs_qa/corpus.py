@@ -729,9 +729,12 @@ def revalidate_corpus(corpus: DocCorpus, project_root: Path) -> DocCorpus:
         except OSError as exc:
             # Deleted or unreachable since the sweep. Dropping it is the
             # answer, not a failure to raise: the corpus is a cache of what
-            # is on disk, and this file is not. Logged rather than silent so
-            # an unexpected permission error is still traceable.
-            logger.debug("docs-qa corpus: dropping unstattable %s: %s", rel_path, exc)
+            # is on disk, and this file is not. At INFO rather than DEBUG,
+            # which is off at the default level: an unexpected EACCES would
+            # otherwise silently stop a document being checked with no trace
+            # anywhere. Affordable because a steady-state revalidation never
+            # reaches this branch at all.
+            logger.info("docs-qa corpus: dropping unstattable %s: %s", rel_path, exc)
             continue
         if record.mtime_ns == stat.st_mtime_ns and record.size == stat.st_size:
             documents[rel_path] = record
