@@ -1,6 +1,6 @@
 # Plan 00363: self-matching process watcher blocker
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-09
 **Owner**: joseph
 **Priority**: High
@@ -126,8 +126,7 @@ deny for `setsid`, advise otherwise), Rule C (unbounded liveness loop, advise).
   release commit `3cdc2e11`): the `self_matching_process_probe` handler with
   `R-PGREP-SELF-MATCH` (deny), `R-UNBOUNDED-LIVENESS-LOOP` and
   `R-PGREP-UNRESOLVED-PATTERN` (advisory).
-- Rule B (wrapper-pid wait, Phase 3) built on the
-  `agent-ab2da8fe312aa481b-9a2cd3ca` worktree branch: `R-WAIT-ON-WRAPPER-PID`
-  in the same handler, denying for `setsid` and advising for `nohup sh -c`,
-  `nohup bash -c`, `timeout` and `env`. Ships in the next release; the main
-  thread merges and closes the plan.
+- Rule B (wrapper-pid wait, Phase 3) merged at `8ae8ac61`:
+  `R-WAIT-ON-WRAPPER-PID` in the same handler, denying for `setsid` and
+  advising for `nohup sh -c`, `nohup bash -c`, `timeout` and `env`. Ships in
+  the next release with callout `01-wait-on-wrapper-pid.md`.

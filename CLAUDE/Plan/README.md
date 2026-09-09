@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00363: self-matching process watcher blocker](00363-self-matching-process-watcher-blocker/PLAN.md) - Not Started (a `pgrep -f`/`pkill -f`/`ps | grep` probe inside a wait loop matches the `bash -c` shell running the loop, so the wait never ends; a PreToolUse Bash handler denies the self-matching shape and names the safe rewrite)
-
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00329: post upgrade truth changes report bloat](00329-post-upgrade-truth-changes-report-bloat/PLAN.md) - Not Started (the upgrade flow's truth-changes reconciliation hands the agent up to 89KB / 74 entries with no bound and no supersession collapsing, so superseded truths are replayed and the step is skimmed rather than performed)
@@ -123,13 +121,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
+- [00363: self-matching process watcher blocker](Completed/00363-self-matching-process-watcher-blocker/PLAN.md) - Complete at `003f3036` and `8ae8ac61` + the archiving commit (a process probe whose literal pattern is in the calling shell's own argv, and a wait on `$!` after `setsid`, are denied; Rules A and C shipped in v3.63.0, Rule B holds a callout for the next release)
+
 - [00330: hooks daemon skill surface coherence](Completed/00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Complete at `bf5da1f5`, `59b11a0a` and `f458057e` + the archiving commit (`optimise` scores every registered handler by a per-handler relevance declaration, one `housekeeping` invocation runs the full pass in a ruled order, the skill routes eight subcommands and documents the rest, and a gate fails when the skill surface drifts from the registry, CLI or schema)
 
 - [00362: client upgrade report — fix all known defects](Completed/00362-client-upgrade-report-fix-all-known-defects/PLAN.md) - Complete + the archiving commit (the stability-release ledger: all eight client findings and every defect recorded in a live plan fixed or ruled out, v3.62.1's missing bootstrap assets repaired, full QA 26/26)
 
 - [00361: supervisor worker crash loop visibility and backoff](Completed/00361-supervisor-worker-crash-loop-visibility-and-backoff/PLAN.md) - Complete at `da5b7258` + the archiving commit (a worker death is logged with its exit code and source fingerprint, a crash loop is held to a backoff and logged once, and the fallback transitions are logged; verified live)
-
-- [00252: guards for premises no write-time hook sees](Completed/00252-guards-for-premises-no-write-time-hook-sees/PLAN.md) - Complete at `772ef675`, `6c9a6f6f` and `7b94bac3` + the archiving commit (the test suite runs in a hermetic git environment, and the secret-term guard scans staged content and `gh` bodies at commit time; client-mode verified)
 
 - [00360: pending release notes holding area](Completed/00360-pending-release-notes-holding-area/PLAN.md) - Complete (a plan closes by leaving its callout in `UNRELEASED/release-notes/`, the project-only gate denies a Complete flip without the holding-area criterion, the release folds the callouts in and moves them with an ABORT if any remain, and `release-slate-check` lists them without changing its verdict)
 
@@ -234,9 +232,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 363 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 322 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 323 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 18 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 17 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
