@@ -358,6 +358,8 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 <!-- handler: block-unread-overwrite -->
 
+<!-- handler: block-self-matching-process-probe -->
+
 <!-- handler: block-dangerous-permissions -->
 
 <!-- handler: github_auto_close_keywords -->
@@ -440,6 +442,9 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 | R-ROOT-RECURSION-CATASTROPHIC      | `grep -r`/`find`/`rg`/... rooted at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`             | Walks the entire filesystem and can pin every CPU core for hours                                                                                                                                  | Scope the search to the project (e.g. `rg -l "pattern" .`)                                                       |
 | R-CURL-PIPE-SHELL                  | \`curl                                                                                               | wget ...                                                                                                                                                                                          | bash                                                                                                             |
 | R-WRITE-CLOBBER                    | `Write` to an existing file you have not read this session                                           | You cannot know what you are destroying, so you could not report the loss even afterwards                                                                                                         | `Read` the file then retry, or use `Edit` for a targeted change                                                  |
+| R-PGREP-SELF-MATCH                 | a `pgrep -f`/`pkill -f`/\`ps                                                                         | grep\` whose literal pattern matches this command's own argv                                                                                                                                      | The probe always finds itself, so a wait never ends and a check always lies                                      |
+| R-UNBOUNDED-LIVENESS-LOOP          | a `while`/`until` wait on a process with a sleep-only body and no cap                                | run_in_background has no time limit, so a wrong probe waits for ever                                                                                                                              | Wrap it in `timeout 3600 bash -c '…'`, add a counter, or wait on a log marker                                    |
+| R-PGREP-UNRESOLVED-PATTERN         | a process probe whose pattern is built by expansion, inside a wait or a kill                         | If it expands to text in this command's argv, the probe counts the caller                                                                                                                         | Bracket the pattern where it is built, or wait on a log marker                                                   |
 | R-CHMOD-WORLD-WRITABLE             | `chmod 777`/`chmod a+w`/`chmod o+w`                                                                  | Allows anyone to read, write, and execute, bypassing all file permission security                                                                                                                 | Use least-privilege permissions instead (755/644/600)                                                            |
 | R-GH-AUTO-CLOSE-KEYWORD            | a GitHub closing keyword + issue reference in a git/gh message                                       | Auto-closes the referenced issue/PR the moment the commit reaches the default branch, and cannot be disabled repository-side                                                                      | Use a non-closing reference instead, e.g. Addresses #123                                                         |
 | R-GIT-MERGE-SQUASH                 | `git merge --squash`                                                                                 | Severs ancestry -- git branch -d refuses the branch forever                                                                                                                                       | Use git merge --no-ff instead                                                                                    |
@@ -509,33 +514,33 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
 
-<!-- handler: model-downgrade-recorder -->
-
-- model_downgrade_recorder — the automatic model downgrade is written down
-
-<!-- handler: markdown-table-formatter -->
-
-- markdown_table_formatter — markdown tables are auto-aligned
-
 <!-- handler: background-process-tracker -->
 
 - background_process_tracker — backgrounded processes are tracked
-
-<!-- handler: git-hooks-executable-fixer -->
-
-- git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
 <!-- handler: budget-exhaustion-detector -->
 
 - budget_exhaustion_detector — hidden agent budgets are surfaced
 
+<!-- handler: command-hints -->
+
+- command_hints — advisory reminders after specific commands
+
+<!-- handler: git-hooks-executable-fixer -->
+
+- git_hooks_executable_fixer — auto-fixes non-executable git hooks
+
 <!-- handler: goal-injection -->
 
 - goal_injection — plan-start goal signal for the ccy supervisor
 
-<!-- handler: command-hints -->
+<!-- handler: markdown-table-formatter -->
 
-- command_hints — advisory reminders after specific commands
+- markdown_table_formatter — markdown tables are auto-aligned
+
+<!-- handler: model-downgrade-recorder -->
+
+- model_downgrade_recorder — the automatic model downgrade is written down
 
 <!-- handler: recovery-cron-advisor -->
 
@@ -545,6 +550,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - ccy_supervisor_integrity — keep the ccy supervisor properly set up
 
+<!-- handler: docs-qa-sweep -->
+
+- docs_qa_sweep — documentation drift report at session start
+
 <!-- handler: git-upstream-checker -->
 
 - git_upstream_checker — additive fetch + pull/cleanup advice on session start
@@ -552,6 +561,14 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: hook-registration-checker -->
 
 - hook_registration_checker — hooks configuration policy
+
+<!-- handler: model-fallback-detector -->
+
+- model_fallback_detector — silent model substitution is surfaced
+
+<!-- handler: plan-qa-sweep -->
+
+- plan_qa_sweep — plan-tree drift report at session start
 
 <!-- handler: plan-workflow-asset-checker -->
 
@@ -565,29 +582,17 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths
 
-<!-- handler: docs-qa-sweep -->
-
-- docs_qa_sweep — documentation drift report at session start
-
-<!-- handler: plan-qa-sweep -->
-
-- plan_qa_sweep — plan-tree drift report at session start
-
-<!-- handler: model-fallback-detector -->
-
-- model_fallback_detector — silent model substitution is surfaced
-
 <!-- handler: tool-disable-advisor -->
 
 - tool_disable_advisor — declared never-want tools are checked at session start
 
-<!-- handler: standing-authorisations -->
-
-- standing_authorisations — a project can record a standing request
-
 <!-- handler: idle-housekeeping-advisory -->
 
 - idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
+
+<!-- handler: standing-authorisations -->
+
+- standing_authorisations — a project can record a standing request
 
 <!-- handler: auto-approve-reads -->
 
