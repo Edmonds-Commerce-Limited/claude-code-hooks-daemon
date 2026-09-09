@@ -70,7 +70,16 @@ elif [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
 else
     _dir="${TMPDIR:-/tmp}/echd-captures"
 fi
-mkdir -p "$_dir"
+# A capture directory that cannot be created must NEVER cost the caller their
+# output: this helper is what pipe_blocker names as the alternative to a
+# truncating pipe, so eating the stream would lose exactly what it promises to
+# keep. Degrade to a plain pass-through instead — every byte still reaches
+# stdout, and the warning says no capture file exists. mkdir's own error stays
+# on stderr above ours so the cause is visible too.
+if ! mkdir -p "$_dir"; then
+    echo "echd-capture: cannot create capture dir $_dir — passing output through unchanged" >&2
+    exec cat
+fi
 
 # Filesystem-safe label (alnum, dash, underscore only).
 _safe_label=""
@@ -84,9 +93,14 @@ fi
 _stamp="$(date +%s 2>/dev/null || echo 0)"
 _capture="$_dir/command-output-${_safe_label}${_stamp}-$$.txt"
 
-# Tee the FULL stream to the capture file while counting nothing here (we count
+# Write the FULL stream to the capture file, counting nothing here (we count
 # from the file afterwards, so the preview and totals are always consistent).
-cat > "$_capture"
+# A failed write is fatal and loud: continuing would print a footer naming a
+# capture that does not exist, which reads as "the command produced nothing".
+if ! cat > "$_capture"; then
+    echo "echd-capture: failed to write capture file $_capture — output not captured" >&2
+    exit 1
+fi
 
 _total_lines="$(wc -l < "$_capture" | tr -d '[:space:]')"
 _total_bytes="$(wc -c < "$_capture" | tr -d '[:space:]')"
