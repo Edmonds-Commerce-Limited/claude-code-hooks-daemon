@@ -1,6 +1,6 @@
 # Plan 00172: Close the HandlersConfig ↔ wired-events coverage gap
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-07-17
 **Owner**: joseph
 **Priority**: Medium

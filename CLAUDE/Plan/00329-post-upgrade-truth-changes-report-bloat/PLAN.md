@@ -1,6 +1,6 @@
 # Plan 00329: post upgrade truth changes report bloat
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-04
 **Owner**: joseph
 **Priority**: Medium

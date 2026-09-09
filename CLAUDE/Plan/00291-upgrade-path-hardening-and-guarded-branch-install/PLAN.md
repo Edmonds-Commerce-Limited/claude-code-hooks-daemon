@@ -1,6 +1,6 @@
 # Plan 00291: upgrade path hardening and guarded branch install
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-30
 **Owner**: joseph
 **Priority**: Medium
