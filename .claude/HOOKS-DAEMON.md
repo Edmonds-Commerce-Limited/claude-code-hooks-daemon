@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-09-09 (v3.63.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-09-09 (v3.62.1) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (57 handlers)
+### PreToolUse (58 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -25,6 +25,7 @@
 | 16 | curl_pipe_shell | TERMINAL | Block curl/wget piped to shell commands |
 | 16 | write_clobber_guard | BLOCKING | Deny ``Write`` to an existing file that was not read this session |
 | 17 | pipe_blocker | BLOCKING | Block expensive commands piped to tail/head to prevent information loss |
+| 17 | self_matching_process_probe | BLOCKING | Block a liveness probe whose pattern matches the shell running it |
 | 18 | dangerous_permissions | TERMINAL | Block chmod 777 and dangerous permission commands |
 | 18 | github_auto_close_keywords | BLOCKING | Deny git messages carrying GitHub auto-closing keyword references |
 | 19 | ancestry_preserving_merge | BLOCKING | Block (or, in warn mode, advise against) ancestry-severing merges |

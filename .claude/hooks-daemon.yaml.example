@@ -115,6 +115,13 @@ handlers:
       enabled: true
       priority: 16
 
+    # Blocks a pgrep -f / pkill -f / ps|grep probe whose literal pattern is in
+    # the calling shell's own argv, so the probe always finds itself and a
+    # waiter never returns. Advisory beside it: an uncapped while/until wait.
+    self_matching_process_probe:
+      enabled: true
+      priority: 17
+
     pipe_blocker:          # Blocks dangerous pipe patterns in bash commands
       enabled: true
       priority: 15

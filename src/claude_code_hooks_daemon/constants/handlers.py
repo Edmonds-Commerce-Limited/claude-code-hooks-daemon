@@ -304,6 +304,14 @@ class HandlerID:
         config_key="root_recursion_guard",
         display_name="root-recursion-guard",
     )
+    # A process probe that matches the shell running it (Plan 00363): the Bash
+    # tool runs every command through `bash -c "<command>"`, so a `pgrep -f`
+    # pattern is always in the probing shell's own argv.
+    SELF_MATCHING_PROCESS_PROBE = HandlerIDMeta(
+        class_name="SelfMatchingProcessProbeHandler",
+        config_key="self_matching_process_probe",
+        display_name="block-self-matching-process-probe",
+    )
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = HandlerIDMeta(
         class_name="QaSuppressionHandler",
