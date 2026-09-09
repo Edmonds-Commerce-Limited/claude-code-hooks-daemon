@@ -152,6 +152,17 @@ lives in so each phase can go to one worktree agent.
   its band; daemon start logs no collision warning.
 - [ ] ⬜ **Task 5.3**: `CLAUDE/Worktree.md` records the relay behaviour and the
   override until 5.1 ships, then the fixed behaviour.
+- [ ] ⬜ **Task 5.4**: `scripts/qa/audit_error_hiding.py` and
+  `scripts/qa/audit_capture_corruption.py` exclude any path CONTAINING
+  `untracked`, so from a worktree under `untracked/worktrees/` (a sanctioned
+  root) they scan nothing: error-hiding then reports every exclusion as
+  stale, capture-corruption reports no files. Match the exclusion on the
+  repo-relative path; the audit fails loudly when it collected zero files.
+  Found by the Phase 1 agent.
+- [ ] ⬜ **Task 5.5**: `scripts/qa/llm_qa.py` hardcodes
+  `untracked/venv/bin/python`, so a worktree needs a hand-made symlink to its
+  fingerprint-keyed venv. Resolve through `scripts/lib/resolve_venv.sh` (or
+  the same fingerprint logic) instead.
 
 ### Phase 6: closure
 
@@ -170,3 +181,4 @@ lives in so each phase can go to one worktree agent.
 ## Delivery & Milestones
 
 - Filed after the v3.63.0 release, from the four Step 10 review reports.
+- Phase 1 merged to main at `0560b5ff`.
