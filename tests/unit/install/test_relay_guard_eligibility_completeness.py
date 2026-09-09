@@ -71,7 +71,9 @@ class TestGuardPresenceMatchesMeta:
         source = (_HOOKS_DIR / hook_file).read_text()
         transport = TransportConfig(relay_enabled=True)
 
-        result = generate_forwarder_content(source, hook_file, transport, Path("/proj/untracked"), Path("/proj"))
+        result = generate_forwarder_content(
+            source, hook_file, transport, Path("/proj/untracked"), Path("/proj")
+        )
 
         has_guard = "relay hot path" in result
         assert has_guard == meta.relay_eligible, (

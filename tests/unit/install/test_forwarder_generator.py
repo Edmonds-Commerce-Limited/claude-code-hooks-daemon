@@ -95,9 +95,7 @@ def test_disabled_transport_returns_source_unchanged_even_without_anchor() -> No
     transport = TransportConfig()
     weird_source = "#!/bin/bash\necho hi\n"
 
-    result = generate_forwarder_content(
-        weird_source, "pre-tool-use", transport, _UNTRACKED, _ROOT
-    )
+    result = generate_forwarder_content(weird_source, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
     assert result == weird_source
 
@@ -125,9 +123,7 @@ def test_enabled_transport_inserts_guard_before_init_sh_source() -> None:
 def test_enabled_transport_is_idempotent_against_already_generated_content() -> None:
     """Running generation twice must not stack a second guard block."""
     transport = TransportConfig(relay_enabled=True)
-    once = generate_forwarder_content(
-        _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
-    )
+    once = generate_forwarder_content(_SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
     twice = generate_forwarder_content(once, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
@@ -163,9 +159,7 @@ def test_f1_disabled_config_strips_a_foreign_guard_entirely() -> None:
     contaminated = _foreign_guard_source()
     transport = TransportConfig()  # disabled — the client's real default
 
-    result = generate_forwarder_content(
-        contaminated, "pre-tool-use", transport, _UNTRACKED, _ROOT
-    )
+    result = generate_forwarder_content(contaminated, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
     assert "relay hot path" not in result
     assert "/workspace/untracked" not in result
@@ -307,9 +301,7 @@ def test_enabled_transport_without_anchor_returns_unchanged() -> None:
     transport = TransportConfig(relay_enabled=True)
     weird_source = "#!/bin/bash\necho hi\n"
 
-    result = generate_forwarder_content(
-        weird_source, "pre-tool-use", transport, _UNTRACKED, _ROOT
-    )
+    result = generate_forwarder_content(weird_source, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
     assert result == weird_source
 
@@ -472,9 +464,7 @@ def test_nc_enabled_appends_to_forward_stop_event_call() -> None:
 
 def test_nc_enabled_is_idempotent() -> None:
     transport = TransportConfig(nc_enabled=True)
-    once = generate_forwarder_content(
-        _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
-    )
+    once = generate_forwarder_content(_SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT)
     twice = generate_forwarder_content(once, "pre-tool-use", transport, _UNTRACKED, _ROOT)
     assert twice == once
     assert once.count('"pre-tool-use"') == 1
@@ -549,8 +539,12 @@ def test_nc_enabled_deep_path_forward_stop_event_bakes_override() -> None:
 def test_nc_enabled_deep_path_is_still_idempotent() -> None:
     deep_untracked_dir = Path("/" + "a" * 90 + "/untracked")
     transport = TransportConfig(nc_enabled=True)
-    once = generate_forwarder_content(_SAMPLE_SOURCE, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT)
-    twice = generate_forwarder_content(once, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT)
+    once = generate_forwarder_content(
+        _SAMPLE_SOURCE, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT
+    )
+    twice = generate_forwarder_content(
+        once, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT
+    )
     assert twice == once
     assert once.count('"pre-tool-use"') == 1
 
@@ -633,7 +627,9 @@ def test_previous_release_form_gains_the_events_dir_override_on_a_deep_path() ->
     legacy = _source_with_call('send_request_stdin "PreToolUse" "" "pre-tool-use"')
     transport = TransportConfig(nc_enabled=True)
 
-    result = generate_forwarder_content(legacy, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT)
+    result = generate_forwarder_content(
+        legacy, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT
+    )
 
     assert (
         _call_line(result)

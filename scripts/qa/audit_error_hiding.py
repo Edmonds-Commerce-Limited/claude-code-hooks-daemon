@@ -101,6 +101,7 @@ def _is_excluded(path: Path, root: Path, exclude_patterns: tuple[str, ...]) -> b
     relative = path.relative_to(root) if path.is_relative_to(root) else path
     return any(pattern in str(relative) for pattern in exclude_patterns)
 
+
 _SHELL_EXTENSIONS: tuple[str, ...] = (".sh", ".bash")
 
 # Matches a heredoc start line invoking python (python/python3, or a shell

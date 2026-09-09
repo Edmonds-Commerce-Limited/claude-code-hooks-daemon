@@ -33,6 +33,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.install.forwarder_generator import generate_forwarder_content
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -119,7 +120,7 @@ def _run(forwarder: Path, events_dir: Path, *, cwd: Path | None = None) -> str:
         capture_output=True,
         cwd=str(cwd) if cwd is not None else None,
         env=env,
-        timeout=30,
+        timeout=Timeout.REQUEST_DEFAULT,
         check=False,
     )
     assert completed.returncode == 0, completed.stderr.decode()
@@ -193,7 +194,7 @@ class TestAnInvocationByRelativePath:
             capture_output=True,
             cwd=str(root_a),
             env=env,
-            timeout=30,
+            timeout=Timeout.REQUEST_DEFAULT,
             check=False,
         )
         assert completed.returncode == 0, completed.stderr.decode()

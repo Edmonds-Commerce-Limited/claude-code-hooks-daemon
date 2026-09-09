@@ -80,9 +80,7 @@ def generate_fresh_hook_scripts() -> dict[str, str]:
     # — false on every machine but the one that generated them (Plan 00250
     # Task 2.4c), and false in every worktree of it.
     installed = get_installed_hook_scripts()
-    untracked_dir = recorded_untracked_dir(installed) or (
-        get_event_socket_dir(project_root).parent
-    )
+    untracked_dir = recorded_untracked_dir(installed) or (get_event_socket_dir(project_root).parent)
     # The guard bakes the checkout too (Plan 00364 Task 5.1), so it is read
     # back for the same reason and from the same artefact.
     guard_root = recorded_project_root(installed) or project_root

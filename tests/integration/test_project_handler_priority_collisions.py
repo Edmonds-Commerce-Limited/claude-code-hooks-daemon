@@ -48,7 +48,9 @@ def _project_context() -> None:
 
 
 def _router_with_library_handlers() -> EventRouter:
-    config = Config.model_validate(ConfigLoader.load(_repo_root() / ".claude" / "hooks-daemon.yaml"))
+    config = Config.model_validate(
+        ConfigLoader.load(_repo_root() / ".claude" / "hooks-daemon.yaml")
+    )
     registry = HandlerRegistry()
     registry.discover()
     router = EventRouter()
@@ -67,7 +69,9 @@ def _router_with_library_handlers() -> EventRouter:
 def _collisions() -> dict[str, tuple[int, list[str]]]:
     """``handler name -> (priority, the handlers already holding it)``."""
     router = _router_with_library_handlers()
-    discovered = ProjectHandlerLoader.discover_handlers(_repo_root() / ".claude" / "project-handlers")
+    discovered = ProjectHandlerLoader.discover_handlers(
+        _repo_root() / ".claude" / "project-handlers"
+    )
     collisions: dict[str, tuple[int, list[str]]] = {}
     for event_type, handler in discovered:
         chain = router.get_chain(event_type)

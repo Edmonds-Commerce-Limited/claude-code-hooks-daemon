@@ -51,10 +51,7 @@ def _fake_resolver(root: Path, *, answer: str, exit_code: int = 0, stderr: str =
     resolver = root / "scripts" / "lib" / "resolve_venv.sh"
     resolver.parent.mkdir(parents=True, exist_ok=True)
     resolver.write_text(
-        "#!/bin/bash\n"
-        f'printf "%s" "{stderr}" >&2\n'
-        f'echo "{answer}"\n'
-        f"exit {exit_code}\n"
+        "#!/bin/bash\n" f'printf "%s" "{stderr}" >&2\n' f'echo "{answer}"\n' f"exit {exit_code}\n"
     )
     resolver.chmod(resolver.stat().st_mode | stat.S_IXUSR)
     return resolver
