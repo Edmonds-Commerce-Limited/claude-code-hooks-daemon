@@ -121,12 +121,29 @@ def _mkdir_lock(
     stale_seconds = _env_seconds(_STALE_ENV, DEFAULT_STALE_SECONDS)
     deadline = time.monotonic() + timeout_seconds
     announced = False
+    retaken_immediately = False
     while True:
         try:
             lock_dir.mkdir()
             break
         except FileExistsError:
-            age = time.time() - lock_dir.stat().st_mtime
+            try:
+                age = time.time() - lock_dir.stat().st_mtime
+            except FileNotFoundError:
+                # The holder's rmtree landed between our mkdir and this stat --
+                # the contention window this lock exists for. The lock is free,
+                # so retake it. Letting the error out would surface a lock-layer
+                # fault as whatever the caller's FileNotFoundError handler says.
+                #
+                # Bounded like every other wait here: a lock NAME that can never
+                # be stat'ed (a dangling symlink) must end in the timeout rather
+                # than spin, so only the first retry is immediate.
+                if time.monotonic() >= deadline:
+                    raise VenvLockTimeout(_timeout_message(lock_dir, timeout_seconds)) from None
+                if retaken_immediately:
+                    time.sleep(_POLL_SECONDS)
+                retaken_immediately = True
+                continue
             if age >= stale_seconds:
                 if on_wait is not None:
                     on_wait(

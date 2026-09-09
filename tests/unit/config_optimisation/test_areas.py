@@ -9,9 +9,41 @@ rules (``auto_continue_stop`` carries ``planning``), which is pinned here.
 
 from __future__ import annotations
 
-from claude_code_hooks_daemon.config_optimisation.areas import AREA_ORDER, Area, area_for
+from claude_code_hooks_daemon.config_optimisation.areas import (
+    _AGENT_BEHAVIOUR_EVENTS,
+    _SESSION_ENV_EVENTS,
+    AREA_ORDER,
+    Area,
+    area_for,
+)
+from claude_code_hooks_daemon.constants.events import EventID, all_event_metas
 from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.handlers.registry import iter_builtin_handler_classes
+from claude_code_hooks_daemon.pseudo_events.registry import NITPICK
+
+
+class TestEventsAreNamedByTheEventCatalogue:
+    """The event rules key on the catalogue's own spellings, not copies of them.
+
+    A copy does not fail when an event key is renamed: the set simply stops
+    matching, and the handler lands under "Other guards". Nothing raises.
+    """
+
+    def test_every_named_event_exists_in_the_catalogue(self) -> None:
+        known = {meta.config_key for meta in all_event_metas()} | {NITPICK}
+        assert _AGENT_BEHAVIOUR_EVENTS <= known
+        assert _SESSION_ENV_EVENTS <= known
+
+    def test_the_named_events_are_the_ones_the_rules_intend(self) -> None:
+        assert _AGENT_BEHAVIOUR_EVENTS == {
+            EventID.STOP.config_key,
+            EventID.SUBAGENT_STOP.config_key,
+            NITPICK,
+        }
+        assert _SESSION_ENV_EVENTS == {
+            EventID.SESSION_START.config_key,
+            EventID.STATUS_LINE.config_key,
+        }
 
 
 class TestPrecedence:

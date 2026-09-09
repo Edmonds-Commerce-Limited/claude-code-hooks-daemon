@@ -1621,10 +1621,13 @@ def cmd_repair(args: argparse.Namespace) -> int:
     except VenvLockTimeout as exc:
         print(f"ERROR: {exc}")
         return 1
-    except FileNotFoundError:
-        print(
-            "ERROR: 'uv' not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
-        )
+    except FileNotFoundError as exc:
+        # NOT "install uv": only the spawn itself can mean a missing
+        # toolchain, and that is caught at the spawn (_repair_venv_locked).
+        # Reaching here means some OTHER path is missing -- the venv lock
+        # races by construction -- and naming uv would send the reader to fix
+        # something that is not broken.
+        print(f"ERROR: venv repair could not run: {exc}")
         return 1
     except subprocess.TimeoutExpired as exc:
         # The same handler covers both bounded subprocesses (uv sync and the
@@ -1637,14 +1640,23 @@ def cmd_repair(args: argparse.Namespace) -> int:
 
 def _repair_venv_locked(project_root: Path, venv_path: Path, env: dict[str, str]) -> int:
     """The mutating half of ``cmd_repair``; the caller holds the venv build lock."""
-    result = subprocess.run(  # nosec B603 B607 - uv is trusted tool, no user input
-        ["uv", "sync"],
-        cwd=str(project_root),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=_UV_SYNC_TIMEOUT_SECONDS,
-    )
+    try:
+        result = subprocess.run(  # nosec B603 B607 - uv is trusted tool, no user input
+            ["uv", "sync"],
+            cwd=str(project_root),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=_UV_SYNC_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError:
+        # Scoped to the SPAWN: this is the only place a FileNotFoundError
+        # means the uv binary is absent rather than some path the repair
+        # touched on the way here.
+        print(
+            "ERROR: 'uv' not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
+        )
+        return 1
     if result.returncode != 0:
         print(f"ERROR: uv sync failed (exit {result.returncode})")
         if result.stderr:
@@ -1655,12 +1667,18 @@ def _repair_venv_locked(project_root: Path, venv_path: Path, env: dict[str, str]
 
     # Verify the repair worked
     venv_python = venv_path / "bin" / "python"
-    verify = subprocess.run(  # nosec B603 - venv python with hardcoded import check
-        [str(venv_python), "-c", "import claude_code_hooks_daemon; print('OK')"],
-        capture_output=True,
-        text=True,
-        timeout=_VERIFY_IMPORT_TIMEOUT_SECONDS,
-    )
+    try:
+        verify = subprocess.run(  # nosec B603 - venv python with hardcoded import check
+            [str(venv_python), "-c", "import claude_code_hooks_daemon; print('OK')"],
+            capture_output=True,
+            text=True,
+            timeout=_VERIFY_IMPORT_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError:
+        # A sync that reported success but left no interpreter behind. The
+        # missing file is the VENV's python, never uv, so say which.
+        print(f"ERROR: venv repaired but its interpreter is missing: {venv_python}")
+        return 1
     if verify.returncode == 0:
         print("Verification: import claude_code_hooks_daemon OK")
         return 0
@@ -3004,7 +3022,9 @@ def cmd_release_slate_check(
     into CLEAN while still printing the report, so the decision is on record),
     and ``RELEASE_SLATE_UNDETERMINED`` when the check itself could not be made
     — which ``--accept`` deliberately does NOT rescue: acknowledging WIP is not
-    acknowledging blindness.
+    acknowledging blindness. That covers both shapes of blindness: collection
+    raising, and collection completing with a git read that failed
+    (``SlateReport.undetermined_reason``).
     """
     try:
         report = (collect or _collect_release_slate)()
@@ -3017,6 +3037,15 @@ def cmd_release_slate_check(
     else:
         print(report.render())
 
+    # Checked BEFORE --accept: a report that collected but could not read part
+    # of the repository is blindness, not in-flight work, so it takes the same
+    # exit as a collection that raised.
+    if report.undetermined_reason:
+        print(
+            f"release-slate-check: could not determine the slate: {report.undetermined_reason}",
+            file=sys.stderr,
+        )
+        return RELEASE_SLATE_UNDETERMINED
     if report.is_clean:
         return RELEASE_SLATE_CLEAN
     if getattr(args, "accept", False):
@@ -3044,6 +3073,7 @@ def _slate_as_json(report: "SlateReport") -> dict[str, Any]:
         "branches_ahead": [{"name": b.name, "ahead": b.ahead} for b in report.branches_ahead],
         "worktrees": [str(p) for p in report.worktrees],
         "pending_release_notes": list(report.pending_release_notes),
+        "undetermined_reason": report.undetermined_reason,
     }
 
 

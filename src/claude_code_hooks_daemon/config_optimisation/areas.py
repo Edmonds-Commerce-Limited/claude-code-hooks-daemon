@@ -19,7 +19,9 @@ from collections.abc import Iterable
 from enum import StrEnum
 from typing import Final
 
+from claude_code_hooks_daemon.constants.events import EventID
 from claude_code_hooks_daemon.constants.tags import HandlerTag
+from claude_code_hooks_daemon.pseudo_events.registry import NITPICK
 
 
 class Area(StrEnum):
@@ -43,8 +45,15 @@ AREA_ORDER: Final[tuple[Area, ...]] = (
     Area.OTHER,
 )
 
-_AGENT_BEHAVIOUR_EVENTS: Final[frozenset[str]] = frozenset({"stop", "subagent_stop", "nitpick"})
-_SESSION_ENV_EVENTS: Final[frozenset[str]] = frozenset({"session_start", "status_line"})
+#: Event rules, keyed on the catalogue's OWN spellings rather than copies of
+#: them: a renamed event key would leave a literal set matching nothing, and
+#: the handler would land under "Other guards" with nothing raised.
+_AGENT_BEHAVIOUR_EVENTS: Final[frozenset[str]] = frozenset(
+    {EventID.STOP.config_key, EventID.SUBAGENT_STOP.config_key, NITPICK}
+)
+_SESSION_ENV_EVENTS: Final[frozenset[str]] = frozenset(
+    {EventID.SESSION_START.config_key, EventID.STATUS_LINE.config_key}
+)
 
 _AGENT_BEHAVIOUR_TAGS: Final[frozenset[str]] = frozenset({HandlerTag.CONTEXT_INJECTION})
 _SAFETY_TAGS: Final[frozenset[str]] = frozenset({HandlerTag.SAFETY})

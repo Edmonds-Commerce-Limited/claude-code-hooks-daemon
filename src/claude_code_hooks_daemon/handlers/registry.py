@@ -8,7 +8,7 @@ import importlib
 import inspect
 import logging
 import pkgutil
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeGuard
@@ -203,6 +203,86 @@ def iter_builtin_handler_classes() -> Iterator[BuiltinHandlerRef]:
                         config_key=_get_config_key(attr.__name__),
                         handler_cls=attr,
                     )
+
+
+def config_skip_reason(
+    handler_config: Mapping[str, Any] | None, *, registry_disabled: bool
+) -> str | None:
+    """Why the pre-construction gates exclude a handler, or None if they do not.
+
+    The first two of :meth:`HandlerRegistry.register_all`'s four enablement
+    gates. They are decided BEFORE the handler is built, because a handler
+    that is off must never have its constructor run.
+
+    Args:
+        handler_config: The ``handlers.<event>.<key>`` block. Absent means
+            ENABLED — registration defaults ``enabled`` to True — and so does
+            ``None``, which is what a bare ``key:`` parses to in YAML.
+        registry_disabled: :meth:`HandlerRegistry.is_disabled` for this
+            handler class. Runtime state rather than config, which is why a
+            caller that has no registry passes False.
+
+    Returns:
+        A short reason naming the gate, or None when neither excludes it.
+    """
+    block = handler_config if isinstance(handler_config, Mapping) else {}
+    if not block.get(ConfigKey.ENABLED, True):
+        return "disabled by config"
+    if registry_disabled:
+        return "disabled in the registry"
+    return None
+
+
+def tag_skip_reason(event_config: Mapping[str, Any] | None, tags: Collection[str]) -> str | None:
+    """Why the tag gates exclude a handler carrying ``tags``, or None if they do not.
+
+    The other two gates. These need the INSTANCE's tags, so they are decided
+    after construction — which is why this is a second function rather than
+    one predicate taking everything.
+
+    ``enable_tags`` is judged TRUTHY, not list-shaped: a scalar
+    ``enable_tags: safety`` in YAML is a string, iterates as characters,
+    matches no handler and takes the whole event dark. That is what
+    registration does, so a reporting surface has to reproduce it rather than
+    read the same config more charitably and disagree with the daemon.
+
+    Args:
+        event_config: The ``handlers.<event>`` block carrying the tag filters.
+        tags: The handler instance's own tags.
+
+    Returns:
+        A short reason naming the gate, or None when neither excludes it.
+    """
+    block = event_config if isinstance(event_config, Mapping) else {}
+    enable_tags = block.get(ConfigKey.ENABLE_TAGS)
+    if enable_tags and not any(tag in tags for tag in enable_tags):
+        return f"no matching tags in enable_tags {enable_tags}"
+    disable_tags_raw: Any = block.get(ConfigKey.DISABLE_TAGS, [])
+    disable_tags: list[str] = disable_tags_raw if isinstance(disable_tags_raw, list) else []
+    if disable_tags and any(tag in tags for tag in disable_tags):
+        return f"has tag in disable_tags {disable_tags}"
+    return None
+
+
+def handler_is_enabled(
+    event_config: Mapping[str, Any] | None,
+    config_key: str,
+    tags: Collection[str],
+    *,
+    registry_disabled: bool = False,
+) -> bool:
+    """Whether ``register_all`` would register this handler for this config.
+
+    All four gates, in one call, for a caller that already has the handler's
+    tags — the config-optimisation checklist, which must report exactly what
+    the daemon runs. Registration itself applies the two halves separately
+    because it decides the first pair before constructing the handler.
+    """
+    block = event_config if isinstance(event_config, Mapping) else {}
+    return (
+        config_skip_reason(block.get(config_key), registry_disabled=registry_disabled) is None
+        and tag_skip_reason(block, tags) is None
+    )
 
 
 class HandlerRegistry:
@@ -411,11 +491,6 @@ class HandlerRegistry:
             # Get configuration for this event type
             event_config = (config or {}).get(dir_name) or {}
 
-            # Extract tag filters from event config
-            enable_tags = event_config.get(ConfigKey.ENABLE_TAGS)
-            disable_tags_raw: Any = event_config.get(ConfigKey.DISABLE_TAGS, [])
-            disable_tags: list[str] = disable_tags_raw if isinstance(disable_tags_raw, list) else []
-
             # Find all Python files in the directory
             for py_file in event_dir.glob("*.py"):
                 if py_file.name.startswith("_"):
@@ -436,15 +511,18 @@ class HandlerRegistry:
                     if is_discoverable_handler(attr):
                         # Check handler-specific config (use config key from HandlerID constant)
                         config_key = _get_config_key(attr.__name__)
-                        handler_config = event_config.get(config_key, {})
+                        # `or {}`: a bare `key:` in YAML parses to None, and the
+                        # options/priority reads below need a mapping either way.
+                        handler_config = event_config.get(config_key) or {}
 
-                        # Skip disabled handlers
-                        if not handler_config.get(ConfigKey.ENABLED, True):
-                            logger.debug("Handler %s is disabled", attr.__name__)
-                            continue
-
-                        if self.is_disabled(attr.__name__):
-                            logger.debug("Handler %s is disabled in registry", attr.__name__)
+                        # Gates 1 and 2, from the shared predicate the
+                        # config-optimisation checklist reports with, so the
+                        # report can never disagree with what runs here.
+                        skip = config_skip_reason(
+                            handler_config, registry_disabled=self.is_disabled(attr.__name__)
+                        )
+                        if skip is not None:
+                            logger.debug("Handler %s skipped - %s", attr.__name__, skip)
                             continue
 
                         try:
@@ -452,21 +530,11 @@ class HandlerRegistry:
                             # Handler subclasses override __init__ with no args
                             instance = attr()
 
-                            # Tag-based filtering
-                            if enable_tags and not any(tag in instance.tags for tag in enable_tags):
-                                logger.debug(
-                                    "Handler %s skipped - no matching tags in enable_tags %s",
-                                    attr.__name__,
-                                    enable_tags,
-                                )
-                                continue
-
-                            if disable_tags and any(tag in instance.tags for tag in disable_tags):
-                                logger.debug(
-                                    "Handler %s skipped - has tag in disable_tags %s",
-                                    attr.__name__,
-                                    disable_tags,
-                                )
+                            # Gates 3 and 4, same shared predicate: they need
+                            # the instance's tags, so they run after construction.
+                            tag_skip = tag_skip_reason(event_config, instance.tags)
+                            if tag_skip is not None:
+                                logger.debug("Handler %s skipped - %s", attr.__name__, tag_skip)
                                 continue
 
                             # Override priority from config, falling back to the

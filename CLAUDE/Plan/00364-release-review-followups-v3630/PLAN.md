@@ -51,24 +51,24 @@ lives in so each phase can go to one worktree agent.
 
 ### Phase 1: core / daemon / config_optimisation (review-core NOTEs 2-7)
 
-- [ ] ⬜ **Task 1.1**: `daemon/venv_lock.py` — catch `FileNotFoundError` around
+- [x] ✅ **Task 1.1**: `daemon/venv_lock.py` — catch `FileNotFoundError` around
   the stale-lock `stat()` (holder released between `mkdir` and `stat`) and
   retry; narrow `cmd_repair`'s `FileNotFoundError` handler so a lock-layer
   error is never printed as "'uv' not found".
-- [ ] ⬜ **Task 1.2**: `core/release_slate.py` — `_git_lines` signals failure
+- [x] ✅ **Task 1.2**: `core/release_slate.py` — `_git_lines` signals failure
   instead of returning `[]`; `collect_slate` carries it into a field that
   forces `RELEASE_SLATE_UNDETERMINED` (exit 1, not rescued by `--accept`).
-- [ ] ⬜ **Task 1.3**: `config_optimisation/checklist.py` — extract the
+- [x] ✅ **Task 1.3**: `config_optimisation/checklist.py` — extract the
   enablement predicate shared with `HandlerRegistry.register_all` (all four
   gates, including `is_disabled`; truthy `enable_tags` not list-only) and
   pin them together with a test.
-- [ ] ⬜ **Task 1.4**: `config_optimisation/checklist.py` — wrap handler
+- [x] ✅ **Task 1.4**: `config_optimisation/checklist.py` — wrap handler
   instantiation in `build_checklist`; a constructor failure becomes a
   visible `ChecklistItem`, not an aborted report.
-- [ ] ⬜ **Task 1.5**: `core/relevance.py` `_LANGUAGE_MARKERS` keyed on
+- [x] ✅ **Task 1.5**: `core/relevance.py` `_LANGUAGE_MARKERS` keyed on
   `HandlerTag` members; `config_optimisation/areas.py` event sets keyed on
   the event-key constants.
-- [ ] ⬜ **Task 1.6**: `core/acceptance_test.py` — check the
+- [x] ✅ **Task 1.6**: `core/acceptance_test.py` — check the
   `hook_input`/`dispatch_as_bash` pair BEFORE deriving `tool_payload`, so
   the error names what the author declared.
 

@@ -9,8 +9,8 @@ npm handlers a ``package.json``, the ccy handlers an armed supervisor. The
 optimal state of a relevant handler is enabled; an irrelevant one is
 reported as "not applicable here", never as a shortfall.
 
-This module is pure stdlib so the base ``Handler`` can import it without
-pulling in config or registry code.
+This module depends on stdlib and the constants catalogue only, so the base
+``Handler`` can import it without pulling in config or registry code.
 """
 
 from __future__ import annotations
@@ -20,18 +20,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.constants.tags import HandlerTag
+
 #: Root-level marker files that identify a language toolchain. A cheap,
 #: deterministic probe — no directory walk — so relevance can be decided by
-#: a CLI verb in milliseconds. The keys are the ``HandlerTag`` language
-#: spellings.
+#: a CLI verb in milliseconds. The keys ARE the ``HandlerTag`` language
+#: constants, not copies of their spellings: a handler asks
+#: ``uses_any_language(HandlerTag.GO)``, so a rename that left these as
+#: literals would make the dict match nothing and classify the handler
+#: irrelevant with nothing raised.
 _LANGUAGE_MARKERS: Final[dict[str, tuple[str, ...]]] = {
-    "python": ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"),
-    "javascript": ("package.json",),
-    "typescript": ("tsconfig.json",),
-    "php": ("composer.json",),
-    "go": ("go.mod",),
-    "rust": ("Cargo.toml",),
-    "java": ("pom.xml", "build.gradle", "build.gradle.kts"),
+    HandlerTag.PYTHON: ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"),
+    HandlerTag.JAVASCRIPT: ("package.json",),
+    HandlerTag.TYPESCRIPT: ("tsconfig.json",),
+    HandlerTag.PHP: ("composer.json",),
+    HandlerTag.GO: ("go.mod",),
+    HandlerTag.RUST: ("Cargo.toml",),
+    HandlerTag.JAVA: ("pom.xml", "build.gradle", "build.gradle.kts"),
 }
 
 
