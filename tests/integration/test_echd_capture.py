@@ -118,3 +118,86 @@ def test_short_output_shown_in_full(tmp_path: Path) -> None:
     result = _run_pipe(producer, "20", tmp_path)
     assert result.returncode == 0, result.stderr
     assert "only-line" in result.stdout
+
+
+def test_all_mode_prints_the_whole_stream(tmp_path: Path) -> None:
+    """``--all`` captures as usual but shows every line as the preview."""
+    producer = "printf 'L%s\\n' $(seq 1 40)"
+    result = _run_pipe(producer, "--all", tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "L1\n" in result.stdout
+    assert "L40\n" in result.stdout
+    # The footer says "all 40" rather than naming a truncated slice.
+    assert "showing all 40 lines" in result.stdout
+    capture = _capture_file_from_output(result.stdout)
+    assert capture.read_text().count("\n") == 40
+
+
+def test_label_is_embedded_in_the_capture_filename(tmp_path: Path) -> None:
+    """``--label NAME`` makes a capture identifiable among its siblings."""
+    result = _run_pipe("printf 'x\\n'", "--label pytest-run 5", tmp_path)
+    assert result.returncode == 0, result.stderr
+    capture = _capture_file_from_output(result.stdout)
+    assert capture.name.startswith("command-output-pytest-run-")
+
+
+def test_label_unsafe_characters_are_replaced(tmp_path: Path) -> None:
+    """A label carrying path separators or spaces cannot escape the dir."""
+    result = _run_pipe("printf 'x\\n'", "--label 'a b/../c' 5", tmp_path)
+    assert result.returncode == 0, result.stderr
+    capture = _capture_file_from_output(result.stdout)
+    assert capture.parent == tmp_path
+    # Separators, spaces and dots all collapse to underscores.
+    assert capture.name.startswith("command-output-a_b____c-")
+
+
+def test_unknown_argument_exits_two(tmp_path: Path) -> None:
+    """A mistyped flag is a usage error, not a silent default."""
+    result = _run_pipe("printf 'x\\n'", "--bogus", tmp_path)
+    assert result.returncode == 2, result.stdout
+    assert "unknown argument: --bogus" in result.stderr
+
+
+class TestCaptureDirectoryUnusable:
+    """The helper must never eat the stream it exists to preserve.
+
+    pipe_blocker tells every agent to use this helper INSTEAD of a truncating
+    pipe, on the grounds that truncation loses data. A capture directory that
+    cannot be created must therefore degrade to a plain pass-through, not
+    consume stdin and report success with an empty preview.
+    """
+
+    def test_stream_passes_through_when_dir_cannot_be_created(self, tmp_path: Path) -> None:
+        """Parent exists but refuses directory creation: every byte still shows."""
+        result = _run_pipe("printf 'line-a\\nline-b\\nline-c\\n'", "2", Path("/proc/nonexistent/x"))
+        assert "line-a" in result.stdout
+        assert "line-b" in result.stdout
+        assert "line-c" in result.stdout
+
+    def test_pass_through_warns_on_stderr(self, tmp_path: Path) -> None:
+        """The degradation is announced, so nobody thinks a capture exists."""
+        result = _run_pipe("printf 'line-a\\n'", "2", Path("/proc/nonexistent/x"))
+        assert "echd-capture" in result.stderr
+        assert "passing output through unchanged" in result.stderr
+        # No footer: there is no capture file to point at.
+        assert "full output:" not in result.stdout
+
+    def test_pass_through_when_parent_is_a_regular_file(self, tmp_path: Path) -> None:
+        """ENOTDIR is the portable form of the same failure."""
+        blocker = tmp_path / "not-a-dir"
+        blocker.write_text("regular file\n", encoding="utf-8")
+        result = _run_pipe("printf 'kept\\n'", "2", blocker / "captures")
+        assert "kept" in result.stdout
+        assert "passing output through unchanged" in result.stderr
+
+    def test_capture_write_failure_exits_non_zero(self, tmp_path: Path) -> None:
+        """Directory exists but holds no files: fail loudly rather than exit 0.
+
+        ``/proc`` is the root-proof trigger — ``mkdir -p`` succeeds because it
+        already exists, and creating a regular file inside it fails for every
+        user, so this pins the branch without relying on file permissions.
+        """
+        result = _run_pipe("printf 'x\\n'", "2", Path("/proc"))
+        assert result.returncode == 1, f"expected a loud failure, got {result.returncode}"
+        assert "echd-capture" in result.stderr
+        assert "full output:" not in result.stdout
