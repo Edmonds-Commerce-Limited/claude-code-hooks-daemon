@@ -1570,3 +1570,231 @@ class TestAllowIsFinalOptIn:
         chain.execute({"tool_name": "Read"})
 
         assert successor.handle_called == 1
+
+
+class TestAllowOnlyFieldsAreAccumulated:
+    """``guidance``/``updated_input``/``worktree_path`` travel like ``context``.
+
+    The decision stays most-restrictive-wins, but these three fields are
+    accumulated information rather than a decision, so a contentless early
+    ALLOW winning the decision must not swallow a later handler's advisory
+    remedy or input rewrite.
+    """
+
+    def test_a_bare_allow_does_not_swallow_a_later_allows_guidance(self) -> None:
+        chain = HandlerChain()
+        chain.add(MockHandler("bare", priority=10, result=HookResult(decision=Decision.ALLOW)))
+        chain.add(
+            MockHandler(
+                "advisor",
+                priority=20,
+                result=HookResult(
+                    decision=Decision.ALLOW,
+                    context=["short summary"],
+                    guidance="SUGGESTION: the remedy text",
+                    updated_input={"command": "rewritten"},
+                ),
+            )
+        )
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.decision == Decision.ALLOW
+        assert result.result.guidance == "SUGGESTION: the remedy text"
+        assert result.result.updated_input == {"command": "rewritten"}
+        assert result.result.context == ["short summary"]
+
+    def test_a_bare_allow_does_not_swallow_a_later_allows_worktree_path(self) -> None:
+        chain = HandlerChain()
+        chain.add(MockHandler("bare", priority=10, result=HookResult(decision=Decision.ALLOW)))
+        chain.add(
+            MockHandler(
+                "namer",
+                priority=20,
+                result=HookResult(decision=Decision.ALLOW, worktree_path="/repo/wt/feature"),
+            )
+        )
+
+        result = chain.execute({"hook_event_name": "WorktreeCreate"})
+
+        assert result.result.worktree_path == "/repo/wt/feature"
+
+    def test_the_first_handler_to_set_a_field_owns_it(self) -> None:
+        """Accumulation is first-non-None, matching the reason/footer rule."""
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "first",
+                priority=10,
+                result=HookResult(decision=Decision.ALLOW, guidance="first remedy"),
+            )
+        )
+        chain.add(
+            MockHandler(
+                "second",
+                priority=20,
+                result=HookResult(decision=Decision.ALLOW, guidance="second remedy"),
+            )
+        )
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.guidance == "first remedy"
+
+    def test_a_deny_wins_the_decision_and_keeps_its_own_reason(self) -> None:
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "advisor",
+                priority=10,
+                result=HookResult(decision=Decision.ALLOW, guidance="SUGGESTION: rewrite it"),
+            )
+        )
+        chain.add(
+            MockHandler(
+                "blocker",
+                priority=20,
+                terminal=True,
+                result=HookResult(decision=Decision.DENY, reason="BLOCKED: forbidden command"),
+            )
+        )
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason == "BLOCKED: forbidden command"
+        assert result.result.guidance == "SUGGESTION: rewrite it"
+
+    def test_a_denys_own_guidance_is_never_overwritten_by_an_allows(self) -> None:
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "advisor",
+                priority=10,
+                result=HookResult(decision=Decision.ALLOW, guidance="allow guidance"),
+            )
+        )
+        chain.add(
+            MockHandler(
+                "blocker",
+                priority=20,
+                terminal=True,
+                result=HookResult(
+                    decision=Decision.DENY, reason="denied", guidance="deny guidance"
+                ),
+            )
+        )
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.guidance == "deny guidance"
+
+    def test_a_later_denys_guidance_reaches_an_earlier_denys_response(self) -> None:
+        """The first deny owns the reason; a later deny's remedy is not lost."""
+        chain = HandlerChain()
+        chain.add(_deny("first-blocker", 10, "first reason", terminal=False))
+        chain.add(
+            MockHandler(
+                "second-blocker",
+                priority=20,
+                terminal=False,
+                result=HookResult(
+                    decision=Decision.DENY, reason="second reason", guidance="second remedy"
+                ),
+            )
+        )
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.reason == "first reason"
+        assert result.result.guidance == "second remedy"
+
+    def test_an_allows_rule_is_not_attributed_to_a_denys_response(self) -> None:
+        """``rule`` sub-classifies ONE decision, so it never crosses to another."""
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "advisor",
+                priority=10,
+                result=HookResult(decision=Decision.ALLOW, rule="R-ADVISORY"),
+            )
+        )
+        chain.add(
+            MockHandler(
+                "blocker",
+                priority=20,
+                terminal=True,
+                result=HookResult(decision=Decision.DENY, reason="denied"),
+            )
+        )
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.rule is None
+
+    def test_a_rule_carries_between_results_that_share_a_verdict(self) -> None:
+        chain = HandlerChain()
+        chain.add(MockHandler("bare", priority=10, result=HookResult(decision=Decision.ALLOW)))
+        chain.add(
+            MockHandler(
+                "advisor",
+                priority=20,
+                result=HookResult(decision=Decision.ALLOW, rule="R-ADVISORY"),
+            )
+        )
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.rule == "R-ADVISORY"
+
+    def test_a_project_handlers_input_rewrite_survives_an_earlier_bare_allow(self) -> None:
+        """``updated_input`` is the PreToolUse rewrite channel — losing it is worse."""
+        chain = HandlerChain()
+        chain.add(MockHandler("bare", priority=10, result=HookResult(decision=Decision.ALLOW)))
+        chain.add(
+            MockHandler(
+                "rewriter",
+                priority=90,
+                result=HookResult(
+                    decision=Decision.ALLOW, updated_input={"command": "safe --version"}
+                ),
+            )
+        )
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.updated_input == {"command": "safe --version"}
+
+    def test_collect_all_mode_accumulates_the_same_fields(self) -> None:
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "advisor",
+                priority=10,
+                result=HookResult(
+                    decision=Decision.ALLOW, context=["hint"], guidance="advisor remedy"
+                ),
+            )
+        )
+        chain.add(_deny("blocker", 20, "denied"))
+
+        result = chain.execute({"tool_name": "Bash"}, collect_all=True)
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.guidance == "advisor remedy"
+
+    def test_a_handler_that_never_matched_contributes_nothing(self) -> None:
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "silent",
+                priority=10,
+                should_match=False,
+                result=HookResult(decision=Decision.ALLOW, guidance="never shown"),
+            )
+        )
+        chain.add(MockHandler("bare", priority=20, result=HookResult(decision=Decision.ALLOW)))
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.guidance is None

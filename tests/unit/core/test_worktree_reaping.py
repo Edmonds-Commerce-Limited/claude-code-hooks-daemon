@@ -19,6 +19,8 @@ they get surfaced for a human instead of reaped.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from claude_code_hooks_daemon.core.worktree_reaping import (
@@ -38,6 +40,8 @@ def _state(
     """A clean, fully-merged worktree — the only shape that is reapable."""
     return WorktreeState(
         name=name,
+        path=Path(f"/repo/.claude/worktrees/{name}"),
+        branch=name,
         uncommitted_paths=uncommitted_paths,
         commits_ahead_of_base=commits_ahead_of_base,
         unlanded_patches=unlanded_patches,

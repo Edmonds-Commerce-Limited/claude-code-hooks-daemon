@@ -5575,12 +5575,14 @@ def cmd_worktree_reap(args: argparse.Namespace, *, run_fn: "RunGit | None" = Non
 
     refused = 0
     for state in states:
-        path = repo_root / ".claude" / "worktrees" / state.name
         if not is_reapable(state):
             refused += 1
             print(f"KEEP    {reap_refusal_reason(state)}")
             continue
-        outcome = reap_worktree(repo_root, state, path, dry_run=not reap, **collect_kwargs)
+        # The state carries the path git reported. Rebuilding it here picked
+        # `.claude/worktrees/` unconditionally, which named a path that does
+        # not exist for every worktree under the other sanctioned root.
+        outcome = reap_worktree(repo_root, state, dry_run=not reap, **collect_kwargs)
         print(f"{'REAPED ' if outcome.removed else 'DRY-RUN'} {outcome.detail}")
 
     unmerged = 0

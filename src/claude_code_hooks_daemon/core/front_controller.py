@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.core.chain import is_restrictive
+from claude_code_hooks_daemon.core.chain import carry_accumulated_fields, is_restrictive
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
@@ -97,6 +97,9 @@ class FrontController:
         accumulated_context: list[str] = []
         handlers_matched: list[str] = []
         final_result: HookResult | None = None
+        # Every matched handler's result, in chain order, so the ALLOW-only
+        # information fields can be merged onto the winner afterwards.
+        matched_results: list[HookResult] = []
 
         try:
             for handler in self.handlers:
@@ -110,6 +113,7 @@ class FrontController:
                     # Track handler
                     result.add_handler(handler.name)
                     accumulated_context.extend(result.context)
+                    matched_results.append(result)
 
                     restrictive = is_restrictive(result.decision)
                     # First restrictive result owns the response and the footer;
@@ -130,6 +134,11 @@ class FrontController:
                 return HookResult.allow()
 
             final_result.context = list(accumulated_context)
+            # Guidance, input rewrites and worktree paths accumulate exactly
+            # like context: the decision is most-restrictive-wins, but a
+            # contentless early ALLOW must not swallow a later handler's
+            # remedy text.
+            carry_accumulated_fields(final_result, matched_results)
             for h in handlers_matched:
                 final_result.add_handler(h)
             self._inject_config_key_footer(final_result, final_handler)

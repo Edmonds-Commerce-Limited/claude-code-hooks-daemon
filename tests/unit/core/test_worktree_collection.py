@@ -32,6 +32,27 @@ HEAD 789abc
 branch refs/heads/agent-bbb-222
 """
 
+#: A directory name and its branch name are independent: `git worktree add
+#: <dir> -b <branch>` names them separately, and nothing keeps them in step.
+_RENAMED_LISTING = """worktree /repo
+HEAD abc123
+branch refs/heads/main
+
+worktree /repo/.claude/worktrees/agent-aaa-111
+HEAD def456
+branch refs/heads/feature/something-else
+"""
+
+#: `git worktree add --detach` produces a record with no branch line at all.
+_DETACHED_LISTING = """worktree /repo
+HEAD abc123
+branch refs/heads/main
+
+worktree /repo/.claude/worktrees/agent-aaa-111
+HEAD def456
+detached
+"""
+
 
 def _ok(stdout: str) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess([], 0, stdout, "")
@@ -75,6 +96,42 @@ class TestWhichWorktreesAreCollected:
     def test_an_unlistable_repo_yields_nothing_rather_than_guessing(self) -> None:
         git = _FakeGit(listing=_fail("not a git repository"))
         assert collect_worktree_states(Path("/repo"), "main", run_fn=git) == ()
+
+
+class TestWhatTheListingAlreadySaysIsKept:
+    """Anything rebuilt from the name afterwards is a guess git need not make."""
+
+    def test_each_state_carries_the_path_git_reported(self) -> None:
+        states = collect_worktree_states(Path("/repo"), "main", run_fn=_FakeGit())
+        assert [state.path for state in states] == [
+            Path("/repo/.claude/worktrees/agent-aaa-111"),
+            Path("/repo/untracked/worktrees/agent-bbb-222"),
+        ]
+
+    def test_the_untracked_root_is_not_rewritten_to_the_dot_claude_one(self) -> None:
+        """Both roots are sanctioned, so neither may be assumed."""
+        states = collect_worktree_states(Path("/repo"), "main", run_fn=_FakeGit())
+        assert str(states[1].path) == "/repo/untracked/worktrees/agent-bbb-222"
+
+    def test_each_state_carries_the_branch_git_reported(self) -> None:
+        states = collect_worktree_states(Path("/repo"), "main", run_fn=_FakeGit())
+        assert [state.branch for state in states] == ["agent-aaa-111", "agent-bbb-222"]
+
+    def test_a_branch_named_differently_from_its_directory_is_read_as_it_is(self) -> None:
+        git = _FakeGit(listing=_ok(_RENAMED_LISTING))
+        state = collect_worktree_states(Path("/repo"), "main", run_fn=git)[0]
+        assert state.name == "agent-aaa-111"
+        assert state.branch == "feature/something-else"
+
+    def test_a_detached_worktree_has_no_branch_rather_than_a_guessed_one(self) -> None:
+        git = _FakeGit(listing=_ok(_DETACHED_LISTING))
+        state = collect_worktree_states(Path("/repo"), "main", run_fn=git)[0]
+        assert state.branch is None
+
+    def test_the_main_checkouts_branch_never_attaches_to_an_agent_worktree(self) -> None:
+        """`refs/heads/main` sits in a record this collector skips entirely."""
+        states = collect_worktree_states(Path("/repo"), "main", run_fn=_FakeGit())
+        assert all(state.branch != "main" for state in states)
 
 
 class TestTheCleanReading:
@@ -164,6 +221,12 @@ class TestAgainstARealGitRepository:
     def test_it_finds_the_worktree_and_nothing_else(self, tmp_path: Path) -> None:
         states = collect_worktree_states(self._repo_with_one_worktree(tmp_path), "main")
         assert [state.name for state in states] == ["agent-probe-1"]
+
+    def test_real_git_output_supplies_the_path_and_the_branch(self, tmp_path: Path) -> None:
+        repo = self._repo_with_one_worktree(tmp_path)
+        state = collect_worktree_states(repo, "main")[0]
+        assert state.path == repo / ".claude/worktrees/agent-probe-1"
+        assert state.branch == "agent-probe-1"
 
     def test_a_worktree_at_the_base_is_reapable(self, tmp_path: Path) -> None:
         """Real git output, not a fixture string, feeding the real predicate."""

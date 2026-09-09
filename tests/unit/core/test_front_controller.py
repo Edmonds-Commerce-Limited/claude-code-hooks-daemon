@@ -405,6 +405,112 @@ class TestNonTerminalHandlerDispatch:
         assert "wrong_handler" not in result.reason
 
 
+# Allow-only Field Accumulation Tests
+
+
+class TestAllowOnlyFieldAccumulation:
+    """``guidance``/``updated_input``/``worktree_path`` travel like ``context``.
+
+    A contentless early ALLOW owns the decision under most-restrictive-wins,
+    but it must not swallow a later handler's remedy text or input rewrite.
+    """
+
+    def _handler(self, name, priority, result, terminal=False):
+        handler = MagicMock(spec=Handler)
+        handler.name = name
+        handler.priority = priority
+        handler.terminal = terminal
+        handler.matches.return_value = True
+        handler.handle.return_value = result
+        handler.config_key = name
+        return handler
+
+    def test_bare_allow_does_not_swallow_later_guidance(self, front_controller):
+        """A later ALLOW's guidance and updated_input reach the response."""
+        front_controller.register(self._handler("bare", 10, HookResult(decision=Decision.ALLOW)))
+        front_controller.register(
+            self._handler(
+                "advisor",
+                20,
+                HookResult(
+                    decision=Decision.ALLOW,
+                    guidance="SUGGESTION: the remedy text",
+                    updated_input={"command": "rewritten"},
+                ),
+            )
+        )
+
+        result = front_controller.dispatch({"tool_name": "Bash"})
+
+        assert result.decision == Decision.ALLOW
+        assert result.guidance == "SUGGESTION: the remedy text"
+        assert result.updated_input == {"command": "rewritten"}
+
+    def test_bare_allow_does_not_swallow_later_worktree_path(self, front_controller):
+        front_controller.register(self._handler("bare", 10, HookResult(decision=Decision.ALLOW)))
+        front_controller.register(
+            self._handler(
+                "namer", 20, HookResult(decision=Decision.ALLOW, worktree_path="/repo/wt/x")
+            )
+        )
+
+        result = front_controller.dispatch({"hook_event_name": "WorktreeCreate"})
+
+        assert result.worktree_path == "/repo/wt/x"
+
+    def test_deny_wins_the_decision_and_keeps_its_own_reason(self, front_controller):
+        front_controller.register(
+            self._handler(
+                "advisor", 10, HookResult(decision=Decision.ALLOW, guidance="allow guidance")
+            )
+        )
+        front_controller.register(
+            self._handler(
+                "blocker",
+                20,
+                HookResult(decision=Decision.DENY, reason="BLOCKED: forbidden"),
+                terminal=True,
+            )
+        )
+
+        result = front_controller.dispatch({"tool_name": "Bash"})
+
+        assert result.decision == Decision.DENY
+        assert result.reason.startswith("BLOCKED: forbidden")
+        assert result.guidance == "allow guidance"
+
+    def test_a_denys_own_guidance_is_never_overwritten(self, front_controller):
+        front_controller.register(
+            self._handler(
+                "advisor", 10, HookResult(decision=Decision.ALLOW, guidance="allow guidance")
+            )
+        )
+        front_controller.register(
+            self._handler(
+                "blocker",
+                20,
+                HookResult(decision=Decision.DENY, reason="denied", guidance="deny guidance"),
+                terminal=True,
+            )
+        )
+
+        result = front_controller.dispatch({"tool_name": "Bash"})
+
+        assert result.guidance == "deny guidance"
+
+    def test_the_first_handler_to_set_a_field_owns_it(self, front_controller):
+        front_controller.register(
+            self._handler("first", 10, HookResult(decision=Decision.ALLOW, guidance="first"))
+        )
+        front_controller.register(
+            self._handler("second", 20, HookResult(decision=Decision.ALLOW, guidance="second"))
+        )
+
+        result = front_controller.dispatch({"tool_name": "Bash"})
+
+        assert result.guidance == "first"
+
+
 # Context Accumulation Tests
 
 
