@@ -137,3 +137,51 @@ class TestCmdCheckTruthChangesOffload:
         payload = json.loads(capsys.readouterr().out)
         assert Path(payload["report_path"]).is_file()
         assert payload["chunks"][0]["key"] == "unassigned"
+
+
+class TestReportOffloadHonoursGlobalProjectRoot:
+    """The wrapper passes --project-root BEFORE the subcommand; it must survive."""
+
+    def _namespace_for(self, argv: list[str]) -> argparse.Namespace:
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.daemon import cli
+
+        seen: list[argparse.Namespace] = []
+
+        def capture(args: argparse.Namespace) -> int:
+            seen.append(args)
+            return 0
+
+        with (
+            patch("sys.argv", ["claude-hooks-daemon", *argv]),
+            patch.object(cli, "cmd_check_truth_changes", capture),
+            patch.object(cli, "cmd_check_config_migrations", capture),
+        ):
+            cli.main()
+        assert len(seen) == 1
+        return seen[0]
+
+    def test_global_project_root_is_not_clobbered_by_the_subcommand(
+        self, tmp_path: Path
+    ) -> None:
+        args = self._namespace_for(
+            ["--project-root", str(tmp_path), "check-truth-changes", "--from", "1", "--to", "2"]
+        )
+        assert args.project_root == tmp_path
+
+    def test_subcommand_project_root_wins_when_given(self, tmp_path: Path) -> None:
+        args = self._namespace_for(
+            [
+                "--project-root",
+                str(tmp_path / "global"),
+                "check-config-migrations",
+                "--from",
+                "1",
+                "--to",
+                "2",
+                "--project-root",
+                str(tmp_path / "local"),
+            ]
+        )
+        assert args.project_root == tmp_path / "local"

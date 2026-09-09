@@ -3136,13 +3136,17 @@ def _add_report_offload_arguments(parser: argparse.ArgumentParser, *, default_su
         default=False,
         help="Print the whole report inline instead of a file plus bounded summary",
     )
+    # SUPPRESS, not None: the bin/hooks-daemon wrapper passes the GLOBAL
+    # --project-root before the subcommand, and a subparser default would
+    # overwrite that value in the namespace with None.
     parser.add_argument(
         "--project-root",
         dest="project_root",
         type=Path,
         metavar="PATH",
-        default=None,
-        help="Project root whose untracked/ receives the report (default: auto-detect)",
+        default=argparse.SUPPRESS,
+        help="Project root whose untracked/ receives the report (default: the global "
+        "--project-root, else auto-detect)",
     )
 
 
@@ -3159,12 +3163,11 @@ def _resolve_report_dir(args: argparse.Namespace, subdir: Path) -> Path | None:
     explicit = getattr(args, "report_dir", None)
     if explicit:
         return Path(explicit).resolve()
-    try:
-        project_path = get_project_path(getattr(args, "project_root", None))
-    except SystemExit:
-        # get_project_path has already printed why. No project root means no
-        # untracked/ to write into; the report is still worth printing, so
-        # degrade to the inline form rather than failing the command.
+    project_path = _find_project_tree_root(getattr(args, "project_root", None))
+    if project_path is None:
+        # No project root means no untracked/ to write into; the report is
+        # still worth printing, so degrade to the inline form rather than
+        # failing the command.
         print(
             "WARNING: no project root found for the report file; printing the full "
             "report inline instead (pass --project-root or --report-dir).",
@@ -3172,6 +3175,21 @@ def _resolve_report_dir(args: argparse.Namespace, subdir: Path) -> Path | None:
         )
         return None
     return (project_path / subdir).resolve()
+
+
+def _find_project_tree_root(override: Path | None) -> Path | None:
+    """The nearest directory holding ``.claude/``, or None when there is none.
+
+    A report directory needs a TREE, not a validated install, so this does not
+    go through :func:`get_project_path`, which terminates the process when the
+    install fails validation.
+    """
+    if override is not None:
+        return Path(override).resolve()
+    for candidate in (Path.cwd(), *Path.cwd().parents):
+        if (candidate / ".claude").is_dir():
+            return candidate
+    return None
 
 
 def _warn_report_offload_failed(command: str, error: OSError) -> None:

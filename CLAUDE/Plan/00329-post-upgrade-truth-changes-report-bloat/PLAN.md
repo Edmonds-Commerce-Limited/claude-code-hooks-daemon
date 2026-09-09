@@ -75,13 +75,20 @@ upgrade rather than assuming this plan's first measurement found all of it.
 
 ### Phase 0: Measure the whole post-upgrade envelope
 
-- [ ] ⬜ **Task 0.1**: Run a canary upgrade across a wide version span and
+- [x] ✅ **Task 0.1** (cc33c4ce — v3.12.0 → v3.63.0 on the dummy-client
+  fixture; per-source byte table in `JOURNAL/00329-Journal-26-09-09.md`:
+  143 KB of `upgrade.sh` stdout, 90 KB truth-changes, 51 KB
+  config-migrations, and the metadata block last): Run a canary upgrade across a wide version span and
   measure EVERY artefact the project agent receives, not just
   `check-truth-changes`: `check-config-migrations`, the upgrade script's
   stdout, `post-upgrade-tasks/`, the `optimise` step and the regenerated
   `CLAUDE.md`. Record a per-source byte table. The client install under
   `untracked/repos/` is a starting point for the canary.
-- [ ] ⬜ **Task 0.2**: Establish what Claude Code actually does with an
+- [x] ✅ **Task 0.2** (cc33c4ce — TRUNCATION: an exit-1 result is delivered
+  head-and-tail past ~10,000 characters with the middle dropped and no file;
+  an exit-0 result is persisted with a 2,000-character preview. Sources: the
+  Claude Code docs "Output limits", the installed 2.1.267 binary, and a
+  direct probe; all in the journal): Establish what Claude Code actually does with an
   oversized tool result — truncation, elision, or delivery-in-full that the
   agent then skims. The remedy differs: truncation silently DROPS
   instructions, whereas skimming merely deprioritises them. Do not design
@@ -107,35 +114,49 @@ upgrade rather than assuming this plan's first measurement found all of it.
 
 ### Phase 2: Bound what remains
 
-- [ ] ⬜ **Task 2.1**: Give the command a file-offload path: write the full
+- [x] ✅ **Task 2.1** (cc33c4ce — `install/report_offload.py`,
+  `SUMMARY_MAX_BYTES = 8000`; both commands write under the project's
+  `untracked/` and print a bounded summary; `--full`, `--report-dir`,
+  `--project-root`): Give the command a file-offload path: write the full
   report to a file, print a bounded summary plus that path. This is the
   idiom the project already uses elsewhere (`echd-capture`, and the
   `subagent_report_size_blocker` handler that exists to enforce exactly this
   for subagent reports).
-- [ ] ⬜ **Task 2.2**: Make the upgrade skill's step 4 consume the bounded
+- [x] ✅ **Task 2.2** (cc33c4ce — steps 4 and 5 of `upgrade.md`, both copies;
+  `upgrade.sh` passes `--project-root` so its embedded copy is bounded too): Make the upgrade skill's step 4 consume the bounded
   form, so the instruction the agent receives matches the report it gets.
 
 ### Phase 3: Chunk the remainder, and parallelise it safely
 
-- [ ] ⬜ **Task 3.1**: Emit the reconciliation work as CHUNKS the upgrade
+- [x] ✅ **Task 3.1** (cc33c4ce — `chunk-NN-<topic>.md` files, each a
+  self-contained brief ending in the return contract "the files you changed,
+  not the entries you read"): Emit the reconciliation work as CHUNKS the upgrade
   agent can delegate one-per-subagent, so no single context has to hold the
   whole report. Each subagent returns what it CHANGED, not the entries it
   read — otherwise the coordinator re-accumulates the bloat the chunking
   removed.
-- [ ] ⬜ **Task 3.2**: Chunk by TOPIC, not by size, and only AFTER Phase 1
+- [x] ✅ **Task 3.2** (cc33c4ce — `chunk_by_topic` takes the output of
+  `collapse_superseded`; the key is the entry's `topic`, falling back to its
+  `id`; every shipped entry back-filled with a topic, 14 in all): Chunk by TOPIC, not by size, and only AFTER Phase 1
   collapsing. Ordering is load-bearing: while superseded chains survive, two
   chunks can carry contradictory instructions about the same document. One
   agent reading sequentially lands on the current truth because the later
   entry overwrites the earlier; N agents in parallel race for the same file
   and the winner is arbitrary. Chunking an uncollapsed report converts a
   self-correcting sequence into a non-deterministic one.
-- [ ] ⬜ **Task 3.3**: Confirm topic chunks are DISJOINT in the documents
+- [x] ✅ **Task 3.3** (cc33c4ce — structural half proven by
+  `TestChunkByTopic`/`TestRealCorpusTopics` (a partition, unique keys, no
+  unassigned entry); the document half is the schema contract "two truths
+  that could edit one document share a topic", with the SEQUENTIAL chunk
+  for entries that declare none — see the journal): Confirm topic chunks are DISJOINT in the documents
   they touch. Disjointness is what makes parallel dispatch safe; if two
   topics can edit one file, they belong in the same chunk.
 
 ### Phase 4: Prove it
 
-- [ ] ⬜ **Task 4.1**: A test pinning that the full-span report stays under
+- [x] ✅ **Task 4.1** (cc33c4ce — `TestBoundedSummary`: the real full span,
+  the real corpus plus a 40-entry release, and a 400-topic release all stay
+  under `SUMMARY_MAX_BYTES`): A test pinning that the full-span report stays under
   the chosen bound as the corpus grows — the regression that lets this
   defect return is a new release quietly adding entries.
 - [x] ✅ **Task 4.2** (162efcc6 — `TestRealManifestCorpus` in
@@ -146,8 +167,9 @@ upgrade rather than assuming this plan's first measurement found all of it.
 
 ## Success Criteria
 
-- [ ] The full-span report is bounded, and the bound holds when a new
-  truth-change file is added.
+- [x] The full-span report is bounded, and the bound holds when a new
+  truth-change file is added (cc33c4ce — 8,000-byte constant; 2,059 bytes
+  measured on v3.12.0 → v3.63.0).
 - [x] The plan-creation truth is surfaced once, as the v3.26.0 value (162efcc6).
 - [x] No reconciliation report contains an entry whose `now` is contradicted
   by another entry in the same report (162efcc6 — for keyed truths; a chain
@@ -161,8 +183,11 @@ upgrade rather than assuming this plan's first measurement found all of it.
      JOURNAL/00329-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Milestone A — the whole post-upgrade envelope is measured, per source, so
-  the fix targets what is actually large rather than the first thing found.
-- Milestone B — the mechanism is decided and its collapsing yield measured.
+  the fix targets what is actually large rather than the first thing found
+  (cc33c4ce).
+- Milestone B — the mechanism is decided and its collapsing yield measured
+  (162efcc6).
 - Milestone C — the report is bounded and the skill consumes the bounded
-  form.
-- Milestone D — the remainder is chunked by topic and safely parallelisable.
+  form (cc33c4ce).
+- Milestone D — the remainder is chunked by topic and safely parallelisable
+  (cc33c4ce).
