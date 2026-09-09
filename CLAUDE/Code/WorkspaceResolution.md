@@ -253,3 +253,11 @@ Which handlers currently resolve through `Workspace` rather than through
 [Plan 00296](../Plan/Completed/00296-monorepo-workspace-resolver/PLAN.md), along with the
 field report that motivated it. A handler that needs a project — not a git
 root — should use `Workspace.for_path()`.
+
+A declaration takes precedence over any inference a handler makes on its own.
+`markdown_organization` treats `vendor/` and `node_modules/` as implicit
+monorepos, but it resolves a declared `projects:` root FIRST, at any depth —
+under `vendor/`, inside another declared project — and consults its own
+inference only for a path no declaration covers (Plan 00365). A root that is
+where it is because Composer installed a first-party package from source is
+declared exactly as it sits; nothing needs to be moved to be declarable.
