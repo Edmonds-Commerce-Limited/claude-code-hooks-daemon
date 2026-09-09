@@ -145,6 +145,64 @@ Both files were updated in the source tree and in the deployed
 that a steady-state revalidation logs nothing at all, which is why INFO is
 affordable here.
 
+## QA result
+
+`./scripts/qa/llm_qa.py all`, on the committed tree with the worktree's own
+daemon running:
+
+```
+QA: 22/26 PASSED, 4/26 FAILED
+❌ tests: 21390 passed, 6 failed, 21 skipped | coverage: 95.3%
+❌ error_hiding: 172 violations
+   capture_corruption: NO OUTPUT (run tool first)
+❌ smoke_test: 2/3 probes passed (1 failed)
+```
+
+It is not fully green, and the four failures are environmental. Two of them
+are proven so; the evidence is below.
+
+### One real regression, found by QA and fixed
+
+The first run had a seventh test failure and it was mine. Task 2.9 replaced
+`"$@"` with `[args...]`, but
+`tests/unit/scripts/test_skill_scripts_are_referenced.py` accepts only
+`"$@"`, `$*` or an **angle-bracket** placeholder. The review's suggested
+`[args...]` is not the convention this repository already enforces. It now
+reads `<the arguments you were given>`, which satisfies that gate and mine,
+and my own test pins the angle bracket rather than merely banning `"$@"`.
+
+### Why the four remaining failures are environmental
+
+**`error_hiding` (172) and `capture_corruption` (no output): this worktree
+lives under a directory called `untracked`.** `audit_error_hiding` skips a
+file when any exclude pattern is a SUBSTRING of its absolute path, and one
+pattern is `untracked/`. Every file in
+`/workspace/untracked/worktrees/worktree-plan-00364-p2-install/` matches, so
+zero violations are collected and all 172 exclusions are then reported as
+`stale-exclusion`. `audit_capture_corruption` has the identical bug through
+`_EXCLUDE_DIR_PARTS` containing `"untracked"` matched against `path.parts`,
+collecting 0 shell files.
+
+Proved, not assumed: `git archive HEAD` into a pristine tree and running the
+same audit there reports the SAME 172, including the three entries for files
+Phase 2 touched. Both bite every phase worktree.
+
+**Four of the six test failures are these same two audits plus
+`test_stop_hook_hard_block` (2) and `test_forwarder_socket_stdin` (2).** The
+latter need `.claude/hooks-daemon/scripts/lib/resolve_venv.sh`, which is
+untracked (`git ls-files .claude/hooks-daemon` is empty) and absent from the
+MAIN checkout too, so they fail there as well.
+
+**`smoke_test`'s `stop_loop_guard` probe** expects `decision!=block` for
+`stop_hook_active=true` and gets `block`. Phase 2 touches no handler and no
+core file: `git diff --name-only f4253b3d..HEAD` is entirely plan_qa,
+install, `config/validator`, `docs_qa/corpus`, skills and the capture helper.
+
+Starting the worktree's own daemon (its own socket, so the live session's is
+untouched) took the acceptance failures from ten to four. The daemon then
+auto-committed `f4253b3d`, regenerating the CLAUDE.md handler block; that is
+its own doing, not an edit of mine.
+
 ## Two things the coordinator needs to know
 
 ### The QA runner cannot resolve a worktree's venv
@@ -166,14 +224,12 @@ else does.
 Note also that `uv sync --active` without `--extra dev` STRIPS the dev tools
 out of the venv.
 
-### Five integration tests fail in a bare worktree, for environmental reasons
+### The two audits are blind in any checkout under a path containing "untracked"
 
-`test_daemon_smoke` (1), `test_forwarder_socket_stdin` (2) and
-`test_plugin_daemon_integration` (2) fail because
-`.claude/hooks-daemon/scripts/lib/resolve_venv.sh` does not exist: the
-worktree's `.claude/hooks-daemon/` holds only `untracked/`, so no daemon is
-deployed to answer them. None of the five touches any module Phase 2 changed.
-Everything else passes.
+Detailed under "QA result" above. Worth its own task alongside the venv one:
+both audits should match their exclude patterns against the REPO-RELATIVE
+path, not the absolute one. Until then neither audit sees anything in a
+worktree, so a real regression in either would pass unnoticed there.
 
 ## Release notes
 
