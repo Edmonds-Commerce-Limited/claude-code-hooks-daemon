@@ -81,10 +81,21 @@ def _criteria_section(content: str) -> str:
 class PlanDoneRequiresHoldingAreaHandler(Handler):
     """Deny a Complete flip whose Success Criteria never mention the holding area."""
 
+    #: Workflow band (36-55, see CLAUDE/HANDLER_DEVELOPMENT.md "Priority
+    #: Guide"): a plan-status gate is workflow enforcement, not a safety
+    #: guard. The exact slot must be one no PreToolUse handler already holds
+    #: — a project handler that shares a priority makes the daemon log a
+    #: collision warning on every start and leaves the two handlers'
+    #: relative order arbitrary (tests/integration/
+    #: test_project_handler_priority_collisions.py enforces this). 51 also
+    #: sits after plan_qa_edit (44) and plan_workflow (46), so their
+    #: advisories are already attached when this terminal DENY lands.
+    _PRIORITY = 51
+
     def __init__(self) -> None:
         super().__init__(
             handler_id="plan-done-requires-holding-area",
-            priority=20,
+            priority=self._PRIORITY,
             terminal=True,
             tags=["project", "blocking", "plan"],
         )
