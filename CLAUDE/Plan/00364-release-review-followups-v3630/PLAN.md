@@ -146,7 +146,12 @@ lives in so each phase can go to one worktree agent.
   worktree checkout reaches its own daemon; keep the
   `HOOKS_DAEMON_RELAY_BINARY` override working. Integration test: a
   forwarder generated for root A, executed with cwd under root B, does not
-  dial A's socket.
+  dial A's socket. Second half (Phase 4 agent's finding): a worktree has no
+  `.claude/hooks-daemon.env` because it is gitignored, so `init.sh` never
+  enters self-install mode there and every wrapper answers with its
+  not-installed fallback (a block, so a smoke probe "passes" for the wrong
+  reason). `scripts/setup_worktree.sh` must provision it, and the wrapper's
+  fallback must say which checkout it is answering for.
 - [ ] ⬜ **Task 5.2**: `.claude/project-handlers/pre_tool_use/plan_done_requires_holding_area.py`
   moves off priority 20 (shared with built-in `GIT_BRANCH`/`GIT_STASH`/
   `GIT_MESSAGE_BACKTICK`/`NITPICK_HEDGING` on PreToolUse) to a free slot in
