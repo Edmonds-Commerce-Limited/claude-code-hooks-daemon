@@ -7,9 +7,22 @@ realpath), and Bash path-mention detection with its two narrow exemptions
 position).
 """
 
+import time
 from pathlib import Path
 
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+
+#: Wall-clock ceiling for the wide-range tests below. The rejected path does
+#: no allocation at all, so it costs microseconds; a range materialised before
+#: the cap saw it cost 650 ms for ONE token and 13.5 s for twenty. Two orders
+#: of magnitude of headroom keeps this from turning into a timing flake while
+#: still failing loudly on a re-materialising regression.
+_WIDE_RANGE_BUDGET_SECONDS = 0.05
+
+#: The whole code-point space as a LITERAL range, the shape the probe in
+#: Plan 00364's review measured. A Python escape sequence would not do: it
+#: tokenises as ordinary backslash text and never reaches the range branch.
+_WIDEST_POSSIBLE_RANGE = f"[{chr(0)}-{chr(0x10FFFF)}]"
 
 
 class TestResolveProtectedPatterns:
@@ -512,6 +525,78 @@ class TestBracketExpansionPrimitives:
     def test_expansion_is_capped(self) -> None:
         token = "x" + "[a-z]" * 4
         assert sfm._expand_bracket_expressions(token) == [token]
+
+    def test_a_range_at_the_cap_still_expands(self) -> None:
+        """The rejection must start exactly where the product cap already did.
+
+        A range of ``_MAX_BRACKET_EXPANSIONS`` members passed the product cap
+        before and still has to, or the cheap check has quietly narrowed what
+        the guard expands.
+        """
+        end = chr(ord("a") + sfm._MAX_BRACKET_EXPANSIONS - 1)
+        expansions = sfm._expand_bracket_expressions(f"x[a-{end}]")
+        assert len(expansions) == sfm._MAX_BRACKET_EXPANSIONS
+        assert expansions[0] == "xa"
+
+    def test_a_range_one_past_the_cap_is_left_unexpanded(self) -> None:
+        end = chr(ord("a") + sfm._MAX_BRACKET_EXPANSIONS)
+        token = f"x[a-{end}]"
+        assert sfm._expand_bracket_expressions(token) == [token]
+
+
+class TestAWideRangeIsRejectedBeforeItIsBuilt:
+    """The cap must bound the WORK, not just the result (Plan 00364 Task 3.1).
+
+    ``_MAX_BRACKET_EXPANSIONS`` was checked against a member list
+    ``_bracket_expression_members`` had ALREADY built, so a token carrying a
+    wide literal range materialised every code point in it — and deduplicated
+    them — purely to discover the product was over the cap.
+
+    The verdict is identical either way: over the cap, the token is returned
+    unexpanded and judged exactly as it was before, which fails CLOSED. Only
+    the cost differs, and it matters because ``find_protected_mention`` runs on
+    Write/Edit CONTENT from ``secret_file_guard``, a PreToolUse handler on the
+    dispatch hot path.
+    """
+
+    def test_the_widest_possible_range_is_left_unexpanded(self) -> None:
+        token = f"f{_WIDEST_POSSIBLE_RANGE}.txt"
+        assert sfm._expand_bracket_expressions(token) == [token]
+
+    def test_the_widest_possible_range_costs_no_time(self) -> None:
+        token = f"f{_WIDEST_POSSIBLE_RANGE}.txt"
+        start = time.perf_counter()
+        sfm._expand_bracket_expressions(token)
+        elapsed = time.perf_counter() - start
+        assert elapsed < _WIDE_RANGE_BUDGET_SECONDS, (
+            f"expanding {len(_WIDEST_POSSIBLE_RANGE)} characters of literal "
+            f"range took {elapsed:.3f}s — the range is being materialised "
+            f"before the cap rejects it"
+        )
+
+    def test_the_members_helper_rejects_the_range_itself(self) -> None:
+        """The check belongs INSIDE the helper, not at its call site.
+
+        Asserting on ``_expand_bracket_expressions`` alone would still pass
+        with the rejection left where it was, since that function's return
+        value never changed.
+        """
+        assert sfm._bracket_expression_members(_WIDEST_POSSIBLE_RANGE) is None
+
+    def test_many_wide_ranges_in_one_payload_stay_cheap(self) -> None:
+        """The measured 13.5 s case: cost is linear in the token count.
+
+        Driven through the public entry point ``secret_file_guard`` calls, so
+        this covers the real hot path rather than the primitive alone.
+        """
+        content = " ".join(f"f{index}{_WIDEST_POSSIBLE_RANGE}.txt" for index in range(20))
+        start = time.perf_counter()
+        assert sfm.find_protected_mention(content, ("*.secret*",)) is None
+        elapsed = time.perf_counter() - start
+        assert elapsed < _WIDE_RANGE_BUDGET_SECONDS, (
+            f"twenty wide-range tokens took {elapsed:.3f}s on the PreToolUse "
+            f"hot path"
+        )
 
     def test_edge_predicates_are_left_untouched(self) -> None:
         """The fix deliberately does NOT redefine the edge predicates — the
