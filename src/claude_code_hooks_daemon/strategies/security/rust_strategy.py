@@ -62,7 +62,7 @@ class RustSecurityStrategy:
         transmute_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.rs")),
+                "file_path": scratch_path(_FIXTURE_DIR, "test_security.rs"),
                 "content": "let x: u32 = std::mem::transmute(y);",
             },
         )

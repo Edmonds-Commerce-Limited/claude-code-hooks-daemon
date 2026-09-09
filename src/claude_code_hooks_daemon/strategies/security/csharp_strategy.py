@@ -73,7 +73,7 @@ class CSharpSecurityStrategy:
         binary_formatter_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.cs")),
+                "file_path": scratch_path(_FIXTURE_DIR, "test_security.cs"),
                 "content": "BinaryFormatter formatter = new BinaryFormatter();",
             },
         )

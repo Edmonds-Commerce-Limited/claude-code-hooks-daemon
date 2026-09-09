@@ -155,9 +155,7 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(
-                    scratch_path(_FIXTURE_DIR, "CLAUDE", "Plan", "099-test", "PLAN.md")
-                ),
+                "file_path": scratch_path(_FIXTURE_DIR, "CLAUDE", "Plan", "099-test", "PLAN.md"),
                 "content": "# Plan 099: Test Plan\n\n**Status**: Not Started",
             },
         )

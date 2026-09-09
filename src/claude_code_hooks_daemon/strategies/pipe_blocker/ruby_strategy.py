@@ -37,6 +37,7 @@ class RubyPipeBlockerStrategy:
             AcceptanceTest(
                 title="Ruby: rspec piped to tail",
                 command='echo "rspec | tail -20"',
+                dispatch_as_bash=True,
                 description="Blocks rspec (expensive test runner) piped to tail",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Pipe to tail/head", r"expensive"],

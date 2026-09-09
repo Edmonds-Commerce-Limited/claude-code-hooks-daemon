@@ -10,6 +10,7 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
+from claude_code_hooks_daemon.strategies.pipe_blocker.registry import PipeBlockerStrategyRegistry
 
 _PROJECT_CONTEXT_PATH = "claude_code_hooks_daemon.core.project_context.ProjectContext"
 
@@ -616,3 +617,49 @@ class TestPipeBlockerGetRules:
     def test_every_rule_has_non_empty_verbose(self, handler: PipeBlockerHandler) -> None:
         for rule in handler.get_rules():
             assert rule.verbose, f"{rule.rule_id} has empty verbose content"
+
+
+class TestPipeBlockerAggregatesItsStrategiesAcceptanceTests:
+    """Every other strategy family aggregates; this one did not (Task 3.5).
+
+    The eight ``pipe_blocker`` strategies each declared one ``AcceptanceTest``
+    that nothing ever called: the handler declared its own list and never
+    merged theirs, so the tests reached neither the playbook nor the contract
+    suite. They were the only strategy files the release-wide ``ToolPayload``
+    conversion skipped, which reads as an inconsistency in the conversion
+    rather than as unreachable code.
+    """
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    def test_every_strategys_tests_are_included(self, handler: PipeBlockerHandler) -> None:
+        titles = {test.title for test in handler.get_acceptance_tests()}
+        for strategy in PipeBlockerStrategyRegistry.create_default().strategies():
+            for test in strategy.get_acceptance_tests():
+                assert test.title in titles, (
+                    f"{strategy.language_name}'s acceptance test {test.title!r} "
+                    f"is not reachable from the handler, so nothing runs it"
+                )
+
+    def test_the_handlers_own_tests_survive_aggregation(self, handler: PipeBlockerHandler) -> None:
+        titles = {test.title for test in handler.get_acceptance_tests()}
+        assert "npm test piped to tail (blacklisted — expensive path)" in titles
+
+    def test_no_title_is_declared_twice(self, handler: PipeBlockerHandler) -> None:
+        """A duplicate title makes two playbook blocks indistinguishable."""
+        titles = [test.title for test in handler.get_acceptance_tests()]
+        assert len(titles) == len(set(titles))
+
+    def test_every_aggregated_test_declares_a_way_to_drive_it(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """The contract suite can only verify a test it can dispatch.
+
+        ``dispatch_as_bash=True`` derives the payload from the command, so the
+        string a human is shown and the one the harness runs cannot drift.
+        """
+        for test in handler.get_acceptance_tests():
+            assert test.tool_payload is not None, f"{test.title!r} declares no payload"
+            assert test.tool_payload.tool_input["command"] == test.command

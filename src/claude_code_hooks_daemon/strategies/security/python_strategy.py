@@ -91,7 +91,7 @@ class PythonSecurityStrategy:
         eval_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.py")),
+                "file_path": scratch_path(_FIXTURE_DIR, "test_security.py"),
                 "content": "result = eval(user_input)",
             },
         )

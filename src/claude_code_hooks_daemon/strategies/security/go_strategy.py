@@ -67,7 +67,7 @@ class GoSecurityStrategy:
         template_html_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.go")),
+                "file_path": scratch_path(_FIXTURE_DIR, "test_security.go"),
                 "content": "safe := template.HTML(userInput)",
             },
         )

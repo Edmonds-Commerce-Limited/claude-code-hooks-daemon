@@ -71,7 +71,7 @@ class JavaQaSuppressionStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "Example.java")),
+                "file_path": scratch_path(_FIXTURE_DIR, "Example.java"),
                 "content": "@Suppress" + "Warnings" + '("unchecked")\npublic class Example {}',
             },
         )

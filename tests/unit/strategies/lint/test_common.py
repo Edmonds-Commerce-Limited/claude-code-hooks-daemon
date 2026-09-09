@@ -1,7 +1,12 @@
 """Tests for Lint Strategy common utilities."""
 
+import stat
+import tempfile
+from pathlib import Path
+
 from claude_code_hooks_daemon.strategies.lint.common import (
     COMMON_SKIP_PATHS,
+    lint_output_dir,
     matches_skip_path,
 )
 
@@ -61,6 +66,48 @@ class TestCommonSkipPaths:
             "__pycache__/",
             ".git/",
         }
+
+
+class TestLintOutputDir:
+    """One unpredictable, per-process destination for compiler artefacts.
+
+    Kotlin and Rust both need somewhere to put the class files and metadata
+    their check commands emit, and both used to name a fixed path in the
+    shared temp directory. That is the classic insecure-temporary-directory
+    shape: on a multi-user host another user can pre-create the name as a
+    symlink and steer compiler output through it, and two concurrent lint runs
+    share the directory regardless.
+    """
+
+    def test_the_directory_exists(self) -> None:
+        assert Path(lint_output_dir()).is_dir()
+
+    def test_the_path_is_absolute(self) -> None:
+        """``lint_on_edit`` runs the command from an unspecified cwd."""
+        assert Path(lint_output_dir()).is_absolute()
+
+    def test_the_same_directory_is_reused_within_the_process(self) -> None:
+        """A fresh directory per call would leak one per linted file."""
+        assert lint_output_dir() == lint_output_dir()
+
+    def test_the_name_is_not_predictable(self) -> None:
+        """The whole point: a name an attacker can guess can be pre-created."""
+        assert lint_output_dir() != str(Path(tempfile.gettempdir()) / "claude-hooks-daemon-lint")
+
+    def test_only_the_owner_can_reach_it(self) -> None:
+        """0700, so no other user can read the artefacts or swap the target."""
+        mode = Path(lint_output_dir()).stat().st_mode
+        assert stat.S_IMODE(mode) == 0o700
+
+    def test_the_path_carries_no_shell_metacharacter(self) -> None:
+        """It is interpolated into a command run with no shell.
+
+        ``tempfile`` draws its suffix from an alphanumeric alphabet, so this
+        holds by construction -- but the command strings are asserted safe in
+        ``test_lint_commands_are_runnable_as_declared.py`` and this is the one
+        component of them that is not a literal.
+        """
+        assert not set(lint_output_dir()) & set(" \t'\"|&;<>$`*?()[]{}!#~")
 
 
 class TestMatchesSkipPath:

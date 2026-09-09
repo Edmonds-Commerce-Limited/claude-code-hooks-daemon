@@ -55,7 +55,7 @@ class RubyCommentStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "example.rb")),
+                "file_path": scratch_path(_FIXTURE_DIR, "example.rb"),
                 "content": (
                     'VERSION = "2.4.2"  #'
                     " Prior 2.4.1: fixed a race. Prior 2.4.0: original broken "

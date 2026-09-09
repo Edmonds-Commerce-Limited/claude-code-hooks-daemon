@@ -68,10 +68,8 @@ class JavaTddStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(
-                    scratch_path(
-                        _FIXTURE_DIR, "src", "main", "java", "com", "example", "UserService.java"
-                    )
+                "file_path": scratch_path(
+                    _FIXTURE_DIR, "src", "main", "java", "com", "example", "UserService.java"
                 ),
                 "content": "package com.example;\n\npublic class UserService {}",
             },

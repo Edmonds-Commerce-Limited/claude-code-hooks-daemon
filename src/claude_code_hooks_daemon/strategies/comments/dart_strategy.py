@@ -56,7 +56,7 @@ class DartCommentStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "example.dart")),
+                "file_path": scratch_path(_FIXTURE_DIR, "example.dart"),
                 "content": (
                     'const String version = "3.2.3"; // Prior 3.2.2: fixed a race. '
                     "Prior 3.2.1: original broken behaviour.\n"

@@ -61,7 +61,7 @@ class ShellCommentStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "example.sh")),
+                "file_path": scratch_path(_FIXTURE_DIR, "example.sh"),
                 "content": (
                     'CCY_VERSION="3.27.1"  #'
                     " Patch: 3.27.0 was assigned. Prior 3.26.2: whitelisted the "

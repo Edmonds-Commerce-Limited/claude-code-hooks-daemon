@@ -1272,14 +1272,14 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         public_pattern_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path("sensitive-public-pattern-probe.txt")),
+                "file_path": scratch_path("sensitive-public-pattern-probe.txt"),
                 "content": "deploy target: /var/www/vhosts/example",
             },
         )
         clean_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path("sensitive-clean-probe.txt")),
+                "file_path": scratch_path("sensitive-clean-probe.txt"),
                 "content": "The quick brown fox jumps over the lazy dog.\n",
             },
         )

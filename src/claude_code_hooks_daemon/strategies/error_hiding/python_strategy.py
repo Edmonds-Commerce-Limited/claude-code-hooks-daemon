@@ -74,14 +74,14 @@ class PythonErrorHidingStrategy:
         bad_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "bad.py")),
+                "file_path": scratch_path(_FIXTURE_DIR, "bad.py"),
                 "content": "try:\n    do_something()\nexcept:\n    pass\n",
             },
         )
         good_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "good.py")),
+                "file_path": scratch_path(_FIXTURE_DIR, "good.py"),
                 "content": (
                     "import logging\n\n\n"
                     "def run(task):\n    try:\n        task()\n"

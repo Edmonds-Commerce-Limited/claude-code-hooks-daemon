@@ -36,6 +36,39 @@ class TestPipeBlockerStrategyRegistryInit:
         assert isinstance(registry.registered_languages, list)
 
 
+class TestPipeBlockerStrategyRegistryStrategies:
+    """The public accessor the handler aggregates acceptance tests through.
+
+    ``registered_languages`` returns names, which is no use to a caller that
+    needs the instances. Without this, the handler would have to reach into
+    ``_strategies`` the way ``qa_suppression`` still does.
+    """
+
+    def test_empty_on_init(self) -> None:
+        assert PipeBlockerStrategyRegistry().strategies() == []
+
+    def test_returns_every_registered_instance(self) -> None:
+        registry = PipeBlockerStrategyRegistry()
+        python = _FakeStrategy("Python", (r"^pytest\b",))
+        universal = _FakeStrategy("Universal", (r"^make\b",))
+        registry.register(python)
+        registry.register(universal)
+        assert registry.strategies() == [python, universal]
+
+    def test_a_filtered_out_strategy_is_gone(self) -> None:
+        """Filtering must reach the accessor, not only the pattern merge."""
+        registry = PipeBlockerStrategyRegistry()
+        registry.register(_FakeStrategy("Python", (r"^pytest\b",)))
+        registry.register(_FakeStrategy("Ruby", (r"^rspec\b",)))
+        registry.filter_by_languages(["python"])
+        assert [s.language_name for s in registry.strategies()] == ["Python"]
+
+    def test_the_default_registry_exposes_all_eight(self) -> None:
+        registry = PipeBlockerStrategyRegistry.create_default()
+        assert len(registry.strategies()) == len(registry.registered_languages)
+        assert len(registry.strategies()) == 8
+
+
 class TestPipeBlockerStrategyRegistryRegister:
     """Tests for register method."""
 

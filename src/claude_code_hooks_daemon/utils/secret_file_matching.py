@@ -412,10 +412,12 @@ _BRACKET_EXPRESSION_RE: Final[re.Pattern[str]] = re.compile(r"\[!?\]?[^\]]*\]")
 # set to its concrete members instead fixes the INPUT the existing gates see,
 # rather than adding another gate to them.
 #
-# The cap bounds the combinatorial product across a token's expressions.
-# Beyond it -- and for every class that is not a finite list -- the token is
-# left UNEXPANDED and judged exactly as it was before, so the fallback fails
-# CLOSED.
+# The cap bounds the combinatorial product across a token's expressions, and
+# equally the width of any ONE range within them -- ``_bracket_expression_
+# members`` applies it before materialising, so the guarantee is on the WORK
+# done rather than only on the result kept. Beyond it -- and for every class
+# that is not a finite list -- the token is left UNEXPANDED and judged exactly
+# as it was before, so the fallback fails CLOSED.
 _MAX_BRACKET_EXPANSIONS: Final[int] = 64
 
 # `[[:alpha:]]`-style named classes are not character LISTS; expanding the raw
@@ -437,6 +439,15 @@ def _bracket_expression_members(expression: str) -> tuple[str, ...] | None:
     ``expression`` is a COMPLETE bracket expression including its delimiters
     (``[0]``, ``[a-f]``, ``[]]``). ``None`` means "leave this token alone",
     i.e. keep the pre-Plan-00356 conservative treatment.
+
+    A range WIDER than ``_MAX_BRACKET_EXPANSIONS`` is rejected here rather
+    than built and handed to the product cap in
+    :func:`_expand_bracket_expressions`. The verdict is the same either way --
+    a range that wide already blows the product, so the token comes back
+    unexpanded -- but the cost is not: this function is reached from
+    ``find_protected_mention`` on Write/Edit CONTENT, and materialising a
+    literal range spanning the code-point space cost 650 ms and 145 MB per
+    token on a PreToolUse hot path.
     """
     body = expression[1:-1]
     if body[:1] in _BRACKET_NEGATION_CHARS:
@@ -452,7 +463,11 @@ def _bracket_expression_members(expression: str) -> tuple[str, ...] | None:
     while index < len(body):
         if index + 2 < len(body) and body[index + 1] == "-":
             start, end = body[index], body[index + 2]
-            if ord(end) < ord(start):
+            span = ord(end) - ord(start)
+            # An inverted range names nothing; an over-wide one cannot survive
+            # the product cap anyway. Both leave the token unexpanded, so
+            # deciding here costs one subtraction instead of a full range.
+            if span < 0 or span >= _MAX_BRACKET_EXPANSIONS:
                 return None
             members.extend(chr(point) for point in range(ord(start), ord(end) + 1))
             index += 3

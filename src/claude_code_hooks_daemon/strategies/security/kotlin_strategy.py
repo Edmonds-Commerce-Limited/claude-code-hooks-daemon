@@ -73,7 +73,7 @@ class KotlinSecurityStrategy:
         object_input_stream_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "test_security.kt")),
+                "file_path": scratch_path(_FIXTURE_DIR, "test_security.kt"),
                 "content": "val ois = ObjectInputStream(socket.getInputStream())",
             },
         )

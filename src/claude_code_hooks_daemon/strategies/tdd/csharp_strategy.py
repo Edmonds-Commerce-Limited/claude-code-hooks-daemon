@@ -68,7 +68,7 @@ class CSharpTddStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "src", "Services", "UserService.cs")),
+                "file_path": scratch_path(_FIXTURE_DIR, "src", "Services", "UserService.cs"),
                 "content": "namespace MyApp.Services;\n\npublic class UserService {}",
             },
         )

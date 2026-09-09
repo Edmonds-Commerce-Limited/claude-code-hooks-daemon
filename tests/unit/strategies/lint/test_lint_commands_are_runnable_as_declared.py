@@ -123,6 +123,19 @@ class TestKotlinLintsTheFilesItClaims:
         assert tokens[0] == "kotlinc"
         assert "{file}" in tokens
 
+    def test_the_class_docstring_does_not_advertise_the_removed_flag(self) -> None:
+        """Prose that contradicts the command reintroduces the bug.
+
+        The tests above guard the command string; nothing guarded the class
+        docstring, which went on describing `kotlinc -script` after the flag
+        was dropped — documenting the exact defect that was fixed.
+        """
+        docstring = KotlinLintStrategy.__doc__ or ""
+        assert "-script" not in docstring, (
+            "the class docstring still advertises `-script`, which this "
+            f"strategy's command does not use: {docstring!r}"
+        )
+
     def test_the_default_command_sends_class_files_somewhere_else(self) -> None:
         """Without `-d`, kotlinc writes `.class` files beside the user's source.
 

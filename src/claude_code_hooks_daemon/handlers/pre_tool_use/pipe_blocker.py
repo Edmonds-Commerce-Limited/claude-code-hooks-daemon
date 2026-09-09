@@ -1236,7 +1236,15 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """Return acceptance tests for pipe blocker handler."""
+        """Return this handler's own tests plus every active strategy's.
+
+        The strategy half covers the language blacklists (one probe per
+        registered language); the handler half covers the parsing rules those
+        blacklists are consulted from -- substitution, message-value
+        exemptions, per-pipe classification. Aggregating is what every other
+        strategy family does, and it is what makes the strategies' tests
+        reachable at all: declared but never merged, they ran nowhere.
+        """
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
@@ -1256,8 +1264,14 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         #   - bash: evaluates false string comparison (exit 1), no side effects
         #   - source segment = '[[ "find ...' → not in blacklist → "unknown" path → extra_whitelist ✓
         #
-        # Never use: echo (whitelisted), real direct commands (execute if hook fails)
-        return [
+        # Never use a real direct command (it executes if the hook fails), and
+        # never make `echo` the PRODUCER — it is whitelisted, so the pipe would
+        # be allowed and the test would assert nothing. The strategies' probes
+        # below do start with `echo`, which is not the same thing: their pipe
+        # sits inside a QUOTED ARGUMENT, so the producer classified is the
+        # command named in that string, and a hook that failed open would
+        # merely print the text.
+        tests: list[Any] = [
             AcceptanceTest(
                 title="npm test piped to tail (blacklisted — expensive path)",
                 command="false && npm test | tail -5",
@@ -1472,3 +1486,9 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
                 requires_main_thread=False,
             ),
         ]
+        # One blacklist probe per ACTIVE language: a project that filtered the
+        # registry down should not be handed a playbook block for a strategy
+        # its config switched off.
+        for strategy in self._registry.strategies():
+            tests.extend(strategy.get_acceptance_tests())
+        return tests

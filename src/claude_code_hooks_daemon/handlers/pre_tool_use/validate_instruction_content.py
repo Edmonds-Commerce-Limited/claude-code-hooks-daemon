@@ -324,14 +324,14 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
         implementation_log_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "CLAUDE.md")),
+                "file_path": scratch_path(_FIXTURE_DIR, "CLAUDE.md"),
                 "content": "Created the file ProductService.php and added the class",
             },
         )
         clean_content_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "CLAUDE.md")),
+                "file_path": scratch_path(_FIXTURE_DIR, "CLAUDE.md"),
                 "content": "# Project Instructions\n\nUse strict typing for all modules.",
             },
         )

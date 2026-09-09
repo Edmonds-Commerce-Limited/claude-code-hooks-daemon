@@ -43,6 +43,7 @@ class PythonPipeBlockerStrategy:
             AcceptanceTest(
                 title="Python: pytest piped to tail",
                 command='echo "pytest | tail -20"',
+                dispatch_as_bash=True,
                 description="Blocks pytest (expensive test runner) piped to tail",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Pipe to tail/head", r"expensive"],

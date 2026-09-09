@@ -56,14 +56,14 @@ class ShellLintStrategy:
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "valid.sh")),
+                "file_path": scratch_path(_FIXTURE_DIR, "valid.sh"),
                 "content": "#!/bin/bash\necho hello",
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "invalid.sh")),
+                "file_path": scratch_path(_FIXTURE_DIR, "invalid.sh"),
                 "content": "#!/bin/bash\nif [ -f file ]; then\necho missing fi",
             },
         )

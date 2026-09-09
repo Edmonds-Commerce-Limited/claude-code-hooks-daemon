@@ -15,6 +15,7 @@ resolves correctly on its own.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -163,3 +164,51 @@ class TestRuleIndexIsNotPoisonedByAnEarlyCall:
         assert early != "markdown_organization"
         ProjectContext.initialize(_project_root() / ".claude" / "hooks-daemon.yaml")
         assert attribute_deny("BLOCKED [R-MARKDOWN-PLAN-SYNC]: probe") == "markdown_organization"
+
+
+class TestThePartialIndexAnnouncesItself:
+    """A degraded attribution must be visible, not inferred from a count.
+
+    No current caller reaches the uncached branch -- ``block_report`` is only
+    driven by the daemon CLI, which initialises ``ProjectContext`` first. A
+    future one that does would not merely run slowly (handler discovery walks
+    the whole package per deny event): it would silently fail to attribute the
+    rules of every handler that cannot be constructed without the context, and
+    those denies land in ``unattributed_denies`` looking like a data
+    conclusion rather than a missing precondition.
+
+    Warned ONCE per process, because ``attribute_deny`` is called per deny
+    event and a warning per event would bury the run's real output.
+    """
+
+    def test_a_lookup_before_initialisation_warns_once(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from claude_code_hooks_daemon.block_report import fingerprints
+
+        fingerprints._cached_rule_index.cache_clear()
+        fingerprints._warn_rule_index_is_partial.cache_clear()
+        ProjectContext.reset()
+        try:
+            with caplog.at_level(logging.WARNING, logger=fingerprints.__name__):
+                attribute_deny("BLOCKED [R-MARKDOWN-PLAN-SYNC]: probe")
+                attribute_deny("BLOCKED [R-MARKDOWN-PLAN-SYNC]: probe")
+        finally:
+            ProjectContext.initialize(_project_root() / ".claude" / "hooks-daemon.yaml")
+
+        warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+        assert len(warnings) == 1, f"expected exactly one warning, got {len(warnings)}"
+        assert "ProjectContext" in warnings[0].getMessage(), (
+            "the warning must NAME the missing precondition, or a reader "
+            f"cannot act on it: {warnings[0].getMessage()!r}"
+        )
+
+    def test_an_initialised_lookup_is_silent(self, caplog: pytest.LogCaptureFixture) -> None:
+        """The warning marks a degraded run, so the normal one must not carry it."""
+        from claude_code_hooks_daemon.block_report import fingerprints
+
+        fingerprints._warn_rule_index_is_partial.cache_clear()
+        assert ProjectContext.is_initialized(), "fixture premise"
+        with caplog.at_level(logging.WARNING, logger=fingerprints.__name__):
+            attribute_deny("BLOCKED [R-MARKDOWN-PLAN-SYNC]: probe")
+        assert [record for record in caplog.records if record.levelno == logging.WARNING] == []

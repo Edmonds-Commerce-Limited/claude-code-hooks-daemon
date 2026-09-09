@@ -232,7 +232,7 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "Plan", "001-test", "PLAN.md")),
+                "file_path": scratch_path(_FIXTURE_DIR, "Plan", "001-test", "PLAN.md"),
                 "content": "# Plan 001\n\n**Estimated Effort**: 4 hours\n\nTask list here.",
             },
         )

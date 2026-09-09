@@ -612,7 +612,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         inside_write_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path("acceptance-probe.md")),
+                "file_path": scratch_path("acceptance-probe.md"),
                 "content": "# probe",
             },
         )

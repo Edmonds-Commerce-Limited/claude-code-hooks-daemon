@@ -40,12 +40,15 @@ matching is deliberately strict rather than fuzzy.
 
 from __future__ import annotations
 
+import logging
 import re
 from functools import lru_cache
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.rule_explain.lookup import discover_handler_rules
+
+logger = logging.getLogger(__name__)
 
 # Matches the leading header every RuleFormatter-rendered deny text carries
 # (both ``.terse()`` and ``.verbose()`` start with this — see core/rule.py).
@@ -180,6 +183,23 @@ def _cached_rule_index() -> dict[str, str]:
     return _build_rule_index()
 
 
+@lru_cache(maxsize=1)
+def _warn_rule_index_is_partial() -> None:
+    """Announce a degraded attribution run, once per process.
+
+    ``lru_cache`` is the once-only mechanism rather than a module flag,
+    because it also gives the tests a ``cache_clear()`` to re-arm with --
+    the same pattern :func:`_cached_rule_index` already uses.
+    """
+    logger.warning(
+        "block_report: attributing denies before ProjectContext is "
+        "initialised. Handler discovery cannot construct the handlers that "
+        "read it, so their rule IDs are missing from the index and their "
+        "denies will be counted as unattributed. Initialise ProjectContext "
+        "before calling attribute_deny to get a complete attribution."
+    )
+
+
 def _rule_id_to_config_key() -> dict[str, str]:
     """The rule index, memoised only once it can be complete.
 
@@ -187,9 +207,15 @@ def _rule_id_to_config_key() -> dict[str, str]:
     before initialisation and drops out of discovery, so an index built then is
     PARTIAL. Memoising it would mis-attribute every rule of the missing
     handlers for the rest of the process; such a call is served uncached.
+
+    That uncached path also walks the whole handler package per deny event, so
+    it is slow as well as partial. Both facts are worth one WARNING: the count
+    of unattributed denies alone reads as a finding about the data rather than
+    as a missing precondition.
     """
     if ProjectContext.is_initialized():
         return _cached_rule_index()
+    _warn_rule_index_is_partial()
     return _build_rule_index()
 
 

@@ -71,7 +71,7 @@ class GoTddStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "src", "myapp", "server.go")),
+                "file_path": scratch_path(_FIXTURE_DIR, "src", "myapp", "server.go"),
                 "content": "package main\n\nfunc main() {}",
             },
         )

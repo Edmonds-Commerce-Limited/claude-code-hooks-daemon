@@ -68,7 +68,7 @@ class KotlinQaSuppressionStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "Example.kt")),
+                "file_path": scratch_path(_FIXTURE_DIR, "Example.kt"),
                 "content": '@Suppress("UNCHECKED_CAST")\nfun example() {}',
             },
         )

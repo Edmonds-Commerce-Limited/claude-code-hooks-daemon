@@ -67,10 +67,8 @@ class KotlinTddStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(
-                    scratch_path(
-                        _FIXTURE_DIR, "src", "main", "kotlin", "com", "example", "UserService.kt"
-                    )
+                "file_path": scratch_path(
+                    _FIXTURE_DIR, "src", "main", "kotlin", "com", "example", "UserService.kt"
                 ),
                 "content": "package com.example\n\nclass UserService",
             },

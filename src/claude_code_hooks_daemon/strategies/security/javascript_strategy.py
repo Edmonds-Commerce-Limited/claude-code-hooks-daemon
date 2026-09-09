@@ -79,7 +79,7 @@ class JavaScriptSecurityStrategy:
         eval_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "utils.ts")),
+                "file_path": scratch_path(_FIXTURE_DIR, "utils.ts"),
                 "content": "const result = eval(userCode);",
             },
         )

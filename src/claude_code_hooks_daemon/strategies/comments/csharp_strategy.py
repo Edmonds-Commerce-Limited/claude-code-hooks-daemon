@@ -56,7 +56,7 @@ class CSharpCommentStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "Example.cs")),
+                "file_path": scratch_path(_FIXTURE_DIR, "Example.cs"),
                 "content": (
                     'public const string Version = "6.0.3"; // Prior 6.0.2: fixed '
                     "a race. Prior 6.0.1: original broken behaviour.\n"

@@ -88,16 +88,14 @@ class SecretDetectionStrategy:
         aws_key_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "config.ts")),
+                "file_path": scratch_path(_FIXTURE_DIR, "config.ts"),
                 "content": 'const key = "AKIAIOSFODNN7EXAMPLE1";',
             },
         )
         fixture_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(
-                    scratch_path(_FIXTURE_DIR, "tests", "fixtures", "security_test.py")
-                ),
+                "file_path": scratch_path(_FIXTURE_DIR, "tests", "fixtures", "security_test.py"),
                 "content": 'AWS_KEY = "AKIAIOSFODNN7EXAMPLE1"',
             },
         )

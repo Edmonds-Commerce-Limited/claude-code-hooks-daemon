@@ -36,6 +36,7 @@ class GoPipeBlockerStrategy:
             AcceptanceTest(
                 title="Go: go test piped to tail",
                 command='echo "go test ./... | tail -20"',
+                dispatch_as_bash=True,
                 description="Blocks go test (expensive) piped to tail",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Pipe to tail/head", r"expensive"],

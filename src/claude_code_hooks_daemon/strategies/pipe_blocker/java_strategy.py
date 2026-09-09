@@ -37,6 +37,7 @@ class JavaPipeBlockerStrategy:
             AcceptanceTest(
                 title="Java: mvn test piped to tail",
                 command='echo "mvn test | tail -20"',
+                dispatch_as_bash=True,
                 description="Blocks mvn test (expensive) piped to tail",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Pipe to tail/head", r"expensive"],

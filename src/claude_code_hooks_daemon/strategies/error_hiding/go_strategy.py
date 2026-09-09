@@ -65,14 +65,14 @@ class GoErrorHidingStrategy:
         bad_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "bad.go")),
+                "file_path": scratch_path(_FIXTURE_DIR, "bad.go"),
                 "content": "package main\nfunc main() { if err != nil {} }",
             },
         )
         good_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "good.go")),
+                "file_path": scratch_path(_FIXTURE_DIR, "good.go"),
                 "content": (
                     'package main\nimport ("fmt"; "os")\n'
                     "func main() {\n"

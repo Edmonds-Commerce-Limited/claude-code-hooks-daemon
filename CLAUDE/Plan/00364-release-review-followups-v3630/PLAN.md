@@ -105,26 +105,28 @@ lives in so each phase can go to one worktree agent.
 
 ### Phase 3: strategies / utils / block_report (review-strategies findings 1-7)
 
-- [ ] ⬜ **Task 3.1**: `utils/secret_file_matching.py` — reject a bracket range
+- [x] ✅ **Task 3.1**: `utils/secret_file_matching.py` — reject a bracket range
   wider than `_MAX_BRACKET_EXPANSIONS` before materialising it (fail
   closed, token left unexpanded). Test: a wide literal range costs
   milliseconds, not hundreds.
-- [ ] ⬜ **Task 3.2**: `strategies/lint/kotlin_strategy.py` docstring matches
+- [x] ✅ **Task 3.2**: `strategies/lint/kotlin_strategy.py` docstring matches
   the command (no `-script`).
-- [ ] ⬜ **Task 3.3**: Kotlin and Rust lint output directory: one shared
+- [x] ✅ **Task 3.3**: Kotlin and Rust lint output directory: one shared
   per-process unpredictable destination from `strategies/lint/common.py`,
   not a fixed `/tmp` name.
-- [ ] ⬜ **Task 3.4**: `utils/cron_cadence.py` uses `unique_temp_path` from
+- [x] ✅ **Task 3.4**: `utils/cron_cadence.py` uses `unique_temp_path` from
   `utils/temp_names.py`; the `O_EXCL` private-mode open stays.
-- [ ] ⬜ **Task 3.5**: `pipe_blocker` strategies — the eight dead
+- [x] ✅ **Task 3.5**: `pipe_blocker` strategies — the eight dead
   `get_acceptance_tests()` methods are either aggregated by
   `PipeBlockerHandler` with `dispatch_as_bash=True` or deleted with their
-  non-empty-list tests.
-- [ ] ⬜ **Task 3.6**: `block_report/fingerprints.py` — one WARNING when the
+  non-empty-list tests. Aggregated: all eight drive cleanly as Bash
+  payloads, so none had to be deleted.
+- [x] ✅ **Task 3.6**: `block_report/fingerprints.py` — one WARNING when the
   uncached rule-index branch is taken, naming the missing `ProjectContext`
   precondition.
-- [ ] ⬜ **Task 3.7**: Drop the redundant `str()` around `scratch_path()` in
-  every strategy file.
+- [x] ✅ **Task 3.7**: Drop the redundant `str()` around `scratch_path()` in
+  every strategy file. Widened to the nine handler modules carrying the
+  same wrapper, so a later consistency sweep does not rediscover them.
 
 ### Phase 4: handlers residue (review-handlers suggestions 1 and 3)
 

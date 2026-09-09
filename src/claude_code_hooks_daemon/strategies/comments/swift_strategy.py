@@ -56,7 +56,7 @@ class SwiftCommentStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "Example.swift")),
+                "file_path": scratch_path(_FIXTURE_DIR, "Example.swift"),
                 "content": (
                     'let version = "5.9.3" // Prior 5.9.2: fixed a race. Prior '
                     "5.9.1: original broken behaviour.\n"

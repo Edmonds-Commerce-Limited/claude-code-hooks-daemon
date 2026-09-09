@@ -67,7 +67,7 @@ class SwiftQaSuppressionStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "Example.swift")),
+                "file_path": scratch_path(_FIXTURE_DIR, "Example.swift"),
                 "content": "// swiftlint:" + "disable" + " force_cast\nlet x = obj as! String",
             },
         )

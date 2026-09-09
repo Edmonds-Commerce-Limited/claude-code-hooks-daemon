@@ -89,14 +89,14 @@ class ShellErrorHidingStrategy:
         bad_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "bad.sh")),
+                "file_path": scratch_path(_FIXTURE_DIR, "bad.sh"),
                 "content": "#!/bin/bash\nsome_command || true\n",
             },
         )
         good_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "good.sh")),
+                "file_path": scratch_path(_FIXTURE_DIR, "good.sh"),
                 "content": "#!/bin/bash\nset -euo pipefail\ncmd || { echo failed >&2; exit 1; }\n",
             },
         )

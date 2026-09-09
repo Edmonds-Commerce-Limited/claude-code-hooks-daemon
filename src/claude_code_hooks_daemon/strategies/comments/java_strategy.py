@@ -51,7 +51,7 @@ class JavaCommentStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": str(scratch_path(_FIXTURE_DIR, "Example.java")),
+                "file_path": scratch_path(_FIXTURE_DIR, "Example.java"),
                 "content": (
                     'public static final String VERSION = "11.0.3"; // Prior '
                     "11.0.2: fixed a race. Prior 11.0.1: original broken "
