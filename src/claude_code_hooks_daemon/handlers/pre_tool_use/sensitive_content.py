@@ -35,6 +35,7 @@ last two part of this ONE guard rather than a sibling):
 
 import logging
 import re
+import shlex
 from pathlib import Path
 from typing import Any, ClassVar, Final, NamedTuple
 
@@ -141,6 +142,36 @@ _GIT_COMMIT_SUBCOMMAND: Final[str] = "commit"
 _COMMIT_ALL_LONG_FLAG: Final[str] = "--all"
 _COMMIT_ALL_SHORT_LETTER: Final[str] = "a"
 
+# Everything after `--` is an operand, so a pathspec named `-a` is a file.
+_END_OF_OPTIONS: Final[str] = "--"
+
+# Short options of `git commit` that CONSUME a value: the letters after one of
+# these inside a cluster belong to that value, not to another flag, so
+# `-mall day` is a message and not `--all`. The first set's value is REQUIRED,
+# so a cluster ending there takes the next token too (`-m msg`); `-S`/`-u`
+# take an optional value, which git accepts only attached.
+_COMMIT_SHORT_FLAGS_WITH_REQUIRED_VALUE: Final[str] = "mcCFt"
+_COMMIT_SHORT_FLAGS_WITH_OPTIONAL_VALUE: Final[str] = "Su"
+
+# Long options of `git commit` whose value is a SEPARATE token: the only
+# places a leading dash can appear without being a flag of its own.
+_COMMIT_LONG_FLAGS_WITH_VALUE: Final[frozenset[str]] = frozenset(
+    {
+        "--message",
+        "--file",
+        "--template",
+        "--author",
+        "--date",
+        "--cleanup",
+        "--reuse-message",
+        "--reedit-message",
+        "--fixup",
+        "--squash",
+        "--trailer",
+        "--pathspec-from-file",
+    }
+)
+
 # Staged-content bounds (Plan 00252 Task 3.2: decide the limit here rather
 # than meet it as a timeout in the field). A single file whose ADDED lines
 # exceed the per-file bound is stood down and logged by path; once the
@@ -161,6 +192,23 @@ _DIFF_HEADER_PREFIX: Final[str] = "diff --git "
 _DIFF_ADDED_PREFIX: Final[str] = "+"
 _DIFF_FILE_HEADER_PREFIX: Final[str] = "+++ "
 _DIFF_PATH_PREFIX: Final[str] = "b/"
+
+# The C escapes git writes when it quotes a path (`quote_c_style`), plus its
+# three-digit octal form for any byte outside printable ASCII. Decoding is a
+# byte operation: `\303\251` is ONE character in UTF-8, not two.
+_C_QUOTE_ESCAPES: Final[dict[str, int]] = {
+    "a": 0x07,
+    "b": 0x08,
+    "f": 0x0C,
+    "n": 0x0A,
+    "r": 0x0D,
+    "t": 0x09,
+    "v": 0x0B,
+    "\\": 0x5C,
+    '"': 0x22,
+}
+_OCTAL_ESCAPE_DIGITS: Final[int] = 3
+_OCTAL_DIGITS: Final[str] = "01234567"
 
 # `gh` subcommands that PUBLISH a body to GitHub. `view`/`list`/`checkout`
 # read; `gh api` is deliberately outside this surface (its `-F` means a
@@ -186,6 +234,29 @@ _PATTERN_KEY_PATTERN: Final[str] = "pattern"
 _PATTERN_KEY_DESCRIPTION: Final[str] = "description"
 
 
+class _DispatchKey(NamedTuple):
+    """What tells one tool call's haystacks apart from another's.
+
+    Derived from the call's own CONTENT, never from the address of the dict
+    carrying it. ``id()`` is unique only among LIVE objects, and the daemon
+    frees each event's dict when its dispatch ends -- so a later dict
+    allocated at that address compares equal to an address-derived key and
+    the handler answers the new event from the previous event's text. The
+    daemon also dispatches on a thread pool, so one handler instance is
+    genuinely shared between concurrently allocating events.
+
+    ``cwd`` is part of the key because the staged-diff surface belongs to a
+    REPOSITORY: the same commit command in another worktree is a different
+    call with different content.
+    """
+
+    session_id: str
+    cwd: str
+    tool_name: str
+    subject: str
+    body: str
+
+
 class _Haystack(NamedTuple):
     """One piece of text a tool call would introduce, and what to call it.
 
@@ -200,31 +271,135 @@ class _Haystack(NamedTuple):
     text: str
 
 
+def _shell_tokens(command: str) -> list[str]:
+    """Shell tokens of ``command``, falling back to whitespace splitting.
+
+    An unbalanced quote is not something the shell would run either, so
+    ``shlex`` raising means there is no correct tokenisation to be had. The
+    naive split still locates the subcommand, and reading an extra flag out of
+    it scans MORE than the commit records rather than less -- the safe
+    direction for a guard.
+    """
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return command.split()
+
+
+def _read_short_cluster(letters: str) -> tuple[bool, bool]:
+    """``(cluster carries -a, cluster consumes the next token)``.
+
+    A short cluster ends at the first letter that takes a value: everything
+    after it is that value. Reading straight through instead is how a
+    ``-m``-attached message was mined for flags.
+    """
+    for position, letter in enumerate(letters):
+        if letter == _COMMIT_ALL_SHORT_LETTER:
+            return True, False
+        if letter in _COMMIT_SHORT_FLAGS_WITH_OPTIONAL_VALUE:
+            return False, False
+        if letter in _COMMIT_SHORT_FLAGS_WITH_REQUIRED_VALUE:
+            return False, position == len(letters) - 1
+    return False, False
+
+
+def _commits_working_tree(options: list[str]) -> bool:
+    """True when this ``git commit`` option run carries ``-a``/``--all``.
+
+    Walks the options rather than testing each token independently, because
+    whether a token IS an option depends on what came before it: an option's
+    value, and anything after ``--``, are operands.
+    """
+    index = 0
+    while index < len(options):
+        option = options[index]
+        index += 1
+        if option == _END_OF_OPTIONS:
+            return False
+        if option == _COMMIT_ALL_LONG_FLAG:
+            return True
+        if option.startswith("--"):
+            if option in _COMMIT_LONG_FLAGS_WITH_VALUE:
+                index += 1
+            continue
+        if len(option) < 2 or not option.startswith("-"):
+            continue
+        carries_all, consumes_next = _read_short_cluster(option[1:])
+        if carries_all:
+            return True
+        if consumes_next:
+            index += 1
+    return False
+
+
 def _is_git_commit(command: str) -> tuple[bool, bool]:
     """``(is a git commit, commits the working tree via -a/--all)``.
 
-    The same token walk as :meth:`SensitiveContentHandler._writes_git_metadata`
-    so the two can never disagree about where the subcommand sits.
+    Locates the subcommand exactly as
+    :meth:`SensitiveContentHandler._writes_git_metadata` does, but over SHELL
+    tokens: this function also reads option VALUES, and a value is only
+    distinguishable from a flag once quoting is applied. Splitting on
+    whitespace made every dashed word of a quoted message an option, so
+    ``git commit -m 'fix the -a flag handling'`` diffed the whole dirty
+    working tree and let an UNSTAGED file deny a commit that never included
+    it.
     """
-    tokens = command.split()
+    tokens = _shell_tokens(command)
     for position, token in enumerate(tokens[:-1]):
         if token != _GIT_EXECUTABLE and not token.endswith(f"/{_GIT_EXECUTABLE}"):
             continue
         subcommand_index = git_subcommand_index(tokens, position)
         if subcommand_index is None or tokens[subcommand_index] != _GIT_COMMIT_SUBCOMMAND:
             continue
-        options = tokens[subcommand_index + 1 :]
-        commits_all = any(
-            option == _COMMIT_ALL_LONG_FLAG
-            or (
-                option.startswith("-")
-                and not option.startswith("--")
-                and _COMMIT_ALL_SHORT_LETTER in option[1:]
-            )
-            for option in options
-        )
-        return True, commits_all
+        return True, _commits_working_tree(tokens[subcommand_index + 1 :])
     return False, False
+
+
+def _is_octal_escape(text: str) -> bool:
+    """True when ``text`` is a complete three-digit octal escape body."""
+    return len(text) == _OCTAL_ESCAPE_DIGITS and all(digit in _OCTAL_DIGITS for digit in text)
+
+
+def _unquote_diff_path(raw: str) -> str:
+    """Decode git's C-quoted header path back to the real name.
+
+    ``core.quotePath`` defaults to true, so a path carrying a non-ASCII byte,
+    a quote, a backslash or a tab arrives as ``"b/caf\\303\\251.md"``: octal
+    escapes, and the ``b/`` prefix INSIDE the quotes where ``removeprefix``
+    cannot reach it. An undecoded key then matches no exclude glob and no
+    secret-list path, so an allowlist stops working on a file-name property
+    nobody would connect to it.
+
+    An unquoted path is returned untouched: a backslash there is a literal
+    character of the name, not an escape.
+    """
+    if len(raw) < 2 or not raw.startswith('"') or not raw.endswith('"'):
+        return raw
+    body = raw[1:-1]
+    decoded = bytearray()
+    index = 0
+    while index < len(body):
+        char = body[index]
+        index += 1
+        if char != "\\":
+            decoded.extend(char.encode(_BODY_FILE_ENCODING))
+            continue
+        if index >= len(body):
+            # A trailing lone backslash is not an escape git would emit.
+            decoded.extend(b"\\")
+            break
+        escape = body[index]
+        octal = body[index : index + _OCTAL_ESCAPE_DIGITS]
+        if escape in _C_QUOTE_ESCAPES:
+            decoded.append(_C_QUOTE_ESCAPES[escape])
+            index += 1
+        elif _is_octal_escape(octal):
+            decoded.append(int(octal, 8))
+            index += _OCTAL_ESCAPE_DIGITS
+        else:
+            decoded.extend(f"\\{escape}".encode(_BODY_FILE_ENCODING))
+            index += 1
+    return decoded.decode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS)
 
 
 def _added_lines_by_path(diff_output: str) -> dict[str, str]:
@@ -242,7 +417,7 @@ def _added_lines_by_path(diff_output: str) -> dict[str, str]:
             continue
         if line.startswith(_DIFF_FILE_HEADER_PREFIX):
             target = line[len(_DIFF_FILE_HEADER_PREFIX) :].strip()
-            current = target.removeprefix(_DIFF_PATH_PREFIX)
+            current = _unquote_diff_path(target).removeprefix(_DIFF_PATH_PREFIX)
             added.setdefault(current, "")
             continue
         if current is not None and line.startswith(_DIFF_ADDED_PREFIX):
@@ -310,11 +485,12 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         self._public_patterns: list[dict[str, str]] = []
         self._secret_word_list_path: str | None = None
         self._exclude_paths: list[str] | None = None
-        # Per-dispatch cache: matches() and handle() see the same hook_input,
-        # so the staged diff is read ONCE and a body file is read ONCE. Keyed
-        # on the hook_input object itself -- a fresh dispatch is a fresh dict.
-        self._cached_input_id: int | None = None
-        self._cached_haystacks: list[_Haystack] = []
+        # Per-dispatch bridge: matches() and handle() see the same call, so
+        # the staged diff costs ONE subprocess and a body file ONE read. Key
+        # and value live in a SINGLE attribute so a concurrent dispatch can
+        # never pair one call's key with another call's haystacks -- one
+        # assignment is atomic, two are not.
+        self._cached_dispatch: tuple[_DispatchKey, list[_Haystack]] | None = None
 
     def _get_content(self, hook_input: dict[str, Any]) -> str:
         """Content to check: full content for Write, only the ADDED text for Edit.
@@ -380,7 +556,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        haystacks = self._haystacks_for(hook_input)
+        haystacks = self._compute_and_cache(hook_input)
         if not haystacks:
             return False
 
@@ -390,21 +566,57 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         terms = self._secret_terms()
         return any(sr.find_first_match_index(hay.text, terms) is not None for hay in haystacks)
 
-    def _haystacks_for(self, hook_input: dict[str, Any]) -> list[_Haystack]:
-        """Every piece of text this tool call would introduce, or ``[]``.
+    def _dispatch_key(self, hook_input: dict[str, Any]) -> _DispatchKey:
+        """Identify this tool call by what it carries, never by where it lives."""
+        tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
+        command = str(tool_input.get(_FIELD_COMMAND, ""))
+        return _DispatchKey(
+            session_id=str(hook_input.get(HookInputField.SESSION_ID, "")),
+            cwd=str(hook_input.get(HookInputField.CWD, "")),
+            tool_name=str(hook_input.get(HookInputField.TOOL_NAME, "")),
+            subject=command or str(tool_input.get(_FIELD_FILE_PATH, "")),
+            body=self._get_content(hook_input),
+        )
 
-        The one place tool dispatch happens, so ``matches()`` and ``handle()``
-        can never disagree about what was inspected — a divergence there would
-        deny with a reason derived from text the match was not based on. The
-        result is cached per dispatch because two of the surfaces cost a
-        subprocess or a file read.
+    def _compute_and_cache(self, hook_input: dict[str, Any]) -> list[_Haystack]:
+        """Compute this call's haystacks, leaving them for its own ``handle()``.
+
+        Deliberately never READS the cache. The entry is a one-shot bridge
+        across a single dispatch, not a memo across calls: the index can be
+        restaged between two textually identical commit commands, so a second
+        dispatch pays for its own diff rather than inheriting a stale one.
         """
-        if self._cached_input_id == id(hook_input):
-            return self._cached_haystacks
         haystacks = self._compute_haystacks(hook_input)
-        self._cached_input_id = id(hook_input)
-        self._cached_haystacks = haystacks
+        self._cached_dispatch = (self._dispatch_key(hook_input), haystacks)
         return haystacks
+
+    def _take_cached_haystacks(self, hook_input: dict[str, Any]) -> list[_Haystack]:
+        """The haystacks ``matches()`` computed for THIS call, else fresh ones.
+
+        ``matches()`` and ``handle()`` must never disagree about what was
+        inspected — a divergence there denies with a reason derived from text
+        the match was not based on — but agreement is only worth having when
+        the two are looking at the SAME call, which is what the key check
+        establishes. Reading the entry consumes it: ``handle()`` is its last
+        reader, and the text it holds (staged file content, a body file) is
+        exactly what this handler exists to keep out of sight.
+        """
+        cached = self._cached_dispatch
+        if cached is not None and cached[0] == self._dispatch_key(hook_input):
+            self._cached_dispatch = None
+            return cached[1]
+        return self._compute_haystacks(hook_input)
+
+    def commit_side_effects(self, hook_input: dict[str, Any], chain_decision: Decision) -> None:
+        """Release the text this call introduced, whatever the chain decided.
+
+        ``matches()`` can be the last method a dispatch calls here — another
+        terminal handler denies first, so ``handle()`` never runs and never
+        consumes the entry. The chain's post-decision hook is then the only
+        place that retained content is dropped from an instance that lives
+        for the whole daemon process.
+        """
+        self._cached_dispatch = None
 
     def _compute_haystacks(self, hook_input: dict[str, Any]) -> list[_Haystack]:
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
@@ -469,12 +681,38 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             if not path_is_file(path, unreadable_means=False):
                 _LOGGER.debug("sensitive_content: skipping unreadable gh body file %s", path)
                 continue
+            body = self._read_body_file(path)
+            if not body:
+                continue
+            haystacks.append(_Haystack(subject=f"gh body file {path}", text=body))
+        return haystacks
+
+    @staticmethod
+    def _read_body_file(path: Path) -> str:
+        """Text of ``path``, or ``""`` when there is nothing to judge.
+
+        ``path_is_file(unreadable_means=False)`` answers False only when the
+        STAT fails, and statting a file is not reading it: a file whose own
+        mode denies read stats perfectly well, and so does one unlinked
+        between that check and this read. Letting either raise takes the
+        WHOLE guard down for the command -- ``_compute_haystacks`` never
+        returns, so the inline ``--body`` goes unjudged too -- which is why
+        this degrades per file, the way a non-zero ``git diff`` already does.
+
+        An empty string is the same answer for an unreadable file, an
+        oversized one and an empty one: no text this call would publish, so
+        nothing for the caller to scan. The failure is logged with the path
+        and the error, never swallowed.
+        """
+        try:
             if path.stat().st_size > _MAX_BODY_FILE_BYTES:
                 _LOGGER.info("sensitive_content: gh body file %s exceeds the size bound", path)
-                continue
-            text = path.read_bytes().decode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS)
-            haystacks.append(_Haystack(subject=f"gh body file {path}", text=text))
-        return haystacks
+                return ""
+            raw = path.read_bytes()
+        except OSError as error:
+            _LOGGER.debug("sensitive_content: gh body file %s could not be read: %s", path, error)
+            return ""
+        return raw.decode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS)
 
     def _staged_content_haystacks(
         self, hook_input: dict[str, Any], commits_all: bool
@@ -660,7 +898,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return [_RULE_PUBLIC_PATTERN, _RULE_SECRET_TERM]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        haystacks = self._haystacks_for(hook_input)
+        haystacks = self._take_cached_haystacks(hook_input)
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
 
         for hay in haystacks:

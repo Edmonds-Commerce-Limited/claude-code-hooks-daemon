@@ -1022,3 +1022,30 @@ class TestDestructiveGitUpdateRefBranchDelete:
             "tool_input": {"command": "git -C /srv/project update-ref -d refs/heads/feature"},
         }
         assert handler.matches(hook_input) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git update-ref refs/heads/backup HEAD; echo -d refs/heads/backup",
+            "git update-ref refs/heads/backup HEAD && printf -- '-d refs/heads/x'",
+        ],
+    )
+    def test_a_later_statements_text_does_not_condemn_a_ref_create(self, handler, command):
+        """The pattern must stay inside ONE segment, like its push-force sibling.
+
+        Both statements here are benign: `update-ref` with no `-d` CREATES a
+        ref, and the flag text belongs to a later, unrelated statement. A `.*`
+        spanning `;` and `&&` judges one statement by another's text, so the
+        author sees a deny citing a rule their command does not match — with
+        nothing in it to point at.
+        """
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+        assert handler.matches(hook_input) is False
+
+    def test_the_delete_is_still_blocked_when_it_is_the_later_statement(self, handler):
+        """Scoping to a segment must not lose the segment that IS destructive."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git fetch origin && git update-ref -d refs/heads/feature"},
+        }
+        assert handler.matches(hook_input) is True

@@ -6,6 +6,7 @@ NEVER appear in the deny reason — only a 1-based index into the (gitignored,
 hence meaningless-without-it) file.
 """
 
+import logging
 import re
 import subprocess
 from pathlib import Path
@@ -671,6 +672,21 @@ class TestStagedContentSurface:
         assert handler.matches(_commit_input(repo, 'git commit -am "x"')) is True
         assert handler.matches(_commit_input(repo, 'git commit --all -m "x"')) is True
 
+    def test_a_short_flag_quoted_in_the_message_does_not_diff_the_working_tree(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """A message is a VALUE, not the flags it happens to quote.
+
+        Reading ``-a`` out of the message diffs against HEAD -- the whole
+        dirty working tree -- so an UNSTAGED file denies a commit that never
+        included it, naming a path the author cannot find in the index.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        (repo / "README.md").write_text("# repo\nalpha-term\n")
+
+        command = "git commit -m 'fix the -a flag handling'"
+        assert handler.matches(_commit_input(repo, command)) is False
+
     def test_binary_blob_is_skipped(self, repo: Path, tmp_path: Path) -> None:
         handler = _wordlist(tmp_path, "alpha-term")
         _stage(repo, "blob.bin", b"\x00\x01alpha-term\x00\xff")
@@ -686,6 +702,38 @@ class TestStagedContentSurface:
         _stage(repo, "big.txt", big + "alpha-term\n")
 
         assert handler.matches(_commit_input(repo)) is False
+
+    def test_a_non_ascii_staged_path_is_named_by_its_real_name(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """``core.quotePath`` defaults to true, so git C-quotes such a path."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/café.md", "alpha-term\n")
+
+        result = handler.handle(_commit_input(repo))
+
+        assert result.decision == Decision.DENY
+        assert "notes/café.md" in (result.reason or "")
+        assert "\\303" not in (result.reason or "")
+
+    def test_an_excluded_non_ascii_path_is_still_excluded(self, repo: Path, tmp_path: Path) -> None:
+        """The consequence of leaving the path encoded, and the reason it matters.
+
+        The map key becomes ``repo_root / relpath``, so a key that kept its
+        quotes and its ``b/`` prefix matches no exclude glob and no secret-list
+        path: a project that exempted a fixture tree has that exemption
+        silently bypassed for exactly the files whose NAMES carry a non-ASCII
+        byte -- a property nobody would connect to an allowlist.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        handler._exclude_paths = ["tests/fixtures/café.md"]
+        _stage(repo, "tests/fixtures/café.md", "alpha-term\n")
+
+        with patch(
+            "claude_code_hooks_daemon.utils.path_exclusion.resolve_project_root",
+            return_value=str(repo),
+        ):
+            assert handler.matches(_commit_input(repo)) is False
 
     def test_excluded_path_is_not_inspected(self, repo: Path, tmp_path: Path) -> None:
         handler = _wordlist(tmp_path, "alpha-term")
@@ -727,6 +775,106 @@ class TestStagedContentSurface:
             assert handler.handle(hook_input).decision == Decision.DENY
         diff_calls = [c for c in spy.call_args_list if "diff" in c.args]
         assert len(diff_calls) == 1
+
+
+class TestQuotedDiffPathParsing:
+    """git C-quotes a diff header path, and the quotes swallow the ``b/`` prefix.
+
+    ``core.quotePath`` defaults to true, so any path with a non-ASCII byte, a
+    quote, a backslash or a tab arrives as ``"b/caf\\303\\251.md"``.
+    ``removeprefix("b/")`` cannot strip a prefix that sits INSIDE the opening
+    quote, so the map key kept both -- and every path-based check downstream
+    (exclusions, the secret-list self-exemption) stopped matching.
+    """
+
+    def test_a_non_ascii_path_is_decoded_back_to_the_real_name(self) -> None:
+        diff = (
+            'diff --git "a/caf\\303\\251.md" "b/caf\\303\\251.md"\n'
+            "new file mode 100644\n"
+            "--- /dev/null\n"
+            '+++ "b/caf\\303\\251.md"\n'
+            "@@ -0,0 +1 @@\n"
+            "+alpha-term\n"
+        )
+
+        assert sensitive_content_module._added_lines_by_path(diff) == {"café.md": "alpha-term\n"}
+
+    @pytest.mark.parametrize(
+        ("quoted", "expected"),
+        [
+            ('"b/plain.md"', "plain.md"),
+            ('"b/two\\twords.md"', "two\twords.md"),
+            ('"b/say \\"hi\\".md"', 'say "hi".md'),
+            ('"b/back\\\\slash.md"', "back\\slash.md"),
+            ("b/unquoted.md", "unquoted.md"),
+        ],
+    )
+    def test_each_escape_git_emits_is_decoded(self, quoted: str, expected: str) -> None:
+        diff = f"diff --git x y\n+++ {quoted}\n@@ -0,0 +1 @@\n+line\n"
+
+        assert list(sensitive_content_module._added_lines_by_path(diff)) == [expected]
+
+    def test_an_unquoted_path_is_left_alone(self) -> None:
+        """A backslash in an UNQUOTED header is a literal, not an escape."""
+        diff = "diff --git x y\n+++ b/a\\tb.md\n@@ -0,0 +1 @@\n+line\n"
+
+        assert list(sensitive_content_module._added_lines_by_path(diff)) == ["a\\tb.md"]
+
+
+class TestCommitAllFlagParsing:
+    """``_is_git_commit`` decides WHAT a commit would record, so it must read
+    the command the way the shell does.
+
+    ``-a``/``--all`` switches the staged-content scan from ``--cached`` (the
+    index) to ``HEAD`` (the whole dirty working tree). A bare ``str.split()``
+    cannot see quoting, so every whitespace-delimited word of a quoted message
+    was read as an option: any word starting with one dash and containing an
+    ``a`` turned the scan onto files the commit was never going to record.
+    """
+
+    @pytest.mark.parametrize(
+        ("command", "expected_all"),
+        [
+            ("git commit -m 'fix the -a flag handling'", False),
+            ('git commit -m "document -a and -am shorthands"', False),
+            ("git commit -m 'plain message'", False),
+            # A sticky short-option value: `-mall-fixed` is a MESSAGE, and the
+            # letters after the `m` belong to it, not to another flag.
+            ("git commit -m'add auth to the api'", False),
+            ("git commit --message='refactor -a handling'", False),
+            ("git commit -am 'genuine all'", True),
+            ("git commit -a -m 'genuine all'", True),
+            ("git commit --all -m 'genuine all'", True),
+            # The flag can also FOLLOW the message, so the walk cannot simply
+            # stop at the first `-m` and call the rest a value.
+            ("git commit -m 'genuine all' -a", True),
+            ("git -C /srv/project commit -am 'global option first'", True),
+        ],
+    )
+    def test_commits_all_is_read_from_options_only(self, command: str, expected_all: bool) -> None:
+        is_commit, commits_all = sensitive_content_module._is_git_commit(command)
+        assert is_commit is True
+        assert commits_all is expected_all
+
+    def test_unbalanced_quote_falls_back_to_whitespace_splitting(self) -> None:
+        """A command the shell itself would reject still has to be judged.
+
+        ``shlex`` raises on an unterminated quote; standing down entirely
+        would drop the staged-content surface for it, so the naive split is
+        the fallback -- over-reading a flag is the safe direction.
+        """
+        is_commit, _ = sensitive_content_module._is_git_commit("git commit -m 'unterminated")
+        assert is_commit is True
+
+    def test_a_non_commit_subcommand_is_not_a_commit(self) -> None:
+        assert sensitive_content_module._is_git_commit("git tag -a v1 -m 'note'") == (False, False)
+
+    def test_pathspecs_after_the_end_of_options_marker_are_not_flags(self) -> None:
+        """After ``--`` git reads operands, so a file called ``-a`` is a file."""
+        is_commit, commits_all = sensitive_content_module._is_git_commit(
+            "git commit -m 'msg' -- -a"
+        )
+        assert (is_commit, commits_all) == (True, False)
 
 
 class TestGhBodySurface:
@@ -823,6 +971,165 @@ class TestGhBodySurface:
         handler = _wordlist(tmp_path, "alpha-term")
 
         assert handler.matches(_bash_input("gh issue comment 12 --body-file -")) is False
+
+    @pytest.mark.parametrize("failure", [PermissionError, FileNotFoundError])
+    def test_a_body_file_that_cannot_be_read_is_skipped_and_logged(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        failure: type[OSError],
+    ) -> None:
+        """Statting a file is not reading it, and the gap raises.
+
+        ``path_is_file(unreadable_means=False)`` answers False only when the
+        STAT fails; a file whose own mode denies read stats perfectly well, and
+        so does one unlinked between the check and the read. The raise escapes
+        ``matches()``, where the chain catching it does not rescue this guard:
+        with ``strict_mode: false`` it silently stops applying, and with
+        ``strict_mode: true`` it denies legitimate work.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        handler._secret_terms()  # cache the word list before read_bytes is broken
+        body = tmp_path / "body.md"
+        body.write_text("alpha-term\n")
+        hook_input = _bash_input(f"gh issue comment 12 --body-file {body}")
+
+        with caplog.at_level(logging.DEBUG, logger=sensitive_content_module.__name__):
+            with patch.object(Path, "read_bytes", side_effect=failure(13, "denied")):
+                assert handler.matches(hook_input) is False
+
+        assert str(body) in caplog.text
+
+    def test_an_unreadable_body_file_does_not_disarm_the_rest_of_the_command(
+        self, tmp_path: Path
+    ) -> None:
+        """The whole guard used to stand down, because ``_compute_haystacks``
+        never returned -- so the INLINE body went unjudged too."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        handler._secret_terms()
+        body = tmp_path / "body.md"
+        body.write_text("nothing to see\n")
+        command = f"gh issue comment 12 --body 'alpha-term' --body-file {body}"
+
+        with patch.object(Path, "read_bytes", side_effect=PermissionError(13, "denied")):
+            assert handler.matches(_bash_input(command)) is True
+
+
+class TestPerDispatchHaystackCache:
+    """The ``matches()``->``handle()`` bridge must never answer one call from another's text.
+
+    The cache exists so a staged diff (a subprocess) and a body file (a read)
+    are paid for ONCE per dispatch. Keying it on ``id(hook_input)`` was wrong:
+    ``id`` is unique only among LIVE objects, and the daemon frees each
+    event's dict when the dispatch ends -- so a later dict allocated at that
+    address compares EQUAL to the cached key and the handler answers the NEW
+    event from the PREVIOUS event's haystacks. The daemon also dispatches on
+    a thread pool, so one handler instance really is shared across
+    concurrently allocating events.
+
+    The failure is silent and bidirectional: a clean call denied on another
+    call's match, or a dirty call allowed on another call's clean text. Every
+    test here forces the address collision deterministically rather than
+    waiting for the allocator to produce one.
+    """
+
+    @staticmethod
+    def _force_one_address(monkeypatch: pytest.MonkeyPatch) -> None:
+        """Make every ``id()`` in the handler module answer the same address.
+
+        Shadowing the builtin in the module namespace reproduces an address
+        collision exactly, with no dependence on CPython's allocator. Once
+        the cache key is content-derived nothing in the module calls ``id``
+        at all, which is precisely what these tests assert.
+        """
+        monkeypatch.setattr(sensitive_content_module, "id", lambda _object: 1, raising=False)
+
+    def test_a_new_input_at_the_same_address_is_judged_on_its_own_text(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        self._force_one_address(monkeypatch)
+
+        assert handler.matches(_bash_input('git tag -m "alpha-term" v1')) is True
+        assert handler.matches(_bash_input('git tag -m "ordinary release note" v2')) is False
+
+    def test_handle_does_not_deny_a_clean_call_on_the_previous_calls_match(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Direction one: a clean commit denied, naming another call's pattern."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        self._force_one_address(monkeypatch)
+
+        assert handler.matches(_bash_input('git tag -m "alpha-term" v1')) is True
+        assert handler.handle(_bash_input('git tag -m "ordinary note" v2')).decision == (
+            Decision.ALLOW
+        )
+
+    def test_a_term_is_not_waved_through_on_a_previous_clean_dispatch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Direction two -- the one that matters: the term reaching the commit."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        self._force_one_address(monkeypatch)
+
+        assert handler.matches(_bash_input('git tag -m "ordinary note" v1')) is False
+        dirty = _bash_input('git tag -m "alpha-term" v2')
+        assert handler.matches(dirty) is True
+        assert handler.handle(dirty).decision == Decision.DENY
+
+    def test_the_same_command_in_another_repo_is_judged_against_that_repo(
+        self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The staged diff belongs to a repository, so ``cwd`` disambiguates too."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/report.md", "alpha-term\n")
+        clean_repo = tmp_path / "clean-repo"
+        clean_repo.mkdir()
+        _git(clean_repo, "init", "-q")
+        _git(clean_repo, "config", "user.email", "t@example.com")
+        _git(clean_repo, "config", "user.name", "T")
+        self._force_one_address(monkeypatch)
+
+        assert handler.matches(_commit_input(repo)) is True
+        assert handler.matches(_commit_input(clean_repo)) is False
+
+    def test_handle_reuses_the_cache_for_the_call_matches_just_judged(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """The bridge still works: one staged-diff subprocess per dispatch.
+
+        Same guarantee as ``test_matches_and_handle_agree_on_one_diff_read``,
+        asserted here on the ALLOW path -- a clean commit must not pay for the
+        diff twice either.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/clean.md", "nothing to see\n")
+        hook_input = _commit_input(repo)
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.run_git",
+            wraps=sensitive_content_module.run_git,
+        ) as spy:
+            assert handler.matches(hook_input) is False
+            assert handler.handle(hook_input).decision == Decision.ALLOW
+        assert len([call for call in spy.call_args_list if "diff" in call.args]) == 1
+
+    def test_commit_side_effects_drops_the_retained_text(self, repo: Path, tmp_path: Path) -> None:
+        """Nothing a call introduced is kept on the shared instance afterwards.
+
+        ``matches()`` can be the last method a dispatch calls (another
+        terminal handler denies first), so the chain's post-decision hook is
+        where the retained staged content -- which is exactly the text this
+        handler exists to keep out of sight -- is released.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/report.md", "alpha-term\n")
+        hook_input = _commit_input(repo)
+        assert handler.matches(hook_input) is True
+
+        handler.commit_side_effects(hook_input, Decision.DENY)
+
+        assert handler._cached_dispatch is None
 
 
 class TestGetClaudeMd:
