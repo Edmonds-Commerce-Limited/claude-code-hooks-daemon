@@ -682,14 +682,14 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 _LOGGER.debug("sensitive_content: skipping unreadable gh body file %s", path)
                 continue
             body = self._read_body_file(path)
-            if body is None:
+            if not body:
                 continue
             haystacks.append(_Haystack(subject=f"gh body file {path}", text=body))
         return haystacks
 
     @staticmethod
-    def _read_body_file(path: Path) -> str | None:
-        """Text of ``path``, or None when it cannot be read or is too big.
+    def _read_body_file(path: Path) -> str:
+        """Text of ``path``, or ``""`` when there is nothing to judge.
 
         ``path_is_file(unreadable_means=False)`` answers False only when the
         STAT fails, and statting a file is not reading it: a file whose own
@@ -698,15 +698,20 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         WHOLE guard down for the command -- ``_compute_haystacks`` never
         returns, so the inline ``--body`` goes unjudged too -- which is why
         this degrades per file, the way a non-zero ``git diff`` already does.
+
+        An empty string is the same answer for an unreadable file, an
+        oversized one and an empty one: no text this call would publish, so
+        nothing for the caller to scan. The failure is logged with the path
+        and the error, never swallowed.
         """
         try:
             if path.stat().st_size > _MAX_BODY_FILE_BYTES:
                 _LOGGER.info("sensitive_content: gh body file %s exceeds the size bound", path)
-                return None
+                return ""
             raw = path.read_bytes()
         except OSError as error:
             _LOGGER.debug("sensitive_content: gh body file %s could not be read: %s", path, error)
-            return None
+            return ""
         return raw.decode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS)
 
     def _staged_content_haystacks(

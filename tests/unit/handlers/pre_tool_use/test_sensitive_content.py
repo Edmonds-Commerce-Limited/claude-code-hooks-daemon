@@ -716,9 +716,7 @@ class TestStagedContentSurface:
         assert "notes/café.md" in (result.reason or "")
         assert "\\303" not in (result.reason or "")
 
-    def test_an_excluded_non_ascii_path_is_still_excluded(
-        self, repo: Path, tmp_path: Path
-    ) -> None:
+    def test_an_excluded_non_ascii_path_is_still_excluded(self, repo: Path, tmp_path: Path) -> None:
         """The consequence of leaving the path encoded, and the reason it matters.
 
         The map key becomes ``repo_root / relpath``, so a key that kept its
@@ -853,9 +851,7 @@ class TestCommitAllFlagParsing:
             ("git -C /srv/project commit -am 'global option first'", True),
         ],
     )
-    def test_commits_all_is_read_from_options_only(
-        self, command: str, expected_all: bool
-    ) -> None:
+    def test_commits_all_is_read_from_options_only(self, command: str, expected_all: bool) -> None:
         is_commit, commits_all = sensitive_content_module._is_git_commit(command)
         assert is_commit is True
         assert commits_all is expected_all
@@ -1118,9 +1114,7 @@ class TestPerDispatchHaystackCache:
             assert handler.handle(hook_input).decision == Decision.ALLOW
         assert len([call for call in spy.call_args_list if "diff" in call.args]) == 1
 
-    def test_commit_side_effects_drops_the_retained_text(
-        self, repo: Path, tmp_path: Path
-    ) -> None:
+    def test_commit_side_effects_drops_the_retained_text(self, repo: Path, tmp_path: Path) -> None:
         """Nothing a call introduced is kept on the shared instance afterwards.
 
         ``matches()`` can be the last method a dispatch calls (another
