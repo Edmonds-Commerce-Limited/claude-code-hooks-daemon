@@ -1,6 +1,6 @@
 # Plan 00364: v3.63.0 release review follow-ups
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-09
 **Owner**: joseph
 **Priority**: Medium
@@ -170,19 +170,27 @@ lives in so each phase can go to one worktree agent.
 
 ### Phase 6: closure
 
-- [ ] ⬜ **Task 6.1**: Full QA 26/26; daemon restart; release-notes callouts
+- [x] ✅ **Task 6.1**: Full QA 26/26; daemon restart; release-notes callouts
   in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` for every user-visible
-  change; plan archived.
+  change; plan archived. One residue found during closure — the worktree
+  setup script aborted silently before its new `hooks-daemon.env` step
+  because it asked a `pip` that a uv venv does not ship — is fixed on Plan
+  00365's branch and recorded in this plan's journal.
 
 ## Success Criteria
 
-- [ ] Every task above ticked, or its decline recorded in Non-Goals.
-- [ ] `./scripts/qa/llm_qa.py all` green.
-- [ ] `bin/hooks-daemon restart` logs no "priority collision" line.
-- [ ] A worktree's `.claude/hooks/pre-tool-use` reaches the worktree's own
+- [x] Every task above ticked, or its decline recorded in Non-Goals.
+- [x] `./scripts/qa/llm_qa.py all` green.
+- [x] `bin/hooks-daemon restart` logs no "priority collision" line.
+- [x] A worktree's `.claude/hooks/pre-tool-use` reaches the worktree's own
   daemon with no environment override.
+- [x] Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/02-repair-names-the-real-failure.md`
+  through `09-qa-audits-fail-loudly-when-they-scanned-nothing.md`.
 
 ## Delivery & Milestones
 
 - Filed after the v3.63.0 release, from the four Step 10 review reports.
-- Phase 1 merged to main at `0560b5ff`.
+- Phase 1 merged to main at `0560b5ff`; Phase 4 at `718e0375`; Phase 3 at
+  `735a4328`; Phase 2 at `befa2c8e`; Phase 5 at `b56c2621`.
+- Closure QA 26/26 on `b56c2621` (21,540 tests, coverage 95.4%).

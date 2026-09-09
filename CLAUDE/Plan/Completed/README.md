@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00334: core doc templates for client projects](00334-core-doc-templates-for-client-projects/PLAN.md) - Complete at `4e78f7c9` + the archiving commit (daemon guidance named client documents no install path created, so a client enforced a workflow whose documentation did not exist; ships three genericised core documents deployed DAEMON-owned beside a seed-once CLIENT-owned override, each gated on the subsystem that NAMES it, and replaces the hand-maintained citation list with a scan)
+
 - [00252: guards for premises no write-time hook sees](00252-guards-for-premises-no-write-time-hook-sees/PLAN.md) - Complete at `772ef675`, `6c9a6f6f` and `7b94bac3` + the archiving commit (the test suite runs in a hermetic git environment, and the secret-term guard scans staged content and `gh` bodies at commit time; client-mode verified)
 
 - [00242: Terminal handlers are a flawed primitive](00242-terminal-handlers-are-a-flawed-primitive/PLAN.md) - Complete at `ab3cab93`…`8804d561` + the archiving commit (terminality is now a property of the DECISION: an ALLOW never ends the chain and a DENY may, with PermissionRequest the one per-event opt-in; collect-all violations ships behind `daemon.chain.collect_all_violations`, default off, measured at ~2 ms; side effects roll back on a deny)

@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00365: markdown_organization — a declared project at any depth](00365-markdown-organization-nested-vendor-and-existing-file-edits/PLAN.md) - In Progress (field report: an `Edit` of an existing `.md` two `vendor/` levels deep is denied and neither a `projects:` declaration nor `extra_allowed_markdown_paths` rescues it; ruling: a `projects:` entry naming the directory as it is, at any depth, must simply work)
 
-- [00364: v3.63.0 release review follow-ups](00364-release-review-followups-v3630/PLAN.md) - In Progress (every non-blocking finding from the four Step 10 review reports — venv-lock misreport, slate check reading git failure as clean, plan-QA commit gate spawning one `git diff` per plan, bracket-range cost, dead pipe_blocker tests — plus the worktree hook wrapper relaying to the main repo's daemon and the priority-20 project-handler collision)
-
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00329: post upgrade truth changes report bloat](00329-post-upgrade-truth-changes-report-bloat/PLAN.md) - Not Started (the upgrade flow's truth-changes reconciliation hands the agent up to 89KB / 74 entries with no bound and no supersession collapsing, so superseded truths are replayed and the step is skimmed rather than performed)
@@ -123,6 +121,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00364: v3.63.0 release review follow-ups](Completed/00364-release-review-followups-v3630/PLAN.md) - Complete at `0560b5ff`…`b56c2621` + the archiving commit (every non-blocking Step 10 finding fixed: venv-lock misreport, slate check reading a git failure as clean, plan-QA gate spawning `git diff` per plan, bracket-range cost, lint temp dirs, dead pipe_blocker tests; a worktree's hooks reach its own daemon; project handler off priority 20; QA audits and runner work from a worktree)
+
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 - [00363: self-matching process watcher blocker](Completed/00363-self-matching-process-watcher-blocker/PLAN.md) - Complete at `003f3036` and `8ae8ac61` + the archiving commit (a process probe whose literal pattern is in the calling shell's own argv, and a wait on `$!` after `setsid`, are denied; Rules A and C shipped in v3.63.0, Rule B holds a callout for the next release)
@@ -183,8 +183,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00335: heredoc receiver policy and review followups](Completed/00335-heredoc-receiver-policy-and-review-followups/PLAN.md) - Complete at `745ff9c5` + the archiving commit (inverting the quoted-heredoc exemption to an allowlist of data sinks closed a fourth executor bypass found by probing, the word-expansion family recorded as unclosable, and the `jq` over-block in one change)
 
-- [00334: core doc templates for client projects](Completed/00334-core-doc-templates-for-client-projects/PLAN.md) - Complete at `4e78f7c9` + the archiving commit (daemon guidance named client documents no install path created, so a client enforced a workflow whose documentation did not exist; ships three genericised core documents deployed DAEMON-owned beside a seed-once CLIENT-owned override, each gated on the subsystem that NAMES it, and replaces the hand-maintained citation list with a scan)
-
 ## Blocked / On Hold Plans
 
 - None. (00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
@@ -236,9 +234,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 365 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 323 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 324 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 19 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 18 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
