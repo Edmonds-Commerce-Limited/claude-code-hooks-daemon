@@ -74,33 +74,33 @@ lives in so each phase can go to one worktree agent.
 
 ### Phase 2: install / plan_qa / docs_qa / skills (review-install NOTE 3 + suggestions)
 
-- [ ] ⬜ **Task 2.1**: `plan_qa/gitfacts.py` — memoise `staged_changes()` on the
+- [x] ✅ **Task 2.1**: `plan_qa/gitfacts.py` — memoise `staged_changes()` on the
   instance; `row_folder_bijection._folder_findings` computes `_level` only
   when a finding is emitted. Regression test asserts one `git diff` spawn.
-- [ ] ⬜ **Task 2.2**: `install/client_validator.py` — compose the
+- [x] ✅ **Task 2.2**: `install/client_validator.py` — compose the
   `echd-capture` path from `DaemonPath`/`bin_wrapper` constants.
-- [ ] ⬜ **Task 2.3**: `install/handler_key_audit.py` — test pins
+- [x] ✅ **Task 2.3**: `install/handler_key_audit.py` — test pins
   `_DEFAULT_PSEUDO_EVENT_BLOCKS` to the reference config; promote
   `ConfigValidator._find_similar_names` to a public helper;
   `_fill_block_defaults` raises for an unknown relocation target instead
   of emitting a triggerless enabled block.
-- [ ] ⬜ **Task 2.4**: `plan_qa/checks/same_commit_plan_doc.py` — catch
+- [x] ✅ **Task 2.4**: `plan_qa/checks/same_commit_plan_doc.py` — catch
   `(OSError, UnicodeDecodeError)` around `read_text`.
-- [ ] ⬜ **Task 2.5**: `install/forwarder_generator.py` — shell-escape
+- [x] ✅ **Task 2.5**: `install/forwarder_generator.py` — shell-escape
   `daemon_down_stdout` (or assert shell-safety at the catalogue); hoist the
   `metas_by_bash_key` rebuild out of the per-call path.
-- [ ] ⬜ **Task 2.6**: `install/transport_verify.py` — test for
+- [x] ✅ **Task 2.6**: `install/transport_verify.py` — test for
   `_DAEMON_ERROR_MARKER` ahead of the "exit-code translation broken" branch
   and report the outage instead.
-- [ ] ⬜ **Task 2.7**: `install/settings_merge.py` — write via temp file +
+- [x] ✅ **Task 2.7**: `install/settings_merge.py` — write via temp file +
   `Path.replace` so the "atomic" comment is true.
-- [ ] ⬜ **Task 2.8**: `install/templates/echd-capture` — last-resort fallback
+- [x] ✅ **Task 2.8**: `install/templates/echd-capture` — last-resort fallback
   dir via `mktemp -d` (or ownership check) instead of a fixed name in
   `/tmp`; "Tee" comment reworded; `--help` stops at the first non-comment
   line. Tests cover `--label`, `--all`, and the exit-2 bad-argument branch.
-- [ ] ⬜ **Task 2.9**: `skills/hooks-daemon/SKILL.md` description lists
+- [x] ✅ **Task 2.9**: `skills/hooks-daemon/SKILL.md` description lists
   `optimise`; `dev-handlers.md` copy-paste block drops the literal `"$@"`.
-- [ ] ⬜ **Task 2.10**: `docs_qa/corpus.py` `revalidate_corpus` logs an
+- [x] ✅ **Task 2.10**: `docs_qa/corpus.py` `revalidate_corpus` logs an
   unstattable file at `info`, not `debug`.
 
 ### Phase 3: strategies / utils / block_report (review-strategies findings 1-7)

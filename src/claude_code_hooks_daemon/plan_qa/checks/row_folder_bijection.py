@@ -43,22 +43,33 @@ def _level(context: CheckContext, number: int | None, *, pre_existing: bool) -> 
     return commit_scoped_level(context, number, pre_existing=pre_existing)
 
 
-def _folder_findings(context: CheckContext, folder: PlanFolder) -> list[Finding]:
-    rows = context.readme.rows_for(folder.number) if context.readme is not None else ()
-    # A folder-level mismatch is this commit's only if the commit touched the
-    # folder. Nothing else it stages can have caused the folder to be
-    # unindexed or filed under the wrong section.
-    level = _level(
+def _folder_level(context: CheckContext, folder: PlanFolder) -> Level:
+    """How answerable this commit is for a mismatch on ``folder``.
+
+    A folder-level mismatch is this commit's only if the commit touched the
+    folder. Nothing else it stages can have caused the folder to be
+    unindexed or filed under the wrong section.
+
+    Called only once a finding exists. The blame question reads staged git
+    facts, and computing it for every folder in the tree -- almost all of
+    them clean -- is what made this check the most expensive thing in the
+    commit gate (Plan 00364 Task 2.1).
+    """
+    return _level(
         context,
         folder.number,
         pre_existing=not commit_touches_plan(context, folder.number),
     )
 
+
+def _folder_findings(context: CheckContext, folder: PlanFolder) -> list[Finding]:
+    rows = context.readme.rows_for(folder.number) if context.readme is not None else ()
+
     if not rows:
         return [
             Finding(
                 check_id=CHECK_ID,
-                level=level,
+                level=_folder_level(context, folder),
                 message=f"Plan folder {folder.name} has no README index row",
                 remediation=_UNINDEXED_REMEDIATION,
                 path=folder.name,
@@ -74,7 +85,7 @@ def _folder_findings(context: CheckContext, folder: PlanFolder) -> list[Finding]
     return [
         Finding(
             check_id=CHECK_ID,
-            level=level,
+            level=_folder_level(context, folder),
             message=(
                 f"Plan folder {folder.name} is indexed under section(s) {actual} "
                 f"but its location expects one of {expected}"

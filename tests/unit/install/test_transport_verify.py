@@ -168,6 +168,40 @@ class TestStopHardBlockProbe:
         result = probe_stop_hard_block(tmp_path)
         assert result.passed, result.detail
 
+    def test_a_daemon_outage_is_reported_as_an_outage(self, tmp_path: Path) -> None:
+        """Plan 00364 Task 2.6: name the subsystem that is actually down.
+
+        With the daemon down, ``forward_stop_event`` emits ``emit_hook_error``'s
+        ``decision: block`` body on stdout and exits 0 -- exactly the shape of
+        the exit-code-translation failure below it. The probe correctly failed
+        and then told the operator to go and look at the translation logic,
+        which is working fine. The marker on stderr distinguishes the two.
+        """
+        _write_script(
+            tmp_path / "stop",
+            "cat >/dev/null\n"
+            'echo \'{"decision":"block","reason":"failed to start hooks daemon"}\'\n'
+            'echo "HOOKS DAEMON ERROR [daemon_startup_failed]: Stop hook" >&2\n',
+        )
+        result = probe_stop_hard_block(tmp_path)
+
+        assert not result.passed
+        assert "exit-code translation" not in result.detail
+        assert "HOOKS DAEMON ERROR" in result.detail
+
+    def test_the_translation_failure_is_still_reported_when_the_daemon_is_up(
+        self, tmp_path: Path
+    ) -> None:
+        """The narrowing must not swallow the defect the branch exists for."""
+        _write_script(
+            tmp_path / "stop",
+            'cat >/dev/null\necho \'{"decision":"block","reason":"r"}\'\n',
+        )
+        result = probe_stop_hard_block(tmp_path)
+
+        assert not result.passed
+        assert "exit-code translation broken" in result.detail
+
 
 class TestListenerProbes:
     def test_all_wired_sockets_present_passes(

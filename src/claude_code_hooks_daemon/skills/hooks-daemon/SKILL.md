@@ -1,6 +1,6 @@
 ---
 name: hooks-daemon
-description: Manage Claude Code Hooks Daemon - install, upgrade, check health, restart, run the housekeeping pass, and report issues
+description: Manage Claude Code Hooks Daemon - install, upgrade, optimise the configuration, check health, restart, run the housekeeping pass, file a bug-report, and report issues
 argument-hint: "[install|upgrade|optimise|housekeeping|restart|health|bug-report|report] [args...]"
 disable-model-invocation: false
 user-invocable: true

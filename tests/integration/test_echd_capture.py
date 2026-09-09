@@ -23,10 +23,10 @@ ECHD_CAPTURE = (
 )
 
 
-def _run_pipe(
-    producer: str, capture_args: str, capture_dir: Path
+def _run_pipe_with_env(
+    producer: str, capture_args: str, env: dict[str, str]
 ) -> subprocess.CompletedProcess[str]:
-    """Run ``producer | echd-capture <capture_args>`` with a controlled dir."""
+    """Run ``producer | echd-capture <capture_args>`` under an explicit env."""
     # Group the producer so its full stdout (and exit status) flows into the pipe.
     script = f"set -o pipefail\n{{ {producer} ; }} | '{ECHD_CAPTURE}' {capture_args}\n"
     return subprocess.run(
@@ -34,8 +34,15 @@ def _run_pipe(
         capture_output=True,
         text=True,
         check=False,
-        env={"ECHD_CAPTURE_DIR": str(capture_dir), "PATH": "/usr/bin:/bin"},
+        env={"PATH": "/usr/bin:/bin", **env},
     )
+
+
+def _run_pipe(
+    producer: str, capture_args: str, capture_dir: Path
+) -> subprocess.CompletedProcess[str]:
+    """Run ``producer | echd-capture <capture_args>`` with a controlled dir."""
+    return _run_pipe_with_env(producer, capture_args, {"ECHD_CAPTURE_DIR": str(capture_dir)})
 
 
 def _capture_file_from_output(stdout: str) -> Path:
@@ -201,3 +208,120 @@ class TestCaptureDirectoryUnusable:
         assert result.returncode == 1, f"expected a loud failure, got {result.returncode}"
         assert "echd-capture" in result.stderr
         assert "full output:" not in result.stdout
+
+
+class TestTheLastResortDirectoryIsUnpredictable:
+    """Plan 00364 Task 2.8.
+
+    With no project root and no explicit override the helper fell back to a
+    FIXED name in a world-writable directory. ``mkdir -p`` follows a
+    pre-existing symlink, so anyone who created that name first could
+    redirect every capture on the machine to a path they control. The
+    fallback is rare but it is the branch that fires when
+    ``CLAUDE_PROJECT_DIR`` is unset, which is how it was noticed.
+    """
+
+    def test_the_fallback_dir_is_not_a_fixed_name(self, tmp_path: Path) -> None:
+        result = _run_pipe_with_env("printf 'x\\n'", "2", {"TMPDIR": str(tmp_path)})
+        assert result.returncode == 0, result.stderr
+
+        capture = _capture_file_from_output(result.stdout)
+        assert capture.parent.parent == tmp_path
+        assert capture.parent != tmp_path / "echd-captures"
+
+    def test_two_runs_do_not_share_a_directory(self, tmp_path: Path) -> None:
+        """An attacker cannot pre-create the name, because it is not known."""
+        first = _run_pipe_with_env("printf 'x\\n'", "2", {"TMPDIR": str(tmp_path)})
+        second = _run_pipe_with_env("printf 'y\\n'", "2", {"TMPDIR": str(tmp_path)})
+
+        one = _capture_file_from_output(first.stdout).parent
+        two = _capture_file_from_output(second.stdout).parent
+        assert one != two
+
+    def test_the_fallback_dir_is_private_to_its_owner(self, tmp_path: Path) -> None:
+        result = _run_pipe_with_env("printf 'x\\n'", "2", {"TMPDIR": str(tmp_path)})
+        capture = _capture_file_from_output(result.stdout)
+        assert capture.parent.stat().st_mode & 0o077 == 0
+
+    def test_an_explicit_override_still_wins(self, tmp_path: Path) -> None:
+        """The precedence chain is unchanged; only the last rung moved."""
+        explicit = tmp_path / "explicit"
+        result = _run_pipe_with_env(
+            "printf 'x\\n'",
+            "2",
+            {"ECHD_CAPTURE_DIR": str(explicit), "TMPDIR": str(tmp_path / "ignored")},
+        )
+        assert _capture_file_from_output(result.stdout).parent == explicit
+
+    def test_a_project_dir_still_wins_over_the_fallback(self, tmp_path: Path) -> None:
+        project = tmp_path / "project"
+        project.mkdir()
+        result = _run_pipe_with_env(
+            "printf 'x\\n'",
+            "2",
+            {"CLAUDE_PROJECT_DIR": str(project), "TMPDIR": str(tmp_path / "ignored")},
+        )
+        assert _capture_file_from_output(result.stdout).parent == project / "untracked" / "captures"
+
+    def test_an_uncreatable_fallback_still_passes_the_stream_through(self, tmp_path: Path) -> None:
+        """The pass-through promise holds for this branch too."""
+        result = _run_pipe_with_env(
+            "printf 'kept-a\\nkept-b\\n'", "2", {"TMPDIR": "/proc/nonexistent/nope"}
+        )
+        assert "kept-a" in result.stdout
+        assert "kept-b" in result.stdout
+        assert "full output:" not in result.stdout
+        assert "echd-capture" in result.stderr
+
+
+class TestHelpStopsAtTheHeader:
+    """``--help`` prints the usage block, not every comment in the file.
+
+    Plan 00364 Task 2.8. It ran a comment-extraction pipeline over the whole
+    script, so the help text trailed off into the implementation's own
+    inline rationale — including the comments explaining the failure modes,
+    which is not what a user asking for usage wants.
+    """
+
+    def _help(self) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", str(ECHD_CAPTURE), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+
+    def test_the_usage_block_is_printed(self) -> None:
+        result = self._help()
+        assert result.returncode == 0
+        assert "capture full piped output" in result.stdout
+        assert "--label NAME" in result.stdout
+        assert "Capture directory precedence" in result.stdout
+
+    def test_implementation_comments_are_not_printed(self) -> None:
+        """Everything below the first line of code is the script's business."""
+        result = self._help()
+        assert "Filesystem-safe label" not in result.stdout
+        assert "Unique capture filename" not in result.stdout
+        assert "Emit the bounded preview" not in result.stdout
+
+    def test_the_shebang_is_not_printed_as_help(self) -> None:
+        result = self._help()
+        assert "/bin/bash" not in result.stdout
+
+    def test_short_form_matches_long_form(self) -> None:
+        short = subprocess.run(
+            ["bash", str(ECHD_CAPTURE), "-h"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert short.stdout == self._help().stdout
+
+
+def test_the_deployed_copy_matches_the_template() -> None:
+    """``bin/echd-capture`` is the template, deployed. Drift is invisible."""
+    deployed = REPO_ROOT / "bin" / "echd-capture"
+    assert deployed.read_text(encoding="utf-8") == ECHD_CAPTURE.read_text(encoding="utf-8")

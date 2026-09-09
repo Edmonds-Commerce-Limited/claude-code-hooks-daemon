@@ -412,3 +412,84 @@ class TestReportSubcommandArgumentIsData:
             "description must be substituted literally by the shell, not "
             "handed to a program that parses it."
         )
+
+
+# ── The frontmatter advertises what the skill can actually do ───────────────
+
+
+def _frontmatter_value(key: str) -> str:
+    """One scalar key from SKILL.md's YAML frontmatter."""
+    text = (_SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    match = re.search(rf"^{re.escape(key)}:\s*(.+)$", text, re.MULTILINE)
+    assert match is not None, f"SKILL.md frontmatter has no '{key}'"
+    return match.group(1).strip().strip('"')
+
+
+class TestTheDescriptionAdvertisesEverySubcommand:
+    """Plan 00364 Task 2.9.
+
+    ``description`` is what the model reads when deciding whether this skill
+    answers a request, and it listed seven of the eight subcommands
+    ``argument-hint`` names. The omitted one was ``optimise`` -- so a request
+    to tune the daemon's configuration matched nothing, for a skill built to
+    serve it.
+    """
+
+    def test_every_argument_hint_subcommand_appears_in_the_description(self) -> None:
+        hint = _frontmatter_value("argument-hint")
+        subcommands = re.findall(r"[a-z][a-z-]+", hint.split("]")[0])
+        description = _frontmatter_value("description").lower()
+
+        missing = [name for name in subcommands if name not in description]
+        assert not missing, f"SKILL.md description omits: {missing}"
+
+    def test_optimise_is_one_of_them(self) -> None:
+        """The specific omission, pinned so it cannot come back unnoticed."""
+        assert "optimise" in _frontmatter_value("description").lower()
+
+
+class TestCopyPasteBlocksAreCopyPasteable:
+    """A command a human is told to type must not carry ``"$@"``.
+
+    Plan 00364 Task 2.9. Typed into an interactive shell, ``"$@"`` expands to
+    that SHELL's own positional parameters -- normally empty -- so the
+    command silently does something different from what the reader was
+    shown. A placeholder says what to put there instead.
+
+    Scoped to the reference documents, NOT to ``SKILL.md``: its blocks are
+    the routing script's own body, executed with arguments the skill runner
+    passes, where forwarding ``"$@"`` is exactly right.
+    """
+
+    def _reference_docs(self) -> list[Path]:
+        return [path for path in sorted(_SKILL_ROOT.rglob("*.md")) if path.name != "SKILL.md"]
+
+    def test_the_reference_docs_are_being_scanned(self) -> None:
+        """The scan below must never silently collapse to an empty list."""
+        names = {path.name for path in self._reference_docs()}
+        assert "dev-handlers.md" in names
+
+    def test_no_reference_doc_tells_a_human_to_type_the_positional_expansion(self) -> None:
+        offenders: list[str] = []
+        for path in self._reference_docs():
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+                if '"$@"' in line:
+                    offenders.append(f"{path.relative_to(_SKILL_ROOT)}:{number}: {line.strip()}")
+        assert not offenders, (
+            "Use an angle-bracket placeholder instead, e.g. "
+            "`<the arguments you were given>`:\n" + "\n".join(offenders)
+        )
+
+    def test_the_replacement_still_passes_arguments_through(self) -> None:
+        """Dropping ``"$@"`` must not drop the ARGUMENTS.
+
+        ``init-handlers.sh`` reads them, and
+        ``tests/unit/scripts/test_skill_scripts_are_referenced.py`` requires
+        every invocation of such a script to forward something. An
+        angle-bracket placeholder is what satisfies both rules: it tells the
+        reader to substitute, and it is not a live expansion.
+        """
+        text = (_SKILL_ROOT / "dev-handlers.md").read_text(encoding="utf-8")
+        invocations = [line for line in text.splitlines() if "init-handlers.sh" in line]
+        assert invocations
+        assert all("<" in line for line in invocations), invocations

@@ -4,6 +4,8 @@ import json
 
 import yaml
 
+from claude_code_hooks_daemon.constants.paths import DaemonPath
+from claude_code_hooks_daemon.install import bin_wrapper
 from claude_code_hooks_daemon.install.client_validator import (
     ClientInstallValidator,
     ValidationResult,
@@ -936,3 +938,51 @@ class TestVerifyEchdCaptureDeployed:
         ClientInstallValidator.validate_post_install(project_root)
 
         assert seen == [project_root]
+
+
+class TestEchdCapturePathComesFromTheDeploymentConstants:
+    """The check looks where the deployer writes, by construction.
+
+    Plan 00364 Task 2.2. The expected path was four string literals here
+    while ``deploy_echd_capture`` builds its own from
+    ``DaemonPath``/``bin_wrapper`` constants. Renaming the helper would move
+    the deployment and leave this check watching the old name -- reporting a
+    clean install for a file nobody writes any more.
+    """
+
+    def _project(self, tmp_path):
+        project_root = tmp_path / "project"
+        daemon_root = project_root / DaemonPath.CLAUDE_DIR / DaemonPath.HOOKS_DAEMON_DIR
+        daemon_root.mkdir(parents=True)
+        return project_root, daemon_root
+
+    def test_a_real_deployment_satisfies_the_check(self, tmp_path):
+        """Coupled through behaviour: deploy for real, then validate."""
+        project_root, daemon_root = self._project(tmp_path)
+        deployed = bin_wrapper.deploy_echd_capture(daemon_root)
+
+        result = ClientInstallValidator._verify_echd_capture_deployed(project_root)
+
+        assert deployed.is_file()
+        assert result.warnings == []
+
+    def test_the_missing_warning_names_the_deployment_target(self, tmp_path):
+        project_root, daemon_root = self._project(tmp_path)
+        expected = daemon_root / bin_wrapper.BIN_DIR_NAME / bin_wrapper.ECHD_CAPTURE_NAME
+
+        result = ClientInstallValidator._verify_echd_capture_deployed(project_root)
+
+        assert str(expected) in result.warnings[0]
+
+    def test_renaming_the_helper_moves_the_check_with_it(self, tmp_path, monkeypatch):
+        """The constant is read when the check runs, not copied at import."""
+        monkeypatch.setattr(bin_wrapper, "ECHD_CAPTURE_NAME", "renamed-capture")
+        project_root, daemon_root = self._project(tmp_path)
+        helper = daemon_root / bin_wrapper.BIN_DIR_NAME / "renamed-capture"
+        helper.parent.mkdir()
+        helper.write_text("#!/bin/bash\n")
+        helper.chmod(0o755)
+
+        result = ClientInstallValidator._verify_echd_capture_deployed(project_root)
+
+        assert result.warnings == []

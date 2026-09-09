@@ -16,7 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.constants.paths import DaemonPath
 from claude_code_hooks_daemon.daemon.paths import resolve_existing_venv_python
+from claude_code_hooks_daemon.install import bin_wrapper
 from claude_code_hooks_daemon.utils.hook_registration import (
     detect_duplicate_hooks,
     detect_legacy_hook_commands,
@@ -171,9 +173,21 @@ class ClientInstallValidator:
         to the redirect recipe when the helper does not resolve, so the
         install still works; but an operator should know the preferred path
         is absent.
+
+        The path is composed from the same constants ``deploy_echd_capture``
+        writes to, and read when the check RUNS. Spelling it out in string
+        literals meant a rename would move the deployment and leave this
+        check watching the old name — reporting a clean install for a file
+        nobody writes any more (Plan 00364 Task 2.2).
         """
         warnings: list[str] = []
-        helper = project_root / ".claude" / "hooks-daemon" / "bin" / "echd-capture"
+        helper = (
+            project_root
+            / DaemonPath.CLAUDE_DIR
+            / DaemonPath.HOOKS_DAEMON_DIR
+            / bin_wrapper.BIN_DIR_NAME
+            / bin_wrapper.ECHD_CAPTURE_NAME
+        )
         if not helper.is_file():
             warnings.append(
                 f"echd-capture helper not deployed: {helper}\n"

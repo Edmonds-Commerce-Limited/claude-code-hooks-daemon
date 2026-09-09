@@ -79,7 +79,11 @@ def _plan_status(
     for candidate in sorted(plan_dir.glob(f"**/{number:05d}-*/PLAN.md")):
         try:
             return PlanDoc.parse(candidate.read_text(encoding="utf-8")).status
-        except OSError:
+        except (OSError, UnicodeDecodeError):
+            # Both halves are "this document cannot be read", which the
+            # docstring above already answers with None. UnicodeDecodeError is
+            # a ValueError, so an OSError-only clause let a non-UTF-8 PLAN.md
+            # raise straight out of the commit gate (Plan 00364 Task 2.4).
             return None
     return None
 

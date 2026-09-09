@@ -72,6 +72,10 @@ _RECOMMENDED_DEFAULTS: Final[tuple[tuple[str, str], ...]] = (
 #: nothing but silently withholds a guard the verbatim copy used to provide.
 _SECURITY_RELEVANT_KEYS: Final = frozenset({"permissions", "enableArtifact"})
 
+#: Suffix of the same-directory scratch file every whole-file write lands in
+#: before it is renamed over the target. See :func:`_write_atomically`.
+_TMP_SUFFIX: Final = ".tmp"
+
 #: The wired forwarders, keyed by the command each renders to. Membership of
 #: this set — not a substring of the command — is what separates our forwarder
 #: from a client script that happens to live under ``.claude/hooks/``.
@@ -393,6 +397,28 @@ def _serialise(settings: Mapping[str, Any]) -> str:
     return json.dumps(settings, indent=2) + "\n"
 
 
+def _write_atomically(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` via a temp file in the same directory.
+
+    The lost-update reasoning below (four unlocked writers, worst case a lost
+    update rather than corruption) only holds while every writer is atomic.
+    ``write_text`` truncates before it writes, so an interruption left a
+    half-written ``settings.json`` -- a file Claude Code cannot parse, taking
+    every hook down with it (Plan 00364 Task 2.7). Same directory, so the
+    replace is a rename within one filesystem.
+    """
+    tmp_path = path.with_suffix(path.suffix + _TMP_SUFFIX)
+    tmp_path.write_text(text, encoding="utf-8")
+    try:
+        tmp_path.replace(path)
+    except OSError:
+        # The rename is the only step that can fail with the destination
+        # still intact. Clear the temp file so a retry is not confused by a
+        # stale sibling, then let the caller see the failure.
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def run_settings_merge(
     client_path: Path,
     new_default_path: Path,
@@ -421,7 +447,7 @@ def run_settings_merge(
         )
 
     if not client_path.exists():
-        client_path.write_text(_serialise(new_default), encoding="utf-8")
+        _write_atomically(client_path, _serialise(new_default))
         return MergeOutcome(status=MergeStatus.INSTALLED)
 
     notes: list[str] = []
@@ -462,15 +488,15 @@ def run_settings_merge(
         return MergeOutcome(status=MergeStatus.UNCHANGED, report=report, messages=tuple(notes))
 
     # Re-read immediately before writing. Four things write this file with no
-    # lock between them; every whole-file writer is atomic or can be, so the
-    # failure mode is a LOST UPDATE rather than corruption, and re-reading is
-    # the cheap mitigation. A lock is worth adding when one is actually
-    # observed, not in anticipation.
+    # lock between them; every whole-file writer here is atomic
+    # (`_write_atomically`), so the failure mode is a LOST UPDATE rather than
+    # corruption, and re-reading is the cheap mitigation. A lock is worth
+    # adding when one is actually observed, not in anticipation.
     latest, _ = _load_json_object(client_path)
     if latest is not None and latest != client:
         merged, report = merge_settings(latest, new_default, old_default)
 
-    client_path.write_text(_serialise(merged), encoding="utf-8")
+    _write_atomically(client_path, _serialise(merged))
     return MergeOutcome(status=MergeStatus.MERGED, report=report, messages=tuple(notes))
 
 
@@ -500,7 +526,7 @@ def _escalate(
 ) -> MergeOutcome:
     """Write the merge we would have made, change nothing, and say both paths."""
     proposal_path = client_path.with_name(client_path.name + PROPOSAL_SUFFIX)
-    proposal_path.write_text(_serialise(proposal), encoding="utf-8")
+    _write_atomically(proposal_path, _serialise(proposal))
 
     diff = _top_level_diff(client, proposal) if client is not None else ()
     return MergeOutcome(

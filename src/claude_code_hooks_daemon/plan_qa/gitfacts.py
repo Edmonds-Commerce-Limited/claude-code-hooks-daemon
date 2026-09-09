@@ -55,9 +55,19 @@ class GitFacts:
         """
         self._repo_root = repo_root
         self._pathspecs = tuple(pathspecs) if pathspecs else ()
+        self._staged: tuple[StagedChange, ...] | None = None
 
     def staged_changes(self) -> tuple[StagedChange, ...]:
         """Changes THIS commit will actually contain.
+
+        Read from git ONCE per instance and held. The commit gate asks this
+        question once per plan folder in the tree (``commit_touches_plan``
+        from ``row_folder_bijection`` and its siblings), so an unmemoised
+        call spawns a subprocess per folder inside a PreToolUse budget --
+        measured at 363 spawns against one on this repository's own plan
+        tree. An instance is built per context and never outlives the
+        decision it informs, so no invalidation is needed: a context that
+        wants fresh facts constructs a new ``GitFacts``.
 
         A bare ``git commit`` (or ``git commit -a``) commits the INDEX, so
         this compares the index to HEAD (``git diff --cached``).
@@ -72,6 +82,8 @@ class GitFacts:
         so a modified-but-unstaged path named on the commit line is still
         seen, and a staged-but-unnamed path is correctly excluded.
         """
+        if self._staged is not None:
+            return self._staged
         if self._pathspecs:
             output = self._git_output(
                 "diff",
@@ -84,9 +96,11 @@ class GitFacts:
             )
         else:
             output = self._git_output("diff", "--cached", "--name-status", "-z", "--find-renames")
-        if output is None:
-            return ()
-        return _parse_name_status_z(output)
+        # An unavailable answer is cached too: a wedged or absent git will not
+        # recover mid-decision, so re-asking it once per plan folder only
+        # multiplies the timeout that made it unavailable.
+        self._staged = () if output is None else _parse_name_status_z(output)
+        return self._staged
 
     def staged_paths_under(self, prefix: str) -> tuple[str, ...]:
         """New-side staged paths under ``prefix`` (repo-relative, sorted)."""

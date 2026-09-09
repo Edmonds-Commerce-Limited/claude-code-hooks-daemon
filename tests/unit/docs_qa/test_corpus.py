@@ -1,6 +1,7 @@
 """Tests for ``docs_qa.corpus`` (Plan 00284, Task 3.1a)."""
 
 import json
+import logging
 import os
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -1001,6 +1002,39 @@ class TestRevalidateCorpus:
     def test_a_cold_corpus_is_returned_unchanged(self, tmp_path: Path) -> None:
         cold = DocCorpus(project_root=tmp_path, documents={}, cold=True)
         assert revalidate_corpus(cold, tmp_path) is cold
+
+    def test_dropping_an_unstattable_file_is_logged_at_info(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Plan 00364 Task 2.10.
+
+        Dropping the record is right -- the corpus caches what is on disk and
+        this file is not there. But the drop was logged at ``debug``, which
+        is off at the default level, so an unexpected ``EACCES`` produced no
+        trace anywhere: a document silently stops being checked and nothing
+        says why. ``info`` keeps it findable without adding noise, because
+        the branch only fires when a file really has gone.
+        """
+        index_path = _staleness_scaffold(tmp_path, "# Own\n", f"# Partner\n\n{_STALENESS_FENCE}")
+        (tmp_path / "CLAUDE" / "Partner.md").unlink()
+
+        with caplog.at_level(logging.INFO, logger="claude_code_hooks_daemon.docs_qa.corpus"):
+            revalidate_corpus(load_or_cold_corpus(tmp_path, index_path), tmp_path)
+
+        dropped = [r for r in caplog.records if "CLAUDE/Partner.md" in r.getMessage()]
+        assert len(dropped) == 1
+        assert dropped[0].levelno == logging.INFO
+
+    def test_a_steady_state_revalidation_logs_nothing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The reason INFO is affordable: the branch does not fire normally."""
+        index_path = _staleness_scaffold(tmp_path, "# Own\n", f"# Partner\n\n{_STALENESS_FENCE}")
+
+        with caplog.at_level(logging.INFO, logger="claude_code_hooks_daemon.docs_qa.corpus"):
+            revalidate_corpus(load_or_cold_corpus(tmp_path, index_path), tmp_path)
+
+        assert caplog.records == []
 
 
 class TestLoadEditCorpus:
