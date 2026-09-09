@@ -149,6 +149,17 @@ Fully green is therefore not reachable inside this worktree without either
 relocating the worktrees out from under `untracked/` or deploying the hook
 wrapper library into them. Both are environment decisions above this phase.
 
+## One thing I caused and undid
+
+Starting the worktree's daemon made it regenerate the auto-generated handler
+block in `CLAUDE.md` and **auto-commit it** (`4ceea9a7`, 28 lines reordered in
+the advisory list). That is the block this phase was told not to touch, and the
+commit was the daemon's, not an edit of mine — but restarting the daemon is
+what triggered it. I reverted it (`1c2e3eae`), so `CLAUDE.md` on this branch is
+now byte-identical to the branch point. Reverting also removes merge-conflict
+surface: three sibling phase branches restarting their own daemons would each
+carry their own version of the same reordering.
+
 ## For the coordinator
 
 1. **`CLAUDE/UPGRADES/UNRELEASED/release-notes/02-lint-temp-dir-and-bracket-range-cost.md`**
