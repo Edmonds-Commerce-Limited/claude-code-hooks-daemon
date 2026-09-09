@@ -256,6 +256,14 @@ class AcceptanceTest:
             raise ValueError("command must be a non-empty string")
         if not self.description or not self.description.strip():
             raise ValueError("description must be a non-empty string")
+        # BEFORE the derivation, not after: deriving populates `tool_payload`,
+        # so a check that ran afterwards would refuse this pair by naming a
+        # field the author never wrote. An error must name what was declared.
+        if self.hook_input is not None and dispatch_as_bash:
+            raise ValueError(
+                "hook_input and dispatch_as_bash are mutually exclusive: the "
+                "command is either the raw hook input or the Bash payload, not both"
+            )
         if dispatch_as_bash:
             self._derive_bash_payload()
         if self.harness_cannot_produce and self.tool_payload is not None:

@@ -593,6 +593,28 @@ class TestHookInputField:
                 dispatch_as_bash=True,
             )
 
+    def test_that_refusal_names_what_the_author_actually_declared(self):
+        """The author wrote ``dispatch_as_bash``, never ``tool_payload``.
+
+        Deriving the Bash payload FIRST populates ``tool_payload``, so the
+        pair check that runs afterwards sees a field nobody wrote and names
+        it — sending the author to look for a declaration that is not there.
+        """
+        with pytest.raises(ValueError) as excinfo:
+            AcceptanceTest(
+                title="Contradiction",
+                command='echo "x"',
+                description="Cannot be both",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[],
+                hook_input={"last_assistant_message": "x"},
+                dispatch_as_bash=True,
+            )
+        message = str(excinfo.value)
+        assert "hook_input" in message
+        assert "dispatch_as_bash" in message
+        assert "tool_payload" not in message
+
 
 class TestAcceptanceTestValidation:
     """Test validation of AcceptanceTest fields."""
