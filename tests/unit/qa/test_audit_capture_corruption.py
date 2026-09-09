@@ -372,3 +372,38 @@ class TestRealRepoIsClean:
         assert violations == [], "Real-repo capture-corruption regression: " + "; ".join(
             f"{v.file}:{v.line} [{v.function}] [{v.rule}] {v.message}" for v in violations[:5]
         )
+
+
+class TestAScanRootUnderAnExcludedDirectoryIsStillScanned:
+    """The excluded names are directories INSIDE a scanned tree, not anywhere.
+
+    Testing each part of the ABSOLUTE path meant a checkout that merely LIVES
+    under one of them saw every file excluded — which is this project's own
+    worktree layout (`untracked/worktrees/<branch>/`). `_collect_shell_files`
+    then returned nothing, and the audit's "no violations" described its own
+    empty file list rather than the code (Plan 00364 Task 5.4).
+    """
+
+    @staticmethod
+    def _worktree_scripts(tmp_path: Path) -> Path:
+        scripts = tmp_path / "untracked" / "worktrees" / "worktree-plan-00364" / "scripts"
+        scripts.mkdir(parents=True)
+        return scripts
+
+    def test_shell_files_under_such_a_root_are_collected(self, tmp_path: Path) -> None:
+        from audit_capture_corruption import _collect_shell_files
+
+        scripts = self._worktree_scripts(tmp_path)
+        (scripts / "helper.sh").write_text("#!/bin/bash\necho hi\n")
+
+        assert [p.name for p in _collect_shell_files([scripts])] == ["helper.sh"]
+
+    def test_an_excluded_directory_INSIDE_the_root_is_still_skipped(self, tmp_path: Path) -> None:
+        from audit_capture_corruption import _collect_shell_files
+
+        scripts = self._worktree_scripts(tmp_path)
+        nested = scripts / "untracked"
+        nested.mkdir()
+        (nested / "generated.sh").write_text("#!/bin/bash\necho generated\n")
+
+        assert _collect_shell_files([scripts]) == []

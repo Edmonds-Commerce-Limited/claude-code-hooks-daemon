@@ -166,10 +166,21 @@ def _default_relay_binary_path(untracked_dir: Path) -> str:
     return str(untracked_dir / "bin" / "hooks-relay")
 
 
+def deployed_hooks_dir(project_root: Path) -> str:
+    """``<project_root>/.claude/hooks/`` — where a deployed forwarder lives.
+
+    Trailing slash included: it is a PREFIX the guard compares
+    ``${BASH_SOURCE[0]}`` against, and without it ``/proj/.claude/hooks-old/``
+    would match too.
+    """
+    return f"{project_root}/.claude/hooks/"
+
+
 def build_relay_guard_block(
     event_file_name: str,
     transport: TransportConfig,
     untracked_dir: Path,
+    project_root: Path,
 ) -> str:
     """Render the relay hot-path guard block for one forwarder.
 
@@ -187,10 +198,29 @@ def build_relay_guard_block(
             resolved for install mode (self-install vs ``.claude/hooks-daemon/``)
             — baked in as a literal absolute path, never computed at hook-run
             time.
+        project_root: The checkout this forwarder is generated FOR. Not
+            derivable from ``untracked_dir`` (a client install puts that three
+            levels down, at ``<root>/.claude/hooks-daemon/untracked``), so it
+            is an argument rather than an inference.
 
     Returns:
         The guard block text, newline-terminated, ready to be inserted
         directly above :data:`INIT_SH_ANCHOR`.
+
+    **One guard belongs to ONE checkout (Plan 00364 Task 5.1)**: every path
+    here is a literal, which is what makes the hot path free — and what makes
+    a COPY of the file dangerous. A git worktree inherits the tracked
+    forwarder verbatim, so its ``.claude/hooks/pre-tool-use`` dialled the main
+    checkout's relay socket and was answered by the main checkout's daemon,
+    with the worktree's own config and project handlers never consulted. The
+    guard therefore also tests ``${BASH_SOURCE[0]}`` — the file bash is
+    actually executing — against :func:`deployed_hooks_dir` for
+    ``project_root``. A forwarder running from anywhere else falls through to
+    ``init.sh``, which computes that checkout's own project-scoped socket.
+    Bash builtins throughout, so this costs no spawn; the cost of a false
+    negative (a hook invoked by a path that does not match the literal, e.g.
+    through a symlinked root) is one legacy-transport round trip, never a
+    wrong answer.
 
     **Events-dir three-way agreement (Plan 00290 F3 fix)**: the events
     directory is normally computed DYNAMICALLY in bash
@@ -214,7 +244,8 @@ def build_relay_guard_block(
     timeout_ms = transport.timeout_seconds * 1000
     lines = [
         _GUARD_HEADER,
-        'if [[ "${1:-}" != "--no-relay" ]]; then\n',
+        'if [[ "${1:-}" != "--no-relay" && '
+        f'"${{BASH_SOURCE[0]}}" == "{deployed_hooks_dir(project_root)}"* ]]; then\n',
         f'    _rl_dir="{untracked_dir}"\n',
     ]
     if event_socket_dir_is_fallback(untracked_dir):
@@ -326,6 +357,40 @@ def normalise_project_root(content: str, project_root: str) -> str:
 #: the untracked directory the forwarder was generated for.
 _RECORDED_UNTRACKED_DIR = re.compile(r'^\s*_rl_dir="([^"]+)"', re.MULTILINE)
 
+#: The guard's checkout test, which records the project root it was generated
+#: for — the second literal a forwarder bakes (see `build_relay_guard_block`).
+_RECORDED_PROJECT_ROOT = re.compile(r'\$\{BASH_SOURCE\[0\]\}" == "([^"]+)/\.claude/hooks/"\*')
+
+
+def _one_recorded_value(
+    hook_contents: dict[str, str], pattern: re.Pattern[str], what: str
+) -> Path | None:
+    """The single value ``pattern`` reads back out of every guarded forwarder.
+
+    Shared by :func:`recorded_untracked_dir` and :func:`recorded_project_root`
+    so "what the artefact records" and "what counts as the files disagreeing"
+    cannot drift into two answers.
+
+    Raises:
+        AssertionError: if two forwarders record DIFFERENT values.
+    """
+    found: dict[str, str] = {}
+    for name, content in hook_contents.items():
+        match = pattern.search(content)
+        if match:
+            found[name] = match.group(1)
+    if not found:
+        return None
+
+    distinct = sorted(set(found.values()))
+    if len(distinct) > 1:
+        raise AssertionError(
+            f"the deployed forwarders disagree about the {what} "
+            f"they were generated for: {distinct}. One has been hand-edited — "
+            f"regenerate them all rather than reconciling by hand.\n{found}"
+        )
+    return Path(distinct[0])
+
 
 def recorded_untracked_dir(hook_contents: dict[str, str]) -> Path | None:
     """The untracked dir the deployed forwarders say they were generated for.
@@ -350,22 +415,20 @@ def recorded_untracked_dir(hook_contents: dict[str, str]) -> Path | None:
             was hand-edited, and regenerating to match either would launder the
             edit the comparison exists to catch.
     """
-    found: dict[str, str] = {}
-    for name, content in hook_contents.items():
-        match = _RECORDED_UNTRACKED_DIR.search(content)
-        if match:
-            found[name] = match.group(1)
-    if not found:
-        return None
+    return _one_recorded_value(hook_contents, _RECORDED_UNTRACKED_DIR, "untracked directory")
 
-    distinct = sorted(set(found.values()))
-    if len(distinct) > 1:
-        raise AssertionError(
-            f"the deployed forwarders disagree about the untracked directory "
-            f"they were generated for: {distinct}. One has been hand-edited — "
-            f"regenerate them all rather than reconciling by hand.\n{found}"
-        )
-    return Path(distinct[0])
+
+def recorded_project_root(hook_contents: dict[str, str]) -> Path | None:
+    """The checkout the deployed forwarders' relay guard belongs to.
+
+    The guard bakes TWO absolute paths, and a caller that reads back only one
+    of them re-makes the mistake :func:`recorded_untracked_dir` was written to
+    fix: it silently assumes the other is this checkout's, which is true only
+    on the machine that generated the artefact. Same contract as its sibling —
+    ``None`` when no forwarder carries a guard, ``AssertionError`` when two
+    disagree.
+    """
+    return _one_recorded_value(hook_contents, _RECORDED_PROJECT_ROOT, "project root")
 
 
 def surviving_absolute_paths(content: str) -> list[str]:
@@ -486,6 +549,7 @@ def generate_forwarder_content(
     event_file_name: str,
     transport: TransportConfig,
     untracked_dir: Path,
+    project_root: Path,
 ) -> str:
     """Generate the content to deploy for one hook forwarder (Task 4.1).
 
@@ -497,6 +561,9 @@ def generate_forwarder_content(
         transport: The resolved ``daemon.transport`` config.
         untracked_dir: The target project's resolved daemon untracked
             directory (install-mode aware).
+        project_root: The target project's root — the checkout the relay
+            guard will refuse to fire outside of (see
+            :func:`build_relay_guard_block`).
 
     The relay guard is handled as a single STRIP-then-REAPPLY transform
     (Plan 00290 F1/F2/F4 fix), unconditionally:
@@ -538,7 +605,7 @@ def generate_forwarder_content(
         and event_file_name not in RELAY_EXCLUDED_EVENT_FILE_NAMES
         and INIT_SH_ANCHOR in result
     ):
-        guard = build_relay_guard_block(event_file_name, transport, untracked_dir)
+        guard = build_relay_guard_block(event_file_name, transport, untracked_dir, project_root)
         result = result.replace(INIT_SH_ANCHOR, guard + INIT_SH_ANCHOR, 1)
     if transport.nc_enabled:
         result = append_nc_socket_arg(result, event_file_name, untracked_dir)
@@ -611,7 +678,9 @@ def regenerate_deployed_hooks(project_root: Path, hooks_dir: Path) -> list[str]:
             # unconditional F1 guard-strip still runs on every OTHER file.
             logger.warning("skipping unreadable forwarder %s: %s", path, exc)
             continue
-        generated = generate_forwarder_content(source, path.name, transport, untracked_dir)
+        generated = generate_forwarder_content(
+            source, path.name, transport, untracked_dir, project_root
+        )
         if generated != source:
             path.write_text(generated)
             rewritten.append(path.name)

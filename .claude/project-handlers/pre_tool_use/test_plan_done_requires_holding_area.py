@@ -48,6 +48,19 @@ class TestIdentity:
         assert "project" in handler.tags
         assert "blocking" in handler.tags
 
+    def test_priority_is_in_the_workflow_band(
+        self, handler: PlanDoneRequiresHoldingAreaHandler
+    ) -> None:
+        """A plan-status gate is workflow enforcement (band 36-55).
+
+        Which exact slot is free is a whole-chain property this file cannot
+        see, so `tests/integration/test_project_handler_priority_collisions.py`
+        owns that half: it registers every library handler and fails if this
+        one lands on a priority already taken. Here only the band is pinned,
+        which is what keeps the two checks from restating each other.
+        """
+        assert 36 <= handler.priority <= 55
+
 
 class TestAWriteThatCompletesAPlan:
     def test_denied_without_the_criterion(

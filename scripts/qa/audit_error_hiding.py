@@ -83,6 +83,25 @@ _DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
     ".eggs/",
 )
 
+
+def _is_excluded(path: Path, root: Path, exclude_patterns: tuple[str, ...]) -> bool:
+    """Is ``path`` inside one of the excluded directories of ``root``'s tree?
+
+    The patterns name directories to skip INSIDE the tree being scanned, so
+    the match is made against the path relative to that tree — never against
+    the absolute path. Matching absolutely made every file invisible whenever
+    the checkout itself lived under a matching directory, which is this
+    project's own sanctioned worktree layout (``untracked/worktrees/<branch>``,
+    see ``WORKTREE_DIR_PATTERNS``): the audit then collected nothing, reported
+    no violations, and marked every live exclusion stale.
+
+    A path outside ``root`` cannot be made relative to it, so it is judged on
+    its absolute form rather than silently included.
+    """
+    relative = path.relative_to(root) if path.is_relative_to(root) else path
+    return any(pattern in str(relative) for pattern in exclude_patterns)
+
+
 _SHELL_EXTENSIONS: tuple[str, ...] = (".sh", ".bash")
 
 # Matches a heredoc start line invoking python (python/python3, or a shell
@@ -251,20 +270,36 @@ def audit_file(filepath: Path) -> list[dict[str, Any]]:
 
 
 def audit_directory(
-    directory: Path, exclude_patterns: tuple[str, ...] = _DEFAULT_EXCLUDE_PATTERNS
+    directory: Path,
+    exclude_patterns: tuple[str, ...] = _DEFAULT_EXCLUDE_PATTERNS,
+    root: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Audit all Python files in a directory."""
+    """Audit all Python files in a directory.
+
+    ``root`` is the tree the exclusion patterns are relative to (the
+    workspace when called from :func:`collect_python_violations`); it
+    defaults to ``directory`` itself. See :func:`_is_excluded`.
+    """
     all_violations = []
 
-    for py_file in directory.rglob("*.py"):
-        # Skip excluded paths
-        if any(pattern in str(py_file) for pattern in exclude_patterns):
-            continue
-
-        violations = audit_file(py_file)
-        all_violations.extend(violations)
+    for py_file in collect_python_files(directory, exclude_patterns, root):
+        all_violations.extend(audit_file(py_file))
 
     return all_violations
+
+
+def collect_python_files(
+    directory: Path,
+    exclude_patterns: tuple[str, ...] = _DEFAULT_EXCLUDE_PATTERNS,
+    root: Path | None = None,
+) -> list[Path]:
+    """Every non-excluded ``*.py`` file under ``directory``."""
+    base = directory if root is None else root
+    return sorted(
+        py_file
+        for py_file in directory.rglob("*.py")
+        if not _is_excluded(py_file, base, exclude_patterns)
+    )
 
 
 def extract_heredoc_python_blocks(content: str) -> list[tuple[int, str]]:
@@ -419,7 +454,7 @@ def collect_shell_files(
             continue
         for pattern in ("*.sh", "*.bash"):
             for shell_file in directory.rglob(pattern):
-                if any(excl in str(shell_file) for excl in exclude_patterns):
+                if _is_excluded(shell_file, workspace, exclude_patterns):
                     continue
                 files.append(shell_file)
 
@@ -431,21 +466,30 @@ def collect_shell_files(
     return sorted(files)
 
 
-def collect_python_violations(workspace: Path) -> list[dict[str, Any]]:
-    """Audit every ``.py`` file under the audited roots (dirs + root files)."""
-    violations: list[dict[str, Any]] = []
+def collect_workspace_python_files(workspace: Path) -> list[Path]:
+    """Every ``.py`` file the audit covers: audited dirs + audited root files."""
+    files: list[Path] = []
 
     for rel in AUDITED_DIRECTORIES:
         directory = workspace / rel
         if directory.is_dir():
-            violations.extend(audit_directory(directory))
+            files.extend(collect_python_files(directory, _DEFAULT_EXCLUDE_PATTERNS, workspace))
 
     for rel in AUDITED_ROOT_FILES:
         candidate = workspace / rel
         if candidate.suffix == ".py" and candidate.is_file():
-            violations.extend(audit_file(candidate))
+            files.append(candidate)
 
-    return violations
+    return files
+
+
+def collect_python_violations(workspace: Path) -> list[dict[str, Any]]:
+    """Audit every ``.py`` file under the audited roots (dirs + root files)."""
+    return [
+        violation
+        for py_file in collect_workspace_python_files(workspace)
+        for violation in audit_file(py_file)
+    ]
 
 
 def collect_shell_violations(workspace: Path) -> list[dict[str, Any]]:
@@ -483,7 +527,12 @@ def format_violation_report(violations: list[dict[str, Any]]) -> str:
         for v in sorted(file_violations, key=lambda x: x["line"]):
             lines.append(f"  Line {v['line']}: {v['rule']}")
             lines.append(f"    {v['message']}")
-            lines.append(f"    ({v['description']})")
+            # A stale-exclusion finding carries no description — its message
+            # already says everything. Demanding one crashed the text report
+            # on exactly the runs that had something to report.
+            description = v.get("description")
+            if description:
+                lines.append(f"    ({description})")
 
     return "\n".join(lines)
 
@@ -610,24 +659,44 @@ def write_json_output(violations: list[dict[str, Any]], output_path: Path) -> No
         json.dump(data, f, indent=2)
 
 
-def main() -> int:
-    """Main entry point."""
-    workspace = Path(__file__).parent.parent.parent
+def run_audit(workspace: Path, json_mode: bool) -> int:
+    """Audit ``workspace`` and return the process exit code.
 
-    json_mode = "--json" in sys.argv
-
+    Split out of :func:`main` so the whole run — including the
+    collected-nothing failure below — is reachable against an arbitrary
+    workspace instead of only against this checkout.
+    """
     if not json_mode:
         print("Auditing codebase for error hiding patterns...")
         print(f"Workspace: {workspace}\n")
+
+    # A run that collected no files reports "no violations" and no stale
+    # exclusions to match against — indistinguishable from a clean codebase,
+    # and precisely how the absolute-path exclusion bug stayed quiet. There is
+    # always something to audit in a real checkout, so zero candidates is a
+    # broken invocation and is reported as a failure (Plan 00364 Task 5.4).
+    candidates = collect_workspace_python_files(workspace) + collect_shell_files(workspace)
+    if not candidates:
+        print(
+            f"error-hiding audit: no Python or shell files found under {workspace} "
+            f"(searched {', '.join(AUDITED_DIRECTORIES)} plus "
+            f"{', '.join(AUDITED_ROOT_FILES)}). Nothing was audited, so this run "
+            "proves nothing — check the workspace path and the exclusion patterns.",
+            file=sys.stderr,
+        )
+        return 1
 
     # Audit AUDITED_DIRECTORIES + AUDITED_ROOT_FILES (Plan 00200 Phase 5:
     # widened beyond "production code only" src/, which left the QA scripts
     # that IMPLEMENT the gates permanently exempt from the gate they enforce).
     all_violations = collect_python_violations(workspace) + collect_shell_violations(workspace)
 
-    # Apply exclusions for intentional patterns (documented in error_hiding_exclusions.json)
-    script_dir = Path(__file__).parent
-    exclusions = load_exclusions(script_dir)
+    # Apply exclusions for intentional patterns (documented in
+    # error_hiding_exclusions.json). They are read from the WORKSPACE being
+    # audited, not from this file's own directory: an exclusion is a licence
+    # for a specific finding in a specific tree, and reading another tree's
+    # licences would report every one of them as stale.
+    exclusions = load_exclusions(workspace / "scripts" / "qa")
 
     # Audit the exclusions themselves BEFORE applying them, against the
     # unfiltered set. A suppression file is otherwise only ever consulted to
@@ -655,6 +724,11 @@ def main() -> int:
     if not json_mode:
         print("✅ All checks passed - no error hiding detected!")
     return 0
+
+
+def main() -> int:
+    """Main entry point: audit this checkout."""
+    return run_audit(Path(__file__).parent.parent.parent, json_mode="--json" in sys.argv)
 
 
 if __name__ == "__main__":

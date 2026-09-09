@@ -41,6 +41,16 @@ source "$SCRIPT_DIR/../init.sh"
 send_request_stdin "PreToolUse"
 """
 
+#: The checkout most cases below generate for. Two constants, not two
+#: literals per call: the guard bakes BOTH the untracked dir and the checkout
+#: root, and neither is derivable from the other (a client install puts the
+#: untracked dir at ``<root>/.claude/hooks-daemon/untracked``).
+_ROOT = Path("/proj")
+_UNTRACKED = Path("/proj/untracked")
+
+#: A checkout deep enough that the natural events dir overflows AF_UNIX.
+_DEEP_ROOT = Path("/" + "a" * 90)
+
 
 # ---------------------------------------------------------------------------
 # Default (relay disabled): byte-identical
@@ -52,7 +62,7 @@ def test_disabled_transport_returns_source_unchanged() -> None:
     assert transport.relay_enabled is False
 
     result = generate_forwarder_content(
-        _SAMPLE_SOURCE, "pre-tool-use", transport, Path("/proj/untracked")
+        _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
     )
 
     assert result == _SAMPLE_SOURCE
@@ -74,7 +84,7 @@ def test_every_real_deployed_hook_is_byte_identical_when_disabled(hook_file: str
     source = (_HOOKS_DIR / hook_file).read_text()
     transport = TransportConfig()
 
-    result = generate_forwarder_content(source, hook_file, transport, Path("/proj/untracked"))
+    result = generate_forwarder_content(source, hook_file, transport, _UNTRACKED, _ROOT)
 
     assert result == strip_relay_guard_block(source)
     assert "relay hot path" not in result
@@ -85,9 +95,7 @@ def test_disabled_transport_returns_source_unchanged_even_without_anchor() -> No
     transport = TransportConfig()
     weird_source = "#!/bin/bash\necho hi\n"
 
-    result = generate_forwarder_content(
-        weird_source, "pre-tool-use", transport, Path("/proj/untracked")
-    )
+    result = generate_forwarder_content(weird_source, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
     assert result == weird_source
 
@@ -101,7 +109,7 @@ def test_enabled_transport_inserts_guard_before_init_sh_source() -> None:
     transport = TransportConfig(relay_enabled=True)
 
     result = generate_forwarder_content(
-        _SAMPLE_SOURCE, "pre-tool-use", transport, Path("/proj/untracked")
+        _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
     )
 
     assert result != _SAMPLE_SOURCE
@@ -115,11 +123,9 @@ def test_enabled_transport_inserts_guard_before_init_sh_source() -> None:
 def test_enabled_transport_is_idempotent_against_already_generated_content() -> None:
     """Running generation twice must not stack a second guard block."""
     transport = TransportConfig(relay_enabled=True)
-    once = generate_forwarder_content(
-        _SAMPLE_SOURCE, "pre-tool-use", transport, Path("/proj/untracked")
-    )
+    once = generate_forwarder_content(_SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
-    twice = generate_forwarder_content(once, "pre-tool-use", transport, Path("/proj/untracked"))
+    twice = generate_forwarder_content(once, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
     assert twice == once
     assert once.count("relay hot path (generated") == 1
@@ -134,10 +140,15 @@ def test_enabled_transport_is_idempotent_against_already_generated_content() -> 
 # ---------------------------------------------------------------------------
 
 
-def _foreign_guard_source(untracked_dir: str = "/workspace/untracked") -> str:
+def _foreign_guard_source(
+    untracked_dir: str = "/workspace/untracked", project_root: str = "/workspace"
+) -> str:
     """A forwarder that already carries a guard baked for a DIFFERENT project."""
     guard = build_relay_guard_block(
-        "pre-tool-use", TransportConfig(relay_enabled=True), Path(untracked_dir)
+        "pre-tool-use",
+        TransportConfig(relay_enabled=True),
+        Path(untracked_dir),
+        Path(project_root),
     )
     return _SAMPLE_SOURCE.replace(INIT_SH_ANCHOR, guard + INIT_SH_ANCHOR)
 
@@ -148,9 +159,7 @@ def test_f1_disabled_config_strips_a_foreign_guard_entirely() -> None:
     contaminated = _foreign_guard_source()
     transport = TransportConfig()  # disabled — the client's real default
 
-    result = generate_forwarder_content(
-        contaminated, "pre-tool-use", transport, Path("/proj/untracked")
-    )
+    result = generate_forwarder_content(contaminated, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
     assert "relay hot path" not in result
     assert "/workspace/untracked" not in result
@@ -165,11 +174,12 @@ def test_f2_enabled_config_replaces_foreign_guard_with_clients_own_paths() -> No
     transport = TransportConfig(relay_enabled=True)
 
     result = generate_forwarder_content(
-        contaminated, "pre-tool-use", transport, Path("/client/untracked")
+        contaminated, "pre-tool-use", transport, Path("/client/untracked"), Path("/client")
     )
 
     assert "/workspace/untracked" not in result
     assert '_rl_dir="/client/untracked"' in result
+    assert '"${BASH_SOURCE[0]}" == "/client/.claude/hooks/"*' in result
     assert result.count("relay hot path (generated") == 1
 
 
@@ -178,13 +188,13 @@ def test_f4_disabling_transport_strips_a_previously_generated_guard() -> None:
     shape, not leave a stale guard from when it was last enabled."""
     own_transport = TransportConfig(relay_enabled=True)
     previously_generated = generate_forwarder_content(
-        _SAMPLE_SOURCE, "pre-tool-use", own_transport, Path("/proj/untracked")
+        _SAMPLE_SOURCE, "pre-tool-use", own_transport, _UNTRACKED, _ROOT
     )
     assert "relay hot path" in previously_generated  # sanity: guard really is there
 
     disabled_transport = TransportConfig()
     result = generate_forwarder_content(
-        previously_generated, "pre-tool-use", disabled_transport, Path("/proj/untracked")
+        previously_generated, "pre-tool-use", disabled_transport, _UNTRACKED, _ROOT
     )
 
     assert result == _SAMPLE_SOURCE
@@ -203,7 +213,7 @@ def test_relay_guard_excludes_stop_events(event_file_name: str) -> None:
     transport = TransportConfig(relay_enabled=True)
     source = _SAMPLE_SOURCE.replace('send_request_stdin "PreToolUse"', 'forward_stop_event "Stop"')
 
-    result = generate_forwarder_content(source, event_file_name, transport, Path("/proj/untracked"))
+    result = generate_forwarder_content(source, event_file_name, transport, _UNTRACKED, _ROOT)
 
     assert "relay hot path" not in result
     assert result == source
@@ -217,7 +227,7 @@ def test_relay_guard_excluded_but_nc_still_applies_to_stop() -> None:
     transport = TransportConfig(relay_enabled=True, nc_enabled=True)
     source = _SAMPLE_SOURCE.replace('send_request_stdin "PreToolUse"', 'forward_stop_event "Stop"')
 
-    result = generate_forwarder_content(source, "stop", transport, Path("/proj/untracked"))
+    result = generate_forwarder_content(source, "stop", transport, _UNTRACKED, _ROOT)
 
     assert "relay hot path" not in result
     assert 'forward_stop_event "Stop" "stop"' in result
@@ -228,7 +238,7 @@ def test_real_stop_hooks_never_get_relay_guard_when_enabled(hook_file: str) -> N
     source = (_HOOKS_DIR / hook_file).read_text()
     transport = TransportConfig(relay_enabled=True)
 
-    result = generate_forwarder_content(source, hook_file, transport, Path("/proj/untracked"))
+    result = generate_forwarder_content(source, hook_file, transport, _UNTRACKED, _ROOT)
 
     assert "relay hot path" not in result
     assert result == source
@@ -251,7 +261,7 @@ def test_relay_guard_excludes_raw_stdout_events(event_file_name: str) -> None:
         'send_request_stdin "PreToolUse"', 'send_request_stdin "Status" "status"'
     )
 
-    result = generate_forwarder_content(source, event_file_name, transport, Path("/proj/untracked"))
+    result = generate_forwarder_content(source, event_file_name, transport, _UNTRACKED, _ROOT)
 
     assert "relay hot path" not in result
     assert result == source
@@ -262,7 +272,7 @@ def test_real_raw_stdout_hooks_never_get_relay_guard_when_enabled(hook_file: str
     source = (_HOOKS_DIR / hook_file).read_text()
     transport = TransportConfig(relay_enabled=True)
 
-    result = generate_forwarder_content(source, hook_file, transport, Path("/proj/untracked"))
+    result = generate_forwarder_content(source, hook_file, transport, _UNTRACKED, _ROOT)
 
     assert "relay hot path" not in result
     assert result == source
@@ -291,46 +301,54 @@ def test_enabled_transport_without_anchor_returns_unchanged() -> None:
     transport = TransportConfig(relay_enabled=True)
     weird_source = "#!/bin/bash\necho hi\n"
 
-    result = generate_forwarder_content(
-        weird_source, "pre-tool-use", transport, Path("/proj/untracked")
-    )
+    result = generate_forwarder_content(weird_source, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
     assert result == weird_source
 
 
 def test_guard_block_reentry_check_is_first() -> None:
-    """The `--no-relay` re-entry check gates the whole guard (loop-safety)."""
+    """The `--no-relay` re-entry check gates the whole guard (loop-safety).
+
+    It is the FIRST condition of the guard's single `if`, so the re-entry the
+    relay itself performs cannot reach the exec again whatever the other
+    conditions say. The checkout test (Plan 00364 Task 5.1) is conjoined onto
+    the same line and is asserted by its own tests below.
+    """
     block = build_relay_guard_block(
-        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u")
+        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"), Path("/p")
     )
     lines = [line for line in block.splitlines() if line.strip()]
-    assert lines[1] == 'if [[ "${1:-}" != "--no-relay" ]]; then'
+    assert lines[1].startswith('if [[ "${1:-}" != "--no-relay" &&')
+    assert lines[1].endswith("]]; then")
 
 
 def test_guard_block_names_the_correct_event_socket() -> None:
     block = build_relay_guard_block(
-        "user-prompt-submit", TransportConfig(relay_enabled=True), Path("/proj/untracked")
+        "user-prompt-submit", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
     )
     assert '_rl_sock="$_rl_events_dir/user-prompt-submit.sock"' in block
 
 
 def test_guard_block_uses_literal_untracked_dir() -> None:
     block = build_relay_guard_block(
-        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/some/project/untracked")
+        "pre-tool-use",
+        TransportConfig(relay_enabled=True),
+        Path("/some/project/untracked"),
+        Path("/some/project"),
     )
     assert '_rl_dir="/some/project/untracked"' in block
 
 
 def test_guard_block_default_relay_binary_path() -> None:
     block = build_relay_guard_block(
-        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/proj/untracked")
+        "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
     )
     assert '_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/proj/untracked/bin/hooks-relay}"' in block
 
 
 def test_guard_block_honours_relay_binary_override() -> None:
     transport = TransportConfig(relay_enabled=True, relay_binary="/opt/custom/hooks-relay")
-    block = build_relay_guard_block("pre-tool-use", transport, Path("/proj/untracked"))
+    block = build_relay_guard_block("pre-tool-use", transport, _UNTRACKED, _ROOT)
     assert '_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/opt/custom/hooks-relay}"' in block
     assert "/proj/untracked/bin/hooks-relay" not in block
 
@@ -341,7 +359,7 @@ def test_guard_block_events_dir_is_env_overridable() -> None:
     is computed from — mirrors CLAUDE_HOOKS_SOCKET_PATH's override pattern
     for the legacy socket."""
     block = build_relay_guard_block(
-        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/proj/untracked")
+        "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
     )
     assert '_rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"' in block
     assert '_rl_sock="$_rl_events_dir/pre-tool-use.sock"' in block
@@ -349,7 +367,7 @@ def test_guard_block_events_dir_is_env_overridable() -> None:
 
 def test_guard_block_relay_binary_is_env_overridable() -> None:
     block = build_relay_guard_block(
-        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/proj/untracked")
+        "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
     )
     assert '_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/proj/untracked/bin/hooks-relay}"' in block
 
@@ -357,7 +375,7 @@ def test_guard_block_relay_binary_is_env_overridable() -> None:
 def test_guard_block_env_overrides_are_pure_parameter_expansion() -> None:
     """Still zero subshells/spawns — `${VAR:-default}` is a bash builtin."""
     block = build_relay_guard_block(
-        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u")
+        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"), Path("/p")
     )
     assert "$(" not in block
     assert "`" not in block
@@ -365,13 +383,13 @@ def test_guard_block_env_overrides_are_pure_parameter_expansion() -> None:
 
 def test_guard_block_timeout_ms_derived_from_timeout_seconds() -> None:
     transport = TransportConfig(relay_enabled=True, timeout_seconds=5)
-    block = build_relay_guard_block("pre-tool-use", transport, Path("/proj/untracked"))
+    block = build_relay_guard_block("pre-tool-use", transport, _UNTRACKED, _ROOT)
     assert '--timeout-ms "5000"' in block
 
 
 def test_guard_block_execs_with_fallback_and_stdin_intact() -> None:
     block = build_relay_guard_block(
-        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u")
+        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"), Path("/p")
     )
     assert 'exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}"' in block
 
@@ -379,7 +397,7 @@ def test_guard_block_execs_with_fallback_and_stdin_intact() -> None:
 def test_guard_block_is_pure_builtin_no_subshell_spawn() -> None:
     """No `$( )`/backtick/external command inside the guard — bash builtins only."""
     block = build_relay_guard_block(
-        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u")
+        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"), Path("/p")
     )
     assert "$(" not in block
     assert "`" not in block
@@ -393,7 +411,7 @@ def test_guard_block_is_pure_builtin_no_subshell_spawn() -> None:
 def test_generated_forwarder_is_syntactically_valid_bash() -> None:
     transport = TransportConfig(relay_enabled=True)
     content = generate_forwarder_content(
-        _SAMPLE_SOURCE, "pre-tool-use", transport, Path("/proj/untracked")
+        _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
     )
 
     result = subprocess.run(
@@ -415,7 +433,7 @@ def test_generated_forwarder_is_syntactically_valid_bash() -> None:
 def test_nc_disabled_leaves_call_site_unchanged() -> None:
     transport = TransportConfig(nc_enabled=False)
     result = generate_forwarder_content(
-        _SAMPLE_SOURCE, "pre-tool-use", transport, Path("/proj/untracked")
+        _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
     )
     assert result == _SAMPLE_SOURCE
 
@@ -423,7 +441,7 @@ def test_nc_disabled_leaves_call_site_unchanged() -> None:
 def test_nc_enabled_appends_bash_key_to_send_request_stdin_call() -> None:
     transport = TransportConfig(nc_enabled=True)
     result = generate_forwarder_content(
-        _SAMPLE_SOURCE, "pre-tool-use", transport, Path("/proj/untracked")
+        _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
     )
     assert 'send_request_stdin "PreToolUse" "" "pre-tool-use"' in result
 
@@ -433,23 +451,21 @@ def test_nc_enabled_preserves_existing_response_mode_arg() -> None:
         'send_request_stdin "PreToolUse"', 'send_request_stdin "Status" "status"'
     )
     transport = TransportConfig(nc_enabled=True)
-    result = generate_forwarder_content(source, "status-line", transport, Path("/proj/untracked"))
+    result = generate_forwarder_content(source, "status-line", transport, _UNTRACKED, _ROOT)
     assert 'send_request_stdin "Status" "status" "status-line"' in result
 
 
 def test_nc_enabled_appends_to_forward_stop_event_call() -> None:
     source = _SAMPLE_SOURCE.replace('send_request_stdin "PreToolUse"', 'forward_stop_event "Stop"')
     transport = TransportConfig(nc_enabled=True)
-    result = generate_forwarder_content(source, "stop", transport, Path("/proj/untracked"))
+    result = generate_forwarder_content(source, "stop", transport, _UNTRACKED, _ROOT)
     assert 'forward_stop_event "Stop" "stop"' in result
 
 
 def test_nc_enabled_is_idempotent() -> None:
     transport = TransportConfig(nc_enabled=True)
-    once = generate_forwarder_content(
-        _SAMPLE_SOURCE, "pre-tool-use", transport, Path("/proj/untracked")
-    )
-    twice = generate_forwarder_content(once, "pre-tool-use", transport, Path("/proj/untracked"))
+    once = generate_forwarder_content(_SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT)
+    twice = generate_forwarder_content(once, "pre-tool-use", transport, _UNTRACKED, _ROOT)
     assert twice == once
     assert once.count('"pre-tool-use"') == 1
 
@@ -457,7 +473,7 @@ def test_nc_enabled_is_idempotent() -> None:
 def test_both_rungs_enabled_together() -> None:
     transport = TransportConfig(relay_enabled=True, nc_enabled=True)
     result = generate_forwarder_content(
-        _SAMPLE_SOURCE, "pre-tool-use", transport, Path("/proj/untracked")
+        _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
     )
     assert "relay hot path" in result
     assert 'send_request_stdin "PreToolUse" "" "pre-tool-use"' in result
@@ -480,7 +496,7 @@ def test_nc_enabled_short_path_appends_empty_events_dir_override() -> None:
     dynamic path never overflows, so no baked override is needed."""
     transport = TransportConfig(nc_enabled=True)
     result = generate_forwarder_content(
-        _SAMPLE_SOURCE, "pre-tool-use", transport, Path("/proj/untracked")
+        _SAMPLE_SOURCE, "pre-tool-use", transport, _UNTRACKED, _ROOT
     )
     assert 'send_request_stdin "PreToolUse" "" "pre-tool-use" ""' in result
 
@@ -501,7 +517,7 @@ def test_nc_enabled_deep_path_bakes_resolved_events_dir_override() -> None:
 
     transport = TransportConfig(nc_enabled=True)
     result = generate_forwarder_content(
-        _SAMPLE_SOURCE, "pre-tool-use", transport, deep_untracked_dir
+        _SAMPLE_SOURCE, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT
     )
 
     assert f'send_request_stdin "PreToolUse" "" "pre-tool-use" "{expected_fallback}"' in result
@@ -515,7 +531,7 @@ def test_nc_enabled_deep_path_forward_stop_event_bakes_override() -> None:
 
     source = _SAMPLE_SOURCE.replace('send_request_stdin "PreToolUse"', 'forward_stop_event "Stop"')
     transport = TransportConfig(nc_enabled=True)
-    result = generate_forwarder_content(source, "stop", transport, deep_untracked_dir)
+    result = generate_forwarder_content(source, "stop", transport, deep_untracked_dir, _DEEP_ROOT)
 
     assert f'forward_stop_event "Stop" "stop" "{expected_fallback}"' in result
 
@@ -523,8 +539,12 @@ def test_nc_enabled_deep_path_forward_stop_event_bakes_override() -> None:
 def test_nc_enabled_deep_path_is_still_idempotent() -> None:
     deep_untracked_dir = Path("/" + "a" * 90 + "/untracked")
     transport = TransportConfig(nc_enabled=True)
-    once = generate_forwarder_content(_SAMPLE_SOURCE, "pre-tool-use", transport, deep_untracked_dir)
-    twice = generate_forwarder_content(once, "pre-tool-use", transport, deep_untracked_dir)
+    once = generate_forwarder_content(
+        _SAMPLE_SOURCE, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT
+    )
+    twice = generate_forwarder_content(
+        once, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT
+    )
     assert twice == once
     assert once.count('"pre-tool-use"') == 1
 
@@ -557,7 +577,7 @@ def test_nc_enabled_is_idempotent_against_previous_release_three_arg_form() -> N
     legacy = _source_with_call('send_request_stdin "PreToolUse" "" "pre-tool-use"')
     transport = TransportConfig(nc_enabled=True)
 
-    result = generate_forwarder_content(legacy, "pre-tool-use", transport, Path("/proj/untracked"))
+    result = generate_forwarder_content(legacy, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
     assert _call_line(result) == 'send_request_stdin "PreToolUse" "" "pre-tool-use" ""'
     assert result.count('"pre-tool-use"') == 1
@@ -568,7 +588,7 @@ def test_nc_enabled_is_idempotent_against_previous_release_stop_form() -> None:
     legacy = _source_with_call('forward_stop_event "Stop" "stop"')
     transport = TransportConfig(nc_enabled=True)
 
-    result = generate_forwarder_content(legacy, "stop", transport, Path("/proj/untracked"))
+    result = generate_forwarder_content(legacy, "stop", transport, _UNTRACKED, _ROOT)
 
     assert _call_line(result) == 'forward_stop_event "Stop" "stop" ""'
     assert result.count('"stop"') == 1
@@ -579,7 +599,7 @@ def test_nc_enabled_is_idempotent_against_previous_release_status_form() -> None
     legacy = _source_with_call('send_request_stdin "Status" "status" "status-line"')
     transport = TransportConfig(nc_enabled=True)
 
-    result = generate_forwarder_content(legacy, "status-line", transport, Path("/proj/untracked"))
+    result = generate_forwarder_content(legacy, "status-line", transport, _UNTRACKED, _ROOT)
 
     assert _call_line(result) == 'send_request_stdin "Status" "status" "status-line" ""'
     assert result.count('"status-line"') == 1
@@ -593,7 +613,7 @@ def test_nc_enabled_repairs_a_doubled_call_site() -> None:
     )
     transport = TransportConfig(nc_enabled=True)
 
-    result = generate_forwarder_content(doubled, "pre-tool-use", transport, Path("/proj/untracked"))
+    result = generate_forwarder_content(doubled, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
     assert _call_line(result) == 'send_request_stdin "PreToolUse" "" "pre-tool-use" ""'
 
@@ -607,7 +627,9 @@ def test_previous_release_form_gains_the_events_dir_override_on_a_deep_path() ->
     legacy = _source_with_call('send_request_stdin "PreToolUse" "" "pre-tool-use"')
     transport = TransportConfig(nc_enabled=True)
 
-    result = generate_forwarder_content(legacy, "pre-tool-use", transport, deep_untracked_dir)
+    result = generate_forwarder_content(
+        legacy, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT
+    )
 
     assert (
         _call_line(result)
@@ -619,7 +641,7 @@ def test_previous_release_form_still_generates_valid_bash() -> None:
     legacy = _source_with_call('send_request_stdin "PreToolUse" "" "pre-tool-use"')
     transport = TransportConfig(nc_enabled=True)
 
-    content = generate_forwarder_content(legacy, "pre-tool-use", transport, Path("/proj/untracked"))
+    content = generate_forwarder_content(legacy, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
     result = subprocess.run(
         ["bash", "-n", "-c", content],
@@ -638,7 +660,7 @@ def test_every_real_hook_generates_valid_bash_when_enabled(hook_file: str) -> No
     source = (_HOOKS_DIR / hook_file).read_text()
     transport = TransportConfig(relay_enabled=True)
 
-    content = generate_forwarder_content(source, hook_file, transport, Path("/proj/untracked"))
+    content = generate_forwarder_content(source, hook_file, transport, _UNTRACKED, _ROOT)
 
     result = subprocess.run(
         ["bash", "-n", "-c", content],
@@ -694,3 +716,88 @@ def test_load_transport_config_falls_back_to_defaults_on_malformed_yaml(
 
     assert transport == TransportConfig()
     assert any("hooks-daemon.yaml" in record.message for record in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# The guard belongs to ONE checkout (Plan 00364 Task 5.1)
+# ---------------------------------------------------------------------------
+#
+# Every path in the guard is a literal, deliberately: it is a zero-spawn hot
+# path that must not compute anything at hook-run time. A git worktree
+# inherits the tracked forwarder VERBATIM, literals and all, so its
+# `.claude/hooks/pre-tool-use` dialled the MAIN checkout's relay socket and
+# was answered by the main checkout's daemon — the worktree's own handlers,
+# config and project handlers never saw the event.
+#
+# The fix keeps every path a literal and adds one more: the hooks directory
+# the forwarder was generated FOR. `${BASH_SOURCE[0]}` is the file bash is
+# executing, so comparing it against that literal answers "am I the copy this
+# guard was built for?" with a bash builtin and no spawn. A foreign copy
+# falls through to init.sh, which computes ITS OWN checkout's socket.
+
+
+def test_guard_block_requires_the_source_to_live_under_its_own_hooks_dir() -> None:
+    block = build_relay_guard_block(
+        "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
+    )
+    assert '"${BASH_SOURCE[0]}" == "/proj/.claude/hooks/"*' in block
+
+
+def test_the_checkout_test_is_on_the_same_line_as_the_reentry_check() -> None:
+    """One `if`, so the guard keeps its single-branch zero-spawn shape."""
+    block = build_relay_guard_block(
+        "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
+    )
+    conditions = [line for line in block.splitlines() if line.startswith("if [[")]
+    assert len(conditions) == 1
+    assert conditions[0].startswith('if [[ "${1:-}" != "--no-relay" &&')
+
+
+def test_the_checkout_test_adds_no_spawn() -> None:
+    block = build_relay_guard_block(
+        "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
+    )
+    assert "$(" not in block
+    assert "`" not in block
+
+
+def test_the_relay_binary_override_still_applies() -> None:
+    """The override must not become unreachable behind the checkout test."""
+    transport = TransportConfig(relay_enabled=True, relay_binary="/opt/custom/hooks-relay")
+    block = build_relay_guard_block("pre-tool-use", transport, _UNTRACKED, _ROOT)
+    assert '_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/opt/custom/hooks-relay}"' in block
+    assert '"${BASH_SOURCE[0]}" == "/proj/.claude/hooks/"*' in block
+
+
+def test_the_events_dir_override_still_applies() -> None:
+    block = build_relay_guard_block(
+        "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
+    )
+    assert '_rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"' in block
+
+
+def test_a_client_layouts_root_is_not_derived_from_its_untracked_dir() -> None:
+    """A client's untracked dir is three levels below the root it must name."""
+    block = build_relay_guard_block(
+        "pre-tool-use",
+        TransportConfig(relay_enabled=True),
+        Path("/client/.claude/hooks-daemon/untracked"),
+        Path("/client"),
+    )
+    assert '"${BASH_SOURCE[0]}" == "/client/.claude/hooks/"*' in block
+    assert '_rl_dir="/client/.claude/hooks-daemon/untracked"' in block
+
+
+def test_the_generated_forwarder_carries_the_checkout_test() -> None:
+    content = generate_forwarder_content(
+        _SAMPLE_SOURCE, "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
+    )
+    assert '"${BASH_SOURCE[0]}" == "/proj/.claude/hooks/"*' in content
+
+
+def test_stripping_still_removes_a_guard_that_carries_the_checkout_test() -> None:
+    """The strip is marker-based, so it must not care what the body says."""
+    generated = generate_forwarder_content(
+        _SAMPLE_SOURCE, "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
+    )
+    assert strip_relay_guard_block(generated) == _SAMPLE_SOURCE

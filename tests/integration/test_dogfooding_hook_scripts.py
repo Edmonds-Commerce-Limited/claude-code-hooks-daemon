@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.install.forwarder_generator import (
+    recorded_project_root,
     recorded_untracked_dir,
     unexpected_absolute_paths,
 )
@@ -73,13 +74,16 @@ def generate_fresh_hook_scripts() -> dict[str, str]:
 
     project_root = get_project_root()
     transport = load_transport_config(project_root)
-    # Generate for the root the DEPLOYED forwarders record, not this checkout's.
-    # Comparing against a regeneration at the current root additionally asserts
-    # "this checkout sits where the committed file's did" — false on every
-    # machine but the one that generated them (Plan 00250 Task 2.4c).
-    untracked_dir = recorded_untracked_dir(get_installed_hook_scripts()) or (
-        get_event_socket_dir(project_root).parent
-    )
+    # Generate for the roots the DEPLOYED forwarders record, not this
+    # checkout's. Comparing against a regeneration at the current root
+    # additionally asserts "this checkout sits where the committed file's did"
+    # — false on every machine but the one that generated them (Plan 00250
+    # Task 2.4c), and false in every worktree of it.
+    installed = get_installed_hook_scripts()
+    untracked_dir = recorded_untracked_dir(installed) or (get_event_socket_dir(project_root).parent)
+    # The guard bakes the checkout too (Plan 00364 Task 5.1), so it is read
+    # back for the same reason and from the same artefact.
+    guard_root = recorded_project_root(installed) or project_root
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_hooks_dir = Path(tmpdir) / "hooks"
@@ -104,7 +108,7 @@ def generate_fresh_hook_scripts() -> dict[str, str]:
             create_forwarder_script(tmp_hooks_dir, hook_name, event_name)
             plain_content = (tmp_hooks_dir / hook_name).read_text()
             scripts[hook_name] = generate_forwarder_content(
-                plain_content, hook_name, transport, untracked_dir
+                plain_content, hook_name, transport, untracked_dir, guard_root
             )
 
         # Generate status-line script. regenerate_deployed_hooks transforms
@@ -114,7 +118,7 @@ def generate_fresh_hook_scripts() -> dict[str, str]:
         create_status_line_script(tmp_hooks_dir)
         plain_status_line = (tmp_hooks_dir / "status-line").read_text()
         scripts["status-line"] = generate_forwarder_content(
-            plain_status_line, "status-line", transport, untracked_dir
+            plain_status_line, "status-line", transport, untracked_dir, guard_root
         )
 
         return scripts
@@ -225,9 +229,9 @@ class TestDogfoodingHookScripts:
         """
         installed = get_installed_hook_scripts()
         baked_roots = [str(get_project_root())]
-        recorded = recorded_untracked_dir(installed)
-        if recorded is not None:
-            baked_roots.append(str(recorded))
+        for recorded in (recorded_untracked_dir(installed), recorded_project_root(installed)):
+            if recorded is not None:
+                baked_roots.append(str(recorded))
 
         offenders = {
             name: unexpected

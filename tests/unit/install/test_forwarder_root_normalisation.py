@@ -39,6 +39,7 @@ import pytest
 from claude_code_hooks_daemon.install.forwarder_generator import (
     PROJECT_ROOT_PLACEHOLDER,
     normalise_project_root,
+    recorded_project_root,
     recorded_untracked_dir,
     surviving_absolute_paths,
     unexpected_absolute_paths,
@@ -47,7 +48,15 @@ from claude_code_hooks_daemon.install.forwarder_generator import (
 _ROOT = "/workspace"
 _OTHER_ROOT = "/home/runner/work/claude-code-hooks-daemon/claude-code-hooks-daemon"
 
-_GUARD = '_rl_dir="{root}/untracked"\n_rl_bin="${{HOOKS_DAEMON_RELAY_BINARY:-{root}/untracked/bin/hooks-relay}}"\n'
+#: The three absolute paths a generated guard bakes, in the shape it bakes
+#: them: the checkout the forwarder belongs to (Plan 00364 Task 5.1), the
+#: untracked dir, and the relay binary under it.
+_GUARD = (
+    'if [[ "${{1:-}}" != "--no-relay" && '
+    '"${{BASH_SOURCE[0]}}" == "{root}/.claude/hooks/"* ]]; then\n'
+    '_rl_dir="{root}/untracked"\n'
+    '_rl_bin="${{HOOKS_DAEMON_RELAY_BINARY:-{root}/untracked/bin/hooks-relay}}"\n'
+)
 
 
 class TestNormalisingTheRoot:
@@ -167,7 +176,9 @@ class TestALongRootChangesTheGuardsSHAPE:
             build_relay_guard_block,
         )
 
-        return build_relay_guard_block("pre-tool-use", TransportConfig(), Path(root) / "untracked")
+        return build_relay_guard_block(
+            "pre-tool-use", TransportConfig(), Path(root) / "untracked", Path(root)
+        )
 
     def test_a_short_root_bakes_only_the_root(self) -> None:
         normalised = normalise_project_root(self._guard_at(_ROOT), _ROOT)
@@ -244,6 +255,54 @@ class TestReadingTheRootTheTrackedFilesRecord:
         assert recorded.name == "untracked"
 
 
+class TestReadingTheCHECKOUTTheTrackedFilesRecord:
+    """The guard bakes a SECOND root, and it must be readable back too.
+
+    `build_relay_guard_block` records the checkout the forwarder belongs to,
+    so the relay never fires from a copy under a different root (Plan 00364
+    Task 5.1). A caller that reads back only the untracked dir would then
+    judge the checkout literal as an undeclared machine-specific path — the
+    same mistake `recorded_untracked_dir` exists to prevent, one path along.
+    """
+
+    def test_it_reads_the_checkout_out_of_a_guard_block(self) -> None:
+        assert recorded_project_root({"pre-tool-use": _GUARD.format(root=_ROOT)}) == Path(_ROOT)
+
+    def test_files_without_a_guard_are_ignored_not_fatal(self) -> None:
+        contents = {
+            "pre-tool-use": _GUARD.format(root=_ROOT),
+            "stop": "#!/bin/bash\nexec thing\n",
+        }
+        assert recorded_project_root(contents) == Path(_ROOT)
+
+    def test_no_guard_anywhere_returns_none(self) -> None:
+        assert recorded_project_root({"stop": "#!/bin/bash\n"}) is None
+
+    def test_disagreeing_files_are_an_error(self) -> None:
+        contents = {
+            "pre-tool-use": _GUARD.format(root=_ROOT),
+            "post-tool-use": _GUARD.format(root=_OTHER_ROOT),
+        }
+        with pytest.raises(AssertionError, match="disagree"):
+            recorded_project_root(contents)
+
+    def test_the_real_tracked_forwarders_record_a_checkout(self) -> None:
+        hooks_dir = Path(__file__).resolve().parents[3] / ".claude" / "hooks"
+        contents = {
+            path.name: path.read_text(encoding="utf-8")
+            for path in hooks_dir.iterdir()
+            if path.is_file() and not path.name.endswith(".bak")
+        }
+        recorded = recorded_project_root(contents)
+        assert recorded is not None
+        untracked = recorded_untracked_dir(contents)
+        assert untracked is not None
+        assert untracked.is_relative_to(recorded), (
+            "the untracked dir a forwarder records must sit inside the checkout "
+            f"it records: {untracked} is not under {recorded}"
+        )
+
+
 class TestTheRecordedRootIsHostnameIndependentInPractice:
     """The runner condition, reproduced rather than reasoned about.
 
@@ -264,7 +323,9 @@ class TestTheRecordedRootIsHostnameIndependentInPractice:
             build_relay_guard_block,
         )
 
-        return build_relay_guard_block("user-prompt-expansion", TransportConfig(), self._RECORDED)
+        return build_relay_guard_block(
+            "user-prompt-expansion", TransportConfig(), self._RECORDED, self._RECORDED.parent
+        )
 
     @pytest.mark.parametrize(
         ("hostname", "label"),
@@ -317,6 +378,7 @@ class TestTheGuardJudgesTheBAKEDRootNotTheLIVEOne:
     def test_judging_against_the_live_root_alone_is_what_failed_on_ci(self) -> None:
         """Pins the defect, so a revert cannot pass quietly."""
         assert unexpected_absolute_paths(self._content(), [self._LIVE]) == [
+            f"{self._BAKED}/.claude/hooks",
             f"{self._BAKED}/untracked",
             f"{self._BAKED}/untracked/bin/hooks-relay",
         ]
@@ -344,6 +406,7 @@ class TestTheGuardJudgesTheBAKEDRootNotTheLIVEOne:
 
     def test_no_declared_roots_reports_every_absolute_path(self) -> None:
         assert unexpected_absolute_paths(self._content(), []) == [
+            f"{self._BAKED}/.claude/hooks",
             f"{self._BAKED}/untracked",
             f"{self._BAKED}/untracked/bin/hooks-relay",
         ]
@@ -364,10 +427,16 @@ class TestTheGuardJudgesTheBAKEDRootNotTheLIVEOne:
         }
         recorded = recorded_untracked_dir(contents)
         assert recorded is not None, "the tracked forwarders record no root to judge against"
+        checkout = recorded_project_root(contents)
+        assert checkout is not None, "the tracked forwarders record no checkout to judge against"
 
+        # BOTH baked roots are declared. Declaring only one would report the
+        # other as machine-specific from any foreign checkout — the very
+        # failure this class is named for.
+        declared = [_OTHER_ROOT, str(recorded), str(checkout)]
         offenders = {
             name: unexpected
             for name, content in contents.items()
-            if (unexpected := unexpected_absolute_paths(content, [_OTHER_ROOT, str(recorded)]))
+            if (unexpected := unexpected_absolute_paths(content, declared))
         }
         assert not offenders

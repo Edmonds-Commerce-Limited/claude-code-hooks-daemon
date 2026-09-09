@@ -275,7 +275,7 @@ class TestListenerProbes:
 
 class TestGuardStateProbe:
     def test_guard_expected_and_present_passes(self, tmp_path: Path) -> None:
-        guard = build_relay_guard_block("pre-tool-use", TransportConfig(), tmp_path)
+        guard = build_relay_guard_block("pre-tool-use", TransportConfig(), tmp_path, tmp_path)
         (tmp_path / "pre-tool-use").write_text("#!/bin/bash\n" + guard + INIT_SH_ANCHOR)
         result = probe_forwarder_guard_state(tmp_path, expect_relay=True)
         assert result.passed, result.detail
@@ -286,7 +286,7 @@ class TestGuardStateProbe:
         assert not result.passed
 
     def test_guard_unexpected_but_present_fails(self, tmp_path: Path) -> None:
-        guard = build_relay_guard_block("pre-tool-use", TransportConfig(), tmp_path)
+        guard = build_relay_guard_block("pre-tool-use", TransportConfig(), tmp_path, tmp_path)
         (tmp_path / "pre-tool-use").write_text("#!/bin/bash\n" + guard + INIT_SH_ANCHOR)
         result = probe_forwarder_guard_state(tmp_path, expect_relay=False)
         assert not result.passed
@@ -301,7 +301,7 @@ class TestGuardStateProbe:
         # D1 (canary run 4): clients legitimately ship their own files in
         # .claude/hooks/ — only the catalogue's wired forwarder names are
         # this probe's business.
-        guard = build_relay_guard_block("pre-tool-use", TransportConfig(), tmp_path)
+        guard = build_relay_guard_block("pre-tool-use", TransportConfig(), tmp_path, tmp_path)
         (tmp_path / "pre-tool-use").write_text("#!/bin/bash\n" + guard + INIT_SH_ANCHOR)
         for foreign in ("php-qa-ci__custom.py", "CLAUDE.md", "README.md", "test-all-hooks.sh"):
             (tmp_path / foreign).write_text("# client-owned file, not a forwarder\n")
@@ -317,7 +317,7 @@ class TestGuardStateProbe:
 
     def test_foreign_file_content_is_not_checked_in_the_off_state(self, tmp_path: Path) -> None:
         (tmp_path / "pre-tool-use").write_text("#!/bin/bash\n" + INIT_SH_ANCHOR)
-        guard = build_relay_guard_block("pre-tool-use", TransportConfig(), tmp_path)
+        guard = build_relay_guard_block("pre-tool-use", TransportConfig(), tmp_path, tmp_path)
         (tmp_path / "RELAY-NOTES.md").write_text("A quoted guard block:\n" + guard)
 
         result = probe_forwarder_guard_state(tmp_path, expect_relay=False)

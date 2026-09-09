@@ -27,7 +27,78 @@ from typing import Any, Final, NamedTuple, TypeAlias
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPTS_DIR = PROJECT_ROOT / "scripts" / "qa"
 QA_OUTPUT_DIR = PROJECT_ROOT / "untracked" / "qa"
-VENV_PYTHON = PROJECT_ROOT / "untracked" / "venv" / "bin" / "python"
+
+#: The canonical bash venv resolver, relative to a checkout root. It answers
+#: with the fingerprint-keyed ``untracked/venv-<fingerprint>/bin/python`` that
+#: every other entry point (init.sh, venv_resolver.sh, venv-include.bash) uses.
+_RESOLVE_VENV_SH = Path("scripts") / "lib" / "resolve_venv.sh"
+
+#: The pre-v3.7.0 unversioned venv path. `venv-include.bash` refuses to CREATE
+#: anything here, so it exists only where an operator left a symlink behind —
+#: which is why hardcoding it worked in the main checkout and in no worktree.
+_LEGACY_VENV_PYTHON = Path("untracked") / "venv" / "bin" / "python"
+
+
+class VenvResolutionError(RuntimeError):
+    """No QA interpreter could be resolved for a checkout."""
+
+
+def resolve_venv_python(project_root: Path = PROJECT_ROOT) -> Path:
+    """The interpreter the QA tools run under, for ``project_root``.
+
+    The resolver is authoritative wherever it is deployed; the legacy path is
+    consulted ONLY when the resolver itself is missing, never as a rescue for
+    a resolver that ran and reported failure. Rescuing there would resurrect
+    the silent fallback the fingerprint layout exists to remove: a stale
+    ``untracked/venv`` symlink would answer for a venv the resolver had just
+    rejected, and the QA suite would run under the wrong Python.
+
+    Raises:
+        VenvResolutionError: naming BOTH places that were tried, and the
+            resolver's own diagnostic when it produced one.
+    """
+    resolver = project_root / _RESOLVE_VENV_SH
+    legacy = project_root / _LEGACY_VENV_PYTHON
+
+    if not resolver.is_file():
+        if legacy.is_file():
+            return legacy
+        raise VenvResolutionError(
+            f"no QA interpreter for {project_root}:\n"
+            f"  1. canonical resolver {resolver} is not present\n"
+            f"  2. legacy interpreter {legacy} does not exist either\n"
+            "Install/repair the daemon so the resolver is deployed, then re-run."
+        )
+
+    completed = subprocess.run(
+        ["bash", str(resolver), "python", str(project_root)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    resolved = completed.stdout.strip()
+    if completed.returncode == 0 and resolved:
+        return Path(resolved)
+
+    diagnostic = completed.stderr.strip() or "(no diagnostic on stderr)"
+    raise VenvResolutionError(
+        f"no QA interpreter for {project_root}:\n"
+        f"  1. {resolver} python {project_root} exited {completed.returncode}:\n"
+        f"     {diagnostic}\n"
+        f"  2. legacy interpreter {legacy} is NOT consulted when the resolver "
+        "is present, so that a stale symlink cannot answer for a venv the "
+        "resolver rejected.\n"
+        "Create the venv (hooks-daemon skill, install action), then re-run."
+    )
+
+
+try:
+    VENV_PYTHON = resolve_venv_python()
+except VenvResolutionError as exc:
+    # TOOL_REGISTRY below bakes this interpreter into every command, so an
+    # unresolvable venv means no tool can run: report it as the message it is
+    # rather than as an import traceback.
+    raise SystemExit(f"llm_qa: {exc}") from exc
 
 # Exit codes. 2 is deliberately skipped: the sibling run_all.sh already uses it
 # for "cannot run" (venv resolver missing), and the two entry points must not

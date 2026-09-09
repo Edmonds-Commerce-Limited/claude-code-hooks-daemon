@@ -159,6 +159,35 @@ fi
 mkdir -p "${WORKTREE_DIR}/.claude/hooks-daemon/untracked"
 echo -e "${GREEN}✓${NC} Daemon untracked directory created"
 
+# Step 9: Provision .claude/hooks-daemon.env for the new worktree.
+#
+# The file is gitignored, so `git worktree add` never brings it across, and
+# init.sh only enters self-install mode when it EXISTS. Without it every hook
+# wrapper in the worktree answers with its "not installed" fallback — which
+# for Stop is decision=block, i.e. indistinguishable from a working gate.
+#
+# Written by the installer's own create_daemon_env, so there is one definition
+# of this file's content; never copied from another checkout, which would
+# carry that checkout's hand-edits (and defeat worktree isolation). The
+# content it writes is checkout-agnostic: HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"
+# is expanded by init.sh against whichever checkout sources it.
+echo -e "${YELLOW}→${NC} Provisioning .claude/hooks-daemon.env..."
+if ! "${WT_VENV_PATH}/bin/python" - "${WORKTREE_DIR}" <<'PY'
+import sys
+from pathlib import Path
+
+worktree = Path(sys.argv[1])
+sys.path.insert(0, str(worktree))
+from install import create_daemon_env
+
+create_daemon_env(worktree, daemon_root="$PROJECT_PATH")
+PY
+then
+    echo -e "${RED}✗${NC} Failed to write ${WORKTREE_DIR}/.claude/hooks-daemon.env"
+    echo "  Without it the worktree's hooks answer 'daemon not installed'."
+    exit 1
+fi
+
 echo ""
 echo -e "${GREEN}=== Worktree Ready ===${NC}"
 echo ""

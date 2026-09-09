@@ -39,7 +39,51 @@ What it does:
 4. Installs the package in editable mode (`pip install -e ".[dev]"`)
 5. Verifies the editable install points at the worktree's own `src/`
 6. Creates the daemon's `untracked/` directory
-7. Prints an agent prompt template
+7. Writes `.claude/hooks-daemon.env` (see below)
+8. Prints an agent prompt template
+
+## The Worktree's Own Daemon Answers Its Own Hooks
+
+Two things have to be true for a worktree's `.claude/hooks/*` to reach the
+daemon running in THAT worktree, and both are handled for you.
+
+**`.claude/hooks-daemon.env` must exist in the worktree.** It is gitignored,
+so `git worktree add` never brings it across, and `init.sh` only enters
+self-install mode when it is present. Without it `HOOKS_DAEMON_ROOT_DIR` falls
+back to `.claude/hooks-daemon`, no daemon is found there, and every wrapper
+answers with its "Hooks daemon not installed" fallback. `setup_worktree.sh`
+writes it. The file's content is checkout-agnostic
+(`HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"`, expanded by `init.sh` at source
+time), so a worktree created another way can be fixed by re-running the setup
+script — never by copying the file from another checkout, which
+`worktree_file_copy` blocks and which would carry that checkout's edits.
+
+**The relay hot path is scoped to the checkout it was generated for.** The
+generated guard in each `.claude/hooks/<event>` bakes absolute literals on
+purpose — it is a zero-spawn hot path — so a worktree inherits the MAIN
+checkout's socket path with the tracked file. The guard therefore also tests
+`${BASH_SOURCE[0]}` against the hooks directory it was generated for: outside
+that checkout it declines the relay and falls through to `init.sh`, which
+computes this worktree's own project-scoped socket. No environment override is
+needed, and `HOOKS_DAEMON_RELAY_BINARY` is not a workaround for anything.
+
+The cost is one legacy-transport round trip per hook in a worktree, and the
+same applies when a hook is invoked by a RELATIVE path even in the main
+checkout (Claude Code itself always invokes them absolutely, via
+`$CLAUDE_PROJECT_DIR`). A slower answer from the right daemon is the trade
+being made.
+
+Verify with a probe rather than by inspection — the wrong-daemon failure is
+silent, and its answer looks exactly like the right one:
+
+```bash
+printf '{"tool_name":"Bash","tool_input":{"command":"true"},"hook_event_name":"PreToolUse","session_id":"probe"}' \
+  | bash .claude/hooks/pre-tool-use
+./bin/hooks-daemon logs -n 5   # the probe's session_id appears in THIS worktree's log
+```
+
+A not-installed answer names the checkout it is answering for, so an answer
+about another checkout is visible in the response itself.
 
 **Never hand-build the venv** (e.g. `python3 -m venv untracked/venv`): that
 produces the retired pre-v3.7.0 layout, and the fingerprint-aware venv

@@ -270,7 +270,7 @@ class TestExcludedEventsCarryNoGuard:
         transport = TransportConfig(relay_enabled=True)
 
         result = generate_forwarder_content(
-            source, meta.bash_key, transport, Path("/proj/untracked")
+            source, meta.bash_key, transport, Path("/proj/untracked"), Path("/proj")
         )
 
         assert "relay hot path" not in result, (

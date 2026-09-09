@@ -141,36 +141,32 @@ lives in so each phase can go to one worktree agent.
 
 ### Phase 5: worktree relay and project-handler priority
 
-- [ ] ⬜ **Task 5.1**: The generated relay hot path in `.claude/hooks/*` bakes
+- [x] ✅ **Task 5.1**: The generated relay hot path in `.claude/hooks/*` bakes
   `_rl_dir="/workspace/untracked"` absolute. A worktree inherits it and
-  relays to the MAIN repo's daemon. Fix: resolve the relay directory from
-  the hook's own location (or `CLAUDE_PROJECT_DIR`) at run time, so a
-  worktree checkout reaches its own daemon; keep the
-  `HOOKS_DAEMON_RELAY_BINARY` override working. Integration test: a
-  forwarder generated for root A, executed with cwd under root B, does not
-  dial A's socket. Second half (Phase 4 agent's finding): a worktree has no
-  `.claude/hooks-daemon.env` because it is gitignored, so `init.sh` never
-  enters self-install mode there and every wrapper answers with its
-  not-installed fallback (a block, so a smoke probe "passes" for the wrong
-  reason). `scripts/setup_worktree.sh` must provision it, and the wrapper's
-  fallback must say which checkout it is answering for.
-- [ ] ⬜ **Task 5.2**: `.claude/project-handlers/pre_tool_use/plan_done_requires_holding_area.py`
-  moves off priority 20 (shared with built-in `GIT_BRANCH`/`GIT_STASH`/
-  `GIT_MESSAGE_BACKTICK`/`NITPICK_HEDGING` on PreToolUse) to a free slot in
-  its band; daemon start logs no collision warning.
-- [ ] ⬜ **Task 5.3**: `CLAUDE/Worktree.md` records the relay behaviour and the
-  override until 5.1 ships, then the fixed behaviour.
-- [ ] ⬜ **Task 5.4**: `scripts/qa/audit_error_hiding.py` and
-  `scripts/qa/audit_capture_corruption.py` exclude any path CONTAINING
-  `untracked`, so from a worktree under `untracked/worktrees/` (a sanctioned
-  root) they scan nothing: error-hiding then reports every exclusion as
-  stale, capture-corruption reports no files. Match the exclusion on the
-  repo-relative path; the audit fails loudly when it collected zero files.
-  Found by the Phase 1 agent.
-- [ ] ⬜ **Task 5.5**: `scripts/qa/llm_qa.py` hardcodes
-  `untracked/venv/bin/python`, so a worktree needs a hand-made symlink to its
-  fingerprint-keyed venv. Resolve through `scripts/lib/resolve_venv.sh` (or
-  the same fingerprint logic) instead.
+  relays to the MAIN repo's daemon. Fixed by baking the hooks directory the
+  guard was generated for and testing `${BASH_SOURCE[0]}` against it (one
+  bash builtin, still no spawn) — the paths stay literals, and a copy under
+  another checkout falls through to `init.sh`, which resolves its own
+  socket. `HOOKS_DAEMON_RELAY_BINARY`/`HOOKS_DAEMON_EVENTS_DIR` overrides
+  and the marker-based strip are unchanged; `recorded_project_root` reads
+  the new literal back for the dogfooding comparison. Second half (Phase 4
+  agent's finding): `scripts/setup_worktree.sh` provisions
+  `.claude/hooks-daemon.env` through `install.py`'s own `create_daemon_env`,
+  and the not-installed fallback names the checkout in both encoders.
+- [x] ✅ **Task 5.2**: `plan_done_requires_holding_area` moves from priority
+  20 to 51 (workflow band, free on PreToolUse, after `plan_qa_edit` and
+  `plan_workflow`). `tests/integration/test_project_handler_priority_collisions.py`
+  reproduces the controller's own collision rule against the real registry.
+- [x] ✅ **Task 5.3**: `CLAUDE/Worktree.md` records the fixed relay
+  behaviour, the `hooks-daemon.env` provisioning, and a probe for verifying
+  which daemon answered. No override is named as a workaround.
+- [x] ✅ **Task 5.4**: both audits match the exclusion on the path relative
+  to the tree being scanned, and the error-hiding audit fails with a named
+  workspace when it collected zero candidate files. Found by the Phase 1
+  agent.
+- [x] ✅ **Task 5.5**: `scripts/qa/llm_qa.py` resolves the interpreter
+  through `scripts/lib/resolve_venv.sh`, falling back to the legacy path
+  only when the resolver is absent, and naming both attempts on failure.
 
 ### Phase 6: closure
 

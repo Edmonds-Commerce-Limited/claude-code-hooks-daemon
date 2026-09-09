@@ -47,7 +47,7 @@ class TestGuardPresenceMatchesMeta:
         source = _SAMPLE_SOURCE_TEMPLATE.format(json_key=meta.json_key)
 
         result = generate_forwarder_content(
-            source, meta.bash_key, transport, Path("/proj/untracked")
+            source, meta.bash_key, transport, Path("/proj/untracked"), Path("/proj")
         )
 
         has_guard = "relay hot path" in result
@@ -71,7 +71,9 @@ class TestGuardPresenceMatchesMeta:
         source = (_HOOKS_DIR / hook_file).read_text()
         transport = TransportConfig(relay_enabled=True)
 
-        result = generate_forwarder_content(source, hook_file, transport, Path("/proj/untracked"))
+        result = generate_forwarder_content(
+            source, hook_file, transport, Path("/proj/untracked"), Path("/proj")
+        )
 
         has_guard = "relay hot path" in result
         assert has_guard == meta.relay_eligible, (

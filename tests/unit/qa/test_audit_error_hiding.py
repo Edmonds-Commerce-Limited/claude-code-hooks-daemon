@@ -46,6 +46,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "scripts" / "qa"))
 from audit_error_hiding import (  # E402: sys.path insert above must precede this import
     AUDITED_DIRECTORIES,
@@ -59,6 +61,8 @@ from audit_error_hiding import (  # E402: sys.path insert above must precede thi
     collect_shell_files,
     collect_shell_violations,
     extract_heredoc_python_blocks,
+    format_violation_report,
+    run_audit,
 )
 
 from claude_code_hooks_daemon.strategies.error_hiding.shell_strategy import (
@@ -494,3 +498,93 @@ class TestAuditDirectoryUnaffectedByWidening:
         (tmp_path / "pkg" / "mod.py").write_text("try:\n    risky()\nexcept:\n    pass\n")
         violations = audit_directory(tmp_path)
         assert "silent-pass" in _rules(violations)
+
+
+class TestAWorkspaceLivingUnderAnExcludedDirectoryIsStillAudited:
+    """The exclusions name directories INSIDE the scanned tree, not anywhere.
+
+    Matching each pattern against the ABSOLUTE path made every file invisible
+    once the workspace itself sat under a matching directory — which is the
+    project's own sanctioned worktree layout (`untracked/worktrees/<branch>/`,
+    `WORKTREE_DIR_PATTERNS`). From such a checkout the auditor collected zero
+    files, found zero violations, and therefore reported all 100+ live
+    exclusions as stale: a green-looking scan of nothing, and a report about
+    the scan's location rather than about the code (Plan 00364 Task 5.4).
+    """
+
+    @staticmethod
+    def _worktree_workspace(tmp_path: Path) -> Path:
+        workspace = tmp_path / "untracked" / "worktrees" / "worktree-plan-00364"
+        workspace.mkdir(parents=True)
+        return workspace
+
+    def test_python_violations_are_collected_from_such_a_workspace(self, tmp_path: Path) -> None:
+        workspace = self._worktree_workspace(tmp_path)
+        (workspace / "scripts").mkdir()
+        (workspace / "scripts" / "tool.py").write_text(
+            "try:\n    risky()\nexcept ValueError:\n    result = []\n"
+        )
+        assert "silent-fallback" in _rules(collect_python_violations(workspace))
+
+    def test_shell_files_are_collected_from_such_a_workspace(self, tmp_path: Path) -> None:
+        workspace = self._worktree_workspace(tmp_path)
+        (workspace / "scripts").mkdir()
+        (workspace / "scripts" / "a.sh").write_text("#!/bin/bash\necho a\n")
+        assert {p.name for p in collect_shell_files(workspace)} == {"a.sh"}
+
+    def test_an_excluded_directory_INSIDE_the_workspace_is_still_skipped(
+        self, tmp_path: Path
+    ) -> None:
+        """The exclusion must keep working where it was always meant to."""
+        workspace = self._worktree_workspace(tmp_path)
+        nested = workspace / "scripts" / "untracked"
+        nested.mkdir(parents=True)
+        (nested / "generated.py").write_text("try:\n    risky()\nexcept:\n    pass\n")
+        (nested / "generated.sh").write_text("#!/bin/bash\nrisky || true\n")
+        assert collect_python_violations(workspace) == []
+        assert collect_shell_files(workspace) == []
+
+
+class TestAnAuditThatCollectedNothingFailsLoudly:
+    """Zero candidate files is a broken invocation, never a clean bill.
+
+    Without this the audit's "no violations found" is indistinguishable from
+    "nothing was looked at", which is exactly how the excluded-workspace bug
+    above stayed quiet: the run reported success on the violation count and
+    only the stale-exclusion check hinted that the scan was empty.
+    """
+
+    def test_it_returns_non_zero_and_names_the_workspace(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert run_audit(tmp_path, json_mode=False) != 0
+        assert str(tmp_path) in capsys.readouterr().err
+
+    def test_a_workspace_with_files_is_audited_normally(self, tmp_path: Path) -> None:
+        (tmp_path / "scripts").mkdir()
+        (tmp_path / "scripts" / "clean.py").write_text("value = 1\n")
+        assert run_audit(tmp_path, json_mode=False) == 0
+
+
+class TestTheTextReportSurvivesAStaleExclusion:
+    """A stale-exclusion finding carries no ``description`` key.
+
+    ``find_stale_exclusions`` builds its findings without one, so the text
+    report crashed with a ``KeyError`` on the exact run that had something to
+    say — the JSON path (what the QA pipeline consumes) was fine, which is why
+    it stayed hidden.
+    """
+
+    def test_a_finding_without_a_description_is_still_reported(self) -> None:
+        report = format_violation_report(
+            [
+                {
+                    "file": "scripts/qa/thing.sh",
+                    "line": 0,
+                    "rule": "stale-exclusion",
+                    "message": "matches no finding",
+                }
+            ]
+        )
+        assert "stale-exclusion" in report
+        assert "matches no finding" in report
