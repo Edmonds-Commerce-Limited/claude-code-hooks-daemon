@@ -216,8 +216,17 @@ case "$SUBCOMMAND" in
         ;;
 
     report)
-        # LLM-driven investigation report — outputs prompt for Claude to follow
-        cat "$SKILL_DIR/report.md" | sed "s/\$ARGUMENTS/$*/"
+        # LLM-driven investigation report — outputs prompt for Claude to follow,
+        # with the human's description standing in for report.md's $ARGUMENTS
+        # placeholder.
+        #
+        # Bash parameter expansion substitutes LITERALLY, so the description is
+        # data: no character in it can terminate the replacement or be read as
+        # a further command. Handing it to a stream editor instead made every
+        # character syntax — a `/` (a file path in the description) ended the
+        # replacement and the remainder was parsed as more editor commands.
+        REPORT_PROMPT="$(cat "$SKILL_DIR/report.md")"
+        printf '%s\n' "${REPORT_PROMPT//\$ARGUMENTS/$*}"
         ;;
 
     restart|bug-report)

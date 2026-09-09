@@ -20,6 +20,8 @@ pipeline's blocking Step 8 — runs it on every release (Task 4.3).
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 import types
 import typing
 from pathlib import Path
@@ -30,6 +32,7 @@ from pydantic import BaseModel
 
 from claude_code_hooks_daemon.config.models import Config, HandlersConfig
 from claude_code_hooks_daemon.config_optimisation.checklist import build_checklist
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.handlers import RETIRED_HANDLERS, HandlerID
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.relevance import RelevanceContext
@@ -330,3 +333,80 @@ def test_config_key_extraction_sees_known_keys() -> None:
     }
     assert "plan_workflow.enabled" in seen
     assert any(key.startswith("handlers.") for key in seen)
+
+
+# ── 5. The routing block treats its argument as data ────────────────────────
+
+
+def _routing_block() -> str:
+    """Return the shell routing block SKILL.md's Implementation section holds."""
+    text = (_SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    match = re.search(r"## Implementation\b.*?```bash\n(.*?)```", text, re.DOTALL)
+    assert match is not None, "SKILL.md no longer carries an Implementation bash block"
+    return match.group(1)
+
+
+def _report_arm() -> str:
+    """Return just the ``report)`` arm of the routing block."""
+    match = re.search(r"^    report\)\n(.*?)^        ;;", _routing_block(), re.DOTALL | re.MULTILINE)
+    assert match is not None, "SKILL.md no longer routes a `report` subcommand"
+    return match.group(1)
+
+
+class TestReportSubcommandArgumentIsData:
+    """The description a human types is DATA, never part of a command.
+
+    ``report`` renders ``report.md`` with the user's description substituted
+    for its ``$ARGUMENTS`` placeholder. Interpolating that description into a
+    stream-editor script instead made every character in it syntax: a ``/``
+    terminated the replacement and the remainder was parsed as further editor
+    commands — an injection sink shipped to every client, and a break on the
+    benign case of a description naming a file path.
+    """
+
+    def _run_report(self, tmp_path: Path, description: str) -> subprocess.CompletedProcess[str]:
+        """Execute the routing block's ``report`` arm against a copied skill tree."""
+        skill_copy = tmp_path / "hooks-daemon"
+        shutil.copytree(_SKILL_ROOT, skill_copy)
+        # The block derives SKILL_DIR from its own location, so the runner has
+        # to sit in the skill directory it should resolve to.
+        runner = skill_copy / "routing-block.sh"
+        runner.write_text("#!/bin/bash\n" + _routing_block(), encoding="utf-8")
+        return subprocess.run(
+            ["bash", str(runner), "report", description],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=Timeout.VALIDATION_CHECK,
+        )
+
+    def test_description_is_substituted_for_the_placeholder(self, tmp_path: Path) -> None:
+        result = self._run_report(tmp_path, "daemon stopped responding")
+        assert result.returncode == 0, result.stderr
+        assert "**daemon stopped responding**" in result.stdout
+        assert "$ARGUMENTS" not in result.stdout
+        # The rest of the prompt still comes through.
+        assert "## Instructions" in result.stdout
+
+    def test_a_description_containing_a_path_survives_verbatim(self, tmp_path: Path) -> None:
+        """The benign break: slashes are ordinary characters in a description."""
+        result = self._run_report(tmp_path, "Write to src/foo/bar.py hangs")
+        assert result.returncode == 0, result.stderr
+        assert "**Write to src/foo/bar.py hangs**" in result.stdout
+
+    def test_a_command_shaped_description_is_not_executed(self, tmp_path: Path) -> None:
+        """The injection shape: substituted literally, so nothing runs."""
+        description = "x/;e echo INJECTED_MARKER/"
+        result = self._run_report(tmp_path, description)
+        assert result.returncode == 0, result.stderr
+        assert f"**{description}**" in result.stdout
+        # A line that IS the marker would mean the argument reached a shell.
+        assert "INJECTED_MARKER" not in result.stdout.splitlines()
+
+    def test_report_arm_runs_no_external_command(self) -> None:
+        """No pipeline in the arm: the rendering is pure builtins."""
+        assert "|" not in _report_arm(), (
+            "The `report` arm pipes into another command again. The user's "
+            "description must be substituted literally by the shell, not "
+            "handed to a program that parses it."
+        )
