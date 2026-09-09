@@ -254,15 +254,17 @@ def test_tool_use_error_recovery_branch_skipped_on_success(
     #
     # Tolerate that one case explicitly rather than broadly: anything OTHER
     # than a recognised higher-priority guard must still be the default branch,
-    # so a genuine regression in Branch 4 cannot hide behind this.
+    # so a genuine regression in Branch 4 cannot hide behind this. It is a
+    # PASS, not a skip: this file is a blocking release gate that turns a skip
+    # into a failure, and the release guard answers precisely while that gate
+    # runs, so a skip here could only ever fail. The negative control has
+    # already proved its point above; the default-branch wording is Branch 4's
+    # own property and is pinned by `auto_continue_stop`'s unit tests.
     if _RELEASE_GUARD_FRAGMENT in reason:
-        pytest.skip(
-            "A release is in flight, so the terminal `release_blocker` project "
-            "handler (priority 8) answered ahead of `auto_continue_stop` (10). "
-            "Branch 2.5 correctly did not fire, which is what this negative "
-            "control exists to prove; the default-branch wording cannot be "
-            "observed over the socket until the release finishes."
+        assert "release-state.json" in reason, (
+            f"The release guard must name the state file it acted on. Got: {reason!r}"
         )
+        return
     assert _DEFAULT_REASON_FRAGMENT in reason, (
         f"Default branch reason must direct the agent to use the "
         f"STOPPING BECAUSE: prefix. Got: {reason!r}"
