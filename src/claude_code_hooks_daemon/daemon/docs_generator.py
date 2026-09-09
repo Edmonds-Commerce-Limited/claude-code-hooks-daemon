@@ -42,6 +42,13 @@ _TRACK_PLANS_KEY = "track_plans_in_project"
 _PLAN_WORKFLOW_DOCS_KEY = "plan_workflow_docs"
 _OPTIONS_KEY = "options"
 
+#: The only events under which the plan-mode handlers above are registered
+#: (`markdown_organization` on PostToolUse, `plan_number_helper` on
+#: PreToolUse). This is an intentional narrow subset, NOT a stale copy of the
+#: wired-event catalogue: plan-mode settings can live nowhere else, so
+#: widening the lookup to every wired event would find nothing more.
+_PLAN_MODE_EVENT_KEYS: tuple[str, ...] = ("post_tool_use", "pre_tool_use")
+
 # Type alias for collected handler data:
 # (handler_name, config_key, event_type_str, priority, behavior, description, is_enabled)
 CollectedHandler = tuple[str, str, str, int, str, str, bool]
@@ -462,7 +469,7 @@ class DocsGenerator:
         Returns:
             Plan tracking path string, or None if not configured.
         """
-        for event_type_key in ("post_tool_use", "pre_tool_use"):
+        for event_type_key in _PLAN_MODE_EVENT_KEYS:
             event_config = self._config.get(event_type_key, {})
 
             # Check markdown_organization handler
@@ -487,7 +494,7 @@ class DocsGenerator:
         Returns:
             Path to workflow docs, or None if not configured.
         """
-        for event_type_key in ("post_tool_use", "pre_tool_use"):
+        for event_type_key in _PLAN_MODE_EVENT_KEYS:
             event_config = self._config.get(event_type_key, {})
             md_org = event_config.get(_MARKDOWN_ORGANIZATION_KEY, {})
             options = md_org.get(_OPTIONS_KEY, {})

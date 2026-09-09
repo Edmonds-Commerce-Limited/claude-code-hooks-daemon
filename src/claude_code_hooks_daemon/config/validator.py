@@ -104,7 +104,7 @@ class ConfigValidator:
     VALID_EVENT_TYPES: ClassVar[set[str]] = {meta.config_key for meta in wired_event_metas()}
 
     # Valid log levels - derived from the LogLevel enum (single source of truth)
-    # so this set can never drift from the Pydantic schema / ConfigSchema.
+    # so this set can never drift from the Pydantic ``DaemonConfig`` model.
     VALID_LOG_LEVELS: ClassVar[set[str]] = {level.value for level in LogLevel}
 
     # Priority range (inclusive) - sourced from ValidationLimit (the real
