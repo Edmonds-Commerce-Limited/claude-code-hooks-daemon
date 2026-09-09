@@ -234,6 +234,26 @@ jobs:
             echo "swiftc not on this runner; probe #144 will skip via required_tools"
           fi
 
+      # Same shape for Go. Playbook probe #155 (Go lint, expected DENY) flaked
+      # to "no decision" on one run in three, and the verdict quoted the cause:
+      # "Go lint check timed out after 15s for invalid.go - the write was
+      # ALLOWED without this check passing". The first `go vet` on a runner
+      # compiles the standard library into an empty GOCACHE, which on a busy
+      # runner can exceed the budget; warming it here moves that cold start out
+      # of the timed probe. As above, the budget is not raised.
+      - name: Warm the Go toolchain
+        if: ${{ !cancelled() }}
+        run: |
+          if command -v go >/dev/null 2>&1; then
+            mkdir -p "${RUNNER_TEMP}/warm-go"
+            printf 'module warm\n\ngo 1.21\n' > "${RUNNER_TEMP}/warm-go/go.mod"
+            printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("warm") }\n' \
+              > "${RUNNER_TEMP}/warm-go/main.go"
+            (cd "${RUNNER_TEMP}/warm-go" && time go vet ./...)
+          else
+            echo "go not on this runner; probe #155 will skip via required_tools"
+          fi
+
       - name: Tests + coverage
         if: ${{ !cancelled() }}
         run: >
