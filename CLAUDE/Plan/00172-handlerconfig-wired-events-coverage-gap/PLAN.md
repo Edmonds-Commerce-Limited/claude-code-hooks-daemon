@@ -113,14 +113,17 @@ no action beyond a clarifying comment.
 
 ### Phase 3: Housekeeping (Findings 3-4)
 
-- [ ] ⬜ **Task 3.1**: Resolve the `schema.py` 3-event stub (derive or remove).
-- [ ] ⬜ **Task 3.2**: Comment the doc/playbook generator subsets as
-  intentional so future audits rule them out.
+- [x] ✅ **Task 3.1**: Resolve the `schema.py` 3-event stub (derive or remove).
+  Decision: removed — it never ran on the runtime path and `ConfigValidator`
+  is already catalogue-derived; a test locks the package to one validator
+  (`bd3e68b7`).
+- [x] ✅ **Task 3.2**: Comment the doc/playbook generator subsets as
+  intentional so future audits rule them out. (`bd3e68b7`)
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Run `./scripts/qa/run_all.sh` (all pass).
-- [ ] ⬜ **Task 4.2**: Restart daemon, confirm RUNNING.
+- [x] ✅ **Task 4.1**: Run `./scripts/qa/llm_qa.py all` (all pass).
+- [x] ✅ **Task 4.2**: Restart daemon, confirm RUNNING.
 
 ## Dependencies
 
@@ -130,16 +133,20 @@ no action beyond a clarifying comment.
 
 ## Success Criteria
 
-- [ ] `HandlersConfig` and `PluginConfig.event_type` coverage are derived from
+- [x] `HandlersConfig` and `PluginConfig.event_type` coverage are derived from
   or test-locked against `wired_event_metas()`.
-- [ ] A drift test fails if a wired event gains handlers without config
+- [x] A drift test fails if a wired event gains handlers without config
   coverage.
-- [ ] All QA checks pass; daemon restarts RUNNING.
+- [x] All QA checks pass; daemon restarts RUNNING.
 
 ## Delivery & Milestones
 
 <!-- Curated milestones + delivery commit hashes only (git is the SSoT for
      "when"). Blow-by-blow log lives in JOURNAL/. -->
 
-- Not yet started. Recovery cron intentionally not created — short tracking
-  task, not a long execution run.
+- Phases 1-2 (model, plugin Literal, drift tests): `a22fe679`, delivered
+  under Plan 00362.
+- Phase 3 (`ConfigSchema` removed, generator subsets annotated) and the
+  release-notes callout: `bd3e68b7`.
+- Recovery cron intentionally not created — short tracking task, not a long
+  execution run.
