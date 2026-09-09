@@ -261,9 +261,9 @@ def test_tool_use_error_recovery_branch_skipped_on_success(
     # already proved its point above; the default-branch wording is Branch 4's
     # own property and is pinned by `auto_continue_stop`'s unit tests.
     if _RELEASE_GUARD_FRAGMENT in reason:
-        assert "release-state.json" in reason, (
-            f"The release guard must name the state file it acted on. Got: {reason!r}"
-        )
+        assert (
+            "release-state.json" in reason
+        ), f"The release guard must name the state file it acted on. Got: {reason!r}"
         return
     assert _DEFAULT_REASON_FRAGMENT in reason, (
         f"Default branch reason must direct the agent to use the "
