@@ -427,9 +427,7 @@ class TestAllowOnlyFieldAccumulation:
 
     def test_bare_allow_does_not_swallow_later_guidance(self, front_controller):
         """A later ALLOW's guidance and updated_input reach the response."""
-        front_controller.register(
-            self._handler("bare", 10, HookResult(decision=Decision.ALLOW))
-        )
+        front_controller.register(self._handler("bare", 10, HookResult(decision=Decision.ALLOW)))
         front_controller.register(
             self._handler(
                 "advisor",
@@ -449,9 +447,7 @@ class TestAllowOnlyFieldAccumulation:
         assert result.updated_input == {"command": "rewritten"}
 
     def test_bare_allow_does_not_swallow_later_worktree_path(self, front_controller):
-        front_controller.register(
-            self._handler("bare", 10, HookResult(decision=Decision.ALLOW))
-        )
+        front_controller.register(self._handler("bare", 10, HookResult(decision=Decision.ALLOW)))
         front_controller.register(
             self._handler(
                 "namer", 20, HookResult(decision=Decision.ALLOW, worktree_path="/repo/wt/x")
@@ -493,9 +489,7 @@ class TestAllowOnlyFieldAccumulation:
             self._handler(
                 "blocker",
                 20,
-                HookResult(
-                    decision=Decision.DENY, reason="denied", guidance="deny guidance"
-                ),
+                HookResult(decision=Decision.DENY, reason="denied", guidance="deny guidance"),
                 terminal=True,
             )
         )

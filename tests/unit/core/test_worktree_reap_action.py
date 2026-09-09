@@ -174,7 +174,5 @@ class TestTheDryRun:
         assert "wip/x" in outcome.detail
 
     def test_a_dry_run_of_a_refused_worktree_still_explains_the_refusal(self) -> None:
-        outcome = reap_worktree(
-            Path("/repo"), _dirty_state(), run_fn=_FakeGit(), dry_run=True
-        )
+        outcome = reap_worktree(Path("/repo"), _dirty_state(), run_fn=_FakeGit(), dry_run=True)
         assert "not safe to reap" in outcome.detail
