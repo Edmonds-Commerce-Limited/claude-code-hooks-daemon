@@ -111,10 +111,17 @@ deny for `setsid`, advise otherwise), Rule C (unbounded liveness loop, advise).
 - [x] ✅ `pkill -f <literal>` is denied (would kill the calling shell).
 - [x] ✅ `ps aux | grep foo | grep -v grep` and `pgrep -x foo` are allowed with
   no advisory; so is `until grep -q MARKER log; do sleep 10; done`.
-- [ ] ⬜ Full QA passes; acceptance tests pass in the main thread.
-- [x] ✅ The release-notes callout is in the UNRELEASED holding area.
+- [x] ✅ Full QA passes; acceptance tests pass in the main thread (Rules A
+  and C, v3.63.0 gates).
+- [x] ✅ The release-notes callout is in the UNRELEASED holding area (folded
+  into v3.63.0's release notes at release time).
+- [ ] ⬜ Rule B (Phase 3) ships with its own callout in the holding area.
 
 ## Delivery & Milestones
 
-- Plan filed during the v3.63.0 release; delivery targeted for the release
-  after it unless it lands green before the v3.63.0 QA gate.
+- Plan filed during the v3.63.0 release.
+- Rules A and C merged at `003f3036` and shipped in v3.63.0 (tag `v3.63.0`,
+  release commit `3cdc2e11`): the `self_matching_process_probe` handler with
+  `R-PGREP-SELF-MATCH` (deny), `R-UNBOUNDED-LIVENESS-LOOP` and
+  `R-PGREP-UNRESOLVED-PATTERN` (advisory).
+- Rule B (wrapper-pid wait, Phase 3) outstanding for the next release.
