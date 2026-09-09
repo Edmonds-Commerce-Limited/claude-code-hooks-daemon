@@ -600,6 +600,13 @@ handlers:
 
 Denied wherever it appears, not only inside a loop: an advisory in a background waiter is read by nobody.
 
+**Also blocked** — `R-WAIT-ON-WRAPPER-PID`, a wait on a wrapper's `$!`:
+
+- `setsid ./job.bash & kill -0 $!` — `$!` is `setsid`'s pid, and setsid forks and exits at once, so the wait ends immediately and reports the job finished
+- Advisory (not denied) for `nohup sh -c`, `nohup bash -c`, `timeout` and `env`: whether those hand the pid on or keep it turns on what they were asked to run, which the command text does not say
+- Remedies: a pidfile the job writes itself (`nohup sh -c './job.bash > run.log 2>&1 & echo $! > job.pid' &`), `pgrep -P <wrapper-pid>` once to resolve the child, or waiting on a log marker
+- Never flagged: `./job.bash & pid=$!` (no wrapper), `nohup ./job.bash & pid=$!` (nohup execs in place), `setsid -w ./job.bash & wait $!` (`-w` makes the wrapper outlive the job)
+
 **Allowed** — these are the fixes:
 
 - `until grep -q "PLAY RECAP" run.log; do sleep 10; done` — wait on the artefact; a log marker cannot match the waiter
