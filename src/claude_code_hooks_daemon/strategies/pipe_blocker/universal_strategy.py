@@ -44,6 +44,7 @@ class UniversalPipeBlockerStrategy:
             AcceptanceTest(
                 title="Universal: make piped to tail",
                 command='echo "make build | tail -20"',
+                dispatch_as_bash=True,
                 description="Blocks make (universal build command) piped to tail",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Pipe to tail/head", r"expensive"],

@@ -37,6 +37,7 @@ class RustPipeBlockerStrategy:
             AcceptanceTest(
                 title="Rust: cargo test piped to tail",
                 command='echo "cargo test | tail -20"',
+                dispatch_as_bash=True,
                 description="Blocks cargo test (expensive) piped to tail",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Pipe to tail/head", r"expensive"],

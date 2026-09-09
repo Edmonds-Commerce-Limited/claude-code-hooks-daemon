@@ -43,6 +43,7 @@ class JavaScriptPipeBlockerStrategy:
             AcceptanceTest(
                 title="JavaScript: npm test piped to tail",
                 command='echo "npm test | tail -10"',
+                dispatch_as_bash=True,
                 description="Blocks npm test (expensive) piped to tail",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Pipe to tail/head", r"expensive"],

@@ -32,6 +32,7 @@ class ShellPipeBlockerStrategy:
             AcceptanceTest(
                 title="Shell: shellcheck piped to tail",
                 command='echo "shellcheck script.sh | tail -5"',
+                dispatch_as_bash=True,
                 description="Blocks shellcheck (expensive linter) piped to tail",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Pipe to tail/head", r"expensive"],

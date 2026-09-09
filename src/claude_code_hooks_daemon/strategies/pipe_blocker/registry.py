@@ -44,6 +44,18 @@ class PipeBlockerStrategyRegistry:
         for lang in to_remove:
             del self._strategies[lang]
 
+    def strategies(self) -> list[PipeBlockerStrategy]:
+        """Currently registered strategy instances, in registration order.
+
+        Registration is keyed by ``language_name``, so each instance appears
+        exactly once and no deduplication is needed (unlike the lint registry,
+        which registers one strategy under several extensions).
+
+        Returns:
+            The active strategies, after any language filtering.
+        """
+        return list(self._strategies.values())
+
     @property
     def registered_languages(self) -> list[str]:
         """Get names of all registered languages."""
