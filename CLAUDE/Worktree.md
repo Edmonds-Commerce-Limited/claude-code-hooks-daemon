@@ -36,7 +36,10 @@ What it does:
 3. Creates the fingerprint-keyed venv (`untracked/venv-{slug}-py{MM}-{fingerprint}/`
    — see the "Venv layout" section in [SELF_INSTALL.md](SELF_INSTALL.md)) via
    `ensure_venv`
-4. Installs the package in editable mode (`pip install -e ".[dev]"`)
+4. Syncs the dev extras (pytest, ruff, mypy...) into that venv from `uv.lock`
+   (`uv sync --frozen --all-extras`) and proves `import pytest` works —
+   `ensure_venv` alone builds the runtime venv a client install needs, which
+   cannot run QA
 5. Verifies the editable install points at the worktree's own `src/`
 6. Creates the daemon's `untracked/` directory
 7. Writes `.claude/hooks-daemon.env` (see below)

@@ -127,13 +127,41 @@ echo -e "${GREEN}✓${NC} Worktree created"
 # ensure_venv picks untracked/venv-{fingerprint}/ so concurrent containers
 # with the same Python share one venv, and distinct Pythons don't collide.
 DAEMON_VERSION="$(_read_daemon_version "${WORKTREE_DIR}/src/claude_code_hooks_daemon/version.py")"
-echo -e "${YELLOW}→${NC} Creating Python venv (fingerprint-keyed) via uv sync..."
+echo -e "${YELLOW}→${NC} Creating Python venv (fingerprint-keyed)..."
 WT_VENV_PATH="$(ensure_venv "${WORKTREE_DIR}" "v${DAEMON_VERSION}" python3)"
 if [[ -z "${WT_VENV_PATH}" ]] || [[ ! -x "${WT_VENV_PATH}/bin/python" ]]; then
     echo -e "${RED}✗${NC} Failed to create venv via ensure_venv"
     exit 1
 fi
 echo -e "${GREEN}✓${NC} Venv created at ${WT_VENV_PATH}"
+
+# Step 4b: Sync the dev extras into that venv.
+#
+# ensure_venv builds the RUNTIME venv a client install needs — no pytest, no
+# ruff, no mypy — because the client installer never asks for the `dev` extra.
+# A worktree exists to run QA, so it needs the same dev toolchain the main
+# checkout gets from venv-include.bash's install_deps: `--frozen --all-extras`
+# into the same fingerprint venv, so it matches uv.lock exactly. Link mode
+# follows ensure_venv's choice: copy inside a container (uv's cache and the
+# bind-mounted target are cross-device), uv's default elsewhere.
+echo -e "${YELLOW}→${NC} Installing dev extras (pytest, ruff, mypy...) from uv.lock..."
+WT_LINK_MODE="${UV_LINK_MODE:-}"
+if [[ -z "${WT_LINK_MODE}" ]] && _uv_in_container; then
+    WT_LINK_MODE="copy"
+fi
+if [[ -n "${WT_LINK_MODE}" ]]; then
+    UV_LINK_MODE="${WT_LINK_MODE}" UV_PROJECT_ENVIRONMENT="${WT_VENV_PATH}" \
+        uv sync --frozen --all-extras --project "${WORKTREE_DIR}" --quiet
+else
+    UV_PROJECT_ENVIRONMENT="${WT_VENV_PATH}" \
+        uv sync --frozen --all-extras --project "${WORKTREE_DIR}" --quiet
+fi
+if ! "${WT_VENV_PATH}/bin/python" -c "import pytest"; then
+    echo -e "${RED}✗${NC} Dev extras did not install: 'import pytest' fails in ${WT_VENV_PATH}"
+    echo "  QA cannot run in this worktree. Fix: UV_PROJECT_ENVIRONMENT=${WT_VENV_PATH} uv sync --frozen --all-extras --project ${WORKTREE_DIR}"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} Dev extras installed (pytest importable)"
 
 # Step 5: Verify editable install points to correct source.
 # uv sync already installed the package editable via pyproject; just verify.

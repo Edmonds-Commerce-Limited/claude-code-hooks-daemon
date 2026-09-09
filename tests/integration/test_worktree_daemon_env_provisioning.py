@@ -107,3 +107,37 @@ class TestTheSetupScriptProvisionsIt:
             if "hooks-daemon.env" in line and ("cp " in line or "rsync " in line)
         ]
         assert not offenders, f"the env file must be written fresh, not copied: {offenders}"
+
+
+class TestTheSetupScriptProvisionsADevVenv:
+    """The worktree exists to run QA, so its venv must carry the dev extras.
+
+    `ensure_venv` builds the RUNTIME venv a client install needs — no pytest,
+    no ruff, no mypy — because the client installer never asks for the `dev`
+    extra. The main checkout gets those from `venv-include.bash`'s
+    `install_deps`, which syncs `--all-extras` into the same fingerprint venv.
+    The setup script called only `ensure_venv`, so every fresh worktree had a
+    venv in which `import pytest` failed and each agent had to discover the
+    gap by hand.
+    """
+
+    def test_it_syncs_the_dev_extras_into_the_worktree_venv(self) -> None:
+        script = _SETUP_WORKTREE.read_text()
+        sync_lines = [
+            line
+            for line in script.splitlines()
+            if "uv sync" in line and not line.lstrip().startswith("#")
+        ]
+        assert sync_lines, (
+            "setup_worktree.sh must run `uv sync` for the dev extras after ensure_venv"
+        )
+        assert all("--frozen" in line and "--all-extras" in line for line in sync_lines), (
+            f"the dev sync must be `--frozen --all-extras` so the worktree matches uv.lock: {sync_lines}"
+        )
+
+    def test_it_proves_pytest_imports_before_declaring_the_worktree_ready(self) -> None:
+        script = _SETUP_WORKTREE.read_text()
+        assert "import pytest" in script, (
+            "setup_worktree.sh must verify the dev toolchain is importable — a venv without "
+            "pytest fails only when the first agent runs QA"
+        )
