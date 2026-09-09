@@ -314,6 +314,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 - [00173: Supervisor Ctrl+Z guard + status-line message channel](00173-supervisor-ctrlz-guard-and-status-message/PLAN.md) - Complete (neutralises the Ctrl+Z-suspends-Claude footgun (upstream anthropics/claude-code#43596): the ccy PTY supervisor strips the `0x1a` SUSP byte from its forwarded stdin so it never reaches Claude's PTY …)
 
+- [00172: Close the HandlersConfig ↔ wired-events coverage gap](00172-handlerconfig-wired-events-coverage-gap/PLAN.md) - Complete at `a22fe679`, `bd3e68b7` and `e7974c5c` + the archiving commit (`HandlersConfig` and `PluginConfig.event_type` are locked to the wired-event catalogue; the dead 3-event `ConfigSchema` stub is removed so config has one validation path, and the generators' intentional event subsets are documented as such)
+
 - [00171: supervisor_indicator /proc-scan negative caching](00171-supervisor-indicator-proc-scan-negative-caching/PLAN.md) - Complete (fast follow-up closing the three non-blocking v3.43.0 release code-review findings per Plan 00157 "never drop a finding".)
 
 - [00169: Prior-Art / SOTA Research and Feature Brainstorm](00169-prior-art-sota-research-and-feature-brainstorm/PLAN.md) - Complete (pre-release research + ideation pass — no code shipped.)
