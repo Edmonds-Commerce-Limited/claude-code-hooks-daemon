@@ -25,6 +25,8 @@ import subprocess
 from pathlib import Path
 from typing import Final
 
+import pytest
+
 from claude_code_hooks_daemon.install import bin_wrapper
 
 #: Stub resolver: the wrapper sources this and calls resolve_venv_python.
@@ -106,8 +108,16 @@ def _run(wrapper: Path, cwd: Path, *args: str) -> list[str]:
 def _anchored_root(argv: list[str]) -> str | None:
     """Return the LAST --project-root value in argv, or None.
 
-    Last, not first: argparse takes the final occurrence, so that is the value
-    that actually determines the target.
+    Last, not first: the wrapper injects its anchor ahead of the caller's own
+    argv, so a caller who repeats the GLOBAL flag overrides it by coming
+    later.
+
+    This is about argv only. Which value the CLI ends up USING is decided by
+    ``apply_global_project_root`` (Plan 00374), because the global flag and
+    the twenty-five subcommand-level ones write to different dests — a
+    subcommand-level value wins wherever it sits. Reading argv order as the
+    whole answer is what let the CLI discard the anchor unnoticed while every
+    test here stayed green; see TestTheAnchorReachesTheCommand below.
     """
     values = [
         argv[index + 1]
@@ -267,6 +277,61 @@ class TestUnanchorableLayoutFailsLoud:
         result = _run_raw(wrapper, caller, "status")
 
         assert str(caller) not in result.stdout
+
+
+class TestTheAnchorReachesTheCommand:
+    """The layer every other test in this file stops one short of (Plan 00374).
+
+    Everything above runs a STUB interpreter and asserts the argv the wrapper
+    built. That is the right test for the wrapper, and it was always passing —
+    while the CLI threw the anchor away, because twenty-five subparsers
+    declared their own ``--project-root`` and argparse writes a subparser's
+    defaults into the namespace whether or not the flag was supplied.
+
+    This file's own docstring names the discipline it was missing: the tests
+    "assert the ACTUAL command the wrapper builds rather than trusting a
+    reading of the shell." They then trusted a reading of argparse. So one
+    case here runs the REAL wrapper and the REAL CLI and asserts which project
+    was ACTED ON.
+
+    ``plan-qa --sweep`` is the probe because its verdict is root-dependent and
+    unambiguous: a root with no plan tree is an operational error naming that
+    root. A command whose output is the same either way could not tell us
+    which tree it looked at.
+    """
+
+    _MISSING_PLAN_DIR_EXIT: Final[int] = 2
+
+    def _repo_wrapper(self) -> Path:
+        wrapper = Path(__file__).resolve().parents[3] / "bin" / "hooks-daemon"
+        if not wrapper.is_file():
+            pytest.skip("no deployed wrapper in this checkout")
+        return wrapper
+
+    def test_a_global_anchor_selects_the_tree_the_command_reads(self, tmp_path: Path) -> None:
+        """The wrapper's own argv shape: --project-root BEFORE the subcommand."""
+        wrapper = self._repo_wrapper()
+        elsewhere = tmp_path / "elsewhere"
+        (elsewhere / ".claude").mkdir(parents=True)
+        (elsewhere / ".claude" / "hooks-daemon.yaml").write_text(
+            "plan_workflow:\n  enabled: true\n", encoding="utf-8"
+        )
+
+        result = subprocess.run(
+            [str(wrapper), _PROJECT_ROOT_FLAG, str(elsewhere), "plan-qa", "--sweep"],
+            cwd=str(tmp_path),
+            capture_output=True,
+            text=True,
+            timeout=_STUB_TIMEOUT_SECONDS,
+            check=False,
+        )
+
+        assert result.returncode == self._MISSING_PLAN_DIR_EXIT, (
+            "the CLI read a tree other than the one the anchor named; "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert str(elsewhere) in result.stderr
+        assert "plan tree is clean" not in result.stdout.lower()
 
 
 class TestBothCopiesStayIdentical:

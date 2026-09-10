@@ -63,22 +63,28 @@ right argv; the CLI discards it.
 
 ### Phase 1: Reproduce and fix
 
-- [ ] ⬜ **Task 1.1**: Write the failing test — a global `--project-root`
+- [x] ✅ **Task 1.1**: Write the failing test — a global `--project-root`
   before a subcommand that declares its own must reach the command function.
-- [ ] ⬜ **Task 1.2**: Give the global flag its own `dest`, then reconcile
+- [x] ✅ **Task 1.2**: Give the global flag its own `dest`, then reconcile
   after parsing: a subcommand-supplied value wins, otherwise the global value
   is used. One place, rather than twenty-five subparser edits that would each
   risk changing a documented per-command default.
-- [ ] ⬜ **Task 1.3**: Cover the precedence both ways round, and cover a
+- [x] ✅ **Task 1.3**: Cover the precedence both ways round, and cover a
   subcommand that has no `--project-root` of its own so the reconciliation
-  cannot regress it.
+  cannot regress it. A source guard added here found two more: `deploy-plan-workflow`
+  and `agents` declared `--project-root` with `default=Path.cwd()`, which sits in
+  the namespace before reconciliation and so pre-empted the anchor entirely.
+  Both now default to `None` with the cwd fallback resolved in the command function.
 
 ### Phase 2: Close the premise gap in the anchoring suite
 
-- [ ] ⬜ **Task 2.1**: Extend
+- [x] ✅ **Task 2.1**: Extend
   `tests/unit/install/test_bin_wrapper_project_anchoring.py` so at least one
   case runs the REAL CLI under the wrapper's argv shape and asserts which
-  project it acted on — the layer its docstring stops one short of.
+  project it acted on — the layer its docstring stops one short of. Also
+  corrected `_anchored_root`'s docstring, which restated the same false
+  premise ("argparse takes the final occurrence, so that is the value that
+  actually determines the target").
 
 ## Success Criteria
 
@@ -91,3 +97,5 @@ right argv; the CLI discards it.
 
 - Discovered while building Plan 00373's QA gate: the gate's own live probe
   disagreed with its unit tests, and the CLI entry path was the reason.
+- `05d526be` — Phase 1: split dest + reconciliation, the two cwd defaults
+  removed, source guard against their return.
