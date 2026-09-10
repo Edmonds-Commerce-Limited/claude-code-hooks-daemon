@@ -31,7 +31,19 @@ def _make(
 
 
 def _set_name(explanation: SegmentExplanation) -> None:
-    explanation.name = "renamed"
+    """Exercise the frozen dataclass's own ``__setattr__`` override.
+
+    ``explanation.name = ...`` is a real, permanent runtime violation this
+    function exists to trigger (``FrozenInstanceError``, a subclass of
+    ``AttributeError``) -- but it is ALSO a violation pyright's static
+    read-only-attribute check correctly rejects on sight, since it can prove
+    the field is frozen without running anything. ``setattr()`` with a
+    NON-literal name goes through the exact same ``__setattr__`` override at
+    runtime (unlike ``object.__setattr__``, which bypasses it and would defeat
+    this test), while being opaque to that static check.
+    """
+    field_name = "name"
+    setattr(explanation, field_name, "renamed")
 
 
 class TestSegmentExplanationConstruction:
