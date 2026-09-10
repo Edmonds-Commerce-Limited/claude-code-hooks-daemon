@@ -191,6 +191,13 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "corpus at session start regardless of how a file reached disk, "
         "the same batch-equivalent mitigation `plan_qa_edit` relies on",
     ),
+    "PlanCloseApprovalHandler": (
+        _BLIND,
+        "a PLAN.md status flipped by heredoc never reaches the gate; the "
+        "session sweep's terminal-placement and index checks still surface "
+        "the closed plan, and the key is off by default so the exposure is "
+        "confined to projects that opted into the gate",
+    ),
     "PlanQaEditHandler": (
         _BLIND,
         "mitigated, not closed: `plan_qa_sweep` re-checks plan documents at "

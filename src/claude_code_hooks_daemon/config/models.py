@@ -832,6 +832,8 @@ class PlanWorkflowConfig(BaseModel):
         directory: Path to plan folder relative to workspace root
         workflow_docs: Path to workflow documentation file
         enforce_claude_code_sync: Whether to enforce plansDirectory sync
+        close_requires_human_approval: Whether an agent may flip a PLAN.md to
+            a terminal status without a human's approval (Plan 00367)
         qa: Plan QA subsystem policy (Plan 00144)
         scripts: `planlib` operator-script safety library policy (Plan 00213)
     """
@@ -864,6 +866,20 @@ class PlanWorkflowConfig(BaseModel):
     enforce_claude_code_sync: bool = Field(
         default=False,
         description="Enforce plansDirectory sync with .claude/settings.json",
+    )
+    # Plan 00367: OFF by default because a fully completed plan can be closed
+    # by the agent that completed it; a mandatory human sign-off "is just
+    # going to lead to lots of plans kept open for no good reason". A project
+    # that wants the gate turns it on and closes plans by hand (or with
+    # `hooks-daemon approve-plan-close NNNNN`).
+    close_requires_human_approval: bool = Field(
+        default=False,
+        description=(
+            "When true, an agent's Write/Edit that flips a PLAN.md **Status** to "
+            "Complete, Cancelled or Superseded is denied; a human closes the plan "
+            "by editing the header themselves or by running "
+            "`hooks-daemon approve-plan-close NNNNN` first"
+        ),
     )
     qa: PlanWorkflowQaConfig = Field(
         default_factory=PlanWorkflowQaConfig,
@@ -1657,6 +1673,35 @@ class DaemonConfig(BaseModel):
         return get_pid_path(workspace_root)
 
 
+class WorktreeConfig(BaseModel):
+    """Worktree-workflow policy (Plan 00367 Phase 4).
+
+    The deployed ``Worktree.core.md`` told every agent to ask a human before
+    merging a parent worktree into main, and nothing enforced it. The
+    parent-to-main merge now happens once verification passes; a project that
+    wants a human in that loop turns this key on and the
+    ``merge_to_main_approval`` handler denies the merge until a human runs
+    ``hooks-daemon approve-merge <branch>``.
+
+    Attributes:
+        merge_to_main_requires_human_approval: When true, a ``git merge`` (or
+            ``gh pr merge``) run in the MAIN checkout while it is on the
+            default branch is denied until a human records a one-shot
+            approval for that branch. A merge in a linked worktree (child to
+            parent) is never gated.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    merge_to_main_requires_human_approval: bool = Field(
+        default=False,
+        description=(
+            "When true, a git merge run in the main checkout on the default branch "
+            "is denied until a human runs `hooks-daemon approve-merge <branch>`"
+        ),
+    )
+
+
 class CcyConfig(BaseModel):
     """Configuration for the ccy (claude-yolo) container workflow (Plan 00147).
 
@@ -1800,6 +1845,7 @@ class Config(BaseModel):
         plugins: Plugin system configuration
         project_handlers: Project-level handler configuration
         ccy: ccy container-workflow configuration (Plan 00147)
+        worktree: Worktree-workflow policy, the merge-to-main gate (Plan 00367)
         layout: Project directory-layout truths with no other config home
             (Plan 00288); composed with other homes by the ``ProjectLayout``
             facade (``core/project_layout.py``)
@@ -1823,6 +1869,7 @@ class Config(BaseModel):
     )
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     ccy: CcyConfig = Field(default_factory=CcyConfig)
+    worktree: WorktreeConfig = Field(default_factory=WorktreeConfig)
     tool_policy: ToolPolicyConfig = Field(default_factory=ToolPolicyConfig)
     claude_md: ClaudeMdConfig = Field(default_factory=ClaudeMdConfig)
     pseudo_events: dict[str, dict[str, Any]] = Field(

@@ -279,6 +279,15 @@ class HandlerID:
         config_key="ancestry_preserving_merge",
         display_name="block-ancestry-severing-merge",
     )
+    # Merge-to-main approval (Plan 00367 Phase 4): with
+    # `worktree.merge_to_main_requires_human_approval` on, a git merge run in
+    # the main checkout on the default branch is denied until a human records
+    # approval with `hooks-daemon approve-merge <branch>`.
+    MERGE_TO_MAIN_APPROVAL = HandlerIDMeta(
+        class_name="MergeToMainApprovalHandler",
+        config_key="merge_to_main_approval",
+        display_name="merge-to-main-approval",
+    )
     # Backtick substitution in a git message (Plan 00219): backticks inside a
     # DOUBLE-quoted -m are executed by bash, not quoted, so the span is
     # replaced by the command's stdout and the text is silently lost.
@@ -731,6 +740,15 @@ class HandlerID:
         class_name="PlanQaEditHandler",
         config_key="plan_qa_edit",
         display_name="plan-qa-edit",
+    )
+
+    # Plan-close approval gate (PreToolUse handler) — Plan 00367: with
+    # `plan_workflow.close_requires_human_approval` on, an agent's flip of a
+    # PLAN.md to a terminal status is denied until a human records approval
+    PLAN_CLOSE_APPROVAL = HandlerIDMeta(
+        class_name="PlanCloseApprovalHandler",
+        config_key="plan_close_approval",
+        display_name="plan-close-approval",
     )
 
     # Plan QA commit gate (PreToolUse handler) — Plan 00144: Stage 2

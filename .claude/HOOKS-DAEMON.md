@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-09-09 (v3.63.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-09-10 (v3.63.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (58 handlers)
+### PreToolUse (60 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -32,6 +32,7 @@
 | 19 | git_stash | BLOCKING | Block or warn about git stash based on mode configuration |
 | 20 | git_message_backtick | BLOCKING | Block a double-quoted git message whose backticks would be executed |
 | 20 | lock_file_edit_blocker | TERMINAL | Block direct editing of package manager lock files |
+| 20 | merge_to_main_approval | BLOCKING | Deny a merge into the main checkout's default branch while the key is on |
 | 21 | pip_break_system | TERMINAL | Block pip install --break-system-packages commands |
 | 22 | sudo_pip | TERMINAL | Block sudo pip install commands |
 | 23 | ask_user_question_blocker | TERMINAL | Allow AskUserQuestion only when every question is prefix-justified |
@@ -50,6 +51,7 @@
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
 | 42 | global_npm_advisor | NON-TERMINAL | Advise on global npm/yarn package installations |
+| 43 | plan_close_approval | BLOCKING | Deny an agent's terminal status flip of a PLAN.md while the key is on |
 | 43 | staged_lint_gate | NON-TERMINAL | Warn-first cheap-syntax-check backstop over staged files on git commit |
 | 44 | plan_qa_commit_gate | NON-TERMINAL | Warn-first cross-file plan QA gate on git commit |
 | 44 | plan_qa_edit | BLOCKING | Blocking/advisory edit-time lint for plan documents |
@@ -185,8 +187,8 @@
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 8 | ReleaseBlockerHandler | BLOCKING | Blocks Stop event while a release is in flight |
-| 20 | PlanDoneRequiresHoldingAreaHandler | BLOCKING | Deny a Complete flip whose Success Criteria never mention the holding area |
 | 41 | EnforceLlmQaHandler | BLOCKING | Block run_all.sh and direct LLM agents to llm_qa.py |
+| 51 | PlanDoneRequiresHoldingAreaHandler | BLOCKING | Deny a Complete flip whose Success Criteria never mention the holding area |
 
 ### Pseudo Nitpick (2 handlers)
 

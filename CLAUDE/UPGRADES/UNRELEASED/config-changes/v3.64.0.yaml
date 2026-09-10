@@ -1,0 +1,84 @@
+version: "3.64.0"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added:
+    - key: plan_workflow.close_requires_human_approval
+      recommended: false
+      dormant: true
+      description: >-
+        NEW boolean (Plan 00367, default false). When true, an agent's
+        Write/Edit that flips a PLAN.md `**Status**:` to Complete, Cancelled
+        or Superseded is denied by the `plan_close_approval` handler with a
+        reason naming this key and the human's route: edit the header
+        themselves outside Claude, or run
+        `hooks-daemon approve-plan-close NNNNN`, which records a one-shot
+        marker under the daemon's untracked directory that the very next
+        terminal flip of that plan consumes. Only the flip is gated; a plan
+        a human already closed stays editable. False (the default) changes
+        nothing: a fully completed plan is closed by the agent that
+        completed it, which is the owner's ruling -- a mandatory sign-off
+        "is just going to lead to lots of plans kept open for no good
+        reason". The deployed PlanWorkflow core document now says exactly
+        that and cites this key as the opt-in gate, so the document and the
+        daemon agree (the `unenforced-approval-gate` docs-QA check keeps
+        them agreeing).
+      example_yaml: |
+        plan_workflow:
+          enabled: true
+          close_requires_human_approval: true
+      migration_note: >-
+        No action needed. Turn it on only if you want a human in the loop
+        for every plan closure; the `plan_close_approval` handler must also
+        be enabled (it ships enabled at priority 43 in a fresh config and is
+        inert while the key is false).
+    - key: handlers.pre_tool_use.plan_close_approval
+      recommended: false
+      dormant: true
+      description: >-
+        NEW PreToolUse blocking handler (Plan 00367), priority 43, PLANNING
+        tagged. Enforces `plan_workflow.close_requires_human_approval`
+        above; never matches while that key is false, so enabling the
+        handler alone changes nothing.
+      migration_note: >-
+        Add `plan_close_approval: {enabled: true, priority: 43}` under
+        `handlers.pre_tool_use` if you intend to turn the key on. A config
+        without the handler is still valid.
+    - key: worktree.merge_to_main_requires_human_approval
+      recommended: false
+      dormant: true
+      description: >-
+        NEW boolean (Plan 00367 Phase 4, default false). When true, a
+        `git merge <branch>` (or `gh pr merge`) run in the MAIN checkout
+        while it is on the default branch is denied by the
+        `merge_to_main_approval` handler with a reason naming this key and
+        the human's route: run `hooks-daemon approve-merge <branch>`, which
+        records a one-shot marker under the daemon's untracked directory
+        that the very next merge of that branch consumes. A merge run
+        inside a linked worktree (child into parent) is never gated either
+        way. False (the default) changes nothing: the parent-to-main merge
+        happens once verification passes, which is the owner's ruling for
+        plan closure applied the same way here. The deployed Worktree core
+        document now describes the toggle instead of prescribing an
+        unenforced "ask a human" step (the `unenforced-approval-gate`
+        docs-QA check keeps them agreeing).
+      example_yaml: |
+        worktree:
+          merge_to_main_requires_human_approval: true
+      migration_note: >-
+        No action needed. Turn it on only if you want a human in the loop
+        for every parent-to-main merge; the `merge_to_main_approval`
+        handler must also be enabled (it ships enabled at priority 20 in a
+        fresh config and is inert while the key is false).
+    - key: handlers.pre_tool_use.merge_to_main_approval
+      recommended: false
+      dormant: true
+      description: >-
+        NEW PreToolUse blocking handler (Plan 00367 Phase 4), priority 20,
+        GIT tagged. Enforces `worktree.merge_to_main_requires_human_approval`
+        above; never matches while that key is false, so enabling the
+        handler alone changes nothing.
+      migration_note: >-
+        Add `merge_to_main_approval: {enabled: true, priority: 20}` under
+        `handlers.pre_tool_use` if you intend to turn the key on. A config
+        without the handler is still valid.

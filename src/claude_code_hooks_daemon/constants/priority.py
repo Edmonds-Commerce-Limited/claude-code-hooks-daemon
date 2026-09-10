@@ -112,6 +112,11 @@ class Priority:
     # order does not change any verdict since the two match disjoint command
     # sets (merge/gh-pr-merge vs stash).
     ANCESTRY_PRESERVING_MERGE = 19
+    # Plan 00367 Phase 4: beside the ancestry guard, after it, so a squash
+    # merge is refused for its own reason before the approval gate speaks.
+    # Shares 20 with GIT_BRANCH/GIT_STASH the way those two share it: the
+    # command sets are disjoint.
+    MERGE_TO_MAIN_APPROVAL = 20
 
     # Plan 00275: safety-band guard on git messages, beside git_message_backtick
     # (20) and the git-workflow opinions at 19-20. Matches a disjoint hazard
@@ -223,6 +228,12 @@ class Priority:
     # QA pair at 44 -- a sibling gate on the same `git commit` trigger, not an
     # extension of either.
     STAGED_LINT_GATE = 43
+    # Plan 00367: shares 43 with staged_lint_gate the way the docs QA pair
+    # shares 47 -- disjoint tool shapes (PLAN.md Write/Edit vs git-commit
+    # Bash), so the slot never collides in practice. Sits BEFORE the plan QA
+    # lint at 44: a flip a human has not approved is denied before it is
+    # linted, so the deny names the gate and not a status-coherence finding.
+    PLAN_CLOSE_APPROVAL = 43
 
     PLAN_QA_EDIT = 44
     PLAN_QA_COMMIT_GATE = 44

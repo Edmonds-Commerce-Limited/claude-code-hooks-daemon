@@ -93,10 +93,21 @@ _EARNS_GUIDANCE: dict[str, str] = {
     ),
     "LockFileEditBlockerHandler": "T1 denies direct lock-file edits",
     "LspEnforcementHandler": "T1 denies the first symbol-lookup grep in a session",
+    "MergeToMainApprovalHandler": (
+        "T1 denies a parent-to-main merge while the project's key is on, and "
+        "the guidance carries what the deny cannot: that the route is the "
+        "human's, so the agent reports the branch ready and stops rather "
+        "than polls -- same shape as plan_close_approval's reason"
+    ),
     "PipBreakSystemHandler": "T1 denies --break-system-packages",
     "PipeBlockerHandler": "T1 denies expensive pipes to head/tail",
     "DocsQaEditHandler": "T1 denies documentation writes that break the docs QA rules",
     "DocsQaCommitGateHandler": "T2 fires on the commit whose contents are already staged",
+    "PlanCloseApprovalHandler": (
+        "T1 denies an agent's terminal status flip while the project's key is on, "
+        "and the guidance carries what the deny cannot: that the route is the "
+        "human's, so the agent reports the plan ready and stops rather than polls"
+    ),
     "PlanQaEditHandler": "T1 denies plan documents that break the QA rules",
     "PlanTimeEstimatesHandler": "T1 denies time estimates in plan documents",
     "QaSuppressionHandler": "T1 denies QA suppression annotations",
