@@ -1,0 +1,11 @@
+# Plan 00372 — Build Report
+
+Both live defects in `worktree-reap` are fixed, tested and pushed to `worktree-plan-00372` (`225ec9740`).
+
+**Defect 1 (data-loss hazard)**: `WorktreeState` gains `live_process_pids` (`/proc/*/cwd` scan, never `pgrep -f`) and `age_seconds` (the linked worktree's `.git` pointer-file mtime, verified live to survive `status`/`add`/`commit` unchanged). `reap_refusal_reason` now refuses a history-free worktree under a 15-minute `MINIMUM_AGE_SECONDS` or with a live process inside it, either independently sufficient. Reproduced with real git and a real `sleep` subprocess, not fakes: renamed `test_a_worktree_at_the_base_is_reapable` (was asserting the exact live-incident shape reapable) to assert refusal, plus a backdated-mtime discrimination test and an independent-signals test.
+
+**Defect 2 (broken branch delete)**: `git branch -d` rejects a fully-qualified `refs/heads/<name>` ref outright (verified live in a throwaway repo) — `reap_worktree`/`prune_branch` were passing exactly that via `branch_ref()`, so the delete never once succeeded and produced a self-contradicting "kept ... not found" message. Fixed to pass the bare name; corrected the two comments that repeated the disproven tag-ambiguity rationale for `-d` specifically (real for `rev-parse`/`cherry`/`merge-base`, not for `branch -d`).
+
+`collect_worktree_states` and `cmd_worktree_reap` gained `process_cwds_fn`/`age_fn` DI parameters mirroring the existing `run_fn` pattern. 147/147 relevant tests green, 100% line/branch coverage on `worktree_reaping.py`. Full QA: 25/27 green; the 10 `pyright` errors are pre-existing, unchanged, and in four files this plan never touched. Release-notes callout at `CLAUDE/UPGRADES/UNRELEASED/release-notes/24-worktree-reap-fresh-worktree-and-branch-delete.md`. PLAN.md Status is `Complete`; ready for the coordinator to archive on `main`.
+
+One out-of-scope note: `scripts/qa/run_format_check.sh`'s `black` pass also reformatted `tests/unit/core/test_claude_md_injector.py` (disagrees with `ruff format`'s style, plus a printed warning that `black` cannot fully AST-verify its py3.13-target output under this worktree's Python 3.11 interpreter) — left uncommitted in the worktree rather than folded into this plan's commit or discarded with a blocked destructive command.
