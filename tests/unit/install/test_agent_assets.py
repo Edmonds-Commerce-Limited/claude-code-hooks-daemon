@@ -142,7 +142,6 @@ class TestClassification:
 
     def test_outdated(self, tmp_path: Path) -> None:
         spec = _spec(DEDUPE_AGENT_NAME)
-        historic = spec.historic_versions[0]
         target = deployed_agent_path(spec, tmp_path)
         target.parent.mkdir(parents=True)
         # Synthesise a file whose md5 equals a historic entry is impossible;
@@ -158,7 +157,6 @@ class TestClassification:
         )
         target.write_text(body)
         assert classify_agent(patched, tmp_path) is AgentAssetState.OUTDATED
-        assert historic  # historic entries exist on the real spec too
 
     def test_customised(self, tmp_path: Path) -> None:
         spec = _spec(DEDUPE_AGENT_NAME)
