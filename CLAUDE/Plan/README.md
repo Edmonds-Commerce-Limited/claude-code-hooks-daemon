@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00372: worktree reap two defects](00372-worktree-reap-two-defects/PLAN.md) - Not Started (a live run found a fresh worktree wrongly listed as reapable, and a branch delete that never actually worked)
+
 - [00371: qa acceptance probes detect a stale daemon](00371-qa-acceptance-probes-detect-a-stale-daemon/PLAN.md) - Not Started (dogfooding defect: the acceptance harness dispatches every probe through the live daemon socket, which silently grades whatever code the daemon loaded at startup rather than the working tree; a startup source fingerprint exposed over the daemon's health socket action lets every live-dispatch acceptance test detect and fail on a stale daemon by name)
 
 - [00368: lsp is signal not noise](00368-lsp-is-signal-not-noise/PLAN.md) - In Progress (the language server analysed every worktree under `untracked/` and flooded the agent's context with other checkouts' errors; the exclude is in, and pyright becomes a zero-error QA gate with a session-start checker for a missing exclude or a stale server)
