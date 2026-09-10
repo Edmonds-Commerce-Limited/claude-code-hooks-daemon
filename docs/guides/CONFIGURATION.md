@@ -121,6 +121,27 @@ is idempotent and respects the user: an existing `CCY_CLAUDE_WRAPPER` in
 
 ---
 
+## Worktree Workflow
+
+The top-level `worktree:` block holds policy for the git-worktree parent/child
+workflow (Plan 00367).
+
+```yaml
+worktree:
+  merge_to_main_requires_human_approval: false   # default false
+```
+
+| Value   | Behaviour                                                                                                                         |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `false` | (default) The parent-to-main merge happens once verification passes; no daemon gate.                                              |
+| `true`  | A `git merge`/`gh pr merge` run in the MAIN checkout on its default branch is denied until a human runs `approve-merge <branch>`. |
+
+A merge run inside a linked worktree (child into parent) is never gated
+either way. Handler details, the deny reason and the human's approval route
+are in [`merge_to_main_approval`](HANDLER_REFERENCE.md#merge_to_main_approval).
+
+---
+
 ## Projects (monorepo boundaries)
 
 The top-level `projects:` block declares a monorepo's sub-trees so

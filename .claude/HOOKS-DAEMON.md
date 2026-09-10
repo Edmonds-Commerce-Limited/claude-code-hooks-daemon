@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (59 handlers)
+### PreToolUse (60 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -32,6 +32,7 @@
 | 19 | git_stash | BLOCKING | Block or warn about git stash based on mode configuration |
 | 20 | git_message_backtick | BLOCKING | Block a double-quoted git message whose backticks would be executed |
 | 20 | lock_file_edit_blocker | TERMINAL | Block direct editing of package manager lock files |
+| 20 | merge_to_main_approval | BLOCKING | Deny a merge into the main checkout's default branch while the key is on |
 | 21 | pip_break_system | TERMINAL | Block pip install --break-system-packages commands |
 | 22 | sudo_pip | TERMINAL | Block sudo pip install commands |
 | 23 | ask_user_question_blocker | TERMINAL | Allow AskUserQuestion only when every question is prefix-justified |

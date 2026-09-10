@@ -978,6 +978,36 @@ handlers:
 
 ---
 
+#### merge_to_main_approval
+
+| Property       | Value                    |
+| -------------- | ------------------------ |
+| **Config key** | `merge_to_main_approval` |
+| **Priority**   | 20                       |
+| **Type**       | Blocking                 |
+| **Event**      | PreToolUse               |
+
+**Description:** Makes a human's approval of the parent-to-main merge a REAL, configurable gate instead of a sentence in `Worktree.core.md` nobody enforces (Plan 00367). With `worktree.merge_to_main_requires_human_approval: true`, a `git merge <branch>` (or `gh pr merge`) run in the MAIN checkout while it is on the default branch is denied until a human has approved that branch. A merge run inside a linked worktree (child into parent) is never gated -- that is the automatic half of the worktree workflow.
+
+**Fires when:** the key is true, the command is a `git merge`/`gh pr merge` naming a real branch (not `--abort`/`--continue`/`--quit`, and not a bare mention inside a quoted string such as `echo 'git merge x'`), and the shell's cwd is a MAIN checkout currently on its default branch. With the key false (the shipped default) the handler never matches and the parent-to-main merge happens once verification passes.
+
+**The human's route:** run `hooks-daemon approve-merge <branch>`, which records a one-shot marker under the daemon's untracked directory (`untracked/merge-approvals/<branch>.approved`) that the very next merge of that branch consumes. Approving one branch does not approve another, and an approval left unconsumed because the key is off is noted by the command.
+
+**Config example:**
+
+```yaml
+worktree:
+  merge_to_main_requires_human_approval: true   # default false
+
+handlers:
+  pre_tool_use:
+    merge_to_main_approval:
+      enabled: true
+      priority: 20
+```
+
+---
+
 #### project_containment
 
 | Property       | Value                 |
@@ -3825,6 +3855,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `git_stash`                    | PreToolUse        | 20       | git stash creation (deny by default; configurable)                    |
 | `git_message_backtick`         | PreToolUse        | 20       | Backticks in a double-quoted git -m (bash executes them)              |
 | `ancestry_preserving_merge`    | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)   |
+| `merge_to_main_approval`       | PreToolUse        | 20       | git merge/gh pr merge into main without a human's approval (opt-in)   |
 | `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)           |
 | `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                 |
 | `comment_changelog`            | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries)  |

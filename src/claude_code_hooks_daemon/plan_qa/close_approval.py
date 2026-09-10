@@ -15,19 +15,24 @@ package: the handler and the CLI both call it, and neither needs the model.
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME
+from claude_code_hooks_daemon.utils.one_shot_approval import (
+    MARKER_SUFFIX,
+    OneShotApprovalStore,
+)
 
 #: Directory under the daemon's untracked dir that holds the markers.
 APPROVAL_SUBDIR: Final[str] = "plan-close-approvals"
 #: Marker filename suffix; the stem is the zero-padded plan number.
-APPROVAL_SUFFIX: Final[str] = ".approved"
+APPROVAL_SUFFIX: Final[str] = MARKER_SUFFIX
 
 _PLAN_NUMBER_WIDTH: Final[int] = 5
 _FOLDER_NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"^(\d{1,5})-")
+
+_STORE: Final[OneShotApprovalStore] = OneShotApprovalStore(APPROVAL_SUBDIR)
 
 
 def format_plan_number(plan_number: int) -> str:
@@ -37,29 +42,17 @@ def format_plan_number(plan_number: int) -> str:
 
 def approval_marker_path(untracked_dir: Path, plan_number: int) -> Path:
     """Where the one-shot approval for ``plan_number`` lives."""
-    return untracked_dir / APPROVAL_SUBDIR / f"{format_plan_number(plan_number)}{APPROVAL_SUFFIX}"
+    return _STORE.path(untracked_dir, format_plan_number(plan_number))
 
 
 def record_approval(untracked_dir: Path, plan_number: int) -> Path:
     """Write the approval marker (creating its directory) and return its path."""
-    marker = approval_marker_path(untracked_dir, plan_number)
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(UTC).isoformat(timespec="seconds")
-    marker.write_text(
-        f"plan {format_plan_number(plan_number)} close approved at {stamp}\n",
-        encoding="utf-8",
-    )
-    return marker
+    return _STORE.record(untracked_dir, format_plan_number(plan_number))
 
 
 def consume_approval(untracked_dir: Path, plan_number: int) -> bool:
     """Remove the marker for ``plan_number``; True if there was one to consume."""
-    marker = approval_marker_path(untracked_dir, plan_number)
-    try:
-        marker.unlink()
-    except FileNotFoundError:
-        return False
-    return True
+    return _STORE.consume(untracked_dir, format_plan_number(plan_number))
 
 
 def plan_number_from_plan_doc_path(file_path: Path, plan_dir_rel: str) -> int | None:

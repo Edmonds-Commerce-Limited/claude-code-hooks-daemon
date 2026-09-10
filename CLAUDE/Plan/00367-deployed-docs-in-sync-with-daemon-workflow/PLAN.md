@@ -46,10 +46,13 @@ merge approval). The plan-closing gate becomes a real, configurable one:
 
 ## Non-Goals
 
-- No decision here on the 11 `Worktree.core.md` merge-approval
-  instructions: enforce them behind a key or delete them is the owner's
-  call (DBF section 4), recorded as known instances until made.
 - No change to the definition of done ("merged into main").
+
+**Superseded**: the original scope left the 11 `Worktree.core.md`
+merge-approval instructions as an owner decision deferred to a later plan
+(DBF section 4). The owner's ruling arrived before this plan closed:
+enforce them behind a key, on the same shape as the plan-closing gate.
+Phase 4 below does that; it is not a separate plan.
 
 ## Tasks
 
@@ -88,6 +91,44 @@ merge approval). The plan-closing gate becomes a real, configurable one:
   `Worktree.core.md` count is recorded for the owner's decision. (7dcd68b9;
   journal 08:04)
 
+### Phase 4: The Worktree.core.md fix (DBF clause 4, the deferred decision)
+
+- [x] ✅ **Task 4.1**: `worktree.merge_to_main_requires_human_approval: bool`
+  (default false) as `WorktreeConfig`, a real `Config` field path (so the
+  docs-QA key resolver can confirm it); threaded through
+  `HandlerRegistry.register_all` to every GIT-tagged handler the same way
+  `plan_workflow` injects `_close_requires_human_approval`.
+- [x] ✅ **Task 4.2**: `merge_to_main_approval` handler
+  (`R-MERGE-TO-MAIN-APPROVAL`, priority 20, GIT-tagged, terminal): with the
+  key true, a `git merge`/`gh pr merge` run in the MAIN checkout on its
+  default branch is denied until a human runs
+  `hooks-daemon approve-merge <branch>`, which records a one-shot marker
+  under the daemon's untracked directory the next matching merge consumes.
+  A linked worktree (child into parent) is never gated — checked via the
+  `.git` entry, never guessed from the path. The command match reuses
+  `GIT_INVOCATION` (the same evasion-hardened fragment `destructive_git`
+  and `ancestry_preserving_merge` use) and blanks quoted literal spans
+  (`utils.quoted_spans.blank_shell_literal_spans`) so a bare mention such
+  as `echo 'git merge x'` is not read as a real merge. The one-shot marker
+  logic is shared with `plan_close_approval` via a new
+  `utils/one_shot_approval.py` (`OneShotApprovalStore`), and
+  `plan_qa/close_approval.py` was refactored onto it rather than kept as a
+  second copy. TDD, acceptance tests, handler reference, `approve-merge`
+  CLI subcommand, evasion-suite classification.
+- [x] ✅ **Task 4.3**: Rewrite every "human must approve"/"REQUIRES
+  APPROVAL" instance in the `Worktree.core.md` TEMPLATE and the deployed
+  copy (byte-identical) — the Merge Rules summary, Critical Rule 7, both
+  worked examples (sequential and hierarchical-parallel), the Team Lead
+  Workflow step, the shutdown sequence, the Common Pitfalls anti-pattern,
+  the Verification Checklist, the Troubleshooting entry, the Quick
+  Reference diagram and table, and the closing "Remember" bullet — so each
+  describes the toggle instead of prescribing an unenforced stop.
+  `CLAUDE/AgentTeam.md`'s parent-to-main merge instructions (Integration
+  Phase, the worked walkthrough, the Gate Summary checklist) got the same
+  treatment for consistency, though it sits outside the docs-QA corpus.
+  `bin/hooks-daemon docs-qa --sweep` reports 0 `unenforced-approval-gate`
+  findings across both core documents.
+
 ## Success Criteria
 
 - [x] A commit that adds an unenforced human gate to a core document is
@@ -95,9 +136,15 @@ merge approval). The plan-closing gate becomes a real, configurable one:
 - [x] With the key on, an agent cannot close a plan; with it off (the
   default), a fully completed plan closes as before. (31112907)
 - [x] `PlanWorkflow.core.md` carries no unenforced approval gate. (7dcd68b9)
+- [x] `Worktree.core.md` carries no unenforced approval gate; the sweep
+  reports 0 across both core documents.
+- [x] With `worktree.merge_to_main_requires_human_approval` on, a
+  `git merge`/`gh pr merge` into main from the main checkout is denied
+  until `hooks-daemon approve-merge <branch>`; with it off (the default),
+  the parent-to-main merge happens once verification passes, as before.
 - [x] Every release-bound consequence is in the pending-release holding
   area: a release-notes callout and a config-changes manifest. (31112907,
-  7dcd68b9)
+  7dcd68b9, Phase 4)
 
 ## Delivery & Milestones
 
@@ -109,3 +156,8 @@ merge approval). The plan-closing gate becomes a real, configurable one:
 - Milestone C — the plan workflow core document is in sync. Delivered in
   7dcd68b9; the sweep reports 0 instances in `PlanWorkflow.core.md` and 11
   in `Worktree.core.md`, which stay for the owner's decision.
+- Milestone D — the worktree merge gate exists behind its key, and the
+  worktree core document is in sync. `worktree.merge_to_main_requires_human_approval`,
+  the `merge_to_main_approval` handler, the `approve-merge` CLI
+  subcommand, and both copies of `Worktree.core.md` plus `AgentTeam.md`
+  rewritten. Sweep reports 0 across both core documents.

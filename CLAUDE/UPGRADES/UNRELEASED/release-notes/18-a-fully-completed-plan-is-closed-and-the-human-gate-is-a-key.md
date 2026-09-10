@@ -1,4 +1,4 @@
-# Callout: a fully completed plan is closed, and the human gate is a key
+# Callout: a fully completed plan is closed, and both human gates are keys now
 
 **Plan**: 00367
 **Audience**: everyone
@@ -27,7 +27,19 @@ This was handled Defence Before Fix. The net is the docs-QA check
 `unenforced-approval-gate`: a daemon-owned core document may prescribe a
 human approval gate only when the same paragraph names, in backticks, the
 config key that enforces it. It blocks a NEW unenforced gate at edit and
-commit time and reports pre-existing ones in the sweep. The plan-workflow
-document's three instances are fixed; the eleven in `Worktree.core.md` (the
-parent-to-main merge approval) are recorded for the owner's decision and
-still show in `docs-qa --sweep`.
+commit time and reports pre-existing ones in the sweep.
+
+The eleven instances in `Worktree.core.md` (the parent-to-main merge
+approval) got the same treatment. A project that wants a human in that loop
+turns on `worktree.merge_to_main_requires_human_approval` (default `false`).
+With it on, the new `merge_to_main_approval` handler denies a `git merge`
+(or `gh pr merge`) run in the MAIN checkout while it is on the default
+branch, and names the human's route: run
+`hooks-daemon approve-merge <branch>`, which records a one-shot marker under
+the daemon's untracked directory that the very next merge of that branch
+consumes. A merge run inside a linked worktree (child into parent) is never
+gated either way. With the key off (the default), the parent-to-main merge
+happens once verification passes, unchanged from before. `Worktree.core.md`
+now describes the toggle instead of prescribing an unenforced "ask a human"
+step, so `docs-qa --sweep` reports zero `unenforced-approval-gate` findings
+across both core documents.

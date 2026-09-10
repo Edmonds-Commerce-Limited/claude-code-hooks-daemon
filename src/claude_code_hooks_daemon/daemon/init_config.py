@@ -199,6 +199,8 @@ class ConfigTemplate:
             "# Block backticks in a double-quoted git -m (bash executes them)\n"
             "    ancestry_preserving_merge: {enabled: true, priority: 19}  "
             "# Block squash/rebase merges that sever ancestry\n"
+            "    merge_to_main_approval: {enabled: true, priority: 20}  "
+            "# A human approves a parent-to-main merge when worktree.merge_to_main_requires_human_approval is true\n"
             "\n"
             "    # CODE QUALITY HANDLERS (Priority 25-35)\n"
             "    qa_suppression: {enabled: true, priority: 30}  # Unified multi-language QA suppression blocker (11 languages)\n"

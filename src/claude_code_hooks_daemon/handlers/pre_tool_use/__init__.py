@@ -18,6 +18,7 @@ from .git_message_backtick import GitMessageBacktickHandler
 from .git_stash import GitStashHandler
 from .github_auto_close_keywords import GithubAutoCloseKeywordsHandler
 from .markdown_organization import MarkdownOrganizationHandler
+from .merge_to_main_approval import MergeToMainApprovalHandler
 from .npm_command import NpmCommandHandler
 from .plan_close_approval import PlanCloseApprovalHandler
 from .plan_qa_commit_gate import PlanQaCommitGateHandler
@@ -59,6 +60,7 @@ __all__ = [
     "GitStashHandler",
     "GithubAutoCloseKeywordsHandler",
     "MarkdownOrganizationHandler",
+    "MergeToMainApprovalHandler",
     "NpmCommandHandler",
     "PlanCloseApprovalHandler",
     "PlanQaCommitGateHandler",

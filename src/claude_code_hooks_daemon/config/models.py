@@ -1673,6 +1673,35 @@ class DaemonConfig(BaseModel):
         return get_pid_path(workspace_root)
 
 
+class WorktreeConfig(BaseModel):
+    """Worktree-workflow policy (Plan 00367 Phase 4).
+
+    The deployed ``Worktree.core.md`` told every agent to ask a human before
+    merging a parent worktree into main, and nothing enforced it. The
+    parent-to-main merge now happens once verification passes; a project that
+    wants a human in that loop turns this key on and the
+    ``merge_to_main_approval`` handler denies the merge until a human runs
+    ``hooks-daemon approve-merge <branch>``.
+
+    Attributes:
+        merge_to_main_requires_human_approval: When true, a ``git merge`` (or
+            ``gh pr merge``) run in the MAIN checkout while it is on the
+            default branch is denied until a human records a one-shot
+            approval for that branch. A merge in a linked worktree (child to
+            parent) is never gated.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    merge_to_main_requires_human_approval: bool = Field(
+        default=False,
+        description=(
+            "When true, a git merge run in the main checkout on the default branch "
+            "is denied until a human runs `hooks-daemon approve-merge <branch>`"
+        ),
+    )
+
+
 class CcyConfig(BaseModel):
     """Configuration for the ccy (claude-yolo) container workflow (Plan 00147).
 
@@ -1816,6 +1845,7 @@ class Config(BaseModel):
         plugins: Plugin system configuration
         project_handlers: Project-level handler configuration
         ccy: ccy container-workflow configuration (Plan 00147)
+        worktree: Worktree-workflow policy, the merge-to-main gate (Plan 00367)
         layout: Project directory-layout truths with no other config home
             (Plan 00288); composed with other homes by the ``ProjectLayout``
             facade (``core/project_layout.py``)
@@ -1839,6 +1869,7 @@ class Config(BaseModel):
     )
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     ccy: CcyConfig = Field(default_factory=CcyConfig)
+    worktree: WorktreeConfig = Field(default_factory=WorktreeConfig)
     tool_policy: ToolPolicyConfig = Field(default_factory=ToolPolicyConfig)
     claude_md: ClaudeMdConfig = Field(default_factory=ClaudeMdConfig)
     pseudo_events: dict[str, dict[str, Any]] = Field(

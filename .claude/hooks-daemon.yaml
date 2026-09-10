@@ -363,6 +363,10 @@ handlers:
       options:
         mode: block             # Block ancestry-severing merges (use --no-ff / gh pr merge --merge)
 
+    merge_to_main_approval: # A human approves the parent-to-main merge when
+      enabled: true          # worktree.merge_to_main_requires_human_approval is true (Plan 00367);
+      priority: 20            # inert here since that key is false (default)
+
     lock_file_edit_blocker: # Prevents editing package lock files
       enabled: true
       priority: 20

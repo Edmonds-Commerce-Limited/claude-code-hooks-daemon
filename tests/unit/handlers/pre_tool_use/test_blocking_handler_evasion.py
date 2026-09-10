@@ -435,6 +435,17 @@ _COMMAND_ANCHORED_NOT_UNIT_TESTABLE: dict[str, str] = {
     "RootRecursionGuardHandler": "matches the scan ROOT operand, not the binary name",
     "WorktreeFileCopyHandler": "matches worktree path operands, not the binary name",
     "GlobalNpmAdvisorHandler": "advisory only; never denies, so a bypass changes nothing",
+    "MergeToMainApprovalHandler": (
+        "the command match (git merge / gh pr merge) already runs through "
+        "GIT_INVOCATION, the same evasion-hardened fragment DestructiveGitHandler "
+        "and AncestryPreservingMergeHandler use above, and blank_shell_literal_spans "
+        "to ignore a purely-quoted mention -- but matches() also requires the "
+        "opt-in config gate (off here, so the bare command never matches at all) "
+        "and real cwd/git-repo state (is_linked_worktree, current branch, default "
+        "branch) that this harness's bare command payload cannot supply. Covered "
+        "by its own dedicated unit suite with monkeypatched module functions: "
+        "tests/unit/handlers/pre_tool_use/test_merge_to_main_approval.py"
+    ),
 }
 
 # Per-handler setup for anything that needs configuration to match at all.

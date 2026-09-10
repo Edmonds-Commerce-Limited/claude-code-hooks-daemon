@@ -20,7 +20,11 @@ from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 if TYPE_CHECKING:
-    from claude_code_hooks_daemon.config.models import DocumentationConfig, PlanWorkflowConfig
+    from claude_code_hooks_daemon.config.models import (
+        DocumentationConfig,
+        PlanWorkflowConfig,
+        WorktreeConfig,
+    )
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.core.router import EventRouter
     from claude_code_hooks_daemon.core.workspace import ProjectRegistry
@@ -408,6 +412,7 @@ class HandlerRegistry:
         documentation: "DocumentationConfig | None" = None,
         project_layout: "ProjectLayout | None" = None,
         project_registry: "ProjectRegistry | None" = None,
+        worktree: "WorktreeConfig | None" = None,
     ) -> int:
         """Register all discovered handlers with the router.
 
@@ -426,6 +431,9 @@ class HandlerRegistry:
                 onto every handler instance, mirroring project_exclude_paths
             project_registry: Optional ProjectRegistry facade (Plan 00296)
                 injected onto every handler instance, mirroring project_layout
+            worktree: Optional WorktreeConfig (Plan 00367) for git-tagged
+                handlers; its merge-to-main toggle is injected as
+                ``_merge_to_main_requires_human_approval``
 
         Returns:
             Number of handlers registered
@@ -610,6 +618,17 @@ class HandlerRegistry:
                                 }
                                 for attr_key, attr_val in plan_attrs.items():
                                     setattr(instance, f"_{attr_key}", attr_val)
+
+                            # Inject the worktree merge-gate toggle for git-tagged
+                            # handlers (Plan 00367 Phase 4) -- same DI idiom as
+                            # plan_workflow above; absent config means gate off.
+                            if worktree is not None and "git" in instance.tags:
+                                merge_attr_name = "_merge_to_main_requires_human_approval"
+                                setattr(
+                                    instance,
+                                    merge_attr_name,
+                                    worktree.merge_to_main_requires_human_approval,
+                                )
 
                             # Inject documentation config for documentation-tagged
                             # handlers (Plan 00284) -- same DI idiom as plan_workflow

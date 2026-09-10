@@ -279,6 +279,15 @@ class HandlerID:
         config_key="ancestry_preserving_merge",
         display_name="block-ancestry-severing-merge",
     )
+    # Merge-to-main approval (Plan 00367 Phase 4): with
+    # `worktree.merge_to_main_requires_human_approval` on, a git merge run in
+    # the main checkout on the default branch is denied until a human records
+    # approval with `hooks-daemon approve-merge <branch>`.
+    MERGE_TO_MAIN_APPROVAL = HandlerIDMeta(
+        class_name="MergeToMainApprovalHandler",
+        config_key="merge_to_main_approval",
+        display_name="merge-to-main-approval",
+    )
     # Backtick substitution in a git message (Plan 00219): backticks inside a
     # DOUBLE-quoted -m are executed by bash, not quoted, so the span is
     # replaced by the command's stdout and the text is silently lost.
