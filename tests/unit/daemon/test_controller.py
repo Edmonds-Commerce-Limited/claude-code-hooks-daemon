@@ -214,7 +214,7 @@ class TestDaemonController:
         from claude_code_hooks_daemon.core.event import HookInput
 
         event = HookEvent(
-            event=EventType.PRE_TOOL_USE,
+            event_type=EventType.PRE_TOOL_USE,
             hook_input=HookInput(
                 tool_name="Bash",
                 tool_input={"command": "ls"},
@@ -237,7 +237,7 @@ class TestDaemonController:
         assert controller.is_initialised is False
 
         event = HookEvent(
-            event=EventType.PRE_TOOL_USE,
+            event_type=EventType.PRE_TOOL_USE,
             hook_input=HookInput(
                 tool_name="Bash",
                 tool_input={"command": "ls"},
@@ -265,7 +265,7 @@ class TestDaemonController:
         from claude_code_hooks_daemon.core.event import HookInput
 
         event = HookEvent(
-            event=EventType.PRE_TOOL_USE,
+            event_type=EventType.PRE_TOOL_USE,
             hook_input=HookInput(
                 tool_name="Bash",
                 tool_input={"command": "ls"},
@@ -295,7 +295,7 @@ class TestDaemonController:
         from claude_code_hooks_daemon.core.event import HookInput
 
         event = HookEvent(
-            event=EventType.PRE_TOOL_USE,
+            event_type=EventType.PRE_TOOL_USE,
             hook_input=HookInput(
                 tool_name="Bash",
                 tool_input={"command": "ls"},
@@ -498,7 +498,7 @@ class TestDaemonController:
         from claude_code_hooks_daemon.core.event import HookInput
 
         event = HookEvent(
-            event=EventType.PRE_TOOL_USE,
+            event_type=EventType.PRE_TOOL_USE,
             hook_input=HookInput(
                 tool_name="Bash",
                 tool_input={"command": "ls"},
@@ -512,6 +512,7 @@ class TestDaemonController:
         # FAIL FAST: Handler crash should BLOCK operation (fail-closed)
         # When protection system is down, default to blocking for safety
         assert result.result.decision.value == "deny"
+        assert result.result.reason is not None
         assert "SYSTEM ERROR" in result.result.reason
         assert "crashed" in result.result.reason
         # Check that RuntimeError appears somewhere in context
@@ -721,7 +722,7 @@ class TestControllerProcessEventErrors:
         controller = self._make_initialised_controller(workspace_root)
 
         event = HookEvent(
-            event=EventType.PRE_TOOL_USE,
+            event_type=EventType.PRE_TOOL_USE,
             hook_input=HookInput(
                 tool_name="Bash",
                 tool_input={"command": "ls"},
@@ -751,7 +752,7 @@ class TestControllerProcessEventErrors:
         controller = self._make_initialised_controller(workspace_root)
 
         event = HookEvent(
-            event=EventType.PRE_TOOL_USE,
+            event_type=EventType.PRE_TOOL_USE,
             hook_input=HookInput(
                 tool_name="Bash",
                 tool_input={"command": "ls"},
@@ -822,7 +823,7 @@ class TestControllerChainConfig:
         from claude_code_hooks_daemon.core.event import HookInput
 
         return HookEvent(
-            event=EventType.PRE_TOOL_USE,
+            event_type=EventType.PRE_TOOL_USE,
             hook_input=HookInput(
                 tool_name="Bash",
                 tool_input={"command": command},
@@ -1086,7 +1087,7 @@ class TestControllerVerdictLog:
         from claude_code_hooks_daemon.core.event import HookInput
 
         return HookEvent(
-            event=EventType.PRE_TOOL_USE,
+            event_type=EventType.PRE_TOOL_USE,
             hook_input=HookInput(
                 tool_name="Bash",
                 tool_input={"command": command},

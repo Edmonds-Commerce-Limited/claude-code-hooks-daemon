@@ -151,7 +151,7 @@ class TestDegradedModeRequestHandling:
     ) -> None:
         """In degraded mode, process_event should return configuration error."""
         event = HookEvent(
-            event=EventType.PRE_TOOL_USE,
+            event_type=EventType.PRE_TOOL_USE,
             hook_input=HookInput(
                 tool_name="Bash",
                 tool_input={"command": "ls"},
@@ -199,7 +199,7 @@ class TestDegradedModeRequestHandling:
         daemon is degraded (the php-qa-ci canary caught the old fail-open
         behaviour letting this straight through as an ALLOW)."""
         event = HookEvent(
-            event=EventType.PRE_TOOL_USE,
+            event_type=EventType.PRE_TOOL_USE,
             hook_input=HookInput(
                 tool_name="Bash",
                 tool_input={"command": "git reset --hard HEAD"},
@@ -211,7 +211,8 @@ class TestDegradedModeRequestHandling:
 
         assert result.result.decision == Decision.DENY
         context_text = "\n".join(result.result.context)
-        assert "DEGRADED" in result.result.reason or "DEGRADED" in context_text
+        reason_text = result.result.reason or ""
+        assert "DEGRADED" in reason_text or "DEGRADED" in context_text
 
     def test_degraded_every_request_returns_error(
         self, degraded_controller: DaemonController
@@ -219,7 +220,7 @@ class TestDegradedModeRequestHandling:
         """Every request in degraded mode should return config error."""
         for event_type in [EventType.PRE_TOOL_USE, EventType.POST_TOOL_USE]:
             event = HookEvent(
-                event=event_type,
+                event_type=event_type,
                 hook_input=HookInput(
                     tool_name="Bash",
                     tool_input={"command": "ls"},
