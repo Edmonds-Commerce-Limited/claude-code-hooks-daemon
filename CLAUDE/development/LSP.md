@@ -26,6 +26,18 @@ integration spawn:
   thousands of "unknown attribute" diagnostics against files they had not
   touched here. `tests/unit/test_pyright_config.py` pins the list.
 
+## The QA gate
+
+`scripts/qa/run_pyright_check.py` (the `pyright` tool in `llm_qa.py`, Plan
+00368\) runs the same CLI over the same config and fails on ANY error, so a
+clean gate means a clean diagnostics stream. It passes the QA venv's
+interpreter as `--pythonpath`: the `untracked/venv` symlink above exists only
+in the main checkout, and in a worktree or on a CI runner a bare
+`pyright --project .` resolves no site-packages and reports every third-party
+import missing. Use the script, not the bare command, when the count matters.
+The `lsp_noise_checker` SessionStart advisory reports an `exclude` entry the
+config is missing, and a language server older than the config file.
+
 ## Diagnosing: is it the config or a stale server?
 
 Run the CLI against a flagged file:

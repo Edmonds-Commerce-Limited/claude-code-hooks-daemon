@@ -734,6 +734,18 @@ class HandlerID:
         display_name="monorepo-detector",
     )
 
+    # LSP noise checker (SessionStart handler) -- Plan 00368: for every
+    # supported language present (Python, TypeScript/JavaScript, Go, Rust,
+    # PHP), that language's server must be told to exclude every tree the
+    # daemon knows is not project code, and a language server older than
+    # its check's anchor file is stale. Advises the exact fix; never
+    # blocks.
+    LSP_NOISE_CHECKER = HandlerIDMeta(
+        class_name="LspNoiseCheckerHandler",
+        config_key="lsp_noise_checker",
+        display_name="lsp-noise-checker",
+    )
+
     # Plan QA edit lint (PreToolUse handler) — Plan 00144: Stage 1 checks on
     # the would-be PLAN.md content at Write/Edit time
     PLAN_QA_EDIT = HandlerIDMeta(

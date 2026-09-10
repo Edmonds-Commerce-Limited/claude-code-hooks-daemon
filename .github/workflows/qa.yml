@@ -131,6 +131,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: mypy src/
 
+      # Plan 00368: the zero-errors pyright gate, run through its own script
+      # rather than as a bare `pyright` call. The script passes the running
+      # interpreter as --pythonpath, which matters HERE more than anywhere:
+      # pyrightconfig.json names `untracked/venv`, a symlink no runner has,
+      # and without the override every third-party import is reported
+      # missing. The pinned PyPI `pyright` (a dev extra, installed by the
+      # frozen sync above) wraps the npm release and needs the runner's node.
+      - name: Types (pyright)
+        if: ${{ !cancelled() }}
+        run: python scripts/qa/run_pyright_check.py --json
+
       # Plan 00250: the acceptance gates RELEASING.md Step 12.0 declares
       # BLOCKING have never run here. They open a socket under untracked/ and
       # skip when they cannot find one, so without a daemon they are reported

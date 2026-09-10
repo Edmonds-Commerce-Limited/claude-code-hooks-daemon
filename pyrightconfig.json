@@ -9,6 +9,16 @@
     "tests/fixtures",
     "remote-docs",
     "**/node_modules",
+    "**/vendor",
+    "**/third_party",
+    "**/dist",
+    "**/build",
+    "**/.build",
+    "**/target",
+    "**/.next",
+    "**/.venv",
+    "**/venv",
+    "**/coverage",
     "**/__pycache__"
   ]
 }

@@ -14,13 +14,17 @@ broken test fixtures are noise of the same kind.
 import json
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CONFIG = _REPO_ROOT / "pyrightconfig.json"
 
 # Trees that are never this checkout's live code: linked worktrees, venvs,
 # fixtures and canary clones (untracked/), the plan archive's historical
-# probes and archived code, the acceptance-test fixture files, and the test
-# fixtures that are broken on purpose.
+# probes and archived code, the acceptance-test fixture files, the test
+# fixtures that are broken on purpose, and the reviewed vendored/build names
+# at any depth (the same set the lsp_noise_checker advisory derives its
+# expectation from, so this repo's own config satisfies its own handler).
 _REQUIRED_EXCLUDES = frozenset(
     {
         "untracked",
@@ -29,6 +33,7 @@ _REQUIRED_EXCLUDES = frozenset(
         "tests/fixtures",
         "remote-docs",
     }
+    | {f"**/{name}" for name in CORE_VENDORED_BUILD_DIR_NAMES}
 )
 
 

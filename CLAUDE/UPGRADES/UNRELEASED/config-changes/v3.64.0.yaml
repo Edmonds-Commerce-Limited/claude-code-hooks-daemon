@@ -3,6 +3,48 @@ date: "UNRELEASED"
 breaking: false
 config_changes:
   added:
+    - key: handlers.session_start.lsp_noise_checker
+      recommended: true
+      dormant: false
+      description: >-
+        NEW SessionStart advisory handler (Plan 00368), ships enabled at
+        priority 69, one Strategy Pattern check per supported language
+        present (Python, TypeScript/JavaScript, Go, Rust, PHP -- a
+        root-level toolchain marker for at least one), silent otherwise
+        and on a resumed session. Claude Code injects a language server's
+        diagnostics after every edit, and a stream carrying noise --
+        other checkouts' half-built branches under the daemon's runtime
+        directory, archived plan probes, vendored and build output, the
+        vendored remote-docs tree -- trains the agent to skim it, which
+        is the same as having no LSP at all. Two checks per language,
+        each printing that language's exact fix: `R-LSP-CONFIG-EXCLUDE`
+        when its server isn't told to exclude a tree the daemon KNOWS is
+        not project code (the runtime dir, `plan_workflow.directory`, the
+        reviewed vendored/build names at any depth,
+        `documentation.trees.remote` -- derived, never typed), and
+        `R-LSP-SERVER-STALE` when a matching language-server process
+        started before that check's anchor file was last written (names
+        the pid and the command that ends it; the harness respawns a
+        fresh server on the next LSP use). Verified against Claude Code's
+        own marketplace plugin configs, not assumed: Python/TypeScript
+        read a real project exclude file; Go/Rust have no exclude list
+        (Go checks module-boundary membership, Rust's fix is `Cargo.toml`
+        `[workspace] exclude`); PHP (intelephense) reads no project file
+        at all, so its fix is a project-scope LSP plugin override.
+      example_yaml: |
+        handlers:
+          session_start:
+            lsp_noise_checker:
+              enabled: true
+              priority: 69
+      migration_note: >-
+        On by default; no action needed to adopt. The first new session in
+        a project using any supported language whose server isn't told to
+        exclude the daemon's runtime directory prints that language's exact
+        fix -- apply it, then end the language server as the advisory says.
+        A project using none of the five supported languages never hears
+        from it. Disable with
+        handlers.session_start.lsp_noise_checker.enabled: false.
     - key: plan_workflow.close_requires_human_approval
       recommended: false
       dormant: true
@@ -82,3 +124,6 @@ config_changes:
         Add `merge_to_main_approval: {enabled: true, priority: 20}` under
         `handlers.pre_tool_use` if you intend to turn the key on. A config
         without the handler is still valid.
+  renamed: []
+  removed: []
+  changed: []

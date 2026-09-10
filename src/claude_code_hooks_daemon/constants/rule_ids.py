@@ -528,3 +528,16 @@ class RuleID:
     #: SUPPRESSED: that one needs a declaration and stops ticks entirely until
     #: a real prompt; this one needs no declaration and never stops them.
     FAILSAFE_CRON_BACKED_OFF: str = "R-FAILSAFE-CRON-BACKED-OFF"
+
+    # ------------------------------------------------------------------
+    # lsp_noise_checker handler (Plan 00368) — both advisory
+    # ------------------------------------------------------------------
+
+    #: The pyright config has no `exclude` for a tree the daemon knows is not
+    #: project code (its runtime dir, the plan directory, vendored/build dirs,
+    #: the remote-docs tree), or there is no config at all.
+    LSP_CONFIG_EXCLUDE: str = "R-LSP-CONFIG-EXCLUDE"
+
+    #: A running `pyright-langserver` started before the pyright config was
+    #: last written, so it is still analysing the OLD scope.
+    LSP_SERVER_STALE: str = "R-LSP-SERVER-STALE"

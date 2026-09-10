@@ -32,11 +32,13 @@ server with the exact fix, in this repo and in every client.
 
 - `./scripts/qa/llm_qa.py all` runs pyright over the project and fails on
   any error; the count is zero on main.
-- A `SessionStart` handler `lsp_noise_checker` advises, with the exact
-  command, when `pyrightconfig.json` is missing an exclude for a tree the
-  daemon knows is not project code (its runtime dir, the plan directory,
-  vendor and build dirs, fixture trees, the remote-docs tree), or when a
-  running `pyright-langserver` started before the config was last written.
+- A `SessionStart` handler `lsp_noise_checker` advises, for every supported
+  language present (Python, TypeScript/JavaScript, Go, Rust, PHP - not
+  Python alone), with that language's exact fix, when its server isn't
+  told to exclude a tree the daemon knows is not project code (its runtime
+  dir, the plan directory, vendor and build dirs, fixture trees, the
+  remote-docs tree), or when a matching language-server process started
+  before that check's anchor file was last written.
 - The remaining real errors are fixed, not suppressed: no `# type: ignore`,
   no `# pyright: ignore`, no rule downgrades in the config.
 
@@ -55,20 +57,29 @@ server with the exact fix, in this repo and in every client.
 
 ### Phase 2: The gate and the checker
 
-- [ ] ⬜ **Task 2.1**: `pyright` as a `TOOL_REGISTRY` entry in
+- [x] ✅ **Task 2.1**: `pyright` as a `TOOL_REGISTRY` entry in
   `scripts/qa/llm_qa.py` (blocking, zero errors, cache file like the
   others), with the wiring tests the other tools have; `CLAUDE/QA.md` and
   `CLAUDE/development/QA.md` name it. Pyright itself: pin the version and
   install path the QA needs (`pyproject.toml` dev extra if it is on PyPI
   as `pyright`, else document the `npm`/binary route the CI job uses) and
-  add it to the CI workflow.
-- [ ] ⬜ **Task 2.2**: `lsp_noise_checker` (`SessionStart`, advisory,
-  Python projects only): the two checks above, rule IDs
-  `R-LSP-CONFIG-EXCLUDE` and `R-LSP-SERVER-STALE`, `get_claude_md()`,
-  `get_acceptance_tests()`, `explain-rule`, handler reference; the
-  daemon's own knowledge of the excluded trees comes from
+  add it to the CI workflow (`61bd6d36`).
+- [x] ✅ **Task 2.2**: `lsp_noise_checker` (`SessionStart`, advisory,
+  every supported language - Python, TypeScript/JavaScript, Go, Rust, PHP,
+  not Python alone): a per-language `LspNoiseStrategy` Strategy Pattern
+  registry (`strategies/lsp_noise/`, mirroring the `tdd` archetype) behind
+  a zero-language-logic handler; the two checks above, rule IDs
+  `R-LSP-CONFIG-EXCLUDE` and `R-LSP-SERVER-STALE` (language named in the
+  message), `get_claude_md()`, `get_acceptance_tests()` aggregated per
+  language, `explain-rule`, handler reference with a per-language mechanism
+  table; the daemon's own knowledge of the excluded trees comes from
   `constants.layout`, the plan-workflow config and the remote-docs config,
-  never a hand-typed list.
+  never a hand-typed list. Each language's exclude mechanism verified
+  against Claude Code's own marketplace plugin configs
+  (`anthropics/claude-plugins-official`) and each tool's own docs, never
+  assumed - PHP (intelephense) takes no project-file exclude at all, so
+  its fix is a project-scope LSP plugin override, scanned for rather than
+  reported "unsupported".
 
 ### Phase 3: The sweep
 
@@ -84,9 +95,9 @@ server with the exact fix, in this repo and in every client.
 
 - [ ] `pyright --project .` reports 0 errors on main and QA fails if one
   returns.
-- [ ] A session in a project whose pyright config analyses its runtime
-  dir, or whose language server predates its config, is told exactly how
-  to fix it.
+- [ ] A session in a project using any supported language whose server
+  analyses its runtime dir, or whose language-server process predates its
+  check's anchor file, is told exactly how to fix it.
 - [ ] No suppression comment or rule downgrade was added to reach zero.
 - [ ] Every release-bound consequence is in the pending-release holding
   area: a release-notes callout, and a config-changes manifest if a key
@@ -95,3 +106,4 @@ server with the exact fix, in this repo and in every client.
 ## Delivery & Milestones
 
 - `461a2563` — Phase 1, the exclude and its guard.
+- `61bd6d36` — Task 2.1, pyright as a zero-errors QA gate.

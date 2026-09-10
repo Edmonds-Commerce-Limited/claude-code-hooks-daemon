@@ -253,6 +253,90 @@ def process(config: dict[str, Any]) -> None:
 
 ---
 
+## Type Errors (Pyright)
+
+Pyright joins mypy as a second, stricter checker (`run_pyright_check.py`,
+Plan 00368). It is the same binary the language server runs, so the
+gate's verdict and the diagnostics an agent sees after every edit agree.
+The rule is zero errors, and the ways OUT are narrower than for mypy:
+no `# type: ignore`, no `# pyright: ignore`, no rule downgrade in
+`pyrightconfig.json`. Fix the code. The three shapes below are most of
+the count.
+
+### Optional Result Used Without Narrowing
+
+**Symptom:**
+
+```
+error: Operator "in" not supported for "None" (reportOperatorIssue)
+error: "group" is not a known attribute of "None" (reportOptionalMemberAccess)
+```
+
+**Root Cause:**
+A call that returns `X | None` (`re.match`, `dict.get`, a handler helper)
+is used as if it always returned `X`. mypy passes because the value is often
+`Any` in test code; pyright infers the real type.
+
+**Fix:**
+
+```python
+# ❌ WRONG - result may be None
+match = re.match(r"(\d+)", text)
+assert "42" in match.group(1)
+
+# ✅ RIGHT - narrow first; in a test an assertion IS the narrowing
+match = re.match(r"(\d+)", text)
+assert match is not None
+assert "42" in match.group(1)
+```
+
+### Attribute Access on a Base-Typed Fixture
+
+**Symptom:**
+
+```
+error: Cannot access attribute "config" for class "Handler" (reportAttributeAccessIssue)
+```
+
+**Root Cause:**
+A fixture is annotated with the base class (`Handler`) but the test reads an
+attribute only the concrete handler has.
+
+**Fix:**
+
+```python
+# ❌ WRONG - the base type has no `config`
+@pytest.fixture
+def handler() -> Handler:
+    return TddEnforcementHandler()
+
+# ✅ RIGHT - annotate the fixture with the class it returns
+@pytest.fixture
+def handler() -> TddEnforcementHandler:
+    return TddEnforcementHandler()
+```
+
+### Noise From Files That Are Not Project Code
+
+**Symptom:**
+Hundreds of errors in paths under `untracked/`, the plan archive or a
+fixture tree, or `reportMissingImports` for every third-party package.
+
+**Root Cause:**
+Not a code defect. Either `pyrightconfig.json` lacks the `exclude` for a
+tree the daemon knows is not project code (the `lsp_noise_checker`
+SessionStart advisory names the missing entries), or pyright resolved no
+interpreter: the config's `untracked/venv` is a symlink only the main
+checkout has, which is why the gate passes the QA interpreter as
+`--pythonpath` and why a bare `pyright --project .` in a worktree reports
+imports missing.
+
+**Fix:**
+Add the exclude, or run the gate script rather than bare `pyright`. The
+diagnosing steps are in [LSP.md](LSP.md).
+
+---
+
 ## Test Failures (Pytest)
 
 ### Fixture Not Found
