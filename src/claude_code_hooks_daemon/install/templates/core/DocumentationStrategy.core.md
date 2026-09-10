@@ -680,7 +680,7 @@ from rule to instrument:
 | `generated-doc-hand-edit`    | R10     | edit, sweep         | Yes at edit — the path matches a manifest glob        |
 | `plan-promotion-disposition` | R8      | staged              | **Never** — weak keyword approximation                |
 | `source-tree-markdown`       | R2, R7d | sweep               | **Never** — always advisory                           |
-| `unenforced-approval-gate`   | R14     | edit, staged, sweep | Yes — only for an instruction NEW in this edit        |
+| `unenforced-approval-gate`   | R14     | edit, staged, sweep | Yes — every instance, pre-existing or new             |
 
 Two properties of that table are worth internalising:
 

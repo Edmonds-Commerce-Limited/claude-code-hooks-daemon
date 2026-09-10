@@ -188,7 +188,8 @@ class TestWhatIsNotAnInstance:
         )
         assert _run(CheckStage.EDIT, context) == []
 
-    def test_a_pre_existing_instance_is_advisory_at_edit(self, tmp_path: Path) -> None:
+    def test_a_pre_existing_instance_still_blocks_at_edit(self, tmp_path: Path) -> None:
+        """No grandfathering: a baseline is the owner's decision, not the check's."""
         path = _write_core(tmp_path, "PlanWorkflow.core.md", _ORIGINATING_LINE)
         context = edit_context(
             project_root=tmp_path,
@@ -200,7 +201,7 @@ class TestWhatIsNotAnInstance:
         )
         findings = _run(CheckStage.EDIT, context)
         assert len(findings) == 1
-        assert findings[0].severity is Severity.ADVISE
+        assert findings[0].severity is Severity.BLOCK
 
 
 class TestStagedAndSweep:
@@ -216,7 +217,7 @@ class TestStagedAndSweep:
         assert len(findings) == 1
         assert findings[0].severity is Severity.BLOCK
 
-    def test_an_instance_already_in_head_is_advisory_when_staged(self, tmp_path: Path) -> None:
+    def test_an_instance_already_in_head_still_blocks_when_staged(self, tmp_path: Path) -> None:
         root = tmp_path / "repo"
         _init_repo(root)
         path = _write_core(root, "PlanWorkflow.core.md", _ORIGINATING_LINE)
@@ -227,7 +228,7 @@ class TestStagedAndSweep:
         context = staged_context(project_root=root, policy=DocumentationPolicy())
         findings = _run(CheckStage.STAGED, context)
         assert len(findings) == 1
-        assert findings[0].severity is Severity.ADVISE
+        assert findings[0].severity is Severity.BLOCK
 
     def test_the_sweep_counts_every_instance_as_advisory(self, tmp_path: Path) -> None:
         _write_core(

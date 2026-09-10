@@ -1081,7 +1081,11 @@ documentation:
     edit_mode: warn
     commit_gate_mode: warn
     sweep_mode: advise
-    check_modes: {}
+    check_modes:
+      # Plan 00367 (DBF): a deployed core doc that prescribes a human gate
+      # the daemon does not enforce fails the edit and the commit, every
+      # instance, no grandfathering. Warning here would be a baseline.
+      unenforced-approval-gate: block
     grandfather_allowlist: []
     # Plan 00289: frozen historical records are excluded from the corpus
     # ENTIRELY, not merely capped at advisory severity the way

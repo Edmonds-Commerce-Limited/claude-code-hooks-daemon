@@ -16,9 +16,10 @@ exists (``plan_workflow.close_requires_human_approval``). The gate is then
 enforced, configurable, and documented in one place. A negated mention ("no
 approval needed") and a review VERDICT ("report approved") are not gates.
 
-Block-eligible for an instruction NEW in the edit or commit (mirroring
-``pointer-resolves``); a pre-existing instance advises, and the sweep counts
-every instance as advisory.
+Every instance blocks at edit and at commit, pre-existing or new: there is
+no grandfathering, because a rule that only warns on what is already there
+is a baseline, and a baseline is the owner's decision (DBF section 4). The
+sweep counts every instance as advisory, as every sweep does (R13).
 """
 
 from __future__ import annotations
@@ -153,16 +154,16 @@ def _finding(
     )
 
 
-def _findings_for(
-    rel_path: str, content: str, before: str | None, *, block_new: bool
-) -> list[Finding]:
-    before_lines = {line.strip() for line in before.splitlines()} if before else set()
-    findings: list[Finding] = []
-    for line_number, line, unknown_key in _gate_lines(content):
-        is_new = line not in before_lines
-        severity = Severity.BLOCK if (block_new and is_new) else Severity.ADVISE
-        findings.append(_finding(rel_path, line_number, unknown_key, severity))
-    return findings
+def _findings_for(rel_path: str, content: str, severity: Severity) -> list[Finding]:
+    # No grandfathering: an instance that was already in the file is exactly
+    # as much a defect as a new one, and a rule that only warns on existing
+    # instances is a baseline, which is the owner's decision, not this
+    # check's (DBF section 4). The sweep is advisory by project rule (R13);
+    # the edit handler and the commit gate are the entry points that fail.
+    return [
+        _finding(rel_path, line_number, unknown_key, severity)
+        for line_number, _line, unknown_key in _gate_lines(content)
+    ]
 
 
 def _run_edit(context: CheckContext) -> list[Finding]:
@@ -171,20 +172,17 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     rel_path = str(context.file_path.relative_to(context.project_root))
     if not _is_core_doc(rel_path, context.policy.trees.agent):
         return []
-    return _findings_for(
-        rel_path, context.file_content, context.file_content_before, block_new=True
-    )
+    return _findings_for(rel_path, context.file_content, Severity.BLOCK)
 
 
 def _run_staged(context: CheckContext) -> list[Finding]:
-    if context.staged_documents is None or context.gitfacts is None:
+    if context.staged_documents is None:
         return []
     findings: list[Finding] = []
     for rel_path, content in sorted(context.staged_documents.items()):
         if not _is_core_doc(rel_path, context.policy.trees.agent):
             continue
-        head = context.gitfacts.head_file_text(rel_path)
-        findings.extend(_findings_for(rel_path, content, head, block_new=True))
+        findings.extend(_findings_for(rel_path, content, Severity.BLOCK))
     return findings
 
 
@@ -199,7 +197,7 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
             content = (context.project_root / rel_path).read_text(encoding="utf-8")
         except OSError:
             continue
-        findings.extend(_findings_for(rel_path, content, None, block_new=False))
+        findings.extend(_findings_for(rel_path, content, Severity.ADVISE))
     return findings
 
 
