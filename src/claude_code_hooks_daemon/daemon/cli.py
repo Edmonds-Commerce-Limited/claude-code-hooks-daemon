@@ -5512,6 +5512,12 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
         payload = [
             {
                 "check_id": finding.check_id,
+                # Plan 00375: "severity" is the name docs-qa already emits and
+                # the one both verbs converge on. "level" is the deprecated
+                # spelling, kept because --json is documented public API — a
+                # reader that knows only one name drops every finding from the
+                # other verb while still counting it toward the total.
+                "severity": finding.level.value,
                 "level": finding.level.value,
                 "message": finding.message,
                 "remediation": finding.remediation,

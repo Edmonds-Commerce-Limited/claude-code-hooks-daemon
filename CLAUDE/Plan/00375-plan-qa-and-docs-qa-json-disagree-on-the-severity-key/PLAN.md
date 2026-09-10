@@ -1,6 +1,6 @@
 # Plan 00375: `plan-qa` and `docs-qa` JSON disagree on the severity key
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-10
 **Owner**: joseph
 **Priority**: Low
@@ -45,15 +45,21 @@ handles both.
 
 ### Phase 1: Converge, additively
 
-- [ ] ⬜ **Task 1.1**: Decide the surviving name. `severity` is the
-  recommendation: it is what `docs-qa` already emits, it is the more common
-  term across tooling, and `Level` is the plan-QA *enum's* internal name
-  rather than a description of the field.
-- [ ] ⬜ **Task 1.2**: Emit BOTH keys from the verb that has to change, so no
-  existing consumer breaks. Record the old key as deprecated in the upgrade
-  notes for that release.
-- [ ] ⬜ **Task 1.3**: A test asserting both verbs' `--json` findings carry
-  the same severity key, so the two cannot diverge again.
+- [x] ✅ **Task 1.1**: Decide the surviving name. `severity` wins: it is what
+  `docs-qa` already emits, it is the more common term across tooling, and
+  `Level` is the plan-QA *enum's* internal name rather than a description of
+  the field. The enums agree on their values (`advise`, `block`), so only the
+  key name ever differed.
+- [x] ✅ **Task 1.2**: `plan-qa --json` emits BOTH keys with the same value,
+  so no existing consumer breaks; `docs-qa` is untouched. The deprecation is
+  recorded in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/27-plan-qa-json-now-names-severity-like-docs-qa.md`.
+  No doc quoted either key name, so there was no doc truth to correct.
+- [x] ✅ **Task 1.3**: `tests/unit/daemon/test_cli_qa_json_severity_key.py`
+  drives both verbs and asserts they agree on the canonical name. Its class
+  guard enumerates every severity-VALUED key rather than asserting one is
+  present, so a future third spelling fails here instead of silently halving
+  a reader's count.
 
 ### Phase 2: Retire the old key
 
