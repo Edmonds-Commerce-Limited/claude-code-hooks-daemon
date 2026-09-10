@@ -359,6 +359,7 @@ class TestHandle:
         payload = _hook_input("Read", {"file_path": "/p/topic-opus-security-DETAIL.md"})
         result = handler.handle(payload)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "opus-security-DETAIL" in result.reason
 
     def test_deny_reason_explains_summary_contract(
@@ -366,6 +367,7 @@ class TestHandle:
     ) -> None:
         payload = _hook_input("Read", {"file_path": "/p/topic-opus-security-DETAIL.md"})
         result = handler.handle(payload)
+        assert result.reason is not None
         assert "SUMMARY" in result.reason
         assert "NO escape hatch" in result.reason
 
@@ -475,6 +477,7 @@ class TestQuarantineArtefactReadGuardDisclosureLadder:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "NO escape hatch" in result.reason
 
     def test_second_fire_for_same_agent_is_terse(
@@ -487,6 +490,7 @@ class TestQuarantineArtefactReadGuardDisclosureLadder:
         )
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "NO escape hatch" not in result.reason
         assert "opus-security-DETAIL" in result.reason
 
@@ -499,6 +503,7 @@ class TestQuarantineArtefactReadGuardDisclosureLadder:
             self._hook_input("/p/topic-opus-security-DETAIL.md", transcript_path)
         )
 
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.QUARANTINE_ARTEFACT_READ}]")
 
     def test_missing_transcript_path_is_always_verbose(
@@ -508,4 +513,5 @@ class TestQuarantineArtefactReadGuardDisclosureLadder:
         handler.handle(hook_input)
         result = handler.handle(hook_input)
 
+        assert result.reason is not None
         assert "SUMMARY" in result.reason

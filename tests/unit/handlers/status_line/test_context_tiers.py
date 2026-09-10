@@ -38,8 +38,9 @@ class TestTierThresholds:
     def test_frozen(self) -> None:
         """TierThresholds must be immutable."""
         thresholds = TierThresholds(orange_pct=51, red_pct=76)
+        attribute_name = "".join(["orange", "_pct"])
         with pytest.raises(dataclasses.FrozenInstanceError):
-            thresholds.orange_pct = 10
+            setattr(thresholds, attribute_name, 10)
 
 
 class TestDefaultConfig:

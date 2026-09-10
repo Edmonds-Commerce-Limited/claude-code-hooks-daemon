@@ -185,8 +185,9 @@ class TestHandle:
         with _patched_root(root):
             result = _handler(policy).handle(_bash_input("git commit -m 'x'", cwd=str(root)))
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.DOCS_QA_COMMIT}]")
-        assert "pointer-resolves" in (result.reason or "")
+        assert "pointer-resolves" in result.reason
 
     def test_missing_cwd_is_treated_as_same_repo(self, tmp_path: Path) -> None:
         root = tmp_path / "repo"
@@ -283,6 +284,8 @@ class TestBlockModeDisclosureLadder:
             first = _handler(policy).handle(hook_input)
             second = _handler(policy).handle(hook_input)
 
+        assert first.reason is not None
+        assert second.reason is not None
         assert "STAGED tree" in first.reason
         assert "STAGED tree" in second.reason
 

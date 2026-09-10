@@ -295,6 +295,7 @@ class TestDenyMessage:
         handler = GithubAutoCloseKeywordsHandler()
         result = handler.handle(_bash("git commit -m 'Fixes #123'"))
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "Fixes #123" in result.reason
         assert "Addresses #123" in result.reason
         assert "Refs" in result.reason
@@ -328,6 +329,7 @@ class TestDisclosureLadder:
         result = handler.handle(
             self._hook_input("git commit -m 'Fixes #123'", "/tmp/agent-a/transcript.jsonl")
         )
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.GH_AUTO_CLOSE_KEYWORD}]")
 
     def test_first_fire_is_verbose(self) -> None:
@@ -335,6 +337,7 @@ class TestDisclosureLadder:
         result = handler.handle(
             self._hook_input("git commit -m 'Fixes #123'", "/tmp/agent-a/transcript.jsonl")
         )
+        assert result.reason is not None
         assert "NO ESCAPE HATCH" in result.reason
 
     def test_second_fire_same_agent_is_terse_but_still_names_match(self) -> None:
@@ -342,6 +345,7 @@ class TestDisclosureLadder:
         transcript_path = "/tmp/agent-a/transcript.jsonl"
         handler.handle(self._hook_input("git commit -m 'Fixes #123'", transcript_path))
         result = handler.handle(self._hook_input("git commit -m 'closes #456'", transcript_path))
+        assert result.reason is not None
         assert "NO ESCAPE HATCH" not in result.reason
         assert "Fix:" in result.reason
         assert 'MATCHED: "closes #456"' in result.reason
@@ -354,6 +358,7 @@ class TestDisclosureLadder:
         result = handler.handle(
             self._hook_input("git commit -m 'Fixes #123'", "/tmp/agent-b/transcript.jsonl")
         )
+        assert result.reason is not None
         assert "NO ESCAPE HATCH" in result.reason
 
     def test_missing_transcript_path_fails_toward_verbose_every_time(self) -> None:
@@ -361,6 +366,8 @@ class TestDisclosureLadder:
         hook_input = _bash("git commit -m 'Fixes #123'")
         first = handler.handle(hook_input)
         second = handler.handle(hook_input)
+        assert first.reason is not None
+        assert second.reason is not None
         assert "NO ESCAPE HATCH" in first.reason
         assert "NO ESCAPE HATCH" in second.reason
 

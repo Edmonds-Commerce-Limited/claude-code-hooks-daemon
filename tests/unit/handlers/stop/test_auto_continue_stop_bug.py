@@ -69,6 +69,7 @@ class TestAutoContinueStopBug:
         # If matches() works, handle() should block the stop
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "AUTO-CONTINUE" in result.reason
 
     def test_bug_variations_of_should_i_proceed(self, tmp_path: Path) -> None:

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.status_line import DaemonStatsHandler
 
 
@@ -62,7 +63,7 @@ class TestDaemonStatsHandler:
             mock_logger.return_value.level = 20  # INFO
             result = handler.handle({})
 
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         assert len(result.context) >= 1
         # Check for uptime (should be in minutes)
         assert "2.1m" in result.context[0] or "125" in result.context[0]
@@ -220,7 +221,7 @@ class TestDaemonStatsHandler:
             mock_logger.return_value.level = 20
             result = handler.handle({})
 
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         assert len(result.context) >= 1
         # Should still have uptime and log level, just no memory
         assert "1.0m" in result.context[0] or "60" in result.context[0]
@@ -233,7 +234,7 @@ class TestDaemonStatsHandler:
         ):
             result = handler.handle({})
 
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         assert len(result.context) == 0
 
     def test_handle_psutil_error_silent_fail(self, handler: DaemonStatsHandler) -> None:
@@ -263,7 +264,7 @@ class TestDaemonStatsHandler:
             result = handler.handle({})
 
         # Should still return stats, just without memory
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         assert len(result.context) >= 1
 
     def test_handle_shows_block_count_when_positive(self, handler: DaemonStatsHandler) -> None:
@@ -352,7 +353,7 @@ class TestDaemonStatsHandler:
             result = handler.handle({})
 
         # Handler should still work, just without block count
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         assert len(result.context) >= 1
         # Verify no context item contains "blocks"
         block_parts = [p for p in result.context if "blocks" in p]
@@ -388,6 +389,6 @@ class TestDaemonStatsHandler:
             result = handler.handle({})
 
         # Should still return stats, just without memory
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         assert len(result.context) >= 1
         assert "MB" not in result.context[0]

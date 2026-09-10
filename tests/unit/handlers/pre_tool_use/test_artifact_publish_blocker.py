@@ -163,9 +163,20 @@ class TestHandle:
         assert result.decision == Decision.ALLOW
 
 
+class _HandlerWithWorkspaceRoot(ArtifactPublishBlockerHandler):
+    """Test-only subclass that types the workspace root the handler reads via getattr.
+
+    The handler itself never declares `_workspace_root` — it is read through
+    `getattr(self, "_workspace_root", None)` — so tests that set it need a place
+    to declare the attribute's type without widening the real handler's surface.
+    """
+
+    _workspace_root: Path
+
+
 def _handler_with_source_disable(tmp_path: Path, *, enabled: bool = True) -> Any:
     """Build a handler wired to a temp workspace with the option set."""
-    handler = ArtifactPublishBlockerHandler()
+    handler = _HandlerWithWorkspaceRoot()
     handler._source_disable = enabled
     handler._workspace_root = tmp_path
     return handler

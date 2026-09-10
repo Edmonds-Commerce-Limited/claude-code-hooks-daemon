@@ -239,32 +239,38 @@ class TestErrorHidingBlockerHandle:
     def test_reason_contains_blocked(self, handler: ErrorHidingBlockerHandler) -> None:
         hook_input = make_write_input("/tmp/test.sh", "cmd || true\n")
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "BLOCKED" in result.reason
 
     def test_reason_contains_pattern_name(self, handler: ErrorHidingBlockerHandler) -> None:
         hook_input = make_write_input("/tmp/test.sh", "cmd || true\n")
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "|| true" in result.reason
 
     def test_reason_contains_language(self, handler: ErrorHidingBlockerHandler) -> None:
         hook_input = make_write_input("/tmp/test.sh", "cmd || true\n")
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "Shell" in result.reason
 
     def test_reason_contains_filename(self, handler: ErrorHidingBlockerHandler) -> None:
         hook_input = make_write_input("/tmp/test.sh", "cmd || true\n")
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "test.sh" in result.reason
 
     def test_reason_contains_suggestion(self, handler: ErrorHidingBlockerHandler) -> None:
         hook_input = make_write_input("/tmp/test.sh", "cmd || true\n")
         result = handler.handle(hook_input)
         # Suggestion should appear in reason
+        assert result.reason is not None
         assert "Handle failure explicitly" in result.reason
 
     def test_reason_contains_disable_hint(self, handler: ErrorHidingBlockerHandler) -> None:
         hook_input = make_write_input("/tmp/test.sh", "cmd || true\n")
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "error_hiding_blocker" in result.reason
 
     def test_returns_allow_for_clean_shell(self, handler: ErrorHidingBlockerHandler) -> None:
@@ -297,21 +303,25 @@ class TestErrorHidingBlockerHandle:
         content = "except:\n    pass\n"
         hook_input = make_write_input("/tmp/test.py", content)
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "Python" in result.reason
 
     def test_javascript_reason_contains_language(self, handler: ErrorHidingBlockerHandler) -> None:
         hook_input = make_write_input("/tmp/test.js", "catch (e) {}")
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "JavaScript" in result.reason
 
     def test_go_reason_contains_language(self, handler: ErrorHidingBlockerHandler) -> None:
         hook_input = make_write_input("/tmp/main.go", "if err != nil {}")
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "Go" in result.reason
 
     def test_java_reason_contains_language(self, handler: ErrorHidingBlockerHandler) -> None:
         hook_input = make_write_input("/tmp/Main.java", "catch (Exception e) {}")
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "Java" in result.reason
 
 
@@ -461,11 +471,13 @@ class TestErrorHidingBlockerDisclosureLadder:
 
         handler = ErrorHidingBlockerHandler()
         result = handler.handle(self._hook_input("/tmp/transcript-eh-a.jsonl"))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.ERROR_HIDING}]")
 
     def test_first_fire_is_verbose(self) -> None:
         handler = ErrorHidingBlockerHandler()
         result = handler.handle(self._hook_input("/tmp/transcript-eh-b.jsonl"))
+        assert result.reason is not None
         assert "cardinal sin" in result.reason
 
     def test_second_fire_same_agent_is_terse(self) -> None:
@@ -473,6 +485,7 @@ class TestErrorHidingBlockerDisclosureLadder:
         transcript = "/tmp/transcript-eh-c.jsonl"
         handler.handle(self._hook_input(transcript))
         second = handler.handle(self._hook_input(transcript))
+        assert second.reason is not None
         assert "cardinal sin" not in second.reason
         assert "PATTERN:" in second.reason
 
@@ -480,11 +493,14 @@ class TestErrorHidingBlockerDisclosureLadder:
         handler = ErrorHidingBlockerHandler()
         handler.handle(self._hook_input("/tmp/transcript-eh-d.jsonl"))
         other = handler.handle(self._hook_input("/tmp/transcript-eh-e.jsonl"))
+        assert other.reason is not None
         assert "cardinal sin" in other.reason
 
     def test_missing_transcript_path_always_verbose(self) -> None:
         handler = ErrorHidingBlockerHandler()
         first = handler.handle(self._hook_input(None))
         second = handler.handle(self._hook_input(None))
+        assert first.reason is not None
+        assert second.reason is not None
         assert "cardinal sin" in first.reason
         assert "cardinal sin" in second.reason

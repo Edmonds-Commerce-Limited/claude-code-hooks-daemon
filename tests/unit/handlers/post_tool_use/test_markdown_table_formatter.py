@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.markdown_table_formatter import (
     _LABEL_ASTERISKS,
@@ -44,6 +45,7 @@ def handler() -> MarkdownTableFormatterHandler:
 
 class TestInit:
     def test_handler_id_config_key(self, handler: MarkdownTableFormatterHandler) -> None:
+        assert isinstance(handler.handler_id, HandlerIDMeta)
         assert handler.handler_id.config_key == "markdown_table_formatter"
 
     def test_priority(self, handler: MarkdownTableFormatterHandler) -> None:

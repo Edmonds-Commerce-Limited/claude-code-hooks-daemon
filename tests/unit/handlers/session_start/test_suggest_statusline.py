@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.session_start import SuggestStatusLineHandler
 from claude_code_hooks_daemon.handlers.session_start.suggest_statusline import (
     RECOMMENDED_REFRESH_INTERVAL_S,
@@ -65,7 +66,7 @@ class TestSuggestStatusLineHandler:
         """Test handler returns status line setup suggestion."""
         result = handler.handle({})
 
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         assert len(result.context) > 0
 
         # Check for key elements in suggestion
@@ -272,6 +273,7 @@ class TestSuggestionDecay:
         — a silent handler is indistinguishable from a working one.
         """
         state = handler._state_file_override
+        assert state is not None
         state.write_text("{ not json")
 
         assert self._show(handler) is True

@@ -385,6 +385,7 @@ class TestValidateEslintOnWriteHandler:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "ESLint validation FAILED" in result.reason
         assert "ESLint error output" in result.reason
 
@@ -410,6 +411,7 @@ class TestValidateEslintOnWriteHandler:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "stderr output" in result.reason
 
     @patch("subprocess.run")
@@ -455,6 +457,7 @@ class TestValidateEslintOnWriteHandler:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "timed out" in result.reason
 
     @patch("subprocess.run")
@@ -475,6 +478,7 @@ class TestValidateEslintOnWriteHandler:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "Failed to run ESLint" in result.reason
 
     def test_handle_missing_file_path(self, handler: ValidateEslintOnWriteHandler) -> None:
@@ -487,6 +491,7 @@ class TestValidateEslintOnWriteHandler:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
+        assert result.reason is not None
         assert "No file path found" in result.reason
 
     @patch("subprocess.run")
@@ -913,6 +918,7 @@ class TestValidateEslintOnWriteDisclosureLadder:
         test_file.write_text("const x = 1;")
         mock_run.return_value = MagicMock(returncode=1, stdout="ESLint error output", stderr="")
         result = handler.handle(self._hook_input(test_file, "/tmp/transcript-esl-a.jsonl"))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.ESLINT_ERRORS}]")
 
     @patch("subprocess.run")
@@ -923,6 +929,7 @@ class TestValidateEslintOnWriteDisclosureLadder:
         test_file.write_text("const x = 1;")
         mock_run.return_value = MagicMock(returncode=1, stdout="ESLint error output", stderr="")
         result = handler.handle(self._hook_input(test_file, "/tmp/transcript-esl-b.jsonl"))
+        assert result.reason is not None
         assert "ALREADY landed on disk" in result.reason
         assert "ESLint error output" in result.reason
 
@@ -936,6 +943,7 @@ class TestValidateEslintOnWriteDisclosureLadder:
         transcript = "/tmp/transcript-esl-c.jsonl"
         handler.handle(self._hook_input(test_file, transcript))
         second = handler.handle(self._hook_input(test_file, transcript))
+        assert second.reason is not None
         assert "ALREADY landed on disk" not in second.reason
         assert "ESLint error output" in second.reason
 
@@ -948,6 +956,8 @@ class TestValidateEslintOnWriteDisclosureLadder:
         mock_run.return_value = MagicMock(returncode=1, stdout="ESLint error output", stderr="")
         first = handler.handle(self._hook_input(test_file, None))
         second = handler.handle(self._hook_input(test_file, None))
+        assert first.reason is not None
+        assert second.reason is not None
         assert "ALREADY landed on disk" in first.reason
         assert "ALREADY landed on disk" in second.reason
 
@@ -965,6 +975,7 @@ class TestValidateEslintOnWriteDisclosureLadder:
             side_effect=subprocess_module.TimeoutExpired(cmd="tsx", timeout=Timeout.ESLINT_CHECK),
         ):
             result = handler.handle(self._hook_input(test_file, None))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.ESLINT_TIMEOUT}]")
 
     def test_run_failure_uses_the_run_failure_rule(
@@ -976,6 +987,7 @@ class TestValidateEslintOnWriteDisclosureLadder:
         test_file.write_text("const x = 1;")
         with patch("subprocess.run", side_effect=RuntimeError("boom")):
             result = handler.handle(self._hook_input(test_file, None))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.ESLINT_RUN_FAILURE}]")
 
 

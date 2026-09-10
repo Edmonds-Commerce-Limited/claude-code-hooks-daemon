@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
+from claude_code_hooks_daemon.constants import HandlerIDMeta, HandlerTag, HookInputField
 from claude_code_hooks_daemon.core import Decision
 
 
@@ -35,6 +35,7 @@ class TestGitFilemodeCheckerInit:
         )
 
         handler = GitFilemodeCheckerHandler()
+        assert isinstance(handler.handler_id, HandlerIDMeta)
         assert handler.handler_id.config_key == "git_filemode_checker"
 
     def test_non_terminal(self) -> None:

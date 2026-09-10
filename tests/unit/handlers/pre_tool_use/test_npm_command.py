@@ -113,6 +113,7 @@ class TestNpmCommandHandler:
             "tool_input": {"command": "npm run build_prod"},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "npm run build_prod" in result.reason
         # The truncated form must NOT be the blocked command.
         assert "BLOCKED COMMAND:\n  npm run build\n" not in result.reason
@@ -124,6 +125,7 @@ class TestNpmCommandHandler:
             "tool_input": {"command": "npm run test123"},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "npm run test123" in result.reason
 
     def test_matches_uppercase_script_name(self, handler: NpmCommandHandler) -> None:
@@ -328,6 +330,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "npm run build" in result.reason
         assert "npm run llm:build" in result.reason
         assert "PHILOSOPHY" in result.reason
@@ -340,6 +343,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "npm run llm:lint" in result.reason
 
     def test_handle_blocks_npm_run_type_check(self, handler: NpmCommandHandler) -> None:
@@ -350,6 +354,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "npm run llm:type-check" in result.reason
 
     def test_handle_blocks_npm_run_format(self, handler: NpmCommandHandler) -> None:
@@ -360,6 +365,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "npm run llm:format" in result.reason
 
     def test_handle_blocks_npm_run_test(self, handler: NpmCommandHandler) -> None:
@@ -370,6 +376,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "npm run llm:test" in result.reason
 
     def test_handle_blocks_npm_run_qa(self, handler: NpmCommandHandler) -> None:
@@ -380,6 +387,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "npm run llm:qa" in result.reason
 
     def test_handle_blocks_npm_run_unknown_suggests_qa(self, handler: NpmCommandHandler) -> None:
@@ -390,6 +398,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "npm run llm:qa" in result.reason
 
     # Tests for handle() method - npx commands
@@ -402,6 +411,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "npx tsc" in result.reason
         assert "llm:type-check" in result.reason
 
@@ -413,6 +423,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "npx eslint" in result.reason
         assert "llm:lint" in result.reason
 
@@ -424,6 +435,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "npx prettier" in result.reason
         assert "llm:format:check" in result.reason
 
@@ -435,6 +447,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "npx cspell" in result.reason
         assert "llm:spell-check" in result.reason
 
@@ -446,6 +459,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "npx playwright" in result.reason
         assert "llm:test" in result.reason
 
@@ -457,6 +471,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "npx tsx" in result.reason
         assert "npm run llm:" in result.reason
 
@@ -470,6 +485,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "Piping npm/npx commands is pointless" in result.reason
         assert "./var/qa/" in result.reason
         assert "jq" in result.reason
@@ -482,6 +498,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "Piping npm/npx commands is pointless" in result.reason
 
     def test_handle_blocks_npx_piped_to_awk(self, handler: NpmCommandHandler) -> None:
@@ -492,6 +509,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "Piping npm/npx commands is pointless" in result.reason
 
     def test_handle_pipe_block_message_includes_philosophy(
@@ -503,6 +521,7 @@ class TestNpmCommandHandler:
             "tool_input": {"command": "npm run test | grep failed"},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "PHILOSOPHY" in result.reason
         assert "cache files" in result.reason
         assert "jq to query" in result.reason
@@ -520,6 +539,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert len(result.reason) < 1000
 
     def test_handle_pipe_block_extracts_command_name(self, handler: NpmCommandHandler) -> None:
@@ -529,6 +549,7 @@ class TestNpmCommandHandler:
             "tool_input": {"command": "npm run llm:test | grep error"},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "npm run llm:test" in result.reason  # Shows the correct command
 
     # Tests for handle() method - edge cases
@@ -541,6 +562,7 @@ class TestNpmCommandHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
+        assert result.reason is not None
         assert "No command found" in result.reason
 
     def test_handle_allows_when_pattern_not_matched(self, handler: NpmCommandHandler) -> None:
@@ -605,6 +627,7 @@ class TestNpmCommandHandler:
             "tool_input": {"command": "npm run build"},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "BLOCKED COMMAND:" in result.reason
         assert "npm run build" in result.reason
 
@@ -615,6 +638,7 @@ class TestNpmCommandHandler:
             "tool_input": {"command": "npm run lint"},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "USE THIS INSTEAD:" in result.reason
         assert "npm run llm:lint" in result.reason
 
@@ -625,6 +649,7 @@ class TestNpmCommandHandler:
             "tool_input": {"command": "npm run test"},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "PHILOSOPHY" in result.reason
         assert "Minimal stdout" in result.reason
         assert "Verbose JSON logging" in result.reason
@@ -748,6 +773,7 @@ class TestNpmCommandHandler:
         }
         result = advisory_handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "Piping npm/npx commands is pointless" in result.reason
 
     def test_advisory_mode_includes_example_script(
@@ -926,28 +952,34 @@ class TestNpmCommandDisclosureLadder:
         from claude_code_hooks_daemon.constants.rule_ids import RuleID
 
         result = handler.handle(self._non_llm_input("/tmp/transcript-npm-a.jsonl"))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.NPM_NON_LLM_COMMAND}]")
 
     def test_first_fire_is_verbose(self, handler: NpmCommandHandler) -> None:
         result = handler.handle(self._non_llm_input("/tmp/transcript-npm-b.jsonl"))
+        assert result.reason is not None
         assert "PHILOSOPHY" in result.reason
 
     def test_second_fire_same_agent_is_terse(self, handler: NpmCommandHandler) -> None:
         transcript = "/tmp/transcript-npm-c.jsonl"
         handler.handle(self._non_llm_input(transcript))
         second = handler.handle(self._non_llm_input(transcript))
+        assert second.reason is not None
         assert "PHILOSOPHY" not in second.reason
         assert "BLOCKED COMMAND:" in second.reason
 
     def test_different_agent_is_independently_verbose(self, handler: NpmCommandHandler) -> None:
         handler.handle(self._non_llm_input("/tmp/transcript-npm-d.jsonl"))
         other = handler.handle(self._non_llm_input("/tmp/transcript-npm-e.jsonl"))
+        assert other.reason is not None
         assert "PHILOSOPHY" in other.reason
 
     def test_missing_transcript_path_always_verbose(self, handler: NpmCommandHandler) -> None:
         first = handler.handle(self._non_llm_input(None))
         second = handler.handle(self._non_llm_input(None))
+        assert first.reason is not None
         assert "PHILOSOPHY" in first.reason
+        assert second.reason is not None
         assert "PHILOSOPHY" in second.reason
 
     def test_piped_and_non_llm_rules_disclose_independently(
@@ -962,7 +994,9 @@ class TestNpmCommandDisclosureLadder:
         }
         non_llm_result = handler.handle(self._non_llm_input(transcript))
         piped_result = handler.handle(piped_input)
+        assert non_llm_result.reason is not None
         assert "PHILOSOPHY" in non_llm_result.reason
+        assert piped_result.reason is not None
         assert "Piping npm/npx commands is pointless" in piped_result.reason
 
 
@@ -1057,6 +1091,7 @@ class TestNpmCommandMonorepoWorkspace:
             result = handler.handle(self._input("npm run build", cwd=root / "apps" / "web"))
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "llm:build" in result.reason
 
     def test_advises_in_sibling_workspace_without_llm_scripts(self, tmp_path: Path) -> None:
@@ -1151,4 +1186,5 @@ class TestNpmCommandMonorepoWorkspace:
             )
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "Piping npm/npx commands is pointless" in result.reason

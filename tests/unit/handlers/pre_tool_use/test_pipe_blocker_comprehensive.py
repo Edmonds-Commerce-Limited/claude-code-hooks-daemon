@@ -508,6 +508,7 @@ class TestPipeBlockerExtraOptions:
         assert handler.matches(hook_input) is True
         # handle() should use blacklisted message
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "information" in result.reason.lower()
 
     def test_extra_whitelist_multi_word_command(self) -> None:
@@ -650,6 +651,7 @@ class TestPipeBlockerMessageBodyFalsePositive:
             "tool_input": {"command": 'git commit -m "fix" && pytest tests/ | tail -20'},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert 'git commit -m "fix" && pytest tests/ | tail -20' in result.reason
 
 
@@ -675,6 +677,7 @@ class TestPipeBlockerHandleBlacklisted:
     def test_blacklisted_reason_mentions_command(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest tests/ | tail -20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "pytest tests/ | tail -20" in result.reason
 
     def test_blacklisted_reason_mentions_information_loss(
@@ -682,31 +685,37 @@ class TestPipeBlockerHandleBlacklisted:
     ) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm test | head -n 10"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "information" in result.reason.lower()
 
     def test_blacklisted_reason_mentions_rerun(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm test | head -n 10"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "re-run" in result.reason.lower() or "rerun" in result.reason.lower()
 
     def test_blacklisted_reason_suggests_temp_file(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "mypy src/ | tail -20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "temp" in result.reason.lower() or "/tmp" in result.reason
 
     def test_blacklisted_reason_names_source_command(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "cargo test | tail -20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "cargo" in result.reason.lower()
 
     def test_blacklisted_reason_has_sections(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "\n\n" in result.reason
 
     def test_blacklisted_reason_has_blocked_marker(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "🚫" in result.reason or "BLOCKED" in result.reason
 
     def test_blacklisted_reason_does_not_mention_extra_whitelist(
@@ -715,6 +724,7 @@ class TestPipeBlockerHandleBlacklisted:
         """Blacklisted message should NOT mention extra_whitelist (different from unknown)."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "extra_whitelist" not in result.reason
 
     def test_blacklisted_reason_redirects_stdout_and_stderr(
@@ -723,12 +733,14 @@ class TestPipeBlockerHandleBlacklisted:
         """Snippet redirects both stdout and stderr to the temp file."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert '> "$TEMP_FILE" 2>&1' in result.reason
 
     def test_blacklisted_reason_captures_exit_code(self, handler: PipeBlockerHandler) -> None:
         """Snippet captures the exit code after running the command."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "EXIT_CODE=$?" in result.reason
 
     def test_blacklisted_reason_echoes_completed_ok_on_success(
@@ -737,6 +749,7 @@ class TestPipeBlockerHandleBlacklisted:
         """Snippet echoes 'Completed OK' when exit code is 0."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "Completed OK" in result.reason
 
     def test_blacklisted_reason_echoes_completed_with_errors_on_failure(
@@ -745,6 +758,7 @@ class TestPipeBlockerHandleBlacklisted:
         """Snippet echoes 'Completed with errors' when exit code is non-zero."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "Completed with errors (exit code: $EXIT_CODE)" in result.reason
 
 
@@ -772,6 +786,7 @@ class TestPipeBlockerPythonModuleLabel:
             "tool_input": {"command": "python -m pytest tests/ | tail -5"},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "Piping pytest to tail/head" in result.reason
         assert "Piping python to tail/head" not in result.reason
 
@@ -786,6 +801,7 @@ class TestPipeBlockerPythonModuleLabel:
         transcript_input = {**hook_input, "transcript_path": "/tmp/t-py-module-terse"}
         handler.handle(transcript_input)
         result = handler.handle(transcript_input)
+        assert result.reason is not None
         assert "pytest is expensive" in result.reason
         assert "python is expensive" not in result.reason
 
@@ -803,6 +819,7 @@ class TestPipeBlockerPythonModuleLabel:
         transcript_input = {**hook_input, "transcript_path": "/tmp/t-py-module-unknown-terse"}
         handler.handle(transcript_input)
         result = handler.handle(transcript_input)
+        assert result.reason is not None
         assert "mymodule unrecognized" in result.reason
         assert "python unrecognized" not in result.reason
         assert r'"^python\\b"' in result.reason
@@ -815,6 +832,7 @@ class TestPipeBlockerPythonModuleLabel:
             "tool_input": {"command": "python -m mymodule | tail -5"},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert r'"^python\\b"' in result.reason
 
     def test_plain_python_script_without_dash_m_is_unaffected(
@@ -828,6 +846,7 @@ class TestPipeBlockerPythonModuleLabel:
         transcript_input = {**hook_input, "transcript_path": "/tmp/t-py-plain-script-terse"}
         handler.handle(transcript_input)
         result = handler.handle(transcript_input)
+        assert result.reason is not None
         assert "python unrecognized" in result.reason
 
 
@@ -851,16 +870,19 @@ class TestPipeBlockerHandleUnknown:
             "tool_input": {"command": "docker ps -a | tail -n 20"},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "docker ps -a | tail -n 20" in result.reason
 
     def test_unknown_reason_mentions_extra_whitelist(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "extra_whitelist" in result.reason
 
     def test_unknown_reason_suggests_temp_file(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "temp" in result.reason.lower() or "/tmp" in result.reason
 
     def test_unknown_reason_shows_whitelist_examples(self, handler: PipeBlockerHandler) -> None:
@@ -870,6 +892,7 @@ class TestPipeBlockerHandleUnknown:
             "tool_input": {"command": "docker ps | tail -n 20"},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "grep" in result.reason.lower() or "awk" in result.reason.lower()
 
     def test_unknown_reason_mentions_source_command(self, handler: PipeBlockerHandler) -> None:
@@ -878,34 +901,40 @@ class TestPipeBlockerHandleUnknown:
             "tool_input": {"command": "docker logs container | tail -n 50"},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "docker" in result.reason.lower()
 
     def test_unknown_reason_has_blocked_marker(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "🚫" in result.reason or "BLOCKED" in result.reason
 
     def test_unknown_reason_has_sections(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "\n\n" in result.reason
 
     def test_unknown_reason_does_not_mention_rerun(self, handler: PipeBlockerHandler) -> None:
         """Unknown message should NOT mention re-run (that's blacklisted-only messaging)."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "re-run" not in result.reason.lower() and "rerun" not in result.reason.lower()
 
     def test_unknown_reason_redirects_stdout_and_stderr(self, handler: PipeBlockerHandler) -> None:
         """Snippet redirects both stdout and stderr to the temp file."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert '> "$TEMP_FILE" 2>&1' in result.reason
 
     def test_unknown_reason_captures_exit_code(self, handler: PipeBlockerHandler) -> None:
         """Snippet captures the exit code after running the command."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "EXIT_CODE=$?" in result.reason
 
     def test_unknown_reason_echoes_completed_ok_on_success(
@@ -914,6 +943,7 @@ class TestPipeBlockerHandleUnknown:
         """Snippet echoes 'Completed OK' when exit code is 0."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "Completed OK" in result.reason
 
     def test_unknown_reason_echoes_completed_with_errors_on_failure(
@@ -922,6 +952,7 @@ class TestPipeBlockerHandleUnknown:
         """Snippet echoes 'Completed with errors' when exit code is non-zero."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "Completed with errors (exit code: $EXIT_CODE)" in result.reason
 
     def test_handle_head_command_reason_mentions_head(self, handler: PipeBlockerHandler) -> None:
@@ -932,6 +963,7 @@ class TestPipeBlockerHandleUnknown:
         }
         result = handler.handle(hook_input)
         # Command appears in reason message
+        assert result.reason is not None
         assert "head" in result.reason.lower()
 
     def test_handle_with_complex_command(self, handler: PipeBlockerHandler) -> None:
@@ -947,6 +979,7 @@ class TestPipeBlockerHandleUnknown:
     def test_handle_long_message(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "docker ps | tail -n 20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert len(result.reason) > 50
 
 
@@ -966,18 +999,21 @@ class TestPipeBlockerMessageDifferentiation:
         """Blacklisted commands get 'information loss' message."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "information" in result.reason.lower()
 
     def test_unknown_has_extra_whitelist_message(self, handler: PipeBlockerHandler) -> None:
         """Unknown commands get 'add to extra_whitelist' message."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "extra_whitelist" in result.reason
 
     def test_blacklisted_does_not_have_extra_whitelist(self, handler: PipeBlockerHandler) -> None:
         """Blacklisted message should NOT suggest adding to whitelist."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "extra_whitelist" not in result.reason
 
     def test_unknown_does_not_have_information_loss(self, handler: PipeBlockerHandler) -> None:
@@ -985,6 +1021,7 @@ class TestPipeBlockerMessageDifferentiation:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
         result = handler.handle(hook_input)
         # find is unknown, not blacklisted, so no 'information loss' message
+        assert result.reason is not None
         assert "information" not in result.reason.lower()
 
     def test_both_have_deny_decision(self, handler: PipeBlockerHandler) -> None:
@@ -998,8 +1035,12 @@ class TestPipeBlockerMessageDifferentiation:
     def test_both_have_blocked_marker(self, handler: PipeBlockerHandler) -> None:
         blacklisted = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
         unknown = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
-        assert "BLOCKED" in handler.handle(blacklisted).reason
-        assert "BLOCKED" in handler.handle(unknown).reason
+        blacklisted_reason = handler.handle(blacklisted).reason
+        unknown_reason = handler.handle(unknown).reason
+        assert blacklisted_reason is not None
+        assert unknown_reason is not None
+        assert "BLOCKED" in blacklisted_reason
+        assert "BLOCKED" in unknown_reason
 
 
 # ===================================================================================

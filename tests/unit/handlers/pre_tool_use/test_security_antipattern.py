@@ -1,6 +1,6 @@
 """Comprehensive tests for SecurityAntipatternHandler."""
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 
@@ -708,7 +708,7 @@ _EXCLUDE_PHP_PAYLOAD = "<?php " + "passthru" + '("ls");'
 class TestSecurityAntipatternExcludePaths:
     """Client-configurable exclude_paths (Plan 00150)."""
 
-    def _write(self, path, content):
+    def _write(self, path: str, content: str) -> dict[str, Any]:
         return {"tool_name": "Write", "tool_input": {"file_path": path, "content": content}}
 
     def test_is_excluded_true_for_client_glob(self):
@@ -982,8 +982,8 @@ class TestSecurityAntipatternDisclosureLadder:
         reset_data_layer()
 
     @classmethod
-    def _hook_input(cls, transcript_path):
-        hook_input = {
+    def _hook_input(cls, transcript_path: str | None) -> dict[str, Any]:
+        hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {
                 "file_path": "/workspace/src/config.ts",
@@ -999,11 +999,13 @@ class TestSecurityAntipatternDisclosureLadder:
 
         handler = SecurityAntipatternHandler()
         result = handler.handle(self._hook_input("/tmp/transcript-sec-a.jsonl"))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.SEC_HARDCODED_CREDS}]")
 
     def test_first_fire_is_verbose(self):
         handler = SecurityAntipatternHandler()
         result = handler.handle(self._hook_input("/tmp/transcript-sec-b.jsonl"))
+        assert result.reason is not None
         assert "not detect" in result.reason.lower()
 
     def test_second_fire_same_agent_is_terse(self):
@@ -1011,6 +1013,7 @@ class TestSecurityAntipatternDisclosureLadder:
         transcript = "/tmp/transcript-sec-c.jsonl"
         handler.handle(self._hook_input(transcript))
         second = handler.handle(self._hook_input(transcript))
+        assert second.reason is not None
         assert "not detect" not in second.reason.lower()
         assert "Issues detected" in second.reason
 
@@ -1018,11 +1021,14 @@ class TestSecurityAntipatternDisclosureLadder:
         handler = SecurityAntipatternHandler()
         handler.handle(self._hook_input("/tmp/transcript-sec-d.jsonl"))
         other = handler.handle(self._hook_input("/tmp/transcript-sec-e.jsonl"))
+        assert other.reason is not None
         assert "not detect" in other.reason.lower()
 
     def test_missing_transcript_path_always_verbose(self):
         handler = SecurityAntipatternHandler()
         first = handler.handle(self._hook_input(None))
         second = handler.handle(self._hook_input(None))
+        assert first.reason is not None
         assert "not detect" in first.reason.lower()
+        assert second.reason is not None
         assert "not detect" in second.reason.lower()

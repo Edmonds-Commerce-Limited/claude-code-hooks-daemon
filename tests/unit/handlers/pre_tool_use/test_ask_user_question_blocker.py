@@ -43,9 +43,19 @@ class TestAskUserQuestionBlockerHandler:
             AskUserQuestionBlockerHandler,
         )
 
-        instance = AskUserQuestionBlockerHandler()
-        instance._mode = "advisory"
-        return instance
+        class _AdvisoryModeHandler(AskUserQuestionBlockerHandler):
+            """Test double declaring `_mode` so it is a known instance attribute.
+
+            The handler itself reads `_mode` dynamically via
+            `getattr(self, "_mode", MODE_STRICT)`, so assigning it here inside
+            `__init__` (rather than from outside the class) mirrors that.
+            """
+
+            def __init__(self) -> None:
+                super().__init__()
+                self._mode = "advisory"
+
+        return _AdvisoryModeHandler()
 
     # ------------------------------------------------------------------
     # Initialisation

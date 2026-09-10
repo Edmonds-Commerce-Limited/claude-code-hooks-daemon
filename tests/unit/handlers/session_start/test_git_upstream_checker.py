@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
+from claude_code_hooks_daemon.constants import HandlerIDMeta, HandlerTag, HookInputField
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.session_start.git_upstream_checker import (
     GitUpstreamCheckerHandler,
@@ -56,7 +56,9 @@ def _make(mode: str = "warn", auto_fetch: bool = True) -> GitUpstreamCheckerHand
 
 class TestInit:
     def test_handler_id(self) -> None:
-        assert GitUpstreamCheckerHandler().handler_id.config_key == "git_upstream_checker"
+        handler_id = GitUpstreamCheckerHandler().handler_id
+        assert isinstance(handler_id, HandlerIDMeta)
+        assert handler_id.config_key == "git_upstream_checker"
 
     def test_non_terminal(self) -> None:
         assert GitUpstreamCheckerHandler().terminal is False

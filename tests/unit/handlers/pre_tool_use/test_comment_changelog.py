@@ -565,11 +565,13 @@ class TestCommentChangelogDisclosureLadder:
 
         handler = CommentChangelogHandler()
         result = handler.handle(self._hook_input("/tmp/transcript-cl-a.jsonl"))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.COMMENT_CHANGELOG}]")
 
     def test_first_fire_is_verbose(self) -> None:
         handler = CommentChangelogHandler()
         result = handler.handle(self._hook_input("/tmp/transcript-cl-b.jsonl"))
+        assert result.reason is not None
         assert "RATIONALE" in result.reason
 
     def test_second_fire_same_agent_is_terse(self) -> None:
@@ -577,6 +579,7 @@ class TestCommentChangelogDisclosureLadder:
         transcript = "/tmp/transcript-cl-c.jsonl"
         handler.handle(self._hook_input(transcript))
         second = handler.handle(self._hook_input(transcript))
+        assert second.reason is not None
         assert "RATIONALE" not in second.reason
         assert "comment(s) carry changelog narrative" in second.reason
 
@@ -584,11 +587,14 @@ class TestCommentChangelogDisclosureLadder:
         handler = CommentChangelogHandler()
         handler.handle(self._hook_input("/tmp/transcript-cl-d.jsonl"))
         other = handler.handle(self._hook_input("/tmp/transcript-cl-e.jsonl"))
+        assert other.reason is not None
         assert "RATIONALE" in other.reason
 
     def test_missing_transcript_path_always_verbose(self) -> None:
         handler = CommentChangelogHandler()
         first = handler.handle(self._hook_input(None))
         second = handler.handle(self._hook_input(None))
+        assert first.reason is not None
+        assert second.reason is not None
         assert "RATIONALE" in first.reason
         assert "RATIONALE" in second.reason

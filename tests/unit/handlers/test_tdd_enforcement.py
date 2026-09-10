@@ -1988,6 +1988,7 @@ class TestTddEnforcementDisclosureLadder:
         mock_exists.return_value = False
         handler = TddEnforcementHandler()
         result = handler.handle(self._hook_input("/tmp/transcript-a.jsonl"))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.TDD_TEST_FIRST}]")
 
     @patch("pathlib.Path.exists")
@@ -1995,6 +1996,7 @@ class TestTddEnforcementDisclosureLadder:
         mock_exists.return_value = False
         handler = TddEnforcementHandler()
         result = handler.handle(self._hook_input("/tmp/transcript-b.jsonl"))
+        assert result.reason is not None
         assert "PHILOSOPHY" in result.reason
 
     @patch("pathlib.Path.exists")
@@ -2004,6 +2006,7 @@ class TestTddEnforcementDisclosureLadder:
         transcript = "/tmp/transcript-c.jsonl"
         handler.handle(self._hook_input(transcript))
         second = handler.handle(self._hook_input(transcript))
+        assert second.reason is not None
         assert "PHILOSOPHY" not in second.reason
         # Dynamic diagnostic detail always stays present, even when terse.
         assert "Searched locations:" in second.reason
@@ -2014,6 +2017,7 @@ class TestTddEnforcementDisclosureLadder:
         handler = TddEnforcementHandler()
         handler.handle(self._hook_input("/tmp/transcript-d.jsonl"))
         other = handler.handle(self._hook_input("/tmp/transcript-e.jsonl"))
+        assert other.reason is not None
         assert "PHILOSOPHY" in other.reason
 
     @patch("pathlib.Path.exists")
@@ -2022,6 +2026,8 @@ class TestTddEnforcementDisclosureLadder:
         handler = TddEnforcementHandler()
         first = handler.handle(self._hook_input(None))
         second = handler.handle(self._hook_input(None))
+        assert first.reason is not None
+        assert second.reason is not None
         assert "PHILOSOPHY" in first.reason
         assert "PHILOSOPHY" in second.reason
 

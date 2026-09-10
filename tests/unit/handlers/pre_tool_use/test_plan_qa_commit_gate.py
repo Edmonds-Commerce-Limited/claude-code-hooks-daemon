@@ -9,7 +9,7 @@ graceful no-op without injected policy.
 
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import patch
 
 import pytest
@@ -69,7 +69,7 @@ def repo(tmp_path: Path) -> Path:
 
 
 def _handler(
-    mode: str = "warn",
+    mode: Literal["block", "warn", "off"] = "warn",
     policy: PlanWorkflowQaConfig | None = None,
 ) -> PlanQaCommitGateHandler:
     handler = PlanQaCommitGateHandler()
@@ -228,9 +228,10 @@ class TestHandleBlockMode:
             result = _handler("block").handle(_bash_input('git commit -m "Plan 00001: done"'))
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_QA_COMMIT}]")
-        assert "terminal-state-atomic" in (result.reason or "")
-        assert "git mv" in (result.reason or "")
+        assert "terminal-state-atomic" in result.reason
+        assert "git mv" in result.reason
 
     def test_block_mode_advisories_do_not_deny(self, repo: Path) -> None:
         # Only an advisory-level finding staged (plan-ref-format: message
@@ -336,7 +337,9 @@ class TestBlockModeDisclosureLadder:
             first = _handler("block").handle(hook_input)
             second = _handler("block").handle(hook_input)
 
+        assert first.reason is not None
         assert "cross-file plan" in first.reason
+        assert second.reason is not None
         assert "cross-file plan" in second.reason
 
 

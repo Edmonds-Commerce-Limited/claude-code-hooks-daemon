@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from tests.conftest import layout_declaring_vendor_dirs
 
-from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.constants import HandlerIDMeta, Timeout
 from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler
 
 
@@ -18,6 +18,7 @@ def handler() -> LintOnEditHandler:
 
 class TestInit:
     def test_handler_id(self, handler: LintOnEditHandler) -> None:
+        assert isinstance(handler.handler_id, HandlerIDMeta)
         assert handler.handler_id.config_key == "lint_on_edit"
 
     def test_priority(self, handler: LintOnEditHandler) -> None:
@@ -921,6 +922,7 @@ class TestLintOnEditDisclosureLadder:
         test_file.write_text("x = 1")
         self._failing_subprocess(mock_subprocess)
         result = handler.handle(self._hook_input(test_file, "/tmp/transcript-lint-a.jsonl"))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.LINT_FAILURE}]")
 
     @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
@@ -931,6 +933,7 @@ class TestLintOnEditDisclosureLadder:
         test_file.write_text("x = 1")
         self._failing_subprocess(mock_subprocess)
         result = handler.handle(self._hook_input(test_file, "/tmp/transcript-lint-b.jsonl"))
+        assert result.reason is not None
         assert "ALREADY landed on disk" in result.reason
         assert "SyntaxError" in result.reason
 
@@ -944,6 +947,7 @@ class TestLintOnEditDisclosureLadder:
         transcript = "/tmp/transcript-lint-c.jsonl"
         handler.handle(self._hook_input(test_file, transcript))
         second = handler.handle(self._hook_input(test_file, transcript))
+        assert second.reason is not None
         assert "ALREADY landed on disk" not in second.reason
         assert "SyntaxError" in second.reason
 
@@ -956,6 +960,8 @@ class TestLintOnEditDisclosureLadder:
         self._failing_subprocess(mock_subprocess)
         first = handler.handle(self._hook_input(test_file, None))
         second = handler.handle(self._hook_input(test_file, None))
+        assert first.reason is not None
+        assert second.reason is not None
         assert "ALREADY landed on disk" in first.reason
         assert "ALREADY landed on disk" in second.reason
 

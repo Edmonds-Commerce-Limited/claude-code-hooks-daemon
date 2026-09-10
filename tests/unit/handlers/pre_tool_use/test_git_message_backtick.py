@@ -72,11 +72,13 @@ class TestDisclosureLadder:
     def test_deny_leads_with_rule_id(self) -> None:
         handler = GitMessageBacktickHandler()
         result = handler.handle(self._hook_input("/tmp/agent-a/transcript.jsonl"))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_MESSAGE_BACKTICK}]")
 
     def test_first_fire_is_verbose(self) -> None:
         handler = GitMessageBacktickHandler()
         result = handler.handle(self._hook_input("/tmp/agent-a/transcript.jsonl"))
+        assert result.reason is not None
         assert "cc7dddc0" in result.reason
 
     def test_second_fire_same_agent_is_terse(self) -> None:
@@ -84,6 +86,7 @@ class TestDisclosureLadder:
         transcript_path = "/tmp/agent-a/transcript.jsonl"
         handler.handle(self._hook_input(transcript_path))
         result = handler.handle(self._hook_input(transcript_path))
+        assert result.reason is not None
         assert "cc7dddc0" not in result.reason
         assert "Fix:" in result.reason
 
@@ -91,6 +94,7 @@ class TestDisclosureLadder:
         handler = GitMessageBacktickHandler()
         handler.handle(self._hook_input("/tmp/agent-a/transcript.jsonl"))
         result = handler.handle(self._hook_input("/tmp/agent-b/transcript.jsonl"))
+        assert result.reason is not None
         assert "cc7dddc0" in result.reason
 
     def test_missing_transcript_path_fails_toward_verbose_every_time(self) -> None:
@@ -98,6 +102,8 @@ class TestDisclosureLadder:
         hook_input = _bash(f'git commit -m "see {BACKTICK}ls{BACKTICK}"')
         first = handler.handle(hook_input)
         second = handler.handle(hook_input)
+        assert first.reason is not None
+        assert second.reason is not None
         assert "cc7dddc0" in first.reason
         assert "cc7dddc0" in second.reason
 
@@ -140,6 +146,7 @@ class TestDoubleQuotedBackticksAreBlocked:
     def test_reason_names_both_concrete_remedies(self) -> None:
         handler = GitMessageBacktickHandler()
         result = handler.handle(_bash(f'git commit -m "see {BACKTICK}x{BACKTICK}"'))
+        assert result.reason is not None
         assert "single" in result.reason.lower()
         assert "-F" in result.reason
 

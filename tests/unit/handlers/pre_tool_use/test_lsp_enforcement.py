@@ -693,9 +693,19 @@ class TestLspEnforcementHandleAdvisory:
             LspEnforcementHandler,
         )
 
-        h = LspEnforcementHandler()
-        h._mode = "advisory"
-        return h
+        class _AdvisoryModeHandler(LspEnforcementHandler):
+            """Test double declaring `_mode` so it is a known instance attribute.
+
+            The handler itself reads `_mode` dynamically via
+            `getattr(self, "_mode", ...)`, so assigning it here inside
+            `__init__` (rather than from outside the class) mirrors that.
+            """
+
+            def __init__(self) -> None:
+                super().__init__()
+                self._mode = "advisory"
+
+        return _AdvisoryModeHandler()
 
     def test_advisory_always_allows(self, handler: Any) -> None:
         """Advisory mode should always allow with guidance."""
@@ -747,9 +757,19 @@ class TestLspEnforcementHandleStrict:
             LspEnforcementHandler,
         )
 
-        h = LspEnforcementHandler()
-        h._mode = "strict"
-        return h
+        class _StrictModeHandler(LspEnforcementHandler):
+            """Test double declaring `_mode` so it is a known instance attribute.
+
+            The handler itself reads `_mode` dynamically via
+            `getattr(self, "_mode", ...)`, so assigning it here inside
+            `__init__` (rather than from outside the class) mirrors that.
+            """
+
+            def __init__(self) -> None:
+                super().__init__()
+                self._mode = "strict"
+
+        return _StrictModeHandler()
 
     def test_strict_always_denies(self, handler: Any) -> None:
         """Strict mode should always deny."""
@@ -780,9 +800,17 @@ class TestLspEnforcementNoLspMode:
             LspEnforcementHandler,
         )
 
-        h = LspEnforcementHandler()
-        h._no_lsp_mode = no_lsp_mode
-        return h
+        class _NoLspModeHandler(LspEnforcementHandler):
+            """Test double declaring `_no_lsp_mode` so it is a known instance attribute.
+
+            Mirrors the handler's own `getattr(self, "_no_lsp_mode", ...)` read.
+            """
+
+            def __init__(self, mode: str) -> None:
+                super().__init__()
+                self._no_lsp_mode = mode
+
+        return _NoLspModeHandler(no_lsp_mode)
 
     def test_no_lsp_block_mode_still_matches(self) -> None:
         """With no_lsp_mode=block, handler matches even without LSP configured."""
@@ -981,6 +1009,7 @@ class TestLspEnforcementGetRules:
             "tool_input": {"pattern": "class FrontController"},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.LSP_SYMBOL_LOOKUP}]")
 
     def test_block_once_second_call_still_carries_lsp_guidance_in_context(self) -> None:

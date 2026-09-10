@@ -197,6 +197,7 @@ class TestHandle:
     ) -> None:
         result = handler.handle(_bash("git diff firewall/edge/rules.yml"))
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "git diff" in result.reason
         assert "firewall/**" in result.reason
 
@@ -208,6 +209,7 @@ class TestHandle:
         self, handler: FlaggableContentChannelGuardHandler
     ) -> None:
         result = handler.handle(_bash("grep drop firewall/edge/rules.yml"))
+        assert result.reason is not None
         assert "subagent" in result.reason.lower()
         assert "NO escape hatch" in result.reason
 
@@ -292,6 +294,7 @@ class TestFlaggableContentChannelGuardDisclosureLadder:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "NO escape hatch" in result.reason
 
     def test_second_fire_for_same_agent_is_terse(
@@ -306,6 +309,7 @@ class TestFlaggableContentChannelGuardDisclosureLadder:
         )
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "NO escape hatch" not in result.reason
         assert "firewall/**" in result.reason
 
@@ -320,6 +324,7 @@ class TestFlaggableContentChannelGuardDisclosureLadder:
             self._bash_with_transcript("git diff firewall/edge/rules.yml", transcript_path)
         )
 
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.FLAGGABLE_CONTENT_CHANNEL}]")
 
     def test_missing_transcript_path_is_always_verbose(
@@ -329,4 +334,5 @@ class TestFlaggableContentChannelGuardDisclosureLadder:
         handler.handle(hook_input)
         result = handler.handle(hook_input)
 
+        assert result.reason is not None
         assert "NO escape hatch" in result.reason

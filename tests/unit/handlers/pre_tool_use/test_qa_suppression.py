@@ -543,11 +543,13 @@ class TestQaSuppressionDisclosureLadder:
 
         handler = QaSuppressionHandler()
         result = handler.handle(self._hook_input("/tmp/transcript-qa-a.jsonl"))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.QA_SUPPRESSION}]")
 
     def test_first_fire_is_verbose(self) -> None:
         handler = QaSuppressionHandler()
         result = handler.handle(self._hook_input("/tmp/transcript-qa-b.jsonl"))
+        assert result.reason is not None
         assert "CORRECT APPROACH" in result.reason
 
     def test_second_fire_same_agent_is_terse(self) -> None:
@@ -555,6 +557,7 @@ class TestQaSuppressionDisclosureLadder:
         transcript = "/tmp/transcript-qa-c.jsonl"
         handler.handle(self._hook_input(transcript))
         second = handler.handle(self._hook_input(transcript))
+        assert second.reason is not None
         assert "CORRECT APPROACH" not in second.reason
         assert "Resources:" in second.reason
 
@@ -562,11 +565,14 @@ class TestQaSuppressionDisclosureLadder:
         handler = QaSuppressionHandler()
         handler.handle(self._hook_input("/tmp/transcript-qa-d.jsonl"))
         other = handler.handle(self._hook_input("/tmp/transcript-qa-e.jsonl"))
+        assert other.reason is not None
         assert "CORRECT APPROACH" in other.reason
 
     def test_missing_transcript_path_always_verbose(self) -> None:
         handler = QaSuppressionHandler()
         first = handler.handle(self._hook_input(None))
         second = handler.handle(self._hook_input(None))
+        assert first.reason is not None
         assert "CORRECT APPROACH" in first.reason
+        assert second.reason is not None
         assert "CORRECT APPROACH" in second.reason
