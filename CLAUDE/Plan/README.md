@@ -72,10 +72,16 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Infrastructure / Bootstrap
 
+- [00374: the global `--project-root` is clobbered by a subparser default](00374-global-project-root-clobbered-by-subparser-default/PLAN.md) - In Progress (argparse writes a subparser's default into the namespace even when the flag was not given, so the anchor `bin/hooks-daemon` passes before the subcommand is discarded and the CLI targets whichever project the caller is standing in)
+
 - Field report from host `host-a` (`untracked/hooks-daemon-upgrade-python-version.md`): skill `install.sh` aborted on default `python3` (3.9.21) and suggested hardcoded `python3.11` despite `python3.13`/`python3.14` being on PATH
+
 - Consolidates four WET Python-discovery implementations (`scripts/upgrade.sh`, `scripts/install/prerequisites.sh`, skill `install.sh`, `daemon/paths.py`) into one canonical bash helper + one canonical python helper
+
 - Replaces hardcoded `(3.13, 3.12, 3.11)` candidate lists with glob `python3.[1-9][0-9]` + numeric sort — Python 3.14+ works the day it ships, no daemon release required
+
 - Error messages must name interpreters **actually observed during the glob**, never hardcoded ones
+
 - Adds Task 5.1 host-a replay to RELEASING.md Step 12.0 H-1 gate (count 19 → 20)
 
 ### Handler UX Adjustments
@@ -226,27 +232,27 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 373 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 374 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 335 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 15 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 15 + 335 + 13 = **363 folders**, spanning
-  **360 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 16 + 335 + 13 = **364 folders**, spanning
+  **361 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  373 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  374 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  360 + 13 = 373. ✅
+  361 + 13 = 374. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
