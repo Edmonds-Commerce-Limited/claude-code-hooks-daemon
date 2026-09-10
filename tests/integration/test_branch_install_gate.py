@@ -425,7 +425,11 @@ class TestBranchInstallLibrary:
             "print_branch_install_banner", "main", "because canary", "v1.1.0+main.abc1234"
         )
         assert result.returncode == 0
-        assert "NON-RELEASE INSTALL" in result.stdout
-        assert "because canary" in result.stdout
-        assert "v1.1.0+main.abc1234" in result.stdout
-        assert "release tag" in result.stdout
+        # The banner is a warning, not data: it must go to stderr so it can
+        # never corrupt a VAR=$(print_branch_install_banner ...) caller (the
+        # capture_corruption audit's log-helper-stdout rule).
+        assert result.stdout == ""
+        assert "NON-RELEASE INSTALL" in result.stderr
+        assert "because canary" in result.stderr
+        assert "v1.1.0+main.abc1234" in result.stderr
+        assert "release tag" in result.stderr

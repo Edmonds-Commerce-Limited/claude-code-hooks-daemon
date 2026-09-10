@@ -154,9 +154,12 @@ def test_guarded_branch_install_is_stamped_and_flagged_everywhere(tmp_path: Path
             f"upgrade_version.sh failed ({result.returncode})\n--- stdout ---\n"
             f"{result.stdout}\n--- stderr ---\n{result.stderr}"
         )
-        assert "NON-RELEASE INSTALL" in result.stdout
-        assert _REASON in result.stdout
-        assert expected_stamp in result.stdout
+        # The banner is a warning, not data: it goes to stderr so it can never
+        # corrupt a VAR=$(...) caller (capture_corruption's log-helper-stdout
+        # rule) -- same contract as every other print_*/log helper.
+        assert "NON-RELEASE INSTALL" in result.stderr
+        assert _REASON in result.stderr
+        assert expected_stamp in result.stderr
 
         venvs = sorted((daemon_dir / "untracked").glob("venv-*py3*"))
         assert venvs, "no fingerprint-keyed venv was built"

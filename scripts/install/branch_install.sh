@@ -86,15 +86,15 @@ print_branch_install_banner() {
     local ref="$1"
     local reason="$2"
     local stamp="$3"
-    echo ""
-    echo "=========================================================================="
-    echo "  WARNING: NON-RELEASE INSTALL (guarded branch install)"
-    echo "  Tracking ref : $ref @ ${stamp##*.}"
-    echo "  Install stamp: $stamp"
-    echo "  Reason       : $reason"
-    echo "  This is not a release. No rollback guarantee, no upgrade-guide coverage"
-    echo "  until the release that contains it ships. status and every new session"
-    echo "  will flag this install until it is reinstalled from a release tag."
-    echo "=========================================================================="
-    echo ""
+    echo "" >&2
+    echo "==========================================================================" >&2
+    echo "  WARNING: NON-RELEASE INSTALL (guarded branch install)" >&2
+    echo "  Tracking ref : $ref @ ${stamp##*.}" >&2
+    echo "  Install stamp: $stamp" >&2
+    echo "  Reason       : $reason" >&2
+    echo "  This is not a release. No rollback guarantee, no upgrade-guide coverage" >&2
+    echo "  until the release that contains it ships. status and every new session" >&2
+    echo "  will flag this install until it is reinstalled from a release tag." >&2
+    echo "==========================================================================" >&2
+    echo "" >&2
 }

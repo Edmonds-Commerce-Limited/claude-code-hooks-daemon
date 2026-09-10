@@ -28,6 +28,8 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INIT_SH = REPO_ROOT / "init.sh"
 BASH = shutil.which("bash") or "/bin/bash"
@@ -78,7 +80,7 @@ def _resolved_paths(project: Path, extra_env: dict[str, str] | None = None) -> d
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=Timeout.REQUEST_LONG,
         check=False,
     )
     assert result.returncode == 0, result.stderr
