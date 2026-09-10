@@ -139,7 +139,9 @@ class TestTheDeleteAgainstRealGitSemantics:
     """
 
     class _RealisticFakeGit:
-        def __init__(self, listing: str = _ALL_AGENT_BRANCHES, merged: str = _MERGED_AGENT_BRANCHES) -> None:
+        def __init__(
+            self, listing: str = _ALL_AGENT_BRANCHES, merged: str = _MERGED_AGENT_BRANCHES
+        ) -> None:
             self.calls: list[tuple[str, ...]] = []
             self._listing = listing
             self._merged = merged

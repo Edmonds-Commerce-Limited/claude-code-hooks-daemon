@@ -106,9 +106,7 @@ def _reap(args: argparse.Namespace, *, run_fn: RunGit) -> int:
     held old/empty by default so it stays silent and every assertion here
     keeps isolating what it always meant to.
     """
-    return cmd_worktree_reap(
-        args, run_fn=run_fn, age_fn=_old_enough, process_cwds_fn=_nobody_home
-    )
+    return cmd_worktree_reap(args, run_fn=run_fn, age_fn=_old_enough, process_cwds_fn=_nobody_home)
 
 
 @pytest.fixture

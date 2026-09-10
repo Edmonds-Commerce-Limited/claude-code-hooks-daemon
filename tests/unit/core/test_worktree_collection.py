@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 import claude_code_hooks_daemon.core.worktree_reaping as worktree_reaping_module
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.worktree_reaping import (
     MINIMUM_AGE_SECONDS,
     UNKNOWN_COUNT,
@@ -300,7 +301,7 @@ class TestAgainstARealGitRepository:
             assert proc.pid in states[0].live_process_pids
         finally:
             proc.terminate()
-            proc.wait(timeout=5)
+            proc.wait(timeout=Timeout.PROCESS_KILL_WAIT)
 
     def test_a_platform_with_no_proc_reports_no_live_process_rather_than_erroring(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -308,9 +309,7 @@ class TestAgainstARealGitRepository:
         """`/proc` is Linux-only; losing this ONE signal on another platform
         must not take the independent age check down with it.
         """
-        monkeypatch.setattr(
-            worktree_reaping_module, "_PROC_ROOT", tmp_path / "no-such-proc-root"
-        )
+        monkeypatch.setattr(worktree_reaping_module, "_PROC_ROOT", tmp_path / "no-such-proc-root")
         repo = self._repo_with_one_worktree(tmp_path)
         states = collect_worktree_states(repo, "main")
         assert states[0].live_process_pids == ()

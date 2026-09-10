@@ -147,9 +147,7 @@ def _live_pids_under(path: Path, process_cwds: ProcessCwds) -> tuple[int, ...]:
     resolved = path.resolve()
     return tuple(
         sorted(
-            pid
-            for pid, cwd in process_cwds.items()
-            if cwd == resolved or resolved in cwd.parents
+            pid for pid, cwd in process_cwds.items() if cwd == resolved or resolved in cwd.parents
         )
     )
 

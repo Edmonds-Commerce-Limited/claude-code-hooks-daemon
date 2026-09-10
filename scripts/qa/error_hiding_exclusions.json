@@ -1109,6 +1109,18 @@
       "function": "_ensure_source_disable",
       "rule": "log-and-continue",
       "reason": "Plan 00295 Task 2.9: this is best-effort cleanup of a staged temp file after the atomic write it belongs to has already failed and is itself about to be logged and abandoned (the outer except's own log+return follows immediately after). Raising here would replace the outer failure's own error with a secondary cleanup error, hiding the actual cause -- the same principle documented for remote_docs/fetchers.py._close_session above. Nothing is concealed: the cleanup failure is logged at WARNING alongside the file it could not remove, and a leaked temp file (the only consequence) is silently overwritten by write_text on the next retry attempt, never accumulating unboundedly."
+    },
+    {
+      "file": "core/worktree_reaping.py",
+      "function": "default_process_cwds",
+      "rule": "silent-continue",
+      "reason": "Plan 00372: a live-process-in-worktree check for worktree-reap, reading /proc/<pid>/cwd for every pid on the machine. A pid this process cannot introspect (AccessDenied-equivalent OSError, or the process exited between the iterdir listing and the read) is skipped and the scan continues with the rest -- the canonical psutil-style process-iteration pattern already excluded elsewhere in this file (handlers/background_process_tracker.py). A pid this call cannot see cannot be reported as live either way, so skipping it can only make the guard MISS a live process, never fabricate one; the module's UNKNOWN-means-not-reapable posture is upheld by the independent age check (default_worktree_age below) rather than by this scan alone."
+    },
+    {
+      "file": "core/worktree_reaping.py",
+      "function": "default_worktree_age",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00372: WorktreeState.age_seconds is typed float | None precisely so an unreadable .git pointer file (OSError -- permissions, or a worktree removed mid-scan) reads as UNKNOWN rather than as a fabricated age. reap_refusal_reason treats None exactly like this module's existing UNKNOWN_COUNT sentinel for commits_ahead_of_base/unlanded_patches: refused, never read as 'old enough'. Raising here would abort collection for every OTHER worktree in the same run over one unreadable pointer file, which is strictly worse than the current one-worktree-refused outcome."
     }
   ]
 }

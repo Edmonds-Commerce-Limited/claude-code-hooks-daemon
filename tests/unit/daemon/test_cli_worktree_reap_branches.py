@@ -91,9 +91,7 @@ def _reap(args: argparse.Namespace, *, run_fn: RunGit) -> int:
     This file's subject is the orphaned-branch report, not that axis — held
     old/empty by default so it stays silent here.
     """
-    return cmd_worktree_reap(
-        args, run_fn=run_fn, age_fn=_old_enough, process_cwds_fn=_nobody_home
-    )
+    return cmd_worktree_reap(args, run_fn=run_fn, age_fn=_old_enough, process_cwds_fn=_nobody_home)
 
 
 @pytest.fixture
