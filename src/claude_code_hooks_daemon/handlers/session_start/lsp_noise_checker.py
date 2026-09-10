@@ -4,10 +4,12 @@ Plan 00368 Task 2.2. Claude Code injects a language server's diagnostics
 into the agent's context after every edit. When the server analyses trees
 that are not this project's code - the daemon's own runtime directory with
 its linked worktrees and venvs, the plan archive's probes, vendored and
-build output, the vendored remote-docs tree - those trees' half-built or
-deliberately broken files are reported as defects HERE, by the thousand,
-and the agent learns to skim the stream. A skimmed stream reports nothing:
-"if there's noise, there's no signal and LSP is pointless".
+build output, the vendored remote-docs tree, the ccy supervisor's own
+``plugins/`` runtime tree (vendored third-party marketplace plugin code
+ccy itself clones) - those trees' half-built or deliberately broken files
+are reported as defects HERE, by the thousand, and the agent learns to
+skim the stream. A skimmed stream reports nothing: "if there's noise,
+there's no signal and LSP is pointless".
 
 **Every supported language, not Python alone** (owner ruling, Plan 00368):
 this handler is a thin orchestrator with ZERO language-specific logic - see
@@ -46,7 +48,13 @@ from typing import Any, Final
 
 import psutil
 
-from claude_code_hooks_daemon.constants import DaemonPath, HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import (
+    DaemonPath,
+    HandlerID,
+    HandlerTag,
+    Priority,
+    ProjectPath,
+)
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
@@ -106,14 +114,21 @@ def running_language_servers(known_names: frozenset[str]) -> list[RunningServer]
 def required_excludes(layout: ProjectLayout | None) -> frozenset[str]:
     """Every tree no language's server should analyse, from what the daemon already knows.
 
-    Nothing here is typed by hand: the runtime dir is the daemon's path
-    constant, the plan and remote-docs trees come from the configured layout
-    (built-in defaults when no layout has been injected), and the
-    vendored/build names are the reviewed core set, at any depth. Shared by
-    every language strategy - this is daemon knowledge, not a language's.
+    Nothing here is typed by hand: the runtime dir and the ccy plugin
+    runtime tree are the daemon's path constants (``DaemonPath``,
+    ``ProjectPath.CCY_PLUGINS_DIR``), the plan and remote-docs trees come
+    from the configured layout (built-in defaults when no layout has been
+    injected), and the vendored/build names are the reviewed core set, at
+    any depth. Shared by every language strategy - this is daemon
+    knowledge, not a language's.
     """
     resolved = layout if layout is not None else ProjectLayout.built_in_default()
-    entries = {DaemonPath.UNTRACKED_DIR, resolved.plan_dir, resolved.remote_docs_dir}
+    entries = {
+        DaemonPath.UNTRACKED_DIR,
+        resolved.plan_dir,
+        resolved.remote_docs_dir,
+        ProjectPath.CCY_PLUGINS_DIR,
+    }
     entries.update(f"{_ANY_DEPTH_PREFIX}{name}" for name in CORE_VENDORED_BUILD_DIR_NAMES)
     return frozenset(entries)
 

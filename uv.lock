@@ -340,6 +340,7 @@ dependencies = [
     { name = "psutil" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "typing-extensions" },
 ]
 
 [package.optional-dependencies]
@@ -388,6 +389,7 @@ requires-dist = [
     { name = "types-jsonschema", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "types-psutil", marker = "extra == 'dev'", specifier = ">=5.9" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
+    { name = "typing-extensions", specifier = ">=4.12" },
 ]
 provides-extras = ["dev"]
 

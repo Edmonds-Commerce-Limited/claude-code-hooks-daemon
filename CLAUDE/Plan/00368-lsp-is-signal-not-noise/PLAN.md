@@ -1,6 +1,6 @@
 # Plan 00368: lsp is signal not noise
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-10
 **Owner**: joseph
 **Priority**: High
@@ -83,25 +83,45 @@ server with the exact fix, in this repo and in every client.
 
 ### Phase 3: The sweep
 
-- [ ] ⬜ **Task 3.1**: Fix every pyright error under `src/`, `scripts/`,
+- [x] ✅ **Task 3.1**: Fix every pyright error under `src/`, `scripts/`,
   `install.py` and `tests/` outside the excluded fixture trees, by making
   the code correct (Optional narrowing with assertions or guards, typed
-  fixtures, real attribute access), never by suppression.
-- [ ] ⬜ **Task 3.2**: Full QA green with the new tool; daemon restart
-  RUNNING; release-notes callout; config-changes manifest if the handler
-  adds a key.
+  fixtures, real attribute access), never by suppression. Measured 141
+  errors on main: 135 were noise from the ccy supervisor's vendored
+  `plugins/marketplaces/` tree — added to `pyrightconfig.json`'s `exclude`
+  via a new shared constant (`ProjectPath.CCY_PLUGINS_DIR`) that
+  `lsp_noise_checker`'s `required_excludes()` and
+  `test_pyright_config.py`'s pin both read, so every language's strategy
+  and this repo's own config agree. 4 were
+  `tests/unit/handlers/test_dependency_system.py` accessing a gate handler's
+  private attribute
+  through the generic `Handler` type — fixed with `isinstance` narrowing to
+  the concrete `PlanCloseApprovalHandler`/`MergeToMainApprovalHandler`. The
+  remaining 2 were `HookResult`'s two narrowed subclasses each re-declaring
+  `decision` with a `Literal` pyright treats as an invariant override
+  violation — fixed by making `HookResult` generic over the decision
+  `Literal` (`DecisionT`, PEP 696 default via `typing_extensions.TypeVar`)
+  so each tier PARAMETERISES the base instead of overriding a field on it;
+  verified against BOTH type checkers and at runtime (construction,
+  mutation, the deliberate-violation fixture, `decisions_of()`'s field
+  introspection, `merge_pseudo_results`) — see the JOURNAL for the full
+  trace of what was tried and measured.
+- [x] ✅ **Task 3.2**: Full QA green with the new tool (27/27, pyright 0
+  errors); daemon restart RUNNING; release-notes callout updated; no config
+  key was added (the ccy-plugins exclude is a value added to an existing
+  handler's derivation, not a new key), so no config-changes manifest entry.
 
 ## Success Criteria
 
-- [ ] `pyright --project .` reports 0 errors on main and QA fails if one
+- [x] ✅ `pyright --project .` reports 0 errors on main and QA fails if one
   returns.
-- [ ] A session in a project using any supported language whose server
+- [x] ✅ A session in a project using any supported language whose server
   analyses its runtime dir, or whose language-server process predates its
   check's anchor file, is told exactly how to fix it.
-- [ ] No suppression comment or rule downgrade was added to reach zero.
-- [ ] Every release-bound consequence is in the pending-release holding
+- [x] ✅ No suppression comment or rule downgrade was added to reach zero.
+- [x] ✅ Every release-bound consequence is in the pending-release holding
   area: a release-notes callout, and a config-changes manifest if a key
-  was added.
+  was added (none was, here).
 
 ## Delivery & Milestones
 

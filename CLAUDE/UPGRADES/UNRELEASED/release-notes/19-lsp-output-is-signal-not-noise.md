@@ -26,7 +26,9 @@ The `lsp_noise_checker` SessionStart advisory, on by default for every
 supported language present -- Python, TypeScript/JavaScript, Go, Rust and
 PHP -- reports that language's server missing the same daemon-known
 non-project trees (its runtime directory, the plan directory, vendored and
-build directories, the remote-docs tree) with that language's exact fix:
+build directories, the remote-docs tree, and now the ccy supervisor's own
+`.claude/ccy/plugins/` runtime tree -- vendored third-party Claude Code
+marketplace plugins ccy itself clones) with that language's exact fix:
 Python and TypeScript print the entries ready to paste into a config file's
 `exclude`; Go and Rust (whose servers take no exclude list at all) report
 only a tree that actually holds their language's source files, with Rust's
@@ -38,6 +40,12 @@ assumed. A companion check reports a language server that started before
 its check's anchor file was last written, with the command that ends it.
 Both checks are advisory and silent when there is nothing to fix.
 
-The count is not yet zero: the gate reports 938 real errors in this tree,
-nearly all under `tests/`, and Phase 3 of the plan fixes them by making the
-code correct, never with a suppression or a rule downgrade.
+The count is now zero. Every real error the gate found -- two
+`reportIncompatibleVariableOverride`s from three narrowed `HookResult`
+subclasses each re-declaring the `decision` field, four stale test
+attribute accesses, and the marketplace-plugin noise above -- is fixed
+rather than suppressed: `HookResult` is now generic over the decision
+`Literal` its tier permits (`core/hook_result.py`'s `DecisionT`), so each
+tier PARAMETERISES the base instead of overriding a field on it, and no
+`# type: ignore`, `# pyright: ignore` or rule downgrade was added anywhere
+to reach zero.

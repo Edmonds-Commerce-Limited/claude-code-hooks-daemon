@@ -22,10 +22,20 @@ That second axis is what closes ``merge_pseudo_results``, which writes
 ``AdvisoryResult`` would WIDEN the field, and mypy rejects a widened override.
 All three extend ``HookResult`` directly.
 
-**A note on pyright.** It reports ``reportIncompatibleVariableOverride`` here:
-it demands invariance for a mutable attribute, where mypy demands only a
-subtype. This project's QA gate is mypy, so nothing fails — but do NOT "fix" the
-warning by widening the field, which would undo the entire guarantee.
+**Each tier PARAMETERISES the generic ``HookResult[DecisionT]`` rather than
+re-declaring ``decision``.** An earlier version of this module declared
+``decision: Literal[...] = Decision.ALLOW`` directly in each tier's class
+body, overriding the base's ``decision: Decision`` field. pyright's
+``reportIncompatibleVariableOverride`` correctly rejected that: it demands
+invariance for a mutable attribute, and a ``Literal`` subset is not the same
+type as the field it was overriding, only a subtype. mypy accepted it (it
+demands only a subtype for an override), so the warning went unfixed for a
+time — but the fix is not a pyright/mypy strictness mismatch to shrug off,
+it is that overriding a field at all was the wrong shape. Substituting the
+type parameter on ``core/hook_result.py``'s generic base instead means no
+tier here ever re-declares ``decision``, so there is no override for
+pyright to reject in the first place. Do NOT go back to a per-tier field
+re-declaration to "simplify" this — see ``HookResult``'s own docstring.
 
 **A note on ``Decision.CONTINUE``.** It is in every tier because it is
 deliverable on every event. It is also vestigial: nothing in ``src/`` returns
@@ -46,7 +56,7 @@ _UNIVERSAL: Final[frozenset[Decision]] = frozenset({Decision.ALLOW, Decision.CON
 _DECISION_FIELD: Final[str] = "decision"
 
 
-class AdvisoryResult(HookResult):
+class AdvisoryResult(HookResult[Literal[Decision.ALLOW, Decision.CONTINUE]]):
     """For an event that can neither deny nor ask — it can only add context.
 
     ``SessionStart``, ``SessionEnd``, ``Notification``, both worktree events,
@@ -54,10 +64,8 @@ class AdvisoryResult(HookResult):
     through formatters that have no way to express a refusal.
     """
 
-    decision: Literal[Decision.ALLOW, Decision.CONTINUE] = Decision.ALLOW
 
-
-class BlockingResult(HookResult):
+class BlockingResult(HookResult[Literal[Decision.ALLOW, Decision.CONTINUE, Decision.DENY]]):
     """For an event that can block but has no ``ask``.
 
     ``PostToolUse``, ``Stop``, ``SubagentStop``, ``UserPromptSubmit``,
@@ -66,8 +74,6 @@ class BlockingResult(HookResult):
     (``TeammateIdle``/``TaskCompleted``). There is no wire representation for
     ASK on any of them.
     """
-
-    decision: Literal[Decision.ALLOW, Decision.CONTINUE, Decision.DENY] = Decision.ALLOW
 
     @classmethod
     def deny(cls, reason: str, *, context: list[str] | None = None) -> Self:
@@ -88,7 +94,11 @@ class BlockingResult(HookResult):
         return cls(decision=Decision.DENY, reason=reason, context=context or [])
 
 
-class GatingResult(HookResult):
+class GatingResult(
+    HookResult[
+        Literal[Decision.ALLOW, Decision.CONTINUE, Decision.DENY, Decision.ASK, Decision.DEFER]
+    ]
+):
     """For an event that gates an action and can deny or ask.
 
     ``PreToolUse`` (``permissionDecision``) is the only one:
@@ -96,10 +106,6 @@ class GatingResult(HookResult):
     ``allow`` | ``deny`` with no ask outcome, so it sits in the blocking tier
     (Plan 00271 audit item 3).
     """
-
-    decision: Literal[
-        Decision.ALLOW, Decision.CONTINUE, Decision.DENY, Decision.ASK, Decision.DEFER
-    ] = Decision.ALLOW
 
     @classmethod
     def deny(cls, reason: str, *, context: list[str] | None = None) -> Self:

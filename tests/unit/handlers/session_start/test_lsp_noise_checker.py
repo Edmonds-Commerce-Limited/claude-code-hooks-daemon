@@ -19,7 +19,7 @@ from unittest.mock import patch
 import psutil
 import pytest
 
-from claude_code_hooks_daemon.constants import DaemonPath
+from claude_code_hooks_daemon.constants import DaemonPath, ProjectPath
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
@@ -267,6 +267,7 @@ class TestRequiredExcludes:
         assert DaemonPath.UNTRACKED_DIR in required
         assert "docs/plans" in required
         assert "vendored" in required
+        assert ProjectPath.CCY_PLUGINS_DIR in required
         for name in CORE_VENDORED_BUILD_DIR_NAMES:
             assert f"**/{name}" in required
 
@@ -275,6 +276,7 @@ class TestRequiredExcludes:
         default = ProjectLayout.built_in_default()
         assert default.plan_dir in required
         assert default.remote_docs_dir in required
+        assert ProjectPath.CCY_PLUGINS_DIR in required
 
 
 # ── The process scan ─────────────────────────────────────────────────

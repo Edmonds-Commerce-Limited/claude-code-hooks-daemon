@@ -8,9 +8,10 @@ import logging
 import re
 import unicodedata
 from enum import StrEnum
-from typing import Any, Final, Self
+from typing import Any, Final, Generic, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing_extensions import TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,23 @@ class Decision(StrEnum):
     # PreToolUse only: exit gracefully so the tool can be resumed later
     # (Plan 00271 item 2). The docs ignore reason/updatedInput/context on it.
     DEFER = "defer"
+
+
+#: The decision a narrowed ``HookResult[...]`` tier is allowed to hold
+#: (``core/result_types.py``). Bound to ``Decision`` so a tier can only ever
+#: narrow to a subset of real decisions, never something else; defaulted to
+#: ``Any`` — not ``Decision`` — so the many existing unparameterized
+#: ``HookResult`` annotations across this codebase keep accepting an
+#: instance of ANY tier, exactly as they did before this field was generic
+#: (``Any`` is what a bare reference resolves to via PEP 696). Defaulting it
+#: to the bound instead would make bare ``HookResult`` mean "exactly
+#: Literal[Decision]" — invariant, so a narrower tier instance would no
+#: longer be assignable to it, breaking every handler-base override and
+#: every place results flow through a widely-typed collection or parameter.
+#: ``typing_extensions.TypeVar`` (not ``typing.TypeVar``) because the
+#: ``default=`` keyword (PEP 696) is not on ``typing.TypeVar`` before
+#: Python 3.13, and this project targets 3.11+.
+DecisionT = TypeVar("DecisionT", bound=Decision, default=Any)
 
 
 # Universal suffix appended to all PreToolUse DENY reasons.
@@ -186,11 +204,25 @@ def _wrap_status_parts(parts: list[str], columns: int) -> str:
     return _STATUS_ROW_SEPARATOR.join(rows)
 
 
-class HookResult(BaseModel):
+class HookResult(BaseModel, Generic[DecisionT]):
     """Standardised hook result with decision, reason, and context.
 
     Represents the outcome of a hook handler execution with all
     fields needed for Claude Code response format.
+
+    Generic over ``DecisionT`` (``core/result_types.py``'s three tiers each
+    parameterise it with the ``Literal`` of decisions their event can
+    actually deliver, e.g. ``HookResult[Literal[Decision.ALLOW,
+    Decision.CONTINUE]]``) so a tier NEVER re-declares the ``decision``
+    field: pydantic's mutable fields are invariant under override, so a
+    subclass narrowing the field's own annotation is what pyright's
+    ``reportIncompatibleVariableOverride`` correctly rejects. Substituting
+    the type parameter on the GENERIC BASE instead of overriding a field on
+    a subclass sidesteps that: there is no override for pyright to reject.
+    An unparameterized ``HookResult`` (every existing use across this
+    codebase) defaults to ``DecisionT = Any`` (see ``DecisionT``'s own
+    docstring above), so it stays exactly as permissive as before this field
+    became generic.
 
     Attributes:
         decision: Hook decision (allow, deny, ask, continue)
@@ -202,7 +234,16 @@ class HookResult(BaseModel):
 
     model_config = ConfigDict(frozen=False, validate_assignment=True)
 
-    decision: Decision = Field(default=Decision.ALLOW)
+    # The cast documents a real invariant rather than hiding an error: every
+    # tier this project defines includes Decision.ALLOW (it is deliverable on
+    # every event - see result_types.py's _UNIVERSAL), so ALLOW is a valid
+    # default for whatever concrete Literal DecisionT ends up being. Without
+    # it, a bound-typed value (Decision) cannot be assigned to a still-free
+    # TypeVar's own field inside the generic class body: pyright and mypy
+    # both correctly refuse to assume a value valid for the BOUND is valid
+    # for every possible NARROWING of it, which is the same soundness rule
+    # `reportIncompatibleVariableOverride` was enforcing above.
+    decision: DecisionT = Field(default=cast("DecisionT", Decision.ALLOW))
     reason: str | None = Field(default=None)
     context: list[str] = Field(default_factory=list)
     guidance: str | None = Field(default=None)
@@ -988,8 +1029,15 @@ class HookResult(BaseModel):
         Returns:
             A result of the calling class, with the allow decision
         """
+        # cast: `cls` is `type[Self]`, still an unresolved DecisionT inside the
+        # GENERIC base's own method body (Self is only pinned to a concrete
+        # tier once called on one, e.g. `AdvisoryResult.allow()`). ALLOW is
+        # deliverable on every event and every tier this project defines
+        # includes it (result_types.py's _UNIVERSAL), so the cast documents a
+        # real invariant rather than hiding an unsound one — same reasoning as
+        # the field default above.
         return cls(
-            decision=Decision.ALLOW,
+            decision=cast("DecisionT", Decision.ALLOW),
             context=context or [],
             guidance=guidance,
         )
@@ -1014,8 +1062,19 @@ class HookResult(BaseModel):
         Returns:
             HookResult with deny decision
         """
+        # cast: unlike `allow` above, DENY is NOT deliverable by every tier
+        # (AdvisoryResult cannot refuse), so this is not asserting the value is
+        # always valid for `cls` — it is asserting only that DENY is a `Decision`
+        # being routed through the still-generic base method. Pydantic's own
+        # validation is the real backstop: called on a tier that permits DENY
+        # this constructs fine, called on one that does not (e.g.
+        # `AdvisoryResult.deny(...)`, inherited rather than overridden) it
+        # raises ValidationError, exactly as this method's docstring above
+        # promises and `TestAnOutOfTierFactoryStillRefusesAtRuntime` proves.
+        # The return type stays the WIDE "HookResult", never `Self`, so a
+        # caller cannot lean on a narrow static type this cast does not back.
         return cls(
-            decision=Decision.DENY,
+            decision=cast("DecisionT", Decision.DENY),
             reason=reason,
             context=context or [],
         )
@@ -1035,8 +1094,11 @@ class HookResult(BaseModel):
         Returns:
             HookResult with ask decision
         """
+        # cast: same reasoning as `deny` above — ASK is not deliverable by
+        # every tier either, and pydantic's validation is what actually
+        # enforces that at runtime for a tier that inherits this unmodified.
         return cls(
-            decision=Decision.ASK,
+            decision=cast("DecisionT", Decision.ASK),
             reason=reason,
             context=context or [],
         )
@@ -1082,8 +1144,9 @@ class HookResult(BaseModel):
                 ]
             )
 
+        # cast: ALLOW is deliverable by every tier, same reasoning as `allow` above.
         return cls(
-            decision=Decision.ALLOW,
+            decision=cast("DecisionT", Decision.ALLOW),
             reason="HOOKS DAEMON ERROR - Proceeding without protection",
             context=context_lines,
         )
@@ -1124,8 +1187,9 @@ class HookResult(BaseModel):
             ]
         )
 
+        # cast: ALLOW is deliverable by every tier, same reasoning as `allow` above.
         return cls(
-            decision=Decision.ALLOW,
+            decision=cast("DecisionT", Decision.ALLOW),
             reason="HOOKS DAEMON DEGRADED - Configuration invalid",
             context=context_lines,
         )

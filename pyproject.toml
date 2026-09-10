@@ -32,6 +32,11 @@ dependencies = [
     "psutil>=5.9",
     "mdformat>=0.7",
     "mdformat-gfm>=0.4",
+    # PEP 696 TypeVar defaults (core/hook_result.py's DecisionT), unavailable
+    # from typing.TypeVar before Python 3.13 -- this project targets 3.11+.
+    # Already present transitively via pydantic; pinned explicitly because
+    # src/ now imports it directly (Plan 00368 Task 3.1).
+    "typing-extensions>=4.12",
 ]
 
 [project.optional-dependencies]

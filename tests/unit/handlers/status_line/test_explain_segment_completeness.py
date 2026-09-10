@@ -27,6 +27,7 @@ from pathlib import Path
 
 import claude_code_hooks_daemon.handlers.status_line as status_line_pkg
 from claude_code_hooks_daemon.core.handler import Handler
+from claude_code_hooks_daemon.core.handler_bases import StatusLineSegmentHandler
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.handlers.registry import iter_builtin_handler_classes
 
@@ -37,12 +38,28 @@ _STATUS_LINE_EVENT_DIR = "status_line"
 _EXPECTED_HANDLER_COUNT = 14
 
 
-def _status_line_handler_classes() -> list[type[Handler]]:
-    return [
-        ref.handler_cls
-        for ref in iter_builtin_handler_classes()
-        if ref.event_dir == _STATUS_LINE_EVENT_DIR
-    ]
+def _status_line_handler_classes() -> list[type[StatusLineSegmentHandler]]:
+    """Every registered status-line handler class, narrowed to the base that
+    actually declares ``explain_segment()``.
+
+    ``iter_builtin_handler_classes()`` types every entry as the generic
+    ``Handler`` (it spans all 31 events); every status-line handler is a
+    ``StatusLineSegmentHandler`` by convention (``StatusLineHandlerBase =
+    StatusLineSegmentHandler`` in ``core/handler_bases.py``), so the
+    ``issubclass`` assertion below both proves that convention holds and
+    narrows the static type for every caller below that reads
+    ``explain_segment()``.
+    """
+    classes: list[type[StatusLineSegmentHandler]] = []
+    for ref in iter_builtin_handler_classes():
+        if ref.event_dir != _STATUS_LINE_EVENT_DIR:
+            continue
+        assert issubclass(ref.handler_cls, StatusLineSegmentHandler), (
+            f"{ref.handler_cls.__name__} lives under status_line/ but does not "
+            "extend StatusLineSegmentHandler"
+        )
+        classes.append(ref.handler_cls)
+    return classes
 
 
 def _status_line_module_paths() -> list[Path]:
