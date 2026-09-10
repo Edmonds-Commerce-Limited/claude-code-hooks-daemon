@@ -420,6 +420,8 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 <!-- handler: validate-eslint-on-write -->
 
+<!-- handler: lsp-noise-checker -->
+
 <!-- handler: failsafe-cron-blockage-suppressor -->
 
 | ID                                 | Blocked                                                                                                                                                                   | Why                                                                                                                                                                                               | Fix                                                                                                                                                                           |
@@ -494,6 +496,8 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 | R-ESLINT-ERRORS                    | a written/authored TS/TSX file with reported ESLint errors                                                                                                                | The write has already landed on disk; this is a failure report, not a rollback                                                                                                                    | Fix the reported problems with Edit (`npx eslint <file> --fix` clears most)                                                                                                   |
 | R-ESLINT-TIMEOUT                   | an ESLint run that did not finish within the configured timeout                                                                                                           | This handler DENIES on a timeout — unlike lint_on_edit, which allows                                                                                                                              | Investigate why ESLint is slow (config, project size); retry the edit                                                                                                         |
 | R-ESLINT-RUN-FAILURE               | an ESLint invocation that failed to run at all                                                                                                                            | ESLint could not be launched (exception raised invoking it)                                                                                                                                       | Check the ESLint wrapper/tsx setup, then retry the edit                                                                                                                       |
+| R-LSP-CONFIG-EXCLUDE               | a language server config with no exclude for a tree that is not project code                                                                                              | The language server reports other checkouts' and fixtures' defects against this one, and a noisy stream is skimmed                                                                                | Add the listed exclude entries (the advisory prints them ready to use)                                                                                                        |
+| R-LSP-SERVER-STALE                 | a running language server older than the config file its check is anchored to                                                                                             | It is still analysing the scope the OLD config declared                                                                                                                                           | End the named process (the harness respawns it on the next LSP use)                                                                                                           |
 | R-FAILSAFE-CRON-SUPPRESSED         | A delivered failsafe-cron tick, while a 'blocked only on human input' marker is live                                                                                      | Every tick against a session blocked only on human input is a guaranteed no-op model turn                                                                                                         | Nothing to do -- this is expected. Send a real message to clear the marker and resume ticks                                                                                   |
 | R-FAILSAFE-CRON-BACKED-OFF         | A delivered failsafe-cron tick, while this session is producing nothing and owes no ledgered work                                                                         | An hourly tick against a session with nothing to recover costs a full model turn and finds nothing                                                                                                | Nothing to do -- ticks continue, just less often. Any real user message restores hourly cadence                                                                               |
 
@@ -521,41 +525,45 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
 
-<!-- handler: model-downgrade-recorder -->
-
-- model_downgrade_recorder — the automatic model downgrade is written down
-
 <!-- handler: background-process-tracker -->
 
 - background_process_tracker — backgrounded processes are tracked
-
-<!-- handler: git-hooks-executable-fixer -->
-
-- git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
 <!-- handler: budget-exhaustion-detector -->
 
 - budget_exhaustion_detector — hidden agent budgets are surfaced
 
-<!-- handler: goal-injection -->
-
-- goal_injection — plan-start goal signal for the ccy supervisor
-
 <!-- handler: command-hints -->
 
 - command_hints — advisory reminders after specific commands
 
-<!-- handler: recovery-cron-advisor -->
+<!-- handler: git-hooks-executable-fixer -->
 
-- recovery_cron_advisor — failsafe recovery cron lifecycle advisory
+- git_hooks_executable_fixer — auto-fixes non-executable git hooks
+
+<!-- handler: goal-injection -->
+
+- goal_injection — plan-start goal signal for the ccy supervisor
 
 <!-- handler: markdown-table-formatter -->
 
 - markdown_table_formatter — markdown tables are auto-aligned
 
+<!-- handler: model-downgrade-recorder -->
+
+- model_downgrade_recorder — the automatic model downgrade is written down
+
+<!-- handler: recovery-cron-advisor -->
+
+- recovery_cron_advisor — failsafe recovery cron lifecycle advisory
+
 <!-- handler: ccy-supervisor-integrity -->
 
 - ccy_supervisor_integrity — keep the ccy supervisor properly set up
+
+<!-- handler: docs-qa-sweep -->
+
+- docs_qa_sweep — documentation drift report at session start
 
 <!-- handler: git-upstream-checker -->
 
@@ -564,6 +572,14 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: hook-registration-checker -->
 
 - hook_registration_checker — hooks configuration policy
+
+<!-- handler: model-fallback-detector -->
+
+- model_fallback_detector — silent model substitution is surfaced
+
+<!-- handler: plan-qa-sweep -->
+
+- plan_qa_sweep — plan-tree drift report at session start
 
 <!-- handler: plan-workflow-asset-checker -->
 
@@ -577,29 +593,17 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths
 
-<!-- handler: plan-qa-sweep -->
-
-- plan_qa_sweep — plan-tree drift report at session start
-
-<!-- handler: model-fallback-detector -->
-
-- model_fallback_detector — silent model substitution is surfaced
-
 <!-- handler: tool-disable-advisor -->
 
 - tool_disable_advisor — declared never-want tools are checked at session start
 
-<!-- handler: docs-qa-sweep -->
+<!-- handler: idle-housekeeping-advisory -->
 
-- docs_qa_sweep — documentation drift report at session start
+- idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 
 <!-- handler: standing-authorisations -->
 
 - standing_authorisations — a project can record a standing request
-
-<!-- handler: idle-housekeeping-advisory -->
-
-- idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 
 <!-- handler: auto-approve-reads -->
 
