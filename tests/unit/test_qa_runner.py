@@ -995,7 +995,7 @@ class TestCommandExecution:
         )
 
         runner = QARunner(project_root="/workspace")
-        returncode, stdout, _stderr = runner._run_command("echo test", "test command")
+        returncode, stdout, _stderr = runner._run_command(["echo", "test"], "test command")
 
         assert returncode == 0
         assert stdout == "output"
@@ -1008,7 +1008,7 @@ class TestCommandExecution:
         runner = QARunner(project_root="/workspace")
 
         with pytest.raises(QAExecutionError):
-            runner._run_command("slow command", "test command")
+            runner._run_command(["slow", "command"], "test command")
 
 
 class TestOutputDirectoryCreation:
@@ -1040,7 +1040,7 @@ class TestRunCommandErrors:
         runner = QARunner(project_root="/workspace")
 
         with pytest.raises(QAExecutionError) as exc_info:
-            runner._run_command("failing command", "test command")
+            runner._run_command(["failing", "command"], "test command")
 
         assert "Command failed" in str(exc_info.value)
 
@@ -1052,7 +1052,7 @@ class TestRunCommandErrors:
         runner = QARunner(project_root="/workspace")
 
         with pytest.raises(QAExecutionError) as exc_info:
-            runner._run_command("failing command", "test command")
+            runner._run_command(["failing", "command"], "test command")
 
         assert "Execution error" in str(exc_info.value)
 

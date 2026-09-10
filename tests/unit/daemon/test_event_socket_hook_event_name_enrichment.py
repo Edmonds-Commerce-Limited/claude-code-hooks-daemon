@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ import pytest
 from claude_code_hooks_daemon.config.models import (
     DaemonConfig,
     InputValidationConfig,
+    LogLevel,
     TransportConfig,
 )
 from claude_code_hooks_daemon.constants import HandlerID, Priority
@@ -51,7 +53,7 @@ class _EchoHandler(Handler):
 
     def handle(self, hook_input: dict) -> HookResult:
         self.last_hook_input = hook_input
-        return HookResult(decision=Decision.ALLOW, context="echoed")
+        return HookResult(decision=Decision.ALLOW, context=["echoed"])
 
     def get_claude_md(self) -> str | None:
         return None
@@ -61,7 +63,7 @@ class _EchoHandler(Handler):
 
 
 @pytest.fixture
-def isolated_untracked_dir() -> Path:
+def isolated_untracked_dir() -> Generator[Path, None, None]:
     with tempfile.TemporaryDirectory() as tmp:
         yield Path(tmp)
 
@@ -90,7 +92,7 @@ def _make_strict_config(untracked_dir: Path) -> DaemonConfig:
         socket_path=untracked_dir / "daemon.sock",
         pid_file_path=untracked_dir / "daemon.pid",
         idle_timeout_seconds=600,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
         transport=TransportConfig(relay_enabled=True),
         strict_mode=True,
         input_validation=InputValidationConfig(enabled=True),

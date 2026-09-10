@@ -29,7 +29,7 @@ class TestDaemonConfig:
             socket_path=Path("/tmp/test.sock"),
             idle_timeout_seconds=300,
             pid_file_path=Path("/tmp/test.pid"),
-            log_level="DEBUG",
+            log_level=LogLevel.DEBUG,
         )
 
         # Pydantic stores paths as strings
@@ -69,13 +69,20 @@ class TestDaemonConfig:
 
     def test_rejects_invalid_log_level(self) -> None:
         """Test that invalid log levels are rejected."""
+        # model_validate, not the typed constructor: this deliberately sends
+        # an invalid *string* (wire-shaped input), which log_level's real
+        # type (LogLevel) does not statically admit in the first place.
         with pytest.raises(ValidationError, match="Input should be"):
-            DaemonConfig(socket_path=Path("/tmp/test.sock"), log_level="INVALID")
+            DaemonConfig.model_validate(
+                {"socket_path": Path("/tmp/test.sock"), "log_level": "INVALID"}
+            )
 
     def test_accepts_valid_log_levels(self) -> None:
         """Test that all valid log levels are accepted."""
         for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
-            config = DaemonConfig(socket_path=Path("/tmp/test.sock"), log_level=level)
+            config = DaemonConfig.model_validate(
+                {"socket_path": Path("/tmp/test.sock"), "log_level": level}
+            )
             assert config.log_level == LogLevel(level)
 
     def test_enforce_single_daemon_process_defaults_to_false(self) -> None:
@@ -92,8 +99,13 @@ class TestDaemonConfig:
 
     def test_enforce_single_daemon_process_rejects_non_bool(self) -> None:
         """Test that enforce_single_daemon_process rejects truly invalid values."""
+        # model_validate: enforce_single_daemon_process's real type is bool,
+        # so a dict is not a value the typed constructor statically admits --
+        # this test deliberately sends malformed wire-shaped input.
         with pytest.raises(ValidationError, match="Input should be a valid boolean"):
-            DaemonConfig(
-                socket_path=Path("/tmp/test.sock"),
-                enforce_single_daemon_process={"invalid": "dict"},
+            DaemonConfig.model_validate(
+                {
+                    "socket_path": Path("/tmp/test.sock"),
+                    "enforce_single_daemon_process": {"invalid": "dict"},
+                }
             )
