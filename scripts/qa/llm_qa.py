@@ -381,6 +381,20 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="doc_snippets.json",
         jq_hint="jq '.violations[] | {file, line, symbol, keyword}'",
     ),
+    # The two corpus sweeps (Plan 00373). Both shipped as CLI verbs exiting
+    # non-zero on findings and neither was registered here, so plan-tree and
+    # doc-corpus drift could not fail QA, CI or the release gate — and did
+    # not, for four findings a merge put on main.
+    "plan_qa": ToolConfig(
+        command=_python("run_corpus_qa.py", "--corpus", "plan", "--json"),
+        json_file="plan_qa.json",
+        jq_hint="jq '.findings[] | {check_id, severity, path, message}'",
+    ),
+    "docs_qa": ToolConfig(
+        command=_python("run_corpus_qa.py", "--corpus", "docs", "--json"),
+        json_file="docs_qa.json",
+        jq_hint="jq '.findings[] | {check_id, severity, path, message}'",
+    ),
     "sensitive_content": ToolConfig(
         command=_python("check_sensitive_content.py", "--json"),
         json_file="sensitive_content.json",
@@ -579,6 +593,17 @@ def _summarize_doc_snippets(data: QaReport) -> str:
     return f"{total} violations"
 
 
+def _summarize_corpus_qa(data: QaReport) -> str:
+    """Findings plus the severity split, which is the first thing a reader wants.
+
+    Both sweeps print `N findings (B block, A advise)` themselves; the summary
+    line says the same thing so the two never appear to disagree.
+    """
+    summary = data.get("summary", {})
+    total = summary.get("total_issues", 0)
+    return f"{total} findings ({summary.get('block', 0)} block, {summary.get('advise', 0)} advise)"
+
+
 def _summarize_sensitive_content(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
@@ -655,6 +680,8 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "repo_hygiene": _summarize_repo_hygiene,
     "doc_truth": _summarize_doc_truth,
     "doc_snippets": _summarize_doc_snippets,
+    "plan_qa": _summarize_corpus_qa,
+    "docs_qa": _summarize_corpus_qa,
     "sensitive_content": _summarize_sensitive_content,
     "git_history": _summarize_git_history,
     "handler_reference": _summarize_handler_reference,
