@@ -8,6 +8,8 @@ render time in ``status-line-explained``.
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
@@ -30,20 +32,13 @@ def _make(
     )
 
 
-def _set_name(explanation: SegmentExplanation) -> None:
-    """Exercise the frozen dataclass's own ``__setattr__`` override.
+def _field_names() -> list[str]:
+    """Every declared field, read from the dataclass itself.
 
-    ``explanation.name = ...`` is a real, permanent runtime violation this
-    function exists to trigger (``FrozenInstanceError``, a subclass of
-    ``AttributeError``) -- but it is ALSO a violation pyright's static
-    read-only-attribute check correctly rejects on sight, since it can prove
-    the field is frozen without running anything. ``setattr()`` with a
-    NON-literal name goes through the exact same ``__setattr__`` override at
-    runtime (unlike ``object.__setattr__``, which bypasses it and would defeat
-    this test), while being opaque to that static check.
+    The list is derived rather than typed out so a field added later is
+    covered without anyone remembering to add it here.
     """
-    field_name = "name"
-    setattr(explanation, field_name, "renamed")
+    return [field.name for field in dataclasses.fields(SegmentExplanation)]
 
 
 class TestSegmentExplanationConstruction:
@@ -55,10 +50,22 @@ class TestSegmentExplanationConstruction:
         assert explanation.how_to_read == "24-hour HH:MM, no seconds."
         assert explanation.current_value == "Currently shows 14:32."
 
-    def test_is_frozen(self) -> None:
+    @pytest.mark.parametrize("field_name", _field_names())
+    def test_every_field_is_frozen(self, field_name: str) -> None:
+        """Frozen means EVERY field, and the names come from the dataclass.
+
+        Written as a real loop over real field names rather than one literal
+        assignment: a literal `explanation.name = ...` is a violation pyright
+        can prove without running anything, so it rejects the line on sight
+        and the only ways to keep it are a suppression comment or a
+        hand-obfuscated name. Iterating the declared fields makes the dynamism
+        genuine, and buys wider coverage for it. `setattr` still routes
+        through the dataclass's own `__setattr__`, which is what raises;
+        `object.__setattr__` would bypass it and test nothing.
+        """
         explanation = _make()
-        with pytest.raises(AttributeError):
-            _set_name(explanation)
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            setattr(explanation, field_name, "mutated")
 
     def test_glyphs_may_be_empty_for_a_silent_handler(self) -> None:
         """A sensor handler (e.g. context_sidecar) never renders a visible icon."""
