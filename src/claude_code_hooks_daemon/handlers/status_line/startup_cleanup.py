@@ -12,6 +12,7 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,40 @@ class StartupCleanupHandler(StatusLineHandlerBase):
             logger.debug("Failed to read cleanup status: %s", e)
 
         return AdvisoryResult(context=[])
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment and its current value (read-only file peek)."""
+        try:
+            status_file = ProjectContext.daemon_untracked_dir() / _STATUS_FILENAME
+            data = _status_reader.read(status_file)
+            timestamp: float = data.get(_TIMESTAMP_FIELD, _MISSING_TIMESTAMP)
+            count: int = data.get(_COUNT_FIELD, _MISSING_COUNT)
+            elapsed = time.time() - timestamp
+            if elapsed < _STARTUP_PHASE_SECONDS:
+                current_value = "Currently shows: 🧹 (daemon started within the last 5s)."
+            elif elapsed < _DISPLAY_WINDOW_SECONDS and count > 0:
+                current_value = f"Currently shows: 🧹 {count} stale (files cleaned at this start)."
+            else:
+                current_value = (
+                    f"Not shown now — last daemon start was {elapsed:.0f}s ago "
+                    f"(window is {_DISPLAY_WINDOW_SECONDS:.0f}s), or nothing was cleaned."
+                )
+        except (OSError, RuntimeError) as e:
+            logger.debug("Failed to read cleanup status for explain_segment: %s", e)
+            current_value = f"Not shown now — could not read cleanup status: {e}"
+        return SegmentExplanation(
+            glyphs=("🧹",),
+            name="Startup Cleanup",
+            what_it_is=(
+                "A brief indicator that the daemon cleaned up stale files (dead sockets, "
+                "orphaned lock files, etc.) on its most recent start."
+            ),
+            how_to_read=(
+                "First 5s after a daemon start: 🧹 alone. Next 25s, only if files were "
+                f"cleaned: 🧹 N stale. After {_DISPLAY_WINDOW_SECONDS:.0f}s total: gone."
+            ),
+            current_value=current_value,
+        )
 
     def get_claude_md(self) -> str | None:
         return None

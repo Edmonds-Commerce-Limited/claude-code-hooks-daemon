@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,29 @@ class UpgradeNotifierHandler(StatusLineHandlerBase):
         if latest:
             return f"📦 upgrade → v{latest}"
         return None
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment and its current value (read-only cache read)."""
+        try:
+            segment = self._detect_upgrade_segment()
+        except Exception as e:
+            segment = None
+            logger.debug("Failed to read version cache for explain_segment: %s", e)
+        current_value = (
+            f"Currently shows: {segment}"
+            if segment
+            else "Not shown now — no upgrade currently recorded as available."
+        )
+        return SegmentExplanation(
+            glyphs=("📦",),
+            name="Upgrade Notifier",
+            what_it_is="Whether a newer daemon version is available to install.",
+            how_to_read=(
+                "📦 vCURRENT → vLATEST (or 📦 upgrade → vLATEST when only the latest "
+                "is known). Absent entirely unless an upgrade is genuinely available."
+            ),
+            current_value=current_value,
+        )
 
     def get_claude_md(self) -> str | None:
         return None

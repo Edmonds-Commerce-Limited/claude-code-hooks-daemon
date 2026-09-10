@@ -4,6 +4,7 @@ Reads the user's Claude account name from ~/.claude/.last-launch.conf
 and displays it in the status line.
 """
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,10 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
+
+logger = logging.getLogger(__name__)
 
 _CONF_RELATIVE_PATH = (".claude", ".last-launch.conf")
 _TOKEN_PATTERN = re.compile(r'LAST_TOKEN="([^"]*)"')
@@ -70,6 +74,29 @@ class AccountDisplayHandler(StatusLineHandlerBase):
         except Exception:
             # Silent fail - don't break status line for account display issues
             return AdvisoryResult(context=[])
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment and its current value (read-only file peek)."""
+        try:
+            username = _username_reader.read(Path.home().joinpath(*_CONF_RELATIVE_PATH))
+        except Exception as e:
+            logger.debug("Failed to read account conf for explain_segment: %s", e)
+            username = None
+        current_value = (
+            f"Currently shows: 👤 {username} |"
+            if username is not None
+            else "Not shown now — no LAST_TOKEN found in ~/.claude/.last-launch.conf."
+        )
+        return SegmentExplanation(
+            glyphs=("👤",),
+            name="Account Display",
+            what_it_is="The logged-in Claude account username, leading the status line.",
+            how_to_read=(
+                "Plain text, no colour coding. Empty (but present) when the token itself is "
+                "empty; entirely absent when the conf file or LAST_TOKEN is missing."
+            ),
+            current_value=current_value,
+        )
 
     def get_claude_md(self) -> str | None:
         return None

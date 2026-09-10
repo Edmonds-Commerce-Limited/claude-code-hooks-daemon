@@ -1,7 +1,7 @@
 ---
 name: hooks-daemon
-description: Manage Claude Code Hooks Daemon - install, upgrade, optimise the configuration, check health, restart, run the housekeeping pass, file a bug-report, and report issues
-argument-hint: "[install|upgrade|optimise|housekeeping|restart|health|bug-report|report] [args...]"
+description: Manage Claude Code Hooks Daemon - install, upgrade, optimise the configuration, check health, restart, run the housekeeping pass, status-line-explained to explain every status-line icon, file a bug-report, and report issues
+argument-hint: "[install|upgrade|optimise|housekeeping|restart|health|status-line-explained|bug-report|report] [args...]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Bash, Read, Write, Edit
@@ -100,6 +100,21 @@ Verify daemon is running correctly:
 
 See [health.md](health.md) for health check details, including where the logs
 and the verbose environment audit are.
+
+### Explain the Status Line
+
+Every status-line icon, explained: what it is in general and what its
+current value means right now — the answer to "what does this icon mean?"
+for a segment that has no blocking rule to look up:
+
+```claude-code
+/hooks-daemon status-line-explained                 # text
+/hooks-daemon status-line-explained --format json    # machine-readable
+```
+
+See [status-line-explained.md](status-line-explained.md) for the full output
+shape and design notes (it is a read-only, reference rendering — see that
+page for what "reference" means here).
 
 ### Report an Issue
 
@@ -229,6 +244,11 @@ case "$SUBCOMMAND" in
         printf '%s\n' "${REPORT_PROMPT//\$ARGUMENTS/$*}"
         ;;
 
+    status-line-explained)
+        # Explain every status-line icon: what it is, current value (Plan 00369).
+        bash "$SKILL_DIR/scripts/daemon-cli.sh" "$SUBCOMMAND" "$@"
+        ;;
+
     restart|bug-report)
         # Forward to daemon CLI wrapper.
         bash "$SKILL_DIR/scripts/daemon-cli.sh" "$SUBCOMMAND" "$@"
@@ -246,6 +266,7 @@ case "$SUBCOMMAND" in
         echo "                        Full housekeeping pass: reports first, held steps on request, optimise last"
         echo "  restart               Restart daemon (required after config changes)"
         echo "  health                Check daemon health and status"
+        echo "  status-line-explained Explain every status-line icon (--format json)"
         echo "  bug-report DESC       Diagnostic bundle for maintainers"
         echo "  report DESC           LLM-driven investigation report with a timeline"
         echo ""

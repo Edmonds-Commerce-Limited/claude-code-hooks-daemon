@@ -7,6 +7,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 
 
 class CurrentTimeHandler(StatusLineHandlerBase):
@@ -30,6 +31,16 @@ class CurrentTimeHandler(StatusLineHandlerBase):
         time_str = now.strftime("%H:%M")  # 24-hour format, no seconds
 
         return AdvisoryResult(context=[f"| 🕐 {time_str}"])
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment and its current value (read-only, no I/O)."""
+        return SegmentExplanation(
+            glyphs=("🕐",),
+            name="Current Time",
+            what_it_is="The local wall-clock time, refreshed on every status-line render.",
+            how_to_read="24-hour HH:MM, no seconds. Always shown; no colour coding.",
+            current_value=f"Currently shows {datetime.now().strftime('%H:%M')}.",
+        )
 
     def get_claude_md(self) -> str | None:
         return None

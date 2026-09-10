@@ -78,6 +78,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 
 logger = logging.getLogger(__name__)
 
@@ -500,6 +501,52 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
             logger.debug("Failed to read cmdline for pid %s: %s", pid, e)
             return None
         return raw.decode(errors="replace").replace("\x00", " ")
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment and its current value.
+
+        Reuses ``_detect_state``/``_safe_active_message`` directly -- both are
+        read-only (status file + /proc reads only, never a write), and this
+        instance's in-memory caches are discarded when the one-shot CLI
+        process exits, so calling them here is safe.
+        """
+        message = self._safe_active_message()
+        try:
+            state: _SupervisorState | None = self._detect_state()
+        except Exception as e:
+            logger.debug("Failed to detect supervisor state for explain_segment: %s", e)
+            state = None
+
+        if state is None:
+            state_label = "not shown — state could not be determined"
+        else:
+            state_label = {
+                _SupervisorState.ACTIVE_ARMED: "🎩 green — overseeing, will auto-compact",
+                _SupervisorState.ACTIVE_DRYRUN: "🎩 yellow — overseeing only, will not act",
+                _SupervisorState.NOT_ACTIVE: "🎩 orange — status file present but no live process",
+                _SupervisorState.NOT_CONFIGURED: "not shown — no supervisor status file present",
+            }[state]
+
+        if message is not None:
+            text, _level = message
+            current_value = f'Currently shows a transient message attached to the top hat: "{text}"'
+        else:
+            current_value = f"Currently: {state_label}"
+
+        return SegmentExplanation(
+            glyphs=(_ICON,),
+            name="Supervisor Indicator",
+            what_it_is=(
+                "Whether the ccy PTY supervisor (claude-supervise.py) is overseeing this "
+                "session, and any transient supervisor message (e.g. a Ctrl+Z notice)."
+            ),
+            how_to_read=(
+                "🎩 green = active + armed (will auto-compact); 🎩 yellow = active + "
+                "dry-run (observes only); 🎩 orange = a status file exists but the "
+                "supervisor process is not live; no segment at all = never configured."
+            ),
+            current_value=current_value,
+        )
 
     def get_claude_md(self) -> str | None:
         return None
