@@ -82,8 +82,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Handler UX Adjustments
 
-- [00370: daemon restart verifier becomes a project handler](00370-daemon-restart-verifier-becomes-a-project-handler/PLAN.md) - Not Started (owner ruling: `daemon_restart_verifier` only ever fires inside the hooks-daemon repository itself — pure self-dogfooding that never belonged in the shared built-in library — removed entirely and re-homed as a project handler under `.claude/project-handlers/`, this repo's own reference example of that surface)
-
 - Dogfooding alert: agent stalled twice asking tautological questions ("Should I push?"); the prefix-positive `ask_user_question_blocker` (Plan 00108 / v3.14.0) was shipped `enabled: false` so it never fired
 
 - Phase 1 DONE: enabled in this project's config, daemon restarted, live probe confirms unprefixed AskUserQuestion is denied with `ASKING BECAUSE:` guidance
@@ -118,6 +116,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00370: daemon restart verifier becomes a project handler](Completed/00370-daemon-restart-verifier-becomes-a-project-handler/PLAN.md) - Complete + the archiving commit (a handler that only ever fired inside this repository left the shared built-in library and became this repo's own project-handler reference example, with the retired key still validating cleanly in a client config)
 
 - [00369: status line explained command](Completed/00369-status-line-explained-command/PLAN.md) - Complete + the archiving commit (every status-line handler now describes its own glyphs, how to read them and what the value means right now, surfaced by `hooks-daemon status-line-explained`)
 
@@ -168,8 +168,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 - [00346: the QA venv ignores uv.lock](Completed/00346-pin-qa-toolchain-versions/PLAN.md) - Complete at `2de920a3`…`f8e852a1` + the archiving commit (the lockfile was committed and CI-gated while every provisioning path resolved `pyproject.toml` against PyPI instead; locking them fixed a live CI failure — `Format (black)` had been red on main because CI's floating black disagreed with the tree)
 
 - [00345: harness payloads for shell and call syntax tests](Completed/00345-harness-payloads-for-shell-and-call-syntax-tests/PLAN.md) - Complete at `b34ab4cd`…`23fb248f` + the archiving commit (94 → 199 of 228 dispatchable blocks now run automatically, and every remaining skip carries a reason a reader can act on)
-
-- [00337: stop hook, human-input marker and failsafe cron retune](Completed/00337-stop-hook-human-input-cron-retune/PLAN.md) - Complete at `ea03f597`…`51e3694a` + the archiving commit (guidance states the consequence, not just the mechanism; `[awaiting-human]` anchored to the declaration position; the failsafe cron backs off to a 4h cap only when nothing is owed. The DENY-rate classification is Plan 00344)
 
 - [00342: prose guard does not reach stop handlers](Completed/00342-prose-guard-does-not-reach-stop-handlers/PLAN.md) - Complete at the delivery + archiving commits (the prose guard now scopes by base class and carries a Stop axis whose predicate is the marker SIDE EFFECT — `_denies()` would have passed vacuously; quoting a frozen phrase no longer arms cron suppression, and the unquoted residue is asserted as a recorded limit rather than left implicit)
 
@@ -232,15 +230,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 372 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 331 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 332 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 18 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 17 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 18 + 331 + 13 = **362 folders**, spanning
+- **Folder-to-number reconciliation**: 17 + 332 + 13 = **362 folders**, spanning
   **359 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
