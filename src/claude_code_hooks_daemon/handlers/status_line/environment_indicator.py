@@ -12,6 +12,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 
 # ANSI colours — each environment renders in a distinct colour so the runtime
 # is identifiable at a glance. Desktop is red (you are on the host); container
@@ -73,6 +74,31 @@ class EnvironmentIndicatorHandler(StatusLineHandlerBase):
                 runtime, (_UNKNOWN_RUNTIME_ICON, runtime, _UNKNOWN_RUNTIME_COLOR)
             )
         return AdvisoryResult(context=[f"| {color}{icon} {label}{_COLOR_RESET}"])
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment and its current value (read-only, cached at startup)."""
+        try:
+            runtime = ProjectContext.container_runtime()
+            if runtime is None:
+                current_value = f"Currently shows: {_DESKTOP_ICON} {_DESKTOP_LABEL}"
+            else:
+                icon, label, _color = _RUNTIME_DISPLAY.get(
+                    runtime, (_UNKNOWN_RUNTIME_ICON, runtime, _UNKNOWN_RUNTIME_COLOR)
+                )
+                current_value = f"Currently shows: {icon} {label}"
+        except RuntimeError as e:
+            current_value = f"Not shown now — ProjectContext not initialised ({e})."
+        return SegmentExplanation(
+            glyphs=(_DESKTOP_ICON, "🐳", "📦", "🧊"),
+            name="Environment Indicator",
+            what_it_is="Whether this session runs at desktop (host) level or inside a container.",
+            how_to_read=(
+                f"{_DESKTOP_ICON} desktop (red) = host; 🐳 docker (blue), 📦 podman "
+                "(magenta) / generic container (grey), 🧊 lxc (cyan) otherwise. "
+                "Detected once at daemon startup, never re-probed per render."
+            ),
+            current_value=current_value,
+        )
 
     def get_claude_md(self) -> str | None:
         return None

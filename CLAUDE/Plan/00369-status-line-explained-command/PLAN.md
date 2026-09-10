@@ -63,19 +63,19 @@ status-line order, text or JSON.
 
 ### Phase 1: Contract + dataclass
 
-- [ ] ⬜ **Task 1.1**: `SegmentExplanation` dataclass (glyphs, name, what_it_is,
+- [x] ✅ **Task 1.1**: `SegmentExplanation` dataclass (glyphs, name, what_it_is,
   how_to_read, current_value) with fail-fast validation on empty required
   fields.
-- [ ] ⬜ **Task 1.2**: `StatusLineSegmentHandler` base (subclasses
+- [x] ✅ **Task 1.2**: `StatusLineSegmentHandler` base (subclasses
   `AdvisoryHandler`, adds abstract `explain_segment()`); `StatusLineHandlerBase`
   repointed to it. Verify the existing `test_handler_bases.py` sweep still
   passes unchanged (base substitution must not alter the Status tier).
 
 ### Phase 2: Per-handler explanations
 
-- [ ] ⬜ **Task 2.1**: Implement `explain_segment()` on all 14 concrete
+- [x] ✅ **Task 2.1**: Implement `explain_segment()` on all 14 concrete
   status-line handlers, each read-only (no new writes).
-- [ ] ⬜ **Task 2.2**: Completeness sweep test: every discovered status-line
+- [x] ✅ **Task 2.2**: Completeness sweep test: every discovered status-line
   handler has a non-empty explanation; every declared glyph appears in
   that handler's own source (`inspect.getsource`); every status-line
   `*.py` file's `Handler` subclasses are concrete (guards against a

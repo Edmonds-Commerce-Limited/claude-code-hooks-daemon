@@ -49,6 +49,13 @@ _ALLOWED_DIRECT_READS: dict[str, str] = {
         "cost is tracked separately as Plan 00238 Task 2.2, where the fix is "
         "to bound the /proc WALK rather than to cache a read."
     ),
+    "downgrade_indicator.py": (
+        "Plan 00369: explain_segment() glob-scans the downgrade-state directory "
+        "for a read-only 'how many sessions are currently downgraded' summary. "
+        "That read is NEVER on the render path — handle() does not call it — "
+        "it only runs from the one-shot `status-line-explained` CLI, so there "
+        "is no per-render cost to gate against at all."
+    ),
 }
 
 

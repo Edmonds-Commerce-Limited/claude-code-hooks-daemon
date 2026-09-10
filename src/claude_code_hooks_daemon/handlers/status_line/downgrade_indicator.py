@@ -11,6 +11,7 @@ of the status line, self-detected purely from the model id Claude Code itself
 reports -- no dependency on the ccy supervisor or any external signal.
 """
 
+import json
 import logging
 from typing import Any, Final
 
@@ -19,6 +20,7 @@ from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.handlers.status_line.downgrade_state import (
     evaluate_downgrade,
     read_downgrade_counts,
@@ -114,6 +116,48 @@ class DowngradeIndicatorHandler(StatusLineHandlerBase):
         except OSError as e:
             logger.warning("Failed to read/write downgrade-indicator state: %s", e)
             return ""
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment; current value is a read-only scan, not a live check.
+
+        There is no live session id from the CLI, so this cannot answer "is
+        THIS session downgraded" -- instead it reports whether ANY session's
+        persisted state currently shows an open downgrade episode.
+        """
+        active_sessions = 0
+        try:
+            dir_path = state_dir(ProjectContext.daemon_untracked_dir())
+            if dir_path.is_dir():
+                for state_file in dir_path.glob("*.json"):
+                    try:
+                        data = json.loads(state_file.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        continue
+                    if isinstance(data, dict) and data.get("downgraded"):
+                        active_sessions += 1
+            current_value = (
+                f"{active_sessions} session(s) currently show an open downgrade episode."
+                if active_sessions
+                else "No session currently shows an open downgrade episode."
+            )
+        except (RuntimeError, OSError) as e:
+            current_value = f"Not shown now — could not read downgrade state: {e}"
+        return SegmentExplanation(
+            glyphs=(self._emoji,),
+            name="Downgrade Indicator",
+            what_it_is=(
+                "Warns when Anthropic's safety classifier silently substituted this "
+                "session's model down to a lower-ranked family (e.g. Fable to Opus), "
+                "which never recovers on its own."
+            ),
+            how_to_read=(
+                f"{self._emoji} HIGH→CURRENT ↓N↑M — HIGH is the session's high-water "
+                "model family, CURRENT the present one, ↓N/↑M the downgrade/recovery "
+                "episode tally this session. Silent while the session is at its "
+                "recorded high-water mark."
+            ),
+            current_value=current_value,
+        )
 
     def get_claude_md(self) -> str | None:
         return None

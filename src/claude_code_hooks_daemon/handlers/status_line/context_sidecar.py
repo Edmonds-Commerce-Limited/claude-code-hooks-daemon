@@ -38,6 +38,7 @@ from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
     _CONTEXT_TIER_200K_CRITICAL_PCT,
     _CONTEXT_TIER_200K_ORANGE_PCT,
@@ -231,6 +232,31 @@ class ContextSidecarHandler(StatusLineHandlerBase):
                 red_pct=self._1000k_red_pct,
                 critical_pct=self._1000k_critical_pct,
             ),
+        )
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment; it never has a visible icon (see body)."""
+        sidecar_count = 0
+        try:
+            sidecar_dir = ProjectContext.daemon_untracked_dir() / _SIDECAR_SUBDIR
+            if sidecar_dir.is_dir():
+                sidecar_count = sum(1 for p in sidecar_dir.glob("*.json") if not p.name.startswith("."))
+            current_value = (
+                f"Not shown in the status line — it never renders an icon. "
+                f"{sidecar_count} per-session sidecar file(s) currently on disk."
+            )
+        except RuntimeError as e:
+            current_value = f"Not shown in the status line — it never renders an icon ({e})."
+        return SegmentExplanation(
+            glyphs=(),
+            name="Context Sidecar",
+            what_it_is=(
+                "An observe-only sensor: writes this session's context-usage state to "
+                "disk (for the ccy PTY supervisor to read) but never renders anything "
+                "itself. Opt-in, off by default."
+            ),
+            how_to_read="No glyph — this segment never appears in the visible status line.",
+            current_value=current_value,
         )
 
     def get_claude_md(self) -> str | None:

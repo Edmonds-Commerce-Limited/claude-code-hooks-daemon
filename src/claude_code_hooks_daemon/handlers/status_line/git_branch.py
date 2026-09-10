@@ -18,6 +18,7 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, Timeout
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree, run_git
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,48 @@ class GitBranchHandler(StatusLineHandlerBase):
         # (Plan 00238 Task 2.1b). Bounded by the number of distinct cwds a
         # session renders from, which is one in practice.
         self._toplevel_cache: dict[str, str] = {}
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment; current value is a lightweight, read-only probe.
+
+        Deliberately does NOT go through ``_render_git_context``/the render TTL
+        cache or the background auto-fetch scheduler -- those exist for the
+        render hot path and the fetch thread genuinely mutates remote-tracking
+        refs. A single ``git branch --show-current`` is read-only and enough to
+        answer "what would the leading name show right now".
+        """
+        try:
+            cwd = Path.cwd()
+            result = run_git(cwd, "branch", "--show-current", timeout=Timeout.GIT_STATUS_SHORT)
+            branch = result.stdout.strip() if result.returncode == 0 else ""
+            current_value = (
+                f"Currently shows branch: {branch}"
+                if branch
+                else "Not shown now — not inside a git repository (or on a detached HEAD)."
+            )
+        except Exception as e:
+            current_value = f"Not shown now — could not determine the branch: {e}"
+        return SegmentExplanation(
+            glyphs=(
+                _ICON_AHEAD,
+                _ICON_BEHIND,
+                _ICON_STAGED,
+                _ICON_CHANGED,
+                _ICON_CONFLICTS,
+                _ICON_UNTRACKED,
+                _ICON_STASHED,
+                _ICON_WORKTREE,
+            ),
+            name="Git Branch",
+            what_it_is="The current git branch name, with magicmonty-style working-tree status icons.",
+            how_to_read=(
+                f"{_ICON_AHEAD}N ahead / {_ICON_BEHIND}N behind the upstream, "
+                f"{_ICON_STAGED}N staged, {_ICON_CHANGED}N changed, {_ICON_CONFLICTS}N "
+                f"conflicts, {_ICON_UNTRACKED}N untracked, {_ICON_STASHED}N stashed, "
+                f"{_ICON_WORKTREE} marks a linked worktree. Silent outside a git repo."
+            ),
+            current_value=current_value,
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status events."""

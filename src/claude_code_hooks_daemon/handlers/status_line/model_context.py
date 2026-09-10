@@ -78,6 +78,7 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
     _CONTEXT_TIER_200K_CRITICAL_PCT,
     _CONTEXT_TIER_200K_ORANGE_PCT,
@@ -372,6 +373,38 @@ class ModelContextHandler(StatusLineHandlerBase):
                 orange_pct=self._1000k_orange_pct,
                 red_pct=self._1000k_red_pct,
                 critical_pct=self._1000k_critical_pct,
+            ),
+        )
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment; current value is partial (see body)."""
+        try:
+            settings = read_claude_settings(self._get_settings_path())
+            settings_effort = settings.get("effortLevel")
+        except Exception:
+            settings_effort = None
+        effort_note = (
+            f"~{settings_effort} (from settings.json; a session-only /effort override "
+            "would not show here)"
+            if settings_effort
+            else "unknown outside a live session"
+        )
+        return SegmentExplanation(
+            glyphs=("🤖", "▌", "◔", "◑", "◕", "●", "🛑"),
+            name="Model & Context",
+            what_it_is=(
+                "The model name (colour-coded), an effort-level signal bar, and the "
+                "colour-coded context-window usage percentage."
+            ),
+            how_to_read=(
+                "Model: blue=Haiku, green=Sonnet, orange=Opus. Effort bar: 1-5 lit "
+                "segments for low/medium/high/xhigh/max. Context icon: ◔ green (low) "
+                "→ ◑ yellow → ◕ orange → ● red (high) → 🛑 COMPACT NOW (critical); "
+                "thresholds tighten for 1M-token windows."
+            ),
+            current_value=(
+                "Not shown fully here — model name and context % require the live "
+                f"session's render payload. Effort level {effort_note}."
             ),
         )
 

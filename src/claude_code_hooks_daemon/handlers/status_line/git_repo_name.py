@@ -10,6 +10,7 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,21 @@ class GitRepoNameHandler(StatusLineHandlerBase):
         """
         repo_name = ProjectContext.git_repo_name()
         return AdvisoryResult(context=[f"📁 {repo_name}"])
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment and its current value (read-only)."""
+        try:
+            repo_name = ProjectContext.git_repo_name()
+            current_value = f"Currently shows: 📁 {repo_name}"
+        except Exception as e:
+            current_value = f"Not shown now — ProjectContext not initialised ({e})."
+        return SegmentExplanation(
+            glyphs=("📁",),
+            name="Git Repository Name",
+            what_it_is="The repository's name, at the start of the status line.",
+            how_to_read="Plain text, no colour coding. Computed once at daemon startup.",
+            current_value=current_value,
+        )
 
     def get_claude_md(self) -> str | None:
         return None

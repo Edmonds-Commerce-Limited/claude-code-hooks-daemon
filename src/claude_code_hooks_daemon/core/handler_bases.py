@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.core.result_types import (
     GatingResult,
     result_type_for_event,
 )
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 
 
 class AdvisoryHandler(Handler):
@@ -132,12 +133,38 @@ PreCompactHandlerBase = BlockingHandler
 StopHandlerBase = BlockingHandler
 SubagentStopHandlerBase = BlockingHandler
 
+class StatusLineSegmentHandler(AdvisoryHandler):
+    """Status-line handler contract: an advisory decision plus a self-description.
+
+    Every concrete status-line handler must be able to explain its own
+    segment -- icon(s), what it is, how to read it, and what it currently
+    shows -- so ``status-line-explained`` (Plan 00369) can render
+    documentation for every segment without a per-handler special case. A
+    handler that forgets this method fails to INSTANTIATE (abstract), the
+    same protection the tier bases give ``handle()`` -- see the module
+    docstring.
+    """
+
+    @abstractmethod
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment for a human, and report its current value.
+
+        Must be read-only: no writes, no mutation of on-disk or in-memory
+        state (unlike ``handle()``, which some status-line handlers use to
+        record sensor state). Called from a one-shot CLI process, never from
+        the render hot path.
+
+        Returns:
+            A :class:`SegmentExplanation` describing this segment right now.
+        """
+
+
 # Advisory: can neither deny nor ask.
 SessionStartHandlerBase = AdvisoryHandler
 SessionEndHandlerBase = AdvisoryHandler
 PostCompactHandlerBase = AdvisoryHandler
 NotificationHandlerBase = AdvisoryHandler
-StatusLineHandlerBase = AdvisoryHandler
+StatusLineHandlerBase = StatusLineSegmentHandler
 WorktreeCreateHandlerBase = AdvisoryHandler
 WorktreeRemoveHandlerBase = AdvisoryHandler
 SetupHandlerBase = AdvisoryHandler
