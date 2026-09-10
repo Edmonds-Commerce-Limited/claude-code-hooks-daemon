@@ -1,6 +1,6 @@
 # Plan 00367: deployed docs in sync with daemon workflow
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-10
 **Owner**: joseph
 **Priority**: High

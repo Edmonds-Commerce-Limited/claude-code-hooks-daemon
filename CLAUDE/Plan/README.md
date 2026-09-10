@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00368: lsp is signal not noise](00368-lsp-is-signal-not-noise/PLAN.md) - In Progress (the language server analysed every worktree under `untracked/` and flooded the agent's context with other checkouts' errors; the exclude is in, and pyright becomes a zero-error QA gate with a session-start checker for a missing exclude or a stale server)
 
-- [00367: deployed docs in sync with daemon workflow](00367-deployed-docs-in-sync-with-daemon-workflow/PLAN.md) - In Progress (the deployed plan-workflow core doc told agents to ask for human approval before closing a plan while nothing enforced it; DBF net `unenforced-approval-gate` found 14 such instructions, and closing becomes a real opt-in gate `plan_workflow.close_requires_human_approval`, default off)
-
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
@@ -121,6 +119,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00367: deployed docs in sync with daemon workflow](Completed/00367-deployed-docs-in-sync-with-daemon-workflow/PLAN.md) - Complete + the archiving commit (a deployed core doc that told agents a human must approve a step no config key backs is now blocked by the `unenforced-approval-gate` docs-QA check, and both gates became real opt-in keys, default off)
+
 - [00366: supervisor own line follow up](Completed/00366-supervisor-own-line-follow-up/PLAN.md) - Complete + the archiving commit (an armed `/goal` pasted mid-turn was never submitted and sat in the input box for eight hours; the supervisor now remembers its own typed line, presses Enter for it at the next lull, holds the text families while it is pending, and the goal cap is a rolling hour rather than a process lifetime)
 
 - [00365: markdown_organization — a declared project at any depth](Completed/00365-markdown-organization-nested-vendor-and-existing-file-edits/PLAN.md) - Complete at `a8111e72` + the archiving commit (field report: an `Edit` of an existing `.md` two `vendor/` levels deep was denied with no escape hatch; a `projects:` root now wins at any depth, nested vendor trees strip through, a repo-root-anchored extra pattern matches, and an existing `.md` is never a location violation)
@@ -232,15 +232,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 370 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 329 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 330 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 18 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 17 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 18 + 329 + 13 = **360 folders**, spanning
+- **Folder-to-number reconciliation**: 17 + 330 + 13 = **360 folders**, spanning
   **357 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
