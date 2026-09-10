@@ -15,6 +15,7 @@ Validates:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -62,7 +63,7 @@ HOOK_EVENTS_IN_SETTINGS: dict[str, str] = _build_hook_events_map()
 # ---------------------------------------------------------------------------
 
 
-def validate_settings_hooks(settings: dict[str, object]) -> list[str]:
+def validate_settings_hooks(settings: Mapping[str, object]) -> list[str]:
     """Check that settings dict contains all expected hook event registrations.
 
     Args:
@@ -83,8 +84,8 @@ def validate_settings_hooks(settings: dict[str, object]) -> list[str]:
 
 
 def detect_duplicate_hooks(
-    settings: dict[str, object],
-    local_settings: dict[str, object],
+    settings: Mapping[str, object],
+    local_settings: Mapping[str, object],
 ) -> list[str]:
     """Detect hook events registered in BOTH settings.json and settings.local.json.
 
@@ -114,7 +115,7 @@ def detect_duplicate_hooks(
     return issues
 
 
-def detect_local_hooks_misplacement(local_settings: dict[str, object]) -> list[str]:
+def detect_local_hooks_misplacement(local_settings: Mapping[str, object]) -> list[str]:
     """Detect ANY hooks registered in settings.local.json.
 
     Policy: hooks configuration must live exclusively in settings.json.
@@ -146,7 +147,7 @@ def detect_local_hooks_misplacement(local_settings: dict[str, object]) -> list[s
     return issues
 
 
-def detect_legacy_hook_commands(settings: dict[str, object]) -> list[str]:
+def detect_legacy_hook_commands(settings: Mapping[str, object]) -> list[str]:
     """Detect hook commands that bypass the daemon's wrapper scripts.
 
     Daemon-installed hooks invoke `.../.claude/hooks/{bash_key}` — thin bash
