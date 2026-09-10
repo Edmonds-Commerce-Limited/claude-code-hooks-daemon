@@ -72,8 +72,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Infrastructure / Bootstrap
 
-- [00374: the global `--project-root` is clobbered by a subparser default](00374-global-project-root-clobbered-by-subparser-default/PLAN.md) - In Progress (argparse writes a subparser's default into the namespace even when the flag was not given, so the anchor `bin/hooks-daemon` passes before the subcommand is discarded and the CLI targets whichever project the caller is standing in)
-
 - Field report from host `host-a` (`untracked/hooks-daemon-upgrade-python-version.md`): skill `install.sh` aborted on default `python3` (3.9.21) and suggested hardcoded `python3.11` despite `python3.13`/`python3.14` being on PATH
 
 - Consolidates four WET Python-discovery implementations (`scripts/upgrade.sh`, `scripts/install/prerequisites.sh`, skill `install.sh`, `daemon/paths.py`) into one canonical bash helper + one canonical python helper
@@ -120,6 +118,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00374: the global `--project-root` is clobbered by a subparser default](Completed/00374-global-project-root-clobbered-by-subparser-default/PLAN.md) - Complete at `05d526be`…`692b32c5` + the archiving commit (`bin/hooks-daemon` refuses to run rather than let the CLI fall back to the caller's directory, but argparse's subparser default silently discarded the anchor it passed, and the anchoring suite asserted the argv rather than the behaviour)
 
 - [00373: drift reached main unseen — merge bypass and QA blind spot](Completed/00373-drift-reached-main-unseen-merge-bypass-and-qa-blind-spot/PLAN.md) - Complete at `7a722965`…`016611de` + the archiving commit (a merge resurrected an archived plan folder and four plan-QA findings survived a green QA run, green CI and a release-slate check; both sweeps are now QA tools where any finding fails, and `merge_qa_report` reports what a merge/pull/rebase actually introduced)
 
@@ -181,8 +181,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00345: harness payloads for shell and call syntax tests](Completed/00345-harness-payloads-for-shell-and-call-syntax-tests/PLAN.md) - Complete at `b34ab4cd`…`23fb248f` + the archiving commit (94 → 199 of 228 dispatchable blocks now run automatically, and every remaining skip carries a reason a reader can act on)
 
-- [00343: flip the plan QA commit gate from warn to block](Completed/00343-plan-qa-commit-gate-warn-to-block/PLAN.md) - Complete at the delivery + archiving commits (a 253-commit replay found 18 would-be denials of which 7 blamed a commit for plan-tree state it never touched; six checks narrowed to BLOCK only what a commit introduced, replay then 11 denials with zero false positives, and the gate flipped to `block`)
-
 ## Blocked / On Hold Plans
 
 - None. (00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
@@ -234,15 +232,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 375 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 336 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 337 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 16 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 15 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 16 + 336 + 13 = **365 folders**, spanning
+- **Folder-to-number reconciliation**: 15 + 337 + 13 = **365 folders**, spanning
   **362 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

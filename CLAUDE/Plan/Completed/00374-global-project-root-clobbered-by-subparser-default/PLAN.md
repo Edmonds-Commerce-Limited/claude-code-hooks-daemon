@@ -1,7 +1,8 @@
 # Plan 00374: the global `--project-root` is clobbered by a subparser default
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-10
+**Completed**: 2026-09-10
 **Owner**: joseph
 **Priority**: High
 **Recommended Executor**: Opus
@@ -88,10 +89,14 @@ right argv; the CLI discards it.
 
 ## Success Criteria
 
-- [ ] `cli --project-root <R> plan-qa --sweep` and
+- [x] `cli --project-root <R> plan-qa --sweep` and
   `cli plan-qa --sweep --project-root <R>` agree, for a root with no plan tree.
-- [ ] A subcommand-level `--project-root` still overrides a global one.
-- [ ] Full QA passes and CI is green.
+  Verified through the real `bin/hooks-daemon` wrapper, not just the module.
+- [x] A subcommand-level `--project-root` still overrides a global one.
+- [x] Full QA passes and CI is green.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/26-the-wrapper-project-anchor-now-reaches-the-command.md`.
+  No config keys change — the fix is entirely in argparse wiring.
 
 ## Delivery & Milestones
 
@@ -99,3 +104,5 @@ right argv; the CLI discards it.
   disagreed with its unit tests, and the CLI entry path was the reason.
 - `05d526be` — Phase 1: split dest + reconciliation, the two cwd defaults
   removed, source guard against their return.
+- `692b32c5` — Phase 2: the anchoring suite now asserts the CLI's behaviour,
+  not only the argv the wrapper builds.
