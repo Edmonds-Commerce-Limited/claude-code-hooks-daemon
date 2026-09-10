@@ -18,6 +18,13 @@ integration spawn:
   changes and the symlink is maintained to track it.
 - `extraPaths: ["src"]` — first-party imports resolve from source, not from
   an installed package.
+- `exclude` — `untracked/` (every linked worktree, venv, fixture install and
+  canary clone), the plan archive, the acceptance-test and unit-test fixture
+  trees, and `remote-docs/`. Without it the server analyses other
+  checkouts' in-progress branches and reports their half-built symbols as
+  errors in THIS checkout: two sub-agents working in worktrees produced
+  thousands of "unknown attribute" diagnostics against files they had not
+  touched here. `tests/unit/test_pyright_config.py` pins the list.
 
 ## Diagnosing: is it the config or a stale server?
 
