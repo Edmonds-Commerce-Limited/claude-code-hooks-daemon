@@ -1,7 +1,8 @@
 # Plan 00373: drift reached main unseen — merge bypass and QA blind spot
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-10
+**Completed**: 2026-09-10
 **Owner**: joseph
 **Priority**: High
 **Recommended Executor**: Opus
@@ -110,19 +111,31 @@ QA, CI or the release slate registering anything.
 
 ## Success Criteria
 
-- [ ] `bin/hooks-daemon plan-qa --sweep` and `bin/hooks-daemon docs-qa --sweep`
+- [x] `bin/hooks-daemon plan-qa --sweep` and `bin/hooks-daemon docs-qa --sweep`
   both exit 0 on main.
-- [ ] `scripts/qa/llm_qa.py all` runs both sweeps and fails when either finds
-  drift.
-- [ ] Replaying the 00372 scenario — merging a branch that writes into an
-  archived plan's old active path — produces a report naming the finding.
-- [ ] Full QA passes and CI is green.
+- [x] `scripts/qa/llm_qa.py all` runs both sweeps and fails when either finds
+  drift. The registry is 29 tools; both report clean.
+- [x] Replaying the 00372 scenario — a plan archived to `Completed/` plus a
+  resurrected active-location folder holding only a subagent report — makes
+  the gate exit 1 naming `no-new-collisions`, `row-folder-bijection` and
+  `location-status-coherence`.
+- [x] Full QA passes and CI is green.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/25-plan-and-doc-drift-can-now-fail-qa.md` (the
+  two new QA tools, the any-finding-fails rule, and `merge_qa_report`) and
+  the `handlers.post_tool_use.merge_qa_report` entry in
+  `UNRELEASED/config-changes/v3.64.0.yaml`.
 
 ## Delivery & Milestones
 
 - `7a722965` — Task 1.1: the orphaned build report re-homed, plan tree clean.
 - `637bc0ea`, `0984c34c` — Task 1.2: doc corpus clean, 4 findings to 0.
 - `a530a629` — Phase 2: both sweeps registered as QA tools.
+- `016611de` — Phase 3: `merge_qa_report` closes the merge route.
 - Spun out **Plan 00374**: the QA gate's live probe disagreed with its own
   unit tests, and the cause was the CLI discarding `bin/hooks-daemon`'s
   project anchor. Distinct defect, own plan.
+- Spun out **Plan 00375**: the two sweep CLIs name the same concept
+  differently in `--json`, which produced a self-contradicting summary line
+  before it was caught. Deferred as a breaking change with a deprecation
+  path.

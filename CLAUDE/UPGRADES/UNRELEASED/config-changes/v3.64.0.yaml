@@ -124,6 +124,34 @@ config_changes:
         Add `merge_to_main_approval: {enabled: true, priority: 20}` under
         `handlers.pre_tool_use` if you intend to turn the key on. A config
         without the handler is still valid.
+    - key: handlers.post_tool_use.merge_qa_report
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PostToolUse advisory handler (Plan 00373 Phase 3), ships enabled
+        at priority 34, PLANNING and DOCUMENTATION tagged. Every commit-time
+        gate -- `plan_qa_commit_gate`, `docs_qa_commit_gate`,
+        `staged_lint_gate` -- keys on a `git commit` command, and a
+        `git merge`, `git pull` or `git rebase` creates a commit without ever
+        invoking one, so none of them sees it. Measured live: a merge
+        resurrected an archived plan folder and four plan-QA findings reached
+        the default branch unreported. This handler runs AFTER such an
+        operation, reads `git diff --name-only ORIG_HEAD HEAD`, and reports
+        only the plan-QA and docs-QA sweep findings attributable to what that
+        operation actually introduced -- silent when nothing moved and when
+        nothing is attributable, so pre-existing drift is never re-surfaced
+        on every merge. It never blocks: the merge has already landed, so
+        this is a report to repair from, in the same idiom as `lint_on_edit`.
+        Inert in a project with plan QA and docs QA both off.
+      example_yaml: |
+        handlers:
+          post_tool_use:
+            merge_qa_report:
+              enabled: true
+              priority: 34
+      migration_note: >-
+        On by default; no action needed to adopt. Disable with
+        handlers.post_tool_use.merge_qa_report.enabled: false.
   renamed: []
   removed:
     - key: handlers.pre_tool_use.daemon_restart_verifier
