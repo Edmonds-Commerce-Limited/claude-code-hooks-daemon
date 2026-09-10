@@ -1027,6 +1027,14 @@ class TestPlanWorkflowConfig:
         with pytest.raises(ValidationError):
             PlanWorkflowConfig(workflow_docs="/srv/PLANS.md")
 
+    def test_close_requires_human_approval_defaults_off(self) -> None:
+        """Plan 00367: a fully completed plan closes without a human by default."""
+        assert PlanWorkflowConfig().close_requires_human_approval is False
+
+    def test_close_requires_human_approval_opt_in(self) -> None:
+        config = PlanWorkflowConfig(close_requires_human_approval=True)
+        assert config.close_requires_human_approval is True
+
 
 class TestPlanWorkflowQaConfig:
     """Tests for the nested plan_workflow.qa sub-model (Plan 00144)."""

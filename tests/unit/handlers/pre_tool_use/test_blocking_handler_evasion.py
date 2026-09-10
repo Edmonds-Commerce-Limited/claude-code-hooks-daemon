@@ -389,6 +389,7 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "DocsQaEditHandler": "matches a documentation-scoped file path",
     "ErrorHidingBlockerHandler": "matches written content",
     "LockFileEditBlockerHandler": "matches a file path",
+    "PlanCloseApprovalHandler": "matches a plan file path",
     "PlanQaEditHandler": "matches a plan file path",
     "PlanTimeEstimatesHandler": "matches plan document content",
     "PlanWorkflowHandler": "matches a plan file path",

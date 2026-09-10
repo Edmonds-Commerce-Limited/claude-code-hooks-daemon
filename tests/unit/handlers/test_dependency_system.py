@@ -101,6 +101,40 @@ def test_plan_qa_config_injected_into_planning_tagged_handlers() -> None:
     assert plan_helper._plan_qa.edit_mode == "block"
 
 
+def test_close_approval_toggle_injected_into_planning_tagged_handlers() -> None:
+    """Plan 00367: ``plan_workflow.close_requires_human_approval`` rides the
+    same PLANNING-tag injection, and is False (not None) when the workflow
+    is disabled so a gate can never fire on a project without plans.
+    """
+    registry = HandlerRegistry()
+    registry.discover()
+    router = EventRouter()
+    config = {"pre_tool_use": _make_pre_tool_use_config(plan_close_approval={"enabled": True})}
+
+    registry.register_all(
+        router,
+        config=config,
+        plan_workflow=PlanWorkflowConfig(enabled=True, close_requires_human_approval=True),
+    )
+    handlers = router.get_chain(EventType.PRE_TOOL_USE).handlers
+    gate = next((h for h in handlers if h.name == "plan-close-approval"), None)
+    assert gate is not None
+    assert gate._close_requires_human_approval is True
+
+    registry = HandlerRegistry()
+    registry.discover()
+    router = EventRouter()
+    registry.register_all(
+        router,
+        config=config,
+        plan_workflow=PlanWorkflowConfig(enabled=False, close_requires_human_approval=True),
+    )
+    handlers = router.get_chain(EventType.PRE_TOOL_USE).handlers
+    gate = next((h for h in handlers if h.name == "plan-close-approval"), None)
+    assert gate is not None
+    assert gate._close_requires_human_approval is False
+
+
 def test_plan_qa_config_none_when_workflow_disabled() -> None:
     """plan_workflow.enabled False injects None for the QA policy too."""
     registry = HandlerRegistry()

@@ -832,6 +832,8 @@ class PlanWorkflowConfig(BaseModel):
         directory: Path to plan folder relative to workspace root
         workflow_docs: Path to workflow documentation file
         enforce_claude_code_sync: Whether to enforce plansDirectory sync
+        close_requires_human_approval: Whether an agent may flip a PLAN.md to
+            a terminal status without a human's approval (Plan 00367)
         qa: Plan QA subsystem policy (Plan 00144)
         scripts: `planlib` operator-script safety library policy (Plan 00213)
     """
@@ -864,6 +866,20 @@ class PlanWorkflowConfig(BaseModel):
     enforce_claude_code_sync: bool = Field(
         default=False,
         description="Enforce plansDirectory sync with .claude/settings.json",
+    )
+    # Plan 00367: OFF by default because a fully completed plan can be closed
+    # by the agent that completed it; a mandatory human sign-off "is just
+    # going to lead to lots of plans kept open for no good reason". A project
+    # that wants the gate turns it on and closes plans by hand (or with
+    # `hooks-daemon approve-plan-close NNNNN`).
+    close_requires_human_approval: bool = Field(
+        default=False,
+        description=(
+            "When true, an agent's Write/Edit that flips a PLAN.md **Status** to "
+            "Complete, Cancelled or Superseded is denied; a human closes the plan "
+            "by editing the header themselves or by running "
+            "`hooks-daemon approve-plan-close NNNNN` first"
+        ),
     )
     qa: PlanWorkflowQaConfig = Field(
         default_factory=PlanWorkflowQaConfig,

@@ -525,6 +525,10 @@ handlers:
       #   mode: warn              # warn | block — ships advisory while the rollout settles
       #   max_files: 20            # stand down (advisory only) above this many staged lintable files
 
+    plan_close_approval:   # A human closes a plan when plan_workflow.close_requires_human_approval is true (Plan 00367)
+      enabled: true        # Inert while the key is false (this project's setting)
+      priority: 43
+
     plan_qa_edit:          # Stage 1 plan QA lint on PLAN.md writes (Plan 00144)
       enabled: true        # Policy under top-level plan_workflow.qa (edit_mode: block)
       priority: 44
@@ -996,6 +1000,10 @@ plan_workflow:
   directory: "CLAUDE/Plan"
   workflow_docs: "CLAUDE/PlanWorkflow.md"
   enforce_claude_code_sync: false
+  # Plan 00367: a fully completed plan is closed by the agent that completed
+  # it. true makes plan_close_approval deny an agent's terminal status flip
+  # until a human runs `bin/hooks-daemon approve-plan-close NNNNN`.
+  close_requires_human_approval: false
   # planlib operator-script safety library (Plan 00213 Phase 2). Dogfoods the
   # DEPLOYMENT mechanism only (mirrors the ccy.deploy_supervisor precedent
   # below): this repo is a pure software project with no plan-folder

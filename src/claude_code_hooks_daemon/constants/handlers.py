@@ -733,6 +733,15 @@ class HandlerID:
         display_name="plan-qa-edit",
     )
 
+    # Plan-close approval gate (PreToolUse handler) — Plan 00367: with
+    # `plan_workflow.close_requires_human_approval` on, an agent's flip of a
+    # PLAN.md to a terminal status is denied until a human records approval
+    PLAN_CLOSE_APPROVAL = HandlerIDMeta(
+        class_name="PlanCloseApprovalHandler",
+        config_key="plan_close_approval",
+        display_name="plan-close-approval",
+    )
+
     # Plan QA commit gate (PreToolUse handler) — Plan 00144: Stage 2
     # cross-file checks over the staged tree on git commit (warn-first)
     PLAN_QA_COMMIT_GATE = HandlerIDMeta(

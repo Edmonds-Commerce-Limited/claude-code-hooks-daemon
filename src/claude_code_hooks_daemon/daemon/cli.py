@@ -3558,6 +3558,89 @@ def cmd_clear_goal(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_approve_plan_close(args: argparse.Namespace) -> int:
+    """Record a human's one-shot approval to close a plan (Plan 00367).
+
+    The human's route through ``plan_workflow.close_requires_human_approval``:
+    writes ``untracked/plan-close-approvals/NNNNN.approved`` under the daemon's
+    untracked directory, which the very next Write/Edit that flips that plan's
+    ``**Status**`` to Complete, Cancelled or Superseded consumes. Refuses a
+    number that names no ACTIVE plan folder, because an approval for a typo
+    would sit there waiting to close the wrong plan.
+
+    Returns:
+        0 on marker written, 1 on refusal/failure.
+    """
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.plan_qa.close_approval import (
+        format_plan_number,
+        record_approval,
+    )
+
+    raw_number = str(args.plan_number).strip()
+    if not raw_number.isdigit():
+        print(f"ERROR: '{raw_number}' is not a plan number (e.g. 00042)", file=sys.stderr)
+        return 1
+    plan_number = int(raw_number)
+    padded = format_plan_number(plan_number)
+
+    if getattr(args, "project_root", None):
+        project_path = Path(args.project_root).resolve()
+    else:
+        project_path = get_project_path(None)
+    config_file = project_path / ".claude" / "hooks-daemon.yaml"
+    config = Config.load_or_default(config_file)
+    plan_cfg = config.plan_workflow
+    if not plan_cfg.enabled:
+        print(
+            "ERROR: plan_workflow is disabled in config; there is no plan to approve closing.",
+            file=sys.stderr,
+        )
+        return 1
+
+    plan_root = project_path / plan_cfg.directory
+    plan_dir = next(
+        (
+            candidate
+            for candidate in sorted(plan_root.glob(f"{padded}-*"))
+            if candidate.is_dir() and (candidate / "PLAN.md").is_file()
+        ),
+        None,
+    )
+    if plan_dir is None:
+        print(
+            f"ERROR: no active plan folder {padded}-* with a PLAN.md under {plan_root} "
+            "(an archived plan is already closed).",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Same tolerance as clear-goal: a project the context refuses is reported,
+    # and the marker write below then names the real cause when it cannot
+    # find an untracked directory. An earlier step in this process may have
+    # initialised the context already, in which case it is reused.
+    if not ProjectContext.is_initialized():
+        try:
+            ProjectContext.initialize(config_file)
+        except ValueError as e:
+            print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
+    try:
+        untracked_dir = ProjectContext.daemon_untracked_dir()
+    except RuntimeError as e:
+        print(f"ERROR: no untracked directory to record the approval in: {e}", file=sys.stderr)
+        return 1
+    marker = record_approval(untracked_dir, plan_number)
+    print(f"Approved closing plan {padded} ({plan_dir.name}); marker: {marker}")
+    print("The next Write/Edit that flips its **Status** to a terminal state consumes it.")
+    if not plan_cfg.close_requires_human_approval:
+        print(
+            "NOTE: plan_workflow.close_requires_human_approval is false, so the gate is "
+            "off and nothing will consume this marker until the key is turned on."
+        )
+    return 0
+
+
 def cmd_inject_goal(args: argparse.Namespace) -> int:
     """Write a ``<session>.goal-intent`` signal on demand (Plan 00269 Task 2.3).
 
@@ -7600,6 +7683,29 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_clear_goal.set_defaults(func=cmd_clear_goal)
+
+    # approve-plan-close command (Plan 00367): a human's one-shot approval
+    # for the plan_workflow.close_requires_human_approval gate
+    parser_approve_close = subparsers.add_parser(
+        "approve-plan-close",
+        help=(
+            "Record a human's one-shot approval to close plan NNNNN "
+            "(plan_workflow.close_requires_human_approval)"
+        ),
+    )
+    parser_approve_close.add_argument(
+        "plan_number",
+        metavar="NNNNN",
+        help="Plan number whose next terminal status flip is approved (e.g. 00042)",
+    )
+    parser_approve_close.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_approve_close.set_defaults(func=cmd_approve_plan_close)
 
     # verdicts command (Plan 00209): report on the handler decision log
     parser_verdicts = subparsers.add_parser(

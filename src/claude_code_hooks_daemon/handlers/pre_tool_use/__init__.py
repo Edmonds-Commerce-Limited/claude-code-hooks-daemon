@@ -19,6 +19,7 @@ from .git_stash import GitStashHandler
 from .github_auto_close_keywords import GithubAutoCloseKeywordsHandler
 from .markdown_organization import MarkdownOrganizationHandler
 from .npm_command import NpmCommandHandler
+from .plan_close_approval import PlanCloseApprovalHandler
 from .plan_qa_commit_gate import PlanQaCommitGateHandler
 from .plan_qa_edit import PlanQaEditHandler
 from .plan_time_estimates import PlanTimeEstimatesHandler
@@ -59,6 +60,7 @@ __all__ = [
     "GithubAutoCloseKeywordsHandler",
     "MarkdownOrganizationHandler",
     "NpmCommandHandler",
+    "PlanCloseApprovalHandler",
     "PlanQaCommitGateHandler",
     "PlanQaEditHandler",
     "PlanTimeEstimatesHandler",

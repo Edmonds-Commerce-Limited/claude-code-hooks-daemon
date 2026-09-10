@@ -601,6 +601,12 @@ class HandlerRegistry:
                                     "plan_qa": (
                                         plan_workflow.qa if plan_workflow.enabled else None
                                     ),
+                                    # Plan 00367: the plan-closing gate's toggle.
+                                    "close_requires_human_approval": (
+                                        plan_workflow.close_requires_human_approval
+                                        if plan_workflow.enabled
+                                        else False
+                                    ),
                                 }
                                 for attr_key, attr_val in plan_attrs.items():
                                     setattr(instance, f"_{attr_key}", attr_val)

@@ -251,7 +251,7 @@ Use these guidelines — when in doubt, **enable it**. Handlers can always be di
 | **Workflow** (priority 36-55)     | `npm_command`, `global_npm_advisor`, `gh_issue_comments`, `daemon_restart_verifier`                                                                                                                                     | **Enable ALL** — enforces best practices                                    |
 | **Advisory** (priority 55-60)     | `british_english`, `web_search_year`                                                                                                                                                                                    | Enable based on project preferences                                         |
 | **Session/Lifecycle**             | `git_context_injector`, `version_check`, `optimal_config_checker`                                                                                                                                                       | **Enable ALL** — provides valuable context at zero cost                     |
-| **Planning**                      | `plan_workflow`, `plan_time_estimates`, `plan_qa_edit`, `plan_qa_commit_gate`, `markdown_organization`                                                                                                                  | Enable if using the planning workflow (see Planning section below)          |
+| **Planning**                      | `plan_workflow`, `plan_time_estimates`, `plan_qa_edit`, `plan_qa_commit_gate`, `plan_close_approval`, `markdown_organization`                                                                                           | Enable if using the planning workflow (see Planning section below)          |
 
 **Step 6.3: Edit `.claude/hooks-daemon.yaml` and enable handlers:**
 
@@ -475,19 +475,21 @@ handlers:
     plan_workflow: {enabled: true, priority: 46}
     plan_time_estimates: {enabled: true, priority: 45}
     plan_qa_edit: {enabled: true, priority: 44}
+    plan_close_approval: {enabled: true, priority: 43}
     plan_number_helper: {enabled: true, priority: 33}
     markdown_organization: {enabled: true, priority: 50}
 ```
 
 **What each handler does:**
 
-| Handler                 | What It Enforces                                                                                                                                 |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `plan_workflow`         | Guides agents through proper planning steps when creating plans                                                                                  |
-| `plan_time_estimates`   | Blocks time estimates in plan documents (they are always wrong)                                                                                  |
-| `plan_qa_edit`          | Lints PLAN.md writes — including a terminal status left in the active plan root, which needs the archive move, README row and statistics recount |
-| `plan_number_helper`    | Provides the correct next plan number when agents search for it                                                                                  |
-| `markdown_organization` | Enforces markdown file placement rules in CLAUDE/ directory                                                                                      |
+| Handler                 | What It Enforces                                                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan_workflow`         | Guides agents through proper planning steps when creating plans                                                                                                                 |
+| `plan_time_estimates`   | Blocks time estimates in plan documents (they are always wrong)                                                                                                                 |
+| `plan_qa_edit`          | Lints PLAN.md writes — including a terminal status left in the active plan root, which needs the archive move, README row and statistics recount                                |
+| `plan_close_approval`   | Inert by default; with `plan_workflow.close_requires_human_approval: true` an agent cannot flip a plan to Complete/Cancelled/Superseded until a human runs `approve-plan-close` |
+| `plan_number_helper`    | Provides the correct next plan number when agents search for it                                                                                                                 |
+| `markdown_organization` | Enforces markdown file placement rules in CLAUDE/ directory                                                                                                                     |
 
 **3. Restart daemon:**
 

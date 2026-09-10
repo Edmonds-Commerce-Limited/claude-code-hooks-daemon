@@ -139,6 +139,15 @@ class RuleID:
     PLAN_QA_COMMIT: str = "R-PLAN-QA-COMMIT"
 
     # ------------------------------------------------------------------
+    # plan_close_approval handler (Plan 00367)
+    # ------------------------------------------------------------------
+
+    #: A PLAN.md flip to Complete/Cancelled/Superseded while
+    #: plan_workflow.close_requires_human_approval is on and no human has
+    #: recorded a one-shot approval for that plan.
+    PLAN_CLOSE_APPROVAL: str = "R-PLAN-CLOSE-APPROVAL"
+
+    # ------------------------------------------------------------------
     # docs_qa_edit / docs_qa_commit_gate handlers (gate-level granularity)
     # ------------------------------------------------------------------
 

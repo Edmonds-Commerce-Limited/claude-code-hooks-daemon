@@ -223,6 +223,12 @@ class Priority:
     # QA pair at 44 -- a sibling gate on the same `git commit` trigger, not an
     # extension of either.
     STAGED_LINT_GATE = 43
+    # Plan 00367: shares 43 with staged_lint_gate the way the docs QA pair
+    # shares 47 -- disjoint tool shapes (PLAN.md Write/Edit vs git-commit
+    # Bash), so the slot never collides in practice. Sits BEFORE the plan QA
+    # lint at 44: a flip a human has not approved is denied before it is
+    # linted, so the deny names the gate and not a status-coherence finding.
+    PLAN_CLOSE_APPROVAL = 43
 
     PLAN_QA_EDIT = 44
     PLAN_QA_COMMIT_GATE = 44
