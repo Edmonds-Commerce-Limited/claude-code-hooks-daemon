@@ -109,14 +109,25 @@ class StartupCleanupHandler(StatusLineHandlerBase):
             timestamp: float = data.get(_TIMESTAMP_FIELD, _MISSING_TIMESTAMP)
             count: int = data.get(_COUNT_FIELD, _MISSING_COUNT)
             elapsed = time.time() - timestamp
-            if elapsed < _STARTUP_PHASE_SECONDS:
+            if timestamp == _MISSING_TIMESTAMP:
+                current_value = (
+                    "Not shown now — the daemon has recorded no cleanup status yet, "
+                    "so there is no start to report."
+                )
+            elif elapsed < _STARTUP_PHASE_SECONDS:
                 current_value = "Currently shows: 🧹 (daemon started within the last 5s)."
-            elif elapsed < _DISPLAY_WINDOW_SECONDS and count > 0:
+            elif elapsed >= _DISPLAY_WINDOW_SECONDS:
+                current_value = (
+                    f"Not shown now — the last daemon start was {elapsed:.0f}s ago and the "
+                    f"window is {_DISPLAY_WINDOW_SECONDS:.0f}s. That start cleaned "
+                    f"{count} stale file(s)."
+                )
+            elif count > 0:
                 current_value = f"Currently shows: 🧹 {count} stale (files cleaned at this start)."
             else:
                 current_value = (
-                    f"Not shown now — last daemon start was {elapsed:.0f}s ago "
-                    f"(window is {_DISPLAY_WINDOW_SECONDS:.0f}s), or nothing was cleaned."
+                    f"Not shown now — the window is still open ({elapsed:.0f}s of "
+                    f"{_DISPLAY_WINDOW_SECONDS:.0f}s), but the last start cleaned nothing."
                 )
         except (OSError, RuntimeError) as e:
             logger.debug("Failed to read cleanup status for explain_segment: %s", e)
