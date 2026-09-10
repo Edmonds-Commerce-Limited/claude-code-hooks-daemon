@@ -9,6 +9,7 @@ from .git_filemode_checker import GitFilemodeCheckerHandler
 from .git_upstream_checker import GitUpstreamCheckerHandler
 from .gitignore_safety_checker import GitignoreSafetyCheckerHandler
 from .hook_registration_checker import HookRegistrationCheckerHandler
+from .lsp_noise_checker import LspNoiseCheckerHandler
 from .model_fallback_detector import ModelFallbackDetectorHandler
 from .optimal_config_checker import OptimalConfigCheckerHandler
 from .plan_qa_sweep import PlanQaSweepHandler
@@ -32,6 +33,7 @@ __all__ = [
     "GitUpstreamCheckerHandler",
     "GitignoreSafetyCheckerHandler",
     "HookRegistrationCheckerHandler",
+    "LspNoiseCheckerHandler",
     "ModelFallbackDetectorHandler",
     "OptimalConfigCheckerHandler",
     "PlanQaSweepHandler",

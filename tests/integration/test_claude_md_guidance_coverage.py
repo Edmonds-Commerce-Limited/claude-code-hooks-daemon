@@ -212,6 +212,11 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "PlanWorkflowAssetCheckerHandler": "T3 names a provisioning command to run later",
     "ProjectHandlerLoadCheckerHandler": "T3 'your guardrails are OFF' must persist",
     "GitHooksExecutableFixerHandler": "T3 the daemon changed file permissions on your behalf",
+    "LspNoiseCheckerHandler": (
+        "T3 fix-the-noise-source is a standing rule for every diagnostic the "
+        "language server reports for the rest of the session, not just the "
+        "exclude gap this check happens to catch at session start"
+    ),
     "MarkdownTableFormatterHandler": "T3 the daemon rewrites your .md files after every write",
     "SecretFileHygieneCheckerHandler": "T3 the remediation commands must survive to be actioned",
     "ModelFallbackDetectorHandler": (

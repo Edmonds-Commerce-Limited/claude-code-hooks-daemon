@@ -3355,6 +3355,41 @@ handlers:
       priority: 66
 ```
 
+#### lsp_noise_checker
+
+| Property       | Value               |
+| -------------- | ------------------- |
+| **Config key** | `lsp_noise_checker` |
+| **Priority**   | 69                  |
+| **Type**       | Advisory            |
+| **Event**      | SessionStart        |
+
+**Description:** Plan 00368. Claude Code injects a language server's diagnostics into the agent's context after every edit, and a stream that carries noise (other checkouts' half-built branches under the daemon's runtime dir, archived plan probes, vendored and build output, the vendored remote-docs tree) trains the agent to skim it, which is the same as having no LSP at all. This is a Strategy Pattern handler (`strategies/lsp_noise/`, see its `CLAUDE.md`) with zero language-specific logic of its own: on a new session, for every supported language present, it asks that language's strategy for two checks and prints the exact fix for each. Every mechanism below is verified against Claude Code's own marketplace plugin configs (`anthropics/claude-plugins-official`'s `.claude-plugin/marketplace.json`, which carries no `settings`/`initializationOptions` for any of these plugins) and each tool's own docs, never assumed:
+
+| Language              | `R-LSP-CONFIG-EXCLUDE` mechanism                                                                                                                                                                                                                                                                                                                                | `R-LSP-SERVER-STALE` process |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| Python                | `pyrightconfig.json` (or `[tool.pyright]` in `pyproject.toml`) `exclude`                                                                                                                                                                                                                                                                                        | `pyright-langserver`         |
+| TypeScript/JavaScript | `tsconfig.json` (or `jsconfig.json`) `exclude`                                                                                                                                                                                                                                                                                                                  | `typescript-language-server` |
+| Go                    | No exclude list - gopls scopes to `go.mod`'s module boundary; reported only when a non-project tree holds `.go` files inside it                                                                                                                                                                                                                                 | `gopls`                      |
+| Rust                  | No exclude list, but workspace membership is editable - reported entries go into the root `Cargo.toml`'s `[workspace] exclude`                                                                                                                                                                                                                                  | `rust-analyzer`              |
+| PHP                   | No project file at all - intelephense takes `files.exclude` only via LSP client settings, which the official `php-lsp` plugin never sets; the fix is a project-scope LSP plugin under `.claude/plugins/*/` that re-registers `.php` with its own `settings` (the first registered server for an extension wins, so this genuinely replaces the marketplace one) | `intelephense`               |
+
+The derived non-project-tree list itself is language-agnostic and shared by every strategy: the daemon's runtime directory (`untracked`), the configured plan directory (`plan_workflow.directory`), the reviewed vendored/build directory names at any depth (`**/node_modules`, `**/vendor`, `**/dist`, `**/build`, `**/.venv`, …) and the remote-docs tree (`documentation.trees.remote`). `R-LSP-SERVER-STALE` names the pid(s) whose start time predates the language's own anchor file (the config file for Python/TypeScript, `go.mod`/`Cargo.toml` for Go/Rust, the override plugin file for PHP) and the command that ends them; the harness respawns a fresh server on the next LSP use.
+
+**Honest limits:** coverage for Python/TypeScript is judged on the entry text (equal, parent directory, or the bare name of an any-depth glob), not by asking the server what it would actually analyse; a config that reaches the same effect through `include` alone is still reported. The Go/Rust walk is scoped to the daemon's plain (non-glob) required trees only - see `go_strategy.py`/`rust_strategy.py` for why. The PHP check verifies only that a qualifying override FILE exists, not that it is enabled in `.claude/settings.json`. The process scan sees this machine's process table only.
+
+**Silent when:** the project has no supported language's root-level toolchain marker, the session is a resume, every derived tree is excluded for every present language, and no matching language-server process predates its check's anchor file.
+
+**Config example:**
+
+```yaml
+handlers:
+  session_start:
+    lsp_noise_checker:
+      enabled: true
+      priority: 69
+```
+
 ---
 
 ## PreCompact Handlers

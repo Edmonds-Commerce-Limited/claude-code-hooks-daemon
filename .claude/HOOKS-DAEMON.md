@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-09-09 (v3.63.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-09-10 (v3.63.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
@@ -82,7 +82,7 @@
 | 32 | budget_exhaustion_detector | ADVISORY | Advisory PostToolUse handler that flags budget/quota-exhaustion messaging |
 | 33 | model_downgrade_recorder | ADVISORY | Publish Claude Code's own automatic model-downgrade record, silently |
 
-### SessionStart (21 handlers)
+### SessionStart (22 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -107,6 +107,7 @@
 | 66 | monorepo_detector | ADVISORY | Advise when manifests exist below the repo root but not at it |
 | 67 | config_optimisation_reminder | ADVISORY | Remind the agent when the config-optimisation review is stale |
 | 68 | remote_docs_staleness | ADVISORY | Report vendored documents that are stale or no longer parse |
+| 69 | lsp_noise_checker | ADVISORY | Advise when a Python project's pyright config lets noise into the LSP stream |
 
 ### PreCompact (2 handlers)
 
@@ -185,8 +186,8 @@
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 8 | ReleaseBlockerHandler | BLOCKING | Blocks Stop event while a release is in flight |
-| 20 | PlanDoneRequiresHoldingAreaHandler | BLOCKING | Deny a Complete flip whose Success Criteria never mention the holding area |
 | 41 | EnforceLlmQaHandler | BLOCKING | Block run_all.sh and direct LLM agents to llm_qa.py |
+| 51 | PlanDoneRequiresHoldingAreaHandler | BLOCKING | Deny a Complete flip whose Success Criteria never mention the holding area |
 
 ### Pseudo Nitpick (2 handlers)
 

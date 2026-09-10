@@ -345,6 +345,18 @@
       "reason": "Hook registration checker: returns None when ProjectContext not initialized. Caller checks for None and returns empty context. Advisory handler — failure should not break session start. Already logged at debug level."
     },
     {
+      "file": "handlers/session_start/lsp_noise_checker.py",
+      "function": "_get_project_root",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00368 Task 2.2: returns None when ProjectContext is not initialised (unit tests, or any non-daemon caller). matches()/handle() both check for None and skip the check entirely. Advisory handler — failure should not break session start. Same explicitly-non-fatal contract as hook_registration_checker._get_project_root (Plan 00142). Already logged at debug level."
+    },
+    {
+      "file": "strategies/lsp_noise/php_strategy.py",
+      "function": "_load_json_object",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00368 Task 2.2: a project-scope .claude/plugins/*/.lsp.json or plugin.json is user-authored, arbitrary content this strategy only reads best-effort while scanning for a PHP LSP exclude override — a malformed one is skipped, not raised, and _candidate_exclude/_best_override treat it exactly like a directory with no override at all (the advisory then prints the paste-ready snippet, same outcome as no file existing). Same tolerant-JSON-record shape as blockage_marker.read_marker (Plan 00298) and goal_ledger._parse_entry, feeding a SessionStart advisory that must never crash a session over another tool's config file."
+    },
+    {
       "file": "handlers/session_start/gitignore_safety_checker.py",
       "function": "_compute_gitignore_hash",
       "rule": "log-and-continue",

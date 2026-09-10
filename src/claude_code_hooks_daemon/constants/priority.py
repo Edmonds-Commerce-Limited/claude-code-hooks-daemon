@@ -282,6 +282,10 @@ class Priority:
     # SessionStart priority after config_optimisation_reminder (67), so
     # ADVISORY_MAX widens by one again.
     REMOTE_DOCS_STALENESS = 68
+    # Plan 00368 Task 2.2: LSP noise checker -- next free SessionStart
+    # priority after remote_docs_staleness (68), so ADVISORY_MAX widens by
+    # one again.
+    LSP_NOISE_CHECKER = 69
 
     # Advisory handlers (Priority: 55-65)
     CRITICAL_THINKING_ADVISORY = 55
@@ -333,8 +337,10 @@ class PriorityRange:
     # fully occupied by the SessionStart advisory ladder ending at
     # contract_staleness (60). Widened again to 66 for monorepo_detector
     # (Plan 00296 Task 3.4), and to 67 for config_optimisation_reminder
-    # (Plan 00308). Documented in root CLAUDE.md's Priority Ranges.
-    ADVISORY_MAX = 68
+    # (Plan 00308), 68 for remote_docs_staleness (Plan 00326) and 69 for
+    # lsp_noise_checker (Plan 00368). Documented in root CLAUDE.md's Priority
+    # Ranges.
+    ADVISORY_MAX = 69
 
     LOGGING_MIN = 100
     LOGGING_MAX = 199
