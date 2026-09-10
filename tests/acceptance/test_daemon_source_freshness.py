@@ -43,9 +43,7 @@ def _query_running_fingerprint(socket_path: Path) -> str | None:
 class TestRunningDaemonSourceMatchesWorkingTree:
     """The literal regression reproduction."""
 
-    def test_running_daemon_fingerprint_matches_the_working_tree(
-        self, daemon_socket: Path
-    ) -> None:
+    def test_running_daemon_fingerprint_matches_the_working_tree(self, daemon_socket: Path) -> None:
         """A fresh daemon's reported fingerprint equals the current on-disk one.
 
         This is the exact incident, reproduced directly: if the daemon
@@ -55,9 +53,9 @@ class TestRunningDaemonSourceMatchesWorkingTree:
         running_fingerprint = _query_running_fingerprint(daemon_socket)
         current_fingerprint = compute_current_project_fingerprint(REPO_ROOT)
 
-        assert running_fingerprint is not None, (
-            "daemon health response carried no source_fingerprint at all"
-        )
+        assert (
+            running_fingerprint is not None
+        ), "daemon health response carried no source_fingerprint at all"
         assert running_fingerprint == current_fingerprint, describe_fingerprint_mismatch(
             running_fingerprint, current_fingerprint
         )

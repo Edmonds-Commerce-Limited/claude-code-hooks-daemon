@@ -108,13 +108,13 @@ def compute_current_project_fingerprint(project_root: Path | str) -> str:
 
     extra_roots: list[Path] = []
     if config.project_handlers.enabled:
-        extra_roots.append(
-            resolve_repo_relative_path(config.project_handlers.path, project_root)
-        )
+        extra_roots.append(resolve_repo_relative_path(config.project_handlers.path, project_root))
     return compute_daemon_identity_fingerprint(*extra_roots)
 
 
-def describe_fingerprint_mismatch(running_fingerprint: str | None, current_fingerprint: str) -> str | None:
+def describe_fingerprint_mismatch(
+    running_fingerprint: str | None, current_fingerprint: str
+) -> str | None:
     """Return a diagnostic message if the running daemon looks stale, else ``None``.
 
     ``running_fingerprint`` is what a live daemon reported over its
