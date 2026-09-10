@@ -81,6 +81,19 @@ class TestDaemonVenvMetadataSchema:
         with pytest.raises(ValidationError):
             DaemonVenvMetadata(**kw)
 
+    def test_daemon_version_accepts_a_branch_install_stamp(self) -> None:
+        """Plan 00291: a guarded branch install stamps ``vX.Y.Z+<ref>.<sha>``."""
+        kw = self._valid_kwargs()
+        kw["daemon_version"] = "v3.63.0+main.8d011476"
+        assert DaemonVenvMetadata(**kw).daemon_version == "v3.63.0+main.8d011476"
+
+    def test_daemon_version_rejects_a_bare_ref(self) -> None:
+        """The stamp always carries the release it is heading towards."""
+        kw = self._valid_kwargs()
+        kw["daemon_version"] = "main"
+        with pytest.raises(ValidationError):
+            DaemonVenvMetadata(**kw)
+
     def test_written_at_must_be_iso8601(self) -> None:
         kw = self._valid_kwargs()
         kw["written_at"] = "yesterday"

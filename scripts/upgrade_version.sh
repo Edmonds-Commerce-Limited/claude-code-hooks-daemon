@@ -60,6 +60,8 @@ source "$INSTALL_LIB_DIR/settings_deploy.sh"
 source "$INSTALL_LIB_DIR/config_preserve.sh"
 # shellcheck source=install/upgrade_transition.sh
 source "$INSTALL_LIB_DIR/upgrade_transition.sh"
+# shellcheck source=install/branch_install.sh
+source "$INSTALL_LIB_DIR/branch_install.sh"
 
 # ============================================================
 # Argument parsing
@@ -80,6 +82,42 @@ fi
 if [ ! -d "$DAEMON_DIR" ]; then
     fail_fast "Daemon directory does not exist: $DAEMON_DIR"
 fi
+
+# Run AT the project root. The daemon-control helpers invoke daemon.cli
+# start/stop/status with no --project-root, and the CLI resolves the project
+# it manages from the current working directory -- so an upgrade driven from
+# anywhere else started and "verified" a daemon for the caller's own project,
+# wrote its socket and PID file there, and reported success for a client it
+# never touched (Plan 00291 canary re-run). Both arguments are made absolute
+# first so a relative DAEMON_DIR keeps pointing at the same directory.
+PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)"
+DAEMON_DIR="$(cd "$DAEMON_DIR" && pwd)"
+cd "$PROJECT_ROOT"
+
+# Plan 00291: the guarded branch-install gate (see install/branch_install.sh).
+# Evaluated here, before anything is touched: a half-armed gate is refused
+# outright. When armed, INSTALL_STAMP becomes vX.Y.Z+<ref>.<sha> for the
+# commit actually checked out, and that stamp -- not TARGET_VERSION -- is
+# what the venv records and what status / version_check read back.
+BRANCH_INSTALL_STATE="$(branch_install_gate_state)" || fail_fast "Refusing the half-armed branch-install gate (see above)"
+TRACK_REF="${HOOKS_DAEMON_UNSAFE_TRACK_REF:-}"
+TRACK_REASON="${HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE:-}"
+INSTALL_STAMP="$TARGET_VERSION"
+
+# _resolve_install_stamp() - Set INSTALL_STAMP for the commit HEAD is on.
+#
+# Called once the daemon dir sits on the target (the fast path finds it there
+# already; the slow path arrives after Step 6). A release install keeps the
+# tag as its stamp; a branch install computes and announces its own.
+_resolve_install_stamp() {
+    if [ "$BRANCH_INSTALL_STATE" != "armed" ]; then
+        INSTALL_STAMP="$TARGET_VERSION"
+        return 0
+    fi
+    INSTALL_STAMP="$(branch_install_stamp "$DAEMON_DIR" "$TRACK_REF")" \
+        || fail_fast "Could not derive the branch-install stamp for $DAEMON_DIR"
+    print_branch_install_banner "$TRACK_REF" "$TRACK_REASON" "$INSTALL_STAMP"
+}
 
 # Derived paths
 # v3.7.0+ venvs are fingerprint-keyed; v3.8.1 added a scan-fallback for the
@@ -248,6 +286,12 @@ log_step "2" "Pre-upgrade checks"
 # already moved to the target, so reading version.py here would report the NEW
 # version as the one being upgraded FROM. The first pass hands the real
 # starting version over instead, keeping the summary honest.
+#
+# Plan 00291 Task 1.3: with no venv (the fresh-clone client state) there is
+# no interpreter to ask, but version.py is a one-line file, so read it
+# directly rather than reporting "unknown" for a checkout that plainly says.
+# Layer 1 hands the true pre-checkout version over in the environment, which
+# takes precedence because on its path the checkout has already moved.
 CURRENT_VERSION="unknown"
 VERSION_FILE="$DAEMON_DIR/src/claude_code_hooks_daemon/version.py"
 if [ -n "${HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION:-}" ]; then
@@ -257,6 +301,11 @@ elif [ -f "$VERSION_FILE" ] && [ -f "$VENV_PYTHON" ]; then
 from claude_code_hooks_daemon.version import __version__
 print(__version__)
 " 2>/dev/null || echo "unknown")
+elif [ -f "$VERSION_FILE" ]; then
+    CURRENT_VERSION=$(awk -F'"' '/^__version__[[:space:]]*=/ { print $2; exit }' "$VERSION_FILE")
+    if [ -z "$CURRENT_VERSION" ]; then
+        CURRENT_VERSION="unknown"
+    fi
 fi
 
 # Get current git ref for rollback
@@ -276,14 +325,23 @@ print_info "Current git ref: ${ROLLBACK_REF:-unknown}"
 # the TRUE transition of the actually-built venv (INSTALLED_VERSION, the venv
 # stamp) → target, NOT the always-equal git ref. This is the fix for the
 # misleading "Already at version X" that fired even on a genuine version jump.
-if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ]; then
-    print_success "$(upgrade_transition_headline "$INSTALLED_VERSION" "$TARGET_VERSION")"
+#
+# Plan 00291: "already at the target" is a question about COMMITS, not about
+# the spelling of a name. Layer 1 hands a branch install its resolved commit
+# as the target, which no tag describes, so the name comparison alone would
+# send every branch install down the slow path while every tag takes this
+# one. A second tag on the same commit is the same case for a release.
+TARGET_COMMIT="$(git -C "$DAEMON_DIR" rev-parse --verify --quiet "${TARGET_VERSION}^{commit}")" || TARGET_COMMIT=""
+HEAD_COMMIT="$(git -C "$DAEMON_DIR" rev-parse HEAD)"
+if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ] || { [ -n "$TARGET_COMMIT" ] && [ "$TARGET_COMMIT" = "$HEAD_COMMIT" ]; }; then
+    _resolve_install_stamp
+    print_success "$(upgrade_transition_headline "$INSTALLED_VERSION" "$INSTALL_STAMP")"
     print_info "Running idempotent deployment steps to ensure files are current..."
 
     # Plan 00099: ensure_venv uses a fingerprint-keyed venv path so concurrent
     # environments (container vs host, different Pythons) don't clobber each
     # other. Handles stale/missing stamps internally (recreate+restamp).
-    VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$TARGET_VERSION" "${HOOKS_DAEMON_PYTHON:-python3}")
+    VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$INSTALL_STAMP" "${HOOKS_DAEMON_PYTHON:-python3}")
     if [ -z "$VENV_PATH" ]; then
         fail_fast "ensure_venv returned empty path"
     fi
@@ -441,7 +499,10 @@ FASTPATH_RELAY_PY
         print_warning "Failed to regenerate handler docs (non-fatal; run 'hooks-daemon regenerate-docs')"
     fi
 
-    print_success "$(upgrade_transition_summary "$INSTALLED_VERSION" "$TARGET_VERSION")"
+    print_success "$(upgrade_transition_summary "$INSTALLED_VERSION" "$INSTALL_STAMP")"
+    if [ "$BRANCH_INSTALL_STATE" = "armed" ]; then
+        print_branch_install_banner "$TRACK_REF" "$TRACK_REASON" "$INSTALL_STAMP"
+    fi
     exit 0
 fi
 
@@ -818,6 +879,17 @@ print_info "Checking out $TARGET_VERSION..."
 git -C "$DAEMON_DIR" checkout "$TARGET_VERSION" --quiet
 print_success "Checked out $TARGET_VERSION"
 
+# Plan 00291: the daemon dir now sits on the target, so the stamp the venv
+# will carry is known. A branch install announces itself here; a release
+# install keeps the tag. An unguarded checkout of something no tag names is
+# the one shape the gate exists to replace, so it is called out, not stamped.
+_resolve_install_stamp
+if [ "$BRANCH_INSTALL_STATE" != "armed" ]; then
+    if ! EXACT_TAG_AT_HEAD="$(git -C "$DAEMON_DIR" describe --tags --exact-match HEAD 2>&1)"; then
+        print_warning "$TARGET_VERSION is not a release tag ($EXACT_TAG_AT_HEAD). This install will not be recorded as a non-release; reinstall from a release tag."
+    fi
+fi
+
 # Did that checkout replace THIS script? If so, the steps below are the ones
 # the PREVIOUS release shipped, and anything the target added is missing from
 # them. Recorded here and acted on at the very end of the run: re-exec'ing now
@@ -842,7 +914,7 @@ log_step "7" "Recreating virtual environment"
 # Plan 00099: use fingerprint-keyed venv so concurrent environments (container
 # vs host, different Pythons) each keep their own healthy venv. ensure_venv
 # rebuilds when the stamp is missing/stale and handles creation atomically.
-VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$TARGET_VERSION" "${HOOKS_DAEMON_PYTHON:-python3}")
+VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$INSTALL_STAMP" "${HOOKS_DAEMON_PYTHON:-python3}")
 if [ -z "$VENV_PATH" ]; then
     fail_fast "ensure_venv returned empty path"
 fi
@@ -1236,7 +1308,11 @@ print_header "Upgrade Complete"
 print_success "Claude Code Hooks Daemon upgraded successfully!"
 echo ""
 echo "  Previous version: $CURRENT_VERSION"
-echo "  Current version:  $NEW_VERSION"
+if [ "$BRANCH_INSTALL_STATE" = "armed" ]; then
+    echo "  Current version:  $NEW_VERSION (NON-RELEASE, stamped $INSTALL_STAMP)"
+else
+    echo "  Current version:  $NEW_VERSION"
+fi
 echo "  Config:           $TARGET_CONFIG"
 echo "  Config backup:    ${CONFIG_BACKUP:-none}"
 echo "  Rollback snapshot: ${SNAPSHOT_ID:-none}"
@@ -1283,6 +1359,10 @@ echo "IMPORTANT: after the review, restart Claude Code to activate upgraded hook
 echo "  1. Exit your current Claude Code session"
 echo "  2. Start a new Claude Code session"
 echo ""
+
+if [ "$BRANCH_INSTALL_STATE" = "armed" ]; then
+    print_branch_install_banner "$TRACK_REF" "$TRACK_REASON" "$INSTALL_STAMP"
+fi
 
 # Second pass: everything above ran from the pre-upgrade script, because Step 6
 # replaced this file after bash had already read it. Re-exec the target's OWN

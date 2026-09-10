@@ -500,6 +500,15 @@ if [[ -z "${CLAUDE_HOOKS_SOCKET_PATH:-}" ]] && [[ ! -S "$SOCKET_PATH" ]]; then
         _discovered_path=$(cat "$_discovery_file" 2>/dev/null)
         if [[ -n "$_discovered_path" ]] && [[ -S "$_discovered_path" ]]; then
             SOCKET_PATH="$_discovered_path"
+            # The daemon that fell back put its PID file beside that socket
+            # under the same stem (paths.get_pid_path mirrors get_socket_path),
+            # so the PID path must follow too. Left at the long default,
+            # is_daemon_running finds no PID, `cli start` then sees a live
+            # socket that is "not ours" and refuses it, and every forwarder
+            # reports daemon_startup_failed while status shows RUNNING.
+            if [[ -z "${CLAUDE_HOOKS_PID_PATH:-}" ]]; then
+                PID_PATH="${_discovered_path%.sock}.pid"
+            fi
         fi
     fi
 fi

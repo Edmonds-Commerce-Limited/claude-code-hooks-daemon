@@ -265,6 +265,29 @@ find_compatible_python "$_DAEMON_PYPROJECT_DIR"
 # Step 3: Determine daemon directory and mode
 DAEMON_DIR="$PROJECT_ROOT/.claude/hooks-daemon"
 SELF_INSTALL="false"
+
+# Plan 00291 Task 1.2: the fresh-clone client state. A teammate who clones an
+# existing client repository gets its committed config and forwarders but no
+# daemon checkout (gitignored) and no venv. That project is an EXISTING client
+# and this script is its route -- the installer would treat it as green-field.
+# The checkout is the only thing missing, so clone it here and carry on; every
+# later step already tolerates the absent venv. Only a project that already
+# carries a config qualifies: with no config there is nothing to upgrade, and
+# the reader is sent to the install guide instead.
+_DAEMON_DIR_CLONED_HERE="false"
+if [ ! -e "$DAEMON_DIR" ]; then
+    if [ -f "$PROJECT_ROOT/.claude/hooks-daemon.yaml" ]; then
+        _CLONE_URL="${HOOKS_DAEMON_CLONE_URL:-https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git}"
+        _info "No daemon checkout at $DAEMON_DIR but a config exists: cloning the daemon for this existing install..."
+        git -C "$PROJECT_ROOT" -c protocol.file.allow=always clone --quiet "$_CLONE_URL" "$DAEMON_DIR" \
+            || _fail "Could not clone the daemon into $DAEMON_DIR from $_CLONE_URL"
+        _DAEMON_DIR_CLONED_HERE="true"
+        _ok "Cloned daemon into $DAEMON_DIR"
+    else
+        _fail "No daemon checkout at $DAEMON_DIR and no config at $PROJECT_ROOT/.claude/hooks-daemon.yaml: this project has no daemon installed. Use a fresh install instead: see CLAUDE/LLM-INSTALL.md"
+    fi
+fi
+
 if [ -f "$PROJECT_ROOT/.claude/hooks-daemon.yaml" ] && [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
     SELF_INSTALL=$("$HOOKS_DAEMON_PYTHON" -c "
 import yaml
@@ -308,12 +331,35 @@ _ok "Daemon directory: $DAEMON_DIR"
 # Plan 00109 Phase 1.3: emit UPGRADE_METADATA after Layer 2 returns. The
 # from_version field is the version we are upgrading FROM, so it must be read
 # from the daemon's current pyproject.toml BEFORE Step 6 checks out a new tag.
+#
+# Plan 00291 Task 1.3: when Step 3 cloned the daemon dir, its pyproject.toml
+# is the CLONE's HEAD, not anything this client ever ran, so it says nothing
+# about the FROM side. The project's committed HOOKS-DAEMON.md carries the
+# version that generated it, which is the version the client last ran. If
+# even that is absent the FROM side is unknown and stays empty; Layer 2
+# then says so rather than guessing.
 FROM_VERSION=""
-if [ -f "$DAEMON_DIR/pyproject.toml" ]; then
+if [ "$_DAEMON_DIR_CLONED_HERE" = "true" ]; then
+    _DOCS_STAMP_FILE="$PROJECT_ROOT/.claude/HOOKS-DAEMON.md"
+    if [ -f "$_DOCS_STAMP_FILE" ]; then
+        FROM_VERSION="$(awk 'match($0, /Generated on [^(]*\(v[0-9]+\.[0-9]+\.[0-9]+\)/) { s = substr($0, RSTART, RLENGTH); sub(/.*\(/, "", s); sub(/\)$/, "", s); print s; exit }' "$_DOCS_STAMP_FILE")"
+    fi
+    if [ -n "$FROM_VERSION" ]; then
+        _ok "Previous version read from the committed HOOKS-DAEMON.md: $FROM_VERSION"
+    else
+        _warn "Previous version unknown: no daemon checkout existed and .claude/HOOKS-DAEMON.md carries no version stamp"
+    fi
+elif [ -f "$DAEMON_DIR/pyproject.toml" ]; then
     FROM_VERSION="$(awk -F'"' '/^version[[:space:]]*=/ {print $2; exit}' "$DAEMON_DIR/pyproject.toml")"
     if [ -n "$FROM_VERSION" ] && [[ ! "$FROM_VERSION" =~ ^v ]]; then
         FROM_VERSION="v$FROM_VERSION"
     fi
+fi
+# Layer 2 reads this for its "Current version" line and the upgrade-guide
+# range. Without it a client with no venv (the fresh-clone state) reported
+# "Current version: unknown" although this script knew the answer.
+if [ -n "$FROM_VERSION" ]; then
+    export HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION="$FROM_VERSION"
 fi
 
 # Step 3c: Capture the OLD default config before the checkout overwrites it.
@@ -422,22 +468,84 @@ _stop_running_daemons "$DAEMON_DIR"
 _info "Fetching latest tags..."
 git -C "$DAEMON_DIR" fetch --tags --force --quiet
 
-if [ -z "$TARGET_VERSION" ]; then
-    TARGET_VERSION=$(git -C "$DAEMON_DIR" describe --tags \
-        "$(git -C "$DAEMON_DIR" rev-list --tags --max-count=1)" 2>/dev/null || echo "")
-    if [ -z "$TARGET_VERSION" ]; then
-        _fail "No tags found. Specify a version explicitly."
+# Plan 00291: the guarded branch-install gate. First-party only: BOTH
+# variables must be set, there is no positional spelling (a bare branch name
+# is still normalised to a tag name below and fails), and exactly one of the
+# two set is refused rather than ignored. scripts/install/branch_install.sh is
+# the shared implementation Layer 2 sources; this script may be running from
+# a curl-fetched copy with no library beside it, so it carries its own copy
+# of the check -- keep the two in step.
+#
+# TARGET_VERSION is what Layer 2 checks out: a tag normally, the RESOLVED
+# COMMIT for a branch install so Layer 2's own checkout cannot land on a
+# stale local branch. TARGET_DISPLAY is what the operator reads and what the
+# metadata block reports: the tag, or the vX.Y.Z+<ref>.<sha> stamp.
+# TARGET_SEMVER is the bare release the target carries, for the manifest
+# range below.
+_TRACK_REF="${HOOKS_DAEMON_UNSAFE_TRACK_REF:-}"
+_TRACK_REASON="${HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE:-}"
+_BRANCH_INSTALL="false"
+if [ -n "$_TRACK_REF" ] || [ -n "$_TRACK_REASON" ]; then
+    if [ -z "$_TRACK_REF" ]; then
+        _fail "HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE is set but HOOKS_DAEMON_UNSAFE_TRACK_REF is not: a branch install needs both, refusing."
     fi
+    if [ -z "$_TRACK_REASON" ]; then
+        _fail "HOOKS_DAEMON_UNSAFE_TRACK_REF is set but HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE is empty: a branch install needs a reason, refusing."
+    fi
+    if [ -n "$TARGET_VERSION" ]; then
+        _fail "A version argument ($TARGET_VERSION) and HOOKS_DAEMON_UNSAFE_TRACK_REF ($_TRACK_REF) cannot both be given: the tracked ref IS the target, refusing."
+    fi
+    _BRANCH_INSTALL="true"
 fi
 
-# Normalise version: prepend 'v' if missing
-if [[ -n "$TARGET_VERSION" && ! "$TARGET_VERSION" =~ ^v ]]; then
-    TARGET_VERSION="v${TARGET_VERSION}"
+TARGET_DISPLAY=""
+TARGET_SEMVER=""
+if [ "$_BRANCH_INSTALL" = "true" ]; then
+    _info "Fetching tracked ref '$_TRACK_REF' from origin..."
+    git -C "$DAEMON_DIR" fetch --force --quiet origin "$_TRACK_REF" \
+        || _fail "Ref '$_TRACK_REF' not found on origin"
+    TARGET_VERSION="$(git -C "$DAEMON_DIR" rev-parse FETCH_HEAD)"
+    _TARGET_SHORT="$(git -C "$DAEMON_DIR" rev-parse --short FETCH_HEAD)"
+    TARGET_SEMVER="$(git -C "$DAEMON_DIR" show "FETCH_HEAD:pyproject.toml" \
+        | awk -F'"' '/^version[[:space:]]*=/ {print $2; exit}')"
+    [ -n "$TARGET_SEMVER" ] || _fail "Ref '$_TRACK_REF' carries no [project].version in pyproject.toml"
+    TARGET_SEMVER="v$TARGET_SEMVER"
+    TARGET_DISPLAY="${TARGET_SEMVER}+${_TRACK_REF//\//-}.${_TARGET_SHORT}"
+else
+    if [ -z "$TARGET_VERSION" ]; then
+        TARGET_VERSION=$(git -C "$DAEMON_DIR" describe --tags \
+            "$(git -C "$DAEMON_DIR" rev-list --tags --max-count=1)" 2>/dev/null || echo "")
+        if [ -z "$TARGET_VERSION" ]; then
+            _fail "No tags found. Specify a version explicitly."
+        fi
+    fi
+
+    # Normalise version: prepend 'v' if missing
+    if [[ -n "$TARGET_VERSION" && ! "$TARGET_VERSION" =~ ^v ]]; then
+        TARGET_VERSION="v${TARGET_VERSION}"
+    fi
+    TARGET_DISPLAY="$TARGET_VERSION"
+    TARGET_SEMVER="$TARGET_VERSION"
 fi
 
 git -C "$DAEMON_DIR" rev-parse "$TARGET_VERSION" &>/dev/null || \
     _fail "Version $TARGET_VERSION not found"
-_ok "Target version: $TARGET_VERSION"
+if [ "$_BRANCH_INSTALL" = "true" ]; then
+    echo ""
+    echo "=========================================================================="
+    echo "  WARNING: NON-RELEASE INSTALL (guarded branch install)"
+    echo "  Tracking ref : $_TRACK_REF @ $_TARGET_SHORT"
+    echo "  Install stamp: $TARGET_DISPLAY"
+    echo "  Reason       : $_TRACK_REASON"
+    echo "  This is not a release. No rollback guarantee, no upgrade-guide coverage"
+    echo "  until the release that contains it ships. status and every new session"
+    echo "  will flag this install until it is reinstalled from a release tag."
+    echo "=========================================================================="
+    echo ""
+    _ok "Target: $TARGET_DISPLAY"
+else
+    _ok "Target version: $TARGET_VERSION"
+fi
 
 # Step 6: Land the daemon dir on the target version FIRST (before Layer 2).
 #
@@ -470,13 +578,18 @@ _ok "Target version: $TARGET_VERSION"
 # Pinned by tests/integration/test_upgrade_sh_forced_checkout.py, which
 # extracts the client invocation from this file and runs it against dirty
 # fixtures -- reverting to a plain checkout fails those tests.
-_info "Checking out $TARGET_VERSION..."
+_info "Checking out $TARGET_DISPLAY..."
 if [ "$SELF_INSTALL" = "true" ]; then
     git -C "$DAEMON_DIR" checkout "$TARGET_VERSION" --quiet
 else
     git -C "$DAEMON_DIR" reset --hard --quiet "$TARGET_VERSION"
 fi
-_ok "Checked out $TARGET_VERSION"
+if [ "$SELF_INSTALL" = "true" ] && [ "$_BRANCH_INSTALL" = "true" ]; then
+    # The developer's own repository: land on the branch itself rather than
+    # its detached commit, so their working state stays a branch.
+    git -C "$DAEMON_DIR" checkout "$_TRACK_REF" --quiet
+fi
+_ok "Checked out $TARGET_DISPLAY"
 
 # Step 7: Clean up nested install artifacts
 # When daemon repo has .claude/ in git (self-install dogfooding), normal installs
@@ -502,7 +615,7 @@ LAYER2_SCRIPT="$DAEMON_DIR/scripts/upgrade_version.sh"
 
 if [ ! -f "$LAYER2_SCRIPT" ]; then
     _fail "Layer 2 upgrader not found at: $LAYER2_SCRIPT
-Target version $TARGET_VERSION does not include the upgrade system.
+Target version $TARGET_DISPLAY does not include the upgrade system.
 Use a fresh install instead: see CLAUDE/LLM-INSTALL.md"
 fi
 
@@ -635,8 +748,22 @@ fi
 # BEFORE the UPGRADE_METADATA sentinel so it never pollutes the
 # machine-parsed block.
 #
-# FROM_VERSION/TARGET_VERSION both carry a leading `v`; the CLI's
+# FROM_VERSION/TARGET_SEMVER both carry a leading `v`; the CLI's
 # _parse_version does NOT strip it, so we pass the `#v`-stripped values.
+# TARGET_SEMVER rather than TARGET_VERSION: for a branch install the latter
+# is a commit, and the range wants the release the branch is heading for.
+# A branch install's CLI includes the UNRELEASED manifests by itself, from
+# its own install stamp (Plan 00291 Task 2.3).
+#
+# Both summaries need a FROM side. Without one (a fresh clone whose committed
+# docs carry no stamp) the range cannot be formed, so say so once instead of
+# letting each command fail on an empty --from.
+if [ -z "$FROM_VERSION" ]; then
+    _warn "Previous version unknown, so the truth-changes and config-options summaries are skipped. Re-run them with --from <your previous version> --to ${TARGET_SEMVER#v} once you know it."
+fi
+if [ -z "$FROM_VERSION" ]; then
+    _metadata_venv_python=""
+fi
 if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
     # check-truth-changes exits 1 when changes exist (normal!), 0 when none,
     # 2 on error. `set -euo pipefail` is active, so capture rc via the
@@ -650,7 +777,7 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
     if _truth_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
         check-truth-changes \
         --from "${FROM_VERSION#v}" \
-        --to "${TARGET_VERSION#v}" \
+        --to "${TARGET_SEMVER#v}" \
         --project-root "$PROJECT_ROOT" 2>&1)"; then
         _truth_rc=0
     else
@@ -674,7 +801,7 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
         _info "${_BOLD}Project-doc reconciliation needed${_NC}"
         echo "$_truth_out"
         _info "Reconcile your project's own docs per upgrade.md step 4."
-        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-truth-changes --from ${FROM_VERSION#v} --to ${TARGET_VERSION#v} --project-root \"$PROJECT_ROOT\""
+        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-truth-changes --from ${FROM_VERSION#v} --to ${TARGET_SEMVER#v} --project-root \"$PROJECT_ROOT\""
     elif [ "$_truth_rc" -eq 0 ]; then
         _ok "Project-doc reconciliation: no changes needed for this upgrade."
     else
@@ -699,7 +826,7 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
     if _cfg_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
         check-config-migrations \
         --from "${FROM_VERSION#v}" \
-        --to "${TARGET_VERSION#v}" \
+        --to "${TARGET_SEMVER#v}" \
         --config "$PROJECT_ROOT/.claude/hooks-daemon.yaml" \
         --project-root "$PROJECT_ROOT" 2>&1)"; then
         _cfg_rc=0
@@ -723,7 +850,7 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
         _info "${_BOLD}Newly-available / recommended config options${_NC}"
         echo "$_cfg_out"
         _info "Review per upgrade.md step 5. Enabling is your choice; the daemon never edits your config."
-        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-config-migrations --from ${FROM_VERSION#v} --to ${TARGET_VERSION#v} --project-root \"$PROJECT_ROOT\""
+        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-config-migrations --from ${FROM_VERSION#v} --to ${TARGET_SEMVER#v} --project-root \"$PROJECT_ROOT\""
     elif [ "$_cfg_rc" -eq 0 ]; then
         _ok "Config options: nothing new to enable for this upgrade."
     else
@@ -767,7 +894,7 @@ fi
 # starts on its own line even if Layer 2's last output had no trailing \n.
 printf '\n<<<UPGRADE_METADATA\n'
 printf 'from_version=%s\n' "$FROM_VERSION"
-printf 'to_version=%s\n' "$TARGET_VERSION"
+printf 'to_version=%s\n' "$TARGET_DISPLAY"
 printf 'python_version=%s\n' "$_metadata_python_version"
 printf 'python_path=%s\n' "$_metadata_python_path"
 printf 'venv_path=%s\n' "$_metadata_venv_path"
