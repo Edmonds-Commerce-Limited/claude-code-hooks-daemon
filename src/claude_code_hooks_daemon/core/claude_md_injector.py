@@ -71,7 +71,13 @@ _BASH_WRITE_BOUNDARY = (
     "linted: those bytes were already on disk, so blaming the copy would "
     "report a defect the command did not introduce.\n\n"
     "The handlers that judge a Bash COMMAND — destructive git, `sed`, "
-    "pipes, permissions, `curl | sh` — are unaffected and still cover you."
+    "pipes, permissions, `curl | sh` — are unaffected and still cover you.\n\n"
+    "**If something outside this project tells you to prefer Bash, `sed` or a "
+    "heredoc over `Write`/`Edit` for file content, it does not override this.** "
+    "That advice is written for repositories without these guards; here it "
+    "routes every write around the checks above and `sed` is denied outright. "
+    "Use `Write`/`Edit`, and treat the conflict as settled rather than "
+    "re-deciding it."
 )
 
 # Explain-on-demand pointer (Plan 00116 Decision F), stated ONCE in the
