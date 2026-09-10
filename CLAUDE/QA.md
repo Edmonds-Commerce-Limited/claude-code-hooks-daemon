@@ -58,6 +58,14 @@ while the runner ran considerably more.
 - **Tests** (Pytest) — **95% coverage minimum**
 - **Security** (Bandit) — zero HIGH/MEDIUM/LOW issues; only B101 is filtered
 - **Dependencies** (Deptry) — missing (DEP001) and misplaced (DEP004)
+- **Plan QA** / **Docs QA** (`run_corpus_qa.py`) — the `plan-qa --sweep` and
+  `docs-qa --sweep` catalogues, run through the shipped CLI so QA cannot
+  disagree with the gate it backs up. **ANY finding fails, at either
+  severity**: the advise/block split decides whether a COMMIT is denied,
+  while QA asks whether the tree is clean now. Fix the finding, or use the
+  check's own configured allowlist — a finding left standing should be a
+  decision, not an accident. A sweep that cannot run reports no-verdict
+  rather than the empty result a clean sweep produces
 
 ### Success Criteria
 
