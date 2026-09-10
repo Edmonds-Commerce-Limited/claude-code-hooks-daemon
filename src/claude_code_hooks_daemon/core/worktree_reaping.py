@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Protocol
 
 from claude_code_hooks_daemon.core.worktree_paths import WORKTREE_DIR_PATTERNS
-from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
+from claude_code_hooks_daemon.utils.git_repo import run_git, strip_branch_ref
 
 
 class GitResult(Protocol):
@@ -319,10 +319,14 @@ def reap_worktree(
         )
 
     # Task 2.3: a removed worktree that leaves its branch behind has only moved
-    # the clutter from `git worktree list` to `git branch`. Addressed by FULL
-    # ref for the reason `prune_branch` states: a bare name lets git resolve a
-    # same-named tag ahead of the branch (Plan 00254).
-    branch = run_fn(repo_root, "branch", "-d", branch_ref(state.branch))
+    # the clutter from `git worktree list` to `git branch`. Addressed by the
+    # BARE name, deliberately NOT `branch_ref()`: unlike the general
+    # ref-resolving commands `branch_ref()` exists for (`rev-parse`, `cherry`,
+    # `merge-base`), `git branch -d` resolves its argument only inside
+    # `refs/heads/` and REJECTS an already-qualified `refs/heads/<name>`
+    # outright — verified live (Plan 00372) after a full-ref argument here
+    # made every branch delete fail with "not found", never once succeeding.
+    branch = run_fn(repo_root, "branch", "-d", state.branch)
     if branch.returncode != 0:
         return ReapOutcome(
             state.name,
@@ -474,10 +478,13 @@ def prune_branch(
     if dry_run:
         return PruneOutcome(branch.name, deleted=False, detail=f"would delete branch {branch.name}")
 
-    # Addressed by FULL ref: `git branch -d <bare name>` can resolve a same-named
-    # tag ahead of the branch, so the bare form risks acting on something other
-    # than what the predicate just cleared.
-    result = run_fn(repo_root, "branch", "-d", branch_ref(branch.name))
+    # Addressed by the BARE name, deliberately NOT `branch_ref()`: `git branch
+    # -d` resolves its argument only inside `refs/heads/` and REJECTS an
+    # already-qualified `refs/heads/<name>` outright — verified live (Plan
+    # 00372). `branch_ref()`'s tag-ambiguity rationale (Plan 00254) covers the
+    # general ref-resolving commands (`rev-parse`, `cherry`, `merge-base`),
+    # never the `branch` subcommand.
+    result = run_fn(repo_root, "branch", "-d", branch.name)
     if result.returncode != 0:
         return PruneOutcome(
             branch.name,

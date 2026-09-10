@@ -98,7 +98,13 @@ class TestWhatCountsAsOrphaned:
 
 
 class TestAmbiguousNamesCannotSlipThrough:
-    """A same-named tag must not be able to redirect a delete (Plan 00254)."""
+    """The branch LISTING must read full refs (Plan 00254): `:short` yields the
+    shortest UNAMBIGUOUS name, so a branch sharing its name with a tag comes
+    back as `heads/<name>` and every membership test silently goes false.
+
+    The DELETE itself is a different command with a different constraint —
+    see `TestTheDeleteAgainstRealGitSemantics` below, corrected in Plan 00372.
+    """
 
     def test_the_listing_asks_for_the_full_refname(self) -> None:
         git = _FakeGit()
@@ -113,12 +119,52 @@ class TestAmbiguousNamesCannotSlipThrough:
         found = collect_orphaned_branches(Path("/repo"), "main", run_fn=_FakeGit())
         assert [b.name for b in found] == ["agent-orphan-2", "agent-orphan-3"]
 
-    def test_the_delete_addresses_the_branch_unambiguously(self) -> None:
-        """`git branch -d agent-orphan-2` could resolve a tag of that name."""
+    def test_the_delete_addresses_the_branch_by_its_bare_name(self) -> None:
+        """`git branch -d` resolves only inside `refs/heads/` and REJECTS an
+        already-qualified `refs/heads/<name>` argument outright — verified
+        live (Plan 00372). The bare name is unambiguous FOR THIS COMMAND: it
+        cannot resolve a same-named tag, because `branch -d` never looks
+        outside `refs/heads/` in the first place.
+        """
         git = _FakeGit()
         orphans = {b.name: b for b in collect_orphaned_branches(Path("/repo"), "main", run_fn=git)}
         prune_branch(Path("/repo"), orphans["agent-orphan-2"], run_fn=git)
-        assert git.deletions == [("branch", "-d", "refs/heads/agent-orphan-2")]
+        assert git.deletions == [("branch", "-d", "agent-orphan-2")]
+
+
+class TestTheDeleteAgainstRealGitSemantics:
+    """`_FakeGit` above always answers "success" no matter the argv, so it
+    never caught the live bug: `git branch -d refs/heads/<name>` genuinely
+    fails with "not found", confirmed against a real git binary (Plan 00372).
+    """
+
+    class _RealisticFakeGit:
+        def __init__(self, listing: str = _ALL_AGENT_BRANCHES, merged: str = _MERGED_AGENT_BRANCHES) -> None:
+            self.calls: list[tuple[str, ...]] = []
+            self._listing = listing
+            self._merged = merged
+
+        def __call__(self, cwd: Path, *args: str, **_: object) -> subprocess.CompletedProcess[str]:
+            self.calls.append(args)
+            if args[0] == "worktree":
+                return _ok(_LISTING)
+            if args[0] == "branch" and "--merged" in args:
+                return _ok(self._merged)
+            if args[0] == "branch" and "-d" in args:
+                target = args[-1]
+                if target.startswith("refs/heads/"):
+                    return _fail(f"error: branch '{target}' not found.")
+                return _ok("")
+            if args[0] == "branch":
+                return _ok(self._listing)
+            raise AssertionError(f"unexpected git call: {args}")
+
+    def test_the_merged_orphan_is_actually_deleted(self) -> None:
+        git = self._RealisticFakeGit()
+        orphans = {b.name: b for b in collect_orphaned_branches(Path("/repo"), "main", run_fn=git)}
+        outcome = prune_branch(Path("/repo"), orphans["agent-orphan-2"], run_fn=git)
+        assert outcome.deleted
+        assert outcome.detail == "deleted branch agent-orphan-2"
 
 
 class TestAFailedGitCallIsNeverReadAsSafe:

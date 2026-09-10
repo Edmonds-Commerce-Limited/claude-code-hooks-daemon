@@ -121,7 +121,7 @@ class TestActingOnBranchesNeedsItsOwnFlag:
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
         cmd_worktree_reap(_args(reap_branches=True), run_fn=git)
-        assert ("branch", "-d", "refs/heads/agent-orphan-2") in git.branch_deletions
+        assert ("branch", "-d", "agent-orphan-2") in git.branch_deletions
 
     def test_the_unmerged_orphan_gets_no_git_command(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]

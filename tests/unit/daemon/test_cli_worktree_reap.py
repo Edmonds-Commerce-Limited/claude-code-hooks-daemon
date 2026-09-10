@@ -166,7 +166,7 @@ class TestTheWorktreeIsAddressedWhereGitSaidItIs:
         git = _FakeGit(listing=_UNTRACKED_ROOT_LISTING)
         cmd_worktree_reap(_args(reap=True), run_fn=git)
         deleted = [call for call in git.mutations if call[0] == "branch"]
-        assert [call[-1] for call in deleted] == ["refs/heads/wip/renamed-branch"]
+        assert [call[-1] for call in deleted] == ["wip/renamed-branch"]
 
 
 class TestARepositoryWithNoAgentWorktrees:
