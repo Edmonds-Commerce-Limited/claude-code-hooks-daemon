@@ -51,6 +51,7 @@ class GitRepoNameHandler(StatusLineHandlerBase):
             repo_name = ProjectContext.git_repo_name()
             current_value = f"Currently shows: 📁 {repo_name}"
         except Exception as e:
+            logger.debug("ProjectContext not initialised for explain_segment: %s", e)
             current_value = f"Not shown now — ProjectContext not initialised ({e})."
         return SegmentExplanation(
             glyphs=("📁",),

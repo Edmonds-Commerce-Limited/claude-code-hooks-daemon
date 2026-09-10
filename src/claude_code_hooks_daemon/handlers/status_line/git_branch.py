@@ -165,6 +165,7 @@ class GitBranchHandler(StatusLineHandlerBase):
                 else "Not shown now — not inside a git repository (or on a detached HEAD)."
             )
         except Exception as e:
+            logger.debug("Failed to probe git branch for explain_segment: %s", e)
             current_value = f"Not shown now — could not determine the branch: {e}"
         return SegmentExplanation(
             glyphs=(

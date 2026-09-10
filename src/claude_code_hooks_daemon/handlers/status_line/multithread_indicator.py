@@ -144,6 +144,7 @@ class MultithreadIndicatorHandler(StatusLineHandlerBase):
                 f"({'segment would render' if live_count >= 2 else 'segment silent — need 2+'})."
             )
         except (RuntimeError, OSError) as e:
+            logger.debug("Failed to read thread registry for explain_segment: %s", e)
             current_value = f"Not shown now — could not read the thread registry: {e}"
         return SegmentExplanation(
             glyphs=("🧵",),

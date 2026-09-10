@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core.event import EventType
+from claude_code_hooks_daemon.core.handler_bases import StatusLineSegmentHandler
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
@@ -6414,7 +6415,9 @@ def _collect_status_line_segment_entries(
         try:
             instance = handler_class()
         except Exception as exc:
-            logger.exception("Failed to instantiate %s for status-line-explained", handler_class_name)
+            logger.exception(
+                "Failed to instantiate %s for status-line-explained", handler_class_name
+            )
             entry = _StatusLineSegmentEntry(
                 config_key=config_key, class_name=handler_class_name, enabled=False, priority=0
             )
@@ -6430,6 +6433,14 @@ def _collect_status_line_segment_entries(
             enabled=enabled,
             priority=priority,
         )
+        if not isinstance(instance, StatusLineSegmentHandler):
+            # Every module under handlers/status_line/ is expected to subclass
+            # StatusLineHandlerBase (== StatusLineSegmentHandler); this is a
+            # defensive narrowing (satisfies mypy) as much as a real guard
+            # against a future module that does not.
+            entry.error = f"{handler_class_name} does not implement explain_segment()"
+            entries.append(entry)
+            continue
         try:
             entry.explanation = instance.explain_segment()
         except Exception as exc:
@@ -6448,7 +6459,9 @@ def _render_status_line_explained_text(entries: list[_StatusLineSegmentEntry]) -
     broken_entries = [e for e in entries if e.enabled and e.explanation is None]
 
     icon_line = " | ".join(
-        "".join(e.explanation.glyphs) for e in enabled_entries if e.explanation and e.explanation.glyphs
+        "".join(e.explanation.glyphs)
+        for e in enabled_entries
+        if e.explanation and e.explanation.glyphs
     )
     print(
         "Status line, in priority order (REFERENCE line — glyphs shown together; "

@@ -13,6 +13,7 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
+from claude_code_hooks_daemon.constants import Priority
 from claude_code_hooks_daemon.core.handler_bases import (
     AdvisoryHandler,
     StatusLineHandlerBase,
@@ -52,7 +53,9 @@ class _Incomplete(StatusLineSegmentHandler):
     """
 
     def __init__(self) -> None:
-        super().__init__(handler_id="incomplete_test_handler", priority=50, terminal=False)
+        super().__init__(
+            handler_id="incomplete_test_handler", priority=Priority.DEFAULT, terminal=False
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return True
@@ -71,7 +74,9 @@ class _Complete(StatusLineSegmentHandler):
     """Implements everything, including ``explain_segment``."""
 
     def __init__(self) -> None:
-        super().__init__(handler_id="complete_test_handler", priority=50, terminal=False)
+        super().__init__(
+            handler_id="complete_test_handler", priority=Priority.DEFAULT, terminal=False
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return True

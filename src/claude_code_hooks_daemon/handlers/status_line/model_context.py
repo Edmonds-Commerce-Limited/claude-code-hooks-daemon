@@ -381,7 +381,8 @@ class ModelContextHandler(StatusLineHandlerBase):
         try:
             settings = read_claude_settings(self._get_settings_path())
             settings_effort = settings.get("effortLevel")
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to read settings.json for explain_segment: %s", e)
             settings_effort = None
         effort_note = (
             f"~{settings_effort} (from settings.json; a session-only /effort override "

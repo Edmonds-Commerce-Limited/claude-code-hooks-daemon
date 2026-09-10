@@ -6,6 +6,7 @@ ONCE at daemon startup — the status line re-renders on every Claude Code
 refresh, so this handler does no per-render probing.
 """
 
+import logging
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
@@ -13,6 +14,8 @@ from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
+
+logger = logging.getLogger(__name__)
 
 # ANSI colours — each environment renders in a distinct colour so the runtime
 # is identifiable at a glance. Desktop is red (you are on the host); container
@@ -87,6 +90,7 @@ class EnvironmentIndicatorHandler(StatusLineHandlerBase):
                 )
                 current_value = f"Currently shows: {icon} {label}"
         except RuntimeError as e:
+            logger.debug("ProjectContext not initialised for explain_segment: %s", e)
             current_value = f"Not shown now — ProjectContext not initialised ({e})."
         return SegmentExplanation(
             glyphs=(_DESKTOP_ICON, "🐳", "📦", "🧊"),

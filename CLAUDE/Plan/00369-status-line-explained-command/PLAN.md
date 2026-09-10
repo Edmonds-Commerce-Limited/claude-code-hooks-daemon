@@ -1,6 +1,6 @@
 # Plan 00369: status line explained command
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-10
 **Owner**: joseph
 **Priority**: Medium
@@ -103,26 +103,33 @@ status-line order, text or JSON.
 
 ### Phase 4: QA + release
 
-- [ ] ⬜ **Task 4.1**: `./scripts/qa/llm_qa.py all` clean on every touched
-  file (whole-repo pyright may carry pre-existing errors from other
-  in-flight branches; touched files must be pyright-clean regardless).
-- [ ] ⬜ **Task 4.2**: Release-notes callout under
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
-- [ ] ⬜ **Task 4.3**: Worktree daemon restarted, confirmed RUNNING, real
+- [x] ✅ **Task 4.1**: `./scripts/qa/llm_qa.py all` clean on every touched
+  file. First full run: 21/26 tools green, 5 red — all 5 traced to files
+  this plan touched (error_hiding, magic_values, format, type_check, plus
+  2 unrelated-looking test files that turned out to share root cause with
+  error_hiding) and fixed. Second full run: 25/26 green; the sole red
+  ("tests") named 10 `tests/acceptance/` tests untouched by this plan,
+  confirmed to pass individually in isolation — resource contention from
+  5+ concurrent agents' QA runs sharing this container, not a regression.
+- [x] ✅ **Task 4.2**: Release-notes callout under
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (`23-status-line-explained-command.md`).
+- [x] ✅ **Task 4.3**: Worktree daemon restarted, confirmed RUNNING, real
   `status-line-explained` output captured for the report.
 
 ## Success Criteria
 
-- [ ] All 14 status-line handlers implement `explain_segment()`; the
+- [x] All 14 status-line handlers implement `explain_segment()`; the
   completeness sweep passes.
-- [ ] `hooks-daemon status-line-explained` and `explain-status-line` both run
+- [x] `hooks-daemon status-line-explained` and `explain-status-line` both run
   against this project and print every enabled segment's explanation plus
   a "not enabled" section for disabled ones; `--format json` validates as
   JSON.
-- [ ] `/hooks-daemon status-line-explained` is routed in the skill, with a
+- [x] `/hooks-daemon status-line-explained` is routed in the skill, with a
   doc page, and the skill-surface coherence gate (Plan 00330) passes.
-- [ ] Release-notes callout exists.
-- [ ] Full QA green on touched files; worktree daemon restarted and verified
+- [x] Release-notes callout exists.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/23-status-line-explained-command.md`
+- [x] Full QA green on touched files; worktree daemon restarted and verified
   RUNNING.
 
 ## Delivery & Milestones

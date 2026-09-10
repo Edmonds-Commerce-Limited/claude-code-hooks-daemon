@@ -133,6 +133,7 @@ PreCompactHandlerBase = BlockingHandler
 StopHandlerBase = BlockingHandler
 SubagentStopHandlerBase = BlockingHandler
 
+
 class StatusLineSegmentHandler(AdvisoryHandler):
     """Status-line handler contract: an advisory decision plus a self-description.
 

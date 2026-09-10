@@ -131,7 +131,8 @@ class DowngradeIndicatorHandler(StatusLineHandlerBase):
                 for state_file in dir_path.glob("*.json"):
                     try:
                         data = json.loads(state_file.read_text(encoding="utf-8"))
-                    except (OSError, ValueError):
+                    except (OSError, ValueError) as e:
+                        logger.debug("Skipping unreadable downgrade state %s: %s", state_file, e)
                         continue
                     if isinstance(data, dict) and data.get("downgraded"):
                         active_sessions += 1
@@ -141,6 +142,7 @@ class DowngradeIndicatorHandler(StatusLineHandlerBase):
                 else "No session currently shows an open downgrade episode."
             )
         except (RuntimeError, OSError) as e:
+            logger.debug("Failed to scan downgrade state for explain_segment: %s", e)
             current_value = f"Not shown now — could not read downgrade state: {e}"
         return SegmentExplanation(
             glyphs=(self._emoji,),

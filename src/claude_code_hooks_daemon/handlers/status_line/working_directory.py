@@ -1,5 +1,6 @@
 """WorkingDirectoryHandler - display current working directory when it differs from project root."""
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,8 @@ from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
+
+logger = logging.getLogger(__name__)
 
 
 class WorkingDirectoryHandler(StatusLineHandlerBase):
@@ -73,7 +76,8 @@ class WorkingDirectoryHandler(StatusLineHandlerBase):
             else:
                 relative = cwd.relative_to(project_root)
                 current_value = f"Currently shows: 📁 {relative}"
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to compare cwd/project_root for explain_segment: %s", e)
             current_value = (
                 "Not shown now — requires the live session's workspace.current_dir/"
                 "project_dir fields, or no project context is available here."

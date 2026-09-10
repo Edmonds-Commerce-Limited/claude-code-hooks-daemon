@@ -119,6 +119,7 @@ class StartupCleanupHandler(StatusLineHandlerBase):
                     f"(window is {_DISPLAY_WINDOW_SECONDS:.0f}s), or nothing was cleaned."
                 )
         except (OSError, RuntimeError) as e:
+            logger.debug("Failed to read cleanup status for explain_segment: %s", e)
             current_value = f"Not shown now — could not read cleanup status: {e}"
         return SegmentExplanation(
             glyphs=("🧹",),

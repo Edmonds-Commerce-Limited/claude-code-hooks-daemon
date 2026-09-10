@@ -130,5 +130,7 @@ class TestExplainSegmentCompleteness:
     def test_every_handler_name_is_distinct(self) -> None:
         """Two handlers sharing a display name would be indistinguishable in
         the rendered ``status-line-explained`` output."""
-        names = [handler_cls().explain_segment().name for handler_cls in _status_line_handler_classes()]
+        names = [
+            handler_cls().explain_segment().name for handler_cls in _status_line_handler_classes()
+        ]
         assert len(names) == len(set(names)), f"duplicate segment names: {names}"

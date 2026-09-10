@@ -512,16 +512,20 @@ class SupervisorIndicatorHandler(StatusLineHandlerBase):
         """
         message = self._safe_active_message()
         try:
-            state = self._detect_state()
-        except Exception:
+            state: _SupervisorState | None = self._detect_state()
+        except Exception as e:
+            logger.debug("Failed to detect supervisor state for explain_segment: %s", e)
             state = None
 
-        state_label = {
-            _SupervisorState.ACTIVE_ARMED: "🎩 green — overseeing, will auto-compact",
-            _SupervisorState.ACTIVE_DRYRUN: "🎩 yellow — overseeing only, will not act",
-            _SupervisorState.NOT_ACTIVE: "🎩 orange — status file present but no live process",
-            _SupervisorState.NOT_CONFIGURED: "not shown — no supervisor status file present",
-        }.get(state, "not shown — state could not be determined")
+        if state is None:
+            state_label = "not shown — state could not be determined"
+        else:
+            state_label = {
+                _SupervisorState.ACTIVE_ARMED: "🎩 green — overseeing, will auto-compact",
+                _SupervisorState.ACTIVE_DRYRUN: "🎩 yellow — overseeing only, will not act",
+                _SupervisorState.NOT_ACTIVE: "🎩 orange — status file present but no live process",
+                _SupervisorState.NOT_CONFIGURED: "not shown — no supervisor status file present",
+            }[state]
 
         if message is not None:
             text, _level = message

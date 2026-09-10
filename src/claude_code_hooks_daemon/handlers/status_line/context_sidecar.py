@@ -240,12 +240,15 @@ class ContextSidecarHandler(StatusLineHandlerBase):
         try:
             sidecar_dir = ProjectContext.daemon_untracked_dir() / _SIDECAR_SUBDIR
             if sidecar_dir.is_dir():
-                sidecar_count = sum(1 for p in sidecar_dir.glob("*.json") if not p.name.startswith("."))
+                sidecar_count = sum(
+                    1 for p in sidecar_dir.glob("*.json") if not p.name.startswith(".")
+                )
             current_value = (
                 f"Not shown in the status line — it never renders an icon. "
                 f"{sidecar_count} per-session sidecar file(s) currently on disk."
             )
         except RuntimeError as e:
+            logger.debug("Failed to resolve daemon untracked dir for explain_segment: %s", e)
             current_value = f"Not shown in the status line — it never renders an icon ({e})."
         return SegmentExplanation(
             glyphs=(),
