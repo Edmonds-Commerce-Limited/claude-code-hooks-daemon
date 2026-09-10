@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.install.install_stamp import InstallStamp, read_install_stamp
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 from claude_code_hooks_daemon.version import __version__
@@ -193,6 +194,18 @@ class VersionCheckHandler(SessionStartHandlerBase):
             AdvisoryResult with upgrade notice if outdated, empty if up-to-date
         """
         try:
+            # Plan 00291: a guarded branch install is flagged on EVERY new
+            # session, before the cache or the network can answer "up to
+            # date" -- it is not a release, so there is no version to be
+            # current against. Read from the running venv's stamp.
+            stamp = read_install_stamp()
+            if stamp is not None and stamp.is_branch_install:
+                return AdvisoryResult(
+                    decision=Decision.ALLOW,
+                    reason=None,
+                    context=self._branch_install_context(stamp),
+                )
+
             cache_file = self._get_cache_file()
 
             # Check cache first
@@ -244,6 +257,18 @@ class VersionCheckHandler(SessionStartHandlerBase):
         except Exception as e:
             logger.error("Version check failed: %s", e, exc_info=True)
             return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=[])
+
+    @staticmethod
+    def _branch_install_context(stamp: InstallStamp) -> list[str]:
+        """The advisory a branch install gets every new session."""
+        return [
+            f"⚠️  Hooks daemon NON-RELEASE install: {stamp.raw} (tracking '{stamp.ref}')",
+            "",
+            "This install is not a release and is never reported as current.",
+            "It has no rollback guarantee and no upgrade-guide coverage until the",
+            "release that contains it ships. Reinstall from a release tag before",
+            "relying on it (Skill tool: skill=hooks-daemon, args=upgrade).",
+        ]
 
     def _compare_versions(self, current: str, latest: str) -> bool:
         """Compare semantic versions.

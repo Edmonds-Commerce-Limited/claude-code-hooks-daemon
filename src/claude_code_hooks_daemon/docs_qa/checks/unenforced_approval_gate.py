@@ -195,7 +195,18 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
             continue
         try:
             content = (context.project_root / rel_path).read_text(encoding="utf-8")
-        except OSError:
+        except OSError as exc:
+            # A core document the sweep cannot read is itself reported: a
+            # silent skip would count an unreadable file as a clean one.
+            findings.append(
+                Finding(
+                    check_id=CHECK_ID,
+                    severity=Severity.ADVISE,
+                    message=f"`{rel_path}` could not be read for the approval-gate sweep: {exc}",
+                    remediation="Make the core document readable and re-run the sweep.",
+                    path=rel_path,
+                )
+            )
             continue
         findings.extend(_findings_for(rel_path, content, Severity.ADVISE))
     return findings
