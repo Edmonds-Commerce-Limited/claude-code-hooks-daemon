@@ -571,10 +571,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths
 
-<!-- handler: docs-qa-sweep -->
-
-- docs_qa_sweep — documentation drift report at session start
-
 <!-- handler: plan-qa-sweep -->
 
 - plan_qa_sweep — plan-tree drift report at session start
@@ -586,6 +582,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: tool-disable-advisor -->
 
 - tool_disable_advisor — declared never-want tools are checked at session start
+
+<!-- handler: docs-qa-sweep -->
+
+- docs_qa_sweep — documentation drift report at session start
 
 <!-- handler: standing-authorisations -->
 
