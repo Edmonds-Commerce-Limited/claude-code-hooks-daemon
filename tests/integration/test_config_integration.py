@@ -1,6 +1,7 @@
-"""Integration tests for configuration system.
+"""Integration tests for the configuration system.
 
-Tests the full flow: discovery → loading → validation → usage.
+Tests the full flow the daemon runs at startup: discovery -> loading ->
+validation (``ConfigValidator``, the single validation path) -> usage.
 Following strict TDD methodology - tests written FIRST.
 """
 
@@ -11,7 +12,26 @@ import pytest
 import yaml
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
-from claude_code_hooks_daemon.config.schema import ConfigSchema
+from claude_code_hooks_daemon.config.validator import ConfigValidator, ValidationError
+
+#: The ``daemon`` section ``ConfigValidator`` requires of every on-disk config.
+_DAEMON_SECTION: dict[str, Any] = {"log_level": "INFO", "idle_timeout_seconds": 300}
+
+
+def _config(**overrides: Any) -> dict[str, Any]:
+    """A config the live validator accepts, with ``overrides`` merged on top."""
+    base: dict[str, Any] = {
+        "version": "1.0",
+        "daemon": dict(_DAEMON_SECTION),
+        "handlers": {},
+    }
+    base.update(overrides)
+    return base
+
+
+def _write_yaml(path: Path, data: dict[str, Any]) -> None:
+    with path.open("w") as f:
+        yaml.dump(data, f)
 
 
 class TestConfigDiscoveryAndLoading:
@@ -19,106 +39,81 @@ class TestConfigDiscoveryAndLoading:
 
     def test_discover_load_and_validate_config(self, tmp_path: Path) -> None:
         """Should discover, load, and validate config in one flow."""
-        # Setup: Create config in .claude directory
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         config_file = claude_dir / "hooks-daemon.yaml"
+        _write_yaml(
+            config_file,
+            _config(handlers={"pre_tool_use": {"destructive_git": {"enabled": True}}}),
+        )
 
-        config_data = {
-            "version": "1.0",
-            "settings": {"logging_level": "INFO"},
-            "handlers": {"pre_tool_use": {"destructive_git": {"enabled": True}}},
-        }
-
-        with config_file.open("w") as f:
-            yaml.dump(config_data, f)
-
-        # Test: Discover
         found_path = ConfigLoader.find_config(str(tmp_path))
         assert found_path == config_file
 
-        # Test: Load
         config = ConfigLoader.load(found_path)
         assert config["version"] == "1.0"
 
-        # Test: Validate
-        ConfigSchema.validate_config(config)  # Should not raise
+        assert ConfigValidator.validate(config) == []
 
-        # Test: Merge with defaults
         merged = ConfigLoader.merge_with_defaults(config)
-        assert "settings" in merged
-        assert merged["settings"]["logging_level"] == "INFO"
+        assert merged["daemon"]["log_level"] == "INFO"
+        assert merged["handlers"]["pre_tool_use"]["destructive_git"]["enabled"] is True
 
     def test_discover_from_subdirectory(self, tmp_path: Path) -> None:
         """Should discover config when running from subdirectory."""
-        # Create nested structure
         project_root = tmp_path / "project"
         project_root.mkdir()
 
         subdir = project_root / "src" / "handlers"
         subdir.mkdir(parents=True)
 
-        # Place config in project root
         claude_dir = project_root / ".claude"
         claude_dir.mkdir()
         config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: '1.0'\n")
+        _write_yaml(config_file, _config())
 
-        # Discover from deep subdirectory
         found_path = ConfigLoader.find_config(str(subdir))
         assert found_path == config_file
 
-        # Load and validate
         config = ConfigLoader.load(found_path)
-        ConfigSchema.validate_config(config)
+        assert ConfigValidator.validate(config) == []
 
     def test_fallback_to_defaults_when_no_config_found(self, tmp_path: Path) -> None:
         """Should use defaults when no config file exists."""
-        # No config file in tmp_path
-
-        # Should raise when searching
         with pytest.raises(FileNotFoundError):
             ConfigLoader.find_config(str(tmp_path))
 
-        # But merging empty config with defaults should work
         minimal_config: dict[str, Any] = {"version": "2.0"}
         merged = ConfigLoader.merge_with_defaults(minimal_config)
 
-        # Should have default values (Finding #29: defaults carry a daemon section)
+        # Finding #29: defaults carry a daemon section
         assert "daemon" in merged
         assert "log_level" in merged["daemon"]
 
     def test_load_validate_and_extract_handler_settings(self, tmp_path: Path) -> None:
         """Should load config and extract specific handler settings."""
-        # Create config with handler settings
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         config_file = claude_dir / "hooks-daemon.yaml"
-
-        config_data = {
-            "version": "1.0",
-            "handlers": {
-                "pre_tool_use": {
-                    "destructive_git": {"enabled": True, "priority": 10},
-                    "git_stash": {
-                        "enabled": False,
-                        "priority": 20,
-                        "escape_hatch": "I CONFIRM",
-                    },
+        _write_yaml(
+            config_file,
+            _config(
+                handlers={
+                    "pre_tool_use": {
+                        "destructive_git": {"enabled": True, "priority": 10},
+                        "git_stash": {
+                            "enabled": False,
+                            "priority": 20,
+                            "escape_hatch": "I CONFIRM",
+                        },
+                    }
                 }
-            },
-        }
+            ),
+        )
 
-        with config_file.open("w") as f:
-            yaml.dump(config_data, f)
-
-        # Load
         config = ConfigLoader.load(config_file)
+        assert ConfigValidator.validate(config) == []
 
-        # Validate
-        ConfigSchema.validate_config(config)
-
-        # Extract handler settings
         git_settings = ConfigLoader.get_handler_settings(config, "pre_tool_use", "destructive_git")
         assert git_settings is not None
         assert git_settings["enabled"] is True
@@ -142,45 +137,40 @@ class TestConfigErrorHandlingIntegration:
             ConfigLoader.load(config_file)
 
     def test_missing_version_fails_at_validation(self, tmp_path: Path) -> None:
-        """Should fail at validation time for schema violations."""
+        """Should fail at validation time for a missing required field."""
         config_file = tmp_path / "no_version.yaml"
-        config_file.write_text("settings:\n  logging_level: INFO\n")
+        data = _config()
+        del data["version"]
+        _write_yaml(config_file, data)
 
-        # Load succeeds (valid YAML)
         config = ConfigLoader.load(config_file)
 
-        # Validation fails (missing version)
-        with pytest.raises(ValueError, match="Invalid configuration"):
-            ConfigSchema.validate_config(config)
+        errors = ConfigValidator.validate(config)
+        assert "Missing required field: version" in errors
+        with pytest.raises(ValidationError):
+            ConfigValidator.validate_and_raise(config)
 
     def test_invalid_enum_value_fails_at_validation(self, tmp_path: Path) -> None:
         """Should fail at validation for invalid enum values."""
         config_file = tmp_path / "bad_enum.yaml"
-        config_data = {"version": "1.0", "settings": {"logging_level": "TRACE"}}
-
-        with config_file.open("w") as f:
-            yaml.dump(config_data, f)
+        _write_yaml(config_file, _config(daemon={**_DAEMON_SECTION, "log_level": "TRACE"}))
 
         config = ConfigLoader.load(config_file)
 
-        with pytest.raises(ValueError, match="Invalid configuration"):
-            ConfigSchema.validate_config(config)
+        errors = ConfigValidator.validate(config)
+        assert any("daemon.log_level" in error and "TRACE" in error for error in errors)
 
     def test_recoverable_errors_with_defaults(self, tmp_path: Path) -> None:
-        """Should recover from incomplete config using defaults."""
+        """Should recover from incomplete handler config using defaults."""
         config_file = tmp_path / "incomplete.yaml"
-        config_data = {
-            "version": "1.0",
-            "handlers": {"pre_tool_use": {"destructive_git": {}}},  # Missing enabled/priority
-        }
-
-        with config_file.open("w") as f:
-            yaml.dump(config_data, f)
+        _write_yaml(
+            config_file,
+            _config(handlers={"pre_tool_use": {"destructive_git": {}}}),
+        )
 
         config = ConfigLoader.load(config_file)
-        ConfigSchema.validate_config(config)  # Should pass - extra fields allowed
+        assert ConfigValidator.validate(config) == []
 
-        # Extract with defaults
         settings = ConfigLoader.get_handler_settings(
             config, "pre_tool_use", "destructive_git", defaults={"enabled": True, "priority": 50}
         )
@@ -196,33 +186,23 @@ class TestConfigMergingIntegration:
     def test_user_overrides_defaults(self, tmp_path: Path) -> None:
         """Should use user values over defaults when merging."""
         config_file = tmp_path / "user_config.yaml"
-        config_data = {
-            "version": "1.0",
-            "settings": {"logging_level": "DEBUG", "log_file": "/custom/path.log"},
-        }
-
-        with config_file.open("w") as f:
-            yaml.dump(config_data, f)
+        _write_yaml(config_file, _config(daemon={**_DAEMON_SECTION, "log_level": "DEBUG"}))
 
         config = ConfigLoader.load(config_file)
         merged = ConfigLoader.merge_with_defaults(config)
 
-        # User values should win
-        assert merged["settings"]["logging_level"] == "DEBUG"
-        assert merged["settings"]["log_file"] == "/custom/path.log"
+        assert merged["daemon"]["log_level"] == "DEBUG"
+        assert merged["daemon"]["idle_timeout_seconds"] == 300
 
     def test_defaults_fill_missing_values(self, tmp_path: Path) -> None:
         """Should add default values for missing sections."""
         config_file = tmp_path / "partial_config.yaml"
-        config_data = {"version": "2.0", "handlers": {}}
-
-        with config_file.open("w") as f:
-            yaml.dump(config_data, f)
+        _write_yaml(config_file, {"version": "2.0", "handlers": {}})
 
         config = ConfigLoader.load(config_file)
         merged = ConfigLoader.merge_with_defaults(config)
 
-        # Should have default daemon section added (Finding #29)
+        # Finding #29: the default daemon section is added
         assert "daemon" in merged
         assert "log_level" in merged["daemon"]
         assert "idle_timeout_seconds" in merged["daemon"]
@@ -230,23 +210,21 @@ class TestConfigMergingIntegration:
     def test_deep_merge_preserves_nested_structure(self, tmp_path: Path) -> None:
         """Should deep merge nested handler configurations."""
         config_file = tmp_path / "nested_config.yaml"
-        config_data = {
-            "version": "1.0",
-            "handlers": {
-                "pre_tool_use": {
-                    "destructive_git": {"enabled": True, "priority": 10},
-                    "git_stash": {"enabled": False},
+        _write_yaml(
+            config_file,
+            _config(
+                handlers={
+                    "pre_tool_use": {
+                        "destructive_git": {"enabled": True, "priority": 10},
+                        "git_stash": {"enabled": False},
+                    }
                 }
-            },
-        }
-
-        with config_file.open("w") as f:
-            yaml.dump(config_data, f)
+            ),
+        )
 
         config = ConfigLoader.load(config_file)
         merged = ConfigLoader.merge_with_defaults(config)
 
-        # Nested structure should be preserved
         assert merged["handlers"]["pre_tool_use"]["destructive_git"]["enabled"] is True
         assert merged["handlers"]["pre_tool_use"]["destructive_git"]["priority"] == 10
         assert merged["handlers"]["pre_tool_use"]["git_stash"]["enabled"] is False
@@ -259,38 +237,44 @@ class TestConfigPluginSystem:
         """Should load and validate config with plugin definitions."""
         config_file = tmp_path / "plugin_config.yaml"
         # Finding #31: plugins is an OBJECT with a 'plugins' list, not a bare array.
-        config_data = {
-            "version": "2.0",
-            "plugins": {
-                "plugins": [
-                    {"path": ".claude/hooks/custom", "handlers": ["custom_handler"]},
-                    {"path": "/absolute/path/plugins"},
-                ],
-            },
-        }
-
-        with config_file.open("w") as f:
-            yaml.dump(config_data, f)
+        _write_yaml(
+            config_file,
+            _config(
+                version="2.0",
+                plugins={
+                    "plugins": [
+                        {"path": ".claude/hooks/custom", "handlers": ["custom_handler"]},
+                        {"path": "/absolute/path/plugins"},
+                    ],
+                },
+            ),
+        )
 
         config = ConfigLoader.load(config_file)
-        ConfigSchema.validate_config(config)
+        assert ConfigValidator.validate(config) == []
 
-        assert "plugins" in config
         assert len(config["plugins"]["plugins"]) == 2
         assert config["plugins"]["plugins"][0]["path"] == ".claude/hooks/custom"
 
     def test_plugin_without_required_path_fails(self, tmp_path: Path) -> None:
-        """Should fail validation if plugin missing required 'path'."""
+        """Should fail validation if a plugin entry is missing 'path'."""
         config_file = tmp_path / "bad_plugin.yaml"
-        config_data = {"version": "1.0", "plugins": [{"handlers": ["custom"]}]}
-
-        with config_file.open("w") as f:
-            yaml.dump(config_data, f)
+        _write_yaml(config_file, _config(plugins={"plugins": [{"handlers": ["custom"]}]}))
 
         config = ConfigLoader.load(config_file)
 
-        with pytest.raises(ValueError, match="Invalid configuration"):
-            ConfigSchema.validate_config(config)
+        errors = ConfigValidator.validate(config)
+        assert "Missing required field: plugins.plugins[0].path" in errors
+
+    def test_plugins_as_bare_list_fails(self, tmp_path: Path) -> None:
+        """Should reject the pre-Finding-#31 bare-array shape."""
+        config_file = tmp_path / "list_plugins.yaml"
+        _write_yaml(config_file, _config(plugins=[{"path": "/x"}]))
+
+        config = ConfigLoader.load(config_file)
+
+        errors = ConfigValidator.validate(config)
+        assert any("plugins" in error and "dictionary" in error for error in errors)
 
 
 class TestConfigRealWorldScenarios:
@@ -299,82 +283,77 @@ class TestConfigRealWorldScenarios:
     def test_minimal_production_config(self, tmp_path: Path) -> None:
         """Should handle minimal production configuration."""
         config_file = tmp_path / "prod.yaml"
-        config_data = {
-            "version": "1.0",
-            "settings": {"logging_level": "WARNING"},
-            "handlers": {"pre_tool_use": {"destructive_git": {"enabled": True}}},
-        }
+        _write_yaml(
+            config_file,
+            _config(
+                daemon={**_DAEMON_SECTION, "log_level": "WARNING"},
+                handlers={"pre_tool_use": {"destructive_git": {"enabled": True}}},
+            ),
+        )
 
-        with config_file.open("w") as f:
-            yaml.dump(config_data, f)
-
-        # Full workflow
         config = ConfigLoader.load(config_file)
-        ConfigSchema.validate_config(config)
+        assert ConfigValidator.validate(config) == []
         merged = ConfigLoader.merge_with_defaults(config)
 
-        assert merged["settings"]["logging_level"] == "WARNING"
+        assert merged["daemon"]["log_level"] == "WARNING"
         assert merged["handlers"]["pre_tool_use"]["destructive_git"]["enabled"] is True
 
     def test_development_config_with_all_options(self, tmp_path: Path) -> None:
         """Should handle comprehensive development configuration."""
         config_file = tmp_path / "dev.yaml"
-        config_data = {
-            "version": "2.0",
-            "daemon": {"log_level": "DEBUG"},
-            "handlers": {
-                "pre_tool_use": {
-                    "destructive_git": {"enabled": True, "priority": 10},
-                    "git_stash": {"enabled": False, "priority": 20},
-                    "absolute_path": {"enabled": True, "priority": 12},
+        _write_yaml(
+            config_file,
+            _config(
+                version="2.0",
+                daemon={**_DAEMON_SECTION, "log_level": "DEBUG"},
+                handlers={
+                    "pre_tool_use": {
+                        "destructive_git": {"enabled": True, "priority": 10},
+                        "git_stash": {"enabled": False, "priority": 20},
+                        "absolute_path": {"enabled": True, "priority": 12},
+                    },
+                    "session_start": {"docs_qa_sweep": {"enabled": True}},
                 },
-                "session_start": {"enabled": True},
-            },
-            # Finding #31: plugins is an OBJECT with a 'plugins' list.
-            "plugins": {
-                "plugins": [{"path": ".claude/hooks/dev_plugins", "handlers": ["debug_handler"]}],
-            },
-        }
+                # Finding #31: plugins is an OBJECT with a 'plugins' list.
+                plugins={
+                    "plugins": [
+                        {"path": ".claude/hooks/dev_plugins", "handlers": ["debug_handler"]}
+                    ],
+                },
+            ),
+        )
 
-        with config_file.open("w") as f:
-            yaml.dump(config_data, f)
-
-        # Full workflow
         config = ConfigLoader.load(config_file)
-        ConfigSchema.validate_config(config)
+        assert ConfigValidator.validate(config) == []
         merged = ConfigLoader.merge_with_defaults(config)
 
-        # Verify all sections loaded correctly
         assert merged["daemon"]["log_level"] == "DEBUG"
         assert len(merged["handlers"]["pre_tool_use"]) >= 3
+        assert merged["handlers"]["session_start"]["docs_qa_sweep"]["enabled"] is True
         assert len(merged["plugins"]["plugins"]) == 1
 
     def test_team_shared_config(self, tmp_path: Path) -> None:
         """Should handle team-shared base configuration."""
-        # Scenario: Team base config with consistent standards
         config_file = tmp_path / "team_base.yaml"
-        config_data = {
-            "version": "1.0",
-            "settings": {"logging_level": "INFO"},
-            "handlers": {
-                "pre_tool_use": {
-                    "destructive_git": {"enabled": True, "priority": 10},
-                    "git_stash": {
-                        "enabled": True,
-                        "priority": 20,
-                        "escape_hatch": "TEAM_APPROVED_STASH",
-                    },
+        _write_yaml(
+            config_file,
+            _config(
+                handlers={
+                    "pre_tool_use": {
+                        "destructive_git": {"enabled": True, "priority": 10},
+                        "git_stash": {
+                            "enabled": True,
+                            "priority": 20,
+                            "escape_hatch": "TEAM_APPROVED_STASH",
+                        },
+                    }
                 }
-            },
-        }
-
-        with config_file.open("w") as f:
-            yaml.dump(config_data, f)
+            ),
+        )
 
         config = ConfigLoader.load(config_file)
-        ConfigSchema.validate_config(config)
+        assert ConfigValidator.validate(config) == []
 
-        # Extract team-standard settings
         stash_settings = ConfigLoader.get_handler_settings(config, "pre_tool_use", "git_stash")
         assert stash_settings is not None
         assert stash_settings["escape_hatch"] == "TEAM_APPROVED_STASH"

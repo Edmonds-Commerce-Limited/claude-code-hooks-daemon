@@ -1,5 +1,14 @@
 {
   "venvPath": "untracked",
   "venv": "venv",
-  "extraPaths": ["src"]
+  "extraPaths": ["src"],
+  "exclude": [
+    "untracked",
+    "CLAUDE/Plan",
+    "CLAUDE/AcceptanceTests/fixtures",
+    "tests/fixtures",
+    "remote-docs",
+    "**/node_modules",
+    "**/__pycache__"
+  ]
 }

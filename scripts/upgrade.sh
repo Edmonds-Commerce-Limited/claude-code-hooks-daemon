@@ -771,13 +771,29 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
     # inside the `if` condition where a non-zero exit does NOT trip errexit,
     # and we record the exact rc in the else branch.
     _truth_rc=0
+    # Plan 00329: the command writes its full report under the project's
+    # untracked/ and prints a bounded summary, so this block stays small
+    # however wide the span; --project-root pins where the files go.
     if _truth_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
         check-truth-changes \
         --from "${FROM_VERSION#v}" \
-        --to "${TARGET_SEMVER#v}" 2>&1)"; then
+        --to "${TARGET_SEMVER#v}" \
+        --project-root "$PROJECT_ROOT" 2>&1)"; then
         _truth_rc=0
     else
         _truth_rc=$?
+    fi
+    # A target older than the offload does not know --project-root (exit 2):
+    # ask it the pre-offload way rather than report the summary unavailable.
+    if [ "$_truth_rc" -eq 2 ]; then
+        if _truth_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
+            check-truth-changes \
+            --from "${FROM_VERSION#v}" \
+            --to "${TARGET_VERSION#v}" 2>&1)"; then
+            _truth_rc=0
+        else
+            _truth_rc=$?
+        fi
     fi
 
     if [ "$_truth_rc" -eq 1 ]; then
@@ -785,7 +801,7 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
         _info "${_BOLD}Project-doc reconciliation needed${_NC}"
         echo "$_truth_out"
         _info "Reconcile your project's own docs per upgrade.md step 4."
-        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-truth-changes --from ${FROM_VERSION#v} --to ${TARGET_SEMVER#v}"
+        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-truth-changes --from ${FROM_VERSION#v} --to ${TARGET_SEMVER#v} --project-root \"$PROJECT_ROOT\""
     elif [ "$_truth_rc" -eq 0 ]; then
         _ok "Project-doc reconciliation: no changes needed for this upgrade."
     else
@@ -811,10 +827,22 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
         check-config-migrations \
         --from "${FROM_VERSION#v}" \
         --to "${TARGET_SEMVER#v}" \
-        --config "$PROJECT_ROOT/.claude/hooks-daemon.yaml" 2>&1)"; then
+        --config "$PROJECT_ROOT/.claude/hooks-daemon.yaml" \
+        --project-root "$PROJECT_ROOT" 2>&1)"; then
         _cfg_rc=0
     else
         _cfg_rc=$?
+    fi
+    if [ "$_cfg_rc" -eq 2 ]; then
+        if _cfg_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
+            check-config-migrations \
+            --from "${FROM_VERSION#v}" \
+            --to "${TARGET_VERSION#v}" \
+            --config "$PROJECT_ROOT/.claude/hooks-daemon.yaml" 2>&1)"; then
+            _cfg_rc=0
+        else
+            _cfg_rc=$?
+        fi
     fi
 
     if [ "$_cfg_rc" -eq 1 ]; then
@@ -822,7 +850,7 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
         _info "${_BOLD}Newly-available / recommended config options${_NC}"
         echo "$_cfg_out"
         _info "Review per upgrade.md step 5. Enabling is your choice; the daemon never edits your config."
-        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-config-migrations --from ${FROM_VERSION#v} --to ${TARGET_SEMVER#v}"
+        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-config-migrations --from ${FROM_VERSION#v} --to ${TARGET_SEMVER#v} --project-root \"$PROJECT_ROOT\""
     elif [ "$_cfg_rc" -eq 0 ]; then
         _ok "Config options: nothing new to enable for this upgrade."
     else

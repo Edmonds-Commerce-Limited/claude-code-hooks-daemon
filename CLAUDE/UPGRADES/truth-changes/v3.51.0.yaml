@@ -1,7 +1,8 @@
 # NOTE: filename must match the actual released version.
 version: "3.51.0"
 truth_changes:
-  - was: >
+  - topic: daemon-cli
+    was: >
       "bin/hooks-daemon" acts on whichever project your current working
       directory belongs to. Notes may assert that running one project's wrapper
       from another directory is a way to manage that other project's daemon —
@@ -17,7 +18,8 @@ truth_changes:
       absolute path from another project's directory, previously restarted that
       OTHER project's daemon and reported success.
 
-  - was: >
+  - topic: daemon-cli
+    was: >
       The daemon's virtualenv is built by hand, at
       ".claude/hooks-daemon/untracked/venv/", e.g. with
       "python3 -m venv untracked/venv && untracked/venv/bin/pip install -e .".
@@ -36,7 +38,8 @@ truth_changes:
       path into fail-fast errors, because a fallback that can never succeed only
       turns "the resolver is missing" into a confusing "no such file".
 
-  - was: >
+  - topic: daemon-cli
+    was: >
       To run a daemon command, change into the daemon directory first:
       "cd .claude/hooks-daemon && <command>".
     now: >
@@ -48,7 +51,8 @@ truth_changes:
       still teach the cd form instruct an agent to do something the daemon then
       denies, which reads as a broken install.
 
-  - was: >
+  - topic: install-and-upgrade
+    was: >
       "install.py" in the daemon directory is how the daemon is installed or
       reinstalled.
     now: >

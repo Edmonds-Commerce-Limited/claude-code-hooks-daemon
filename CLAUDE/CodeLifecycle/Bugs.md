@@ -13,6 +13,36 @@ Rigorous process to fix bugs with confidence that they won't return.
 
 **Core Principle**: If you can't reproduce it with a failing test, you can't be sure it's fixed.
 
+## Defence Before Fix (DBF)
+
+**Canonical source: <https://defence-before-fix.github.io/>** — the method
+specification (`/SPEC.html`), the detector specification
+(`/DETECTOR-SPEC.html`) and the agent instruction guide
+(`/defence-before-fix-project-prompt.md`). Vendored copies live in the
+remote-docs tree; read those before the network. This project follows the
+method as written there; nothing below replaces it.
+
+DBF runs BEFORE the cycle below. A defect in front of you is evidence of a
+class, and the class gets an automated defence before the instance gets a
+fix, in this order:
+
+1. **Attribute the defect to a class**, with a one-sentence hazard, and
+   search for other instances with at least two independent techniques.
+2. **Build the net**: a rule in a detector that READS code or docs (a test
+   cannot be the detector; a bespoke rule is fine).
+3. **Prove the rule fires** on the originating instance, red before green,
+   and commit that proof before the fix.
+4. **Sweep the whole codebase**, record the instance count, then fix every
+   instance. The count is the finding.
+5. **Enforce permanently, and block**: the rule joins the project's quality
+   gates at their real entry point and fails rather than warns.
+6. **Terse message, stable identifier**, resolving to remediation docs that
+   say what the rule is about, why it exists and how to fix a violation.
+
+Baselining, suppressing, or knowingly leaving an instance unfixed is the
+owner's decision, never the agent's. If no practical detector exists, say
+so, record the toolchain gap, and fix the defect conventionally.
+
 ## The Bug Fix Cycle
 
 ```

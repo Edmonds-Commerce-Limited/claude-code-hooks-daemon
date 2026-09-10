@@ -264,7 +264,13 @@ def test_reinject_cooldown_suppresses_stale_reading(tmp_path: Path) -> None:
     # ...until the cooldown has passed and the effort is STILL below minimum.
     later = _NOW + _mod._EFFORT_REINJECT_COOLDOWN_SECONDS + 1.0
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=later - 1.0)
-    retry = _decide(sidecar_dir, machine, facts=_facts(later))
+    # The first `/effort` is the supervisor's own unconfirmed line, so the
+    # quiet session gets a follow-up [enter] for it before anything new is
+    # typed; the re-inject lands on the tick after.
+    follow_up = _decide(sidecar_dir, machine, facts=_facts(later))
+    assert follow_up.decision_value == "would-resubmit"
+    machine.clear_own_line()
+    retry = _decide(sidecar_dir, machine, facts=_facts(later + 1.0))
     assert retry.decision_value == "would-effort"
 
 

@@ -1,6 +1,7 @@
 version: "3.17.0"
 truth_changes:
-  - was: >
+  - topic: compaction-and-transcripts
+    was: >
       After context compaction the daemon restores prior workflow state (the
       workflow_state_pre_compact / workflow_state_restoration handlers), and
       workflow conventions are documented in docs/WORKFLOWS.md.

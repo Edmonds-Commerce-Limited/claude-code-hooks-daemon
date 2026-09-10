@@ -2,7 +2,8 @@
 # config-changes manifest).
 version: "3.50.0"
 truth_changes:
-  - was: >
+  - topic: daemon-cli
+    was: >
       Daemon CLI commands are run through an interpreter variable, as
       "$PYTHON -m claude_code_hooks_daemon.daemon.cli <command>". Project docs,
       notes and handler guidance commonly assert this form.
@@ -19,7 +20,8 @@ truth_changes:
       replace them — an agent that follows them concludes the daemon is not
       installed and may try to "fix" a working install.
 
-  - was: >
+  - topic: daemon-cli
+    was: >
       "./daemon.sh <command>" in the daemon repository runs the daemon CLI.
     now: >
       "./daemon.sh" is a deprecated shim (v3.50.0) that forwards to
@@ -30,7 +32,8 @@ truth_changes:
       and "logs-all" verbs map onto real CLI flags; "logs-clear" has no CLI
       equivalent and now says so rather than pretending.
 
-  - was: >
+  - topic: plan-workflow
+    was: >
       A plan document may grow to whatever size the work requires; only its
       content is linted, never its length.
     now: >
@@ -43,7 +46,8 @@ truth_changes:
       recurring context cost. Journals and the plan-index README.md are exempt
       at any size. Configure under plan_workflow.qa.plan_doc_size.
 
-  - id: plan-size-remedies
+  - topic: plan-workflow
+    id: plan-size-remedies
     was: >
       When a plan gets too long, trim it — remove the older or less relevant
       sections so it stays readable.
@@ -57,7 +61,8 @@ truth_changes:
       check, because that shape usually means content was destroyed rather than
       moved.
 
-  - was: >
+  - topic: plan-workflow
+    was: >
       A project's plan docs may show PLAN.md carrying a dated progress log
       (a "## Notes & Updates" section), an "**Estimated Effort**" header, or a
       "## Timeline" with target-completion dates — the shipped templates and
@@ -71,7 +76,8 @@ truth_changes:
       "## Delivery & Milestones" (curated milestones + commit hashes) and put
       the blow-by-blow in JOURNAL/. Existing plans are never rewritten.
 
-  - was: >
+  - topic: plan-workflow
+    was: >
       A file under a plan's JOURNAL/ is treated as journal content when its
       name matches the day-file grammar NNNNN-Journal-YY-MM-DD.md.
     now: >

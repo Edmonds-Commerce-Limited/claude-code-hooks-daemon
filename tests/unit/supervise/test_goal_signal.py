@@ -323,7 +323,12 @@ def test_goal_injection_cap(tmp_path: Path) -> None:
     _write_goal(sidecar_dir)
     policy = _mod.CompactPolicy()
     machine = _mod.CompactStateMachine(policy)
-    machine.import_state({"goal_injections": _mod._MAX_GOAL_INJECTIONS})
+    machine.import_state(
+        {
+            "goal_injections": _mod._MAX_GOAL_INJECTIONS,
+            "goal_injection_ts": [_NOW - 1.0] * _mod._MAX_GOAL_INJECTIONS,
+        }
+    )
     outcome = _decide(sidecar_dir, machine=machine)
     assert outcome.payload is None
     assert outcome.noop_reason_log is not None

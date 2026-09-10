@@ -35,9 +35,11 @@ def _check_truth_changes_plan_number() -> CliAcceptanceTest:
         description=(
             "Running check-truth-changes over a range that spans v3.16.0 (where the "
             "next-plan-number truth moved from a folder scan to the git counter) must "
-            "print the was → now reconciliation entry naming the git config key."
+            "print the was → now reconciliation entry naming the git config key. "
+            "--full keeps the report inline; without it the entries go to a file "
+            "and only a bounded summary is printed (Plan 00329)."
         ),
-        command=f"{_CLI_PREFIX} check-truth-changes --from 3.11.0 --to 3.17.0",
+        command=f"{_CLI_PREFIX} check-truth-changes --from 3.11.0 --to 3.17.0 --full",
         expected_stdout_patterns=[
             "Truth-Changes to reconcile",
             "hooksdaemon.latestPlanNumber",

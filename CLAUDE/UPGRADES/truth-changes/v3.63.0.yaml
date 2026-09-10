@@ -1,6 +1,7 @@
 version: "3.63.0"
 truth_changes:
-  - was: >
+  - topic: install-and-upgrade
+    was: >
       Upgrading the hooks daemon overwrites `.claude/settings.json` with the
       daemon's own copy, so any customisation you keep there — your own
       `statusLine`, an extra hook you registered, a `permissions` block, a
@@ -20,7 +21,8 @@ truth_changes:
       preserves your top-level keys too, with one stated limit: it runs before
       any interpreter exists so it cannot separate your hook from ours inside a
       wired event's array, and replaces that array.
-  - was: >
+  - topic: install-and-upgrade
+    was: >
       A value you left at the daemon's default in `settings.json` stays at that
       old value forever once you have upgraded, because the file is either
       overwritten wholesale or left alone.
@@ -32,7 +34,8 @@ truth_changes:
       the upgrade captures before it checks out the new one. When that baseline
       is unavailable nothing is guessed: every value of yours is preserved and
       none is upgraded.
-  - was: >
+  - topic: install-and-upgrade
+    was: >
       If the daemon cannot deploy `settings.json` during an upgrade, the upgrade
       fails and you retry it.
     now: >

@@ -326,7 +326,10 @@ NEW_VERSION="2.15.2"
 **Output interpretation:**
 
 - **Exit code 0**: Config is up to date — no new options to review
-- **Exit code 1**: New options available — review and add what's relevant
+- **Exit code 1**: New options available — review and add what's relevant.
+  What is printed is a bounded summary (the actionable lines plus the path of
+  the full advisory under the project's `untracked/config-changes/`); pass
+  `--full` to print the whole advisory inline.
 - Options under **🆕 Recommended — enable these** are dormant features (new
   opt-in protections, or a flipped default) the daemon actively recommends
   turning on. The line shows the recommended value and your current value; set

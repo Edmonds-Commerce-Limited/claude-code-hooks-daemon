@@ -411,8 +411,8 @@ fix (one environment variable, one timeout) turned into a thirty-site sweep.
 **Apply:** if a module docstring states an invariant worth keeping, add the check
 that fails when it is broken — in the same commit, not later. A convention with
 no guard decays at exactly the rate people forget it, and the decay is invisible
-until something forces you to touch every site at once. See DBF (`CLAUDE.md`
-Core Standard 15).
+until something forces you to touch every site at once. See DBF in
+[CodeLifecycle/Bugs.md](../CodeLifecycle/Bugs.md#defence-before-fix-dbf).
 
 ## A permanently-red CI is a blind guard, not a nuisance
 
@@ -426,8 +426,9 @@ coverage was wired in and inert.
 
 All 41 failures turned out to be real, diagnosable, and fixable in a day.
 
-**Apply:** a check whose result nobody reads is the DBF failure mode (`CLAUDE.md`
-Core Standard 15) one level up from the code. Treat "CI is always red" as an
+**Apply:** a check whose result nobody reads is the DBF failure mode (see
+[CodeLifecycle/Bugs.md](../CodeLifecycle/Bugs.md#defence-before-fix-dbf)) one
+level up from the code. Treat "CI is always red" as an
 outage, not a known quirk: while it is red, every guard downstream of it is
 unverifiable, including ones added later by someone who assumed CI worked.
 

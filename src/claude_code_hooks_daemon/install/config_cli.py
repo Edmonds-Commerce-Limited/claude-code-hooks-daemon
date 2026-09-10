@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.install.config_merger import ConfigMerger
 from claude_code_hooks_daemon.install.config_migrations import (
     UNSET,
     format_advisory_for_llm,
+    format_advisory_summary,
     generate_migration_advisory,
 )
 from claude_code_hooks_daemon.install.config_migrations import (
@@ -30,11 +31,15 @@ from claude_code_hooks_daemon.install.handler_key_audit import (
     format_findings,
     migrate_relocated_handler_keys,
 )
+from claude_code_hooks_daemon.install.report_offload import write_offloaded_report
 from claude_code_hooks_daemon.install.worktree_seed_report import (
     build_seed_report,
     format_report_for_llm,
     suggested_yaml_block,
 )
+
+_ADVISORY_FILENAME = "ADVISORY.md"
+_ADVISORY_RANGE_DIRNAME = "v{frm}-to-v{to}"
 
 
 def _json_safe_value(value: Any) -> Any:
@@ -161,6 +166,7 @@ def run_check_config_migrations(
     output_format: str = "text",
     manifests_dir: Path | None = None,
     include_unreleased: bool | None = None,
+    report_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Generate config migration advisory between two daemon versions.
 
@@ -176,15 +182,20 @@ def run_check_config_migrations(
         manifests_dir: Override manifest directory (for testing)
         include_unreleased: Also read the UNRELEASED staging manifests; ``None``
             includes them exactly when the running install is a branch install
+        report_dir: When given and there is anything to report, the full
+            advisory is written to ``report_dir/v{from}-to-v{to}/ADVISORY.md``
+            and the text form is the bounded summary (Plan 00329). None keeps
+            the whole advisory inline.
 
     Returns:
         Dictionary with advisory results (JSON-serializable).
         Keys: warnings, suggestions, from_version, to_version, has_warnings,
-              has_suggestions, text (if format='text')
+              has_suggestions, report_path, text (if format='text')
 
     Raises:
         FileNotFoundError: If user config file doesn't exist
         ValueError: If from_version > to_version
+        OSError: If report_dir was given and cannot be written
     """
     if not user_config_path.exists():
         raise FileNotFoundError(f"Config file not found: {user_config_path}")
@@ -228,8 +239,23 @@ def run_check_config_migrations(
         ],
     }
 
+    result["report_path"] = None
+    has_content = advisory.has_warnings or bool(advisory.suggestions)
+    report_path: Path | None = None
+    if has_content and report_dir is not None:
+        report_path = write_offloaded_report(
+            report_dir
+            / _ADVISORY_RANGE_DIRNAME.format(frm=advisory.from_version, to=advisory.to_version),
+            _ADVISORY_FILENAME,
+            format_advisory_for_llm(advisory) + "\n",
+        )
+        result["report_path"] = str(report_path)
+
     if output_format == "text":
-        result["text"] = format_advisory_for_llm(advisory)
+        if report_path is not None:
+            result["text"] = format_advisory_summary(advisory, report_path)
+        else:
+            result["text"] = format_advisory_for_llm(advisory)
 
     return result
 

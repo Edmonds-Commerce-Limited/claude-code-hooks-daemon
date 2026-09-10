@@ -26,6 +26,10 @@ from claude_code_hooks_daemon.install.handler_key_audit import (
     audit_handler_keys,
 )
 from claude_code_hooks_daemon.install.install_stamp import is_branch_install
+from claude_code_hooks_daemon.install.report_offload import (
+    SUMMARY_MAX_BYTES,
+    bound_summary,
+)
 from claude_code_hooks_daemon.install.version_parse import parse_version_tuple
 
 # ---------------------------------------------------------------------------
@@ -740,6 +744,67 @@ def format_advisory_for_llm(advisory: MigrationAdvisory) -> str:
 
     lines.append(f"See {_HANDLER_REFERENCE_DOC} for full option details.")
     return "\n".join(lines)
+
+
+def format_advisory_summary(advisory: MigrationAdvisory, report_path: Path) -> str:
+    """The bounded stdout form of an advisory (Plan 00329).
+
+    Keeps every ACTIONABLE line inline — stale keys, renamed keys still in use,
+    and each recommended key with its recommended and current value — and
+    replaces the descriptions, notes, examples and the whole informational
+    section with a count plus the path of the full advisory. Bounded by
+    ``SUMMARY_MAX_BYTES``; past that the item list is cut with a line naming
+    how many more the file holds.
+    """
+    head = [
+        f"Config Migration Advisory: v{advisory.from_version} → v{advisory.to_version}",
+        "",
+        f"Full advisory (every description, note and example): {report_path}",
+    ]
+    items: list[str] = []
+    if advisory.stale_handler_keys:
+        stale_count = len(advisory.stale_handler_keys)
+        items.append(f"{_LABEL_STALE_HANDLER_KEYS} ({stale_count} {_plural(stale_count, 'key')})")
+        items.extend(f"  - {finding.message}" for finding in advisory.stale_handler_keys)
+    if advisory.warnings:
+        issue_count = len(advisory.warnings)
+        items.append(f"{_LABEL_ACTION_REQUIRED} ({issue_count} {_plural(issue_count, 'issue')})")
+        items.extend(
+            f"  - {w.key} → renamed since v{w.version}: {w.message}" for w in advisory.warnings
+        )
+    recommended = [s for s in advisory.suggestions if s.recommended]
+    informational = [s for s in advisory.suggestions if not s.recommended]
+    if recommended:
+        items.append(f"{_LABEL_RECOMMENDED} ({len(recommended)})")
+        items.extend(_recommended_summary_line(s) for s in recommended)
+    tail = [
+        f"{_LABEL_NEW_OPTIONS}: {len(informational)} informational "
+        f"{_plural(len(informational), 'option')}, listed with examples in the full advisory.",
+        f"See {_HANDLER_REFERENCE_DOC} for full option details.",
+    ]
+    return bound_summary(
+        head=head,
+        items=items,
+        tail=tail,
+        max_bytes=SUMMARY_MAX_BYTES,
+        overflow=lambda n: f"  ... {n} more lines, all in {report_path.name}",
+    )
+
+
+def _recommended_summary_line(suggestion: AdvisorySuggestion) -> str:
+    line = f"  - v{suggestion.version}: {suggestion.key}"
+    if suggestion.recommended_value is not UNSET and suggestion.recommended_value is not None:
+        line += (
+            f" = {_format_config_value(suggestion.recommended_value)}"
+            f"  (your config: {_format_config_value(suggestion.current_value)})"
+        )
+    if suggestion.migration_note:
+        line += " — has a migration Note; read it in the full advisory before enabling"
+    return line
+
+
+def _plural(count: int, singular: str) -> str:
+    return singular if count == 1 else f"{singular}s"
 
 
 def _format_config_value(value: Any) -> str:

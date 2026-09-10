@@ -3132,15 +3132,109 @@ def cmd_config_validate(args: argparse.Namespace) -> int:
         return 1
 
 
+_REPORT_OFFLOAD_TRUTH_SUBDIR = Path("untracked") / "truth-changes"
+_REPORT_OFFLOAD_CONFIG_SUBDIR = Path("untracked") / "config-changes"
+
+
+def _add_report_offload_arguments(parser: argparse.ArgumentParser, *, default_subdir: Path) -> None:
+    """The three offload flags shared by the upgrade-time report commands."""
+    parser.add_argument(
+        "--report-dir",
+        dest="report_dir",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Where to write the full report and its chunk files "
+            f"(default: <project root>/{default_subdir}/)"
+        ),
+    )
+    parser.add_argument(
+        "--full",
+        dest="full",
+        action="store_true",
+        default=False,
+        help="Print the whole report inline instead of a file plus bounded summary",
+    )
+    # SUPPRESS, not None: the bin/hooks-daemon wrapper passes the GLOBAL
+    # --project-root before the subcommand, and a subparser default would
+    # overwrite that value in the namespace with None.
+    parser.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        metavar="PATH",
+        default=argparse.SUPPRESS,
+        help="Project root whose untracked/ receives the report (default: the global "
+        "--project-root, else auto-detect)",
+    )
+
+
+def _resolve_report_dir(args: argparse.Namespace, subdir: Path) -> Path | None:
+    """Where an upgrade-time report command offloads its full text (Plan 00329).
+
+    ``--full`` keeps everything inline (None); ``--report-dir`` wins when given;
+    otherwise the project's ``untracked/<subdir>``, which the installer
+    git-ignores in a client. Absolute, so the printed paths are usable from any
+    working directory.
+    """
+    if getattr(args, "full", False):
+        return None
+    explicit = getattr(args, "report_dir", None)
+    if explicit:
+        return Path(explicit).resolve()
+    project_path = _find_project_tree_root(getattr(args, "project_root", None))
+    if project_path is None:
+        # No project root means no untracked/ to write into; the report is
+        # still worth printing, so degrade to the inline form rather than
+        # failing the command.
+        print(
+            "WARNING: no project root found for the report file; printing the full "
+            "report inline instead (pass --project-root or --report-dir).",
+            file=sys.stderr,
+        )
+        return None
+    return (project_path / subdir).resolve()
+
+
+def _find_project_tree_root(override: Path | None) -> Path | None:
+    """The nearest directory holding ``.claude/``, or None when there is none.
+
+    A report directory needs a TREE, not a validated install, so this does not
+    go through :func:`get_project_path`, which terminates the process when the
+    install fails validation.
+    """
+    if override is not None:
+        return Path(override).resolve()
+    for candidate in (Path.cwd(), *Path.cwd().parents):
+        if (candidate / ".claude").is_dir():
+            return candidate
+    return None
+
+
+def _warn_report_offload_failed(command: str, error: OSError) -> None:
+    """The offload directory could not be written: say so, then print inline.
+
+    Losing the report would be worse than an oversized one, and a silent
+    fallback would leave the reader believing a file exists.
+    """
+    print(
+        f"WARNING: {command}: could not write the report file ({error}); "
+        "printing the full report inline instead.",
+        file=sys.stderr,
+    )
+
+
 def cmd_check_config_migrations(args: argparse.Namespace) -> int:
     """Run config migration advisory between two daemon versions.
 
     Compares manifests between --from and --to versions against the user's
     config file, reporting renamed keys still in use and new options available.
+    By default the full advisory is written to a file and stdout carries a
+    bounded summary (Plan 00329); ``--full`` prints everything inline.
 
     Args:
         args: Parsed CLI arguments with from_version, to_version, config,
-              format, and optional manifests_dir
+              format, and optional manifests_dir, report_dir, full
 
     Returns:
         0 if no warnings or suggestions, 1 if warnings/suggestions present,
@@ -3166,20 +3260,35 @@ def cmd_check_config_migrations(args: argparse.Namespace) -> int:
     manifests_dir: Path | None = (
         Path(args.manifests_dir) if getattr(args, "manifests_dir", None) else None
     )
+    report_dir = _resolve_report_dir(args, _REPORT_OFFLOAD_CONFIG_SUBDIR)
 
     # Plan 00291: an explicit flag forces the UNRELEASED staging manifests in;
     # left unset, the loader includes them exactly for a branch install.
     include_unreleased: bool | None = True if getattr(args, "include_unreleased", False) else None
 
     try:
-        result = run_check_config_migrations(
-            from_version=from_version,
-            to_version=to_version,
-            user_config_path=config_path,
-            output_format=output_format,
-            manifests_dir=manifests_dir,
-            include_unreleased=include_unreleased,
-        )
+        try:
+            result = run_check_config_migrations(
+                from_version=from_version,
+                to_version=to_version,
+                user_config_path=config_path,
+                output_format=output_format,
+                manifests_dir=manifests_dir,
+                include_unreleased=include_unreleased,
+                report_dir=report_dir,
+            )
+        except OSError as offload_error:
+            if report_dir is None or isinstance(offload_error, FileNotFoundError):
+                raise
+            _warn_report_offload_failed("check-config-migrations", offload_error)
+            result = run_check_config_migrations(
+                from_version=from_version,
+                to_version=to_version,
+                user_config_path=config_path,
+                output_format=output_format,
+                manifests_dir=manifests_dir,
+                include_unreleased=include_unreleased,
+            )
     except FileNotFoundError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
@@ -3290,13 +3399,16 @@ def cmd_check_worktree_seed(args: argparse.Namespace) -> int:
 def cmd_check_truth_changes(args: argparse.Namespace) -> int:
     """Show truth-changes (was → now) to reconcile across a version range.
 
-    Loads truth-changes manifests in (from, to] and prints the aggregated
-    was → now reconciliation list. Unlike check-config-migrations, this takes
-    no user config — truth-changes are guidance, not compared against anything.
+    Loads truth-changes manifests in (from, to] and, by default, writes the
+    full reconciliation report plus one file per topic chunk under the
+    project's untracked/ and prints a bounded summary naming them (Plan
+    00329); ``--full`` prints the whole report inline. Unlike
+    check-config-migrations, this takes no user config — truth-changes are
+    guidance, not compared against anything.
 
     Args:
         args: Parsed CLI arguments with from_version, to_version, format,
-              and optional truth_changes_dir.
+              and optional truth_changes_dir, report_dir, full, project_root.
 
     Returns:
         0 if no truth-changes in range, 1 if changes present, 2 on error.
@@ -3311,15 +3423,29 @@ def cmd_check_truth_changes(args: argparse.Namespace) -> int:
     )
     # Plan 00291: same switch as check-config-migrations.
     include_unreleased: bool | None = True if getattr(args, "include_unreleased", False) else None
+    report_dir = _resolve_report_dir(args, _REPORT_OFFLOAD_TRUTH_SUBDIR)
 
     try:
-        result = run_check_truth_changes(
-            from_version=args.from_version,
-            to_version=args.to_version,
-            output_format=args.format,
-            truth_changes_dir=truth_changes_dir,
-            include_unreleased=include_unreleased,
-        )
+        try:
+            result = run_check_truth_changes(
+                from_version=args.from_version,
+                to_version=args.to_version,
+                output_format=args.format,
+                truth_changes_dir=truth_changes_dir,
+                include_unreleased=include_unreleased,
+                report_dir=report_dir,
+            )
+        except OSError as offload_error:
+            if report_dir is None:
+                raise
+            _warn_report_offload_failed("check-truth-changes", offload_error)
+            result = run_check_truth_changes(
+                from_version=args.from_version,
+                to_version=args.to_version,
+                output_format=args.format,
+                truth_changes_dir=truth_changes_dir,
+                include_unreleased=include_unreleased,
+            )
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         known = list_known_truth_change_versions(
@@ -6954,6 +7080,9 @@ def main() -> int:
         action="store_true",
         help="Also read the UNRELEASED staging manifests (automatic for a non-release install)",
     )
+    _add_report_offload_arguments(
+        parser_check_migrations, default_subdir=_REPORT_OFFLOAD_CONFIG_SUBDIR
+    )
     parser_check_migrations.set_defaults(func=cmd_check_config_migrations)
 
     # audit-handler-keys command (Plan 00362)
@@ -7046,6 +7175,7 @@ def main() -> int:
         action="store_true",
         help="Also read the UNRELEASED staging manifests (automatic for a non-release install)",
     )
+    _add_report_offload_arguments(parser_check_truth, default_subdir=_REPORT_OFFLOAD_TRUTH_SUBDIR)
     parser_check_truth.set_defaults(func=cmd_check_truth_changes)
 
     # plan-qa command (Plan 00144) — sweep / staged gate / single-file lint

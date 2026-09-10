@@ -12,7 +12,9 @@ optional `id` that names a truth) and how the `upgrade.md` flow and
 
 **When to add a file here**: a release changes something a project's own docs are
 likely to assert (a workflow, a command, a convention). One `{was, now}` entry is two
-sentences. If a release changes no documented truth, add nothing.
+sentences plus a `topic:` naming the document area it lives in (reuse an existing
+slug — `grep topic:` across the live directory — so the entry joins that chunk).
+If a release changes no documented truth, add nothing.
 
 **When the truth you are revising already has an entry** in the live directory (your
 `was` is roughly its `now`), give both entries the same `id` — back-fill the older

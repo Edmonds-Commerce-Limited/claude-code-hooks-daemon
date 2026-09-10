@@ -1,6 +1,7 @@
 version: "3.53.0"
 truth_changes:
-  - id: plan-size-remedies
+  - topic: plan-workflow
+    id: plan-size-remedies
     was: >
       When a PLAN.md grows past the size tiers there are exactly TWO remedies,
       and neither is deletion: RELOCATE the narrative into the plan's JOURNAL/
@@ -39,7 +40,8 @@ truth_changes:
       instead took that PLAN.md from 19,045 to 9,520 bytes with all 31 tasks
       intact, and the extracted material ended up FULLER than what had been
       compressed away, because it finally had a legitimate home.
-  - was: >
+  - topic: plan-workflow
+    was: >
       The plan-shrink-without-journal commit check distinguishes a relocation
       from a deletion by a single reliable signal: a relocation stages a
       JOURNAL/ entry and a deletion does not. So a commit that shrinks a
@@ -55,7 +57,8 @@ truth_changes:
       folder (excluding JOURNAL/) as evidence of relocation, exactly as it
       accepts a journal entry. If you have been journalling solely to keep
       this check quiet while extracting, you no longer need to.
-  - was: >
+  - topic: plan-workflow
+    was: >
       There are two supported ways to create a plan folder: run mkplan.bash, or
       create the NNNNN-name directory yourself with mkdir and then write its
       PLAN.md. Both end up in the same place, so the choice is a matter of
@@ -83,7 +86,8 @@ truth_changes:
       what keeps plan-shaped test fixtures under /tmp working. If
       mkplan.bash is NOT deployed the handler stays silent, because denying the
       only available path would leave an agent unable to create a plan at all.
-  - was: >
+  - topic: daemon-cli
+    was: >
       Runtime files the daemon writes under its untracked directory are ordinary
       files with ordinary permissions, so the only thing you need to know about
       that directory is that it is git-ignored and safe to delete.
@@ -114,7 +118,8 @@ truth_changes:
       possible, because the socket is 0660 owned by the daemon's user and no
       code anywhere sets a shared group, so a second UID was already refused at
       connect().
-  - was: >
+  - topic: install-and-upgrade
+    was: >
       The daemon's own files live in .claude/hooks-daemon/. That directory is
       git-ignored by the installer, so excluding it -- which most projects get
       for free, since ruff and similar tools respect .gitignore -- keeps
@@ -145,7 +150,8 @@ truth_changes:
       findings it could not fix (upgrades overwrite the file), could not
       silence (the qa_suppression handler denies an agent writing an inline
       directive), and had no reason to exclude.
-  - was: >
+  - topic: compaction-and-transcripts
+    was: >
       The daemon archives your conversation transcript before every
       compaction, into untracked/transcripts/. If you need the history of a
       session -- for debugging, for a bug report, for an audit trail -- that
@@ -169,7 +175,8 @@ truth_changes:
       upgrade and is safe to delete. A leftover "transcript_archiver:" block
       in your config is also safe to leave -- retired handler names are
       tolerated by the validator and will not degrade the daemon.
-  - was: >
+  - topic: compaction-and-transcripts
+    was: >
       Secret terms from your block-words list are redacted out of the daemon's
       artefacts, including the PreCompact transcript archive. Scanning the
       daemon's output directories and finding nothing means a term has not

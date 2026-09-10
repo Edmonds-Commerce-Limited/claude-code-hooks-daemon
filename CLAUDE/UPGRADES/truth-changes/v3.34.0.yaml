@@ -1,6 +1,7 @@
 version: "3.34.0"
 truth_changes:
-  - was: >
+  - topic: ccy-supervisor
+    was: >
       The ccy supervisor auto-deploy (v3.33.0, ccy.deploy_supervisor) copies
       claude-supervise.py into a project's .claude/ccy/ but does NOT arm it —
       wiring it as CCY_CLAUDE_WRAPPER is the launcher's job, so on a fresh

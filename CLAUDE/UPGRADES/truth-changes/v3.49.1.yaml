@@ -1,6 +1,7 @@
 version: "3.49.1"
 truth_changes:
-  - was: >
+  - topic: plan-workflow
+    was: >
       mkplan.bash scaffolds a "## Notes & Updates" section into new plans when
       no _TEMPLATE_.md is present, so a project's docs may describe that
       section as part of the plan skeleton.
@@ -11,7 +12,8 @@ truth_changes:
       the generator behind — a plan could previously be born with BOTH a seeded
       "## Notes & Updates" section and a JOURNAL/. Existing plans are never
       rewritten; only newly scaffolded plans are affected.
-  - was: >
+  - topic: plan-workflow
+    was: >
       The recovery-cron advisory instructs the agent to record the failsafe
       recovery cron ID in the plan's "## Notes & Updates" section.
     now: >
@@ -23,7 +25,8 @@ truth_changes:
       also no longer treated as a progress signal by that advisory — task-status
       icons (⬜/🔄/✅) still are, and every genuine progress edit touches one
       under the plan template's task grammar.
-  - was: >
+  - topic: plan-workflow
+    was: >
       Setting plan_workflow.qa.journal.mode to "block" makes the
       journal-dayfile-naming check block, independently of other plan QA
       settings.
@@ -36,7 +39,8 @@ truth_changes:
       "edit_mode: off" disables both journal edit checks outright even with
       "journal.enabled: true". Set the surface mode first, then ratchet
       journal.mode.
-  - was: >
+  - topic: plan-workflow
+    was: >
       The plan_time_estimates handler blocks time estimates in any
       CLAUDE/Plan/*.md file.
     now: >

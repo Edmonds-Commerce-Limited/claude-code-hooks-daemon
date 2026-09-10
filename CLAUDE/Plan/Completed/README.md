@@ -4,9 +4,15 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00339: supervisor injection lands unsubmitted](00339-supervisor-injection-lands-unsubmitted/PLAN.md) - Complete at `e98c19e4` + the archiving commit (probing a real TUI refuted the assumed mechanism: the trigger is Claude Code's paste detection on a large burst, inside which a carriage return is a literal newline, so the injection is now bracketed-paste framed)
+
+- [00336: upgrade path residual findings](00336-upgrade-path-residual-findings/PLAN.md) - Complete at `c85d5e90`…`788ce6c8` + the archiving commit (config preservation now diffs against a true old-version baseline; `HOOKS-DAEMON.md` regenerated on both upgrade paths instead of never; 17 shipped commands our own `project_containment` denied moved in-repo, found by driving the doc corpus through the live handler)
+
 - [00335: heredoc receiver policy and review followups](00335-heredoc-receiver-policy-and-review-followups/PLAN.md) - Complete at `745ff9c5` + the archiving commit (inverting the quoted-heredoc exemption to an allowlist of data sinks closed a fourth executor bypass found by probing, the word-expansion family recorded as unclosable, and the `jq` over-block in one change)
 
 - [00334: core doc templates for client projects](00334-core-doc-templates-for-client-projects/PLAN.md) - Complete at `4e78f7c9` + the archiving commit (daemon guidance named client documents no install path created, so a client enforced a workflow whose documentation did not exist; ships three genericised core documents deployed DAEMON-owned beside a seed-once CLIENT-owned override, each gated on the subsystem that NAMES it, and replaces the hand-maintained citation list with a scan)
+
+- [00329: post upgrade truth changes report bloat](00329-post-upgrade-truth-changes-report-bloat/PLAN.md) - Complete at `162efcc6`, `cc33c4ce`…`ddeb7cee` + the archiving commit (the post-upgrade `check-truth-changes` and `check-config-migrations` output was truncated by Claude Code's failure-path limit, so most entries never reached the agent; both now print a bounded summary and write the full report to a file, superseded chains collapse to the current truth, and the remainder is chunked by topic into disjoint subagent briefs)
 
 - [00252: guards for premises no write-time hook sees](00252-guards-for-premises-no-write-time-hook-sees/PLAN.md) - Complete at `772ef675`, `6c9a6f6f` and `7b94bac3` + the archiving commit (the test suite runs in a hermetic git environment, and the secret-term guard scans staged content and `gh` bodies at commit time; client-mode verified)
 
@@ -313,6 +319,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 - [00176: settings.json merge — preserve client customizations on upgrade](00176-settings-json-merge-preserve-on-upgrade/PLAN.md) - Complete at `d23b836d`…`74f640c2` + the archiving commit (all three deploy routes copied the daemon's `settings.json` over the client's, so every upgrade discarded a custom `statusLine`, a `permissions` block, an extra hook and any deliberate override; `merge_settings` now deep-copies the CLIENT document and edits only the daemon-owned wired-hook block, and an unmergeable file changes nothing and leaves a `.merge-proposal` beside it rather than aborting mid-upgrade)
 
 - [00173: Supervisor Ctrl+Z guard + status-line message channel](00173-supervisor-ctrlz-guard-and-status-message/PLAN.md) - Complete (neutralises the Ctrl+Z-suspends-Claude footgun (upstream anthropics/claude-code#43596): the ccy PTY supervisor strips the `0x1a` SUSP byte from its forwarded stdin so it never reaches Claude's PTY …)
+
+- [00172: Close the HandlersConfig ↔ wired-events coverage gap](00172-handlerconfig-wired-events-coverage-gap/PLAN.md) - Complete at `a22fe679`, `bd3e68b7` and `e7974c5c` + the archiving commit (`HandlersConfig` and `PluginConfig.event_type` are locked to the wired-event catalogue; the dead 3-event `ConfigSchema` stub is removed so config has one validation path, and the generators' intentional event subsets are documented as such)
 
 - [00171: supervisor_indicator /proc-scan negative caching](00171-supervisor-indicator-proc-scan-negative-caching/PLAN.md) - Complete (fast follow-up closing the three non-blocking v3.43.0 release code-review findings per Plan 00157 "never drop a finding".)
 

@@ -45,6 +45,13 @@ CollectedTests = list[tuple[str, str, int, list[AcceptanceTest], str]]
 PSEUDO_EVENT_LABEL_PREFIX = "pseudo:"
 PSEUDO_EVENT_SOURCE = "pseudo-event"
 
+#: Events whose injected context Claude Code surfaces as a system-reminder in
+#: the transcript, so a human tester can SEE a context test pass. This is an
+#: intentional narrow subset of the wired-event catalogue, not a stale copy of
+#: it: on every other event the context is consumed silently, so the playbook
+#: marks those tests VERIFIED_BY_LOAD rather than asking the tester to look.
+_OBSERVABLE_CONTEXT_EVENTS = frozenset({"SessionStart", "UserPromptSubmit", "PostToolUse"})
+
 
 def _tool_payload_block(test: AcceptanceTest) -> list[str]:
     """Render the declared tool call for a test whose command is prose.
@@ -728,9 +735,7 @@ class PlaybookGenerator:
                 # Test details with category annotation for Context tests
                 test_type_str = test.test_type.value.title()
                 if test.test_type.value == "context":
-                    # Determine if OBSERVABLE or VERIFIED_BY_LOAD
-                    observable_events = {"SessionStart", "UserPromptSubmit", "PostToolUse"}
-                    if event_type in observable_events:
+                    if event_type in _OBSERVABLE_CONTEXT_EVENTS:
                         test_type_str = f"{test_type_str} (OBSERVABLE - check system-reminders)"
                     else:
                         test_type_str = f"{test_type_str} (VERIFIED_BY_LOAD - skip test)"
@@ -827,9 +832,7 @@ class PlaybookGenerator:
                     # Test details with category annotation for Context tests
                     test_type_str = test.test_type.value.title()
                     if test.test_type.value == "context":
-                        # Determine if OBSERVABLE or VERIFIED_BY_LOAD
-                        observable_events = {"SessionStart", "UserPromptSubmit", "PostToolUse"}
-                        if event_type in observable_events:
+                        if event_type in _OBSERVABLE_CONTEXT_EVENTS:
                             test_type_str = f"{test_type_str} (OBSERVABLE - check system-reminders)"
                         else:
                             test_type_str = f"{test_type_str} (VERIFIED_BY_LOAD - skip test)"

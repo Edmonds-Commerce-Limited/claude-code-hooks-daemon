@@ -1,0 +1,27 @@
+version: "3.64.0"
+truth_changes:
+  - topic: install-and-upgrade
+    was: >
+      `check-truth-changes` prints the entire `was → now` reconciliation list
+      inline, and step 4 of the upgrade skill reads every entry from that
+      output and reconciles each one itself.
+    now: >
+      `check-truth-changes` writes the full report to
+      `untracked/truth-changes/v<from>-to-v<to>/REPORT.md` plus one
+      `chunk-NN-<topic>.md` file per topic, and prints only a bounded summary
+      (under 8,000 bytes) naming them. Step 4 of the upgrade skill dispatches
+      one subagent per chunk file, in parallel, and each subagent returns only
+      the files it changed; a chunk marked SEQUENTIAL runs alone afterwards.
+      `--full` prints the whole report inline; `--report-dir` moves the files.
+  - topic: install-and-upgrade
+    was: >
+      `check-config-migrations` prints the whole advisory inline — every
+      recommended and informational option with its description, note and
+      example YAML — and step 5 of the upgrade skill reads it from stdout.
+    now: >
+      `check-config-migrations` writes the full advisory to
+      `untracked/config-changes/v<from>-to-v<to>/ADVISORY.md` and prints a
+      bounded summary: stale keys, renamed keys and each recommended key with
+      its recommended and current value inline, plus a count of informational
+      options. A recommendation's migration Note is read from the file before
+      enabling. `--full` prints the whole advisory inline.
