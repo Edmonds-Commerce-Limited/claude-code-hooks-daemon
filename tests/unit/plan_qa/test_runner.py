@@ -2,6 +2,7 @@
 
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -69,8 +70,11 @@ class TestRunStage:
 
     def test_context_is_frozen(self) -> None:
         context = _context()
+        # Aliased through Any: see test_types.py's TestFinding.test_is_frozen
+        # for why -- the assignment itself is what raises FrozenInstanceError.
+        mutable_context: Any = context
         with pytest.raises(FrozenInstanceError):
-            context.plan_dir_rel = "elsewhere"
+            mutable_context.plan_dir_rel = "elsewhere"
 
     def test_plan_dir_property(self) -> None:
         context = CheckContext(project_root=Path("/repo"), plan_dir_rel="CLAUDE/Plan")

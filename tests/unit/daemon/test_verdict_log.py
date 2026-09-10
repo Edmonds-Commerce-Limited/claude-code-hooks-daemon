@@ -383,6 +383,7 @@ class TestAppendVerdicts:
             max_bytes=1024 * 1024,
         )
         assert result == tmp_path / VERDICT_LOG_FILENAME
+        assert result is not None
         lines = result.read_text(encoding="utf-8").strip().splitlines()
         assert len(lines) == 1
         parsed = json.loads(lines[0])

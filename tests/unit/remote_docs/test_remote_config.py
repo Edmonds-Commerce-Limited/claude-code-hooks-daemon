@@ -72,5 +72,8 @@ class TestValidation:
 
     def test_an_unknown_key_is_rejected(self) -> None:
         """extra=forbid: a typo must fail loudly, not be silently ignored."""
+        # model_validate: "default_stalenes_days" (missing an s) is not a
+        # field the typed constructor admits at all -- that unrecognised-ness
+        # is exactly what this test asserts.
         with pytest.raises(ValidationError):
-            DocumentationRemoteConfig(default_stalenes_days=30)
+            DocumentationRemoteConfig.model_validate({"default_stalenes_days": 30})

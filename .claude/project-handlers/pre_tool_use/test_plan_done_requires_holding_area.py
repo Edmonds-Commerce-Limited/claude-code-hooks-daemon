@@ -70,6 +70,7 @@ class TestAWriteThatCompletesAPlan:
         assert handler.matches(payload) is True
         result = handler.handle(payload)
         assert result.decision.value == "deny"
+        assert result.reason is not None
         assert "holding area" in result.reason
         assert "UNRELEASED" in result.reason
 
