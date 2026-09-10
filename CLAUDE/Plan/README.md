@@ -36,6 +36,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - Tiered size enforcement (advise → strong warn → hard block) at escalating thresholds via the existing `plan_qa` surfaces, plus consistent doc/SSoT touch-points — no new handler, no context flooding
 
+- [00375: `plan-qa` and `docs-qa` JSON disagree on the severity key](00375-plan-qa-and-docs-qa-json-disagree-on-the-severity-key/PLAN.md) - Not Started (same concept, two names — `docs-qa` emits `severity`, `plan-qa` emits `level`; deferred out of 00373 because `--json` is documented public API, so a rename needs a deprecation window rather than a QA plan)
+
 - [00373: drift reached main unseen — merge bypass and QA blind spot](00373-drift-reached-main-unseen-merge-bypass-and-qa-blind-spot/PLAN.md) - In Progress (a merge commit resurrected an archived plan folder and nothing complained: every commit-stage gate keys on `git commit`, which `git merge` never invokes, and neither `plan-qa --sweep` nor `docs-qa --sweep` is a QA tool, so the drift survived 27/27 QA, green CI and the release slate)
 
 - [00163: Plan Journalling — first-class per-plan JOURNAL/ support](00163-plan-journalling/PLAN.md) - Dormant (Phases 1–2 shipped in v3.40.0; Task 3.2 is the sole open item)
@@ -232,27 +234,27 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 374 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 375 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 335 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 16 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 17 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 16 + 335 + 13 = **364 folders**, spanning
-  **361 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 17 + 335 + 13 = **365 folders**, spanning
+  **362 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  374 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  375 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  361 + 13 = 374. ✅
+  362 + 13 = 375. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
