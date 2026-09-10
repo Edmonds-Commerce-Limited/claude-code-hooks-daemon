@@ -43,13 +43,17 @@ class TestCcyConfigValidation:
 
     def test_extra_fields_are_rejected(self) -> None:
         """Unknown fields raise ValidationError (extra='forbid' catches typos)."""
+        # model_validate: "typo_field" is not a field the typed constructor
+        # admits at all -- that unrecognised-ness is exactly what is tested.
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            CcyConfig(deploy_supervisor=True, typo_field="oops")
+            CcyConfig.model_validate({"deploy_supervisor": True, "typo_field": "oops"})
 
     def test_deploy_supervisor_rejects_non_bool(self) -> None:
         """A non-bool, non-null value is rejected."""
+        # model_validate: deploy_supervisor's real type is bool | None, so a
+        # string is not admitted by the typed constructor either.
         with pytest.raises(ValidationError):
-            CcyConfig(deploy_supervisor="yes-please")
+            CcyConfig.model_validate({"deploy_supervisor": "yes-please"})
 
 
 class TestCcyConfigInRootConfig:

@@ -246,9 +246,13 @@ class TestHandlerChain:
         h1 = MockHandler("h1", priority=10)
         h2 = MockHandler("h2", priority=30)
 
-        # Simulate a handler whose priority was set to None (e.g., from bad config)
+        # Simulate a handler whose priority was set to None (e.g., from bad config).
+        # Handler.priority's real type is int; aliased through Any because this
+        # invalid-per-the-type-system state is exactly what the regression
+        # test below exercises (chain must not crash sorting on it).
         h_broken = MockHandler("h_broken", priority=50)
-        h_broken.priority = None
+        h_broken_mutable: Any = h_broken
+        h_broken_mutable.priority = None
 
         chain.add(h1)
         chain.add(h_broken)
@@ -683,6 +687,7 @@ class TestHandlerChain:
         assert result.handlers_executed == ["h1"]
         # Should return DENY to block operation when handler crashes
         assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
         assert "SYSTEM ERROR" in result.result.reason
 
     def test_execute_creates_error_context_on_exception(self) -> None:

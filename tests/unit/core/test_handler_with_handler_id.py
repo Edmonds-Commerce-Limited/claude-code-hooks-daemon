@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerIDMeta, Priority
 from claude_code_hooks_daemon.core import Handler, HookResult
 from claude_code_hooks_daemon.core.hook_result import Decision
 
@@ -80,6 +80,7 @@ class TestHandlerWithHandlerID:
 
         assert hasattr(handler, "handler_id")
         assert handler.handler_id == HandlerID.DESTRUCTIVE_GIT
+        assert isinstance(handler.handler_id, HandlerIDMeta)
         assert handler.handler_id.class_name == "DestructiveGitHandler"
 
     def test_different_handlers_have_correct_config_keys(self) -> None:
@@ -186,4 +187,5 @@ class TestHandlerAttributes:
         handler = ConcreteTestHandler(handler_id=HandlerID.WEB_SEARCH_YEAR)
 
         assert handler.handler_id is HandlerID.WEB_SEARCH_YEAR
+        assert isinstance(handler.handler_id, HandlerIDMeta)
         assert handler.handler_id.class_name == "WebSearchYearHandler"

@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from claude_code_hooks_daemon.config.models import DaemonConfig
+from claude_code_hooks_daemon.config.models import DaemonConfig, LogLevel
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.daemon.server import (
     HooksDaemon,
@@ -33,7 +33,7 @@ def _make_config(
         socket_path=socket_path,
         pid_file_path=pid_file_path,
         idle_timeout_seconds=600,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
     )
 
 
@@ -66,7 +66,7 @@ class FakeLegacyController:
 
     def dispatch(self, hook_input: dict[str, Any]) -> HookResult:
         """Dispatch to handlers."""
-        return HookResult(decision=Decision.ALLOW, context="legacy")
+        return HookResult(decision=Decision.ALLOW, context=["legacy"])
 
 
 class NotAController:
