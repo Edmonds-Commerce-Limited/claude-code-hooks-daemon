@@ -173,19 +173,23 @@ def failure_report(corpus: str, message: str) -> dict[str, Any]:
     }
 
 
-def parse_findings(stdout: str) -> list[dict[str, Any]] | None:
-    """The findings array from a sweep's ``--json`` output, or ``None``.
+def parse_findings(stdout: str) -> tuple[list[dict[str, Any]] | None, str | None]:
+    """``(findings, None)`` on a parsed sweep, ``(None, reason)`` when there is none.
 
-    ``None`` means the output was not the documented shape, which is an
-    operational failure rather than an empty result.
+    The reason travels WITH the failure rather than being reconstructed by
+    the caller — the same shape ``run_pyright_check.run_pyright`` uses, and
+    the reason it needs no error-hiding exclusion: a bare ``return None``
+    discards why, so the report can only offer a generic sentence for two
+    quite different failures (a traceback on stdout, and a JSON object where
+    an array belongs).
     """
     try:
         parsed = json.loads(stdout)
-    except json.JSONDecodeError:
-        return None
+    except json.JSONDecodeError as exc:
+        return None, f"stdout was not JSON ({exc})"
     if not isinstance(parsed, list):
-        return None
-    return [entry for entry in parsed if isinstance(entry, dict)]
+        return None, f"stdout was JSON but not an array of findings (got {type(parsed).__name__})"
+    return [entry for entry in parsed if isinstance(entry, dict)], None
 
 
 def _write_report(root: Path, corpus: str, report: dict[str, Any]) -> Path:
@@ -209,9 +213,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _verdict(
-    corpus: str, exit_code: int, stdout: str, stderr: str
-) -> tuple[dict[str, Any], int]:
+def _verdict(corpus: str, exit_code: int, stdout: str, stderr: str) -> tuple[dict[str, Any], int]:
     """Turn one raw CLI result into a report and this wrapper's exit code.
 
     A CLI exit outside its documented clean/findings pair means no verdict
@@ -225,11 +227,15 @@ def _verdict(
             failure_report(corpus, f"the {corpus} sweep exited {exit_code}: {detail}"),
             EXIT_OPERATIONAL,
         )
-    findings = parse_findings(stdout)
+    findings, reason = parse_findings(stdout)
     if findings is None:
-        detail = stderr.strip() or "stdout was not a JSON array of findings"
-        return failure_report(corpus, f"the {corpus} sweep produced no verdict: {detail}"), (
-            EXIT_OPERATIONAL
+        detail = reason or "no reason recorded"
+        stderr_note = f"; stderr: {stderr.strip()}" if stderr.strip() else ""
+        return (
+            failure_report(
+                corpus, f"the {corpus} sweep produced no verdict: {detail}{stderr_note}"
+            ),
+            EXIT_OPERATIONAL,
         )
     report = build_report(corpus, findings)
     return report, EXIT_ISSUES if findings else EXIT_SUCCESS
