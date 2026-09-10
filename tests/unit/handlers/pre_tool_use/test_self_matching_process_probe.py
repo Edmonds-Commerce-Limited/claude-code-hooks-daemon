@@ -236,6 +236,42 @@ class TestDenies:
         assert result.decision == Decision.DENY
         assert not result.context
 
+    def test_bracket_tricked_probe_stays_denied_via_its_own_fallback_echo(
+        self, handler: SelfMatchingProcessProbeHandler
+    ) -> None:
+        """Reported bug, verbatim: bracketing the pattern is NOT sufficient here.
+
+        Confirmed against a real `pgrep`: this shape is a genuine self-match,
+        not a false positive — `pgrep -f '[p]ytest'` is not the tail of the
+        statement (it has a real `|| echo` after it), so bash never
+        exec-optimises it away, and the calling shell's own cmdline still
+        spells "pytest" unescaped inside its own fallback message. The deny
+        must stand; only the explanation should improve.
+        """
+        command = (
+            "set -euo pipefail; kill 377690 405703; sleep 3; "
+            "pgrep -f '[l]lm_qa' || echo \"no QA processes\"; "
+            "pgrep -f '[p]ytest' || echo \"no pytest\""
+        )
+        result = handler.handle(_bash(command))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert RuleID.PGREP_SELF_MATCH in result.reason
+        # Names the ACTUAL offending text instead of silently offering
+        # nothing: the probe's own pattern is already bracketed, so the
+        # ordinary "REWRITE THIS COMMAND AS" rewrite has nothing left to say.
+        assert "pytest" in result.reason
+        assert "FIX THE OTHER TEXT" in result.reason
+        assert 'REWRITE THIS COMMAND AS: pgrep -f "[p]ytest"' not in result.reason
+
+    def test_bracket_tricked_probe_with_a_reworded_fallback_is_allowed(
+        self, handler: SelfMatchingProcessProbeHandler
+    ) -> None:
+        """The counterpart ALLOW: a fallback message that avoids the pattern."""
+        command = 'pgrep -f "[p]ytest" || echo "no match"'
+        result = handler.handle(_bash(command))
+        assert result.decision == Decision.ALLOW
+
 
 class TestAdvises:
     def test_an_uncapped_pid_wait_is_advisory(

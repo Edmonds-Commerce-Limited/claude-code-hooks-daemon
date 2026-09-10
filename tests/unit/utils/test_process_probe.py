@@ -142,6 +142,51 @@ class TestPgrepFullMatch:
         """`&&` runs the next command once; it does not wait."""
         assert _only("pgrep -f run_02 && echo found").wait_construct is None
 
+    def test_classic_self_reference_has_no_external_match(self) -> None:
+        """The probe's own text explains the match; nothing else needs naming."""
+        assert _only("pgrep -f run_02").external_match is None
+
+
+class TestExternalCollateralMatch:
+    """A bracket-tricked probe can still self-match through OTHER text.
+
+    Confirmed against real `pgrep`: a simple command that is NOT the tail of
+    the script — anything with a real `|| …`/`&& …` after it that the shell
+    must be ready to run — is never exec-optimised away, so its cmdline stays
+    the FULL script text for the life of the shell. A companion
+    `|| echo "no <name>"` fallback that spells the target unescaped therefore
+    keeps the probe self-matching even after its own pattern is bracketed —
+    a real hazard, not a false positive, so the verdict must stay
+    SELF_MATCHING. `external_match` names what the bracket trick on the
+    probe's own text cannot fix.
+    """
+
+    def test_the_offending_text_can_be_the_probes_own_fallback(self) -> None:
+        """The reported bug's exact shape: the fallback belongs to THIS probe."""
+        command = 'pgrep -f "[p]ytest" || echo "no pytest"'
+        probe = _only(command)
+        assert probe.verdict is ProbeVerdict.SELF_MATCHING
+        assert probe.external_match == "pytest"
+
+    def test_bracket_tricked_probe_with_no_collateral_text_is_safe(self) -> None:
+        """The ordinary case the bracket trick is meant for: no residual match."""
+        probe = _only('pgrep -f "[p]ytest" || echo "no match"')
+        assert probe.verdict is ProbeVerdict.SAFE
+        assert probe.external_match is None
+
+    def test_safe_rewrite_offers_nothing_once_already_bracketed(self) -> None:
+        """`safe_rewrite` cannot help here; the message must lean on `external_match`."""
+        probe = _only('pgrep -f "[p]ytest" || echo "no pytest"')
+        assert probe.safe_rewrite is None
+        assert probe.external_match == "pytest"
+
+    def test_an_unbracketed_probe_reports_no_external_match(self) -> None:
+        """Fix the probe's own spelling first; external_match waits for a retry."""
+        probe = _only('pgrep -f "pytest" || echo "no pytest"')
+        assert probe.verdict is ProbeVerdict.SELF_MATCHING
+        assert probe.external_match is None
+        assert probe.safe_rewrite == 'pgrep -f "[p]ytest"'
+
 
 class TestPgrepSafeForms:
     """Forms that cannot match the probing shell's own command line."""
