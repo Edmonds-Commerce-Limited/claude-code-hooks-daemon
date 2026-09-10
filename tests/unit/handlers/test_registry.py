@@ -316,7 +316,10 @@ class TestRegisterAll:
         # root layout supplied the declaration must still arrive, on the root
         # scope -- the fallback exists precisely so this Plan 00331
         # behaviour survives a caller that passes no registry.
-        assert all("roles" in h._documentation.vendor_scopes[0].vendor_dirs for h in documented)
+        for h in documented:
+            policy = getattr(h, "_documentation", None)
+            assert policy is not None
+            assert "roles" in policy.vendor_scopes[0].vendor_dirs
 
     def test_register_all_routes_a_sub_projects_vendor_dirs_into_the_docs_policy(
         self, registry: HandlerRegistry, router: EventRouter, tmp_path: Path
@@ -358,7 +361,9 @@ class TestRegisterAll:
         ]
         assert documented, "no documentation-tagged handler registered"
         for handler in documented:
-            scopes = {scope.root: scope for scope in handler._documentation.vendor_scopes}
+            policy = getattr(handler, "_documentation", None)
+            assert policy is not None
+            scopes = {scope.root: scope for scope in policy.vendor_scopes}
             assert "roles" in scopes["apps/api"].vendor_dirs
             assert "roles" not in scopes[""].vendor_dirs
 
@@ -431,7 +436,11 @@ class TestRegisterAll:
         self, registry: HandlerRegistry, router: EventRouter
     ) -> None:
         """register_all should filter handlers by enable_tags."""
-        config = {
+        # `dict[str, Any]`: register_all's runtime config accepts event-level
+        # keys (enable_tags/disable_tags, a list) alongside handler-name keys
+        # (a nested dict) under the same event entry -- a shape its declared
+        # `dict[str, dict[str, dict[str, Any]]]` param type does not capture.
+        config: dict[str, Any] = {
             "pre_tool_use": {
                 "enable_tags": ["safety"],
             }
@@ -453,7 +462,7 @@ class TestRegisterAll:
         self, registry: HandlerRegistry, router: EventRouter
     ) -> None:
         """register_all should exclude handlers by disable_tags."""
-        config = {
+        config: dict[str, Any] = {  # see enable_tags test above for why
             "pre_tool_use": {
                 "disable_tags": ["test"],
             }
@@ -508,7 +517,7 @@ class TestRegisterAll:
         self, registry: HandlerRegistry, router: EventRouter
     ) -> None:
         """register_all should handle disable_tags that is not a list."""
-        config = {
+        config: dict[str, Any] = {  # see enable_tags test above for why
             "pre_tool_use": {
                 "disable_tags": "not-a-list",  # Should be ignored/handled
             }
@@ -882,4 +891,7 @@ class TestProjectExcludePathsReachDocsPolicy:
             if getattr(handler, "_documentation", None) is not None
         ]
         assert documented, "no documentation-tagged handler registered"
-        assert all(h._documentation.exclude_paths == ("docs/fixtures/**",) for h in documented)
+        for h in documented:
+            policy = getattr(h, "_documentation", None)
+            assert policy is not None
+            assert policy.exclude_paths == ("docs/fixtures/**",)

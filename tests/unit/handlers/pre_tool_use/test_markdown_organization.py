@@ -629,6 +629,7 @@ class TestMarkdownOrganizationHandler:
         write_input["tool_input"]["file_path"] = "src/invalid.md"
         result = handler.handle(write_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "MARKDOWN FILE IN WRONG LOCATION" in result.reason
         assert "src/invalid.md" in result.reason
         assert "CLAUDE/Plan" in result.reason
@@ -641,6 +642,7 @@ class TestMarkdownOrganizationHandler:
         write_input["tool_input"]["file_path"] = "src/invalid.md"
         result = handler.handle(write_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "allowed_markdown_paths" in result.reason
         assert "monorepo_subproject_patterns" in result.reason
         assert "hooks-daemon.yaml" in result.reason
@@ -1963,6 +1965,7 @@ class TestClaudeCodeSyncEnforcement:
         result = handler._check_claude_code_sync()
         assert result is not None
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "settings.json not found" in result.reason
 
     # ── Settings file parse error ──
@@ -1976,6 +1979,7 @@ class TestClaudeCodeSyncEnforcement:
         result = handler._check_claude_code_sync()
         assert result is not None
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "Cannot read" in result.reason
 
     # ── plansDirectory not set ──
@@ -1989,6 +1993,7 @@ class TestClaudeCodeSyncEnforcement:
         result = handler._check_claude_code_sync()
         assert result is not None
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "plansDirectory not set" in result.reason
 
     # ── plansDirectory mismatch ──
@@ -2002,6 +2007,7 @@ class TestClaudeCodeSyncEnforcement:
         result = handler._check_claude_code_sync()
         assert result is not None
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "mismatch" in result.reason
         assert "Other/Plans" in result.reason
 
@@ -2054,6 +2060,7 @@ class TestClaudeCodeSyncEnforcement:
         }
         result = handler.handle_planning_mode_write(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "settings.json not found" in result.reason
 
     def test_handle_planning_mode_write_proceeds_when_sync_passes(
@@ -2295,6 +2302,7 @@ class TestUntrackedClaudeMemoryPolicy:
     ) -> None:
         result = policy_handler.handle(self._write(self.MEMORY_PATH))
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         # Specialist message — NOT the generic wrong-location one
         assert "WRONG LOCATION" not in result.reason
         assert "UNTRACKED CLAUDE MEMORY" in result.reason
@@ -2325,6 +2333,7 @@ class TestUntrackedClaudeMemoryPolicy:
     ) -> None:
         result = policy_handler.handle(self._bash(f"echo x > {self.MEMORY_PATH}"))
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "UNTRACKED CLAUDE MEMORY" in result.reason
 
     # --- reads are always allowed ---
@@ -2435,6 +2444,7 @@ class TestUntrackedClaudeMemoryPolicy:
     ) -> None:
         result = policy_handler.handle(self._write("/tmp/test/src/invalid.md"))
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "WRONG LOCATION" in result.reason
         assert "UNTRACKED CLAUDE MEMORY" not in result.reason
 
@@ -2491,6 +2501,7 @@ class TestMarkdownOrganizationDisclosureLadder:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "CHOOSE THE RIGHT LOCATION" in result.reason
 
     def test_wrong_location_second_fire_is_terse(
@@ -2501,6 +2512,7 @@ class TestMarkdownOrganizationDisclosureLadder:
         result = handler.handle(self._write("src/other.md", transcript_path))
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "CHOOSE THE RIGHT LOCATION" not in result.reason
         assert "src/other.md" in result.reason
 
@@ -2511,6 +2523,7 @@ class TestMarkdownOrganizationDisclosureLadder:
         handler.handle(self._write("src/invalid.md", transcript_path))
         result = handler.handle(self._write("src/invalid.md", transcript_path))
 
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.MARKDOWN_WRONG_LOCATION}]")
 
     def test_missing_transcript_path_is_always_verbose(
@@ -2523,6 +2536,7 @@ class TestMarkdownOrganizationDisclosureLadder:
         handler.handle(hook_input)
         result = handler.handle(hook_input)
 
+        assert result.reason is not None
         assert "CHOOSE THE RIGHT LOCATION" in result.reason
 
     def test_untracked_memory_disclosure_is_independent_of_wrong_location(
@@ -2535,6 +2549,7 @@ class TestMarkdownOrganizationDisclosureLadder:
         memory_path = "/root/.claude/projects/proj/memory/fact.md"
         result = handler.handle(self._write(memory_path, transcript_path))
 
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.MARKDOWN_UNTRACKED_MEMORY}]")
         assert "READING memory is still allowed" in result.reason
 
@@ -2665,5 +2680,7 @@ class TestNestedDependencyTreesAndDeclaredProjectsAtAnyDepth:
         verbose = handler.handle(hook_input)
         terse = handler.handle(hook_input)
         assert verbose.decision == Decision.DENY
+        assert verbose.reason is not None
         assert "projects:" in verbose.reason
+        assert terse.reason is not None
         assert "projects:" in terse.reason

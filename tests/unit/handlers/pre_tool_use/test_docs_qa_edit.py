@@ -167,6 +167,7 @@ class TestHandleBlocking:
         with _patched_root(tmp_path):
             result = handler.handle(_write_input(target, content))
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.DOCS_QA_EDIT}]")
         assert "rules-file-shape" in (result.reason or "")
 
@@ -465,7 +466,9 @@ class TestBlockModeDisclosureLadder:
             first = handler.handle(hook_input)
             second = handler.handle(hook_input)
 
+        assert first.reason is not None
         assert "EDIT-stage catalogue" in first.reason
+        assert second.reason is not None
         assert "EDIT-stage catalogue" in second.reason
 
 

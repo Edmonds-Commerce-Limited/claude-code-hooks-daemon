@@ -360,6 +360,7 @@ class TestDisclosureLadder:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "secret-meta" in result.reason
 
     def test_second_fire_for_same_agent_same_rule_is_terse(self) -> None:
@@ -371,6 +372,7 @@ class TestDisclosureLadder:
         )
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "NO escape hatch" not in result.reason
         assert "other.vault-password" not in result.reason  # only the glob is echoed
 
@@ -380,6 +382,7 @@ class TestDisclosureLadder:
         handler.handle(self._read_with_transcript("/proj/.vault-pass", transcript_path))
         result = handler.handle(self._read_with_transcript("/proj/.vault-pass", transcript_path))
 
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.SECRET_READ}]")
 
     def test_different_route_same_agent_is_independently_verbose(self) -> None:
@@ -390,6 +393,7 @@ class TestDisclosureLadder:
         hook_input["transcript_path"] = transcript_path
         result = handler.handle(hook_input)
 
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.SECRET_BASH_MENTION}]")
         assert "secret-meta" in result.reason
 
@@ -399,4 +403,5 @@ class TestDisclosureLadder:
         handler.handle(hook_input)
         result = handler.handle(hook_input)
 
+        assert result.reason is not None
         assert "secret-meta" in result.reason

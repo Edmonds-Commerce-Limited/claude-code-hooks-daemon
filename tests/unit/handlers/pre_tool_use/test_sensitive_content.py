@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -32,7 +33,7 @@ from claude_code_hooks_daemon.utils.git_repo import run_git as unpatched_run_git
 
 
 @pytest.fixture(autouse=True)
-def _reset_disclosure_tracker() -> None:
+def _reset_disclosure_tracker() -> Iterator[None]:
     """Reset the shared DaemonDataLayer singleton around every test in this module."""
     reset_data_layer()
     yield
@@ -54,7 +55,7 @@ def _edit_input(file_path: str, new_string: str, old_string: str = "old") -> dic
 
 
 @pytest.fixture(autouse=True)
-def _reset_redaction_caches() -> None:
+def _reset_redaction_caches() -> Iterator[None]:
     sr.reset_terms_cache()
     sr.reset_active_path_cache()
     yield
@@ -1500,6 +1501,7 @@ class TestDisclosureLadder:
         handler.handle(hook_input)
         result = handler.handle(hook_input)
 
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.SENSITIVE_PUBLIC_PATTERN}]")
 
     def test_secret_term_never_leaks_regardless_of_disclosure_state(self, tmp_path: Path) -> None:
@@ -1520,6 +1522,7 @@ class TestDisclosureLadder:
         terse_result = handler.handle(second)
         assert "zzqx-nonsense-term" not in (terse_result.reason or "")
         assert "entry 1 of 1" in (terse_result.reason or "")
+        assert terse_result.reason is not None
         assert terse_result.reason.startswith(f"BLOCKED [{RuleID.SENSITIVE_SECRET_TERM}]")
 
     def test_missing_transcript_path_is_always_verbose(self) -> None:

@@ -226,6 +226,7 @@ class TestWriteClobberGuardDisclosureLadder:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "DO INSTEAD" in result.reason
 
     def test_second_fire_for_same_agent_is_terse(
@@ -239,6 +240,7 @@ class TestWriteClobberGuardDisclosureLadder:
         result = handler.handle(self._write_with_transcript(str(other), transcript_path))
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "DO INSTEAD" not in result.reason
         assert str(other) in result.reason
 
@@ -249,6 +251,7 @@ class TestWriteClobberGuardDisclosureLadder:
         handler.handle(self._write_with_transcript(existing_file, transcript_path))
         result = handler.handle(self._write_with_transcript(existing_file, transcript_path))
 
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.WRITE_CLOBBER}]")
 
     def test_missing_transcript_path_is_always_verbose(
@@ -258,6 +261,7 @@ class TestWriteClobberGuardDisclosureLadder:
         handler.handle(hook_input)
         result = handler.handle(hook_input)
 
+        assert result.reason is not None
         assert "DO INSTEAD" in result.reason
 
 

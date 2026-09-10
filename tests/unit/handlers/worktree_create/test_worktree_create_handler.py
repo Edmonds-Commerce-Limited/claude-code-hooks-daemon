@@ -90,6 +90,7 @@ class TestHandle:
             capture_output=True,
             text=True,
         ).stdout
+        assert result.worktree_path is not None
         assert result.worktree_path in listing
 
     def test_response_json_is_worktree_path_not_braces(self, repo: Path) -> None:
@@ -165,6 +166,7 @@ class TestRepoRootResolution:
             capture_output=True,
             text=True,
         ).stdout
+        assert result.worktree_path is not None
         assert result.worktree_path in listing
 
     def test_repo_root_cwd_is_unchanged(self, repo: Path) -> None:

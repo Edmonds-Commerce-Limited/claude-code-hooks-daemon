@@ -6,6 +6,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.validate_instruction_content import (
     ValidateInstructionContentHandler,
@@ -144,6 +145,7 @@ class TestImplementationLogs:
         ] = "# Instructions\n\nCreated the file ProductService.php"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
+        assert result.reason is not None
         assert "implementation logs" in result.reason.lower()
 
     def test_blocks_added_class_log(
@@ -199,6 +201,7 @@ class TestStatusIndicators:
         ] = "# Instructions\n\n✓ Complete implementation"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
+        assert result.reason is not None
         assert "status indicators" in result.reason.lower()
 
     def test_blocks_green_circle_done(
@@ -236,6 +239,7 @@ class TestTimestamps:
         mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\nLast updated: 2024-03-15"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
+        assert result.reason is not None
         assert "timestamps" in result.reason.lower()
 
     def test_blocks_timestamp_in_middle(
@@ -261,6 +265,7 @@ class TestLlmSummaries:
         ] = "# Instructions\n\n## Summary\n\nThis project does X"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
+        assert result.reason is not None
         assert "llm summaries" in result.reason.lower()
 
     def test_blocks_key_points_heading(
@@ -294,6 +299,7 @@ class TestTestOutput:
         mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\n42 tests passed"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
+        assert result.reason is not None
         assert "test output" in result.reason.lower()
 
     def test_blocks_test_failed(
@@ -327,6 +333,7 @@ class TestFileListings:
         ] = "# Instructions\n\ncreated src/Service/ProductService.php"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
+        assert result.reason is not None
         assert "file listings" in result.reason.lower()
 
     def test_blocks_file_listing_with_action_verb_js(
@@ -405,6 +412,7 @@ class TestChangeSummaries:
         ] = "# Instructions\n\nAdded 15 lines to implement feature"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
+        assert result.reason is not None
         assert "change summaries" in result.reason.lower()
 
     def test_blocks_removed_lines(
@@ -438,6 +446,7 @@ class TestCompletionIndicators:
         mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\nALL DONE!"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
+        assert result.reason is not None
         assert "completion indicators" in result.reason.lower()
 
     def test_blocks_task_complete(
@@ -652,7 +661,11 @@ class TestRegressionContextNotReason:
         """
         mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\nUse strict typing."
         result = handler.handle(mock_write_tool_call)
-        assert result.decision == "allow"
+        # Compared against the Decision enum member (not the bare string literal
+        # "allow") because pyright narrows `result` itself to `Never` after
+        # `result.decision == "allow"`, which then makes every later attribute
+        # access on `result` (including `.context` below) a spurious type error.
+        assert result.decision == Decision.ALLOW
         assert result.context, "Advisory must be in context list (shown as additionalContext)"
         assert any(
             "validated" in c.lower() for c in result.context
@@ -725,6 +738,7 @@ class TestValidateInstructionContentDisclosureLadder:
         result = handler.handle(hook_input)
 
         assert result.decision == "deny"
+        assert result.reason is not None
         assert "commit message" in result.reason.lower()
 
     def test_second_fire_for_same_agent_same_rule_is_terse(
@@ -735,6 +749,7 @@ class TestValidateInstructionContentDisclosureLadder:
         result = handler.handle(self._hook_input("Added class Foo", transcript_path))
 
         assert result.decision == "deny"
+        assert result.reason is not None
         assert "commit message" not in result.reason.lower()
 
     def test_terse_message_leads_with_rule_id(
@@ -744,6 +759,7 @@ class TestValidateInstructionContentDisclosureLadder:
         handler.handle(self._hook_input("Created the file A.php", transcript_path))
         result = handler.handle(self._hook_input("Added class Foo", transcript_path))
 
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.INSTRUCTION_IMPLEMENTATION_LOG}]")
 
     def test_different_rule_same_agent_is_independently_verbose(
@@ -753,6 +769,7 @@ class TestValidateInstructionContentDisclosureLadder:
         handler.handle(self._hook_input("Created the file A.php", transcript_path))
         result = handler.handle(self._hook_input("ALL DONE!", transcript_path))
 
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.INSTRUCTION_COMPLETION_INDICATOR}]")
         assert "turn-end narration" in result.reason.lower()
 
@@ -769,4 +786,5 @@ class TestValidateInstructionContentDisclosureLadder:
         handler.handle(hook_input)
         result = handler.handle(hook_input)
 
+        assert result.reason is not None
         assert "commit message" in result.reason.lower()

@@ -452,6 +452,7 @@ class TestDisclosureLadder:
                 "cp untracked/worktrees/branch/src/file.py src/", "/tmp/agent-a/transcript.jsonl"
             )
         )
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.WORKTREE_FILE_COPY}]")
 
     def test_first_fire_is_verbose(self, handler: WorktreeFileCopyHandler) -> None:
@@ -460,6 +461,7 @@ class TestDisclosureLadder:
                 "cp untracked/worktrees/branch/src/file.py src/", "/tmp/agent-a/transcript.jsonl"
             )
         )
+        assert result.reason is not None
         assert "CATASTROPHIC" in result.reason
 
     def test_second_fire_same_agent_is_terse_but_still_names_command(
@@ -472,6 +474,7 @@ class TestDisclosureLadder:
         result = handler.handle(
             self._hook_input("mv untracked/worktrees/branch/tests/b.py tests/", transcript_path)
         )
+        assert result.reason is not None
         assert "CATASTROPHIC" not in result.reason
         assert "mv untracked/worktrees/branch/tests/b.py tests/" in result.reason
 
@@ -484,5 +487,7 @@ class TestDisclosureLadder:
         }
         first = handler.handle(hook_input)
         second = handler.handle(hook_input)
+        assert first.reason is not None
         assert "CATASTROPHIC" in first.reason
+        assert second.reason is not None
         assert "CATASTROPHIC" in second.reason

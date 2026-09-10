@@ -416,10 +416,12 @@ class TestDisclosureLadder:
 
     def test_deny_leads_with_rule_id(self, handler: GhPrCommentsHandler) -> None:
         result = handler.handle(self._hook_input("gh pr view 123", "/tmp/agent-a/transcript.jsonl"))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.GH_PR_VIEW_NO_COMMENTS}]")
 
     def test_first_fire_is_verbose(self, handler: GhPrCommentsHandler) -> None:
         result = handler.handle(self._hook_input("gh pr view 123", "/tmp/agent-a/transcript.jsonl"))
+        assert result.reason is not None
         assert "WHY REQUIRED" in result.reason
 
     def test_second_fire_same_agent_is_terse_but_still_names_fix(
@@ -428,6 +430,7 @@ class TestDisclosureLadder:
         transcript_path = "/tmp/agent-a/transcript.jsonl"
         handler.handle(self._hook_input("gh pr view 123", transcript_path))
         result = handler.handle(self._hook_input("gh pr view 456", transcript_path))
+        assert result.reason is not None
         assert "WHY REQUIRED" not in result.reason
         assert "gh pr view 456 --comments" in result.reason
 
@@ -437,5 +440,7 @@ class TestDisclosureLadder:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "gh pr view 123"}}
         first = handler.handle(hook_input)
         second = handler.handle(hook_input)
+        assert first.reason is not None
+        assert second.reason is not None
         assert "WHY REQUIRED" in first.reason
         assert "WHY REQUIRED" in second.reason

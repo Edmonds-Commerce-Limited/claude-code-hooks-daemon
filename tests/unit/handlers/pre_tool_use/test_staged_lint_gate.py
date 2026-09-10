@@ -337,6 +337,7 @@ class TestBlockModeDisclosureLadder:
                 _bash('git commit -m "x"') | {"transcript_path": "/tmp/agent-a/transcript.jsonl"}
             )
 
+        assert result.reason is not None
         assert "CHEAP syntax tier only" in result.reason
 
     def test_second_fire_is_terse_but_findings_stay_full(
@@ -355,6 +356,7 @@ class TestBlockModeDisclosureLadder:
                 _bash('git commit -m "x"') | {"transcript_path": transcript_path}
             )
 
+        assert result.reason is not None
         assert "CHEAP syntax tier only" not in result.reason
         assert result.reason.startswith(f"BLOCKED [{RuleID.STAGED_LINT_FAILURE}]")
         assert "Fix:" in result.reason
@@ -372,5 +374,7 @@ class TestBlockModeDisclosureLadder:
             first = handler.handle(_bash('git commit -m "x"'))
             second = handler.handle(_bash('git commit -m "x"'))
 
+        assert first.reason is not None
         assert "CHEAP syntax tier only" in first.reason
+        assert second.reason is not None
         assert "CHEAP syntax tier only" in second.reason

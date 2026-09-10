@@ -14,6 +14,13 @@ import pytest
 from claude_code_hooks_daemon.config.models import Config, PlanWorkflowConfig
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.router import EventRouter
+from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import (
+    MarkdownOrganizationHandler,
+)
+from claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper import (
+    PlanNumberHelperHandler,
+)
+from claude_code_hooks_daemon.handlers.pre_tool_use.plan_qa_edit import PlanQaEditHandler
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 
 
@@ -60,18 +67,18 @@ def test_plan_workflow_injected_into_planning_tagged_handlers() -> None:
 
     # plan_number_helper should receive plan_workflow values
     plan_helper = next((h for h in handlers if h.name == "plan-number-helper"), None)
-    assert plan_helper is not None
+    assert isinstance(plan_helper, PlanNumberHelperHandler)
     assert plan_helper._track_plans_in_project == "CLAUDE/Plan"
     assert plan_helper._plan_workflow_docs == "CLAUDE/PlanWorkflow.md"
 
     # plan_qa_edit should also receive plan_workflow values
     plan_qa_edit = next((h for h in handlers if h.name == "plan-qa-edit"), None)
-    assert plan_qa_edit is not None
+    assert isinstance(plan_qa_edit, PlanQaEditHandler)
     assert plan_qa_edit._track_plans_in_project == "CLAUDE/Plan"
 
     # markdown_organization should also receive plan_workflow values (has PLANNING tag)
     md_org = next((h for h in handlers if h.name == "enforce-markdown-organization"), None)
-    assert md_org is not None
+    assert isinstance(md_org, MarkdownOrganizationHandler)
     assert md_org._track_plans_in_project == "CLAUDE/Plan"
     assert md_org._plan_workflow_docs == "CLAUDE/PlanWorkflow.md"
 
@@ -96,9 +103,14 @@ def test_plan_qa_config_injected_into_planning_tagged_handlers() -> None:
 
     handlers = router.get_chain(EventType.PRE_TOOL_USE).handlers
     plan_helper = next((h for h in handlers if h.name == "plan-number-helper"), None)
-    assert plan_helper is not None
-    assert plan_helper._plan_qa is plan_workflow.qa
-    assert plan_helper._plan_qa.edit_mode == "block"
+    assert isinstance(plan_helper, PlanNumberHelperHandler)
+    # _plan_qa is injected dynamically by the registry (Plan 00144) and is not
+    # declared on PlanNumberHelperHandler itself, so it is read via getattr
+    # rather than direct attribute access.
+    plan_qa = getattr(plan_helper, "_plan_qa", None)
+    assert plan_qa is not None
+    assert plan_qa is plan_workflow.qa
+    assert plan_qa.edit_mode == "block"
 
 
 def test_plan_qa_config_none_when_workflow_disabled() -> None:
@@ -115,8 +127,8 @@ def test_plan_qa_config_none_when_workflow_disabled() -> None:
 
     handlers = router.get_chain(EventType.PRE_TOOL_USE).handlers
     plan_helper = next((h for h in handlers if h.name == "plan-number-helper"), None)
-    assert plan_helper is not None
-    assert plan_helper._plan_qa is None
+    assert isinstance(plan_helper, PlanNumberHelperHandler)
+    assert getattr(plan_helper, "_plan_qa", None) is None
 
 
 def test_plan_workflow_disabled_sets_none() -> None:
@@ -142,7 +154,7 @@ def test_plan_workflow_disabled_sets_none() -> None:
     handlers = router.get_chain(EventType.PRE_TOOL_USE).handlers
 
     plan_helper = next((h for h in handlers if h.name == "plan-number-helper"), None)
-    assert plan_helper is not None
+    assert isinstance(plan_helper, PlanNumberHelperHandler)
     assert plan_helper._track_plans_in_project is None
     assert plan_helper._plan_workflow_docs is None
 
@@ -174,7 +186,7 @@ def test_plan_workflow_not_provided_uses_handler_options() -> None:
 
     handlers = router.get_chain(EventType.PRE_TOOL_USE).handlers
     md_org = next((h for h in handlers if h.name == "enforce-markdown-organization"), None)
-    assert md_org is not None
+    assert isinstance(md_org, MarkdownOrganizationHandler)
     assert md_org._track_plans_in_project == "Custom/Plans"
     assert md_org._plan_workflow_docs == "Custom/Workflow.md"
 
@@ -212,7 +224,7 @@ def test_plan_workflow_overrides_handler_options() -> None:
 
     handlers = router.get_chain(EventType.PRE_TOOL_USE).handlers
     md_org = next((h for h in handlers if h.name == "enforce-markdown-organization"), None)
-    assert md_org is not None
+    assert isinstance(md_org, MarkdownOrganizationHandler)
     # plan_workflow should take precedence
     assert md_org._track_plans_in_project == "TopLevel/Plans"
     assert md_org._plan_workflow_docs == "TopLevel/Workflow.md"
@@ -269,7 +281,7 @@ def test_handlers_independent_no_shares_options_with() -> None:
     assert count > 0
     handlers = router.get_chain(EventType.PRE_TOOL_USE).handlers
     plan_helper = next((h for h in handlers if h.name == "plan-number-helper"), None)
-    assert plan_helper is not None
+    assert isinstance(plan_helper, PlanNumberHelperHandler)
     assert plan_helper.shares_options_with is None
     # Still receives plan_workflow config via PLANNING tag
     assert plan_helper._track_plans_in_project == "CLAUDE/Plan"

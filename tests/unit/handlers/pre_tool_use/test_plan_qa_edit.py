@@ -258,9 +258,10 @@ class TestHandleWrite:
         with _patched_root(tmp_path):
             result = _handler().handle(_write_input(target, _NO_STATUS_PLAN))
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_QA_EDIT}]")
-        assert "status-line-present" in (result.reason or "")
-        assert "**Status**:" in (result.reason or "")
+        assert "status-line-present" in result.reason
+        assert "**Status**:" in result.reason
 
     def test_warn_mode_downgrades_block_to_advisory(self, tmp_path: Path) -> None:
         handler = _handler(policy=PlanWorkflowQaConfig(edit_mode="warn"))
@@ -494,6 +495,7 @@ class TestBlockModeDisclosureLadder:
         hook_input["transcript_path"] = "/tmp/agent-a/transcript.jsonl"
         with _patched_root(tmp_path):
             result = _handler().handle(hook_input)
+        assert result.reason is not None
         assert "edit-stage rules" in result.reason
 
     def test_second_fire_is_terse_but_findings_stay_full(self, tmp_path: Path) -> None:
@@ -510,6 +512,7 @@ class TestBlockModeDisclosureLadder:
         with _patched_root(tmp_path):
             result = _handler().handle(hook_input2)
 
+        assert result.reason is not None
         assert "edit-stage rules" not in result.reason
         assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_QA_EDIT}]")
         assert "Fix:" in result.reason
@@ -522,7 +525,9 @@ class TestBlockModeDisclosureLadder:
         with _patched_root(tmp_path):
             first = _handler().handle(hook_input)
             second = _handler().handle(hook_input)
+        assert first.reason is not None
         assert "edit-stage rules" in first.reason
+        assert second.reason is not None
         assert "edit-stage rules" in second.reason
 
 

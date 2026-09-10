@@ -35,10 +35,21 @@ def _project(
     return root
 
 
+class _RootedToolDisableAdvisorHandler(ToolDisableAdvisorHandler):
+    """Test double declaring `_workspace_root` so it is a known instance attribute.
+
+    The handler itself reads `_workspace_root` dynamically via
+    `getattr(self, "_workspace_root", None)`, so assigning it here inside
+    `__init__` (rather than from outside the class) mirrors that.
+    """
+
+    def __init__(self, root: Path) -> None:
+        super().__init__()
+        self._workspace_root = root
+
+
 def _handler(root: Path) -> ToolDisableAdvisorHandler:
-    handler = ToolDisableAdvisorHandler()
-    handler._workspace_root = root
-    return handler
+    return _RootedToolDisableAdvisorHandler(root)
 
 
 _NEVER_WANT_YAML = "tool_policy:\n  never_want:\n    - {tool: Artifact, reason: no publishing}\n"

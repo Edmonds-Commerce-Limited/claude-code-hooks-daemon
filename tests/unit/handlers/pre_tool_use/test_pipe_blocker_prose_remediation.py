@@ -75,6 +75,7 @@ class TestProseFalseTriggerGetsNoRemediationTemplate:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "extra_whitelist" not in result.reason
         assert '"^the' not in result.reason
 
@@ -87,6 +88,7 @@ class TestProseFalseTriggerGetsNoRemediationTemplate:
             "tool_input": {"command": self._heredoc_journal_command()},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "echd-capture" not in result.reason
         assert "set -o pipefail" not in result.reason
         assert "TEMP_FILE" not in result.reason
@@ -101,6 +103,7 @@ class TestProseFalseTriggerGetsNoRemediationTemplate:
             "tool_input": {"command": self._heredoc_journal_command()},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "We fixed two earlier issues today" not in result.reason
         assert "guardrail blocks piping straight to a pager" not in result.reason
 
@@ -112,6 +115,7 @@ class TestProseFalseTriggerGetsNoRemediationTemplate:
             "tool_input": {"command": self._heredoc_journal_command()},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert len(result.reason) < 800
 
     def test_reason_still_explains_why_it_was_blocked(self) -> None:
@@ -128,6 +132,7 @@ class TestProseFalseTriggerGetsNoRemediationTemplate:
             "tool_input": {"command": self._heredoc_journal_command()},
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "BLOCKED" in result.reason
 
 
@@ -159,6 +164,7 @@ class TestProseIsDetectedEvenWhenItStartsWithACommandName:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "extra_whitelist" not in result.reason
         assert "echd-capture" not in result.reason
 
@@ -209,6 +215,7 @@ class TestLongRealCommandsAreNotProse:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "extra_whitelist" in result.reason
         assert "does not look like a real shell command" not in result.reason
 
@@ -235,6 +242,7 @@ class TestLongRealCommandsAreNotProse:
                 {"tool_name": "Bash", "tool_input": {"command": f"{command} | head -20"}}
             )
             assert result.decision == Decision.DENY
+            assert result.reason is not None
             assert (
                 "does not look like a real shell command" not in result.reason
             ), f"real command misclassified as prose: {command}"
@@ -264,6 +272,7 @@ class TestLongRealCommandsAreNotProse:
             }
             assert handler.matches(hook_input), f"fixture is whitelisted, proves nothing: {command}"
             result = handler.handle(hook_input)
+            assert result.reason is not None
             assert (
                 "does not look like a real shell command" not in result.reason
             ), f"quoted English misread as prose: {command}"
@@ -283,6 +292,7 @@ class TestLongRealCommandsAreNotProse:
             }
         )
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "extra_whitelist" not in result.reason
 
 
@@ -299,6 +309,7 @@ class TestRealPipeBlocksAreUnaffected:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "expensive" in result.reason
 
     def test_docker_ps_pipe_tail_still_gets_unknown_template(self) -> None:
@@ -309,6 +320,7 @@ class TestRealPipeBlocksAreUnaffected:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "extra_whitelist" in result.reason
 
 

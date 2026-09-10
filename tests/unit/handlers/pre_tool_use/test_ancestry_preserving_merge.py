@@ -380,12 +380,14 @@ class TestDisclosureLadder:
         result = handler.handle(
             self._hook_input("git merge --squash feature", "/tmp/agent-a/transcript.jsonl")
         )
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_MERGE_SQUASH}]")
 
     def test_first_fire_is_verbose(self, handler: AncestryPreservingMergeHandler) -> None:
         result = handler.handle(
             self._hook_input("git merge --squash feature", "/tmp/agent-a/transcript.jsonl")
         )
+        assert result.reason is not None
         assert "WHY THIS MATTERS" in result.reason
 
     def test_second_fire_same_rule_same_agent_is_terse(
@@ -394,6 +396,7 @@ class TestDisclosureLadder:
         transcript_path = "/tmp/agent-a/transcript.jsonl"
         handler.handle(self._hook_input("git merge --squash feature", transcript_path))
         result = handler.handle(self._hook_input("git merge --squash other", transcript_path))
+        assert result.reason is not None
         assert "WHY THIS MATTERS" not in result.reason
         assert "Fix:" in result.reason
 
@@ -403,6 +406,7 @@ class TestDisclosureLadder:
         transcript_path = "/tmp/agent-a/transcript.jsonl"
         handler.handle(self._hook_input("git merge --squash feature", transcript_path))
         result = handler.handle(self._hook_input("gh pr merge --squash 123", transcript_path))
+        assert result.reason is not None
         assert "WHY THIS MATTERS" in result.reason
 
     def test_different_agent_is_independently_verbose(
@@ -414,6 +418,7 @@ class TestDisclosureLadder:
         result = handler.handle(
             self._hook_input("git merge --squash feature", "/tmp/agent-b/transcript.jsonl")
         )
+        assert result.reason is not None
         assert "WHY THIS MATTERS" in result.reason
 
     def test_missing_transcript_path_fails_toward_verbose_every_time(
@@ -422,6 +427,8 @@ class TestDisclosureLadder:
         hook_input = _bash("git merge --squash feature")
         first = handler.handle(hook_input)
         second = handler.handle(hook_input)
+        assert first.reason is not None
+        assert second.reason is not None
         assert "WHY THIS MATTERS" in first.reason
         assert "WHY THIS MATTERS" in second.reason
 

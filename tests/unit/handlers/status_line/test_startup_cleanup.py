@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from claude_code_hooks_daemon.constants import HandlerIDMeta
 from claude_code_hooks_daemon.handlers.status_line.startup_cleanup import StartupCleanupHandler
 
 
@@ -18,6 +19,7 @@ class TestStartupCleanupHandler:
 
     def test_init(self) -> None:
         h = self._make_handler()
+        assert isinstance(h.handler_id, HandlerIDMeta)
         assert h.handler_id.config_key == "startup_cleanup"
         assert h.priority == 28
         assert h.terminal is False

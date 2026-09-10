@@ -6,7 +6,7 @@ Instead, it provides the correct next plan number via context injection.
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -247,7 +247,7 @@ class TestPlanNumberHelperHandler:
         "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
     )
     def test_blocks_and_provides_correct_next_plan_number(
-        self, mock_get_next: any, handler_enabled: PlanNumberHelperHandler, tmp_path: Path
+        self, mock_get_next: MagicMock, handler_enabled: PlanNumberHelperHandler, tmp_path: Path
     ) -> None:
         """Should block broken command and provide correct next plan number."""
         # Mock the plan numbering utility
@@ -280,7 +280,7 @@ class TestPlanNumberHelperHandler:
         "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
     )
     def test_provides_helpful_reason_message(
-        self, mock_get_next: any, handler_enabled: PlanNumberHelperHandler
+        self, mock_get_next: MagicMock, handler_enabled: PlanNumberHelperHandler
     ) -> None:
         """Should provide clear, actionable reason message."""
         mock_get_next.return_value = "00123"
@@ -332,7 +332,7 @@ class TestPlanNumberHelperHandler:
         "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
     )
     def test_handles_get_next_plan_number_errors(
-        self, mock_get_next: any, handler_enabled: PlanNumberHelperHandler
+        self, mock_get_next: MagicMock, handler_enabled: PlanNumberHelperHandler
     ) -> None:
         """Should handle errors from get_next_plan_number gracefully."""
         # Simulate error getting next plan number
@@ -356,7 +356,7 @@ class TestPlanNumberHelperHandler:
         "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
     )
     def test_includes_workflow_docs_when_configured(
-        self, mock_get_next: any, handler_with_workflow_docs: PlanNumberHelperHandler
+        self, mock_get_next: MagicMock, handler_with_workflow_docs: PlanNumberHelperHandler
     ) -> None:
         """Should include workflow docs reference when configured and file exists."""
         mock_get_next.return_value = "00042"
@@ -382,7 +382,7 @@ class TestPlanNumberHelperHandler:
         "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
     )
     def test_omits_workflow_docs_when_file_missing(
-        self, mock_get_next: any, tmp_path: Path
+        self, mock_get_next: MagicMock, tmp_path: Path
     ) -> None:
         """Should not include workflow docs reference when file doesn't exist."""
         handler = PlanNumberHelperHandler()
@@ -413,7 +413,7 @@ class TestPlanNumberHelperHandler:
         "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
     )
     def test_works_without_workflow_docs_config(
-        self, mock_get_next: any, handler_enabled: PlanNumberHelperHandler
+        self, mock_get_next: MagicMock, handler_enabled: PlanNumberHelperHandler
     ) -> None:
         """Should work normally when workflow docs are not configured."""
         # handler_enabled fixture doesn't have _plan_workflow_docs set
@@ -1004,6 +1004,7 @@ class TestDisclosureLadder:
                 "ls -d CLAUDE/Plan/0* | sort -V | tail -1", "/tmp/agent-a/transcript.jsonl"
             )
         )
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_NUMBER_DISCOVERY}]")
 
     @patch(
@@ -1016,6 +1017,7 @@ class TestDisclosureLadder:
         result = handler.handle(
             self._hook_input("ls -d CLAUDE/Plan/0* | tail -1", "/tmp/agent-a/transcript.jsonl")
         )
+        assert result.reason is not None
         assert "different branches" in result.reason
 
     @patch(
@@ -1029,6 +1031,7 @@ class TestDisclosureLadder:
         handler.handle(self._hook_input("ls -d CLAUDE/Plan/0* | tail -1", transcript_path))
         mock_get_next.return_value = "00043"
         result = handler.handle(self._hook_input("ls -d CLAUDE/Plan/0* | tail -1", transcript_path))
+        assert result.reason is not None
         assert "different branches" not in result.reason
         assert "Fix:" in result.reason
         assert "00043" in result.reason
@@ -1045,6 +1048,7 @@ class TestDisclosureLadder:
                 "mkdir -p CLAUDE/Plan/00250-some-feature", "/tmp/agent-a/transcript.jsonl"
             )
         )
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_FOLDER_MKDIR}]")
 
     def test_mkdir_second_fire_is_terse_but_still_names_scaffolder(
@@ -1059,6 +1063,7 @@ class TestDisclosureLadder:
         result = handler.handle(
             self._hook_input("mkdir -p CLAUDE/Plan/00251-another-feature", transcript_path)
         )
+        assert result.reason is not None
         assert "Fix:" in result.reason
         assert "mkplan.bash" in result.reason
         assert "another-feature" in result.reason

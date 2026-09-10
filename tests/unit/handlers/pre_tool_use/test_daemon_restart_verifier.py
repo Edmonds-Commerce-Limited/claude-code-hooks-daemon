@@ -107,7 +107,7 @@ def test_handle_when_not_hooks_daemon_repo() -> None:
     handler = DaemonRestartVerifierHandler()
 
     # Mock the workspace root to not be hooks daemon repo
-    handler._workspace_root = "/tmp/some_other_project"
+    handler._workspace_root = Path("/tmp/some_other_project")
 
     hook_input = {
         "tool_name": "Bash",

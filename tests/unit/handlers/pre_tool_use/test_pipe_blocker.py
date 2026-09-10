@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import GatingResult
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
@@ -333,6 +334,7 @@ class TestBlacklistedVerboseMessage:
         result = handler.handle(
             _with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl")
         )
+        assert result.reason is not None
         assert "Pipe to tail/head detected" in result.reason
 
     def test_first_fire_blacklisted_contains_why_blocked(
@@ -342,6 +344,7 @@ class TestBlacklistedVerboseMessage:
         result = handler.handle(
             _with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl")
         )
+        assert result.reason is not None
         assert "WHY BLOCKED" in result.reason
 
     def test_first_fire_blacklisted_contains_expensive(
@@ -351,6 +354,7 @@ class TestBlacklistedVerboseMessage:
         result = handler.handle(
             _with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl")
         )
+        assert result.reason is not None
         assert "expensive" in result.reason
 
     def test_first_fire_blacklisted_contains_recommended_alternative(
@@ -360,6 +364,7 @@ class TestBlacklistedVerboseMessage:
         result = handler.handle(
             _with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl")
         )
+        assert result.reason is not None
         assert "RECOMMENDED ALTERNATIVE" in result.reason
 
     def test_first_fire_blacklisted_leads_with_rule_id(
@@ -369,6 +374,7 @@ class TestBlacklistedVerboseMessage:
         result = handler.handle(
             _with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl")
         )
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.PIPE_TO_TAIL}]")
 
 
@@ -411,8 +417,10 @@ class TestBlacklistedTerseMessage:
     ) -> None:
         """A long run of repeat fires for the same agent stays terse."""
         transcript_path = "/tmp/agent-a/transcript.jsonl"
+        result: GatingResult | None = None
         for _ in range(10):
             result = handler.handle(_with_transcript(blacklisted_input, transcript_path))
+        assert result is not None
         assert result.reason is not None
         assert "BLOCKED" in result.reason
         assert "expensive" in result.reason
@@ -453,6 +461,7 @@ class TestUnknownVerboseMessage:
     ) -> None:
         """Verbose unknown message contains 'Pipe to tail/head detected'."""
         result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
+        assert result.reason is not None
         assert "Pipe to tail/head detected" in result.reason
 
     def test_first_fire_unknown_contains_extra_whitelist(
@@ -460,6 +469,7 @@ class TestUnknownVerboseMessage:
     ) -> None:
         """Verbose unknown message mentions extra_whitelist."""
         result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
+        assert result.reason is not None
         assert "extra_whitelist" in result.reason
 
     def test_first_fire_unknown_contains_why_blocked(
@@ -467,6 +477,7 @@ class TestUnknownVerboseMessage:
     ) -> None:
         """Verbose unknown message contains 'WHY BLOCKED' section."""
         result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
+        assert result.reason is not None
         assert "WHY BLOCKED" in result.reason
 
     def test_first_fire_unknown_contains_whitelisted_info(
@@ -474,6 +485,7 @@ class TestUnknownVerboseMessage:
     ) -> None:
         """Verbose unknown message contains WHITELISTED COMMANDS section."""
         result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
+        assert result.reason is not None
         assert "WHITELISTED" in result.reason
 
     def test_first_fire_unknown_leads_with_rule_id(
@@ -481,6 +493,7 @@ class TestUnknownVerboseMessage:
     ) -> None:
         """The deny reason leads with a rule_id (Plan 00116 parity contract)."""
         result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.PIPE_TO_TAIL}]")
 
 
@@ -523,8 +536,10 @@ class TestUnknownTerseMessage:
     ) -> None:
         """A long run of repeat fires for the same agent stays terse."""
         transcript_path = "/tmp/agent-a/transcript.jsonl"
+        result: GatingResult | None = None
         for _ in range(10):
             result = handler.handle(_with_transcript(unknown_input, transcript_path))
+        assert result is not None
         assert result.reason is not None
         assert "BLOCKED" in result.reason
         assert "unrecognized" in result.reason

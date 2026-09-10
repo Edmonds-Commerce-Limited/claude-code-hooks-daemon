@@ -274,6 +274,7 @@ class TestPlanTimeEstimatesHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_TIME_ESTIMATE}]")
         assert "Time estimates not allowed" in result.reason
         assert "/workspace/CLAUDE/Plan/001-test/PLAN.md" in result.reason
@@ -289,6 +290,7 @@ class TestPlanTimeEstimatesHandler:
             "transcript_path": "/tmp/agent-2/transcript.jsonl",
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "WHY:" in result.reason
         assert "false expectations" in result.reason
         assert "CORRECT APPROACH:" in result.reason
@@ -304,6 +306,7 @@ class TestPlanTimeEstimatesHandler:
             "transcript_path": "/tmp/agent-3/transcript.jsonl",
         }
         result = handler.handle(hook_input)
+        assert result.reason is not None
         assert "Break work into concrete tasks" in result.reason
         assert "Let user decide scheduling" in result.reason
         assert "Focus on actionable work" in result.reason
@@ -619,6 +622,7 @@ class TestPlanTimeEstimatesDisclosureLadder:
             self._hook_input("**Estimated Effort**: 2 hours", "/tmp/agent-a/transcript.jsonl")
         )
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "CORRECT APPROACH:" in result.reason
 
     def test_second_fire_for_same_agent_is_terse(self, handler: PlanTimeEstimatesHandler) -> None:
@@ -628,6 +632,7 @@ class TestPlanTimeEstimatesDisclosureLadder:
         result = handler.handle(self._hook_input("ETA: 3 weeks", transcript_path))
 
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "CORRECT APPROACH:" not in result.reason
         assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_TIME_ESTIMATE}]")
         assert "Fix:" in result.reason
@@ -644,6 +649,7 @@ class TestPlanTimeEstimatesDisclosureLadder:
         result = handler.handle(
             self._hook_input("**Estimated Effort**: 2 hours", "/tmp/agent-b/transcript.jsonl")
         )
+        assert result.reason is not None
         assert "CORRECT APPROACH:" in result.reason
 
     def test_missing_transcript_path_fails_toward_verbose_every_time(
@@ -659,6 +665,8 @@ class TestPlanTimeEstimatesDisclosureLadder:
         }
         first = handler.handle(hook_input)
         second = handler.handle(hook_input)
+        assert first.reason is not None
+        assert second.reason is not None
         assert "CORRECT APPROACH:" in first.reason
         assert "CORRECT APPROACH:" in second.reason
 

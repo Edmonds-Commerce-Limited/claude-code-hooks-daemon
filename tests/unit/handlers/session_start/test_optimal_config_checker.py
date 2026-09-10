@@ -13,6 +13,7 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
+from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
 from claude_code_hooks_daemon.core import Decision
 
 
@@ -26,6 +27,7 @@ class TestOptimalConfigCheckerInit:
         )
 
         handler = OptimalConfigCheckerHandler()
+        assert isinstance(handler.handler_id, HandlerIDMeta)
         assert handler.handler_id.config_key == "optimal_config_checker"
 
     def test_non_terminal(self) -> None:

@@ -441,26 +441,32 @@ class TestCommentSizeDisclosureLadder:
         from claude_code_hooks_daemon.constants.rule_ids import RuleID
 
         result = handler.handle(self._hook_input("/tmp/transcript-cs-a.jsonl"))
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.COMMENT_SIZE}]")
 
     def test_first_fire_is_verbose(self, handler: CommentSizeHandler) -> None:
         result = handler.handle(self._hook_input("/tmp/transcript-cs-b.jsonl"))
+        assert result.reason is not None
         assert "MUST_EXCEED_COMMENT_SIZE_BECAUSE" in result.reason
 
     def test_second_fire_same_agent_is_terse(self, handler: CommentSizeHandler) -> None:
         transcript = "/tmp/transcript-cs-c.jsonl"
         handler.handle(self._hook_input(transcript))
         second = handler.handle(self._hook_input(transcript))
+        assert second.reason is not None
         assert "shrinking edits are never blocked" not in second.reason
         assert "exceed the size limit" in second.reason
 
     def test_different_agent_is_independently_verbose(self, handler: CommentSizeHandler) -> None:
         handler.handle(self._hook_input("/tmp/transcript-cs-d.jsonl"))
         other = handler.handle(self._hook_input("/tmp/transcript-cs-e.jsonl"))
+        assert other.reason is not None
         assert "MUST_EXCEED_COMMENT_SIZE_BECAUSE" in other.reason
 
     def test_missing_transcript_path_always_verbose(self, handler: CommentSizeHandler) -> None:
         first = handler.handle(self._hook_input(None))
         second = handler.handle(self._hook_input(None))
+        assert first.reason is not None
+        assert second.reason is not None
         assert "MUST_EXCEED_COMMENT_SIZE_BECAUSE" in first.reason
         assert "MUST_EXCEED_COMMENT_SIZE_BECAUSE" in second.reason

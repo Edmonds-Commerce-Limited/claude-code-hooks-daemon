@@ -7,7 +7,10 @@ import pytest
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
-from claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker import SedBlockerHandler
+from claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker import (
+    SedBlockerHandler,
+    SedBlockingMode,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -989,10 +992,12 @@ class TestSedBlockerHandlerBlockingMode:
         return SedBlockerHandler()
 
     @pytest.fixture
-    def direct_invocation_handler(self):
+    def direct_invocation_handler(self, monkeypatch: pytest.MonkeyPatch) -> SedBlockerHandler:
         """Create handler in direct_invocation_only mode."""
         handler = SedBlockerHandler()
-        handler._blocking_mode = "direct_invocation_only"
+        monkeypatch.setattr(
+            handler, "_blocking_mode", SedBlockingMode.DIRECT_INVOCATION_ONLY, raising=False
+        )
         return handler
 
     # Tests for strict mode (default behaviour)
