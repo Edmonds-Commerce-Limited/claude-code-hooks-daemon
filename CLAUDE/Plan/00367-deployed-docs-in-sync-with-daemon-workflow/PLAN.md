@@ -66,38 +66,46 @@ merge approval). The plan-closing gate becomes a real, configurable one:
 
 ### Phase 2: The gate
 
-- [ ] ⬜ **Task 2.1**: `plan_workflow.close_requires_human_approval: bool`
+- [x] ✅ **Task 2.1**: `plan_workflow.close_requires_human_approval: bool`
   (default false) in `PlanWorkflowConfig`, threaded to the plan-workflow
-  handlers; config-changes manifest in the holding area.
-- [ ] ⬜ **Task 2.2**: With the key true, a Write/Edit that flips a PLAN.md
+  handlers; config-changes manifest in the holding area. (31112907)
+- [x] ✅ **Task 2.2**: With the key true, a Write/Edit that flips a PLAN.md
   `**Status**` to Complete, Cancelled or Superseded is denied with a terse
   reason naming the key and the human's route (the human edits the header
   themselves, or runs `hooks-daemon approve-plan-close NNNNN`, which
   records a one-shot approval the next flip consumes). TDD, acceptance
-  test, handler reference regenerated.
+  test, handler reference regenerated. (31112907: `plan_close_approval`,
+  `R-PLAN-CLOSE-APPROVAL`)
 
 ### Phase 3: The fix (DBF clause 4)
 
-- [ ] ⬜ **Task 3.1**: Rewrite the three `PlanWorkflow.core.md` instances
+- [x] ✅ **Task 3.1**: Rewrite the three `PlanWorkflow.core.md` instances
   (template and deployed copy): guideline 09 says a fully completed plan
   is closed and cites the key; the plan-creation "approval" steps describe
   the human's scope decision without prescribing an unenforced stop.
-- [ ] ⬜ **Task 3.2**: Sweep count for `PlanWorkflow.core.md` is 0; the
-  `Worktree.core.md` count is recorded for the owner's decision.
+  (7dcd68b9)
+- [x] ✅ **Task 3.2**: Sweep count for `PlanWorkflow.core.md` is 0; the
+  `Worktree.core.md` count is recorded for the owner's decision. (7dcd68b9;
+  journal 08:04)
 
 ## Success Criteria
 
-- [ ] A commit that adds an unenforced human gate to a core document is
-  denied by the docs-QA commit gate.
-- [ ] With the key on, an agent cannot close a plan; with it off (the
-  default), a fully completed plan closes as before.
-- [ ] `PlanWorkflow.core.md` carries no unenforced approval gate.
-- [ ] Every release-bound consequence is in the pending-release holding
-  area: a release-notes callout and a config-changes manifest.
+- [x] A commit that adds an unenforced human gate to a core document is
+  denied by the docs-QA commit gate. (68c1510e)
+- [x] With the key on, an agent cannot close a plan; with it off (the
+  default), a fully completed plan closes as before. (31112907)
+- [x] `PlanWorkflow.core.md` carries no unenforced approval gate. (7dcd68b9)
+- [x] Every release-bound consequence is in the pending-release holding
+  area: a release-notes callout and a config-changes manifest. (31112907,
+  7dcd68b9)
 
 ## Delivery & Milestones
 
 - Milestone A — the net is committed red on the originating instance,
-  before any fix.
-- Milestone B — the gate exists behind its key.
-- Milestone C — the plan workflow core document is in sync.
+  before any fix. Delivered in 68c1510e.
+- Milestone B — the gate exists behind its key. Delivered in 31112907:
+  `plan_workflow.close_requires_human_approval`, the `plan_close_approval`
+  handler and the `approve-plan-close` CLI subcommand.
+- Milestone C — the plan workflow core document is in sync. Delivered in
+  7dcd68b9; the sweep reports 0 instances in `PlanWorkflow.core.md` and 11
+  in `Worktree.core.md`, which stay for the owner's decision.
