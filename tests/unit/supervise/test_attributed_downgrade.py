@@ -24,6 +24,8 @@ from tests.unit.supervise._load import load_supervisor_module
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from tests.unit.supervise._load import SupervisorStateMachine, SupervisorTickOutcome
+
 _mod = load_supervisor_module()
 
 _NOW = 50_000.0
@@ -100,11 +102,13 @@ def _write_downgrade_signal(
     return path
 
 
-def _machine() -> object:
+def _machine() -> SupervisorStateMachine:
     return _mod.CompactStateMachine(_mod.CompactPolicy())
 
 
-def _decide(sidecar_dir: Path, machine: object, *, now: float = _NOW) -> object:
+def _decide(
+    sidecar_dir: Path, machine: SupervisorStateMachine, *, now: float = _NOW
+) -> SupervisorTickOutcome:
     policy = _mod.CompactPolicy()
     return _mod.decide_once(
         machine,
@@ -115,7 +119,9 @@ def _decide(sidecar_dir: Path, machine: object, *, now: float = _NOW) -> object:
     )
 
 
-def _drive_fable_to_opus(sidecar_dir: Path, machine: object, *, now: float = _NOW) -> None:
+def _drive_fable_to_opus(
+    sidecar_dir: Path, machine: SupervisorStateMachine, *, now: float = _NOW
+) -> None:
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=now - 10.0)
     _decide(sidecar_dir, machine, now=now - 9.0)
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=now - 8.0)

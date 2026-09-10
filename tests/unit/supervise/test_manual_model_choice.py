@@ -30,6 +30,8 @@ from tests.unit.supervise.conftest import write_attributed_downgrade
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from tests.unit.supervise._load import SupervisorStateMachine, SupervisorTickOutcome
+
 _mod = load_supervisor_module()
 
 _NOW = 30_000.0
@@ -85,11 +87,13 @@ def _write_sidecar(
     return path
 
 
-def _machine() -> object:
+def _machine() -> SupervisorStateMachine:
     return _mod.CompactStateMachine(_mod.CompactPolicy())
 
 
-def _decide(sidecar_dir: Path, machine: object, *, facts: object | None = None) -> object:
+def _decide(
+    sidecar_dir: Path, machine: SupervisorStateMachine, *, facts: object | None = None
+) -> SupervisorTickOutcome:
     policy = _mod.CompactPolicy()
     return _mod.decide_once(
         machine,

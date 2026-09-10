@@ -8,17 +8,32 @@ import json
 import os
 import tempfile
 import time
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import LogLevel
 from claude_code_hooks_daemon.constants import Priority
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.server import HooksDaemon
+
+
+def _require_path(path: Path | None) -> Path:
+    """Narrow an Optional path accessor to a concrete `Path`.
+
+    `DaemonConfig.socket_path_obj`/`pid_file_path_obj` are `Path | None` because
+    an unconfigured daemon falls back to a generated path, but every fixture in
+    this module always supplies a concrete path — this asserts that invariant
+    for the type checker instead of widening call sites to handle `None`.
+    """
+    assert path is not None
+    return path
+
 
 # Concurrency-timing parameters for test_daemon_handles_concurrent_requests.
 #
@@ -56,7 +71,7 @@ class SimpleTestHandler(Handler):
 
     def handle(self, hook_input: dict) -> HookResult:
         """Return simple allow result."""
-        return HookResult(decision=Decision.ALLOW, context="Test handler executed")
+        return HookResult(decision=Decision.ALLOW, context=["Test handler executed"])
 
     def get_claude_md(self) -> str | None:
         return None
@@ -92,7 +107,7 @@ class SlowTestHandler(Handler):
     def handle(self, hook_input: dict) -> HookResult:
         """Sleep then return result."""
         time.sleep(self.delay_ms / 1000.0)
-        return HookResult(decision=Decision.ALLOW, context=f"Delayed {self.delay_ms}ms")
+        return HookResult(decision=Decision.ALLOW, context=[f"Delayed {self.delay_ms}ms"])
 
     def get_claude_md(self) -> str | None:
         return None
@@ -117,7 +132,7 @@ class TestHooksDaemon:
     """Test suite for HooksDaemon server."""
 
     @pytest.fixture
-    def temp_socket_path(self) -> Path:
+    def temp_socket_path(self) -> Generator[Path, None, None]:
         """Create temporary socket path."""
         with tempfile.NamedTemporaryFile(suffix=".sock", delete=False) as f:
             socket_path = Path(f.name)
@@ -129,7 +144,7 @@ class TestHooksDaemon:
             socket_path.unlink()
 
     @pytest.fixture
-    def temp_pid_path(self) -> Path:
+    def temp_pid_path(self) -> Generator[Path, None, None]:
         """Create temporary PID file path."""
         with tempfile.NamedTemporaryFile(suffix=".pid", delete=False) as f:
             pid_path = Path(f.name)
@@ -146,7 +161,7 @@ class TestHooksDaemon:
             socket_path=temp_socket_path,
             idle_timeout_seconds=2,  # Short timeout for testing
             pid_file_path=temp_pid_path,
-            log_level="DEBUG",
+            log_level=LogLevel.DEBUG,
         )
 
     @pytest.fixture
@@ -207,8 +222,8 @@ class TestHooksDaemon:
         await asyncio.sleep(0.1)
 
         # Check PID file exists and contains valid PID
-        assert daemon_config.pid_file_path_obj.exists()
-        pid_content = daemon_config.pid_file_path_obj.read_text().strip()
+        assert _require_path(daemon_config.pid_file_path_obj).exists()
+        pid_content = _require_path(daemon_config.pid_file_path_obj).read_text().strip()
         pid = int(pid_content)
         assert pid == os.getpid()
 
@@ -226,14 +241,14 @@ class TestHooksDaemon:
         server_task = asyncio.create_task(daemon.start())
         await asyncio.sleep(0.1)
 
-        assert daemon_config.pid_file_path_obj.exists()
+        assert _require_path(daemon_config.pid_file_path_obj).exists()
 
         # Shutdown
         await daemon.shutdown()
         await server_task
 
         # PID file should be removed
-        assert not daemon_config.pid_file_path_obj.exists()
+        assert not _require_path(daemon_config.pid_file_path_obj).exists()
 
     @pytest.mark.anyio
     async def test_daemon_handles_stale_pid_file(
@@ -241,7 +256,7 @@ class TestHooksDaemon:
     ) -> None:
         """Test that daemon handles stale PID file (process died without cleanup)."""
         # Create stale PID file with non-existent PID
-        daemon_config.pid_file_path_obj.write_text("99999")
+        _require_path(daemon_config.pid_file_path_obj).write_text("99999")
 
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
@@ -249,8 +264,8 @@ class TestHooksDaemon:
         server_task = asyncio.create_task(daemon.start())
         await asyncio.sleep(0.1)
 
-        assert daemon_config.pid_file_path_obj.exists()
-        pid = int(daemon_config.pid_file_path_obj.read_text().strip())
+        assert _require_path(daemon_config.pid_file_path_obj).exists()
+        pid = int(_require_path(daemon_config.pid_file_path_obj).read_text().strip())
         assert pid == os.getpid()
 
         # Cleanup
@@ -278,7 +293,7 @@ class TestHooksDaemon:
 
         # Daemon should have shut down
         assert server_task.done()
-        assert not daemon_config.socket_path_obj.exists()
+        assert not _require_path(daemon_config.socket_path_obj).exists()
 
     @pytest.mark.anyio
     async def test_daemon_resets_idle_timer_on_request(
@@ -498,13 +513,13 @@ class TestHooksDaemon:
         server_task = asyncio.create_task(daemon.start())
         await asyncio.sleep(0.1)
 
-        assert daemon_config.socket_path_obj.exists()
+        assert _require_path(daemon_config.socket_path_obj).exists()
 
         await daemon.shutdown()
         await server_task
 
         # Socket should be removed
-        assert not daemon_config.socket_path_obj.exists()
+        assert not _require_path(daemon_config.socket_path_obj).exists()
 
     @pytest.mark.anyio
     async def test_daemon_handles_missing_event_field(
@@ -627,15 +642,15 @@ class TestHooksDaemon:
     ) -> None:
         """Test that daemon removes stale socket file on startup."""
         # Create stale socket file
-        daemon_config.socket_path_obj.touch()
-        assert daemon_config.socket_path_obj.exists()
+        _require_path(daemon_config.socket_path_obj).touch()
+        assert _require_path(daemon_config.socket_path_obj).exists()
 
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
         await asyncio.sleep(0.1)
 
         # Socket should be recreated and functional
-        assert daemon_config.socket_path_obj.exists()
+        assert _require_path(daemon_config.socket_path_obj).exists()
 
         # Should be able to connect
         _reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
@@ -655,7 +670,7 @@ class TestHooksDaemon:
         await asyncio.sleep(0.1)
 
         # Check socket permissions
-        stat_result = daemon_config.socket_path_obj.stat()
+        stat_result = _require_path(daemon_config.socket_path_obj).stat()
         permissions = stat_result.st_mode & 0o777
         assert permissions == 0o660
 
@@ -679,8 +694,8 @@ class TestHooksDaemon:
         await server_task
 
         # Should have cleaned up properly
-        assert not daemon_config.socket_path_obj.exists()
-        assert not daemon_config.pid_file_path_obj.exists()
+        assert not _require_path(daemon_config.socket_path_obj).exists()
+        assert not _require_path(daemon_config.pid_file_path_obj).exists()
 
     @pytest.mark.anyio
     async def test_daemon_tracks_active_requests_count(
@@ -894,7 +909,7 @@ class TestHooksDaemon:
             socket_path=temp_socket_path,
             idle_timeout_seconds=2,
             pid_file_path=None,  # No PID file
-            log_level="DEBUG",
+            log_level=LogLevel.DEBUG,
         )
 
         daemon = HooksDaemon(config=config, controller=front_controller)
@@ -915,7 +930,7 @@ class TestHooksDaemon:
     ) -> None:
         """Test that daemon handles invalid PID file content."""
         # Create PID file with invalid content
-        daemon_config.pid_file_path_obj.write_text("not-a-number")
+        _require_path(daemon_config.pid_file_path_obj).write_text("not-a-number")
 
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
@@ -923,9 +938,9 @@ class TestHooksDaemon:
         server_task = asyncio.create_task(daemon.start())
         await asyncio.sleep(0.1)
 
-        assert daemon_config.pid_file_path_obj.exists()
+        assert _require_path(daemon_config.pid_file_path_obj).exists()
         # Should have written valid PID
-        pid = int(daemon_config.pid_file_path_obj.read_text().strip())
+        pid = int(_require_path(daemon_config.pid_file_path_obj).read_text().strip())
         assert pid == os.getpid()
 
         await daemon.shutdown()
@@ -937,7 +952,7 @@ class TestHooksDaemon:
     ) -> None:
         """Test that daemon handles PID file for still-running process."""
         # Write current process PID to file (simulating already running daemon)
-        daemon_config.pid_file_path_obj.write_text(str(os.getpid()))
+        _require_path(daemon_config.pid_file_path_obj).write_text(str(os.getpid()))
 
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
@@ -945,8 +960,8 @@ class TestHooksDaemon:
         server_task = asyncio.create_task(daemon.start())
         await asyncio.sleep(0.1)
 
-        assert daemon_config.pid_file_path_obj.exists()
-        pid = int(daemon_config.pid_file_path_obj.read_text().strip())
+        assert _require_path(daemon_config.pid_file_path_obj).exists()
+        pid = int(_require_path(daemon_config.pid_file_path_obj).read_text().strip())
         assert pid == os.getpid()
 
         await daemon.shutdown()
@@ -1012,7 +1027,7 @@ class TestHooksDaemonSystemRequests:
     """Test suite for _system event handling in HooksDaemon."""
 
     @pytest.fixture
-    def temp_socket_path(self) -> Path:
+    def temp_socket_path(self) -> Generator[Path, None, None]:
         """Create temporary socket path."""
         with tempfile.NamedTemporaryFile(suffix=".sock", delete=False) as f:
             socket_path = Path(f.name)
@@ -1022,7 +1037,7 @@ class TestHooksDaemonSystemRequests:
             socket_path.unlink()
 
     @pytest.fixture
-    def temp_pid_path(self) -> Path:
+    def temp_pid_path(self) -> Generator[Path, None, None]:
         """Create temporary PID file path."""
         with tempfile.NamedTemporaryFile(suffix=".pid", delete=False) as f:
             pid_path = Path(f.name)
@@ -1038,7 +1053,7 @@ class TestHooksDaemonSystemRequests:
             socket_path=temp_socket_path,
             idle_timeout_seconds=2,
             pid_file_path=temp_pid_path,
-            log_level="DEBUG",
+            log_level=LogLevel.DEBUG,
         )
 
     @pytest.fixture

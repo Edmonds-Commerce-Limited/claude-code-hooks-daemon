@@ -22,6 +22,8 @@ from tests.unit.supervise.conftest import write_attributed_downgrade
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from tests.unit.supervise._load import SupervisorStateMachine, SupervisorTickOutcome
+
 _mod = load_supervisor_module()
 
 _NOW = 40_000.0
@@ -68,11 +70,13 @@ def _write_sidecar(
     )
 
 
-def _machine(*, flag_compact: bool = False) -> object:
+def _machine(*, flag_compact: bool = False) -> SupervisorStateMachine:
     return _mod.CompactStateMachine(_mod.CompactPolicy(flag_compact_enabled=flag_compact))
 
 
-def _decide(sidecar_dir: Path, machine: object, *, now: float = _NOW) -> object:
+def _decide(
+    sidecar_dir: Path, machine: SupervisorStateMachine, *, now: float = _NOW
+) -> SupervisorTickOutcome:
     policy = _mod.CompactPolicy()
     return _mod.decide_once(
         machine,
@@ -84,8 +88,8 @@ def _decide(sidecar_dir: Path, machine: object, *, now: float = _NOW) -> object:
 
 
 def _open_episode_and_fire_restore(
-    sidecar_dir: Path, machine: object, *, now: float = _NOW
-) -> object:
+    sidecar_dir: Path, machine: SupervisorStateMachine, *, now: float = _NOW
+) -> SupervisorTickOutcome:
     """Drive fable -> opus, then take the auto-restore decision the way the host does.
 
     The MACHINE's downgrade, so the platform's own record of it is written too

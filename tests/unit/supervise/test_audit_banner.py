@@ -20,6 +20,8 @@ from tests.unit.supervise._load import load_supervisor_module
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from tests.unit.supervise._load import SupervisorTickOutcome
+
 _mod = load_supervisor_module()
 
 _NOW = 50_000.0
@@ -59,7 +61,9 @@ def _facts(*, input_line_empty: bool = True) -> object:
     )
 
 
-def _flush(tmp_path: Path, *, items: tuple[str, ...], input_line_empty: bool = True) -> object:
+def _flush(
+    tmp_path: Path, *, items: tuple[str, ...], input_line_empty: bool = True
+) -> SupervisorTickOutcome:
     """Arm ``items`` and run the tick that flushes them."""
     sidecar_dir = tmp_path / "cs"
     _write_sidecar(sidecar_dir)
@@ -327,7 +331,7 @@ def _tick(
     *,
     now: float,
     dry_run: bool = False,
-) -> object:
+) -> SupervisorTickOutcome:
     return _mod.decide_once(
         machine,
         sidecar_dir=sidecar_dir,
@@ -343,7 +347,9 @@ def _tick(
     )
 
 
-def _escape_episode(tmp_path: Path, *, dry_run: bool = False) -> tuple[object, object, Path]:
+def _escape_episode(
+    tmp_path: Path, *, dry_run: bool = False
+) -> tuple[SupervisorTickOutcome, SupervisorTickOutcome, Path]:
     """Drive the machine to a real ``WOULD_ESCAPE`` tick.
 
     An urgent sidecar makes the first tick compact; 61s later the queued
