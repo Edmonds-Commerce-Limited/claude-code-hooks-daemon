@@ -84,17 +84,22 @@ status-line order, text or JSON.
 
 ### Phase 3: CLI command + skill routing
 
-- [ ] ⬜ **Task 3.1**: `cmd_status_line_explained` in `daemon/cli.py`:
+- [x] ✅ **Task 3.1**: `cmd_status_line_explained` in `daemon/cli.py`:
   resolves project config, discovers status-line handlers, sorts by
   resolved priority, renders enabled segments (reference icon line +
   explanation blocks) and disabled segments (under "not enabled"); `--json`.
   Argparse subcommand `status-line-explained` with alias
   `explain-status-line`.
-- [ ] ⬜ **Task 3.2**: Skill routing: `.claude/skills/hooks-daemon/SKILL.md`
+- [x] ✅ **Task 3.2**: Skill routing: `.claude/skills/hooks-daemon/SKILL.md`
   command list, help text, case-statement routing to `daemon-cli.sh`; new
-  `status-line-explained.md` skill doc page.
-- [ ] ⬜ **Task 3.3**: `CLAUDE/Architecture/StatusLine.md` cross-reference plus
-  wherever CLI verbs are documented for humans (`docs/guides/`).
+  `status-line-explained.md` skill doc page. Mirrored into the packaged
+  source (`src/claude_code_hooks_daemon/skills/hooks-daemon/`), which this
+  repo tracks alongside the deployed copy and keeps byte-identical.
+- [x] ✅ **Task 3.3**: `CLAUDE/Architecture/StatusLine.md` cross-reference
+  (new "Self-Description" section + Step 6) plus
+  `docs/guides/HANDLER_REFERENCE.md`'s StatusLine Handlers intro (the
+  human-docs precedent `explain-rule` itself sets no `docs/` entry for, so
+  no separate CLI-reference page was invented).
 
 ### Phase 4: QA + release
 

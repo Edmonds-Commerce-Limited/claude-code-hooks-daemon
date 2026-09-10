@@ -3648,7 +3648,7 @@ handlers:
 
 ## StatusLine Handlers
 
-These handlers generate the terminal status line displayed by Claude Code. They build segments that are concatenated into a single status display.
+These handlers generate the terminal status line displayed by Claude Code. They build segments that are concatenated into a single status display. For a plain-English explanation of any icon and what its current value means, run `bin/hooks-daemon status-line-explained` (or `/hooks-daemon status-line-explained` as a skill command).
 
 #### git_repo_name
 

@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
 from claude_code_hooks_daemon.daemon.metadata import (
     DaemonVenvMetadata,
@@ -6331,6 +6332,218 @@ def cmd_explain_handler(args: argparse.Namespace) -> int:
     return 0
 
 
+_STATUS_LINE_EVENT_DIR = "status_line"
+
+
+class _StatusLineSegmentEntry:
+    """One status-line handler's explanation, resolved for `status-line-explained`.
+
+    Deliberately not a frozen dataclass: ``error`` is set in place when
+    ``explain_segment()`` raises, and this type never leaves this module.
+    """
+
+    __slots__ = ("class_name", "config_key", "enabled", "error", "explanation", "priority")
+
+    def __init__(
+        self,
+        *,
+        config_key: str,
+        class_name: str,
+        enabled: bool,
+        priority: int,
+    ) -> None:
+        self.config_key = config_key
+        self.class_name = class_name
+        self.enabled = enabled
+        self.priority = priority
+        self.explanation: SegmentExplanation | None = None
+        self.error: str | None = None
+
+
+def _collect_status_line_segment_entries(
+    project_root: Path | None,
+) -> list[_StatusLineSegmentEntry]:
+    """Discover every status-line handler and resolve its explanation.
+
+    Resolution never aborts the whole command: a handler that fails to
+    instantiate or whose ``explain_segment()`` raises is recorded with
+    ``error`` set rather than dropped, mirroring
+    ``rule_explain.lookup.collect_handler_rules``' one-broken-handler
+    guarantee.
+
+    Args:
+        project_root: Resolved project root, or ``None`` if unresolvable
+            (config/enabled-state then defaults to "no config found").
+
+    Returns:
+        One entry per discovered status-line handler class, sorted by
+        resolved priority (status-line order — lower priority renders first).
+    """
+    from claude_code_hooks_daemon.constants.config import resolve_priority
+    from claude_code_hooks_daemon.handlers.registry import (
+        HandlerRegistry,
+        _get_config_key,
+        event_dir_name_matches_module,
+        handler_is_enabled,
+    )
+
+    event_config: dict[str, Any] = {}
+    if project_root is not None:
+        config_path = project_root / ".claude" / "hooks-daemon.yaml"
+        if config_path.exists():
+            try:
+                config = Config.load(config_path)
+                event_config = config.handlers.model_dump().get(_STATUS_LINE_EVENT_DIR) or {}
+            except (PydanticValidationError, OSError, ValueError) as exc:
+                logger.debug("Could not load config for status-line-explained: %s", exc)
+
+    registry = HandlerRegistry()
+    registry.discover()
+
+    entries: list[_StatusLineSegmentEntry] = []
+    for handler_class_name in registry.list_handlers():
+        handler_class = registry.get_handler_class(handler_class_name)
+        if handler_class is None:
+            continue
+        if not event_dir_name_matches_module(_STATUS_LINE_EVENT_DIR, handler_class.__module__):
+            continue
+
+        config_key = _get_config_key(handler_class_name)
+        handler_config = event_config.get(config_key) or {}
+
+        try:
+            instance = handler_class()
+        except Exception as exc:
+            logger.exception("Failed to instantiate %s for status-line-explained", handler_class_name)
+            entry = _StatusLineSegmentEntry(
+                config_key=config_key, class_name=handler_class_name, enabled=False, priority=0
+            )
+            entry.error = f"could not instantiate: {exc}"
+            entries.append(entry)
+            continue
+
+        enabled = handler_is_enabled(event_config, config_key, instance.tags)
+        priority = resolve_priority(handler_config, instance.priority)
+        entry = _StatusLineSegmentEntry(
+            config_key=config_key,
+            class_name=handler_class_name,
+            enabled=enabled,
+            priority=priority,
+        )
+        try:
+            entry.explanation = instance.explain_segment()
+        except Exception as exc:
+            logger.exception("explain_segment() failed for %s", handler_class_name)
+            entry.error = str(exc)
+        entries.append(entry)
+
+    entries.sort(key=lambda e: e.priority)
+    return entries
+
+
+def _render_status_line_explained_text(entries: list[_StatusLineSegmentEntry]) -> None:
+    """Print the text-mode rendering: a reference icon line, then per-segment detail."""
+    enabled_entries = [e for e in entries if e.enabled and e.explanation is not None]
+    disabled_entries = [e for e in entries if not e.enabled]
+    broken_entries = [e for e in entries if e.enabled and e.explanation is None]
+
+    icon_line = " | ".join(
+        "".join(e.explanation.glyphs) for e in enabled_entries if e.explanation and e.explanation.glyphs
+    )
+    print(
+        "Status line, in priority order (REFERENCE line — glyphs shown together; "
+        "a live render also needs session-only data, such as the model, context "
+        "%, and current directory, that this command cannot see):"
+    )
+    print()
+    print(f"  {icon_line}" if icon_line else "  (no segment currently renders a glyph)")
+    print()
+
+    for e in enabled_entries:
+        explanation = e.explanation
+        assert explanation is not None
+        glyph_text = " ".join(explanation.glyphs) if explanation.glyphs else "(no glyph)"
+        print(f"{explanation.name}  [{e.config_key}]")
+        print(f"  {glyph_text}")
+        print(f"  What it is: {explanation.what_it_is}")
+        print(f"  How to read it: {explanation.how_to_read}")
+        print(f"  Right now: {explanation.current_value}")
+        print()
+
+    if broken_entries:
+        print("Failed to explain (enabled, but explain_segment() raised):")
+        for e in broken_entries:
+            print(f"  - {e.class_name} [{e.config_key}]: {e.error}")
+        print()
+
+    if disabled_entries:
+        print("Not enabled:")
+        for e in disabled_entries:
+            name = e.explanation.name if e.explanation is not None else e.class_name
+            print(f"  - {name} [{e.config_key}]")
+        print()
+
+
+def _render_status_line_explained_json(entries: list[_StatusLineSegmentEntry]) -> None:
+    """Print the JSON-mode rendering: one object per discovered handler."""
+    payload = []
+    for e in entries:
+        explanation = e.explanation
+        payload.append(
+            {
+                "config_key": e.config_key,
+                "class_name": e.class_name,
+                "enabled": e.enabled,
+                "priority": e.priority,
+                "glyphs": list(explanation.glyphs) if explanation else [],
+                "name": explanation.name if explanation else e.class_name,
+                "what_it_is": explanation.what_it_is if explanation else "",
+                "how_to_read": explanation.how_to_read if explanation else "",
+                "current_value": explanation.current_value if explanation else "",
+                "error": e.error,
+            }
+        )
+    print(json.dumps(payload, indent=2))
+
+
+def cmd_status_line_explained(args: argparse.Namespace) -> int:
+    """Explain every status-line segment for the CURRENT project.
+
+    Plan 00369, field report: "🧹 1 stale — i have forgotten what this
+    means". Renders, in status-line priority order, a reference icon line
+    plus every segment's glyph(s)/what-it-is/how-to-read/current-value —
+    both for handlers currently enabled and (in a separate section) those
+    disabled by config. Robust the same way ``explain-rule``/``explain-handler``
+    are: works without a running daemon, and degrades gracefully when no
+    project config can be resolved.
+
+    Args:
+        args: Parsed CLI arguments with ``project_root`` (optional override)
+            and ``output_format`` (``"text"`` default, or ``"json"``).
+
+    Returns:
+        0 always — an individual handler failing to explain itself is
+        reported inline, not treated as a command failure (mirrors
+        ``collect_handler_rules``).
+    """
+    _init_project_context_for_explain(args)
+
+    override = getattr(args, "project_root", None)
+    project_root = Path(override).resolve() if override else None
+    if project_root is None:
+        config_file = _find_config_file_for_explain(args)
+        project_root = config_file.parent.parent if config_file is not None else None
+
+    entries = _collect_status_line_segment_entries(project_root)
+
+    if getattr(args, "output_format", "text") == "json":
+        _render_status_line_explained_json(entries)
+    else:
+        _render_status_line_explained_text(entries)
+
+    return 0
+
+
 _BUG_REPORT_LOG_LINES = 100
 _BUG_REPORT_DIR_NAME = "bug-reports"
 _BUG_REPORT_ENV_VARS = (
@@ -7338,6 +7551,31 @@ def main() -> int:
         help="Project root override (default: auto-detected from cwd)",
     )
     parser_explain_handler.set_defaults(func=cmd_explain_handler)
+
+    # status-line-explained command (Plan 00369) — explain every status-line
+    # segment: icon(s), what it is, how to read it, current value.
+    # `explain-status-line` is accepted as an alias for discoverability
+    # alongside explain-rule/explain-handler.
+    parser_status_line_explained = subparsers.add_parser(
+        "status-line-explained",
+        aliases=["explain-status-line"],
+        help="Explain every status-line segment: icon(s), what it is, current value",
+    )
+    parser_status_line_explained.add_argument(
+        "--format",
+        dest="output_format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text)",
+    )
+    parser_status_line_explained.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected from cwd)",
+    )
+    parser_status_line_explained.set_defaults(func=cmd_status_line_explained)
 
     # docs-qa command (Plan 00284) — sweep / single-file lint (staged: not
     # implemented in this slice)
