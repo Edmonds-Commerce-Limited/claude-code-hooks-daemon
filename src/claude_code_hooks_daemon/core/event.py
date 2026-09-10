@@ -43,10 +43,22 @@ class HookInput(BaseModel):
 
     model_config = ConfigDict(extra="allow", frozen=True, populate_by_name=True)
 
-    tool_name: str | None = Field(default=None, alias="toolName")
-    tool_input: dict[str, Any] | None = Field(default=None, alias="toolInput")
-    session_id: str | None = Field(default=None, alias="sessionId")
-    transcript_path: str | None = Field(default=None, alias="transcriptPath")
+    # The wire alias is split into validation + serialization aliases rather
+    # than one ``alias``: they are runtime-identical, but a bare ``alias`` also
+    # renames the synthesised ``__init__`` keyword for type checkers, so every
+    # ``HookInput(tool_name=...)`` caller would be reported as a bad call.
+    tool_name: str | None = Field(
+        default=None, validation_alias="toolName", serialization_alias="toolName"
+    )
+    tool_input: dict[str, Any] | None = Field(
+        default=None, validation_alias="toolInput", serialization_alias="toolInput"
+    )
+    session_id: str | None = Field(
+        default=None, validation_alias="sessionId", serialization_alias="sessionId"
+    )
+    transcript_path: str | None = Field(
+        default=None, validation_alias="transcriptPath", serialization_alias="transcriptPath"
+    )
     message: str | None = Field(default=None, description="For Notification events")
     prompt: str | None = Field(default=None, description="For UserPromptSubmit events")
 
@@ -70,7 +82,9 @@ class HookEvent(BaseModel):
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
-    event_type: EventType = Field(alias="event")
+    # Split aliases for the same reason as ``HookInput``: the wire key is
+    # ``event`` but callers construct with ``event_type=``.
+    event_type: EventType = Field(validation_alias="event", serialization_alias="event")
     hook_input: HookInput = Field(default_factory=HookInput)
     request_id: str | None = Field(default=None, description="Optional correlation ID")
 

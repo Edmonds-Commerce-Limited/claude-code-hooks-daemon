@@ -186,6 +186,20 @@ class HasClaudeMd(Protocol):
         ...
 
 
+@runtime_checkable
+class HasRules(Protocol):
+    """Protocol for handlers that have declared their rules.
+
+    Separate from ``HasClaudeMd`` because a handler may provide guidance
+    prose without having declared ``get_rules()`` yet; such a handler falls
+    back to full-prose injection.
+    """
+
+    def get_rules(self) -> list[Rule]:
+        """Return the handler's declared rules."""
+        ...
+
+
 @dataclass(frozen=True, slots=True)
 class _CollectedTiers:
     """Handler guidance sorted into the three Decision I injection tiers.
@@ -601,7 +615,7 @@ class ClaudeMdInjector:
             if not isinstance(handler, HasClaudeMd):
                 continue
             content = handler.get_claude_md()
-            rules = handler.get_rules() if hasattr(handler, "get_rules") else []
+            rules = handler.get_rules() if isinstance(handler, HasRules) else []
 
             # The promoted_handlers config lists CONFIG KEYS — the handler's
             # module basename (e.g. ``lsp_enforcement``). A handler's display
