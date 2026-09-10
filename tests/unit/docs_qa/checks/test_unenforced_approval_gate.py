@@ -243,9 +243,7 @@ class TestStagedAndSweep:
         assert len(findings) == 2
         assert {finding.severity for finding in findings} == {Severity.ADVISE}
 
-    def test_a_core_doc_the_sweep_cannot_read_is_reported_not_skipped(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_core_doc_the_sweep_cannot_read_is_reported_not_skipped(self, tmp_path: Path) -> None:
         """A silent skip would count an unreadable file as a clean one."""
         doc = _write_core(tmp_path, "PlanWorkflow.core.md", _ORIGINATING_LINE)
         policy = DocumentationPolicy()
