@@ -548,3 +548,95 @@ class TestPersistsLoadFailures:
         )
 
         assert health.read_load_failures().is_degraded is False
+
+
+class TestComputeStartupSourceFingerprint:
+    """Tests for DaemonController._compute_startup_source_fingerprint (Plan 00371)."""
+
+    def test_matches_package_only_fingerprint_when_config_is_none(self, tmp_path: Path) -> None:
+        """No project_handlers_config at all -> package root alone."""
+        from claude_code_hooks_daemon.daemon.source_fingerprint import (
+            compute_daemon_identity_fingerprint,
+        )
+
+        controller = DaemonController()
+
+        result = controller._compute_startup_source_fingerprint(tmp_path, None)
+
+        assert result == compute_daemon_identity_fingerprint()
+
+    def test_includes_enabled_project_handlers_directory(self, tmp_path: Path) -> None:
+        """An enabled project-handlers dir with a .py file changes the fingerprint."""
+        from claude_code_hooks_daemon.daemon.source_fingerprint import (
+            compute_daemon_identity_fingerprint,
+        )
+
+        controller = DaemonController()
+        handlers_dir = tmp_path / "project-handlers"
+        handlers_dir.mkdir()
+        (handlers_dir / "custom.py").write_text("# custom\n", encoding="utf-8")
+        project_config = ProjectHandlersConfig(enabled=True, path=str(handlers_dir))
+
+        result = controller._compute_startup_source_fingerprint(tmp_path, project_config)
+
+        assert result != compute_daemon_identity_fingerprint()
+        assert result == compute_daemon_identity_fingerprint(handlers_dir)
+
+    def test_ignores_disabled_project_handlers_directory(self, tmp_path: Path) -> None:
+        """A disabled config's directory must NOT affect the fingerprint.
+
+        Mirrors _load_project_handlers' own early return on
+        ``enabled=False`` -- that directory's modules are never imported, so
+        editing it must not look like the daemon has gone stale.
+        """
+        from claude_code_hooks_daemon.daemon.source_fingerprint import (
+            compute_daemon_identity_fingerprint,
+        )
+
+        controller = DaemonController()
+        handlers_dir = tmp_path / "project-handlers"
+        handlers_dir.mkdir()
+        (handlers_dir / "custom.py").write_text("# custom\n", encoding="utf-8")
+        project_config = ProjectHandlersConfig(enabled=False, path=str(handlers_dir))
+
+        result = controller._compute_startup_source_fingerprint(tmp_path, project_config)
+
+        assert result == compute_daemon_identity_fingerprint()
+
+    def test_resolves_repo_root_token_the_same_as_load_project_handlers(
+        self, tmp_path: Path
+    ) -> None:
+        """A {REPO_ROOT} token resolves against workspace_root, matching the loader."""
+        from claude_code_hooks_daemon.daemon.source_fingerprint import (
+            compute_daemon_identity_fingerprint,
+        )
+
+        controller = DaemonController()
+        handlers_dir = tmp_path / ".claude" / "project-handlers"
+        handlers_dir.mkdir(parents=True)
+        (handlers_dir / "custom.py").write_text("# custom\n", encoding="utf-8")
+        project_config = ProjectHandlersConfig(
+            enabled=True, path="{REPO_ROOT}/.claude/project-handlers"
+        )
+
+        result = controller._compute_startup_source_fingerprint(tmp_path, project_config)
+
+        assert result == compute_daemon_identity_fingerprint(handlers_dir)
+
+    def test_returns_none_on_oserror_without_raising(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A hashing failure is best-effort: logged, None, daemon startup continues."""
+
+        def _raise(*_extra_roots: Path) -> str:
+            raise OSError("simulated read failure")
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.daemon.source_fingerprint.compute_daemon_identity_fingerprint",
+            _raise,
+        )
+        controller = DaemonController()
+
+        result = controller._compute_startup_source_fingerprint(tmp_path, None)
+
+        assert result is None

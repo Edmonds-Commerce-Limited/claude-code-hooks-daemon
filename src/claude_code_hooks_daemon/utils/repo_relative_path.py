@@ -189,3 +189,20 @@ def expand_repo_root_token(value: str, project_root: Path) -> str:
         raise ValueError(f"path must not escape the repository, got {value!r}")
 
     return str(project_root / remainder) if remainder else str(project_root)
+
+
+def resolve_repo_relative_path(value: str, project_root: Path) -> Path:
+    """Resolve a ``{REPO_ROOT}``-token-aware config path to an absolute ``Path``.
+
+    Mirrors exactly what ``DaemonController._load_project_handlers`` does with
+    ``ProjectHandlersConfig.path``: expand a leading ``{REPO_ROOT}`` token via
+    :func:`expand_repo_root_token`, then join a still-relative result onto
+    ``project_root`` (an already-absolute result -- a genuine machine-specific
+    override -- is used as-is). Shared so a second caller (Plan 00371's
+    daemon-identity fingerprint) resolves the SAME directory the loader would,
+    rather than a second, potentially-diverging copy of this logic.
+    """
+    expanded = Path(expand_repo_root_token(value, project_root))
+    if not expanded.is_absolute():
+        expanded = project_root / expanded
+    return expanded

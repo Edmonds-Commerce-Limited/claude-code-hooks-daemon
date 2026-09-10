@@ -24,16 +24,12 @@ the production daemon socket — invoked by RELEASING.md Step 12.0 H-1.
 from __future__ import annotations
 
 import json
-import os
 import socket
 from pathlib import Path
-
-import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SOCKET_GLOB = "daemon-*.sock"
 
 _RECOVERY_REASON_FRAGMENT = "TOOL ERROR RECOVERY:"
 _DEFAULT_REASON_FRAGMENT = "STOPPING BECAUSE:"
@@ -43,38 +39,9 @@ _DEFAULT_REASON_FRAGMENT = "STOPPING BECAUSE:"
 #: narrowly so only that one known guard is tolerated.
 _RELEASE_GUARD_FRAGMENT = "RELEASE IN PROGRESS:"
 
-
-def _socket_is_alive(sock_path: Path) -> bool:
-    """Return True if a Unix socket file accepts a connection.
-
-    Multiple stale ``daemon-{hostname}.sock`` files can accumulate when a
-    container restarts under a new hostname — the old socket inode survives
-    on disk but ``connect()`` raises ``ECONNREFUSED`` because no daemon
-    process is listening. Probing with a short timeout filters those out.
-    """
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(1.0)
-            sock.connect(str(sock_path))
-        return True
-    except OSError:
-        return False
-
-
-def _discover_socket() -> Path | None:
-    """Locate the running daemon's Unix socket via env or glob.
-
-    Mirrors ``scripts/qa/run_smoke_test.sh`` discovery but additionally
-    probes each candidate to skip stale sockets whose daemon process is
-    gone. Env override (``CLAUDE_HOOKS_SOCKET_PATH``) takes precedence.
-    """
-    env_path = os.environ.get("CLAUDE_HOOKS_SOCKET_PATH")
-    if env_path and Path(env_path).is_socket() and _socket_is_alive(Path(env_path)):
-        return Path(env_path)
-    for candidate in sorted((REPO_ROOT / "untracked").glob(SOCKET_GLOB)):
-        if candidate.is_socket() and _socket_is_alive(candidate):
-            return candidate
-    return None
+#: `daemon_socket` (socket discovery + Plan 00371 staleness check) lives in
+#: tests/acceptance/conftest.py, shared across every acceptance file that
+#: dispatches through the live daemon socket.
 
 
 def _send_stop_event(sock_path: Path, transcript_path: Path, session_id: str, cwd: Path) -> dict:
@@ -170,18 +137,6 @@ def _write_transcript(path: Path, *, is_error: bool, tool_use_id: str = "toolu_p
         ),
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-@pytest.fixture
-def daemon_socket() -> Path:
-    sock_path = _discover_socket()
-    if sock_path is None:
-        pytest.skip(
-            "Daemon not running — no live socket found under untracked/. "
-            "Start the daemon with: ./bin/hooks-daemon restart"
-        )
-    assert sock_path is not None
-    return sock_path
 
 
 def test_tool_use_error_recovery_branch_fires(daemon_socket: Path, tmp_path: Path) -> None:

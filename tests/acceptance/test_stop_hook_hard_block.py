@@ -28,49 +28,21 @@ Step 12.0 H-1 alongside the other Phase 9 / Phase 10 acceptance probes.
 from __future__ import annotations
 
 import json
-import os
-import socket
 import subprocess
 from pathlib import Path
-
-import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SOCKET_GLOB = "daemon-*.sock"
 STOP_HOOK = REPO_ROOT / ".claude" / "hooks" / "stop"
 SUBAGENT_STOP_HOOK = REPO_ROOT / ".claude" / "hooks" / "subagent-stop"
 
 _EXIT_HARD_BLOCK = 2
 _EXIT_OK = 0
 
-
-def _socket_is_alive(sock_path: Path) -> bool:
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(1.0)
-            sock.connect(str(sock_path))
-        return True
-    except OSError:
-        return False
-
-
-def _discover_socket() -> Path | None:
-    env_path = os.environ.get("CLAUDE_HOOKS_SOCKET_PATH")
-    if env_path and Path(env_path).is_socket() and _socket_is_alive(Path(env_path)):
-        return Path(env_path)
-    for candidate in sorted((REPO_ROOT / "untracked").glob(SOCKET_GLOB)):
-        if candidate.is_socket() and _socket_is_alive(candidate):
-            return candidate
-    return None
-
-
-@pytest.fixture
-def daemon_running() -> None:
-    sock_path = _discover_socket()
-    if sock_path is None:
-        pytest.skip("Daemon not running — start with: ./bin/hooks-daemon restart")
+#: `daemon_running` (socket discovery + Plan 00371 staleness check) lives in
+#: tests/acceptance/conftest.py, shared across every acceptance file that
+#: dispatches through the live daemon socket.
 
 
 def _invoke_hook(hook_path: Path, hook_input: dict) -> subprocess.CompletedProcess[str]:

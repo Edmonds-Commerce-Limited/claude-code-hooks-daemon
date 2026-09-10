@@ -1166,6 +1166,61 @@ def cmd_health(args: argparse.Namespace) -> int:
     return 0 if healthy else 1
 
 
+def cmd_check_source_fresh(args: argparse.Namespace) -> int:
+    """Verify the running daemon's loaded code matches the working tree (Plan 00371).
+
+    A daemon never hot-reloads: every handler module is imported once, at
+    startup, and a source edit afterwards has no effect until it is
+    restarted. This compares the running daemon's reported
+    ``source_fingerprint`` (from its ``_system``/``health`` socket action)
+    against a fresh fingerprint computed from the current on-disk source, so
+    a QA run or a script (``scripts/qa/run_smoke_test.sh``) can detect and
+    fail on a stale daemon by name instead of a live-dispatch result silently
+    grading the wrong code.
+
+    Args:
+        args: Command-line arguments.
+
+    Returns:
+        0 if the running daemon's loaded code matches the working tree,
+        1 if it does not, or if freshness could not be verified at all
+        (daemon not running, unreachable, or an error response).
+    """
+    from claude_code_hooks_daemon.daemon.source_fingerprint import (
+        compute_current_project_fingerprint,
+        describe_fingerprint_mismatch,
+    )
+
+    project_path = get_project_path(getattr(args, "project_root", None))
+    socket_path, pid_path, drift_warning = _resolve_effective_daemon(args, project_path)
+    if drift_warning is not None:
+        print(drift_warning, file=sys.stderr)
+
+    pid = read_pid_file(str(pid_path))
+    if pid is None:
+        print("Daemon: NOT RUNNING — cannot verify source freshness")
+        print("Start it with: bin/hooks-daemon restart")
+        return 1
+
+    request = {"event": "_system", "hook_input": {"action": "health"}}
+    response = send_daemon_request(socket_path, request)
+
+    running_fingerprint: str | None = None
+    if response is not None and "result" in response:
+        running_fingerprint = response["result"].get("source_fingerprint")
+    elif response is not None and "error" in response:
+        print(f"Daemon health query failed: {response['error']}")
+
+    current_fingerprint = compute_current_project_fingerprint(project_path)
+    mismatch = describe_fingerprint_mismatch(running_fingerprint, current_fingerprint)
+    if mismatch is not None:
+        print(mismatch)
+        return 1
+
+    print(f"Daemon source is fresh (source_fingerprint {current_fingerprint[:12]}).")
+    return 0
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     """Run a verbose environment & configuration audit on demand (Plan 00128).
 
@@ -7053,6 +7108,13 @@ def main() -> int:
     # health command
     parser_health = subparsers.add_parser("health", help="Check daemon health")
     parser_health.set_defaults(func=cmd_health)
+
+    # check-source-fresh command (Plan 00371)
+    parser_check_source_fresh = subparsers.add_parser(
+        "check-source-fresh",
+        help="Verify the running daemon's loaded code matches the working tree",
+    )
+    parser_check_source_fresh.set_defaults(func=cmd_check_source_fresh)
 
     # check command — verbose env/config audit (the report SessionStart hides)
     parser_check = subparsers.add_parser(

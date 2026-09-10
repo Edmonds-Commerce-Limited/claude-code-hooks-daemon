@@ -24,9 +24,7 @@ that need a live daemon.
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import socket
 import subprocess
 import tempfile
 import uuid
@@ -34,7 +32,6 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.playbook_harness import (
     PROBE_DISPATCH_TIMEOUT_SECONDS,
     ExecutableProbe,
@@ -47,7 +44,6 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SOCKET_GLOB = "daemon-*.sock"
 HOOKS_DIR = REPO_ROOT / ".claude" / "hooks"
 DAEMON_CLI = REPO_ROOT / "bin" / "hooks-daemon"
 
@@ -70,31 +66,9 @@ _WRAPPERS = {
 }
 
 
-def _socket_is_alive(sock_path: Path) -> bool:
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(Timeout.SOCKET_LIVENESS_PROBE_SEC)
-            sock.connect(str(sock_path))
-        return True
-    except OSError:
-        return False
-
-
-def _discover_socket() -> Path | None:
-    env_path = os.environ.get("CLAUDE_HOOKS_SOCKET_PATH")
-    if env_path and Path(env_path).is_socket() and _socket_is_alive(Path(env_path)):
-        return Path(env_path)
-    for candidate in sorted((REPO_ROOT / "untracked").glob(SOCKET_GLOB)):
-        if candidate.is_socket() and _socket_is_alive(candidate):
-            return candidate
-    return None
-
-
-@pytest.fixture(scope="module")
-def daemon_running() -> None:
-    """Skip rather than fail when no daemon is up, matching the siblings here."""
-    if _discover_socket() is None:
-        pytest.skip("Daemon not running — start with: ./bin/hooks-daemon restart")
+#: `daemon_running`/`daemon_socket` (socket discovery + Plan 00371 staleness
+#: check) live in tests/acceptance/conftest.py, shared across every
+#: acceptance file that dispatches through the live daemon socket.
 
 
 @pytest.fixture(scope="module")

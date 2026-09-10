@@ -1,6 +1,6 @@
 # Plan 00371: qa acceptance probes detect a stale daemon
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-10
 **Owner**: joseph
 **Priority**: Medium
@@ -101,7 +101,7 @@ auto-remediating pattern.
 
 ### Phase 1: source fingerprint capability
 
-- [ ] ⬜ **Task 1.1**: New module
+- [x] ✅ **Task 1.1**: New module
   `src/claude_code_hooks_daemon/daemon/source_fingerprint.py`:
   `daemon_package_root()`, `compute_source_fingerprint(*roots)`,
   `compute_daemon_identity_fingerprint(project_root)`,
@@ -111,7 +111,7 @@ auto-remediating pattern.
   to a file rename, tolerant of a missing `project-handlers/` dir, and the
   three `describe_fingerprint_mismatch` cases (match / mismatch / no running
   fingerprint).
-- [ ] ⬜ **Task 1.2**: `DaemonController` computes
+- [x] ✅ **Task 1.2**: `DaemonController` computes
   `self._source_fingerprint` once in `initialise()` (best-effort: `OSError`
   during hashing logs and leaves it `None`, matching the existing
   `_sync_agent_assets` fail-open convention — never fatal to daemon startup)
@@ -120,7 +120,7 @@ auto-remediating pattern.
 
 ### Phase 2: expose + CLI verb
 
-- [ ] ⬜ **Task 2.1**: `bin/hooks-daemon check-source-fresh` — resolves the
+- [x] ✅ **Task 2.1**: `bin/hooks-daemon check-source-fresh` — resolves the
   project's socket, sends a `_system`/`health` request, compares against
   `compute_daemon_identity_fingerprint`, prints the verdict, exits 0 fresh /
   1 stale-or-unreachable. Unit tests in `tests/unit/daemon/test_cli.py`
@@ -128,14 +128,14 @@ auto-remediating pattern.
 
 ### Phase 3: wire the acceptance harness
 
-- [ ] ⬜ **Task 3.1**: Centralise `_socket_is_alive` / `_discover_socket` (byte-
+- [x] ✅ **Task 3.1**: Centralise `_socket_is_alive` / `_discover_socket` (byte-
   identical across `test_playbook_harness.py`, `test_absolute_path_socket_deny.py`,
   `test_stop_hook_hard_block.py`, `test_tool_use_error_recovery.py`) into
   `tests/acceptance/conftest.py`, add `assert_daemon_source_fresh(socket_path)`
   there, and fold it into shared `daemon_running`/`daemon_socket` fixtures
   (both names are already used, unchanged, across the 4 files) so removing
   each file's local copy is the only per-file change.
-- [ ] ⬜ **Task 3.2**: Regression test proving detection actually fires:
+- [x] ✅ **Task 3.2**: Regression test proving detection actually fires:
   query the real running daemon's reported fingerprint over the socket, feed
   it to `describe_fingerprint_mismatch` against a deliberately wrong "current"
   value, assert the named-mismatch message. A companion test asserts the
@@ -147,7 +147,7 @@ auto-remediating pattern.
 
 ### Phase 4: smoke test parity
 
-- [ ] ⬜ **Task 4.1**: `scripts/qa/run_smoke_test.sh` calls
+- [x] ✅ **Task 4.1**: `scripts/qa/run_smoke_test.sh` calls
   `bin/hooks-daemon check-source-fresh` before its 3 behavioural probes;
   a non-zero result writes the same JSON failure shape the script already
   uses for "daemon not running", naming staleness instead.
@@ -161,18 +161,21 @@ auto-remediating pattern.
 
 ## Success Criteria
 
-- [ ] A daemon started from code at commit A, then queried after the working
+- [x] A daemon started from code at commit A, then queried after the working
   tree changes to commit B with no restart, reports a `source_fingerprint`
   that no longer equals `compute_daemon_identity_fingerprint` computed
-  against B.
-- [ ] `tests/acceptance/test_playbook_harness.py` (and the 3 other live-socket
+  against B. (Verified live: appended a comment to `controller.py` without
+  restarting, `check-source-fresh` reported STALE DAEMON naming both
+  fingerprints.)
+- [x] `tests/acceptance/test_playbook_harness.py` (and the 3 other live-socket
   acceptance files) fail with a named "stale daemon" reason, not a
   probe-specific symptom, when the running daemon predates the working
-  tree.
-- [ ] `bin/hooks-daemon check-source-fresh` exits 0 against a freshly
+  tree. (Verified live: every test in the stale module failed with the
+  named reason, not a probe-specific symptom.)
+- [x] `bin/hooks-daemon check-source-fresh` exits 0 against a freshly
   restarted daemon and 1 against a deliberately stale one.
-- [ ] `scripts/qa/run_smoke_test.sh` fails fast, by name, on a stale daemon
-  instead of only on the 3 probes it happens to hand-check.
+- [x] `scripts/qa/run_smoke_test.sh` fails fast, by name, on a stale daemon
+  instead of only on the 3 probes it happens to hand-check. (Verified live.)
 - [ ] Full QA green in the worktree after a daemon restart; new files
   pyright-clean.
 
