@@ -63,6 +63,11 @@ _SWEEP_TIMEOUT_SECONDS: Final[int] = 300
 _SEVERITY_BLOCK: Final[str] = "block"
 _SEVERITY_ADVISE: Final[str] = "advise"
 
+# The key a finding's severity arrives under, in the order tried. Two names
+# because the two sibling CLIs disagree: docs-qa emits `severity`, plan-qa
+# emits `level`, for the same concept. See _severity_of.
+_SEVERITY_KEYS: Final[tuple[str, str]] = ("severity", "level")
+
 
 class Corpus(NamedTuple):
     """One sweepable corpus: its CLI verb and the QA tool name it reports as."""
@@ -107,13 +112,35 @@ def run_sweep(corpus: str, root: Path) -> tuple[int, str, str]:
     return completed.returncode, completed.stdout, completed.stderr
 
 
+def _severity_of(finding: dict[str, Any]) -> str:
+    """One finding's severity, under whichever key its CLI used.
+
+    The two sibling verbs name the same concept differently: `docs-qa --json`
+    emits ``severity`` (from `Finding.severity`), `plan-qa --json` emits
+    ``level`` (from `Finding.level`). Reading only ``severity`` made the
+    summary line contradict its own total — a replay of the 00372 scenario
+    printed `3 findings (0 block, 0 advise)`.
+
+    Read here rather than reconciled at the source: changing a shipped
+    ``--json`` key is a breaking change that belongs in a release note, not in
+    a QA plan. This keeps the report honest meanwhile, and fails loudly if a
+    THIRD name ever appears, because the split would stop summing to the total
+    and the class guard in the tests catches that.
+    """
+    for key in _SEVERITY_KEYS:
+        value = finding.get(key)
+        if value is not None:
+            return str(value)
+    return ""
+
+
 def build_report(corpus: str, findings: list[dict[str, Any]]) -> dict[str, Any]:
     """The QA artefact for one completed sweep.
 
     ``total_issues`` is one of the keys ``llm_qa.failure_count`` sums. A
     novel key would print in the summary line and still score as a pass.
     """
-    severities = [str(finding.get("severity", "")) for finding in findings]
+    severities = [_severity_of(finding) for finding in findings]
     return {
         "tool": CORPORA[corpus].tool,
         "summary": {

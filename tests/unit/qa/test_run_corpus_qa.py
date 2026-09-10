@@ -105,6 +105,40 @@ class TestTheReportShape:
         assert summary["block"] == 1
         assert summary["advise"] == 2
 
+    def test_the_plan_sweeps_level_key_counts_too(self) -> None:
+        """The two sibling CLIs name the same concept differently.
+
+        `docs-qa --json` emits `severity`; `plan-qa --json` emits `level`.
+        Counting only `severity` made the summary line contradict itself —
+        measured on a replay of the 00372 scenario, which printed
+        `3 findings (0 block, 0 advise)`. A reader cannot act on a report
+        that disagrees with its own total.
+        """
+        findings = [
+            {"check_id": "no-new-collisions", "level": "block", "message": "m", "path": None},
+            {"check_id": "row-folder-bijection", "level": "advise", "message": "m", "path": None},
+        ]
+
+        summary = corpus_qa.build_report("plan", findings)["summary"]
+
+        assert (summary["block"], summary["advise"]) == (1, 1)
+
+    def test_the_split_always_accounts_for_every_finding(self) -> None:
+        """The class guard: no key naming can make the split disagree with the total.
+
+        Stated as a property rather than as two more key names, because the
+        failure was never about `level` specifically — it was a summary that
+        could claim three findings and place none of them.
+        """
+        findings = [
+            _finding(severity="block"),
+            {"check_id": "x", "level": "advise", "message": "m", "path": None},
+        ]
+
+        summary = corpus_qa.build_report("plan", findings)["summary"]
+
+        assert summary["block"] + summary["advise"] == summary["total_issues"]
+
     def test_an_operational_failure_is_never_a_pass(self) -> None:
         """A sweep that could not run must not look like a sweep that found nothing.
 
