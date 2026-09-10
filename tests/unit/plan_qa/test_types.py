@@ -2,6 +2,7 @@
 
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -31,8 +32,14 @@ class TestFinding:
             remediation="r",
         )
         assert finding.path is None
+        # Aliased through Any: the assignment below is exactly what this test
+        # verifies raises FrozenInstanceError at runtime (Finding's own
+        # __setattr__ override) -- pyright statically (and correctly) rejects
+        # it as invalid on the real type, so the alias keeps the mutation
+        # attempt itself the thing under test rather than a type error.
+        mutable_finding: Any = finding
         with pytest.raises(FrozenInstanceError):
-            finding.message = "other"
+            mutable_finding.message = "other"
 
 
 class TestCheckContext:
@@ -53,8 +60,10 @@ class TestCheckContext:
 
     def test_is_frozen(self) -> None:
         context = CheckContext(project_root=Path("/repo"), plan_dir_rel="CLAUDE/Plan")
+        # See TestFinding.test_is_frozen for why this goes through Any.
+        mutable_context: Any = context
         with pytest.raises(FrozenInstanceError):
-            context.plan_dir_rel = "elsewhere"
+            mutable_context.plan_dir_rel = "elsewhere"
 
 
 class TestCheckSpec:

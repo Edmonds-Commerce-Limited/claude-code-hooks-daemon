@@ -32,6 +32,7 @@ the row does not pass until a real guard actually catches it.
 import json
 import subprocess  # nosec B404 - subprocess used for git fixtures and QA checkers
 import sys
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -64,7 +65,7 @@ _GIT_SURFACES: tuple[tuple[str, str, str], ...] = (
 
 
 @pytest.fixture(autouse=True)
-def _reset_redaction_caches() -> None:
+def _reset_redaction_caches() -> Generator[None, None, None]:
     sr.reset_terms_cache()
     sr.reset_active_path_cache()
     yield

@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
+from pydantic_core import ErrorDetails
 
 from claude_code_hooks_daemon.config.models import Config
 
@@ -154,10 +155,11 @@ class TestFormatExtraFieldBranches:
         """Extra field inside 'plugins' location uses _PLUGIN_VALID_FIELDS (lines 122-123)."""
         from claude_code_hooks_daemon.config.validation_ux import _format_extra_field
 
-        err: dict[str, Any] = {
+        err: ErrorDetails = {
             "loc": ("plugins", "plugins", 0, "xyz_unknown_field"),
             "msg": "Extra inputs are not permitted",
             "type": "extra_forbidden",
+            "input": None,
         }
         lines = _format_extra_field(err, "plugins.plugins.0.xyz_unknown_field")
 
@@ -171,10 +173,11 @@ class TestFormatExtraFieldBranches:
         """Extra field at non-handlers/non-plugins location uses frozenset() (lines 124-125)."""
         from claude_code_hooks_daemon.config.validation_ux import _format_extra_field
 
-        err: dict[str, Any] = {
+        err: ErrorDetails = {
             "loc": ("daemon", "unknown_field"),
             "msg": "Extra inputs are not permitted",
             "type": "extra_forbidden",
+            "input": None,
         }
         lines = _format_extra_field(err, "daemon.unknown_field")
 
@@ -187,10 +190,11 @@ class TestFormatExtraFieldBranches:
         """No close match for handlers extra field lists all valid fields (line 132)."""
         from claude_code_hooks_daemon.config.validation_ux import _format_extra_field
 
-        err: dict[str, Any] = {
+        err: ErrorDetails = {
             "loc": ("handlers", "pre_tool_use", "destructive_git", "zzz_nomatch"),
             "msg": "Extra inputs are not permitted",
             "type": "extra_forbidden",
+            "input": None,
         }
         lines = _format_extra_field(err, "handlers.pre_tool_use.destructive_git.zzz_nomatch")
 

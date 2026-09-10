@@ -6,7 +6,6 @@ plan documents onto journal files or vice versa.
 """
 
 from pathlib import Path
-from typing import ClassVar
 
 import pytest
 
@@ -27,6 +26,26 @@ def _context(**overrides):
 
 def _classify(rel_path: str, **overrides):
     return classify(PROJECT_ROOT / rel_path, _context(**overrides))
+
+
+# Module-level, not a class attribute: referencing a ClassVar from a
+# same-class decorator argument (the parametrize call below) is a scope
+# pyright cannot resolve, so it falls back to `object` for the sorted() key
+# lambda's parameter -- a module constant sidesteps that entirely.
+_SAMPLES: dict[PlanFileKind, str] = {
+    PlanFileKind.PLAN_DOCUMENT: "CLAUDE/Plan/00190-thing/PLAN.md",
+    PlanFileKind.PLAN_INDEX: "CLAUDE/Plan/README.md",
+    PlanFileKind.JOURNAL_DAYFILE: "CLAUDE/Plan/00190-t/JOURNAL/00190-Journal-26-07-31.md",
+    PlanFileKind.JOURNAL_OTHER: "CLAUDE/Plan/00190-thing/JOURNAL/notes.md",
+    PlanFileKind.SUPPORTING_DOC: "CLAUDE/Plan/00190-thing/RESEARCH.md",
+    PlanFileKind.OUTSIDE: "src/module.py",
+}
+# Computed as its own statement, not inline in the parametrize() call below:
+# pytest.mark.parametrize's stub gives sorted()'s call site a contextual
+# expected type that pulls the key lambda's parameter down to `object`,
+# which then cannot subscript. A standalone assignment infers purely from
+# _SAMPLES.items(), with no such pressure.
+_SORTED_SAMPLES = sorted(_SAMPLES.items(), key=lambda kv: kv[0].value)
 
 
 class TestPlanDocuments:
@@ -146,24 +165,15 @@ class TestOutside:
 class TestExhaustiveness:
     """Every kind must be reachable, and every file gets exactly one kind."""
 
-    SAMPLES: ClassVar[dict[PlanFileKind, str]] = {
-        PlanFileKind.PLAN_DOCUMENT: "CLAUDE/Plan/00190-thing/PLAN.md",
-        PlanFileKind.PLAN_INDEX: "CLAUDE/Plan/README.md",
-        PlanFileKind.JOURNAL_DAYFILE: "CLAUDE/Plan/00190-t/JOURNAL/00190-Journal-26-07-31.md",
-        PlanFileKind.JOURNAL_OTHER: "CLAUDE/Plan/00190-thing/JOURNAL/notes.md",
-        PlanFileKind.SUPPORTING_DOC: "CLAUDE/Plan/00190-thing/RESEARCH.md",
-        PlanFileKind.OUTSIDE: "src/module.py",
-    }
-
     def test_every_kind_is_reachable(self):
-        assert set(self.SAMPLES) == set(PlanFileKind)
+        assert set(_SAMPLES) == set(PlanFileKind)
 
-    @pytest.mark.parametrize("kind,rel_path", sorted(SAMPLES.items(), key=lambda kv: kv[0].value))
+    @pytest.mark.parametrize("kind,rel_path", _SORTED_SAMPLES)
     def test_sample_classifies_to_its_kind(self, kind, rel_path):
         assert _classify(rel_path).kind is kind
 
     def test_journal_kinds_and_plan_kinds_are_disjoint(self):
-        for kind, rel_path in self.SAMPLES.items():
+        for kind, rel_path in _SAMPLES.items():
             result = _classify(rel_path)
             plan_ruled = kind in (PlanFileKind.PLAN_DOCUMENT, PlanFileKind.SUPPORTING_DOC)
             assert not (result.is_journal and plan_ruled)
@@ -214,7 +224,7 @@ class TestIsJournalFile:
 
     def test_agrees_with_classify_on_every_sample(self):
         """The two consumers of the journal rule must never disagree."""
-        for rel_path in TestExhaustiveness.SAMPLES.values():
+        for rel_path in _SAMPLES.values():
             classified = _classify(rel_path)
             if classified.kind is PlanFileKind.OUTSIDE:
                 continue

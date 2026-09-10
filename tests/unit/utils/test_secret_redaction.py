@@ -6,6 +6,7 @@ value this module returns except the term list itself (which callers must
 never surface directly — only an index into it).
 """
 
+from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -349,7 +350,7 @@ class TestActiveSecretTerms:
 
 
 @pytest.fixture(autouse=True)
-def _reset_module_caches() -> None:
+def _reset_module_caches() -> Generator[None, None, None]:
     """Isolate every test from the process-lifetime caches this module keeps."""
     sr.reset_terms_cache()
     sr.reset_active_path_cache()
