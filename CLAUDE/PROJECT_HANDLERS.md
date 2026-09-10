@@ -169,11 +169,15 @@ class TestMigrationReminderHandler:
 
 ### 6. Restart Daemon
 
+<!-- ssot-quote: CLAUDE/core/Worktree.core.md#skipping-daemon-restart-verification -->
+
 ```bash
 .claude/hooks-daemon/bin/hooks-daemon restart
 .claude/hooks-daemon/bin/hooks-daemon status
 # Expected: Status: RUNNING
 ```
+
+<!-- /ssot-quote -->
 
 ---
 
