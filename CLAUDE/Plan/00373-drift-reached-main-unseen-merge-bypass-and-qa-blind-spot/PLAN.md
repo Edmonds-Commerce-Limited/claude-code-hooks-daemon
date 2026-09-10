@@ -62,21 +62,28 @@ QA, CI or the release slate registering anything.
 - [x] ✅ **Task 1.1**: Re-home the orphaned 00372 build report into
   `Completed/00372-worktree-reap-two-defects/subagent-reports/`, clearing all
   four plan-QA findings. Delivered in `7a722965`.
-- [ ] ⬜ **Task 1.2**: Clear the four `docs-qa --sweep` findings — two
-  `module-doc-budget` over-runs (`src/CLAUDE.md`,
-  `src/claude_code_hooks_daemon/strategies/lsp_noise/CLAUDE.md`) and two
-  `duplicate-block` findings (`CLAUDE/Architecture/StatusLine.md` against
-  `README.md`, `CLAUDE/PROJECT_HANDLERS.md` against
-  `CLAUDE/core/Worktree.core.md`).
+- [x] ✅ **Task 1.2**: Clear the four `docs-qa --sweep` findings. Both
+  `module-doc-budget` over-runs were the same mistake — a module `CLAUDE.md`
+  restating depth that already had a canonical home — so both were fixed by
+  deleting the duplicate rather than raising a budget. The two
+  `duplicate-block` findings went one each way: `PROJECT_HANDLERS.md` wraps
+  its copy in R4b `ssot-quote` markers (its source, `CLAUDE/core/Worktree.core.md`,
+  is daemon-generated and cannot be edited), and `README.md` keeps its
+  `statusLine` JSON in place under the same markers rather than linking away —
+  a human reading the front door of a public repo should not have to navigate
+  to an agent-tree page to copy eight lines of setup.
 
 ### Phase 2: The sweeps become QA tools
 
-- [ ] ⬜ **Task 2.1**: Add `plan_qa` and `docs_qa` `ToolConfig` entries to
-  `scripts/qa/llm_qa.py`'s `TOOL_REGISTRY`, each invoking its CLI verb with
-  `--json`, plus a summarizer apiece reporting finding counts split by level.
-- [ ] ⬜ **Task 2.2**: Cover both tools with tests asserting that a tree with
-  a seeded finding fails the tool, so a sweep that silently stops running
-  cannot read as a pass.
+- [x] ✅ **Task 2.1**: `plan_qa` and `docs_qa` `ToolConfig` entries in
+  `scripts/qa/llm_qa.py`'s `TOOL_REGISTRY`, both served by
+  `scripts/qa/run_corpus_qa.py`, which shells out to the shipped CLI verb
+  rather than re-resolving config. A shared summarizer reports the count and
+  the severity split.
+- [x] ✅ **Task 2.2**: `tests/unit/qa/test_run_corpus_qa.py`. An operational
+  failure is never a pass: a CLI exit outside its documented clean/findings
+  pair, or output that is not a findings array, reports as no-verdict rather
+  than as an empty — because an empty array is exactly what CLEAN looks like.
 
 ### Phase 3: Commit-stage gates cover the merge route
 
@@ -105,3 +112,8 @@ QA, CI or the release slate registering anything.
 ## Delivery & Milestones
 
 - `7a722965` — Task 1.1: the orphaned build report re-homed, plan tree clean.
+- `637bc0ea`, `0984c34c` — Task 1.2: doc corpus clean, 4 findings to 0.
+- `a530a629` — Phase 2: both sweeps registered as QA tools.
+- Spun out **Plan 00374**: the QA gate's live probe disagreed with its own
+  unit tests, and the cause was the CLI discarding `bin/hooks-daemon`'s
+  project anchor. Distinct defect, own plan.
