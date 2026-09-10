@@ -3,6 +3,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from claude_code_hooks_daemon.core.utils import get_workspace_root
 
 
@@ -10,7 +12,7 @@ class TestGetWorkspaceRoot:
     """Tests for get_workspace_root function targeting branch coverage."""
 
     def test_get_workspace_root_fallback_to_project_context(
-        self, tmp_path: Path, monkeypatch: any
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Falls back to ProjectContext when no .git/CLAUDE markers found (line 76 branch)."""
         # Create a directory without .git or CLAUDE

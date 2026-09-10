@@ -130,8 +130,11 @@ class TestPseudoEventTriggerEquality:
     def test_frozen_dataclass(self) -> None:
         """Trigger is immutable (frozen dataclass)."""
         trigger = PseudoEventTrigger.from_string("pre_tool_use:1/5")
+        # Aliased through Any: see test_types.py's TestFinding.test_is_frozen
+        # for why -- the assignment itself is what raises the error.
+        mutable_trigger: Any = trigger
         with pytest.raises((AttributeError, TypeError)):
-            trigger.numerator = 2
+            mutable_trigger.numerator = 2
 
     def test_equality(self) -> None:
         """Two triggers with same values are equal."""

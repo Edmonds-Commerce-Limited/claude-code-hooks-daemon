@@ -477,6 +477,10 @@ def test_nc_rung_honours_events_dir_env_override(live_pid_file: Path) -> None:
     that still ignored the override would find nothing there and silently
     fall through to the (deliberately unreachable) legacy socket."""
     short_root = Path(tempfile.mkdtemp(prefix="ncenv-"))
+    # Created before the try block, alongside short_root: the finally clause
+    # below unconditionally cleans it up, so it must be bound even if a step
+    # between here and its old creation point raised (it previously was not).
+    override_events_dir = Path(tempfile.mkdtemp(prefix="ncenv-override-"))
     try:
         untracked_dir = short_root / "untracked"
         transport = TransportConfig(nc_enabled=True)
@@ -484,7 +488,6 @@ def test_nc_rung_honours_events_dir_env_override(live_pid_file: Path) -> None:
             short_root, "pre-tool-use", "PreToolUse", transport, untracked_dir
         )
 
-        override_events_dir = Path(tempfile.mkdtemp(prefix="ncenv-override-"))
         event_sock = override_events_dir / "pre-tool-use.sock"
         canned = (
             b'{"hookSpecificOutput":{"hookEventName":"PreToolUse",'

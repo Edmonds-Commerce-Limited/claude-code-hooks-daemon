@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 from claude_code_hooks_daemon.core.release_slate import (
+    CiLookup,
     CiRunState,
     SlateReport,
     collect_slate,
@@ -90,7 +91,7 @@ def _collect(
     tmp_path: Path,
     *,
     git: _FakeGit | None = None,
-    ci: object = None,
+    ci: CiLookup | None = None,
     notes: Path | None = None,
 ) -> SlateReport:
     plan_root = _plan_tree(tmp_path)

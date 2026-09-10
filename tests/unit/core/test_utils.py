@@ -284,6 +284,7 @@ class TestGetFileContent:
         }
         result = get_file_content(hook_input)
         assert result == content
+        assert result is not None
         assert len(result) == 100000
 
 
