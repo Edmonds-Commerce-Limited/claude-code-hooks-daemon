@@ -652,6 +652,10 @@ class HumanInputLine:
         # autocomplete swallowing the argument bytes) is diagnosable from the
         # worker's diagnostic log instead of failing invisibly.
         self._slash_submitted: list[str] = []
+        # Edge flag: the human pressed Enter (on ANY box content, even an empty
+        # one). Whatever the box held went with it -- including a line the
+        # supervisor itself typed -- so the own-line follow-up stands down.
+        self._enter_pressed: bool = False
 
     def feed(self, data: bytes) -> None:
         """Advance the line model with a chunk of forwarded human stdin bytes."""
@@ -687,6 +691,7 @@ class HumanInputLine:
             # Only Enter SUBMITS the line; Ctrl-U/Ctrl-C discard it. A submitted
             # `/compact` sets the edge flag so the supervisor can defer to it.
             if byte in _LINE_SUBMIT_BYTES:
+                self._enter_pressed = True
                 if self._buffer_is_compact():
                     self._compact_submitted = True
                 effort_arg = self._buffer_command_arg(_EFFORT_COMMAND)
@@ -785,6 +790,12 @@ class HumanInputLine:
         lines = self._slash_submitted
         self._slash_submitted = []
         return lines
+
+    def take_enter_pressed(self) -> bool:
+        """Return True once if the human pressed Enter since last checked."""
+        pressed = self._enter_pressed
+        self._enter_pressed = False
+        return pressed
 
     @property
     def is_empty(self) -> bool:
@@ -1602,6 +1613,11 @@ class TickFacts:
     # platform's own downgrade record, so a human's model choice needs no
     # recognition to be respected.
     human_effort_command: str | None = None
+    # The human pressed Enter since the last tick. Recomputed by the worker
+    # from ``human_raw_input`` (so no host change is needed to carry it);
+    # False on the in-process path and on legacy hosts. Whatever the box held
+    # was submitted by that keypress, so a pending own line is cleared.
+    human_enter_pressed: bool = False
     # Plan 00317: raw stdin bytes forwarded since the last tick, base64-encoded
     # (JSON has no byte-string type). Drained from the host's ``RawInputTap``.
     # The worker feeds this into its OWN persistent ``HumanInputLine`` and
@@ -2387,6 +2403,10 @@ _GOAL_MAX_LOGICAL_LINES = 8
 # Family-specific per-process cap so a signal storm cannot type repeatedly
 # (each signal is also consumed on injection).
 _MAX_GOAL_INJECTIONS = 5
+# The goal cap is a ROLLING budget: at most _MAX_GOAL_INJECTIONS successful
+# injections inside this window. A lifetime cap met the fifth goal of a
+# session that lived for days and then silently ignored every later plan flip.
+_GOAL_CAP_WINDOW_SECONDS = 3600.0
 _DRY_RUN_GOAL_BODY_PREFIX = "would inject /goal (dry-run — no real /goal sent):"
 
 # ---------------------------------------------------------------------------
@@ -2915,6 +2935,15 @@ class CompactStateMachine:
         # signals are consumed on injection, so this only ever matters under a
         # signal storm; per-process lifetime, never reset.
         self._goal_injections = 0
+        # Wall-clock timestamps of successful goal injections, pruned to the
+        # rolling cap window on read (`goal_injections_within`).
+        self._goal_injection_ts: list[float] = []
+        # The supervisor's own most recent submitted line, while it is still
+        # unconfirmed: its text, the time it was typed (or last followed up),
+        # and how many follow-up Enters have been pressed for it.
+        self._own_line_text: str | None = None
+        self._own_line_ts: float | None = None
+        self._own_line_resubmits = 0
         # Plan 00299: the exact combined /goal text last SUCCESSFULLY
         # injected (None until the first injection). Compared verbatim (not
         # hashed -- the text is already length-capped) against the next
@@ -3570,16 +3599,69 @@ class CompactStateMachine:
         """How many goal injections this process has fired (Plan 00269)."""
         return self._goal_injections
 
-    def mark_goal_injection(self, goal_line: str | None = None) -> None:
-        """Count one goal injection against the family cap (Plan 00269).
+    def mark_goal_injection(
+        self, goal_line: str | None = None, *, now_wall: float | None = None
+    ) -> None:
+        """Count one goal injection against the rolling family cap (Plan 00269).
 
         ``goal_line`` (Plan 00299) records the injected text as the thrash
         guard for the NEXT tick's candidate; omitted/None leaves the guard
         unchanged (legacy callers, and tests exercising the cap alone).
+        ``now_wall`` stamps the injection for the rolling window; a legacy
+        host that omits it is stamped with the wall clock.
         """
         self._goal_injections += 1
+        self._goal_injection_ts.append(time.time() if now_wall is None else now_wall)
         if goal_line is not None:
             self._last_goal_text = goal_line
+
+    def goal_injections_within(self, window_seconds: float, now_wall: float) -> int:
+        """How many goal injections fired in the last ``window_seconds``."""
+        return sum(1 for ts in self._goal_injection_ts if now_wall - ts < window_seconds)
+
+    @property
+    def own_line_pending(self) -> bool:
+        """True while a line the supervisor typed is still unconfirmed."""
+        return self._own_line_text is not None
+
+    @property
+    def own_line_text(self) -> str | None:
+        """The unconfirmed own line's text, or None."""
+        return self._own_line_text
+
+    @property
+    def own_line_resubmits(self) -> int:
+        """How many follow-up Enters the pending own line has had."""
+        return self._own_line_resubmits
+
+    def mark_own_line_typed(self, payload: str, now_wall: float) -> None:
+        """Remember a just-submitted own line as unconfirmed box content.
+
+        A raw keypress (ESC, a bare Enter) is not a line and is never
+        remembered; only text that was pasted and submitted is.
+        """
+        if not payload.strip() or payload in (_RESUBMIT_PAYLOAD, _ESC_PAYLOAD):
+            return
+        self._own_line_text = payload
+        self._own_line_ts = now_wall
+        self._own_line_resubmits = 0
+
+    def mark_own_line_resubmit(self, now_wall: float) -> None:
+        """Record one follow-up Enter and restart the interval."""
+        self._own_line_resubmits += 1
+        self._own_line_ts = now_wall
+
+    def own_line_resubmit_due(self, now_wall: float) -> bool:
+        """True when the pending own line has aged past the follow-up interval."""
+        if self._own_line_ts is None:
+            return False
+        return now_wall - self._own_line_ts >= _OWN_LINE_RESUBMIT_SECONDS
+
+    def clear_own_line(self) -> None:
+        """Forget the pending own line (it went, or the budget is spent)."""
+        self._own_line_text = None
+        self._own_line_ts = None
+        self._own_line_resubmits = 0
 
     @property
     def last_goal_text(self) -> str | None:
@@ -3639,6 +3721,10 @@ class CompactStateMachine:
             "await_is_human": self._await_is_human,
             "dry_run_fired": self._dry_run_fired,
             "goal_injections": self._goal_injections,
+            "goal_injection_ts": list(self._goal_injection_ts),
+            "own_line_text": self._own_line_text,
+            "own_line_ts": self._own_line_ts,
+            "own_line_resubmits": self._own_line_resubmits,
             "goal_clear_injections": self._goal_clear_injections,
             "last_goal_text": self._last_goal_text,
             "standing_auth_injections": self._standing_auth_injections,
@@ -3691,6 +3777,19 @@ class CompactStateMachine:
             self._dry_run_fired = bool(state["dry_run_fired"])
         if "goal_injections" in state:
             self._goal_injections = _coerce_int(state["goal_injections"])
+        if "goal_injection_ts" in state:
+            raw = state["goal_injection_ts"]
+            self._goal_injection_ts = (
+                [_coerce_float(item) for item in raw] if isinstance(raw, list) else []
+            )
+        if "own_line_text" in state:
+            raw = state["own_line_text"]
+            self._own_line_text = None if raw is None else str(raw)
+        if "own_line_ts" in state:
+            raw = state["own_line_ts"]
+            self._own_line_ts = None if raw is None else _coerce_float(raw)
+        if "own_line_resubmits" in state:
+            self._own_line_resubmits = _coerce_int(state["own_line_resubmits"])
         if "goal_clear_injections" in state:
             self._goal_clear_injections = _coerce_int(state["goal_clear_injections"])
         if "last_goal_text" in state:
@@ -4085,6 +4184,17 @@ _DRY_RUN_RESUBMIT_BODY = (
     "would press [enter] to submit a /compact left unsubmitted in the input box "
     "(dry-run — no real Enter sent)"
 )
+# The supervisor's OWN typed line is followed up. A submitted injection is
+# remembered as box content until there is evidence it went: a human Enter, or
+# the session going busy after a follow-up Enter. Until then, at each lull
+# (human idle, child quiet) this long after the line was typed, one more Enter
+# is pressed -- harmless on an empty box, and the only key that submits a line
+# left sitting there (an Enter mid-turn did not submit a pasted /goal, which
+# then sat in the box for eight hours). Bounded so a session with a dialog
+# open, where Enter confirms a default, is never hammered.
+_OWN_LINE_RESUBMIT_SECONDS = 15.0
+_MAX_OWN_LINE_RESUBMITS = 2
+_OWN_LINE_NOOP_PREFIX = "own line"
 
 
 def _format_bot_prefix(now_wall: float | None = None) -> str:
@@ -4827,6 +4937,57 @@ def decide_once(
                 consume_signal_path = str(switch_path)
                 deferred_log = None
                 noop_reason_log = None
+    # ── The supervisor's OWN line is followed up ────────────────────────────
+    # Ahead of every family that would type MORE text (goal, goal clear,
+    # standing-auth), because those must not paste on top of a line that may
+    # still be sitting in the box. Subordinate to the compaction machine,
+    # whose ESC/Enter flush already handles its own stuck /compact.
+    own_line_blocks_text = False
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+        and machine.own_line_pending
+    ):
+        if facts.human_enter_pressed:
+            # The human submitted the box, own line included.
+            machine.clear_own_line()
+            noop_reason_log = (
+                f"{_NOOP_LOG_PREFIX}: {_OWN_LINE_NOOP_PREFIX} submitted by a human [enter]"
+            )
+        elif machine.own_line_resubmits > 0 and not facts.work_idle:
+            # The child went to work after the follow-up Enter: the line went.
+            machine.clear_own_line()
+            noop_reason_log = (
+                f"{_NOOP_LOG_PREFIX}: {_OWN_LINE_NOOP_PREFIX} confirmed submitted "
+                "(session busy after [enter])"
+            )
+        elif machine.own_line_resubmits >= _MAX_OWN_LINE_RESUBMITS:
+            machine.clear_own_line()
+            noop_reason_log = (
+                f"{_NOOP_LOG_PREFIX}: {_OWN_LINE_NOOP_PREFIX} follow-up budget spent "
+                f"({_MAX_OWN_LINE_RESUBMITS} [enter]) -> assumed submitted"
+            )
+        elif can_inject and facts.work_idle and machine.own_line_resubmit_due(facts.now_wall):
+            decision_value = Decision.WOULD_RESUBMIT.value
+            reason = (
+                f"{_OWN_LINE_NOOP_PREFIX} may still be unsubmitted in the input box "
+                f"({machine.own_line_text.split(None, 1)[0] if machine.own_line_text else '?'}) "
+                f"-> pressing [enter] "
+                f"({machine.own_line_resubmits + 1}/{_MAX_OWN_LINE_RESUBMITS})"
+            )
+            payload = (
+                f"{_format_bot_prefix(facts.now_wall)} {_DRY_RUN_RESUBMIT_BODY}"
+                if dry_run
+                else _RESUBMIT_PAYLOAD
+            )
+            submit = False
+            machine.mark_own_line_resubmit(facts.now_wall)
+            deferred_log = None
+            noop_reason_log = None
+        else:
+            own_line_blocks_text = True
     if (
         payload is None
         and evaluation.decision is Decision.NOOP
@@ -4844,12 +5005,20 @@ def decide_once(
             # is dropped and the reason is logged (deduped by write_noop).
             noop_reason_log = f"{_NOOP_LOG_PREFIX}: {goal_reject}"
         elif goal_path is not None and goal_line is not None:
-            if not can_inject:
+            if own_line_blocks_text:
+                noop_reason_log = (
+                    f"{_NOOP_LOG_PREFIX}: goal signal pending but {_OWN_LINE_NOOP_PREFIX} "
+                    "still in the input box"
+                )
+            elif not can_inject:
                 if facts.idle and not facts.input_line_empty:
                     deferred_log = f"{_DEFERRED_LOG_PREFIX} (goal injection pending)"
                 else:
                     noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal signal pending but session busy"
-            elif machine.goal_injections >= _MAX_GOAL_INJECTIONS:
+            elif (
+                machine.goal_injections_within(_GOAL_CAP_WINDOW_SECONDS, facts.now_wall)
+                >= _MAX_GOAL_INJECTIONS
+            ):
                 noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal injection cap reached"
             elif goal_line == machine.last_goal_text:
                 # Plan 00299 thrash guard: the daemon re-renders the combined
@@ -4899,7 +5068,12 @@ def decide_once(
             own_sessions=own_sessions,
         )
         if clear_path is not None:
-            if not can_inject:
+            if own_line_blocks_text:
+                noop_reason_log = (
+                    f"{_NOOP_LOG_PREFIX}: goal clear pending but {_OWN_LINE_NOOP_PREFIX} "
+                    "still in the input box"
+                )
+            elif not can_inject:
                 if facts.idle and not facts.input_line_empty:
                     deferred_log = f"{_DEFERRED_LOG_PREFIX} (goal clear pending)"
                 else:
@@ -5144,7 +5318,12 @@ def decide_once(
             # the reason logged (deduped by write_noop).
             noop_reason_log = f"{_NOOP_LOG_PREFIX}: {sa_reject}"
         elif sa_path is not None and sa_line is not None:
-            if not can_inject:
+            if own_line_blocks_text:
+                noop_reason_log = (
+                    f"{_NOOP_LOG_PREFIX}: standing-auth signal pending but "
+                    f"{_OWN_LINE_NOOP_PREFIX} still in the input box"
+                )
+            elif not can_inject:
                 if facts.idle and not facts.input_line_empty:
                     deferred_log = f"{_DEFERRED_LOG_PREFIX} (standing-auth reminder pending)"
                 else:
@@ -5174,6 +5353,12 @@ def decide_once(
                 consume_signal_path = str(sa_path)
                 deferred_log = None
                 noop_reason_log = None
+    # Remember a submitted own LINE (never a raw keypress, never a dry-run
+    # marker) as unconfirmed box content -- recorded at decision time, like
+    # the audit trail, so the follow-up ships by worker hot-reload alone. A
+    # failed PTY write costs one harmless Enter at the next lull.
+    if payload is not None and submit and not dry_run:
+        machine.mark_own_line_typed(payload, facts.now_wall)
     return TickOutcome(
         decision_value=decision_value,
         reason=reason,
@@ -5291,7 +5476,7 @@ def _apply_post_injection_bookkeeping(
     # host restart (import_state merges by present key, so an older host
     # never clobbers the worker's audit backlog; it merely doesn't carry it).
     if outcome.decision_value == Decision.WOULD_GOAL.value:
-        machine.mark_goal_injection(outcome.goal_line)
+        machine.mark_goal_injection(outcome.goal_line, now_wall=now_wall)
     elif outcome.decision_value == Decision.WOULD_GOAL_CLEAR.value:
         machine.mark_goal_clear_injection()
     elif outcome.decision_value == Decision.WOULD_STANDING_AUTH.value:
@@ -5418,6 +5603,7 @@ def _facts_to_json(facts: TickFacts) -> str:
             "human_compact_submitted": facts.human_compact_submitted,
             "work_idle": facts.work_idle,
             "human_effort_command": facts.human_effort_command,
+            "human_enter_pressed": facts.human_enter_pressed,
             "human_raw_input": facts.human_raw_input,
             "machine_state": facts.machine_state,
             "tick_id": facts.tick_id,
@@ -5434,6 +5620,7 @@ def _facts_from_json(line: str) -> TickFacts:
         human_compact_submitted=bool(data["human_compact_submitted"]),
         work_idle=bool(data["work_idle"]),
         human_effort_command=data.get("human_effort_command"),
+        human_enter_pressed=bool(data.get("human_enter_pressed", False)),
         human_raw_input=str(data.get("human_raw_input", "")),
         machine_state=data.get("machine_state"),
         tick_id=int(data.get("tick_id", 0)),
@@ -5554,6 +5741,9 @@ def run_worker(
             # input box -- the exact invariant the empty-box guard exists for.
             # Either side seeing text is enough to hold the injection.
             input_line_empty=facts.input_line_empty and line_recognizer.is_empty,
+            # OR, never override: a legacy host sends False, and the worker's
+            # own recognizer is the one that actually sees the keypress.
+            human_enter_pressed=facts.human_enter_pressed or line_recognizer.take_enter_pressed(),
         )
         for typed_slash in line_recognizer.take_slash_submitted():
             # Recognition-miss observability: WHICH command family the human's
