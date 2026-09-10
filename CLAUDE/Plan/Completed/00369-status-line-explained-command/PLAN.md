@@ -1,6 +1,6 @@
 # Plan 00369: status line explained command
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-10
 **Owner**: joseph
 **Priority**: Medium

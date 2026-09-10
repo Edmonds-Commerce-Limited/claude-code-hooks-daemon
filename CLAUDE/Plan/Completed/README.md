@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Complete at `bf5da1f5`, `59b11a0a` and `f458057e` + the archiving commit (`optimise` scores every registered handler by a per-handler relevance declaration, one `housekeeping` invocation runs the full pass in a ruled order, the skill routes eight subcommands and documents the rest, and a gate fails when the skill surface drifts from the registry, CLI or schema)
+
 - [00339: supervisor injection lands unsubmitted](00339-supervisor-injection-lands-unsubmitted/PLAN.md) - Complete at `e98c19e4` + the archiving commit (probing a real TUI refuted the assumed mechanism: the trigger is Claude Code's paste detection on a large burst, inside which a carriage return is a literal newline, so the injection is now bracketed-paste framed)
 
 - [00336: upgrade path residual findings](00336-upgrade-path-residual-findings/PLAN.md) - Complete at `c85d5e90`…`788ce6c8` + the archiving commit (config preservation now diffs against a true old-version baseline; `HOOKS-DAEMON.md` regenerated on both upgrade paths instead of never; 17 shipped commands our own `project_containment` denied moved in-repo, found by driving the doc corpus through the live handler)
