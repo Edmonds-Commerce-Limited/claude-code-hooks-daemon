@@ -1,6 +1,6 @@
 # Plan 00371: qa acceptance probes detect a stale daemon
 
-**Status**: In Progress (implementation complete, all tasks and success criteria met — see below; held at non-terminal status because the plan-qa `terminal-state-atomic`/`location-status-coherence` gates require the `git mv` into `Completed/` + README row + stats update in the SAME commit, which is the coordinator's job on `main`, not this worktree's)
+**Status**: Complete
 **Created**: 2026-09-10
 **Owner**: joseph
 **Priority**: Medium

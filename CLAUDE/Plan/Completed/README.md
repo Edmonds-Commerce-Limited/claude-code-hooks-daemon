@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00338: deployed skill tree invisible to review](00338-deployed-skill-tree-invisible-to-review/PLAN.md) - Complete at the archiving commit (the `.claude/.gitignore` pattern is anchored to `/hooks-daemon/`, so the 21-file deployed skill tree is tracked like its five siblings; both directions pinned by tests, and source-to-deployed drift is now a check rather than an accident)
+
 - [00337: stop hook, human-input marker and failsafe cron retune](00337-stop-hook-human-input-cron-retune/PLAN.md) - Complete at `ea03f597`…`51e3694a` + the archiving commit (guidance states the consequence, not just the mechanism; `[awaiting-human]` anchored to the declaration position; the failsafe cron backs off to a 4h cap only when nothing is owed. The DENY-rate classification is Plan 00344)
 
 - [00330: hooks daemon skill surface coherence](00330-hooks-daemon-skill-surface-coherence/PLAN.md) - Complete at `bf5da1f5`, `59b11a0a` and `f458057e` + the archiving commit (`optimise` scores every registered handler by a per-handler relevance declaration, one `housekeeping` invocation runs the full pass in a ruled order, the skill routes eight subcommands and documents the rest, and a gate fails when the skill surface drifts from the registry, CLI or schema)
