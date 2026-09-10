@@ -24,6 +24,9 @@ from claude_code_hooks_daemon.constants import Priority
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.router import EventRouter
+from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import (
+    MarkdownOrganizationHandler,
+)
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 
 
@@ -307,6 +310,7 @@ class TestEndToEndBlockingScenarios:
 
         # Verify blocking
         assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
         # Reason should mention destructive git or force
         assert (
             "force" in result.result.reason.lower() or "destructive" in result.result.reason.lower()
@@ -344,6 +348,7 @@ class TestEndToEndBlockingScenarios:
 
         # Verify blocking
         assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
         assert "sed" in result.result.reason.lower()
         assert result.terminated_by == "block-sed-command"
 
@@ -591,6 +596,7 @@ class TestMarkdownOrganizationHandlerIntegration:
 
         # Verify blocking
         assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
         assert "MARKDOWN FILE IN WRONG LOCATION" in result.result.reason
         assert result.terminated_by == "enforce-markdown-organization"
 
@@ -671,6 +677,9 @@ class TestMarkdownOrganizationHandlerIntegration:
         pre_tool_use_chain = router.get_chain(EventType.PRE_TOOL_USE)
         handler = pre_tool_use_chain.get("enforce-markdown-organization")
         assert handler is not None
+        # These private attributes belong to the concrete handler, not the
+        # Handler base class .get() is statically typed to return.
+        assert isinstance(handler, MarkdownOrganizationHandler)
 
         # Manually set config (workaround until registry supports handler options)
         handler._workspace_root = project_context

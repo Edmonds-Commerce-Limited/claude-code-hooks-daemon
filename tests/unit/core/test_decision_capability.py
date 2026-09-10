@@ -23,7 +23,7 @@ source, because that is exactly what the scan reads in production: a handler
 class whose file is on disk.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -118,13 +118,20 @@ class FactoryAllowingProbe:
 class NarrowedFactoryProbe:
     """Uses a narrowed tier's inherited factory.
 
-    ``AdvisoryResult.deny(...)`` type-checks — ``deny`` is inherited — and only
-    Pydantic stops it, at runtime, when that handler first executes. The scan
-    is the surface that can say so beforehand.
+    ``AdvisoryResult.deny(...)`` is exactly the mistake a handler author
+    could make since ``deny`` is inherited from ``HookResult`` -- and
+    Pydantic stops it at runtime, when that handler first executes. pyright
+    ALSO now catches the return-type mismatch statically (``HookResult.deny``
+    deliberately returns the wide ``HookResult``, not ``Self`` -- see its own
+    docstring), which is why this probe routes the same call through
+    ``cast()``: the cast keeps this fixture itself pyright-clean while
+    leaving the ``AdvisoryResult.deny(...)`` call fully intact for
+    ``decisions_referenced_by``'s AST walk, which is what these tests exist
+    to exercise. The scan is the surface that can say so beforehand.
     """
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
-        return AdvisoryResult.deny(reason="blocked")
+        return cast("AdvisoryResult", AdvisoryResult.deny(reason="blocked"))
 
 
 class _NotAResult:

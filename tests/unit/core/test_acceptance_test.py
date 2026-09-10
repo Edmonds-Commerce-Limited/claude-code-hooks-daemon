@@ -1,6 +1,7 @@
 """Tests for AcceptanceTest dataclass."""
 
 from dataclasses import FrozenInstanceError
+from typing import Any
 
 import pytest
 
@@ -336,8 +337,11 @@ class TestToolPayloadField:
         edit what the next reads.
         """
         payload = ToolPayload(tool_name=ToolName.WRITE, tool_input={"file_path": "/a"})
+        # Aliased through Any: see test_types.py's TestFinding.test_is_frozen
+        # for why -- the assignment itself is what raises FrozenInstanceError.
+        mutable_payload: Any = payload
         with pytest.raises(FrozenInstanceError):
-            payload.tool_name = ToolName.EDIT
+            mutable_payload.tool_name = ToolName.EDIT
 
     def test_empty_tool_name_rejected(self):
         """An unnamed tool cannot be dispatched, so it must not construct."""

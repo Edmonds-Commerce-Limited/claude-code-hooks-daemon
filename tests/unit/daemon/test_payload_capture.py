@@ -46,6 +46,7 @@ def test_enabled_writes_event_jsonl(tmp_path: Path) -> None:
         hook_input=hook_input,
     )
     assert result == tmp_path / "cap" / "Status.jsonl"
+    assert result is not None
     lines = _read_lines(result)
     assert len(lines) == 1
     assert json.loads(lines[0]) == hook_input

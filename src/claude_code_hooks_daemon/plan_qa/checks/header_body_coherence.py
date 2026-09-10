@@ -46,7 +46,7 @@ _STARTED_REMEDIATION: Final[str] = (
 
 def _rule(context: CheckContext, target: DocumentTarget) -> list[Finding]:
     doc = target.doc
-    if doc.status not in _NON_TERMINAL_STATUSES:
+    if doc.status is None or doc.status not in _NON_TERMINAL_STATUSES:
         return []
 
     level = level_for_plan(context, target.plan_number)

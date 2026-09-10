@@ -78,11 +78,11 @@ class GitContextInjectorHandler(UserPromptSubmitHandlerBase):
         self._last_injected[session_id] = (payload, now)
         return True
 
-    def matches(self, _hook_input: dict[str, Any]) -> bool:
+    def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match all user prompt submissions.
 
         Args:
-            _hook_input: Hook input dictionary from Claude Code (unused)
+            hook_input: Hook input dictionary from Claude Code (unused)
 
         Returns:
             Always True (provide context for all prompts)

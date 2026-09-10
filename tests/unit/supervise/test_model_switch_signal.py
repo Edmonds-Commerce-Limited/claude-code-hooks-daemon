@@ -15,10 +15,14 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests.unit.supervise._load import load_supervisor_module
+
+if TYPE_CHECKING:
+    from tests.unit.supervise._load import SupervisorTickOutcome
 
 _mod = load_supervisor_module()
 
@@ -71,7 +75,7 @@ def _write_goal(sidecar_dir: Path, *, session_id: str = _SESSION, ts: float = _N
 
 def _decide(
     sidecar_dir: Path, *, dry_run: bool = False, facts: object | None = None, machine: object = None
-) -> object:
+) -> SupervisorTickOutcome:
     policy = _mod.CompactPolicy()
     machine = machine or _mod.CompactStateMachine(policy)
     return _mod.decide_once(
@@ -324,7 +328,7 @@ class _AuditDriver:
         self.sidecar_dir = sidecar_dir
         self.machine = _mod.CompactStateMachine(_mod.CompactPolicy())
 
-    def tick(self, *, injected: bool = True) -> object:
+    def tick(self, *, injected: bool = True) -> SupervisorTickOutcome:
         outcome = _decide(self.sidecar_dir, machine=self.machine)
         _mod._apply_post_injection_bookkeeping(self.machine, outcome, injected=injected)
         if injected and outcome.consume_signal_path is not None:

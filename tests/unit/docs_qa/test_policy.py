@@ -145,8 +145,12 @@ class TestVendorDirs:
 class TestPlainDataclasses:
     def test_qa_policy_is_frozen(self) -> None:
         policy = DocumentationQaPolicy()
+        # Aliased through Any: the assignment is exactly what this test
+        # verifies raises FrozenInstanceError at runtime -- pyright statically
+        # (and correctly) rejects it as invalid on the real, frozen type.
+        mutable_policy: Any = policy
         with pytest.raises(FrozenInstanceError):
-            policy.edit_mode = "block"
+            mutable_policy.edit_mode = "block"
 
 
 class TestExcludePaths:

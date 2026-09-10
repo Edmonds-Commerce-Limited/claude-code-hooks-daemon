@@ -1,5 +1,7 @@
 """Tests for security strategy protocol definitions."""
 
+from typing import Any
+
 import pytest
 
 from claude_code_hooks_daemon.strategies.security.protocol import (
@@ -29,8 +31,11 @@ class TestSecurityPattern:
             owasp="A01",
             suggestion="Fix it",
         )
+        # Aliased through Any: see test_types.py's TestFinding.test_is_frozen
+        # for why -- the assignment itself is what raises AttributeError.
+        mutable_pattern: Any = pattern
         with pytest.raises(AttributeError):
-            pattern.name = "Changed"
+            mutable_pattern.name = "Changed"
 
     def test_pattern_equality(self):
         p1 = SecurityPattern(name="A", regex=r"a", owasp="A01", suggestion="s")

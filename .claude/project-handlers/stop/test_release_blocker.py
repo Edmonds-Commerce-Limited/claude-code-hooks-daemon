@@ -395,6 +395,7 @@ class TestTheAbortRouteIsReachable:
 
         result = handler.handle({})
 
+        assert result.reason is not None
         assert "release-state.json" in result.reason, (
             "The deny text must name the state file as the thing to delete when "
             "aborting. Without it the agent is denied the Stop it needs to REPORT "
@@ -467,6 +468,7 @@ class TestReleaseBlockerHandlerHandle:
 
         result = handler.handle({})
 
+        assert result.reason is not None
         assert "RELEASE IN PROGRESS" in result.reason
         assert "acceptance tests" in result.reason
         assert "handlers.stop.release_blocker" in result.reason
@@ -485,6 +487,7 @@ class TestReleaseBlockerHandlerHandle:
 
         result = handler.handle({})
 
+        assert result.reason is not None
         assert "Acceptance Testing Gate" in result.reason
         assert "Step 8" not in result.reason
 
@@ -501,6 +504,7 @@ class TestReleaseBlockerHandlerHandle:
 
         result = handler.handle({})
 
+        assert result.reason is not None
         assert "89" not in result.reason
 
     def test_handle_references_a_path_that_exists(self) -> None:
@@ -542,6 +546,7 @@ class TestReleaseBlockerHandlerHandle:
         with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
             result = handler.handle({})
 
+        assert result.reason is not None
         assert "4.1.2" in result.reason
         assert "9" in result.reason
         assert "untracked/release-state.json" in result.reason

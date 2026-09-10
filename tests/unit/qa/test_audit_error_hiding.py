@@ -65,6 +65,7 @@ from audit_error_hiding import (  # E402: sys.path insert above must precede thi
     run_audit,
 )
 
+from claude_code_hooks_daemon.strategies.error_hiding.protocol import ErrorHidingPattern
 from claude_code_hooks_daemon.strategies.error_hiding.shell_strategy import (
     ShellErrorHidingStrategy,
 )
@@ -279,16 +280,17 @@ class TestShellPatternAudit:
         """Proves genuine reuse: a stub strategy's patterns drive the scan,
         not a hardcoded copy of the real shell patterns."""
 
-        class _StubPattern:
-            name = "TOTALLY-MADE-UP-PATTERN"
-            regex = r"MAGIC_MARKER_XYZ"
-            example = "MAGIC_MARKER_XYZ"
-            suggestion = "remove the marker"
-
         class _StubStrategy:
             language_name = "Stub"
             extensions = (".sh",)
-            patterns = (_StubPattern(),)
+            patterns = (
+                ErrorHidingPattern(
+                    name="TOTALLY-MADE-UP-PATTERN",
+                    regex=r"MAGIC_MARKER_XYZ",
+                    example="MAGIC_MARKER_XYZ",
+                    suggestion="remove the marker",
+                ),
+            )
 
             def get_acceptance_tests(self) -> list[Any]:
                 return []

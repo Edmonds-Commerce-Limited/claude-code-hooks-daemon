@@ -53,7 +53,6 @@ class MyTestPlugin(Handler):
 
         # Create plugins config pointing to the real file
         plugins_config = PluginsConfig(
-            enabled=True,
             plugins=[
                 PluginConfig(
                     path=str(plugin_file),
@@ -135,7 +134,6 @@ class SystemPathsHandler(Handler):
 ''')
 
         plugins_config = PluginsConfig(
-            enabled=True,
             plugins=[
                 PluginConfig(
                     path=str(plugin_file),
@@ -216,7 +214,6 @@ class CompletelyDifferentClassName(Handler):
 ''')
 
         plugins_config = PluginsConfig(
-            enabled=True,
             plugins=[
                 PluginConfig(
                     path=str(plugin_file),

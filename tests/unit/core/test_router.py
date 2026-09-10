@@ -526,7 +526,7 @@ class TestSharedFooterHelper:
         calls: list[tuple[str, str]] = []
         original = router_module.inject_config_key_footer
 
-        def spy(result: HookResult, event_config_key: str, handler: object) -> None:
+        def spy(result: HookResult, event_config_key: str, handler: Handler | None) -> None:
             handler_key = getattr(handler, "config_key", None)
             calls.append((event_config_key, str(handler_key)))
             original(result, event_config_key, handler)

@@ -25,7 +25,7 @@ from unittest.mock import patch
 
 import pytest
 
-from claude_code_hooks_daemon.config.models import DaemonConfig
+from claude_code_hooks_daemon.config.models import DaemonConfig, LogLevel
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
@@ -62,7 +62,7 @@ def _make_config(socket_path: Path, pid_file_path: Path | None = None) -> Daemon
         socket_path=socket_path,
         pid_file_path=pid_file_path,
         idle_timeout_seconds=600,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
     )
 
 

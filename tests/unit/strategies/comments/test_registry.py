@@ -3,6 +3,7 @@
 from claude_code_hooks_daemon.strategies.comments.registry import (
     CommentStrategyRegistry,
 )
+from claude_code_hooks_daemon.strategies.comments.syntax import CommentSyntax
 
 
 def test_register_and_get_strategy() -> None:
@@ -16,8 +17,8 @@ def test_register_and_get_strategy() -> None:
             return (".test",)
 
         @property
-        def syntax(self) -> object:
-            return object()
+        def syntax(self) -> CommentSyntax:
+            return CommentSyntax(line_prefixes=("#",))
 
         @property
         def skip_directories(self) -> tuple[str, ...]:

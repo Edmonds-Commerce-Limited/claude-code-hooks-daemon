@@ -36,7 +36,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from claude_code_hooks_daemon.config.models import DaemonConfig
+from claude_code_hooks_daemon.config.models import DaemonConfig, LogLevel
 from claude_code_hooks_daemon.daemon import server as server_module
 from claude_code_hooks_daemon.daemon.server import HooksDaemon
 
@@ -99,7 +99,7 @@ def _make_daemon(tmp_path: Path) -> HooksDaemon:
         socket_path=tmp_path / "daemon.sock",
         pid_file_path=None,
         idle_timeout_seconds=600,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
     )
     return HooksDaemon(config=config, controller=_StubController())
 

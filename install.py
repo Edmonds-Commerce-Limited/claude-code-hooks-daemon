@@ -1551,10 +1551,10 @@ def main() -> int:
         # POST-INSTALLATION SAFETY CHECKS (skip for self-install mode)
         if not self_install:
             print("\n🔍 Running post-installation verification...")
-            # Import validator only when needed (already imported in pre-install)
-            if "ClientInstallValidator" not in locals():
-                sys.path.insert(0, str(Path(__file__).parent / "src"))
-                from claude_code_hooks_daemon.install import ClientInstallValidator
+            # Deferred import (after venv set-up); the pre-install branch above
+            # has already put ``src`` on sys.path, and a repeat import is a
+            # sys.modules cache hit.
+            from claude_code_hooks_daemon.install import ClientInstallValidator
 
             validation_result = ClientInstallValidator.validate_post_install(project_root)
 

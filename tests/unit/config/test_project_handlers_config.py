@@ -76,8 +76,12 @@ class TestProjectHandlersConfigValidation:
         Regression test for M3: extra='allow' silently accepted typos in config.
         Using extra='forbid' catches config typos early.
         """
+        # model_validate: "typo_field" is not a field the typed constructor
+        # admits at all -- that unrecognised-ness is exactly what is tested.
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            ProjectHandlersConfig(enabled=True, path="handlers", typo_field="oops")
+            ProjectHandlersConfig.model_validate(
+                {"enabled": True, "path": "handlers", "typo_field": "oops"}
+            )
 
 
 class TestProjectHandlersConfigInRootConfig:

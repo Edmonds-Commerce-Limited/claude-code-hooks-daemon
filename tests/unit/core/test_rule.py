@@ -13,6 +13,7 @@ Design contract (Decision A/B/C/D from PLAN.md):
 from __future__ import annotations
 
 import dataclasses
+from typing import Any
 
 import pytest
 
@@ -63,8 +64,11 @@ class TestRuleDataclass:
 
     def test_rule_is_frozen(self, sample_rule: Rule) -> None:
         """Rule is immutable (frozen dataclass)."""
+        # Aliased through Any: see test_types.py's TestFinding.test_is_frozen
+        # for why -- the assignment itself is what raises the error.
+        mutable_rule: Any = sample_rule
         with pytest.raises((dataclasses.FrozenInstanceError, AttributeError)):
-            sample_rule.rule_id = "CHANGED"
+            mutable_rule.rule_id = "CHANGED"
 
     def test_rule_is_dataclass(self, sample_rule: Rule) -> None:
         """Rule is a dataclass."""

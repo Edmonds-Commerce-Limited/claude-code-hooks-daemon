@@ -5,7 +5,7 @@ import pkgutil
 import re
 import tempfile
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 import pytest
 import yaml
@@ -166,7 +166,8 @@ class TestConfigTemplate:
 
     def test_generated_config_is_valid_yaml(self):
         """Test that generated config is parseable YAML."""
-        for mode in ["minimal", "full"]:
+        modes: tuple[Literal["minimal", "full"], ...] = ("minimal", "full")
+        for mode in modes:
             config_yaml = generate_config(mode=mode)
 
             # Should parse without errors

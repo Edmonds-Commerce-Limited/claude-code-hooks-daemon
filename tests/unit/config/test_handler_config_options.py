@@ -31,13 +31,17 @@ class TestHandlerConfigOptions:
 
     def test_extra_fields_not_allowed_at_top_level(self):
         """CRITICAL: HandlerConfig should NOT accept extra fields at top level."""
-        # This should FAIL - extra fields should not be allowed
+        # model_validate: track_plans_in_project/plan_workflow_docs are not
+        # fields the typed constructor admits at all -- that unrecognised-ness
+        # is exactly what this test asserts.
         with pytest.raises(ValueError, match="Extra inputs are not permitted"):
-            HandlerConfig(
-                enabled=True,
-                priority=50,
-                track_plans_in_project="CLAUDE/Plan",  # WRONG - should be in options
-                plan_workflow_docs="CLAUDE/PlanWorkflow.md",  # WRONG - should be in options
+            HandlerConfig.model_validate(
+                {
+                    "enabled": True,
+                    "priority": 50,
+                    "track_plans_in_project": "CLAUDE/Plan",  # WRONG - should be in options
+                    "plan_workflow_docs": "CLAUDE/PlanWorkflow.md",  # WRONG - should be in options
+                }
             )
 
     def test_model_dump_includes_options(self):

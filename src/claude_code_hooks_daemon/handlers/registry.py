@@ -404,7 +404,7 @@ class HandlerRegistry:
         self,
         router: "EventRouter",
         *,
-        config: dict[str, dict[str, dict[str, Any]]] | None = None,
+        config: Mapping[str, Mapping[str, Any]] | None = None,
         workspace_root: Path | None = None,
         project_languages: list[str] | None = None,
         project_exclude_paths: list[str] | None = None,

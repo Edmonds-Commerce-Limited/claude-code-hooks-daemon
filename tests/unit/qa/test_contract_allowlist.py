@@ -25,7 +25,10 @@ def _load_module() -> ModuleType:
 cal = _load_module()
 
 
-def _finding(subject: str = "f1") -> object:
+def _finding(subject: str = "f1"):
+    # No -> object return annotation: cal is loaded via importlib, so its
+    # attributes are already Any; a stricter annotation here would wall that
+    # back off and make every caller's .finding_id access unresolvable.
     return cal.Finding(rule="some-rule", event="Stop", subject=subject, message="m")
 
 

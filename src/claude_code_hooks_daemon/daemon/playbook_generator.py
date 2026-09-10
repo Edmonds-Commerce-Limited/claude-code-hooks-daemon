@@ -13,6 +13,7 @@ import logging
 import shutil
 from collections.abc import Sequence
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -44,6 +45,19 @@ CollectedTests = list[tuple[str, str, int, list[AcceptanceTest], str]]
 # the trigger is a ratio on real events, not a hook event of its own.
 PSEUDO_EVENT_LABEL_PREFIX = "pseudo:"
 PSEUDO_EVENT_SOURCE = "pseudo-event"
+
+
+def _event_type_label(handler: object, default: str) -> str:
+    """Name the event a plugin/project handler is registered for.
+
+    A handler normally carries an ``EventType`` enum; a plain string is passed
+    through and a handler with no ``event_type`` at all gets ``default``.
+    """
+    event_type: object = getattr(handler, "event_type", default)
+    if isinstance(event_type, Enum):
+        return str(event_type.value)
+    return str(event_type)
+
 
 #: Events whose injected context Claude Code surfaces as a system-reminder in
 #: the transcript, so a human tester can SEE a context test pass. This is an
@@ -319,9 +333,7 @@ class PlaybookGenerator:
                     tests = plugin_handler.get_acceptance_tests()
                     if tests:
                         handler_name = plugin_handler.__class__.__name__
-                        event_type_str = getattr(plugin_handler, "event_type", "Plugin")
-                        if hasattr(event_type_str, "value"):
-                            event_type_str = event_type_str.value
+                        event_type_str = _event_type_label(plugin_handler, "Plugin")
 
                         tests_by_handler.append(
                             (handler_name, event_type_str, plugin_handler.priority, tests, "plugin")
@@ -340,9 +352,7 @@ class PlaybookGenerator:
                     tests = project_handler.get_acceptance_tests()
                     if tests:
                         handler_name = project_handler.__class__.__name__
-                        event_type_str = getattr(project_handler, "event_type", "Project")
-                        if hasattr(event_type_str, "value"):
-                            event_type_str = event_type_str.value
+                        event_type_str = _event_type_label(project_handler, "Project")
 
                         project_tests_by_handler.append(
                             (

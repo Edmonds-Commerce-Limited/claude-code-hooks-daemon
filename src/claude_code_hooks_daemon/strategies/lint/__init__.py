@@ -12,7 +12,17 @@ Usage:
         command = strategy.default_lint_command
 """
 
+from typing import TYPE_CHECKING
+
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
+
+if TYPE_CHECKING:
+    # Type-checker-only binding: satisfies pyright's __all__ re-export check
+    # (reportUnsupportedDunderAll) without executing at import time, so the
+    # runtime lazy-import via __getattr__ below -- which exists to avoid a
+    # circular import -- is unaffected. See test_init_lazy_import.py, which
+    # pins the runtime __getattr__ behaviour this must not change.
+    from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
 
 __all__ = [
     "LintStrategy",

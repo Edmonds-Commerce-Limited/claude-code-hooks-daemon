@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -293,8 +294,11 @@ class TestPruneSafety:
 class TestFrozen:
     def test_instance_is_immutable(self) -> None:
         layout = ProjectLayout.from_config(Config())
+        # Aliased through Any: see test_types.py's TestFinding.test_is_frozen
+        # for why -- the assignment itself is what raises FrozenInstanceError.
+        mutable_layout: Any = layout
         with pytest.raises(dataclasses.FrozenInstanceError):
-            layout.source_dirs = ("nope",)
+            mutable_layout.source_dirs = ("nope",)
 
 
 class TestMainRepoCodeDirs:

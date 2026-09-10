@@ -87,6 +87,7 @@ daemon:
         data = yaml.safe_load(yaml_str)
         config = Config.model_validate(data)
 
+        assert config.daemon.languages is not None
         assert len(config.daemon.languages) == 11
         assert "Python" in config.daemon.languages
         assert "C#" in config.daemon.languages

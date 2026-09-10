@@ -10,13 +10,14 @@ removal on start, unlink on shutdown).
 import asyncio
 import json
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
-from claude_code_hooks_daemon.config.models import DaemonConfig, TransportConfig
+from claude_code_hooks_daemon.config.models import DaemonConfig, LogLevel, TransportConfig
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.events import wired_event_metas
 from claude_code_hooks_daemon.core.front_controller import FrontController
@@ -43,7 +44,7 @@ class _EchoHandler(Handler):
 
     def handle(self, hook_input: dict) -> HookResult:
         self.last_hook_input = hook_input
-        return HookResult(decision=Decision.ALLOW, context="echoed")
+        return HookResult(decision=Decision.ALLOW, context=["echoed"])
 
     def get_claude_md(self) -> str | None:
         return None
@@ -53,7 +54,7 @@ class _EchoHandler(Handler):
 
 
 @pytest.fixture
-def isolated_untracked_dir() -> Path:
+def isolated_untracked_dir() -> Generator[Path, None, None]:
     with tempfile.TemporaryDirectory() as tmp:
         yield Path(tmp)
 
@@ -75,7 +76,7 @@ def _make_config(untracked_dir: Path, *, relay_enabled: bool = False) -> DaemonC
         socket_path=untracked_dir / "daemon.sock",
         pid_file_path=untracked_dir / "daemon.pid",
         idle_timeout_seconds=600,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
         transport=TransportConfig(relay_enabled=relay_enabled),
     )
 

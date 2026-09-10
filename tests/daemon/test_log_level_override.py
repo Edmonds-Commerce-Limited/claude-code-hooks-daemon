@@ -7,12 +7,14 @@ import asyncio
 import logging
 import os
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import LogLevel
 from claude_code_hooks_daemon.constants import Priority
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
@@ -34,7 +36,7 @@ class SimpleTestHandler(Handler):
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Return simple allow result."""
-        return HookResult(decision=Decision.ALLOW, context="Test handler executed")
+        return HookResult(decision=Decision.ALLOW, context=["Test handler executed"])
 
     def get_claude_md(self) -> str | None:
         return None
@@ -59,7 +61,7 @@ class TestLogLevelEnvironmentOverride:
     """Test suite for HOOKS_DAEMON_LOG_LEVEL environment variable override."""
 
     @pytest.fixture
-    def temp_socket_path(self) -> Path:
+    def temp_socket_path(self) -> Generator[Path, None, None]:
         """Create temporary socket path."""
         with tempfile.NamedTemporaryFile(suffix=".sock", delete=False) as f:
             socket_path = Path(f.name)
@@ -71,7 +73,7 @@ class TestLogLevelEnvironmentOverride:
             socket_path.unlink()
 
     @pytest.fixture
-    def temp_pid_path(self) -> Path:
+    def temp_pid_path(self) -> Generator[Path, None, None]:
         """Create temporary PID file path."""
         with tempfile.NamedTemporaryFile(suffix=".pid", delete=False) as f:
             pid_path = Path(f.name)
@@ -88,7 +90,7 @@ class TestLogLevelEnvironmentOverride:
             socket_path=temp_socket_path,
             idle_timeout_seconds=2,
             pid_file_path=temp_pid_path,
-            log_level="INFO",  # Default config value
+            log_level=LogLevel.INFO,  # Default config value
         )
 
     @pytest.fixture
@@ -158,7 +160,7 @@ class TestLogLevelEnvironmentOverride:
             socket_path=temp_socket_path,
             idle_timeout_seconds=2,
             pid_file_path=temp_pid_path,
-            log_level="WARNING",  # Higher level in config
+            log_level=LogLevel.WARNING,  # Higher level in config
         )
 
         with patch.dict(os.environ, {"HOOKS_DAEMON_LOG_LEVEL": "DEBUG"}):
@@ -186,7 +188,7 @@ class TestLogLevelEnvironmentOverride:
             socket_path=temp_socket_path,
             idle_timeout_seconds=2,
             pid_file_path=temp_pid_path,
-            log_level="DEBUG",  # Lower level in config
+            log_level=LogLevel.DEBUG,  # Lower level in config
         )
 
         with patch.dict(os.environ, {"HOOKS_DAEMON_LOG_LEVEL": "ERROR"}):
@@ -355,7 +357,7 @@ class TestLogLevelEnvironmentOverride:
                 socket_path=temp_socket_path,
                 idle_timeout_seconds=2,
                 pid_file_path=temp_pid_path,
-                log_level="INFO",
+                log_level=LogLevel.INFO,
             )
 
             with patch.dict(os.environ, {"HOOKS_DAEMON_LOG_LEVEL": level_str}):

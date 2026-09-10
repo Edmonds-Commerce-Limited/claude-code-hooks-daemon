@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
-from claude_code_hooks_daemon.core.event import EventType, HookEvent
+from claude_code_hooks_daemon.core.event import EventType, HookEvent, HookInput
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.controller import DaemonController
@@ -15,16 +15,20 @@ from claude_code_hooks_daemon.daemon.controller import DaemonController
 def _make_stop_event(stop_hook_active: bool = False) -> HookEvent:
     """Create a Stop hook event for testing."""
     return HookEvent(
-        event=EventType.STOP.value,
-        hook_input={"stop_hook_active": stop_hook_active},
+        event_type=EventType.STOP,
+        # stop_hook_active is not a declared HookInput field (it is accepted
+        # via the model's extra="allow" config), so model_validate is used
+        # rather than the typed constructor, which only recognises declared
+        # fields.
+        hook_input=HookInput.model_validate({"stop_hook_active": stop_hook_active}),
     )
 
 
 def _make_pre_tool_use_event() -> HookEvent:
     """Create a PreToolUse hook event for testing."""
     return HookEvent(
-        event=EventType.PRE_TOOL_USE.value,
-        hook_input={"tool_name": "Bash", "tool_input": {"command": "echo hi"}},
+        event_type=EventType.PRE_TOOL_USE,
+        hook_input=HookInput(tool_name="Bash", tool_input={"command": "echo hi"}),
     )
 
 

@@ -1,5 +1,7 @@
 """Tests for TDD Strategy Registry."""
 
+from typing import Any
+
 from claude_code_hooks_daemon.strategies.tdd.registry import TddStrategyRegistry
 
 
@@ -23,11 +25,14 @@ def test_register_and_get_strategy() -> None:
         def is_production_source(self, file_path: str) -> bool:
             return True
 
-        def should_skip(self, file_path: str) -> bool:
+        def should_skip(self, file_path: str, content: str = "") -> bool:
             return False
 
         def compute_test_filename(self, source_filename: str) -> str:
             return f"test_{source_filename}"
+
+        def get_acceptance_tests(self) -> list[Any]:
+            return []
 
     registry = TddStrategyRegistry()
     strategy = TestStrategy()
@@ -63,11 +68,14 @@ def test_get_strategy_case_insensitive() -> None:
         def is_production_source(self, file_path: str) -> bool:
             return True
 
-        def should_skip(self, file_path: str) -> bool:
+        def should_skip(self, file_path: str, content: str = "") -> bool:
             return False
 
         def compute_test_filename(self, source_filename: str) -> str:
             return f"test_{source_filename}"
+
+        def get_acceptance_tests(self) -> list[Any]:
+            return []
 
     registry = TddStrategyRegistry()
     strategy = TestStrategy()
@@ -97,11 +105,14 @@ def test_register_multiple_extensions() -> None:
         def is_production_source(self, file_path: str) -> bool:
             return True
 
-        def should_skip(self, file_path: str) -> bool:
+        def should_skip(self, file_path: str, content: str = "") -> bool:
             return False
 
         def compute_test_filename(self, source_filename: str) -> str:
             return f"test_{source_filename}"
+
+        def get_acceptance_tests(self) -> list[Any]:
+            return []
 
     registry = TddStrategyRegistry()
     strategy = MultiExtStrategy()
@@ -133,11 +144,14 @@ def test_registered_languages() -> None:
         def is_production_source(self, file_path: str) -> bool:
             return True
 
-        def should_skip(self, file_path: str) -> bool:
+        def should_skip(self, file_path: str, content: str = "") -> bool:
             return False
 
         def compute_test_filename(self, source_filename: str) -> str:
             return f"test_{source_filename}"
+
+        def get_acceptance_tests(self) -> list[Any]:
+            return []
 
     class LangB:
         """Test strategy B."""
@@ -156,11 +170,14 @@ def test_registered_languages() -> None:
         def is_production_source(self, file_path: str) -> bool:
             return True
 
-        def should_skip(self, file_path: str) -> bool:
+        def should_skip(self, file_path: str, content: str = "") -> bool:
             return False
 
         def compute_test_filename(self, source_filename: str) -> str:
             return f"test_{source_filename}"
+
+        def get_acceptance_tests(self) -> list[Any]:
+            return []
 
     registry = TddStrategyRegistry()
     registry.register(LangA())

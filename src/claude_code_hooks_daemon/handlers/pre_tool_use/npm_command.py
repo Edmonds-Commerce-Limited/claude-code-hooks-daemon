@@ -260,6 +260,8 @@ class NpmCommandHandler(PreToolUseHandlerBase):
             npm_cmd = npm_match.group(1)
             suggested = self.SUGGESTIONS.get(npm_cmd, "llm:qa")
             blocked_cmd = f"npm run {npm_cmd}"
+            # The example wrapper is named after the script itself.
+            example_wrapper = npm_cmd
         else:
             # Must be npx command
             npx_match = re.search(r"npx\s+([a-z]+)", command)
@@ -267,6 +269,7 @@ class NpmCommandHandler(PreToolUseHandlerBase):
                 tool_name = npx_match.group(1)
                 suggested = self.NPX_TOOL_SUGGESTIONS.get(tool_name, "llm:qa")
                 blocked_cmd = f"npx {tool_name}"
+                example_wrapper = suggested
             else:
                 # Fallback if pattern doesn't match
                 return GatingResult(
@@ -289,7 +292,7 @@ class NpmCommandHandler(PreToolUseHandlerBase):
                     f"  • Verbose JSON files in ./var/qa/ (optimized for jq queries)\n"
                     f"  • Machine-readable output (parse with jq, not grep/sed)\n\n"
                     f"Example package.json script:\n"
-                    f'  "llm:{npm_cmd if npm_match else suggested}": '
+                    f'  "llm:{example_wrapper}": '
                     f'"<tool> --format json --output-file ./var/qa/<tool>-cache.json"\n\n'
                     f"Full guide: {guide_path}\n\n"
                     f"This command will run for now, but consider adding llm: wrappers."

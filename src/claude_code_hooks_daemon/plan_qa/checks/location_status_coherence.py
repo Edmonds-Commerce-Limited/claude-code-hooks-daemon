@@ -101,7 +101,11 @@ def _folder_findings(context: CheckContext, folder: PlanFolder) -> list[Finding]
             )
         )
 
-    if doc.status in _NON_TERMINAL_STATUSES and folder.location in _ARCHIVED_LOCATIONS:
+    if (
+        doc.status is not None
+        and doc.status in _NON_TERMINAL_STATUSES
+        and folder.location in _ARCHIVED_LOCATIONS
+    ):
         findings.append(
             Finding(
                 check_id=CHECK_ID,

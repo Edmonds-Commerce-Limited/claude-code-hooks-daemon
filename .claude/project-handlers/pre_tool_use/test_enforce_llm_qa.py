@@ -106,6 +106,7 @@ class TestEnforceLlmQaHandler:
         """Returns DENY with llm_qa.py guidance."""
         result = handler.handle(bash_hook_input("./scripts/qa/run_all.sh"))
         assert result.decision == "deny"
+        assert result.reason is not None
         assert "llm_qa.py" in result.reason
         assert "run_all.sh" in result.reason
 

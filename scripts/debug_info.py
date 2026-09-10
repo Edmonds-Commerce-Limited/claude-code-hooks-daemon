@@ -372,6 +372,7 @@ class DebugInfoGenerator:
         self.output()
 
         pre_tool_use = self.project_root / ".claude" / "hooks" / "pre-tool-use"
+        test_out = ""
         if pre_tool_use.exists():
             self.output("### Testing PreToolUse hook with simple command")
             self.output("```")

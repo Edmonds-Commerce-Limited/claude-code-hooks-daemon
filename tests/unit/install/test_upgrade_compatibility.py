@@ -62,13 +62,13 @@ class TestHandlerCompatibility:
         """HandlerCompatibility can be initialized with all fields."""
         compat = HandlerCompatibility(
             handler_name="destructive_git",
-            event_type=EventID.PRE_TOOL_USE,
+            event_type=EventID.PRE_TOOL_USE.config_key,
             status=CompatibilityStatus.COMPATIBLE,
             message="Handler is compatible",
         )
 
         assert compat.handler_name == "destructive_git"
-        assert compat.event_type == EventID.PRE_TOOL_USE
+        assert compat.event_type == EventID.PRE_TOOL_USE.config_key
         assert compat.status == CompatibilityStatus.COMPATIBLE
         assert compat.message == "Handler is compatible"
 

@@ -28,11 +28,16 @@ class TestHookResultInit:
 
     def test_init_with_all_parameters(self):
         """Should initialize with all parameters."""
-        result = HookResult(
-            decision=Decision.ASK,
-            reason="Need confirmation",
-            context="Additional info",  # String is coerced to list
-            guidance="Suggested action",
+        # model_validate exercises the same field_validator pipeline as the
+        # keyword constructor but accepts an untyped mapping, matching the
+        # backward-compatible string input this test deliberately sends.
+        result = HookResult.model_validate(
+            {
+                "decision": Decision.ASK,
+                "reason": "Need confirmation",
+                "context": "Additional info",  # String is coerced to list
+                "guidance": "Suggested action",
+            }
         )
         assert result.decision == Decision.ASK
         assert result.reason == "Need confirmation"
@@ -47,7 +52,9 @@ class TestHookResultInit:
 
     def test_init_with_allow_and_context(self):
         """Should initialize allow with context."""
-        result = HookResult(decision=Decision.ALLOW, context="Helpful info")
+        # model_validate exercises the string-coercion path (see class docstring
+        # note on test_init_with_all_parameters) via an untyped mapping.
+        result = HookResult.model_validate({"decision": Decision.ALLOW, "context": "Helpful info"})
         assert result.decision == Decision.ALLOW
         assert result.context == ["Helpful info"]  # Coerced to list
 
@@ -69,13 +76,21 @@ class TestToJsonSilentAllow:
 
     def test_to_json_allow_without_context_or_guidance(self):
         """Allow without context/guidance should return empty dict."""
-        result = HookResult(decision=Decision.ALLOW, reason=None, context=None, guidance=None)
+        # model_validate accepts the untyped mapping this test deliberately
+        # sends -- an explicit None for `context`, which coerce_context accepts
+        # for backward compatibility even though the field's own type is
+        # list[str].
+        result = HookResult.model_validate(
+            {"decision": Decision.ALLOW, "reason": None, "context": None, "guidance": None}
+        )
         output = result.to_json("PreToolUse")
         assert output == {}
 
     def test_to_json_allow_with_none_values(self):
         """Allow with explicit None values should return empty dict."""
-        result = HookResult(decision=Decision.ALLOW, reason=None, context=None, guidance=None)
+        result = HookResult.model_validate(
+            {"decision": Decision.ALLOW, "reason": None, "context": None, "guidance": None}
+        )
         output = result.to_json("PostToolUse")
         assert output == {}
 
@@ -105,7 +120,7 @@ class TestToJsonDenyDecision:
 
     def test_to_json_deny_with_reason_and_context(self):
         """Deny with reason and context should include all fields."""
-        result = HookResult(decision=Decision.DENY, reason="Blocked", context="Extra info")
+        result = HookResult(decision=Decision.DENY, reason="Blocked", context=["Extra info"])
         output = result.to_json("PreToolUse")
 
         assert output["hookSpecificOutput"]["permissionDecision"] == Decision.DENY
@@ -175,7 +190,7 @@ class TestToJsonAskDecision:
 
     def test_to_json_ask_with_context(self):
         """Ask with context should include additionalContext."""
-        result = HookResult(decision=Decision.ASK, reason="Confirm?", context="Details here")
+        result = HookResult(decision=Decision.ASK, reason="Confirm?", context=["Details here"])
         output = result.to_json("PreToolUse")
 
         assert output["hookSpecificOutput"]["permissionDecision"] == Decision.ASK
@@ -195,7 +210,7 @@ class TestToJsonAskDecision:
         result = HookResult(
             decision=Decision.ASK,
             reason="Need approval",
-            context="Context info",
+            context=["Context info"],
             guidance="Guidance text",
         )
         output = result.to_json("PreToolUse")
@@ -212,7 +227,7 @@ class TestToJsonContext:
 
     def test_to_json_allow_with_context(self):
         """Allow with context should include additionalContext."""
-        result = HookResult(decision=Decision.ALLOW, context="Helpful information")
+        result = HookResult(decision=Decision.ALLOW, context=["Helpful information"])
         output = result.to_json("PreToolUse")
 
         assert "hookSpecificOutput" in output
@@ -222,7 +237,7 @@ class TestToJsonContext:
     def test_to_json_context_multiline(self):
         """Context with multiple lines should preserve formatting."""
         context = "Line 1\n\nLine 2\n\nLine 3"
-        result = HookResult(decision=Decision.ALLOW, context=context)
+        result = HookResult(decision=Decision.ALLOW, context=[context])
         output = result.to_json("PreToolUse")
 
         assert output["hookSpecificOutput"]["additionalContext"] == context
@@ -230,14 +245,14 @@ class TestToJsonContext:
     def test_to_json_context_with_special_characters(self):
         """Context with special characters should be preserved."""
         context = "Special: \t\n\r 'quotes' \"double\" \\ backslash"
-        result = HookResult(decision=Decision.ALLOW, context=context)
+        result = HookResult(decision=Decision.ALLOW, context=[context])
         output = result.to_json("PreToolUse")
 
         assert output["hookSpecificOutput"]["additionalContext"] == context
 
     def test_to_json_deny_with_context_no_reason(self):
         """Deny with context but no reason."""
-        result = HookResult(decision=Decision.DENY, context="Additional info")
+        result = HookResult(decision=Decision.DENY, context=["Additional info"])
         output = result.to_json("PreToolUse")
 
         assert output["hookSpecificOutput"]["permissionDecision"] == Decision.DENY
@@ -269,7 +284,7 @@ class TestToJsonGuidance:
         """Allow with both context and guidance should include both."""
         result = HookResult(
             decision=Decision.ALLOW,
-            context="Background info",
+            context=["Background info"],
             guidance="Recommended action",
         )
         output = result.to_json("PreToolUse")
@@ -439,7 +454,7 @@ class TestToJsonEdgeCases:
 
     def test_to_json_empty_context_not_included(self):
         """Empty string context should not trigger output."""
-        result = HookResult(decision=Decision.ALLOW, context="")
+        result = HookResult(decision=Decision.ALLOW, context=[""])
         output = result.to_json("PreToolUse")
 
         # Empty context is falsy, so no output
@@ -455,7 +470,7 @@ class TestToJsonEdgeCases:
 
     def test_to_json_whitespace_only_context(self):
         """Whitespace-only context should be included (not filtered)."""
-        result = HookResult(decision=Decision.ALLOW, context="   \n\n   ")
+        result = HookResult(decision=Decision.ALLOW, context=["   \n\n   "])
         output = result.to_json("PreToolUse")
 
         # Truthy, so should create output
@@ -467,7 +482,7 @@ class TestToJsonEdgeCases:
         result = HookResult(
             decision=Decision.DENY,
             reason="⚠️ Warning: blocked",
-            context="Context with emoji 🔒",
+            context=["Context with emoji 🔒"],
             guidance="Guidance with unicode: ✅",
         )
         output = result.to_json("PreToolUse")
@@ -504,7 +519,7 @@ class TestHookResultIntegration:
         """Typical context workflow (allow with information)."""
         result = HookResult(
             decision=Decision.ALLOW,
-            context="Detected plan workflow. Make sure to update PLAN.md",
+            context=["Detected plan workflow. Make sure to update PLAN.md"],
         )
         output = result.to_json("SessionStart")
 
@@ -517,7 +532,7 @@ class TestHookResultIntegration:
         result = HookResult(
             decision=Decision.DENY,
             reason="TDD violation: Test file missing",
-            context="Handler: example_handler.py\nTest file: test_example_handler.py (NOT FOUND)",
+            context=["Handler: example_handler.py\nTest file: test_example_handler.py (NOT FOUND)"],
             guidance="Create test file first following TDD workflow",
         )
         output = result.to_json("PreToolUse")

@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 from claude_code_hooks_daemon.core.worktree_reaping import (
+    OrphanedBranch,
     collect_orphaned_branches,
     prune_branch,
 )
@@ -140,7 +141,7 @@ class TestAFailedGitCallIsNeverReadAsSafe:
 
 class TestPruning:
     @staticmethod
-    def _orphans(git: _FakeGit) -> dict[str, object]:
+    def _orphans(git: _FakeGit) -> dict[str, OrphanedBranch]:
         return {b.name: b for b in collect_orphaned_branches(Path("/repo"), "main", run_fn=git)}
 
     def test_a_dry_run_deletes_nothing(self) -> None:

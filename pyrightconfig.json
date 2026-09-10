@@ -1,7 +1,7 @@
 {
   "venvPath": "untracked",
   "venv": "venv",
-  "extraPaths": ["src"],
+  "extraPaths": ["src", "scripts/qa"],
   "exclude": [
     "untracked",
     "CLAUDE/Plan",
