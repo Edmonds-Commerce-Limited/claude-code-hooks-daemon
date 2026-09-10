@@ -4,6 +4,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00339: supervisor injection lands unsubmitted](00339-supervisor-injection-lands-unsubmitted/PLAN.md) - Complete at `e98c19e4` + the archiving commit (probing a real TUI refuted the assumed mechanism: the trigger is Claude Code's paste detection on a large burst, inside which a carriage return is a literal newline, so the injection is now bracketed-paste framed)
+
+- [00336: upgrade path residual findings](00336-upgrade-path-residual-findings/PLAN.md) - Complete at `c85d5e90`…`788ce6c8` + the archiving commit (config preservation now diffs against a true old-version baseline; `HOOKS-DAEMON.md` regenerated on both upgrade paths instead of never; 17 shipped commands our own `project_containment` denied moved in-repo, found by driving the doc corpus through the live handler)
+
 - [00335: heredoc receiver policy and review followups](00335-heredoc-receiver-policy-and-review-followups/PLAN.md) - Complete at `745ff9c5` + the archiving commit (inverting the quoted-heredoc exemption to an allowlist of data sinks closed a fourth executor bypass found by probing, the word-expansion family recorded as unclosable, and the `jq` over-block in one change)
 
 - [00334: core doc templates for client projects](00334-core-doc-templates-for-client-projects/PLAN.md) - Complete at `4e78f7c9` + the archiving commit (daemon guidance named client documents no install path created, so a client enforced a workflow whose documentation did not exist; ships three genericised core documents deployed DAEMON-owned beside a seed-once CLIENT-owned override, each gated on the subsystem that NAMES it, and replaces the hand-maintained citation list with a scan)

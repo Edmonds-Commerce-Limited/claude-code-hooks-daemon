@@ -89,6 +89,7 @@ from claude_code_hooks_daemon.daemon.validation import (
 )
 from claude_code_hooks_daemon.daemon.venv_lock import VenvLockTimeout, venv_lock
 from claude_code_hooks_daemon.docs_qa.comment_finder import DEFAULT_MIN_BLOCK_LINES
+from claude_code_hooks_daemon.install.install_stamp import read_install_stamp
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.hook_registration import (
@@ -835,6 +836,22 @@ def _print_degraded_config_block(degraded_state: tuple[bool, list[str]] | None) 
     print("Fix: correct .claude/hooks-daemon.yaml, then restart the daemon.")
 
 
+def _print_install_stamp_line() -> None:
+    """Name a guarded branch install (Plan 00291); silent for a release install.
+
+    The stamp is read from the running interpreter's venv, so this is the
+    install ``status`` itself is running from. A release install prints
+    nothing, keeping its status output byte-for-byte unchanged.
+    """
+    stamp = read_install_stamp()
+    if stamp is None or not stamp.is_branch_install:
+        return
+    print(
+        f"Install: NON-RELEASE {stamp.raw} (tracking '{stamp.ref}') -- "
+        "not a release; reinstall from a release tag before relying on it"
+    )
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     """Check daemon status.
 
@@ -861,6 +878,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         print("Daemon: NOT RUNNING")
         print(f"Socket: {socket_path}")
         print(f"PID file: {pid_path}")
+        _print_install_stamp_line()
         return 1
 
     # Check socket exists
@@ -870,6 +888,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"PID: {pid}")
     print(f"Socket: {socket_path} ({'exists' if socket_exists else 'MISSING'})")
     print(f"PID file: {pid_path}")
+    _print_install_stamp_line()
 
     # Plan 00290: name active per-event listeners when the transport config
     # needs them. Silent when the transport is disabled (default) — matches
@@ -3243,6 +3262,10 @@ def cmd_check_config_migrations(args: argparse.Namespace) -> int:
     )
     report_dir = _resolve_report_dir(args, _REPORT_OFFLOAD_CONFIG_SUBDIR)
 
+    # Plan 00291: an explicit flag forces the UNRELEASED staging manifests in;
+    # left unset, the loader includes them exactly for a branch install.
+    include_unreleased: bool | None = True if getattr(args, "include_unreleased", False) else None
+
     try:
         try:
             result = run_check_config_migrations(
@@ -3251,6 +3274,7 @@ def cmd_check_config_migrations(args: argparse.Namespace) -> int:
                 user_config_path=config_path,
                 output_format=output_format,
                 manifests_dir=manifests_dir,
+                include_unreleased=include_unreleased,
                 report_dir=report_dir,
             )
         except OSError as offload_error:
@@ -3263,6 +3287,7 @@ def cmd_check_config_migrations(args: argparse.Namespace) -> int:
                 user_config_path=config_path,
                 output_format=output_format,
                 manifests_dir=manifests_dir,
+                include_unreleased=include_unreleased,
             )
     except FileNotFoundError as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -3271,7 +3296,9 @@ def cmd_check_config_migrations(args: argparse.Namespace) -> int:
         err_msg = str(e)
         print(f"ERROR: {err_msg}", file=sys.stderr)
         if "from_version" in err_msg or "to_version" in err_msg:
-            known = list_known_versions(manifests_dir=manifests_dir)
+            known = list_known_versions(
+                manifests_dir=manifests_dir, include_unreleased=include_unreleased
+            )
             if known:
                 print(f"Known versions: {', '.join(known)}", file=sys.stderr)
         return 2
@@ -3394,6 +3421,8 @@ def cmd_check_truth_changes(args: argparse.Namespace) -> int:
     truth_changes_dir: Path | None = (
         Path(args.truth_changes_dir) if getattr(args, "truth_changes_dir", None) else None
     )
+    # Plan 00291: same switch as check-config-migrations.
+    include_unreleased: bool | None = True if getattr(args, "include_unreleased", False) else None
     report_dir = _resolve_report_dir(args, _REPORT_OFFLOAD_TRUTH_SUBDIR)
 
     try:
@@ -3403,6 +3432,7 @@ def cmd_check_truth_changes(args: argparse.Namespace) -> int:
                 to_version=args.to_version,
                 output_format=args.format,
                 truth_changes_dir=truth_changes_dir,
+                include_unreleased=include_unreleased,
                 report_dir=report_dir,
             )
         except OSError as offload_error:
@@ -3414,10 +3444,13 @@ def cmd_check_truth_changes(args: argparse.Namespace) -> int:
                 to_version=args.to_version,
                 output_format=args.format,
                 truth_changes_dir=truth_changes_dir,
+                include_unreleased=include_unreleased,
             )
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
-        known = list_known_truth_change_versions(truth_changes_dir=truth_changes_dir)
+        known = list_known_truth_change_versions(
+            truth_changes_dir=truth_changes_dir, include_unreleased=include_unreleased
+        )
         if known:
             print(f"Known versions: {', '.join(known)}", file=sys.stderr)
         return 2
@@ -7041,6 +7074,12 @@ def main() -> int:
         default=None,
         help="Override manifest directory (for testing)",
     )
+    parser_check_migrations.add_argument(
+        "--include-unreleased",
+        dest="include_unreleased",
+        action="store_true",
+        help="Also read the UNRELEASED staging manifests (automatic for a non-release install)",
+    )
     _add_report_offload_arguments(
         parser_check_migrations, default_subdir=_REPORT_OFFLOAD_CONFIG_SUBDIR
     )
@@ -7129,6 +7168,12 @@ def main() -> int:
         metavar="PATH",
         default=None,
         help="Override truth-changes directory (for testing)",
+    )
+    parser_check_truth.add_argument(
+        "--include-unreleased",
+        dest="include_unreleased",
+        action="store_true",
+        help="Also read the UNRELEASED staging manifests (automatic for a non-release install)",
     )
     _add_report_offload_arguments(parser_check_truth, default_subdir=_REPORT_OFFLOAD_TRUTH_SUBDIR)
     parser_check_truth.set_defaults(func=cmd_check_truth_changes)

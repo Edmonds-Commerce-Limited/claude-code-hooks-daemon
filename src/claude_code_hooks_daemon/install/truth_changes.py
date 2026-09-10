@@ -42,6 +42,7 @@ from typing import Any
 
 import yaml
 
+from claude_code_hooks_daemon.install.install_stamp import is_branch_install
 from claude_code_hooks_daemon.install.report_offload import (
     SUMMARY_MAX_BYTES,
     bound_summary,
@@ -54,6 +55,7 @@ from claude_code_hooks_daemon.install.version_parse import parse_version_tuple
 # ---------------------------------------------------------------------------
 
 _TRUTH_CHANGES_SUBPATH = Path("CLAUDE") / "UPGRADES" / "truth-changes"
+_UNRELEASED_DIRNAME = "UNRELEASED"
 _MANIFEST_PREFIX = "v"
 _MANIFEST_SUFFIX = ".yaml"
 _VERSION_SEPARATOR = "."
@@ -294,6 +296,32 @@ def _default_truth_changes_dir() -> Path:
     return project_root / _TRUTH_CHANGES_SUBPATH
 
 
+def _manifest_files(base_dir: Path, include_unreleased: bool | None) -> list[tuple[str, Path]]:
+    """Every ``v{X.Y.Z}.yaml`` in the released directory, plus staging when due.
+
+    Plan 00291 Task 2.3: ``include_unreleased`` left as ``None`` means "ask the
+    install stamp" -- a branch install is ahead of the last release, so the
+    truths it is ahead on are the staged ones under
+    ``<base_dir>/../UNRELEASED/<name>``. A release install never sees them.
+    """
+    if include_unreleased is None:
+        include_unreleased = is_branch_install()
+    directories = [base_dir]
+    if include_unreleased:
+        directories.append(base_dir.parent / _UNRELEASED_DIRNAME / base_dir.name)
+
+    found: list[tuple[str, Path]] = []
+    for directory in directories:
+        if not directory.exists():
+            continue
+        for yaml_file in directory.glob(f"{_MANIFEST_PREFIX}*{_MANIFEST_SUFFIX}"):
+            version_str = yaml_file.stem[len(_MANIFEST_PREFIX) :]
+            if not _VERSION_PATTERN.match(version_str):
+                continue
+            found.append((version_str, yaml_file))
+    return found
+
+
 # ---------------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------------
@@ -303,6 +331,7 @@ def load_truth_changes_between(
     from_version: str,
     to_version: str,
     truth_changes_dir: Path | None = None,
+    include_unreleased: bool | None = None,
 ) -> list[TruthChangeManifest]:
     """Load all truth-changes manifests in the range (from_version, to_version].
 
@@ -314,6 +343,9 @@ def load_truth_changes_between(
         from_version: Version being upgraded from (excluded).
         to_version: Version being upgraded to (included).
         truth_changes_dir: Override the manifest directory (for testing).
+        include_unreleased: Also read the UNRELEASED staging directory. ``None``
+            (the default) includes it exactly when the running install is a
+            branch install.
 
     Returns:
         Manifests sorted by version, oldest first.
@@ -331,14 +363,9 @@ def load_truth_changes_between(
         return []
 
     base_dir = truth_changes_dir if truth_changes_dir is not None else _default_truth_changes_dir()
-    if not base_dir.exists():
-        return []
 
     manifests: list[TruthChangeManifest] = []
-    for yaml_file in base_dir.glob(f"{_MANIFEST_PREFIX}*{_MANIFEST_SUFFIX}"):
-        version_str = yaml_file.stem[len(_MANIFEST_PREFIX) :]
-        if not _VERSION_PATTERN.match(version_str):
-            continue
+    for version_str, yaml_file in _manifest_files(base_dir, include_unreleased):
         v = _parse_version(version_str)
         if from_v < v <= to_v:
             with yaml_file.open() as f:
@@ -349,19 +376,17 @@ def load_truth_changes_between(
     return manifests
 
 
-def list_known_truth_change_versions(truth_changes_dir: Path | None = None) -> list[str]:
-    """Return sorted versions that have a truth-changes manifest file."""
+def list_known_truth_change_versions(
+    truth_changes_dir: Path | None = None,
+    include_unreleased: bool | None = None,
+) -> list[str]:
+    """Return sorted versions that have a truth-changes manifest file.
+
+    ``include_unreleased`` follows :func:`load_truth_changes_between`.
+    """
     base_dir = truth_changes_dir if truth_changes_dir is not None else _default_truth_changes_dir()
-    if not base_dir.exists():
-        return []
 
-    versions: list[str] = []
-    for yaml_file in base_dir.glob(f"{_MANIFEST_PREFIX}*{_MANIFEST_SUFFIX}"):
-        version_str = yaml_file.stem[len(_MANIFEST_PREFIX) :]
-        if not _VERSION_PATTERN.match(version_str):
-            continue
-        versions.append(version_str)
-
+    versions = [version for version, _ in _manifest_files(base_dir, include_unreleased)]
     versions.sort(key=_parse_version)
     return versions
 
@@ -650,6 +675,7 @@ def run_check_truth_changes(
     to_version: str,
     output_format: str = _FORMAT_TEXT,
     truth_changes_dir: Path | None = None,
+    include_unreleased: bool | None = None,
     report_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Load and format truth-changes for a version range.
@@ -659,6 +685,7 @@ def run_check_truth_changes(
         to_version: Version being upgraded to (included in range).
         output_format: 'text' for LLM-readable instructions, 'json' for machine.
         truth_changes_dir: Override the manifest directory (for testing).
+        include_unreleased: Passed through to :func:`load_truth_changes_between`.
         report_dir: When given and there are changes, the full report and the
             chunk files are written under it and the text form is the bounded
             summary. None keeps the whole report inline (``--full``).
@@ -676,7 +703,10 @@ def run_check_truth_changes(
         OSError: If report_dir was given and cannot be written.
     """
     manifests = load_truth_changes_between(
-        from_version, to_version, truth_changes_dir=truth_changes_dir
+        from_version,
+        to_version,
+        truth_changes_dir=truth_changes_dir,
+        include_unreleased=include_unreleased,
     )
 
     changes: list[dict[str, Any]] = [

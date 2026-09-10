@@ -519,6 +519,12 @@
       "reason": "Plan 00290 Phase 5: this function's own documented contract (docstring: 'True/False if the manifest exists and names this binary; None if no manifest available -- nothing to verify against, not a failure') already establishes None as 'cannot verify, not a failure'. An OSError reading the relay binary's own bytes to hash it (removed/permission-changed between the earlier is_file() check and this read -- a TOCTOU the caller cannot prevent) is exactly the same 'cannot verify' outcome as a missing manifest, so it maps to the identical documented None. The caller (probe_transport) surfaces relay_digest_verified=None as 'unknown', never as a false pass -- the deploy-time advisory table (render_table) prints 'unknown (no manifest)' rather than silently reporting a digest match that never happened."
     },
     {
+      "file": "install/install_stamp.py",
+      "function": "read_install_stamp",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00291: this function's own docstring already documents both branches -- a missing stamp file (OSError, the overwhelmingly common case: a release install never writes one) and an unparseable stamp (ValueError, foreign/corrupt content) both mean 'nothing is known about this install', which every caller (status, version_check, the UNRELEASED-manifest loaders, is_branch_install) treats identically as a release install rather than as an error. Raising would make every one of those advisory call sites crash on the common case of a release venv that was never stamped, which is exactly backwards -- the absence of a stamp is the expected default, not a failure."
+    },
+    {
       "file": "plugins/loader.py",
       "function": "load_handler",
       "rule": "return-none-on-error",
@@ -822,26 +828,26 @@
     {
       "file": "scripts/upgrade.sh",
       "lines": [
-        438
+        531
       ],
       "rule": "shell-&>/dev/null",
-      "reason": "Plan 00200 Task 5.4: `git rev-parse \"$TARGET_VERSION\" &>/dev/null || _fail \"Version $TARGET_VERSION not found\"` -- explicit failure handling via `_fail`, output suppressed only because git's own \"unknown revision\" noise is not the diagnostic (the _fail message is). Module-level, hence line-based match."
+      "reason": "Plan 00200 Task 5.4: `git rev-parse \"$TARGET_VERSION\" &>/dev/null || _fail \"Version $TARGET_VERSION not found\"` -- explicit failure handling via `_fail`, output suppressed only because git's own \"unknown revision\" noise is not the diagnostic (the _fail message is). Module-level, hence line-based match. Realigned by Plan 00291 (fresh-clone/guarded-branch-install additions shifted this line down from 438)."
     },
     {
       "file": "scripts/upgrade_version.sh",
       "lines": [
-        450
+        511
       ],
       "rule": "shell-|| true",
-      "reason": "Plan 00200 Task 5.4: `run_pre_install_checks ... \"false\" || true`. The function's own documented contract (fail_on_error=false): 'returns non-zero but doesn't exit', and it already prints any warnings found. The trailing `|| true` exists only to stop `set -e` treating that documented non-fatal return as script-terminating -- the function's own visible warnings are the diagnostic, not this line."
+      "reason": "Plan 00200 Task 5.4: `run_pre_install_checks ... \"false\" || true`. The function's own documented contract (fail_on_error=false): 'returns non-zero but doesn't exit', and it already prints any warnings found. The trailing `|| true` exists only to stop `set -e` treating that documented non-fatal return as script-terminating -- the function's own visible warnings are the diagnostic, not this line. Realigned by Plan 00291 (guarded-branch-install additions shifted this line down from 450)."
     },
     {
       "file": "scripts/upgrade_version.sh",
       "lines": [
-        812
+        873
       ],
       "rule": "shell-&>/dev/null",
-      "reason": "Plan 00200 Task 5.4: `if ! git ... rev-parse \"$TARGET_VERSION\" &>/dev/null; then fail_fast \"Version $TARGET_VERSION not found...\"` -- exit code explicitly checked, specific error printed on failure."
+      "reason": "Plan 00200 Task 5.4: `if ! git ... rev-parse \"$TARGET_VERSION\" &>/dev/null; then fail_fast \"Version $TARGET_VERSION not found...\"` -- exit code explicitly checked, specific error printed on failure. Realigned by Plan 00291 (guarded-branch-install additions shifted this line down from 812)."
     },
     {
       "file": "scripts/validate_worktrees.sh",

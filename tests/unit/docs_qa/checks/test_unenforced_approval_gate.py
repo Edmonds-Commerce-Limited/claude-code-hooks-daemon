@@ -244,6 +244,18 @@ class TestStagedAndSweep:
         assert len(findings) == 2
         assert {finding.severity for finding in findings} == {Severity.ADVISE}
 
+    def test_a_core_doc_the_sweep_cannot_read_is_reported_not_skipped(self, tmp_path: Path) -> None:
+        """A silent skip would count an unreadable file as a clean one."""
+        doc = _write_core(tmp_path, "PlanWorkflow.core.md", _ORIGINATING_LINE)
+        policy = DocumentationPolicy()
+        corpus = build_and_save_corpus(tmp_path, policy, tmp_path / "untracked" / "index.json")
+        doc.unlink()
+        context = sweep_context(project_root=tmp_path, policy=policy, corpus=corpus)
+        findings = _run(CheckStage.SWEEP, context)
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.ADVISE
+        assert "could not be read" in findings[0].message
+
 
 class TestTheKeyResolverReadsTheRealConfig:
     def test_a_real_key_resolves_and_a_missing_one_does_not(
