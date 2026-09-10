@@ -335,9 +335,7 @@ class TestASweepNeverCertifiesATreeItNeverExamined:
         assert exit_code == 2
         assert capsys.readouterr().out.strip() != "[]"
 
-    def test_disabling_the_plan_workflow_is_still_a_legitimate_pass(
-        self, tmp_path: Path
-    ) -> None:
+    def test_disabling_the_plan_workflow_is_still_a_legitimate_pass(self, tmp_path: Path) -> None:
         """A project that declares it has no plan tree is not a broken one.
 
         The guard must discriminate "configured for plans, none present" from

@@ -46,9 +46,7 @@ class TestTheReconciliation:
     """The pure half: which value wins, given what the namespace holds."""
 
     def test_the_global_value_is_used_when_the_subcommand_supplied_none(self) -> None:
-        args = argparse.Namespace(
-            global_project_root=Path("/anchor"), project_root=None, func=None
-        )
+        args = argparse.Namespace(global_project_root=Path("/anchor"), project_root=None, func=None)
 
         assert apply_global_project_root(args).project_root == Path("/anchor")
 
