@@ -115,7 +115,7 @@ if TYPE_CHECKING:
         PlanSummary,
         SlateReport,
     )
-    from claude_code_hooks_daemon.core.worktree_reaping import RunGit
+    from claude_code_hooks_daemon.core.worktree_reaping import ProcessCwdsFn, RunGit, WorktreeAgeFn
     from claude_code_hooks_daemon.daemon.branch_safety import BranchClassification
     from claude_code_hooks_daemon.daemon.controller import DaemonController
     from claude_code_hooks_daemon.daemon.project_handler_health import (
@@ -5917,7 +5917,13 @@ def cmd_find_comment_blocks(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
-def cmd_worktree_reap(args: argparse.Namespace, *, run_fn: "RunGit | None" = None) -> int:
+def cmd_worktree_reap(
+    args: argparse.Namespace,
+    *,
+    run_fn: "RunGit | None" = None,
+    age_fn: "WorktreeAgeFn | None" = None,
+    process_cwds_fn: "ProcessCwdsFn | None" = None,
+) -> int:
     """Report stale agent worktrees, and remove them only when asked.
 
     Plan 00349 Task 2.1 decided report-and-offer over automatic reaping: the
@@ -5939,6 +5945,8 @@ def cmd_worktree_reap(args: argparse.Namespace, *, run_fn: "RunGit | None" = Non
     from claude_code_hooks_daemon.core.worktree_reaping import (
         collect_orphaned_branches,
         collect_worktree_states,
+        default_process_cwds,
+        default_worktree_age,
         is_reapable,
         prune_branch,
         reap_refusal_reason,
@@ -5952,7 +5960,21 @@ def cmd_worktree_reap(args: argparse.Namespace, *, run_fn: "RunGit | None" = Non
     only = getattr(args, "only", None)
 
     collect_kwargs = {"run_fn": run_fn} if run_fn is not None else {}
-    states = collect_worktree_states(repo_root, base_branch, **collect_kwargs)
+    # `age_fn`/`process_cwds_fn` (Plan 00372) apply ONLY to the worktree
+    # collector — `collect_orphaned_branches`, `reap_worktree` and
+    # `prune_branch` below never accept either, so this call resolves all
+    # three params to concrete, correctly-typed values itself rather than
+    # reusing `collect_kwargs`: a single dict cannot hold three differently
+    # typed values and still `**`-unpack against three differently typed
+    # parameters, and passing either to a branch command would raise a
+    # TypeError at runtime regardless.
+    states = collect_worktree_states(
+        repo_root,
+        base_branch,
+        run_fn=run_fn if run_fn is not None else run_git,
+        age_fn=age_fn if age_fn is not None else default_worktree_age,
+        process_cwds_fn=process_cwds_fn if process_cwds_fn is not None else default_process_cwds,
+    )
     # Plan 00352: a branch whose worktree has already gone is invisible to the
     # worktree collector, so it is reported here — the moment a human needs to
     # know is the moment they finish reaping its siblings. `--only` names a

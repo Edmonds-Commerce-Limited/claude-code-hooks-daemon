@@ -15,6 +15,14 @@ folder, and comparing byte counts — judgements a machine cannot make and must
 not fake. `git cherry` reports them as unlanded, which from the predicate's
 side is indistinguishable from real unlanded work. Unknown ⇒ not reapable;
 they get surfaced for a human instead of reaped.
+
+**Plan 00372 found an eighth shape the original 21 never produced: a worktree
+with NO history of its own at all**, created moments before the predicate was
+asked about it. Every check above passes vacuously — no uncommitted paths, no
+commits ahead, no unlanded patches — because a worktree that has just started
+looks IDENTICAL to one that finished and went stale. Age and live-process
+occupancy are the only signals that tell them apart; see
+`TestTheFreshWorktreeGuard` below.
 """
 
 from __future__ import annotations
@@ -24,10 +32,16 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.core.worktree_reaping import (
+    MINIMUM_AGE_SECONDS,
     WorktreeState,
     is_reapable,
     reap_refusal_reason,
 )
+
+#: Comfortably clear of the recency window, so every EXISTING test in this
+#: file (written before Plan 00372) keeps asserting what it always meant to —
+#: this module's age/process axis stays silent unless a test asks otherwise.
+_OLD_ENOUGH_SECONDS = MINIMUM_AGE_SECONDS + 1
 
 
 def _state(
@@ -36,8 +50,12 @@ def _state(
     uncommitted_paths: tuple[str, ...] = (),
     commits_ahead_of_base: int = 0,
     unlanded_patches: int = 0,
+    live_process_pids: tuple[int, ...] = (),
+    age_seconds: float | None = _OLD_ENOUGH_SECONDS,
 ) -> WorktreeState:
-    """A clean, fully-merged worktree — the only shape that is reapable."""
+    """A clean, fully-merged, long-since-created worktree with nobody in it —
+    the only shape that is reapable.
+    """
     return WorktreeState(
         name=name,
         path=Path(f"/repo/.claude/worktrees/{name}"),
@@ -45,6 +63,8 @@ def _state(
         uncommitted_paths=uncommitted_paths,
         commits_ahead_of_base=commits_ahead_of_base,
         unlanded_patches=unlanded_patches,
+        live_process_pids=live_process_pids,
+        age_seconds=age_seconds,
     )
 
 
@@ -119,3 +139,56 @@ class TestTheTwoRealShapesInThisRepo:
         clean = _state()
         dirty = _state(uncommitted_paths=(".claude/ccy/CLAUDE.md",), commits_ahead_of_base=224)
         assert is_reapable(clean) != is_reapable(dirty)
+
+
+class TestTheFreshWorktreeGuard:
+    """A history-free worktree is not evidence it is finished (Plan 00372).
+
+    Reproduces the live incident directly: a worktree created moments earlier
+    for an actively-working agent had zero commits, zero uncommitted paths and
+    zero unlanded patches — every check above passed vacuously, and the reaper
+    listed it as safe to remove.
+    """
+
+    def test_a_live_process_inside_it_blocks_it_even_though_everything_else_is_clean(
+        self,
+    ) -> None:
+        state = _state(live_process_pids=(4242,))
+        assert not is_reapable(state)
+        assert "4242" in (reap_refusal_reason(state) or "")
+
+    def test_multiple_live_pids_are_all_named(self) -> None:
+        state = _state(live_process_pids=(111, 222))
+        reason = reap_refusal_reason(state) or ""
+        assert "111" in reason
+        assert "222" in reason
+
+    def test_created_moments_ago_blocks_it_even_though_everything_else_is_clean(self) -> None:
+        """Exactly the live incident's shape: fresh, clean, no history."""
+        state = _state(age_seconds=3.0)
+        assert not is_reapable(state)
+        assert "3" in (reap_refusal_reason(state) or "")
+
+    def test_an_unknown_age_is_refused_rather_than_assumed_old(self) -> None:
+        """Unknown means not reapable everywhere else in this predicate too."""
+        state = _state(age_seconds=None)
+        assert not is_reapable(state)
+
+    def test_an_old_clean_worktree_with_nobody_in_it_is_still_reapable(self) -> None:
+        """The guard must actually discriminate, not just refuse everything."""
+        assert is_reapable(_state(age_seconds=_OLD_ENOUGH_SECONDS, live_process_pids=()))
+
+    def test_being_just_under_the_window_still_blocks_it(self) -> None:
+        state = _state(age_seconds=MINIMUM_AGE_SECONDS - 1)
+        assert not is_reapable(state)
+
+    def test_being_just_over_the_window_no_longer_blocks_it_on_age_alone(self) -> None:
+        state = _state(age_seconds=MINIMUM_AGE_SECONDS + 1)
+        assert is_reapable(state)
+
+    def test_a_worktree_with_real_history_still_reports_its_own_problems_too(self) -> None:
+        """Reported alongside, not instead of, the existing checks."""
+        state = _state(commits_ahead_of_base=5, age_seconds=3.0)
+        reason = reap_refusal_reason(state) or ""
+        assert "5" in reason
+        assert "3" in reason

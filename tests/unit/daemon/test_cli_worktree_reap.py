@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.core.worktree_reaping import RunGit
 from claude_code_hooks_daemon.daemon.cli import cmd_worktree_reap
 
 _LISTING = """worktree /repo
@@ -90,6 +91,24 @@ def _args(**overrides: object) -> argparse.Namespace:
     return argparse.Namespace(**defaults)
 
 
+def _old_enough(_path: Path) -> float:
+    return 999_999.0
+
+
+def _nobody_home() -> dict[int, Path]:
+    return {}
+
+
+def _reap(args: argparse.Namespace, *, run_fn: RunGit) -> int:
+    """`cmd_worktree_reap` with Plan 00372's age/process axis held old/empty.
+
+    This file's subject is CLI wiring and report formatting, not that axis —
+    held old/empty by default so it stays silent and every assertion here
+    keeps isolating what it always meant to.
+    """
+    return cmd_worktree_reap(args, run_fn=run_fn, age_fn=_old_enough, process_cwds_fn=_nobody_home)
+
+
 @pytest.fixture
 def git() -> _FakeGit:
     return _FakeGit()
@@ -99,13 +118,13 @@ class TestTheDefaultChangesNothing:
     def test_no_worktree_or_branch_is_removed_without_the_flag(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        cmd_worktree_reap(_args(), run_fn=git)
+        _reap(_args(), run_fn=git)
         assert git.mutations == []
 
     def test_it_still_says_what_it_would_do(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        cmd_worktree_reap(_args(), run_fn=git)
+        _reap(_args(), run_fn=git)
         out = capsys.readouterr().out
         assert "agent-clean-1" in out
         assert "would remove" in out.lower()
@@ -114,7 +133,7 @@ class TestTheDefaultChangesNothing:
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """A worktree that silently vanishes from the report looks handled."""
-        cmd_worktree_reap(_args(), run_fn=git)
+        _reap(_args(), run_fn=git)
         out = capsys.readouterr().out
         assert "agent-dirty-2" in out
         assert "not safe to reap" in out
@@ -124,7 +143,7 @@ class TestActingRequiresTheFlag:
     def test_only_the_cleared_worktree_is_removed(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        cmd_worktree_reap(_args(reap=True), run_fn=git)
+        _reap(_args(reap=True), run_fn=git)
         removed = [call for call in git.mutations if call[0] == "worktree"]
         assert len(removed) == 1
         assert "agent-clean-1" in removed[0][2]
@@ -132,11 +151,11 @@ class TestActingRequiresTheFlag:
     def test_the_refused_worktree_gets_no_git_command(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        cmd_worktree_reap(_args(reap=True), run_fn=git)
+        _reap(_args(reap=True), run_fn=git)
         assert not any("agent-dirty-2" in " ".join(call) for call in git.mutations)
 
     def test_its_branch_goes_too(self, git: _FakeGit, capsys: pytest.CaptureFixture[str]) -> None:
-        cmd_worktree_reap(_args(reap=True), run_fn=git)
+        _reap(_args(reap=True), run_fn=git)
         assert any(call[0] == "branch" and "-d" in call for call in git.mutations)
 
 
@@ -147,7 +166,7 @@ class TestTheWorktreeIsAddressedWhereGitSaidItIs:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         git = _FakeGit(listing=_UNTRACKED_ROOT_LISTING)
-        cmd_worktree_reap(_args(reap=True), run_fn=git)
+        _reap(_args(reap=True), run_fn=git)
         removed = [call for call in git.mutations if call[0] == "worktree"]
         assert [call[2] for call in removed] == ["/repo/untracked/worktrees/agent-clean-1"]
 
@@ -155,7 +174,7 @@ class TestTheWorktreeIsAddressedWhereGitSaidItIs:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """A report naming a path that is not there reads as a failed reap."""
-        cmd_worktree_reap(_args(), run_fn=_FakeGit(listing=_UNTRACKED_ROOT_LISTING))
+        _reap(_args(), run_fn=_FakeGit(listing=_UNTRACKED_ROOT_LISTING))
         out = capsys.readouterr().out
         assert "/repo/untracked/worktrees/agent-clean-1" in out
         assert "/repo/.claude/worktrees/agent-clean-1" not in out
@@ -164,9 +183,9 @@ class TestTheWorktreeIsAddressedWhereGitSaidItIs:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         git = _FakeGit(listing=_UNTRACKED_ROOT_LISTING)
-        cmd_worktree_reap(_args(reap=True), run_fn=git)
+        _reap(_args(reap=True), run_fn=git)
         deleted = [call for call in git.mutations if call[0] == "branch"]
-        assert [call[-1] for call in deleted] == ["refs/heads/wip/renamed-branch"]
+        assert [call[-1] for call in deleted] == ["wip/renamed-branch"]
 
 
 class TestARepositoryWithNoAgentWorktrees:
@@ -184,7 +203,7 @@ class TestARepositoryWithNoAgentWorktrees:
         raise AssertionError(f"nothing that changes state should be asked: {args}")
 
     def test_it_says_so_and_succeeds(self, capsys: pytest.CaptureFixture[str]) -> None:
-        exit_code = cmd_worktree_reap(_args(), run_fn=self._no_worktrees)
+        exit_code = _reap(_args(), run_fn=self._no_worktrees)
         assert exit_code == 0
         assert "No agent worktrees found" in capsys.readouterr().out
 
@@ -195,7 +214,7 @@ class TestActingOnOneWorktree:
     def test_only_the_named_worktree_is_removed(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        cmd_worktree_reap(_args(reap=True, only="agent-clean-1"), run_fn=git)
+        _reap(_args(reap=True, only="agent-clean-1"), run_fn=git)
         removed = [call for call in git.mutations if call[0] == "worktree"]
         assert len(removed) == 1
         assert "agent-clean-1" in removed[0][2]
@@ -204,14 +223,14 @@ class TestActingOnOneWorktree:
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Naming one is a choice of TARGET, never an override of the check."""
-        cmd_worktree_reap(_args(reap=True, only="agent-dirty-2"), run_fn=git)
+        _reap(_args(reap=True, only="agent-dirty-2"), run_fn=git)
         assert git.mutations == []
 
     def test_an_unknown_name_is_an_error_not_a_silent_no_op(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """A typo that quietly does nothing reads exactly like success."""
-        exit_code = cmd_worktree_reap(_args(reap=True, only="agent-typo-9"), run_fn=git)
+        exit_code = _reap(_args(reap=True, only="agent-typo-9"), run_fn=git)
         assert exit_code != 0
         assert git.mutations == []
         assert "agent-typo-9" in capsys.readouterr().out
@@ -219,7 +238,7 @@ class TestActingOnOneWorktree:
     def test_the_report_narrows_too(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        cmd_worktree_reap(_args(only="agent-clean-1"), run_fn=git)
+        _reap(_args(only="agent-clean-1"), run_fn=git)
         out = capsys.readouterr().out
         assert "agent-clean-1" in out
         assert "agent-dirty-2" not in out
@@ -239,10 +258,10 @@ class TestTheExitCode:
                     return subprocess.CompletedProcess([], 0, "", "")
                 return super().__call__(cwd, *args, **kw)
 
-        assert cmd_worktree_reap(_args(), run_fn=_AllClean()) == 0
+        assert _reap(_args(), run_fn=_AllClean()) == 0
 
     def test_nonzero_when_something_needs_a_human(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """The refusals are the actionable output, so they must be visible."""
-        assert cmd_worktree_reap(_args(), run_fn=git) == 1
+        assert _reap(_args(), run_fn=git) == 1

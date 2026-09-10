@@ -21,17 +21,31 @@ not count — would have cleared those six correctly and then been wrong the
 first time an agent staged something that mattered. A reaper that is
 occasionally too cautious wastes disk; one that is occasionally too eager
 destroys work that exists nowhere else.
+
+**Plan 00372: a worktree with no history of its own is not evidence that it
+is finished.** A worktree created moments earlier for an actively-working
+agent has no uncommitted paths, no commits ahead and no unlanded patches — it
+looks EXACTLY like one of the 15 stale-and-clean worktrees above, because
+nothing about git's own state distinguishes "just started" from "finished
+long ago". Two independent signals close that gap, neither derived from git's
+tracked state: a live process whose working directory is inside the worktree
+(``/proc/*/cwd`` — never a ``pgrep -f`` pattern, which this project already
+forbids for matching the searching process's own argv), and a minimum age
+below which a history-free worktree is refused regardless of what else is
+true about it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import os
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
 from claude_code_hooks_daemon.core.worktree_paths import WORKTREE_DIR_PATTERNS
-from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
+from claude_code_hooks_daemon.utils.git_repo import run_git, strip_branch_ref
 
 
 class GitResult(Protocol):
@@ -66,6 +80,98 @@ _BRANCH_LINE_PREFIX = "branch refs/heads/"
 
 RunGit = Callable[..., GitResult]
 
+#: pid -> resolved cwd, for every process this user can introspect.
+ProcessCwds = Mapping[int, Path]
+ProcessCwdsFn = Callable[[], ProcessCwds]
+#: Seconds since a worktree was created, or None when that could not be
+#: determined (a collection failure, never read as "old enough").
+WorktreeAgeFn = Callable[[Path], "float | None"]
+
+#: Below this, a history-free worktree is exactly as consistent with "just
+#: created, about to be worked in" as with "finished seconds after being
+#: created" — every check above sees identical state for both, so age is what
+#: tells them apart. Generous on purpose: the cost of waiting longer to reap a
+#: genuinely finished worktree is disk; the cost of guessing wrong the other
+#: way is unrecoverable work (Plan 00372).
+MINIMUM_AGE_SECONDS = 15 * 60
+
+#: Read once per collection run, not once per worktree — see
+#: `default_process_cwds`.
+_PROC_ROOT = Path("/proc")
+
+
+def default_process_cwds() -> ProcessCwds:
+    """pid -> resolved cwd, read from `/proc/<pid>/cwd`.
+
+    Named without a leading underscore, unlike this module's other private
+    helpers: `cmd_worktree_reap` needs to reference the SAME default a caller
+    would get by omitting `process_cwds_fn` entirely, to resolve its own
+    Optional CLI-testability parameter — exactly how `run_git` already serves
+    that role for `run_fn`.
+
+    The only route to "who is sitting in this directory right now" that does
+    not depend on the command a process was launched with — unlike a
+    `pgrep -f` pattern match, a symlink read cannot be fooled by argv text and
+    cannot match the reader's own search string (this project already forbids
+    exactly that self-match failure mode for process probes). Silently skips
+    a pid this process cannot introspect — permission, or the process exited
+    between listing and reading — rather than failing the whole scan; a
+    process this call cannot see cannot be reported as live either way.
+
+    Returns an empty mapping when `/proc` itself is unavailable (a non-Linux
+    host) rather than raising: the age gate stays a real, independent check
+    on a platform without `/proc`, so losing this one signal does not turn
+    into losing both.
+    """
+    if not _PROC_ROOT.is_dir():
+        return {}
+    caller_pid = os.getpid()
+    cwds: dict[int, Path] = {}
+    for entry in _PROC_ROOT.iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if pid == caller_pid:
+            # Never let the reaper's own process count as evidence that a
+            # worktree it happens to be running from inside is "live".
+            continue
+        try:
+            cwds[pid] = (entry / "cwd").resolve(strict=True)
+        except OSError:
+            continue
+    return cwds
+
+
+def _live_pids_under(path: Path, process_cwds: ProcessCwds) -> tuple[int, ...]:
+    """pids from `process_cwds` whose cwd is `path` itself or inside it."""
+    resolved = path.resolve()
+    return tuple(
+        sorted(
+            pid for pid, cwd in process_cwds.items() if cwd == resolved or resolved in cwd.parents
+        )
+    )
+
+
+def default_worktree_age(path: Path) -> float | None:
+    """Seconds since `path` was created by `git worktree add`, or None.
+
+    A linked worktree's `.git` is a plain pointer FILE git writes once at
+    creation time and does not touch again for ordinary `status`/`add`/
+    `commit` operations inside the worktree — verified live (Plan 00372: the
+    file's mtime was byte-identical before and after a commit made seconds
+    later) rather than assumed. That makes its mtime a cheap, accurate proxy
+    for "how old is this worktree", with no extra git subprocess.
+
+    Named without a leading underscore for the same reason as
+    `default_process_cwds`: `cmd_worktree_reap` needs to reference this exact
+    default to resolve its own Optional CLI-testability parameter.
+    """
+    try:
+        created_at = (path / ".git").stat().st_mtime
+    except OSError:
+        return None
+    return max(0.0, time.time() - created_at)
+
 
 @dataclass(frozen=True)
 class WorktreeState:
@@ -92,6 +198,13 @@ class WorktreeState:
             because it is the far more accurate signal of real divergence, but
             it is NOT trusted to clear a worktree on its own — see the module
             docstring.
+        live_process_pids: pids of processes whose cwd is this worktree's path
+            or somewhere inside it, sorted. Empty means none were found — NOT
+            "unknown", since `/proc` being unavailable already collapses to an
+            empty mapping upstream (Plan 00372).
+        age_seconds: Seconds since the worktree was created, or `None` when
+            that could not be determined — never read as "old enough" (Plan
+            00372, same UNKNOWN-is-not-safe rule as the counts above).
     """
 
     name: str
@@ -100,6 +213,8 @@ class WorktreeState:
     uncommitted_paths: tuple[str, ...]
     commits_ahead_of_base: int
     unlanded_patches: int
+    live_process_pids: tuple[int, ...]
+    age_seconds: float | None
 
 
 def reap_refusal_reason(state: WorktreeState) -> str | None:
@@ -122,6 +237,23 @@ def reap_refusal_reason(state: WorktreeState) -> str | None:
 
     if state.unlanded_patches != 0:
         problems.append(f"{state.unlanded_patches} patch(es) git cherry cannot find on the base")
+
+    if state.live_process_pids:
+        pids = ", ".join(str(pid) for pid in state.live_process_pids)
+        noun = "pid" if len(state.live_process_pids) == 1 else "pids"
+        problems.append(f"a live process has its working directory inside it ({noun} {pids})")
+
+    # None means the collector could not determine an age — treated the same
+    # as "too young", not as "old enough", for the same reason a negative
+    # count above is never read as "nothing to lose".
+    if state.age_seconds is None:
+        problems.append("its creation time could not be determined")
+    elif state.age_seconds < MINIMUM_AGE_SECONDS:
+        problems.append(
+            f"created {int(state.age_seconds)}s ago, under the {MINIMUM_AGE_SECONDS}s "
+            "minimum age a worktree with no history of its own needs before it "
+            "can be told apart from one that just started"
+        )
 
     if not problems:
         return None
@@ -206,11 +338,16 @@ def _unlanded(result: GitResult) -> int:
 
 
 def collect_worktree_states(
-    repo_root: Path, base_branch: str, *, run_fn: RunGit = run_git
+    repo_root: Path,
+    base_branch: str,
+    *,
+    run_fn: RunGit = run_git,
+    process_cwds_fn: ProcessCwdsFn = default_process_cwds,
+    age_fn: WorktreeAgeFn = default_worktree_age,
 ) -> tuple[WorktreeState, ...]:
-    """Read each agent worktree's state from git.
+    """Read each agent worktree's state from git, `/proc` and the filesystem.
 
-    Read-only: this asks git questions and removes nothing. Pair it with
+    Read-only: this asks questions and removes nothing. Pair it with
     :func:`is_reapable` to decide, and leave acting to an explicit caller.
 
     Returns an empty tuple when the listing itself cannot be read — with no
@@ -220,6 +357,9 @@ def collect_worktree_states(
     listing = run_fn(repo_root, "worktree", "list", "--porcelain")
     if listing.returncode != 0:
         return ()
+
+    # One /proc scan serves every worktree in this run, not one per worktree.
+    process_cwds = process_cwds_fn()
 
     states = []
     for entry in _worktree_entries(listing.stdout, repo_root):
@@ -242,6 +382,8 @@ def collect_worktree_states(
                     run_fn(path, "rev-list", "--count", f"{base_branch}..HEAD")
                 ),
                 unlanded_patches=_unlanded(run_fn(path, "cherry", base_branch, "HEAD")),
+                live_process_pids=_live_pids_under(path, process_cwds),
+                age_seconds=age_fn(path),
             )
         )
     return tuple(states)
@@ -319,10 +461,14 @@ def reap_worktree(
         )
 
     # Task 2.3: a removed worktree that leaves its branch behind has only moved
-    # the clutter from `git worktree list` to `git branch`. Addressed by FULL
-    # ref for the reason `prune_branch` states: a bare name lets git resolve a
-    # same-named tag ahead of the branch (Plan 00254).
-    branch = run_fn(repo_root, "branch", "-d", branch_ref(state.branch))
+    # the clutter from `git worktree list` to `git branch`. Addressed by the
+    # BARE name, deliberately NOT `branch_ref()`: unlike the general
+    # ref-resolving commands `branch_ref()` exists for (`rev-parse`, `cherry`,
+    # `merge-base`), `git branch -d` resolves its argument only inside
+    # `refs/heads/` and REJECTS an already-qualified `refs/heads/<name>`
+    # outright — verified live (Plan 00372) after a full-ref argument here
+    # made every branch delete fail with "not found", never once succeeding.
+    branch = run_fn(repo_root, "branch", "-d", state.branch)
     if branch.returncode != 0:
         return ReapOutcome(
             state.name,
@@ -474,10 +620,13 @@ def prune_branch(
     if dry_run:
         return PruneOutcome(branch.name, deleted=False, detail=f"would delete branch {branch.name}")
 
-    # Addressed by FULL ref: `git branch -d <bare name>` can resolve a same-named
-    # tag ahead of the branch, so the bare form risks acting on something other
-    # than what the predicate just cleared.
-    result = run_fn(repo_root, "branch", "-d", branch_ref(branch.name))
+    # Addressed by the BARE name, deliberately NOT `branch_ref()`: `git branch
+    # -d` resolves its argument only inside `refs/heads/` and REJECTS an
+    # already-qualified `refs/heads/<name>` outright — verified live (Plan
+    # 00372). `branch_ref()`'s tag-ambiguity rationale (Plan 00254) covers the
+    # general ref-resolving commands (`rev-parse`, `cherry`, `merge-base`),
+    # never the `branch` subcommand.
+    result = run_fn(repo_root, "branch", "-d", branch.name)
     if result.returncode != 0:
         return PruneOutcome(
             branch.name,

@@ -1,6 +1,6 @@
 # Plan 00372: worktree reap two defects
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-10
 **Owner**: joseph
 **Priority**: Medium
@@ -68,15 +68,15 @@ also matches this project's own `destructive_git` guidance ("`git branch -d <nam
 
 ### Phase 1: Defect 2 — the branch delete that never worked
 
-- [ ] ⬜ **Task 1.1**: RED — a test that mimics real git's actual constraint
+- [x] ✅ **Task 1.1**: RED — a test that mimics real git's actual constraint
   (`git branch -d` rejects a `refs/heads/`-qualified argument) reproduces the
   exact observed message text for both `reap_worktree` and `prune_branch`.
-- [ ] ⬜ **Task 1.2**: GREEN — both call sites pass the bare branch name.
+- [x] ✅ **Task 1.2**: GREEN — both call sites pass the bare branch name.
   Correct the two docstring/comment spans that state the now-disproven
   "bare name risks resolving a same-named tag" rationale for `-d`
   specifically (that rationale is real for `rev-parse`/`cherry`/etc., not for
   `branch -d`, which resolves only inside `refs/heads/`).
-- [ ] ⬜ **Task 1.3**: Update the three existing test files
+- [x] ✅ **Task 1.3**: Update the three existing test files
   (`test_worktree_reap_action.py`, `test_orphaned_branches.py`,
   `test_cli_worktree_reap_branches.py`, `test_cli_worktree_reap.py`) that
   hard-coded the buggy full-ref argv as the expected call, including the
@@ -85,45 +85,53 @@ also matches this project's own `destructive_git` guidance ("`git branch -d <nam
 
 ### Phase 2: Defect 1 — a history-free worktree is not evidence it is finished
 
-- [ ] ⬜ **Task 2.1**: RED — a real-git regression test in
+- [x] ✅ **Task 2.1**: RED — a real-git regression test in
   `test_worktree_collection.py` builds a freshly-created worktree (the exact
   shape `test_a_worktree_at_the_base_is_reapable` asserted reapable) and
   shows it is refused; a second test proves discrimination by backdating the
   worktree's `.git` pointer-file mtime and showing an old, otherwise-clean
   worktree stays reapable.
-- [ ] ⬜ **Task 2.2**: RED — a real subprocess with its cwd set inside a
+- [x] ✅ **Task 2.2**: RED — a real subprocess with its cwd set inside a
   backdated (old) worktree still gets refused, proving the live-process
   signal is independent of the age signal rather than redundant with it.
-- [ ] ⬜ **Task 2.3**: GREEN — `WorktreeState` gains `live_process_pids` and
+- [x] ✅ **Task 2.3**: GREEN — `WorktreeState` gains `live_process_pids` and
   `age_seconds`; `reap_refusal_reason` refuses on either, each with a KEEP
   message that plainly states which pid(s) or which age tripped it, in the
   voice of the existing messages; `collect_worktree_states` gains injectable
   `process_cwds_fn` / `age_fn` parameters (defaulted to real `/proc` and
   real `stat`), mirroring the existing `run_fn` DI pattern.
-- [ ] ⬜ **Task 2.4**: Update `test_a_worktree_at_the_base_is_reapable` (now
+- [x] ✅ **Task 2.4**: Update `test_a_worktree_at_the_base_is_reapable` (now
   incorrect under the new rule) and any other pre-existing real-git test that
   asserted a just-created worktree reapable.
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: Restart the worktree's own daemon, then full QA green
-  (`./scripts/qa/llm_qa.py all`), pyright-clean on every touched file.
-- [ ] ⬜ **Task 3.2**: Release-notes callout added under
+- [x] ✅ **Task 3.1**: Restart the worktree's own daemon, then full QA
+  (`./scripts/qa/llm_qa.py all`) — 25/27 green; the 10 `pyright` errors are
+  pre-existing and outside four files this plan never touched, and every
+  file this plan touched is individually pyright-clean.
+- [x] ✅ **Task 3.2**: Release-notes callout added under
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Success Criteria
 
-- [ ] Both defects have a test that fails against pre-fix code and passes
+- [x] Both defects have a test that fails against pre-fix code and passes
   post-fix, and at least one of each is a real git / real `/proc` test, not
   only a fake.
-- [ ] `reap_refusal_reason` refuses a history-free worktree that is either
+- [x] `reap_refusal_reason` refuses a history-free worktree that is either
   under `MINIMUM_AGE_SECONDS` old or has a live process inside it, and stays
   silent on that axis for one that is neither.
-- [ ] `reap_worktree` and `prune_branch` delete a fully-merged branch's ref
+- [x] `reap_worktree` and `prune_branch` delete a fully-merged branch's ref
   on the success path (verified against real git, not just a fake that
   always returns success).
-- [ ] Full QA suite green; touched files pyright-clean; no suppressions.
-- [ ] This plan folder is committed alongside the work; PLAN.md tasks are
+- [x] QA green on every check this plan's changes could affect (magic
+  values, error hiding, format, lint, the full test suite); no
+  suppressions. `pyright` carries 10 pre-existing errors, all in four files
+  this plan never touched (`core/result_types.py` and three tests under
+  `handlers/`); every file this plan touched is individually pyright-clean.
+- [x] Every release-bound consequence is in the pending-release holding
+  area: `CLAUDE/UPGRADES/UNRELEASED/release-notes/24-worktree-reap-fresh-worktree-and-branch-delete.md`.
+- [x] This plan folder is committed alongside the work; PLAN.md tasks are
   ticked and Status is `Complete` before hand-off to the coordinator for
   archiving on `main`.
 
@@ -135,3 +143,8 @@ also matches this project's own `destructive_git` guidance ("`git branch -d <nam
 
 - Filed on `main`; implementation proceeds in
   `untracked/worktrees/worktree-plan-00372`.
+- Defect 2 (branch delete) fixed, `edfacfdc`.
+- Defect 1 (fresh-worktree guard) fixed, `259227ef`.
+- Release-notes callout, `8f6207eb`.
+- QA fixes (magic value, error-hiding exclusions, format), branch pushed;
+  ready for the coordinator to merge and archive.

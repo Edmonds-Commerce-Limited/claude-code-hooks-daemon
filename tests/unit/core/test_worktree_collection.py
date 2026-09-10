@@ -10,14 +10,34 @@ when `rev-list` failed would turn an unreadable worktree into a deletable one
 
 from __future__ import annotations
 
+import os
 import subprocess
+import time
 from pathlib import Path
 
+import pytest
+
+import claude_code_hooks_daemon.core.worktree_reaping as worktree_reaping_module
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.worktree_reaping import (
+    MINIMUM_AGE_SECONDS,
     UNKNOWN_COUNT,
     collect_worktree_states,
     is_reapable,
+    reap_refusal_reason,
 )
+
+
+#: For tests whose subject is the uncommitted/commit-count axis, not Plan
+#: 00372's age/live-process axis — injected so `is_reapable` stays silent
+#: there and the assertion actually isolates what the test is about.
+def _old_enough(_path: Path) -> float:
+    return MINIMUM_AGE_SECONDS + 1
+
+
+def _nobody_home() -> dict[int, Path]:
+    return {}
+
 
 _LISTING = """worktree /repo
 HEAD abc123
@@ -136,7 +156,16 @@ class TestWhatTheListingAlreadySaysIsKept:
 
 class TestTheCleanReading:
     def test_a_clean_worktree_collects_as_reapable(self) -> None:
-        states = collect_worktree_states(Path("/repo"), "main", run_fn=_FakeGit())
+        """Old enough and nobody home, injected: this test is about the
+        uncommitted/commit-count axis, not Plan 00372's age/process axis.
+        """
+        states = collect_worktree_states(
+            Path("/repo"),
+            "main",
+            run_fn=_FakeGit(),
+            age_fn=_old_enough,
+            process_cwds_fn=_nobody_home,
+        )
         assert all(is_reapable(state) for state in states)
 
     def test_status_lines_become_paths_without_their_status_prefix(self) -> None:
@@ -228,10 +257,62 @@ class TestAgainstARealGitRepository:
         assert state.path == repo / ".claude/worktrees/agent-probe-1"
         assert state.branch == "agent-probe-1"
 
-    def test_a_worktree_at_the_base_is_reapable(self, tmp_path: Path) -> None:
-        """Real git output, not a fixture string, feeding the real predicate."""
+    def test_a_freshly_created_worktree_at_the_base_is_refused(self, tmp_path: Path) -> None:
+        """Plan 00372's live incident, reproduced with real git: a worktree
+        seconds old, at the base, with no history of its own, was listed as
+        safe to reap. It looks IDENTICAL to a finished one on every axis this
+        module tracked before — this is the one that tells them apart.
+        """
         states = collect_worktree_states(self._repo_with_one_worktree(tmp_path), "main")
+        assert not is_reapable(states[0])
+        assert "minimum age" in (reap_refusal_reason(states[0]) or "")
+
+    def test_the_same_worktree_once_it_is_old_enough_is_reapable(self, tmp_path: Path) -> None:
+        """Discrimination check: the guard must not just refuse everything.
+
+        `.git` is a plain pointer file `git worktree add` writes once and
+        never touches again (verified live, Plan 00372) -- backdating its
+        mtime is simulating time passing on a REAL worktree, not faking git.
+        """
+        repo = self._repo_with_one_worktree(tmp_path)
+        worktree = repo / ".claude/worktrees/agent-probe-1"
+        past = time.time() - (MINIMUM_AGE_SECONDS + 60)
+        os.utime(worktree / ".git", (past, past))
+        states = collect_worktree_states(repo, "main")
         assert is_reapable(states[0])
+
+    def test_a_live_process_inside_an_old_worktree_still_refuses_it(self, tmp_path: Path) -> None:
+        """The two signals are independent, not redundant: an OLD worktree
+        (age check alone would clear it) that someone is actually sitting in
+        right now must still be refused. A real subprocess, a real /proc scan
+        -- nothing here is mocked.
+        """
+        repo = self._repo_with_one_worktree(tmp_path)
+        worktree = repo / ".claude/worktrees/agent-probe-1"
+        past = time.time() - (MINIMUM_AGE_SECONDS + 60)
+        os.utime(worktree / ".git", (past, past))
+
+        proc = subprocess.Popen(  # nosec B603 B607 - trusted system tool, list form
+            ["sleep", "30"], cwd=worktree
+        )
+        try:
+            states = collect_worktree_states(repo, "main")
+            assert not is_reapable(states[0])
+            assert proc.pid in states[0].live_process_pids
+        finally:
+            proc.terminate()
+            proc.wait(timeout=Timeout.PROCESS_KILL_WAIT)
+
+    def test_a_platform_with_no_proc_reports_no_live_process_rather_than_erroring(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`/proc` is Linux-only; losing this ONE signal on another platform
+        must not take the independent age check down with it.
+        """
+        monkeypatch.setattr(worktree_reaping_module, "_PROC_ROOT", tmp_path / "no-such-proc-root")
+        repo = self._repo_with_one_worktree(tmp_path)
+        states = collect_worktree_states(repo, "main")
+        assert states[0].live_process_pids == ()
 
     def test_an_uncommitted_file_makes_it_refuse(self, tmp_path: Path) -> None:
         repo = self._repo_with_one_worktree(tmp_path)
@@ -264,3 +345,5 @@ class TestAgainstThisRepository:
         for state in collect_worktree_states(repo_root, "main"):
             assert state.name
             assert isinstance(state.uncommitted_paths, tuple)
+            assert isinstance(state.live_process_pids, tuple)
+            assert state.age_seconds is None or state.age_seconds >= 0

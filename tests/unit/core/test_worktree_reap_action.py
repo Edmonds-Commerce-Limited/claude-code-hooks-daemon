@@ -16,9 +16,17 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from claude_code_hooks_daemon.core.worktree_reaping import WorktreeState, reap_worktree
+from claude_code_hooks_daemon.core.worktree_reaping import (
+    MINIMUM_AGE_SECONDS,
+    WorktreeState,
+    reap_worktree,
+)
 
 _Completed = subprocess.CompletedProcess[str]
+
+#: Comfortably clear of Plan 00372's recency window, so `_clean_state()` stays
+#: reapable purely on the axes this file's tests actually exercise.
+_OLD_ENOUGH_SECONDS = MINIMUM_AGE_SECONDS + 1
 
 
 def _ok(stdout: str = "") -> _Completed:
@@ -42,6 +50,8 @@ def _clean_state(
         uncommitted_paths=(),
         commits_ahead_of_base=0,
         unlanded_patches=0,
+        live_process_pids=(),
+        age_seconds=_OLD_ENOUGH_SECONDS,
     )
 
 
@@ -53,6 +63,8 @@ def _dirty_state(name: str = "agent-bbb-222") -> WorktreeState:
         uncommitted_paths=("x.py",),
         commits_ahead_of_base=3,
         unlanded_patches=1,
+        live_process_pids=(),
+        age_seconds=_OLD_ENOUGH_SECONDS,
     )
 
 
@@ -119,14 +131,65 @@ class TestWhatIsAddressed:
         git = _FakeGit()
         reap_worktree(Path("/repo"), _clean_state(branch="feature/other"), run_fn=git)
         branch_call = next(call for call in git.calls if call[0] == "branch")
-        assert branch_call[-1] == "refs/heads/feature/other"
+        assert branch_call[-1] == "feature/other"
 
-    def test_the_branch_is_addressed_by_full_ref_like_prune_branch(self) -> None:
-        """A bare name can resolve a same-named TAG ahead of the branch."""
+    def test_the_branch_is_addressed_by_its_bare_name_not_a_qualified_ref(self) -> None:
+        """`git branch -d` resolves only inside `refs/heads/` and REJECTS a
+        `refs/heads/<name>`-qualified argument outright (Plan 00372, verified
+        live) -- unlike `rev-parse`/`cherry`/`merge-base`, which is what
+        `branch_ref()`'s tag-ambiguity rationale (Plan 00254) actually covers.
+        """
         git = _FakeGit()
         reap_worktree(Path("/repo"), _clean_state(), run_fn=git)
         branch_call = next(call for call in git.calls if call[0] == "branch")
-        assert branch_call[-1] == "refs/heads/agent-aaa-111"
+        assert branch_call[-1] == "agent-aaa-111"
+
+
+class TestTheBranchDeleteAgainstRealGitSemantics:
+    """`_FakeGit` above always answers "success" no matter the argv, which is
+    exactly why it never caught this: it modelled the call succeeding, not
+    the argv real git accepts. `_RealisticFakeGit` mimics the one constraint
+    that matters here, confirmed against a real git binary before writing
+    this test: `git branch -d refs/heads/<name>` fails with "not found",
+    while `git branch -d <name>` succeeds.
+    """
+
+    class _RealisticFakeGit:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, ...]] = []
+
+        def __call__(self, cwd: Path, *args: str, **_: object) -> _Completed:
+            self.calls.append(args)
+            if args[0] == "worktree":
+                return _ok()
+            if args[0] == "branch":
+                target = args[-1]
+                if target.startswith("refs/heads/"):
+                    return _fail(f"error: branch '{target}' not found.")
+                return _ok()
+            raise AssertionError(f"unexpected git call: {args}")
+
+    def test_the_live_incident_is_fixed(self) -> None:
+        """Exact live observation this reproduces: `REAPED removed ..., but
+        git kept the branch worktree-plan-00367: error: branch
+        'refs/heads/worktree-plan-00367' not found.` -- self-contradicting,
+        since "kept" and "not found" cannot both be true, and the delete
+        never had a chance to succeed because it was never asked correctly.
+        """
+        git = self._RealisticFakeGit()
+        outcome = reap_worktree(Path("/repo"), _clean_state(), run_fn=git)
+        assert outcome.removed
+        assert outcome.branch_removed
+        assert (
+            outcome.detail
+            == "removed /repo/.claude/worktrees/agent-aaa-111 and its branch agent-aaa-111"
+        )
+
+    def test_the_failure_message_never_contradicts_itself(self) -> None:
+        git = self._RealisticFakeGit()
+        outcome = reap_worktree(Path("/repo"), _clean_state(), run_fn=git)
+        assert "not found" not in outcome.detail
+        assert "kept" not in outcome.detail
 
     def test_a_worktree_with_no_branch_gets_no_branch_delete(self) -> None:
         """Deleting by directory name could hit an unrelated same-named branch."""
