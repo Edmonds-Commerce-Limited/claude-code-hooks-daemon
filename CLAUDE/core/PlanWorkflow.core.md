@@ -488,7 +488,8 @@ When new work is identified:
 1. Review plan completeness
 2. Verify tasks are well-defined
 3. Check for missing dependencies
-4. Get stakeholder approval (if needed)
+4. Confirm the scope with the human who owns it: a plan's scope is theirs
+   to set, and a change of scope is recorded in the plan before execution
 
 ### Step 5: Execute
 
@@ -1029,7 +1030,12 @@ When Claude Code (or other AI agents) work on a project with plan tracking enabl
 06. **Update task status in real-time** as you work
 07. **Run QA before commits** - this project's full QA suite must pass
 08. **Document blockers immediately** if you get stuck
-09. **Ask user for approval** before marking plan complete
+09. **Close a plan when it is fully complete** - every task ticked and every
+    success criterion met - in the same commit that archives it. A project
+    that wants a human to close plans sets
+    `plan_workflow.close_requires_human_approval: true`; the daemon then
+    denies the status flip until a human records approval, and the agent
+    reports the plan as ready to close and moves on
 10. **Reference plans in all commits** for traceability
 
 ### Agent Workflow Example
@@ -1043,7 +1049,7 @@ Agent:
 3. Inspects recent event flow to see what hook_input looks like for the scenario
 4. Analyses events to determine handler design
 5. Breaks down into TDD tasks
-6. Shows plan to user for approval
+6. Shows the plan to the user, whose call the scope is
 7. Begins execution:
    - Write failing test
    - Implement handler
