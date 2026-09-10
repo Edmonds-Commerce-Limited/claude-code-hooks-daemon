@@ -171,6 +171,12 @@
       "reason": "Directory search loop: log-and-continue when searching upward for .claude directory. SystemExit during path validation means invalid installation at this path — continue searching upward is the correct behaviour. Already logged at debug level."
     },
     {
+      "file": "daemon/cli.py",
+      "function": "_collect_status_line_segment_entries",
+      "rule": "log-and-continue",
+      "reason": "Plan 00369 status-line-explained: an unreadable/invalid hooks-daemon.yaml degrades to event_config={} (every handler resolves 'enabled' via its own default), matching explain-rule/explain-handler's own _init_project_context_for_explain degrade-gracefully contract for a command that must work without a fully validated installation. Already logged at debug level."
+    },
+    {
       "file": "handlers/post_tool_use/goal_injection.py",
       "function": "write_goal_signal",
       "rule": "return-none-on-error",
@@ -635,10 +641,10 @@
     {
       "file": "handlers/status_line/daemon_stats.py",
       "lines": [
-        21
+        22
       ],
       "rule": "silent-fallback",
-      "reason": "Plan 00200 Task 5.4: module-level `try: import psutil except ImportError: psutil = None` -- the standard optional-dependency idiom. Matches this directory's documented CLAUDE.md rule #2 ('Reads are fail-silent and defensive... never raise -- see daemon_stats.py'). No function context at module scope, hence line-based match per the documented legacy-fallback convention."
+      "reason": "Plan 00200 Task 5.4: module-level `try: import psutil except ImportError: psutil = None` -- the standard optional-dependency idiom. Matches this directory's documented CLAUDE.md rule #2 ('Reads are fail-silent and defensive... never raise -- see daemon_stats.py'). No function context at module scope, hence line-based match per the documented legacy-fallback convention. Realigned by Plan 00369's explain_segment() import shifting the try: block by one line."
     },
     {
       "file": "handlers/status_line/thread_registry.py",

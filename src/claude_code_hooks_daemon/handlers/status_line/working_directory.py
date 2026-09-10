@@ -1,5 +1,6 @@
 """WorkingDirectoryHandler - display current working directory when it differs from project root."""
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,9 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
+
+logger = logging.getLogger(__name__)
 
 
 class WorkingDirectoryHandler(StatusLineHandlerBase):
@@ -59,6 +63,35 @@ class WorkingDirectoryHandler(StatusLineHandlerBase):
         except ValueError:
             # current_dir is not relative to project_dir (e.g., different drive on Windows)
             return AdvisoryResult(context=[])
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment and its current value (read-only path compare)."""
+        try:
+            from claude_code_hooks_daemon.core import ProjectContext
+
+            project_root = ProjectContext.project_root()
+            cwd = Path.cwd()
+            if cwd == project_root:
+                current_value = "Not shown now — the current directory is the project root."
+            else:
+                relative = cwd.relative_to(project_root)
+                current_value = f"Currently shows: 📁 {relative}"
+        except Exception as e:
+            logger.debug("Failed to compare cwd/project_root for explain_segment: %s", e)
+            current_value = (
+                "Not shown now — requires the live session's workspace.current_dir/"
+                "project_dir fields, or no project context is available here."
+            )
+        return SegmentExplanation(
+            glyphs=("📁",),
+            name="Working Directory",
+            what_it_is=(
+                "The current working directory, shown only when it differs from the "
+                "project root (e.g. inside a subdirectory or a worktree)."
+            ),
+            how_to_read="Orange text, a path relative to the project root. Silent when they match.",
+            current_value=current_value,
+        )
 
     def get_claude_md(self) -> str | None:
         return None

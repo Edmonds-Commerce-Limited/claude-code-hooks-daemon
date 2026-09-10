@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.handlers.status_line.thread_registry import (
     _REGISTRY_SUBDIR,
     compute_indicator,
@@ -126,6 +127,35 @@ class MultithreadIndicatorHandler(StatusLineHandlerBase):
     def _now(self) -> float:
         """Return the current epoch time (seam for deterministic tests)."""
         return time.time()
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment; current value is a read-only registry peek.
+
+        Deliberately does NOT call ``upsert_heartbeat`` -- writing a heartbeat
+        for this one-shot CLI invocation would inflate the live thread count
+        real Claude Code sessions see. ``read_live_entries`` alone is safe:
+        it only reads existing heartbeat files.
+        """
+        try:
+            registry_dir = ProjectContext.daemon_untracked_dir() / _REGISTRY_SUBDIR
+            live_count = len(read_live_entries(registry_dir, self._now()))
+            current_value = (
+                f"{live_count} live thread(s) right now "
+                f"({'segment would render' if live_count >= 2 else 'segment silent — need 2+'})."
+            )
+        except (RuntimeError, OSError) as e:
+            logger.debug("Failed to read thread registry for explain_segment: %s", e)
+            current_value = f"Not shown now — could not read the thread registry: {e}"
+        return SegmentExplanation(
+            glyphs=("🧵",),
+            name="Multithread Indicator",
+            what_it_is=(
+                "This session's stable rank among Agent-View threads currently sharing "
+                "the same daemon (backgrounded/forked sessions each render their own bar)."
+            ),
+            how_to_read="🧵 Y/X — this thread is rank Y of X live threads. Silent when alone.",
+            current_value=current_value,
+        )
 
     def get_claude_md(self) -> str | None:
         # Display-only: writes nothing to the session and blocks nothing, so

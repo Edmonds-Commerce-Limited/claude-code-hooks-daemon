@@ -93,10 +93,13 @@ class TestIsHooksDaemonRepo:
 class TestIsHooksDaemonRepoCaching:
     """Tests for the memoisation of is_hooks_daemon_repo (Plan 00155 T1).
 
-    daemon_restart_verifier calls is_hooks_daemon_repo on every Bash
-    PreToolUse; the git-remote fork is ~75% of the Bash-event daemon-side
-    cost. The remote cannot change under a running daemon, so the result is
-    memoised per directory — one fork per daemon lifetime, not one per event.
+    Originally the built-in daemon_restart_verifier handler called
+    is_hooks_daemon_repo on every Bash PreToolUse event; the git-remote fork
+    was ~75% of the Bash-event daemon-side cost. That handler is now a
+    project-level handler (Plan 00370), so no per-event caller remains, but
+    the memoisation stays cheap insurance for any future hot caller: the
+    remote cannot change under a running daemon, so the result is memoised
+    per directory — one fork per daemon lifetime, not one per event.
     """
 
     @pytest.fixture(autouse=True)

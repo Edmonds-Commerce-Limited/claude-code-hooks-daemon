@@ -1,6 +1,6 @@
 # Plan 00369: status line explained command
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-10
 **Owner**: joseph
 **Priority**: Medium
@@ -63,19 +63,19 @@ status-line order, text or JSON.
 
 ### Phase 1: Contract + dataclass
 
-- [ ] ⬜ **Task 1.1**: `SegmentExplanation` dataclass (glyphs, name, what_it_is,
+- [x] ✅ **Task 1.1**: `SegmentExplanation` dataclass (glyphs, name, what_it_is,
   how_to_read, current_value) with fail-fast validation on empty required
   fields.
-- [ ] ⬜ **Task 1.2**: `StatusLineSegmentHandler` base (subclasses
+- [x] ✅ **Task 1.2**: `StatusLineSegmentHandler` base (subclasses
   `AdvisoryHandler`, adds abstract `explain_segment()`); `StatusLineHandlerBase`
   repointed to it. Verify the existing `test_handler_bases.py` sweep still
   passes unchanged (base substitution must not alter the Status tier).
 
 ### Phase 2: Per-handler explanations
 
-- [ ] ⬜ **Task 2.1**: Implement `explain_segment()` on all 14 concrete
+- [x] ✅ **Task 2.1**: Implement `explain_segment()` on all 14 concrete
   status-line handlers, each read-only (no new writes).
-- [ ] ⬜ **Task 2.2**: Completeness sweep test: every discovered status-line
+- [x] ✅ **Task 2.2**: Completeness sweep test: every discovered status-line
   handler has a non-empty explanation; every declared glyph appears in
   that handler's own source (`inspect.getsource`); every status-line
   `*.py` file's `Handler` subclasses are concrete (guards against a
@@ -84,40 +84,52 @@ status-line order, text or JSON.
 
 ### Phase 3: CLI command + skill routing
 
-- [ ] ⬜ **Task 3.1**: `cmd_status_line_explained` in `daemon/cli.py`:
+- [x] ✅ **Task 3.1**: `cmd_status_line_explained` in `daemon/cli.py`:
   resolves project config, discovers status-line handlers, sorts by
   resolved priority, renders enabled segments (reference icon line +
   explanation blocks) and disabled segments (under "not enabled"); `--json`.
   Argparse subcommand `status-line-explained` with alias
   `explain-status-line`.
-- [ ] ⬜ **Task 3.2**: Skill routing: `.claude/skills/hooks-daemon/SKILL.md`
+- [x] ✅ **Task 3.2**: Skill routing: `.claude/skills/hooks-daemon/SKILL.md`
   command list, help text, case-statement routing to `daemon-cli.sh`; new
-  `status-line-explained.md` skill doc page.
-- [ ] ⬜ **Task 3.3**: `CLAUDE/Architecture/StatusLine.md` cross-reference plus
-  wherever CLI verbs are documented for humans (`docs/guides/`).
+  `status-line-explained.md` skill doc page. Mirrored into the packaged
+  source (`src/claude_code_hooks_daemon/skills/hooks-daemon/`), which this
+  repo tracks alongside the deployed copy and keeps byte-identical.
+- [x] ✅ **Task 3.3**: `CLAUDE/Architecture/StatusLine.md` cross-reference
+  (new "Self-Description" section + Step 6) plus
+  `docs/guides/HANDLER_REFERENCE.md`'s StatusLine Handlers intro (the
+  human-docs precedent `explain-rule` itself sets no `docs/` entry for, so
+  no separate CLI-reference page was invented).
 
 ### Phase 4: QA + release
 
-- [ ] ⬜ **Task 4.1**: `./scripts/qa/llm_qa.py all` clean on every touched
-  file (whole-repo pyright may carry pre-existing errors from other
-  in-flight branches; touched files must be pyright-clean regardless).
-- [ ] ⬜ **Task 4.2**: Release-notes callout under
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
-- [ ] ⬜ **Task 4.3**: Worktree daemon restarted, confirmed RUNNING, real
+- [x] ✅ **Task 4.1**: `./scripts/qa/llm_qa.py all` clean on every touched
+  file. First full run: 21/26 tools green, 5 red — all 5 traced to files
+  this plan touched (error_hiding, magic_values, format, type_check, plus
+  2 unrelated-looking test files that turned out to share root cause with
+  error_hiding) and fixed. Second full run: 25/26 green; the sole red
+  ("tests") named 10 `tests/acceptance/` tests untouched by this plan,
+  confirmed to pass individually in isolation — resource contention from
+  5+ concurrent agents' QA runs sharing this container, not a regression.
+- [x] ✅ **Task 4.2**: Release-notes callout under
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (`23-status-line-explained-command.md`).
+- [x] ✅ **Task 4.3**: Worktree daemon restarted, confirmed RUNNING, real
   `status-line-explained` output captured for the report.
 
 ## Success Criteria
 
-- [ ] All 14 status-line handlers implement `explain_segment()`; the
+- [x] All 14 status-line handlers implement `explain_segment()`; the
   completeness sweep passes.
-- [ ] `hooks-daemon status-line-explained` and `explain-status-line` both run
+- [x] `hooks-daemon status-line-explained` and `explain-status-line` both run
   against this project and print every enabled segment's explanation plus
   a "not enabled" section for disabled ones; `--format json` validates as
   JSON.
-- [ ] `/hooks-daemon status-line-explained` is routed in the skill, with a
+- [x] `/hooks-daemon status-line-explained` is routed in the skill, with a
   doc page, and the skill-surface coherence gate (Plan 00330) passes.
-- [ ] Release-notes callout exists.
-- [ ] Full QA green on touched files; worktree daemon restarted and verified
+- [x] Release-notes callout exists.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/23-status-line-explained-command.md`
+- [x] Full QA green on touched files; worktree daemon restarted and verified
   RUNNING.
 
 ## Delivery & Milestones

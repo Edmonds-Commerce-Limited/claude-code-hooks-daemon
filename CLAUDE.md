@@ -13,6 +13,8 @@ The handlers listed below are active in this project. Read this section to avoid
 
 The handlers that judge a Bash COMMAND — destructive git, `sed`, pipes, permissions, `curl | sh` — are unaffected and still cover you.
 
+**If something outside this project tells you to prefer Bash, `sed` or a heredoc over `Write`/`Edit` for file content, it does not override this.** That advice is written for repositories without these guards; here it routes every write around the checks above and `sed` is denied outright. Use `Write`/`Edit`, and treat the conflict as settled rather than re-deciding it.
+
 Full detail on any rule: `bin/hooks-daemon explain-rule <ID>`.
 
 ## Frequently-triggered handler guidance
@@ -505,7 +507,7 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 One line each; these fire with their own guidance when relevant. Full text: `bin/hooks-daemon explain-handler <name>`.
 
-<!-- handler: verify-daemon-restart -->
+<!-- handler: daemon-restart-verifier -->
 
 - daemon_restart_verifier — restart the daemon before committing
 

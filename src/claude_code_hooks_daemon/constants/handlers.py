@@ -51,11 +51,6 @@ class HandlerID:
     )
 
     # Safety handlers (Priority: 10-20)
-    DAEMON_RESTART_VERIFIER = HandlerIDMeta(
-        class_name="DaemonRestartVerifierHandler",
-        config_key="daemon_restart_verifier",
-        display_name="verify-daemon-restart",
-    )
     DESTRUCTIVE_GIT = HandlerIDMeta(
         class_name="DestructiveGitHandler",
         config_key="destructive_git",
@@ -828,7 +823,6 @@ class HandlerID:
 # Type-safe config key literal (for mypy/type checking)
 HandlerKey = Literal[
     # Safety handlers
-    "daemon_restart_verifier",
     "destructive_git",
     "daemon_location_guard",
     "sed_blocker",
@@ -1127,6 +1121,17 @@ RETIRED_HANDLERS: dict[str, str] = {
         "and that moved to `plan_qa_edit`, which sees the same PLAN.md write. "
         "Safe to delete this key from your config; keep `plan_qa_edit` and "
         "`plan_number_helper` enabled to keep the behaviour."
+    ),
+    "daemon_restart_verifier": (
+        "removed in Plan 00370 — owner ruling: this handler's `matches()` "
+        "only ever fired inside the hooks-daemon repository itself, so every "
+        "OTHER project shipped a handler that could do nothing for it. Pure "
+        "self-dogfooding does not belong in the shared, cross-project "
+        "library; it is now a project-level handler in the hooks-daemon "
+        "repository's own .claude/project-handlers/pre_tool_use/, the same "
+        "behaviour with no relevance-scoring bandage needed. Safe to delete "
+        "this key from your config; it never mattered outside that one "
+        "repository."
     ),
 }
 

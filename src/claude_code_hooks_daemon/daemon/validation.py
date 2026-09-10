@@ -28,12 +28,16 @@ class InstallationError(Exception):
 
 
 # Memoisation for is_hooks_daemon_repo (Plan 00155 T1). The result forks
-# `git remote get-url origin`, which daemon_restart_verifier would otherwise
-# run on EVERY Bash PreToolUse event (~1.4 ms p50, ~75% of the Bash-event
-# daemon-side cost). A repo's origin URL cannot change under a running daemon
-# in any way that matters, so the answer is cached per directory — one fork per
-# daemon lifetime instead of one per event. A stale entry would require someone
-# re-pointing `origin` mid-daemon; a restart heals it (see _clear cache below).
+# `git remote get-url origin`. Originally this ran on EVERY Bash PreToolUse
+# event via the built-in daemon_restart_verifier handler (~1.4 ms p50, ~75%
+# of the Bash-event daemon-side cost); that handler is now a project-level
+# handler scoped to this repository (Plan 00370), so the remaining caller
+# (daemon/cli.py's one-shot install/upgrade check) forks git at most once
+# per invocation regardless. The cache stays: a repo's origin URL cannot
+# change under a running daemon in any way that matters, so caching per
+# directory costs nothing and keeps this function cheap for any future
+# per-event caller. A stale entry would require someone re-pointing `origin`
+# mid-daemon; a restart heals it (see _clear cache below).
 _REPO_DETECTION_CACHE: dict[Path, bool] = {}
 
 
@@ -70,10 +74,10 @@ def is_hooks_daemon_repo(directory: Path) -> bool:
     This correctly identifies the hooks-daemon repo even if cloned with a
     different directory name.
 
-    The result is memoised per ``directory`` (Plan 00155 T1) so hot callers
-    such as daemon_restart_verifier fork git at most once per daemon lifetime
-    rather than once per Bash event. Call ``_clear_repo_detection_cache`` to
-    force re-resolution.
+    The result is memoised per ``directory`` (Plan 00155 T1) so a hot,
+    per-event caller forks git at most once per daemon lifetime rather than
+    once per event. Call ``_clear_repo_detection_cache`` to force
+    re-resolution.
 
     Args:
         directory: Directory to check

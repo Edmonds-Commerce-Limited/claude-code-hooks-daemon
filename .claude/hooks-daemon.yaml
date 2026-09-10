@@ -383,10 +383,6 @@ handlers:
       enabled: true
       priority: 23
 
-    daemon_restart_verifier: # Verifies daemon restart after code changes
-      enabled: true
-      priority: 23
-
     # CODE QUALITY HANDLERS (Priority 25-45)
     qa_suppression:        # Unified multi-language QA suppression blocker (11 languages)
       enabled: true

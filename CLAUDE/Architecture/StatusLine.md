@@ -364,6 +364,10 @@ Add to `.claude/hooks-daemon.yaml` under `handlers.status_line`.
 
 Create `tests/handlers/status_line/test_my_element.py` with tests for `matches()` and `handle()`.
 
+### Step 6: Implement `explain_segment()`
+
+Required, not optional -- see "Self-Description" below. Without it the handler is abstract and `HandlerRegistry` silently drops it.
+
 ### Important Rules
 
 - **Always set `terminal=False`** -- terminal handlers would stop the chain and suppress all subsequent status elements.
@@ -371,6 +375,32 @@ Create `tests/handlers/status_line/test_my_element.py` with tests for `matches()
 - **Always fail silently** -- catch all exceptions and return `AdvisoryResult(context=[])`.
 - **Include the `|` separator** in your output fragment.
 - **Priority determines position** -- lower priority = further left in the status line.
+- **Always implement `explain_segment()`** -- see the section below. Omitting it is not a lint warning: `StatusLineHandlerBase` (Plan 00369's `StatusLineSegmentHandler`) declares it abstract, so a handler without one fails to INSTANTIATE and silently vanishes from `HandlerRegistry` discovery -- no crash, no log, just a missing status segment.
+
+---
+
+## Self-Description (`explain_segment()`, Plan 00369)
+
+Every concrete status-line handler also implements `explain_segment() -> SegmentExplanation` (`core/segment_explanation.py`), a second, deliberately READ-ONLY method distinct from `handle()`:
+
+```python
+@dataclass(frozen=True, slots=True)
+class SegmentExplanation:
+    glyphs: tuple[str, ...]      # every character/emoji this segment can render (may be empty)
+    name: str                    # short human name, e.g. "Current Time"
+    what_it_is: str              # 1-2 sentences, in general
+    how_to_read: str             # what the values/variants mean
+    current_value: str           # this project's current value, or why it is not shown now
+```
+
+**Why a second method, not just documentation in `handle()`'s docstring**: `hooks-daemon status-line-explained` (the CLI verb backing `/hooks-daemon status-line-explained`) needs a LIVE, per-project answer -- "what does 🧹 mean, and why is it showing `1 stale` right now" -- which only code can compute, not a static docstring. It is a separate method rather than a mode of `handle()` because `handle()` is allowed to WRITE state (`ContextSidecarHandler`'s sidecar, `MultithreadIndicatorHandler`'s heartbeat, `DowngradeIndicatorHandler`'s counters) and `explain_segment()` must never do that: it runs from a one-shot CLI process outside any real render, so a write there would corrupt state a REAL session's status line depends on (e.g. inflating the live `🧵 Y/X` thread count with a synthetic CLI-session heartbeat). Handlers with such a write path compute `current_value` from a read-only peek at the same on-disk state `handle()` would read (or, for `MultithreadIndicatorHandler`, the read-only half of `thread_registry` directly), never by calling `handle()`.
+
+**What `current_value` says when it cannot know**: several segments (model name, context %, effort, the working-directory diff, an active downgrade, the live multithread count) only have a real value inside hook_input fields a live Claude Code render supplies -- a plain CLI invocation has none of them. Those report `current_value` as "not shown now" with the reason, rather than fabricate one.
+
+**Completeness is enforced**, not just conventional:
+`tests/unit/handlers/status_line/test_explain_segment_completeness.py` iterates the discovered status-line handler registry and asserts (1) every handler returns a non-empty `SegmentExplanation`, (2) every declared glyph appears in that handler's own MODULE source (not just its class body -- glyphs are usually module-level constants referenced by name), and (3) no `Handler` subclass in any status-line module is abstract -- the direct guard against the "silently vanishes from discovery" failure mode above.
+
+**The CLI command**: `hooks-daemon status-line-explained` (alias `explain-status-line`; skill: `/hooks-daemon status-line-explained`) discovers every status-line handler, resolves each one's enabled/priority state from the project's `hooks-daemon.yaml` the same way `register_all` would, and renders a REFERENCE icon line (every enabled segment's glyphs, joined -- explicitly not a live render replay, for the reason above) followed by each segment's `what_it_is`/`how_to_read`/`current_value`, plus a `Not enabled:` section for disabled handlers. `--format json` emits the same data as a JSON array. See `docs/guides/HANDLER_REFERENCE.md`'s StatusLine Handlers section and the skill's `status-line-explained.md`.
 
 ---
 

@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.core import (
     get_data_layer,
 )
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
+from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.daemon.controller import get_controller
 
 psutil: ModuleType | None
@@ -112,6 +113,33 @@ class DaemonStatsHandler(StatusLineHandlerBase):
             # Fail silently - don't break status line
 
         return AdvisoryResult(context=parts)
+
+    def explain_segment(self) -> SegmentExplanation:
+        """Describe this segment.
+
+        Deliberately does not call ``get_controller()``: that returns an
+        in-process controller scoped to THIS one-shot CLI invocation, whose
+        uptime would misleadingly read as near-zero rather than the real,
+        separately-running daemon's uptime. ``bin/hooks-daemon status`` talks
+        to the live daemon over its socket and is the accurate source.
+        """
+        return SegmentExplanation(
+            glyphs=("🪝", "❌", "🛡️"),
+            name="Daemon Stats",
+            what_it_is=(
+                "Developer-facing daemon health: uptime, memory (if psutil is "
+                "installed), log level, error count, and cumulative block count."
+            ),
+            how_to_read=(
+                "🪝 {uptime}{memory} : {log level}, then : ❌ N err if any errors have "
+                "occurred, then : 🛡️ N blocks if any Bash/Write/Edit was ever blocked."
+            ),
+            current_value=(
+                "Off by default (opt-in, developer diagnostics), overridable via config. "
+                "Live values require the separately-running daemon; see "
+                "`bin/hooks-daemon status`."
+            ),
+        )
 
     def get_claude_md(self) -> str | None:
         return None

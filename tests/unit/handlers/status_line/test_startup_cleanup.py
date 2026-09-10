@@ -209,3 +209,46 @@ class TestTheReadIsMtimeGated:
             os.utime(status_file, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
 
             assert handler.handle({}).context == ["| 🧹"]
+
+
+class TestTheExplanationSaysWhichSilentCaseThisIs:
+    """The point of the verb is to say what the CURRENT value means.
+
+    "Not shown now — the window expired, or nothing was cleaned" names two
+    mutually exclusive causes and commits to neither, which leaves the reader
+    exactly where they started. The handler holds both the timestamp and the
+    count, so it can always say which one applies.
+    """
+
+    def _explain(self, tmp_path: Path, payload: dict[str, Any] | None) -> str:
+        if payload is not None:
+            (tmp_path / "cleanup_status.json").write_text(json.dumps(payload))
+        with patch(
+            "claude_code_hooks_daemon.handlers.status_line.startup_cleanup.ProjectContext.daemon_untracked_dir",
+            return_value=tmp_path,
+        ):
+            return StartupCleanupHandler().explain_segment().current_value
+
+    def test_an_expired_window_says_so_and_reports_that_start_s_count(self, tmp_path: Path) -> None:
+        value = self._explain(tmp_path, {"count": 5, "timestamp": time.time() - 60})
+        assert "window is 30s" in value
+        assert "5 stale file(s)" in value
+        assert " or " not in value
+
+    def test_a_live_window_with_nothing_cleaned_says_nothing_was_cleaned(
+        self, tmp_path: Path
+    ) -> None:
+        value = self._explain(tmp_path, {"count": 0, "timestamp": time.time() - 10})
+        assert "cleaned nothing" in value
+        assert "window is still open" in value
+        assert " or " not in value
+
+    def test_a_live_window_with_files_cleaned_reports_the_count(self, tmp_path: Path) -> None:
+        value = self._explain(tmp_path, {"count": 7, "timestamp": time.time() - 10})
+        assert "🧹 7 stale" in value
+
+    def test_no_recorded_status_is_not_reported_as_an_ancient_start(self, tmp_path: Path) -> None:
+        """A missing file leaves timestamp at 0.0, i.e. 1970 — never say "1789000000s ago"."""
+        value = self._explain(tmp_path, None)
+        assert "no cleanup status yet" in value
+        assert "s ago" not in value
