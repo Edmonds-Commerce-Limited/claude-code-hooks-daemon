@@ -74,8 +74,8 @@ class TestConfigKeyInjectionInRouter:
         result = router.route(EventType.PRE_TOOL_USE, {"tool_name": "Bash"})
 
         assert result.result.decision == Decision.DENY
-        assert "To disable: handlers.pre_tool_use.destructive_git" in result.result.reason
-        assert "(set enabled: false)" in result.result.reason
+        assert "To disable: handlers.pre_tool_use.destructive_git" in (result.result.reason or "")
+        assert "(set enabled: false)" in (result.result.reason or "")
 
     def test_ask_result_includes_config_path(self) -> None:
         """ASK result should include config path footer in reason."""
@@ -90,8 +90,8 @@ class TestConfigKeyInjectionInRouter:
         result = router.route(EventType.PRE_TOOL_USE, {"tool_name": "Bash"})
 
         assert result.result.decision == Decision.ASK
-        assert "To disable: handlers.pre_tool_use.risky_command" in result.result.reason
-        assert "(set enabled: false)" in result.result.reason
+        assert "To disable: handlers.pre_tool_use.risky_command" in (result.result.reason or "")
+        assert "(set enabled: false)" in (result.result.reason or "")
 
     def test_allow_result_does_not_include_config_path(self) -> None:
         """ALLOW result should NOT include config path footer."""
@@ -120,7 +120,7 @@ class TestConfigKeyInjectionInRouter:
 
         result = router.route(EventType.PRE_TOOL_USE, {"tool_name": "Bash"})
 
-        assert "handlers.pre_tool_use.sed_blocker" in result.result.reason
+        assert "handlers.pre_tool_use.sed_blocker" in (result.result.reason or "")
 
     def test_config_path_format_post_tool_use(self) -> None:
         """Config path should use handlers.post_tool_use.{config_key} format."""
@@ -134,7 +134,7 @@ class TestConfigKeyInjectionInRouter:
 
         result = router.route(EventType.POST_TOOL_USE, {"tool_name": "Bash"})
 
-        assert "handlers.post_tool_use.validate_eslint" in result.result.reason
+        assert "handlers.post_tool_use.validate_eslint" in (result.result.reason or "")
 
     def test_config_path_format_session_start(self) -> None:
         """Config path should use handlers.session_start.{config_key} format."""
@@ -148,7 +148,7 @@ class TestConfigKeyInjectionInRouter:
 
         result = router.route(EventType.SESSION_START, {})
 
-        assert "handlers.session_start.yolo_detection" in result.result.reason
+        assert "handlers.session_start.yolo_detection" in (result.result.reason or "")
 
     def test_config_path_format_stop(self) -> None:
         """Config path should use handlers.stop.{config_key} format."""
@@ -162,7 +162,7 @@ class TestConfigKeyInjectionInRouter:
 
         result = router.route(EventType.STOP, {})
 
-        assert "handlers.stop.stop_guard" in result.result.reason
+        assert "handlers.stop.stop_guard" in (result.result.reason or "")
 
     def test_deny_with_none_reason_gets_config_path(self) -> None:
         """DENY with None reason should still get config path footer."""
@@ -177,8 +177,8 @@ class TestConfigKeyInjectionInRouter:
         result = router.route(EventType.PRE_TOOL_USE, {"tool_name": "Bash"})
 
         assert result.result.decision == Decision.DENY
-        assert "To disable: handlers.pre_tool_use.strict_handler" in result.result.reason
-        assert "(set enabled: false)" in result.result.reason
+        assert "To disable: handlers.pre_tool_use.strict_handler" in (result.result.reason or "")
+        assert "(set enabled: false)" in (result.result.reason or "")
 
     def test_footer_separated_by_blank_line(self) -> None:
         """Footer should be separated from original reason by a blank line."""
@@ -193,7 +193,7 @@ class TestConfigKeyInjectionInRouter:
         result = router.route(EventType.PRE_TOOL_USE, {"tool_name": "Bash"})
 
         # Should have blank line between original reason and footer
-        assert "Original reason\n\nTo disable:" in result.result.reason
+        assert "Original reason\n\nTo disable:" in (result.result.reason or "")
 
     def test_non_terminal_deny_gets_config_path(self) -> None:
         """Non-terminal handler DENY result should also get config path."""
@@ -208,7 +208,7 @@ class TestConfigKeyInjectionInRouter:
         result = router.route(EventType.PRE_TOOL_USE, {"tool_name": "Bash"})
 
         assert result.result.decision == Decision.DENY
-        assert "To disable: handlers.pre_tool_use.advisory_handler" in result.result.reason
+        assert "To disable: handlers.pre_tool_use.advisory_handler" in (result.result.reason or "")
 
     def test_config_key_uses_handler_config_key_attribute(self) -> None:
         """Should use handler's config_key attribute, not handler name."""
@@ -224,7 +224,7 @@ class TestConfigKeyInjectionInRouter:
         result = router.route(EventType.PRE_TOOL_USE, {"tool_name": "Bash"})
 
         # config_key converts hyphens to underscores
-        assert "handlers.pre_tool_use.my_handler" in result.result.reason
+        assert "handlers.pre_tool_use.my_handler" in (result.result.reason or "")
 
     def test_route_by_string_also_injects_config_path(self) -> None:
         """route_by_string should also inject config path."""
@@ -239,7 +239,7 @@ class TestConfigKeyInjectionInRouter:
         result = router.route_by_string("PreToolUse", {"tool_name": "Bash"})
 
         assert result.decision == Decision.DENY
-        assert "To disable: handlers.pre_tool_use.test_handler" in result.reason
+        assert "To disable: handlers.pre_tool_use.test_handler" in (result.reason or "")
 
     def test_allow_with_reason_not_modified(self) -> None:
         """ALLOW result with a reason should NOT get config path footer."""
@@ -288,8 +288,8 @@ class TestConfigKeyInjectionInFrontController:
         result = fc.dispatch({"tool_name": "Bash"})
 
         assert result.decision == Decision.DENY
-        assert "To disable: handlers.pre_tool_use.destructive_git" in result.reason
-        assert "(set enabled: false)" in result.reason
+        assert "To disable: handlers.pre_tool_use.destructive_git" in (result.reason or "")
+        assert "(set enabled: false)" in (result.reason or "")
 
     def test_allow_result_not_modified(self) -> None:
         """FrontController ALLOW result should NOT be modified."""
@@ -323,7 +323,7 @@ class TestConfigKeyInjectionInFrontController:
         result = fc.dispatch({"tool_name": "Bash"})
 
         assert result.decision == Decision.ASK
-        assert "To disable: handlers.post_tool_use.confirm_handler" in result.reason
+        assert "To disable: handlers.post_tool_use.confirm_handler" in (result.reason or "")
 
     def test_deny_with_none_reason(self) -> None:
         """FrontController DENY with None reason should get config path."""
@@ -340,4 +340,4 @@ class TestConfigKeyInjectionInFrontController:
         result = fc.dispatch({"tool_name": "Bash"})
 
         assert result.decision == Decision.DENY
-        assert "To disable: handlers.pre_tool_use.strict_handler" in result.reason
+        assert "To disable: handlers.pre_tool_use.strict_handler" in (result.reason or "")

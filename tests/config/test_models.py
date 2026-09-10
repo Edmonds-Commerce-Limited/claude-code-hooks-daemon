@@ -4,7 +4,9 @@ Tests all Pydantic models, validation, serialization, and configuration loading.
 """
 
 import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -128,24 +130,25 @@ class TestEventHandlersConfig:
     def test_get_handler_returns_existing_config(self) -> None:
         """get_handler returns existing HandlerConfig instance."""
         handler_config = HandlerConfig(enabled=False, priority=30)
-        config = EventHandlersConfig()
-        config.test_handler = handler_config
+        # model_validate, not a direct attribute assignment: "test_handler" is
+        # a dynamic extra attribute (model_config extra="allow"), not a
+        # declared field, so pyright's synthesized class has no such attribute
+        # to assign to.
+        config = EventHandlersConfig.model_validate({"test_handler": handler_config})
 
         retrieved = config.get_handler("test_handler")
         assert retrieved is handler_config
 
     def test_get_handler_handles_none_value(self) -> None:
         """get_handler returns default when attribute is None."""
-        config = EventHandlersConfig()
-        config.handler = None
+        config = EventHandlersConfig.model_validate({"handler": None})
         handler_config = config.get_handler("handler")
         assert isinstance(handler_config, HandlerConfig)
         assert handler_config.enabled is True
 
     def test_get_handler_handles_invalid_type(self) -> None:
         """get_handler returns default for invalid attribute type."""
-        config = EventHandlersConfig()
-        config.handler = "invalid"
+        config = EventHandlersConfig.model_validate({"handler": "invalid"})
         handler_config = config.get_handler("handler")
         assert isinstance(handler_config, HandlerConfig)
 
@@ -417,7 +420,13 @@ class TestPluginConfig:
 
     def test_default_values(self) -> None:
         """PluginConfig has correct defaults for optional fields."""
-        config = PluginConfig(path="path/to/plugin", event_type=EventID.PRE_TOOL_USE.config_key)
+        # model_validate, not the typed constructor: EventID.X.config_key is a
+        # plain str (event_type's real, dynamically-validated wired-event
+        # contract -- see PluginConfig.event_type's field docstring), which
+        # the static EventKey Literal union does not cover.
+        config = PluginConfig.model_validate(
+            {"path": "path/to/plugin", "event_type": EventID.PRE_TOOL_USE.config_key}
+        )
         assert config.path == "path/to/plugin"
         assert config.event_type == EventID.PRE_TOOL_USE.config_key
         assert config.handlers is None
@@ -425,11 +434,13 @@ class TestPluginConfig:
 
     def test_can_set_all_fields(self) -> None:
         """Can set all PluginConfig fields."""
-        config = PluginConfig(
-            path="custom/path",
-            event_type=EventID.POST_TOOL_USE.config_key,
-            handlers=["Handler1", "Handler2"],
-            enabled=False,
+        config = PluginConfig.model_validate(
+            {
+                "path": "custom/path",
+                "event_type": EventID.POST_TOOL_USE.config_key,
+                "handlers": ["Handler1", "Handler2"],
+                "enabled": False,
+            }
         )
         assert config.path == "custom/path"
         assert config.event_type == EventID.POST_TOOL_USE.config_key
@@ -472,7 +483,7 @@ class TestPluginConfig:
 
         for event_type in invalid_event_types:
             with pytest.raises(ValidationError, match="event_type"):
-                PluginConfig(path="path", event_type=event_type)
+                PluginConfig.model_validate({"path": "path", "event_type": event_type})
 
     def test_extra_fields_allowed(self) -> None:
         """PluginConfig allows extra fields."""
@@ -492,7 +503,9 @@ class TestPluginConfig:
         repository -- see ``PluginConfig.path``'s field description for the
         full rationale.
         """
-        config = PluginConfig(path="/abs/plugin", event_type=EventID.PRE_TOOL_USE.config_key)
+        config = PluginConfig.model_validate(
+            {"path": "/abs/plugin", "event_type": EventID.PRE_TOOL_USE.config_key}
+        )
         assert config.path == "/abs/plugin"
         assert config.event_type == EventID.PRE_TOOL_USE.config_key
 
@@ -520,9 +533,15 @@ class TestPluginsConfig:
         """Can set plugin configurations."""
         config = PluginsConfig(
             plugins=[
-                PluginConfig(path="plugin1", event_type=EventID.PRE_TOOL_USE.config_key),
-                PluginConfig(
-                    path="plugin2", event_type=EventID.POST_TOOL_USE.config_key, enabled=False
+                PluginConfig.model_validate(
+                    {"path": "plugin1", "event_type": EventID.PRE_TOOL_USE.config_key}
+                ),
+                PluginConfig.model_validate(
+                    {
+                        "path": "plugin2",
+                        "event_type": EventID.POST_TOOL_USE.config_key,
+                        "enabled": False,
+                    }
                 ),
             ]
         )
@@ -1361,7 +1380,15 @@ class TestMigratePlanHandlerOptions:
         object.__setattr__(config.handlers, "pre_tool_use", raw_pre_tool_use)
         # Clear model_fields_set so plan_workflow is not considered explicitly set
         object.__setattr__(config, "__pydantic_fields_set__", set())
-        result = config.migrate_plan_handler_options()
+        # @model_validator(mode="after")'s own type stub types the decorated
+        # attribute as PydanticDescriptorProxy (pydantic's public typing
+        # contract, not a pyright gap -- see functional_validators.pyi),
+        # which has no __call__, even though pydantic's metaclass replaces it
+        # with the plain bound method by the time the class exists at
+        # runtime. Cast the attribute reference (not the call result) to the
+        # callable it actually is, then call it exactly as before.
+        migrate = cast("Callable[[], Config]", config.migrate_plan_handler_options)
+        result = migrate()
         assert result.plan_workflow.enabled is True
         assert result.plan_workflow.directory == "my/plans"
         assert result.plan_workflow.workflow_docs == "docs/MY_WORKFLOW.md"
@@ -1374,7 +1401,15 @@ class TestMigratePlanHandlerOptions:
         }
         object.__setattr__(config.handlers, "pre_tool_use", raw_pre_tool_use)
         object.__setattr__(config, "__pydantic_fields_set__", set())
-        result = config.migrate_plan_handler_options()
+        # @model_validator(mode="after")'s own type stub types the decorated
+        # attribute as PydanticDescriptorProxy (pydantic's public typing
+        # contract, not a pyright gap -- see functional_validators.pyi),
+        # which has no __call__, even though pydantic's metaclass replaces it
+        # with the plain bound method by the time the class exists at
+        # runtime. Cast the attribute reference (not the call result) to the
+        # callable it actually is, then call it exactly as before.
+        migrate = cast("Callable[[], Config]", config.migrate_plan_handler_options)
+        result = migrate()
         # No track_plans_in_project, so no migration
         assert result.plan_workflow.directory == "CLAUDE/Plan"
 
@@ -1386,7 +1421,15 @@ class TestMigratePlanHandlerOptions:
         }
         object.__setattr__(config.handlers, "pre_tool_use", raw_pre_tool_use)
         object.__setattr__(config, "__pydantic_fields_set__", set())
-        result = config.migrate_plan_handler_options()
+        # @model_validator(mode="after")'s own type stub types the decorated
+        # attribute as PydanticDescriptorProxy (pydantic's public typing
+        # contract, not a pyright gap -- see functional_validators.pyi),
+        # which has no __call__, even though pydantic's metaclass replaces it
+        # with the plain bound method by the time the class exists at
+        # runtime. Cast the attribute reference (not the call result) to the
+        # callable it actually is, then call it exactly as before.
+        migrate = cast("Callable[[], Config]", config.migrate_plan_handler_options)
+        result = migrate()
         assert result.plan_workflow.directory == "CLAUDE/Plan"
 
 
@@ -1402,7 +1445,12 @@ class TestValidateHandlerDependencies:
         handlers_config = HandlersConfig()
         object.__setattr__(handlers_config, "pre_tool_use", "not_a_dict")
         # Manually trigger validation - should not raise
-        result = handlers_config.validate_handler_dependencies()
+        # See the migrate_plan_handler_options comment above: same
+        # PydanticDescriptorProxy stub-typing gap for @model_validator.
+        validate = cast(
+            "Callable[[], HandlersConfig]", handlers_config.validate_handler_dependencies
+        )
+        result = validate()
         assert result is handlers_config
 
     def test_handler_config_object_enabled_check(self) -> None:
@@ -1456,7 +1504,12 @@ class TestValidateHandlerDependencies:
             "pre_tool_use",
             {"destructive_git": {"enabled": True}},
         )
-        result = handlers_config.validate_handler_dependencies()
+        # See the migrate_plan_handler_options comment above: same
+        # PydanticDescriptorProxy stub-typing gap for @model_validator.
+        validate = cast(
+            "Callable[[], HandlersConfig]", handlers_config.validate_handler_dependencies
+        )
+        result = validate()
         assert result is handlers_config
 
     def test_dict_format_disabled_handler_skipped(self) -> None:
@@ -1467,7 +1520,12 @@ class TestValidateHandlerDependencies:
             "pre_tool_use",
             {"destructive_git": {"enabled": False}},
         )
-        result = handlers_config.validate_handler_dependencies()
+        # See the migrate_plan_handler_options comment above: same
+        # PydanticDescriptorProxy stub-typing gap for @model_validator.
+        validate = cast(
+            "Callable[[], HandlersConfig]", handlers_config.validate_handler_dependencies
+        )
+        result = validate()
         assert result is handlers_config
 
     def test_bare_value_handler_config_else_branch(self) -> None:
@@ -1478,7 +1536,12 @@ class TestValidateHandlerDependencies:
             "pre_tool_use",
             {"destructive_git": True},
         )
-        result = handlers_config.validate_handler_dependencies()
+        # See the migrate_plan_handler_options comment above: same
+        # PydanticDescriptorProxy stub-typing gap for @model_validator.
+        validate = cast(
+            "Callable[[], HandlersConfig]", handlers_config.validate_handler_dependencies
+        )
+        result = validate()
         assert result is handlers_config
 
     def test_status_line_included_in_dependency_loop(self) -> None:
@@ -1495,7 +1558,12 @@ class TestValidateHandlerDependencies:
             EventID.STATUS_LINE.config_key,
             {"git_branch": {"enabled": True}},
         )
-        result = handlers_config.validate_handler_dependencies()
+        # See the migrate_plan_handler_options comment above: same
+        # PydanticDescriptorProxy stub-typing gap for @model_validator.
+        validate = cast(
+            "Callable[[], HandlersConfig]", handlers_config.validate_handler_dependencies
+        )
+        result = validate()
         assert result is handlers_config
 
     def test_handler_instantiation_failure_skipped(self) -> None:
@@ -1521,5 +1589,8 @@ class TestValidateHandlerDependencies:
                 "pre_tool_use",
                 {"destructive_git": {"enabled": True}},
             )
-            result = handlers_config.validate_handler_dependencies()
+            validate = cast(
+                "Callable[[], HandlersConfig]", handlers_config.validate_handler_dependencies
+            )
+            result = validate()
             assert result is handlers_config
