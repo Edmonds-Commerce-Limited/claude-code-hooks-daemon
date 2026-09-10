@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 _DAEMON_METADATA_FILENAME = ".daemon-metadata.json"
 _LOCK_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-_DAEMON_VERSION_RE = re.compile(r"^v\d+\.\d+\.\d+$")
+# ``vX.Y.Z`` for a release; ``vX.Y.Z+<ref>.<sha>`` for a guarded branch install
+# (Plan 00291) -- see ``install.install_stamp`` for the reader of that suffix.
+_DAEMON_VERSION_RE = re.compile(r"^v\d+\.\d+\.\d+(\+[0-9A-Za-z._-]+)?$")
 
 
 class DaemonVenvMetadata(BaseModel):
@@ -61,7 +63,9 @@ class DaemonVenvMetadata(BaseModel):
     @classmethod
     def _daemon_version_must_be_v_prefixed(cls, value: str) -> str:
         if not _DAEMON_VERSION_RE.fullmatch(value):
-            raise ValueError("daemon_version must match 'vMAJOR.MINOR.PATCH'")
+            raise ValueError(
+                "daemon_version must match 'vMAJOR.MINOR.PATCH' or 'vMAJOR.MINOR.PATCH+<ref>.<sha>'"
+            )
         return value
 
     @field_validator("written_at")
