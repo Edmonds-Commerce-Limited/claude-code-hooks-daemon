@@ -7,6 +7,7 @@ import pytest
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.relevance import RelevanceContext
 from claude_code_hooks_daemon.handlers.pre_tool_use.daemon_restart_verifier import (
     DaemonRestartVerifierHandler,
 )
@@ -194,3 +195,34 @@ def test_get_acceptance_tests() -> None:
     assert tests[0].title is not None
     assert tests[0].command is not None
     assert tests[0].expected_decision == Decision.ALLOW
+
+
+class TestRelevance:
+    """The handler only ever fires inside the hooks daemon repository, so the
+    optimise review must not score it as a shortfall anywhere else."""
+
+    def test_not_applicable_in_a_client_project(self, tmp_path: Path) -> None:
+        handler = DaemonRestartVerifierHandler()
+        context = RelevanceContext.probe(tmp_path)
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.daemon_restart_verifier.is_hooks_daemon_repo",
+            return_value=False,
+        ) as probe:
+            verdict = handler.get_relevance(context)
+
+        probe.assert_called_once_with(tmp_path)
+        assert verdict.applicable is False
+        assert "hooks daemon repository" in verdict.reason
+
+    def test_applicable_in_the_hooks_daemon_repository(self, tmp_path: Path) -> None:
+        handler = DaemonRestartVerifierHandler()
+        context = RelevanceContext.probe(tmp_path)
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.daemon_restart_verifier.is_hooks_daemon_repo",
+            return_value=True,
+        ):
+            verdict = handler.get_relevance(context)
+
+        assert verdict.applicable is True

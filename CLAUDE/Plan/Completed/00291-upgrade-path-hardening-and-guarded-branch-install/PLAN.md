@@ -1,6 +1,6 @@
 # Plan 00291: upgrade path hardening and guarded branch install
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-30
 **Owner**: joseph
 **Priority**: Medium
@@ -167,12 +167,9 @@ agent thread, as the final confirmation step AFTER a release ships.
   canary-found bugs), both staged under
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 - [x] ✅ Full QA passes (`llm_qa.py all`: 26/26 PASSED).
-- [ ] ⬜ Plan folder moved to `Completed/`, the README row/stats updated, and
-  the status header flipped to `Complete` — atomic per this repo's own plan
-  lifecycle rule (`CLAUDE/Plan/CLAUDE.md`, `terminal-state-atomic`), which
-  this worktree branch deliberately leaves to the coordinating session on
-  `main` rather than editing the shared `CLAUDE/Plan/README.md` from a
-  worktree branch.
+- [x] ✅ Plan folder moved to `Completed/`, the README row/stats updated, and
+  the status header flipped to `Complete` in one commit on `main` after the
+  branch merge (`f0896ced`).
 
 ## Delivery & Milestones
 

@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import record_new_plan_document
+from claude_code_hooks_daemon.handlers.utils.would_be_content import would_be_content
 from claude_code_hooks_daemon.plan_qa.context import edit_context
 from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME, README_FILENAME
 from claude_code_hooks_daemon.plan_qa.remedy import remedy_sentence
@@ -66,12 +67,6 @@ _EDIT_MODE_BLOCK: Final[str] = "block"
 _EDIT_MODE_OFF: Final[str] = "off"
 
 _FIELD_FILE_PATH: Final[str] = "file_path"
-_FIELD_CONTENT: Final[str] = "content"
-_FIELD_OLD_STRING: Final[str] = "old_string"
-_FIELD_NEW_STRING: Final[str] = "new_string"
-_FIELD_REPLACE_ALL: Final[str] = "replace_all"
-
-_SINGLE_REPLACEMENT: Final[int] = 1
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _JOURNAL_MODE_OFF: Final[str] = "off"
@@ -284,21 +279,9 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
         Edit then skips: applying ``old_string`` needs the current text, which
         by definition cannot be read, so there is nothing to lint.
         """
-        tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
-        if hook_input.get(HookInputField.TOOL_NAME) == ToolName.WRITE:
-            raw: Any = tool_input.get(_FIELD_CONTENT, "")
-            return str(raw)
-
-        if not exists_before:
-            return None
-        old_string = str(tool_input.get(_FIELD_OLD_STRING, ""))
-        new_string = str(tool_input.get(_FIELD_NEW_STRING, ""))
-        current = file_path.read_text(encoding="utf-8")
-        if not old_string or old_string not in current:
-            return None
-        if bool(tool_input.get(_FIELD_REPLACE_ALL, False)):
-            return current.replace(old_string, new_string)
-        return current.replace(old_string, new_string, _SINGLE_REPLACEMENT)
+        is_write = hook_input.get(HookInputField.TOOL_NAME) == ToolName.WRITE
+        current = file_path.read_text(encoding="utf-8") if exists_before and not is_write else None
+        return would_be_content(hook_input, current=current)
 
     @staticmethod
     def _advisory_result(findings: list[Finding]) -> GatingResult:

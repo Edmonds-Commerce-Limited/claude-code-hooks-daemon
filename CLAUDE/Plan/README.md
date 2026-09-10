@@ -6,11 +6,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00368: lsp is signal not noise](00368-lsp-is-signal-not-noise/PLAN.md) - In Progress (the language server analysed every worktree under `untracked/` and flooded the agent's context with other checkouts' errors; the exclude is in, and pyright becomes a zero-error QA gate with a session-start checker for a missing exclude or a stale server)
 
-- [00367: deployed docs in sync with daemon workflow](00367-deployed-docs-in-sync-with-daemon-workflow/PLAN.md) - In Progress (the deployed plan-workflow core doc told agents to ask for human approval before closing a plan while nothing enforced it; DBF net `unenforced-approval-gate` found 14 such instructions, and closing becomes a real opt-in gate `plan_workflow.close_requires_human_approval`, default off)
-
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
-
-- [00291: upgrade path hardening and guarded branch install](00291-upgrade-path-hardening-and-guarded-branch-install/PLAN.md) - In Progress (php-qa-ci canary findings: fresh-clone `upgrade_version.sh` hard-fail, UNRELEASED-manifest visibility, silent old-config retention, `v`-prefix handling — plus the owner-ruled guarded, non-obvious, loudly-warned first-party-only branch-install mechanism)
 
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
 
@@ -25,6 +21,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00204: security_antipattern — the three data-flow categories](00204-security-antipattern-dataflow-categories/PLAN.md) - Not Started (v3.52.0 corrected guidance that claimed SQL injection, weak cryptography and path traversal were blocked when no strategy implements any of them; this decides whether construct-level regexes can carry signal for them without the false-positive rate that gets a handler disabled.)
 
 ### Status Line / Agent View
+
+- [00369: status line explained command](00369-status-line-explained-command/PLAN.md) - Not Started (field report: "🧹 1 stale — i have forgotten what this means" — every status-line handler gains a self-describing `explain_segment()`, surfaced by a new `hooks-daemon status-line-explained` CLI verb routed through the skill)
 
 - [00175: statusline refreshInterval first-class default + startup validation](00175-statusline-refresh-interval-first-class/PLAN.md) - Dormant, part-shipped (root-caused the Ctrl+Z notice lag to `statusLine.refreshInterval: 10` — Claude Code re-runs the status command only on events (Ctrl+Z is not one) plus this optional timer whose minimum is 1s, so an …)
 
@@ -84,6 +82,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Handler UX Adjustments
 
+- [00370: daemon restart verifier becomes a project handler](00370-daemon-restart-verifier-becomes-a-project-handler/PLAN.md) - Not Started (owner ruling: `daemon_restart_verifier` only ever fires inside the hooks-daemon repository itself — pure self-dogfooding that never belonged in the shared built-in library — removed entirely and re-homed as a project handler under `.claude/project-handlers/`, this repo's own reference example of that surface)
+
 - Dogfooding alert: agent stalled twice asking tautological questions ("Should I push?"); the prefix-positive `ask_user_question_blocker` (Plan 00108 / v3.14.0) was shipped `enabled: false` so it never fired
 
 - Phase 1 DONE: enabled in this project's config, daemon restarted, live probe confirms unprefixed AskUserQuestion is denied with `ASKING BECAUSE:` guidance
@@ -118,6 +118,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00367: deployed docs in sync with daemon workflow](Completed/00367-deployed-docs-in-sync-with-daemon-workflow/PLAN.md) - Complete + the archiving commit (a deployed core doc that told agents a human must approve a step no config key backs is now blocked by the `unenforced-approval-gate` docs-QA check, and both gates became real opt-in keys, default off)
 
 - [00366: supervisor own line follow up](Completed/00366-supervisor-own-line-follow-up/PLAN.md) - Complete + the archiving commit (an armed `/goal` pasted mid-turn was never submitted and sat in the input box for eight hours; the supervisor now remembers its own typed line, presses Enter for it at the next lull, holds the text families while it is pending, and the goal cap is a rolling hour rather than a process lifetime)
 
@@ -228,9 +230,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 368 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 370 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 328 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 330 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
 - **Active**: 17 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
@@ -238,17 +240,17 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 17 + 328 + 13 = **358 folders**, spanning
-  **355 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 17 + 330 + 13 = **360 folders**, spanning
+  **357 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  368 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  370 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  355 + 13 = 368. ✅
+  357 + 13 = 370. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267

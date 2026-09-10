@@ -251,7 +251,9 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 - Run full QA in parent worktree after all merges
 - **Run Honesty Checker one final time on parent worktree** (verify integration)
 - Sync parent with main (`git merge main --no-edit`) BEFORE merging to main
-- Ask human for approval before merging parent → main
+- Merge parent → main once verification passes (a project that sets
+  `worktree.merge_to_main_requires_human_approval: true` has the daemon deny
+  that merge until a human runs `hooks-daemon approve-merge <branch>`)
 
 **Don't:**
 
@@ -1115,7 +1117,7 @@ cd /workspace/untracked/worktrees/worktree-plan-NNNNN
 ./scripts/qa/llm_qa.py all  # Verify integration works
 ```
 
-### Parent → Main Project (REQUIRES FINAL HONESTY CHECK + HUMAN APPROVAL)
+### Parent → Main Project (REQUIRES FINAL HONESTY CHECK; HUMAN APPROVAL IS OPT-IN)
 
 **CRITICAL MERGE ORDER**: ALWAYS `main → worktree` FIRST, then `worktree → main`.
 
@@ -1172,18 +1174,19 @@ cd /workspace
 git status  # MUST show "nothing to commit, working tree clean"
 
 # ===================================================================
-# STEP 4: ASK HUMAN FOR APPROVAL (MANDATORY!)
+# STEP 4: CONFIRM READY TO MERGE
 # ===================================================================
-# Present to human:
+# Confirmed:
 #   - Final Honesty Checker approved merge
 #   - All child branches verified through 4 gates
 #   - Main workspace is clean
 #   - QA passes in parent worktree
-#   - Safe to merge now?
-# WAIT FOR EXPLICIT "YES" BEFORE PROCEEDING
+# With `worktree.merge_to_main_requires_human_approval: true`, STEP 5 below
+# is denied until a human runs `hooks-daemon approve-merge <branch>` — report
+# readiness and stop there rather than waiting in a loop.
 
 # ===================================================================
-# STEP 5: MERGE PARENT TO MAIN (AFTER APPROVAL ONLY!)
+# STEP 5: MERGE PARENT TO MAIN
 # ===================================================================
 git log worktree-plan-NNNNN --oneline  # Review changes
 git merge worktree-plan-NNNNN --no-edit
@@ -1227,7 +1230,8 @@ git status  # Confirm everything clean
 3. **QA in worktree**: Ensures changes work with current main
 4. **Final Honesty Check**: Audit integrated code BEFORE touching main (NEW!)
 5. **Clean main**: Uncommitted changes cause merge failures
-6. **Human approval**: Final gate before main is modified
+6. **Human gate (opt-in)**: `worktree.merge_to_main_requires_human_approval`
+   adds a final daemon-enforced gate before main is modified
 7. **QA in main**: Last verification after merge (with revert ready)
 8. **Cleanup last**: Keep worktree until merge confirmed successful
 
@@ -1648,15 +1652,15 @@ Task(subagent_type="general-purpose", team_name="plan-00028", name="final-honest
 
 # Wait for final Honesty Checker
 # - If REJECTED: Fix issues in parent worktree, DO NOT merge to main
-# - If APPROVED: Proceed to human approval
+# - If APPROVED: Proceed to merge
 ```
 
-**Phase 5: Merge to Main (After Human Approval)**
+**Phase 5: Merge to Main**
 
 ```bash
-# Ask human for approval (MANDATORY)
-# Present: Final Honesty Checker approved, all handlers verified, QA passes
-# Wait for explicit "YES"
+# Confirmed: Final Honesty Checker approved, all handlers verified, QA passes
+# With `worktree.merge_to_main_requires_human_approval: true`, the merge
+# below is denied until a human runs `hooks-daemon approve-merge <branch>`.
 
 # Merge to main
 cd /workspace
@@ -1741,8 +1745,10 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] Run full QA in parent worktree
 - [ ] Sync parent with main BEFORE merging to main
 - [ ] **Spawn final Honesty Checker** to audit entire parent worktree
-- [ ] Final Honesty Checker approves → Ask human for approval
-- [ ] Human approves → Merge parent to main
+- [ ] Final Honesty Checker approves → merge parent to main (if
+  `worktree.merge_to_main_requires_human_approval` is on, report
+  readiness and wait for a human to run
+  `hooks-daemon approve-merge <branch>`)
 - [ ] Run QA in main (if fails: REVERT IMMEDIATELY)
 - [ ] Push to origin
 - [ ] Stop parent daemon, cleanup worktree

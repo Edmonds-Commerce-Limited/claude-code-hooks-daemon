@@ -1027,6 +1027,53 @@ class TestPlanWorkflowConfig:
         with pytest.raises(ValidationError):
             PlanWorkflowConfig(workflow_docs="/srv/PLANS.md")
 
+    def test_close_requires_human_approval_defaults_off(self) -> None:
+        """Plan 00367: a fully completed plan closes without a human by default."""
+        assert PlanWorkflowConfig().close_requires_human_approval is False
+
+    def test_close_requires_human_approval_opt_in(self) -> None:
+        config = PlanWorkflowConfig(close_requires_human_approval=True)
+        assert config.close_requires_human_approval is True
+
+
+class TestWorktreeConfig:
+    """Plan 00367 Phase 4: the parent-to-main merge gate is a key too."""
+
+    def test_defaults_off(self) -> None:
+        from claude_code_hooks_daemon.config.models import WorktreeConfig
+
+        assert WorktreeConfig().merge_to_main_requires_human_approval is False
+
+    def test_opt_in(self) -> None:
+        from claude_code_hooks_daemon.config.models import WorktreeConfig
+
+        assert (
+            WorktreeConfig(
+                merge_to_main_requires_human_approval=True
+            ).merge_to_main_requires_human_approval
+            is True
+        )
+
+    def test_extra_fields_forbidden(self) -> None:
+        from claude_code_hooks_daemon.config.models import WorktreeConfig
+
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            WorktreeConfig.model_validate({"unknown": True})
+
+    def test_wired_into_config_as_a_real_field_path(self) -> None:
+        """The docs-QA key resolver walks ``Config.model_fields``, so the key
+        must be a real model field path, not a dict entry."""
+        from claude_code_hooks_daemon.config.models import Config
+        from claude_code_hooks_daemon.docs_qa.checks.unenforced_approval_gate import (
+            config_key_exists,
+        )
+
+        config = Config.model_validate(
+            {"version": "2.0", "worktree": {"merge_to_main_requires_human_approval": True}}
+        )
+        assert config.worktree.merge_to_main_requires_human_approval is True
+        assert config_key_exists("worktree.merge_to_main_requires_human_approval")
+
 
 class TestPlanWorkflowQaConfig:
     """Tests for the nested plan_workflow.qa sub-model (Plan 00144)."""

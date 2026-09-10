@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.core import (
     TestType,
 )
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.daemon.validation import is_hooks_daemon_repo
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 
@@ -46,6 +47,19 @@ class DaemonRestartVerifierHandler(PreToolUseHandlerBase):
         # Configuration attributes (set by registry after instantiation)
         # Default to ProjectContext (initialized before handlers), overridden by registry options
         self._workspace_root = ProjectContext.project_root()
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only inside the hooks daemon repository itself.
+
+        ``matches`` already refuses every other project, so anywhere else the
+        handler is inert whether enabled or not; the optimise review reports
+        it as not applicable rather than as a shortfall.
+        """
+        return Relevance.when(
+            is_hooks_daemon_repo(context.project_root),
+            present="this is the hooks daemon repository, where a commit can break the daemon itself",
+            absent="only applies inside the hooks daemon repository (dogfooding); a client cannot break the daemon by committing",
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match git commit commands in hooks daemon repo.
