@@ -410,7 +410,12 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         # only `|` left `<expensive> |& head` allowed while the identical
         # `| head` was denied -- a silent bypass of the whole handler, not a
         # narrow gap: everything downstream keys off this pattern.
-        self._pipe_pattern: re.Pattern[str] = re.compile(r"\|&?\s*(tail|head)\b", re.IGNORECASE)
+        # A bar that is half of `||` is the shell's OR, not a pipe: `cmd ||
+        # tail -n 25 file` reads a FILE as a fallback and truncates nothing,
+        # so neither bar of `||` may start a match.
+        self._pipe_pattern: re.Pattern[str] = re.compile(
+            r"(?<!\|)\|(?!\|)&?\s*(tail|head)\b", re.IGNORECASE
+        )
         self._tail_follow_pattern: re.Pattern[str] = re.compile(r"\btail\s+-[a-z]*f", re.IGNORECASE)
         self._head_bytes_pattern: re.Pattern[str] = re.compile(r"\bhead\s+-[a-z]*c", re.IGNORECASE)
 

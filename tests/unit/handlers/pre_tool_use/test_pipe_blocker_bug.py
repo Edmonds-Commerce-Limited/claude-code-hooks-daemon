@@ -9,6 +9,51 @@ These tests document the CORRECT behavior after the strategy-pattern redesign:
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
 
 
+class TestAShellOrIsNotAPipe:
+    """`cmd || tail -n 25 file` is a fallback, not a pipe.
+
+    The pipe regex matched the second bar of `||`, so an OR whose right-hand
+    side happens to be a `tail`/`head` reading a FILE was denied as
+    "pipe to tail — command unrecognized" (field hit: a journal tail with a
+    fallback file). Nothing is truncated: `tail` takes its path as an
+    argument and no output is piped into it.
+    """
+
+    def test_an_or_fallback_to_tail_on_a_file_is_not_a_pipe(self) -> None:
+        handler = PipeBlockerHandler()
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "tail -n 25 a/JOURNAL/x.md 2>/dev/null || tail -n 25 a/JOURNAL/y.md",
+            },
+        }
+        assert not handler.matches(hook_input)
+
+    def test_an_or_fallback_to_head_after_an_expensive_command_is_not_a_pipe(self) -> None:
+        handler = PipeBlockerHandler()
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "pytest tests/ || head -n 3 untracked/scratch/out.txt"},
+        }
+        assert not handler.matches(hook_input)
+
+    def test_a_real_pipe_beside_an_or_is_still_judged(self) -> None:
+        handler = PipeBlockerHandler()
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "true || pytest tests/ | tail -n 5"},
+        }
+        assert handler.matches(hook_input)
+
+    def test_the_stderr_pipe_is_still_a_pipe(self) -> None:
+        handler = PipeBlockerHandler()
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "pytest tests/ |& head -n 5"},
+        }
+        assert handler.matches(hook_input)
+
+
 class TestPipeBlockerRegressionBehavior:
     """Regression tests covering whitelist, blacklist, and unknown command paths."""
 
