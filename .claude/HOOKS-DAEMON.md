@@ -109,7 +109,7 @@
 | 66 | monorepo_detector | ADVISORY | Advise when manifests exist below the repo root but not at it |
 | 67 | config_optimisation_reminder | ADVISORY | Remind the agent when the config-optimisation review is stale |
 | 68 | remote_docs_staleness | ADVISORY | Report vendored documents that are stale or no longer parse |
-| 69 | lsp_noise_checker | ADVISORY | Advise when a Python project's pyright config lets noise into the LSP stream |
+| 69 | lsp_noise_checker | ADVISORY | Advise when a project's LSP config lets noise into the diagnostics stream |
 
 ### PreCompact (2 handlers)
 
