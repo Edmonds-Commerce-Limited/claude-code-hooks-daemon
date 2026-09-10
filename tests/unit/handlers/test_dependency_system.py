@@ -17,6 +17,12 @@ from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import (
     MarkdownOrganizationHandler,
 )
+from claude_code_hooks_daemon.handlers.pre_tool_use.merge_to_main_approval import (
+    MergeToMainApprovalHandler,
+)
+from claude_code_hooks_daemon.handlers.pre_tool_use.plan_close_approval import (
+    PlanCloseApprovalHandler,
+)
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper import (
     PlanNumberHelperHandler,
 )
@@ -130,7 +136,7 @@ def test_close_approval_toggle_injected_into_planning_tagged_handlers() -> None:
     )
     handlers = router.get_chain(EventType.PRE_TOOL_USE).handlers
     gate = next((h for h in handlers if h.name == "plan-close-approval"), None)
-    assert gate is not None
+    assert isinstance(gate, PlanCloseApprovalHandler)
     assert gate._close_requires_human_approval is True
 
     registry = HandlerRegistry()
@@ -143,7 +149,7 @@ def test_close_approval_toggle_injected_into_planning_tagged_handlers() -> None:
     )
     handlers = router.get_chain(EventType.PRE_TOOL_USE).handlers
     gate = next((h for h in handlers if h.name == "plan-close-approval"), None)
-    assert gate is not None
+    assert isinstance(gate, PlanCloseApprovalHandler)
     assert gate._close_requires_human_approval is False
 
 
@@ -171,7 +177,7 @@ def test_merge_approval_toggle_injected_into_git_tagged_handlers() -> None:
         ),
         None,
     )
-    assert gate is not None
+    assert isinstance(gate, MergeToMainApprovalHandler)
     assert gate._merge_to_main_requires_human_approval is True
 
     registry = HandlerRegistry()
@@ -186,7 +192,7 @@ def test_merge_approval_toggle_injected_into_git_tagged_handlers() -> None:
         ),
         None,
     )
-    assert gate is not None
+    assert isinstance(gate, MergeToMainApprovalHandler)
     assert gate._merge_to_main_requires_human_approval is False
 
 
