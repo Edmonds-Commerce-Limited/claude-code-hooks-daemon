@@ -27,6 +27,17 @@ documented remedy without enumerating them — ``[r]un_02`` no longer matches it
 own spelling, ``run_0[3-9]`` never did, and ``pgrep -x`` compares the whole
 line rather than searching within it.
 
+The "probe's own command line" is the WHOLE ``bash -c`` argv, confirmed
+against real ``pgrep``: a simple command that is not the tail of the script
+(anything followed by ``|| …`` or ``; …``) is never exec-optimised away, so
+its cmdline stays the full script text for as long as the shell runs. A
+bracket-tricked probe can therefore still self-match through text the probe
+never wrote itself — most often its OWN ``|| echo "no <name>"`` fallback,
+which is exactly the shape this project's own diagnostics reach for. That is
+a real hazard, not a false positive, so it stays denied; ``ProcessProbe``
+distinguishes it as ``external_match`` so the message names what the bracket
+trick cannot fix and why, rather than repeating advice already applied.
+
 The same report records a second, compounding shape: the loop itself. A
 ``while``/``until`` whose condition is a process probe and whose body is only
 ``sleep`` has nothing that can stop it but the probe changing its answer, and
@@ -131,6 +142,15 @@ class ProcessProbe:
             Recorded independently of the verdict so a caller can warn about
             an unresolvable pattern that would kill whatever it does match.
         wait_construct: The waiting construct the probe sits inside, if any.
+        external_match: Set only when this probe is SELF_MATCHING for a
+            reason the bracket trick cannot fix: the pattern's own literal
+            spelling in THIS probe's text does not match, but some OTHER text
+            in the command still spells it out unescaped — most often a
+            companion ``|| echo "no <name>"`` fallback naming the same
+            target. Holds the matched substring, so a caller can name it back
+            rather than recommend a rewrite that has already been applied.
+            ``None`` for every other verdict, and for the ordinary case where
+            the probe's own text is what matches.
     """
 
     kind: ProbeKind
@@ -139,6 +159,7 @@ class ProcessProbe:
     verdict: ProbeVerdict
     signals: bool
     wait_construct: WaitConstruct | None
+    external_match: str | None = None
 
     @property
     def is_self_matching(self) -> bool:
@@ -946,8 +967,8 @@ def _as_python_regex(pattern: str) -> str:
     return "".join(result)
 
 
-def _matches_own_command_line(pattern: str, subject: str) -> bool:
-    """Whether ``pattern`` would match the text of the command that runs it.
+def _located_match(pattern: str, subject: str) -> str | None:
+    """The substring of ``subject`` that ``pattern`` matches, or None.
 
     A pattern with no metacharacters is answered by containment, which is both
     faster and exact. Anything else is compiled — and an uncompilable pattern
@@ -955,13 +976,19 @@ def _matches_own_command_line(pattern: str, subject: str) -> bool:
     would still have matched the literal text sitting right there.
     """
     if not pattern:
-        return False
+        return None
     if not _REGEX_METACHARACTERS.intersection(pattern):
-        return pattern in subject
+        return pattern if pattern in subject else None
     try:
-        return re.search(_as_python_regex(pattern), subject) is not None
+        match = re.search(_as_python_regex(pattern), subject)
     except re.error:
-        return pattern in subject
+        return pattern if pattern in subject else None
+    return match.group(0) if match is not None else None
+
+
+def _matches_own_command_line(pattern: str, subject: str) -> bool:
+    """Whether ``pattern`` would match the text of the command that runs it."""
+    return _located_match(pattern, subject) is not None
 
 
 # --------------------------------------------------------------------------
@@ -1070,31 +1097,46 @@ def _probes_for(context: _ProbeContext) -> Iterator[ProcessProbe]:
         yield probe
 
 
-def _pattern_verdict(invocation: _Invocation, subject: str) -> tuple[str | None, ProbeVerdict]:
+def _pattern_verdict(
+    invocation: _Invocation, subject: str, own_text: str
+) -> tuple[str | None, ProbeVerdict, str | None]:
     """The pattern a ``pgrep``/``pkill`` searches for, and what it can see.
 
     Name mode and ``-x`` are SAFE by construction, so neither needs the regex
     test: name mode compares against ``comm`` (``bash`` for the waiting shell,
     never the pattern), and ``-x`` demands the WHOLE command line equal the
     pattern rather than contain it.
+
+    A self-match is checked TWICE once the whole ``subject`` matches: first
+    against ``own_text`` — this probe's own command text — because that is
+    the classic incident shape and the bracket trick fixes it directly. Only
+    when the probe's own text does NOT explain the match is the third element
+    of the return populated with the matched substring found elsewhere in
+    ``subject`` — a companion ``|| echo "no <name>"`` is the common shape —
+    so a caller can point at what actually needs to change instead of
+    recommending a rewrite that has already been applied.
     """
     if not _has_flag(invocation, _FULL_MATCH_FLAGS, _FULL_MATCH_LETTER):
-        return None, ProbeVerdict.SAFE
+        return None, ProbeVerdict.SAFE, None
     if _has_flag(invocation, _EXACT_FLAGS, _EXACT_LETTER):
-        return None, ProbeVerdict.SAFE
+        return None, ProbeVerdict.SAFE, None
     if not invocation.operands:
-        return None, ProbeVerdict.SAFE
+        return None, ProbeVerdict.SAFE, None
     pattern = invocation.operands[0]
     if _is_expanded(invocation.raw_operands[0]):
-        return pattern, ProbeVerdict.UNRESOLVED
-    if _matches_own_command_line(pattern, subject):
-        return pattern, ProbeVerdict.SELF_MATCHING
-    return pattern, ProbeVerdict.SAFE
+        return pattern, ProbeVerdict.UNRESOLVED, None
+    if not _matches_own_command_line(pattern, subject):
+        return pattern, ProbeVerdict.SAFE, None
+    if _matches_own_command_line(pattern, own_text):
+        return pattern, ProbeVerdict.SELF_MATCHING, None
+    return pattern, ProbeVerdict.SELF_MATCHING, _located_match(pattern, subject)
 
 
 def _build_pgrep(context: _ProbeContext) -> ProcessProbe | None:
     """``pgrep`` reports matches; a pipeline stage may then act on them."""
-    pattern, verdict = _pattern_verdict(context.invocation, context.subject)
+    pattern, verdict, external = _pattern_verdict(
+        context.invocation, context.subject, context.span_text
+    )
     return ProcessProbe(
         kind=ProbeKind.PGREP,
         text=context.span_text,
@@ -1102,12 +1144,15 @@ def _build_pgrep(context: _ProbeContext) -> ProcessProbe | None:
         verdict=verdict,
         signals=_pipeline_kills(context.downstream),
         wait_construct=context.construct,
+        external_match=external,
     )
 
 
 def _build_pkill(context: _ProbeContext) -> ProcessProbe | None:
     """``pkill -f`` signals every match, so a self-match kills the caller."""
-    pattern, verdict = _pattern_verdict(context.invocation, context.subject)
+    pattern, verdict, external = _pattern_verdict(
+        context.invocation, context.subject, context.span_text
+    )
     return ProcessProbe(
         kind=ProbeKind.PKILL,
         text=context.span_text,
@@ -1115,6 +1160,7 @@ def _build_pkill(context: _ProbeContext) -> ProcessProbe | None:
         verdict=verdict,
         signals=True,
         wait_construct=context.construct,
+        external_match=external,
     )
 
 

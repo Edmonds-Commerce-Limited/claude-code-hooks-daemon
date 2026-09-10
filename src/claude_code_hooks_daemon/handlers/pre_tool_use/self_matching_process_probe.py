@@ -100,6 +100,18 @@ _KIND_HAZARDS: Final[dict[ProbeKind, str]] = {
 
 _UNKNOWN_HAZARD: Final = "the probe can match the shell running it."
 
+#: Appended when the bracket trick on the probe's OWN pattern cannot save it:
+#: some OTHER text in the command — most often the probe's own `|| echo "no
+#: <name>"` fallback — still spells the pattern out unescaped.
+_EXTERNAL_MATCH_HAZARD: Final = (
+    " Bracketing this probe's own spelling is not enough here: this "
+    "command's text elsewhere still spells `{external}` unescaped, and "
+    "`pgrep -f`/`pkill -f` matches the WHOLE command line, not just this "
+    "probe's own words."
+)
+
+_EXTERNAL_MATCH_LABEL: Final = "FIX THE OTHER TEXT: "
+
 #: What an unresolvable pattern means, said once.
 _UNRESOLVED_HAZARD: Final = (
     "the pattern is built by expansion, so the daemon cannot tell what it "
@@ -129,7 +141,10 @@ _ALTERNATIVES: Final = (
     "  3. Bracket the pattern's first character, e.g. "
     "`pgrep -f '[p]rovision.bash'`. It still matches provision.bash in every "
     "OTHER process, while this shell's own command line reads "
-    "`[p]rovision.bash`, which the pattern does not match.\n"
+    "`[p]rovision.bash`, which the pattern does not match. Do this for EVERY "
+    'unescaped spelling in the command, including a companion `|| echo "no '
+    '<name>"` fallback that names the same target — the whole command line '
+    "is searched, not just the probe's own words.\n"
     "  4. Match the process NAME instead: `pgrep -x <name>`. This shell is "
     "named `bash`, so a name match can never hit it.\n"
     '  5. Probe a REAL captured pid: `kill -0 "$pid"`, or '
@@ -210,10 +225,12 @@ def _hazard(probe: ProcessProbe) -> str:
         return _UNRESOLVED_HAZARD
     hazard = _KIND_HAZARDS.get(probe.kind, _UNKNOWN_HAZARD)
     if probe.lethal and probe.kind is not ProbeKind.PKILL:
-        return (
+        hazard = (
             f"{hazard} The pipeline then signals what it matched, so it would "
             "kill the shell running it."
         )
+    if probe.external_match is not None:
+        hazard = f"{hazard}{_EXTERNAL_MATCH_HAZARD.format(external=probe.external_match)}"
     return hazard
 
 
@@ -228,6 +245,13 @@ def _probe_detail(probe: ProcessProbe) -> str:
     rewrite = probe.safe_rewrite
     if rewrite is not None:
         lines.append(f"{_REWRITE_LABEL}{rewrite}")
+    elif probe.external_match is not None:
+        lines.append(
+            f"{_EXTERNAL_MATCH_LABEL}reword the text that spells "
+            f"`{probe.external_match}` (e.g. an echo/printf fallback message) so it "
+            "no longer contains the pattern unescaped, or run this probe as its own "
+            "separate Bash tool call so nothing else shares its command line."
+        )
     return "\n".join(lines)
 
 
@@ -497,7 +521,10 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             "the harness, which notifies you when it finishes.\n"
             "- `pgrep -f '[p]rovision.bash'` — the bracket still matches "
             "`provision.bash` in every OTHER process; this shell's line now reads "
-            "`[p]rovision.bash`, which the pattern does not match.\n"
+            "`[p]rovision.bash`, which the pattern does not match. Bracket EVERY "
+            "unescaped spelling in the command, not just the probe's own — a "
+            'companion `|| echo "no provision.bash"` fallback naming the same '
+            "target keeps the command denied even after the probe itself is fixed.\n"
             "- `pgrep -x <name>` — matches the process NAME, and this shell is "
             "named `bash`.\n"
             '- `kill -0 "$pid"` / `ps -o pid= -p "$pid"` with a REAL pid. `$!` '
@@ -677,6 +704,32 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
                 ),
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="A bracket-tricked pattern still self-matches via its own fallback",
+                command='false && pgrep -f "[p]robe-demo-job" || echo "no probe-demo-job"',
+                dispatch_as_bash=True,
+                description=(
+                    "The bracket trick fixes only the probe's OWN spelling. Its "
+                    "companion `|| echo` fallback still spells the same name out "
+                    "unescaped, and `pgrep -f` reads the WHOLE command line — not "
+                    "just the probe's own words — so this must stay denied."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"BLOCKED",
+                    RuleID.PGREP_SELF_MATCH,
+                    r"FIX THE OTHER TEXT",
+                    r"probe-demo-job",
+                ],
+                safety_notes=(
+                    "'false &&' short-circuits, so pgrep never runs; the `|| echo` "
+                    "branch that follows only prints harmless text. Detection "
+                    "happens at the PreToolUse hook before any shell starts."
+                ),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
