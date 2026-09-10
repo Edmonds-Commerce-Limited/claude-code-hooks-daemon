@@ -138,6 +138,7 @@ class DaemonController:
         "_pseudo_dispatcher",
         "_registry",
         "_router",
+        "_source_fingerprint",
         "_stats",
         "_verdict_log_config",
     )
@@ -168,6 +169,11 @@ class DaemonController:
         # Defaults keep the deny short-circuit (collect_all_violations=False).
         self._chain_config: ChainConfig = ChainConfig()
         self._pseudo_dispatcher: PseudoEventDispatcher | None = None
+        # Content fingerprint of the code this daemon loaded at startup (Plan
+        # 00371); None until initialise() computes it, and never recomputed
+        # after that -- staying stale IS the point, so a caller can detect
+        # when the on-disk source has moved on without a restart.
+        self._source_fingerprint: str | None = None
 
     def initialise(
         self,
@@ -294,6 +300,19 @@ class DaemonController:
         logger.info("DaemonController initialised with %d total handlers", total_count)
         self._initialised = True
 
+        # Content fingerprint of the code just loaded above (Plan 00371):
+        # this daemon's own package directory plus -- only when project
+        # handlers are actually enabled, matching _load_project_handlers'
+        # own condition exactly -- the resolved project-handlers directory.
+        # Computed once, here, and never again: go stale the instant the
+        # working tree moves on, which is the entire point. Best-effort
+        # (OSError during hashing, e.g. an unreadable file) mirrors the
+        # fail-open startup contract used by _sync_agent_assets below --
+        # never fatal to daemon startup.
+        self._source_fingerprint = self._compute_startup_source_fingerprint(
+            workspace_root, project_handlers_config
+        )
+
         # Inject handler guidance into project CLAUDE.md (advisory, never raises).
         # Pseudo-event handlers must be included: they dispatch through the
         # PseudoEventDispatcher rather than the EventRouter, so walking only
@@ -329,6 +348,42 @@ class DaemonController:
         # fresh paths: glob without waiting for a reinstall. Same best-effort
         # contract — never fatal to daemon startup.
         self._sync_directory_role_rules(workspace_root, config_path)
+
+    def _compute_startup_source_fingerprint(
+        self,
+        workspace_root: Path,
+        project_handlers_config: "ProjectHandlersConfig | None",
+    ) -> str | None:
+        """Fingerprint the code just loaded into this process (Plan 00371).
+
+        Mirrors ``_load_project_handlers``'s own "is this root actually
+        loaded" condition exactly, rather than a second copy of it: the
+        project-handlers directory is only an extra root when
+        ``project_handlers_config`` is present AND enabled, matching the
+        condition under which that directory's modules were actually
+        imported above.
+
+        Returns ``None`` on an ``OSError`` while hashing (e.g. a file
+        vanishing mid-read) -- best-effort, never fatal to daemon startup,
+        same convention as ``_sync_agent_assets``.
+        """
+        from claude_code_hooks_daemon.daemon.source_fingerprint import (
+            compute_daemon_identity_fingerprint,
+        )
+        from claude_code_hooks_daemon.utils.repo_relative_path import (
+            resolve_repo_relative_path,
+        )
+
+        extra_roots: list[Path] = []
+        if project_handlers_config is not None and project_handlers_config.enabled:
+            extra_roots.append(
+                resolve_repo_relative_path(project_handlers_config.path, workspace_root)
+            )
+        try:
+            return compute_daemon_identity_fingerprint(*extra_roots)
+        except OSError as exc:
+            logger.error("Could not compute source fingerprint (daemon continues): %s", exc)
+            return None
 
     def _sync_agent_assets(self, workspace_root: Path, config_path: Path) -> None:
         """Run the config-driven agent-asset lifecycle sync (Plan 00279)."""
@@ -491,11 +546,11 @@ class DaemonController:
         # Resolve path: a leading {REPO_ROOT} token expands against
         # workspace_root; otherwise relative paths are resolved against
         # workspace_root and an absolute path is used as-is.
-        from claude_code_hooks_daemon.utils.repo_relative_path import expand_repo_root_token
+        from claude_code_hooks_daemon.utils.repo_relative_path import (
+            resolve_repo_relative_path,
+        )
 
-        handlers_path = Path(expand_repo_root_token(project_handlers_config.path, workspace_root))
-        if not handlers_path.is_absolute():
-            handlers_path = workspace_root / handlers_path
+        handlers_path = resolve_repo_relative_path(project_handlers_config.path, workspace_root)
 
         # Discover handlers from convention-based directory structure, capturing
         # both successes and structured load failures (Plan 00143).
@@ -1059,6 +1114,10 @@ class DaemonController:
             "stats": self._stats.to_dict(),
             "handlers": self._router.get_handler_count(),
             ModeConstant.KEY_MODE: self._mode_manager.current_mode.value,
+            # Plan 00371: content fingerprint of the code loaded at startup,
+            # so a caller can detect a daemon whose loaded code has fallen
+            # behind the working tree. None until initialise() runs.
+            "source_fingerprint": self._source_fingerprint,
         }
 
         if self._degraded:

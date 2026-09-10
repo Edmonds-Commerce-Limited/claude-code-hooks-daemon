@@ -20,7 +20,6 @@ This file is the live-socket gate.
 from __future__ import annotations
 
 import json
-import os
 import socket
 from pathlib import Path
 
@@ -29,7 +28,6 @@ import pytest
 from claude_code_hooks_daemon.constants import Timeout, ToolName
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SOCKET_GLOB = "daemon-*.sock"
 
 _FILE_TOOLS = [ToolName.READ, ToolName.WRITE, ToolName.EDIT]
 _DENY = "deny"
@@ -37,32 +35,9 @@ _REASON_FRAGMENT = "requires absolute path"
 _RELATIVE_PATH = "relative/path/file.txt"
 _ABSOLUTE_PATH = "/workspace/relative/path/file.txt"
 
-
-def _socket_is_alive(sock_path: Path) -> bool:
-    """Return True if a Unix socket file accepts a connection.
-
-    Stale ``daemon-{hostname}.sock`` files accumulate when a container restarts
-    under a new hostname: the inode survives but ``connect()`` raises
-    ECONNREFUSED because no daemon is listening. Probing filters those out.
-    """
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(1.0)
-            sock.connect(str(sock_path))
-        return True
-    except OSError:
-        return False
-
-
-def _discover_socket() -> Path | None:
-    """Locate the running daemon's Unix socket via env or glob."""
-    env_path = os.environ.get("CLAUDE_HOOKS_SOCKET_PATH")
-    if env_path and Path(env_path).is_socket() and _socket_is_alive(Path(env_path)):
-        return Path(env_path)
-    for candidate in sorted((REPO_ROOT / "untracked").glob(SOCKET_GLOB)):
-        if candidate.is_socket() and _socket_is_alive(candidate):
-            return candidate
-    return None
+#: `daemon_socket` (socket discovery + Plan 00371 staleness check) lives in
+#: tests/acceptance/conftest.py, shared across every acceptance file that
+#: dispatches through the live daemon socket.
 
 
 def _send_pre_tool_use(sock_path: Path, tool_name: str, file_path: str) -> dict:
@@ -109,18 +84,6 @@ def _decision(response: dict) -> str:
 def _reason(response: dict) -> str:
     """Extract the PreToolUse decision reason from a daemon response."""
     return str(response.get("hookSpecificOutput", {}).get("permissionDecisionReason", ""))
-
-
-@pytest.fixture
-def daemon_socket() -> Path:
-    sock_path = _discover_socket()
-    if sock_path is None:
-        pytest.skip(
-            "Daemon not running — no live socket found under untracked/. "
-            "Start it with: ./bin/hooks-daemon restart"
-        )
-    assert sock_path is not None
-    return sock_path
 
 
 @pytest.mark.parametrize("tool_name", _FILE_TOOLS)

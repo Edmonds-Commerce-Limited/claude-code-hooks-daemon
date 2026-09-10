@@ -1109,6 +1109,12 @@
       "function": "_ensure_source_disable",
       "rule": "log-and-continue",
       "reason": "Plan 00295 Task 2.9: this is best-effort cleanup of a staged temp file after the atomic write it belongs to has already failed and is itself about to be logged and abandoned (the outer except's own log+return follows immediately after). Raising here would replace the outer failure's own error with a secondary cleanup error, hiding the actual cause -- the same principle documented for remote_docs/fetchers.py._close_session above. Nothing is concealed: the cleanup failure is logged at WARNING alongside the file it could not remove, and a leaked temp file (the only consequence) is silently overwritten by write_text on the next retry attempt, never accumulating unboundedly."
+    },
+    {
+      "file": "daemon/controller.py",
+      "function": "_compute_startup_source_fingerprint",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00371: hashing the code just loaded (for the staleness-detection fingerprint reported over the health socket action) is diagnostic, not load-bearing -- a rare OSError mid-read (a file vanishing between glob and read) must not abort daemon startup over a value nothing in the startup path depends on, the exact same fail-open contract this file's own _sync_agent_assets entry above documents. The failure is logged at ERROR, so nothing is concealed; get_health() simply reports source_fingerprint: null, and a caller checking freshness (bin/hooks-daemon check-source-fresh, the acceptance-test fixtures) already treats a missing fingerprint as a staleness risk rather than trusting it silently."
     }
   ]
 }

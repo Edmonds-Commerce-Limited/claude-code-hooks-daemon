@@ -2,8 +2,10 @@
 #
 # Run live daemon smoke tests - probe the running daemon via hook scripts
 #
-# Sends 3 known inputs to hook scripts and verifies expected responses.
-# Catches the "#1 dogfooding failure mode": daemon running stale code.
+# First runs `bin/hooks-daemon check-source-fresh` (Plan 00371): a
+# general-purpose comparison of the running daemon's actually-loaded code
+# against the working tree, independent of which handler drifted. Only then
+# sends 3 known inputs to hook scripts and verifies expected responses.
 #
 # Probes:
 #   1. Stop (no explanation)         → must return decision=block
@@ -11,8 +13,8 @@
 #   3. PreToolUse (destructive git)  → must return decision=block
 #
 # Exit codes:
-#   0 - All 3 probes passed
-#   1 - One or more probes failed (or daemon not running)
+#   0 - Source is fresh and all 3 probes passed
+#   1 - Daemon not running, source is stale, or a probe failed
 #
 
 set -uo pipefail
@@ -57,6 +59,33 @@ print()
 PYEOF
     echo "❌ SMOKE TEST FAILED: Daemon not running"
     echo "   Run: ${PROJECT_ROOT}/bin/hooks-daemon restart"
+    exit 1
+fi
+
+# ── Source freshness check (Plan 00371) ─────────────────────────────────────────
+#
+# This file's own header claims to catch "the #1 dogfooding failure mode:
+# daemon running stale code" -- but the 3 fixed probes below only exercise 3
+# specific handlers, so a stale daemon whose drift lies elsewhere (e.g. a
+# probe not covered here) sailed straight through. check-source-fresh is the
+# general-purpose version: it compares the running daemon's actually-loaded
+# code against the current working tree, independent of which handler drifted.
+FRESHNESS_OUTPUT="$("${PROJECT_ROOT}/bin/hooks-daemon" check-source-fresh 2>&1)"
+FRESHNESS_EXIT=$?
+if [[ ${FRESHNESS_EXIT} -ne 0 ]]; then
+    "${VENV_PYTHON}" - "${FRESHNESS_OUTPUT}" << 'PYEOF' > "${OUTPUT_FILE}"
+import json, sys
+freshness_detail = sys.argv[1]
+result = {
+    "tool": "smoke_test",
+    "summary": {"total_probes": 3, "passed_probes": 0, "failed_probes": 3, "passed": False},
+    "probes": [],
+    "error": f"Daemon source freshness check failed: {freshness_detail}",
+}
+json.dump(result, sys.stdout, indent=2)
+print()
+PYEOF
+    echo "❌ SMOKE TEST FAILED: ${FRESHNESS_OUTPUT}"
     exit 1
 fi
 

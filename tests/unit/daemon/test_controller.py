@@ -389,6 +389,37 @@ class TestDaemonController:
         assert "stats" in health
         assert "handlers" in health
 
+    def test_get_health_source_fingerprint_is_none_before_initialise(
+        self, controller: DaemonController
+    ) -> None:
+        """Plan 00371: source_fingerprint key is present but None pre-initialise."""
+        health = controller.get_health()
+
+        assert "source_fingerprint" in health
+        assert health["source_fingerprint"] is None
+
+    def test_get_health_source_fingerprint_set_after_initialise(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
+        """Plan 00371: after initialise(), source_fingerprint matches the
+        daemon-identity fingerprint computed with no extra roots (this
+        fixture's workspace_root has no project_handlers_config passed)."""
+        from claude_code_hooks_daemon.daemon.source_fingerprint import (
+            compute_daemon_identity_fingerprint,
+        )
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root)
+
+        health = controller.get_health()
+
+        assert health["source_fingerprint"] == compute_daemon_identity_fingerprint()
+
     def test_get_handlers(self, controller: DaemonController, workspace_root: Path) -> None:
         """Get handlers returns handler details."""
         with patch("subprocess.run") as mock_run:

@@ -47,9 +47,19 @@ skill shim are still what the upgrade step exercises.
 
 from __future__ import annotations
 
+import os
+import socket
 import subprocess  # nosec B404 - trusted system tool (git) for repo fixtures
 from pathlib import Path
 
+import pytest
+
+from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.daemon.cli import send_daemon_request
+from claude_code_hooks_daemon.daemon.source_fingerprint import (
+    compute_current_project_fingerprint,
+    describe_fingerprint_mismatch,
+)
 from tests.acceptance.blocking_gate_guard import pytest_runtest_makereport
 
 # pytest only collects hooks from a conftest or a plugin, so the guard is
@@ -58,6 +68,98 @@ from tests.acceptance.blocking_gate_guard import pytest_runtest_makereport
 __all__ = ["pytest_runtest_makereport"]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: Glob for a daemon's Unix socket under untracked/, matched by hostname
+#: suffix. Was independently duplicated verbatim (this constant, plus
+#: `_socket_is_alive`/`_discover_socket` below) across four acceptance test
+#: files -- centralised here (Plan 00371) so the staleness check added below
+#: covers every live-dispatch site in one place rather than four.
+SOCKET_GLOB = "daemon-*.sock"
+
+
+def _socket_is_alive(sock_path: Path) -> bool:
+    """Return True if a Unix socket file accepts a connection.
+
+    Stale ``daemon-{hostname}.sock`` files accumulate when a container
+    restarts under a new hostname: the inode survives but ``connect()``
+    raises ECONNREFUSED because no daemon is listening. Probing filters
+    those out.
+    """
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(Timeout.SOCKET_LIVENESS_PROBE_SEC)
+            sock.connect(str(sock_path))
+        return True
+    except OSError:
+        return False
+
+
+def _discover_socket() -> Path | None:
+    """Locate the running daemon's Unix socket via env or glob."""
+    env_path = os.environ.get("CLAUDE_HOOKS_SOCKET_PATH")
+    if env_path and Path(env_path).is_socket() and _socket_is_alive(Path(env_path)):
+        return Path(env_path)
+    for candidate in sorted((REPO_ROOT / "untracked").glob(SOCKET_GLOB)):
+        if candidate.is_socket() and _socket_is_alive(candidate):
+            return candidate
+    return None
+
+
+def assert_daemon_source_fresh(socket_path: Path) -> None:
+    """Fail loudly, by name, if the daemon at ``socket_path`` looks stale (Plan 00371).
+
+    A daemon never hot-reloads: every handler module is imported once, at
+    startup. Plan 00371's field incident was a live-dispatch acceptance
+    probe failing for a reason nothing named, because the daemon answering
+    it still held pre-merge code and nothing compared what it had loaded
+    against the working tree. This is the single place that comparison
+    happens for every acceptance test that dispatches through a live daemon
+    socket -- called from the shared ``daemon_running``/``daemon_socket``
+    fixtures below, so every consumer gets it automatically.
+    """
+    response = send_daemon_request(
+        socket_path, {"event": "_system", "hook_input": {"action": "health"}}
+    )
+    running_fingerprint = None
+    if response is not None and "result" in response:
+        running_fingerprint = response["result"].get("source_fingerprint")
+
+    current_fingerprint = compute_current_project_fingerprint(REPO_ROOT)
+    mismatch = describe_fingerprint_mismatch(running_fingerprint, current_fingerprint)
+    if mismatch is not None:
+        pytest.fail(mismatch)
+
+
+@pytest.fixture(scope="module")
+def daemon_running() -> None:
+    """Skip if no daemon is up; fail (not skip) if the running one is stale.
+
+    Module-scoped (matching ``test_playbook_harness.py``'s own prior choice,
+    now shared here): computed once per test file and reused by every test
+    and fixture in it, including a module-scoped fixture that depends on
+    it -- pytest forbids the reverse (a broader-scoped fixture cannot depend
+    on a narrower one), so this could not be function-scoped without
+    breaking that file.
+    """
+    sock_path = _discover_socket()
+    if sock_path is None:
+        pytest.skip("Daemon not running — start with: ./bin/hooks-daemon restart")
+    assert sock_path is not None  # pytest.skip() is not typed NoReturn; narrows for pyright
+    assert_daemon_source_fresh(sock_path)
+
+
+@pytest.fixture(scope="module")
+def daemon_socket() -> Path:
+    """Same as ``daemon_running``, but returns the discovered socket path."""
+    sock_path = _discover_socket()
+    if sock_path is None:
+        pytest.skip(
+            "Daemon not running — no live socket found under untracked/. "
+            "Start it with: ./bin/hooks-daemon restart"
+        )
+    assert sock_path is not None  # pytest.skip() is not typed NoReturn; narrows for pyright
+    assert_daemon_source_fresh(sock_path)
+    return sock_path
 
 
 def _git(*args: str) -> str:
