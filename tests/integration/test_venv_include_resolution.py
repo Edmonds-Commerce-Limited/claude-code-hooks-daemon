@@ -228,3 +228,30 @@ class TestLegacyFallback:
 
         result = _run(project)
         assert result == str(project / "untracked" / "venv")
+
+
+class TestTheDriftRemediationTargetsTheVenvItChecked:
+    """The printed fix has to work when pasted, or the gate is a dead end.
+
+    `check_venv_matches_lock` runs its own check with
+    `UV_PROJECT_ENVIRONMENT` pointed at the QA venv, then printed a fix that
+    omitted it. Bare `uv sync` targets uv's default `.venv`, so following the
+    instruction exactly installs the missing package somewhere QA never
+    looks and the same failure repeats. Observed live: the pyright dev extra
+    stayed missing across a full sync, and both the dependency gate and
+    `test_the_project_venv_carries_pyright` kept failing.
+    """
+
+    def test_the_fix_line_carries_the_project_environment(self) -> None:
+        source = VENV_INCLUDE.read_text(encoding="utf-8")
+        fix_lines = [
+            line
+            for line in source.splitlines()
+            if "Fix:" in line and "uv sync" in line and "--check" not in line
+        ]
+        assert fix_lines, "the drift remediation line went missing"
+        for line in fix_lines:
+            assert "UV_PROJECT_ENVIRONMENT" in line, (
+                "a bare `uv sync` installs into uv's default .venv, not the venv "
+                f"this check just tested. Offending line: {line.strip()}"
+            )

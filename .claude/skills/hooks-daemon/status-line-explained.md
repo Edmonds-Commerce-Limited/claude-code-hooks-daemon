@@ -11,11 +11,14 @@ A routed skill subcommand — a human types this. On a self-install the
 wrapper is `bin/hooks-daemon`; a client install uses
 `.claude/hooks-daemon/bin/hooks-daemon`:
 
-```bash
+```claude-code
 /hooks-daemon status-line-explained
 /hooks-daemon status-line-explained --format json
+```
 
-# Equivalent CLI verbs (agents can run either directly):
+Equivalent CLI verbs, which an agent can run directly:
+
+```bash
 .claude/hooks-daemon/bin/hooks-daemon status-line-explained
 .claude/hooks-daemon/bin/hooks-daemon explain-status-line   # alias
 ```

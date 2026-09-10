@@ -248,7 +248,11 @@ assert_venv_matches_lock() {
     # difference between a report someone can act on and "something is wrong".
     echo -e "${RED}✗${NC} The venv running QA does not match uv.lock: ${VENV_DIR}" >&2
     echo "${check_output}" >&2
-    echo "    Fix: uv sync --frozen --all-extras" >&2
+    # The env var is not decoration: a bare `uv sync` targets uv's default
+    # .venv, so the fix would install into a venv QA never reads and the
+    # same failure would repeat. Name the venv this check just tested.
+    echo "    Fix: UV_PROJECT_ENVIRONMENT=${VENV_DIR} uv sync --frozen --all-extras \\" >&2
+    echo "           --project ${PROJECT_ROOT}" >&2
     echo "    A toolchain that drifts from the lockfile decides QA verdicts" >&2
     echo "    that nobody else can reproduce — a formatter one minor ahead" >&2
     echo "    rewrites the tree and still reports success." >&2

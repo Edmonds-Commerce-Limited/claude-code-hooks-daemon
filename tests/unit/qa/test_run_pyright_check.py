@@ -110,7 +110,8 @@ class TestBinaryResolution:
         resolved = checker.resolve_pyright_binary(path_lookup=lambda _name: None)
         assert resolved is not None, (
             "pyright is not in the QA interpreter's venv. It is a pinned dev extra "
-            "(pyproject.toml); provision with `uv sync --frozen --all-extras`."
+            "(pyproject.toml); provision with "
+            "`UV_PROJECT_ENVIRONMENT=<the QA venv> uv sync --frozen --all-extras`."
         )
 
 
@@ -167,7 +168,11 @@ class TestMissingBinaryIsAFailure:
         assert exit_code == checker.EXIT_OPERATIONAL
         report = _report(root, checker)
         assert report["summary"]["passed"] is False
-        assert "uv sync --frozen --all-extras" in report["summary"]["error"]
+        error = report["summary"]["error"]
+        assert "uv sync --frozen --all-extras" in error
+        # A bare `uv sync` targets uv's default .venv, not the QA venv, so an
+        # instruction without this env var installs where the gate never looks.
+        assert "UV_PROJECT_ENVIRONMENT" in error
         assert report["errors"] == []
 
 

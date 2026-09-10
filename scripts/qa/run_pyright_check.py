@@ -64,9 +64,16 @@ _PYRIGHT_TIMEOUT_SECONDS: Final[int] = 600
 _SEVERITY_ERROR: Final[str] = "error"
 _SEVERITY_WARNING: Final[str] = "warning"
 
+# UV_PROJECT_ENVIRONMENT is load-bearing, not decoration: this project's QA
+# venv is a fingerprint-named directory, while a bare `uv sync` targets uv's
+# own default `.venv`. Without the variable the install lands somewhere this
+# gate never reads, and the same failure repeats verbatim.
 INSTALL_INSTRUCTION: Final[str] = (
-    "pyright is not installed: run `uv sync --frozen --all-extras` "
-    "(installs the pinned PyPI `pyright` dev extra into the QA venv; needs `node` on PATH)."
+    "pyright is not installed: run `UV_PROJECT_ENVIRONMENT=<the QA venv> "
+    "uv sync --frozen --all-extras` (installs the pinned PyPI `pyright` dev extra "
+    "into the QA venv; needs `node` on PATH). Any QA script prints the QA venv's "
+    "path on its first line, and `bash scripts/qa/run_dependency_check.sh` prints "
+    "the whole command ready to paste."
 )
 
 
