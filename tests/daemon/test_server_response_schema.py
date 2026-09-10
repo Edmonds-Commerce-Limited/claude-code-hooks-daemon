@@ -8,10 +8,12 @@ the complete response that gets sent to Claude Code.
 import asyncio
 import json
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import LogLevel
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
@@ -48,7 +50,7 @@ class TestServerResponseSchema:
     """Test that server responses comply with Claude Code schemas."""
 
     @pytest.fixture
-    def temp_socket_path(self) -> Path:
+    def temp_socket_path(self) -> Generator[Path, None, None]:
         """Create temporary socket path."""
         with tempfile.NamedTemporaryFile(suffix=".sock", delete=False) as f:
             socket_path = Path(f.name)
@@ -58,7 +60,7 @@ class TestServerResponseSchema:
             socket_path.unlink()
 
     @pytest.fixture
-    def temp_pid_path(self) -> Path:
+    def temp_pid_path(self) -> Generator[Path, None, None]:
         """Create temporary PID file path."""
         with tempfile.NamedTemporaryFile(suffix=".pid", delete=False) as f:
             pid_path = Path(f.name)
@@ -74,7 +76,7 @@ class TestServerResponseSchema:
             socket_path=temp_socket_path,
             idle_timeout_seconds=2,
             pid_file_path=temp_pid_path,
-            log_level="DEBUG",
+            log_level=LogLevel.DEBUG,
         )
 
     @pytest.fixture

@@ -36,6 +36,7 @@ class TestPipeBlockerIntegration:
 
         # Should be denied with blacklisted "expensive" message
         assert result.result.decision == "deny", f"Expected deny, got {result.result.decision}"
+        assert result.result.reason is not None
         assert "pipe" in result.result.reason.lower(), "Reason should mention pipe"
         assert "expensive" in result.result.reason, "Blacklisted reason should mention expensive"
         assert len(result.handlers_matched) > 0, "Should have matched handlers"
@@ -60,6 +61,7 @@ class TestPipeBlockerIntegration:
         result = router.route(EventType.PRE_TOOL_USE, hook_input)
 
         assert result.result.decision == "deny"
+        assert result.result.reason is not None
         assert result.result.reason.count("To disable:") == 1
 
     def test_unknown_deny_has_single_disable_footer(self) -> None:
@@ -77,6 +79,7 @@ class TestPipeBlockerIntegration:
         result = router.route(EventType.PRE_TOOL_USE, hook_input)
 
         assert result.result.decision == "deny"
+        assert result.result.reason is not None
         assert result.result.reason.count("To disable:") == 1
 
     def test_docker_ps_pipe_tail_blocks_as_unknown_through_router(self) -> None:
@@ -98,6 +101,7 @@ class TestPipeBlockerIntegration:
 
         # Should be denied with "unknown" message mentioning extra_whitelist
         assert result.result.decision == "deny"
+        assert result.result.reason is not None
         assert (
             "extra_whitelist" in result.result.reason
         ), "Unknown reason should mention extra_whitelist"
