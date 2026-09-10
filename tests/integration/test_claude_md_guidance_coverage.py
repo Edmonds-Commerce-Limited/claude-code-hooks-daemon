@@ -159,7 +159,6 @@ _EARNS_GUIDANCE: dict[str, str] = {
     ),
     # -- Test 2: the advice is too late for the call it fires on ---------
     "AgentIsolationAdvisorHandler": "T2 the isolation argument is already set",
-    "DaemonRestartVerifierHandler": "T2 fires on the commit the restart should precede",
     "MarkdownOrganizationHandler": "T2 the destination path is already chosen",
     "NpmCommandHandler": "T2 the npm script name is already chosen",
     "PlanNumberHelperHandler": "T2 fires on the folder scan that should never have run",

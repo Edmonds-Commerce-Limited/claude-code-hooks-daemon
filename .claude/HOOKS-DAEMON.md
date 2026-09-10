@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-09-09 (v3.63.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-09-10 (v3.63.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (58 handlers)
+### PreToolUse (57 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -35,7 +35,6 @@
 | 21 | pip_break_system | TERMINAL | Block pip install --break-system-packages commands |
 | 22 | sudo_pip | TERMINAL | Block sudo pip install commands |
 | 23 | ask_user_question_blocker | TERMINAL | Allow AskUserQuestion only when every question is prefix-justified |
-| 23 | daemon_restart_verifier | ADVISORY | Verify daemon can restart before allowing git commits |
 | 30 | qa_suppression | BLOCKING | Block QA suppression comments across all supported languages |
 | 31 | comment_changelog | BLOCKING | Block Write/Edit content that writes historical narrative into a comment |
 | 33 | comment_size | BLOCKING | Block/advise on over-long comments, tiered like plan-doc-size |
@@ -180,13 +179,14 @@
 |----------|---------|----------|-------------|
 | 2 | DogfoodingReminderHandler | ADVISORY | Reminds developers of dogfooding workflow and bug handling protocol |
 
-### Project (3 handlers)
+### Project (4 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 8 | ReleaseBlockerHandler | BLOCKING | Blocks Stop event while a release is in flight |
-| 20 | PlanDoneRequiresHoldingAreaHandler | BLOCKING | Deny a Complete flip whose Success Criteria never mention the holding area |
+| 24 | DaemonRestartVerifierHandler | ADVISORY | Advise verifying the daemon restarts before a commit, in this repo |
 | 41 | EnforceLlmQaHandler | BLOCKING | Block run_all.sh and direct LLM agents to llm_qa.py |
+| 51 | PlanDoneRequiresHoldingAreaHandler | BLOCKING | Deny a Complete flip whose Success Criteria never mention the holding area |
 
 ### Pseudo Nitpick (2 handlers)
 

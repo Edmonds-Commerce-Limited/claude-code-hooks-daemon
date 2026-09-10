@@ -72,6 +72,39 @@ class TestRetiredHandlerNames:
 
         ConfigValidator.validate_and_raise(config)
 
+    def test_daemon_restart_verifier_key_is_retired(self) -> None:
+        """Plan 00370: the built-in was removed and re-homed as a project handler.
+
+        A client's config is the client's file; the built-in's removal does
+        not remove their key. A leftover `daemon_restart_verifier:` entry
+        must validate cleanly rather than degrading the daemon.
+        """
+        assert "daemon_restart_verifier" in RETIRED_HANDLERS
+        config = {
+            "version": "1.0",
+            "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
+            "handlers": {
+                "pre_tool_use": {"daemon_restart_verifier": {"enabled": True, "priority": 10}}
+            },
+        }
+
+        ConfigValidator.validate_and_raise(config)
+
+    def test_a_typo_near_the_retired_name_is_still_caught(self) -> None:
+        """Retiring the exact name must not widen the net to near-misses."""
+        config = {
+            "version": "1.0",
+            "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
+            "handlers": {
+                "pre_tool_use": {"daemon_restart_verifyer": {"enabled": True}},
+            },
+        }
+
+        with pytest.raises(ValidationError) as exc_info:
+            ConfigValidator.validate_and_raise(config)
+
+        assert "daemon_restart_verifyer" in str(exc_info.value).lower()
+
 
 class TestHandlerNameValidation:
     """Test that config validator catches handler name typos."""

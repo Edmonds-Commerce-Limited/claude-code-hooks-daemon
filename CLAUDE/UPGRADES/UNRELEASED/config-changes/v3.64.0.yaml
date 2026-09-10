@@ -1,0 +1,22 @@
+version: "3.64.0"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added: []
+  renamed: []
+  removed:
+    - key: handlers.pre_tool_use.daemon_restart_verifier
+      description: >-
+        REMOVED (Plan 00370). This handler's `matches()` only ever fired
+        inside the hooks-daemon repository itself, so it never did anything
+        for a client project. It is now a project-level handler in the
+        hooks-daemon repository's own `.claude/project-handlers/
+        pre_tool_use/`, dogfooding the project-handler surface instead of
+        shipping pure self-checks in the shared library. The key is
+        registered in `RETIRED_HANDLERS`, so a leftover
+        `daemon_restart_verifier:` entry in your config validates cleanly
+        (accepted silently) rather than degrading the daemon.
+      migration_note: >-
+        Safe to delete this key from your config; it never mattered outside
+        the hooks-daemon repository's own checkout.
+  changed: []

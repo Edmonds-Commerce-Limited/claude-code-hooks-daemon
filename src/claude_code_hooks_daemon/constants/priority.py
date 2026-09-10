@@ -40,7 +40,6 @@ class Priority:
     TEST_HANDLER = 5
 
     # Safety handlers (Priority: 10-20)
-    DAEMON_RESTART_VERIFIER = 10
     DESTRUCTIVE_GIT = 10
     SED_BLOCKER = 10
     PIP_BREAK_SYSTEM = 10

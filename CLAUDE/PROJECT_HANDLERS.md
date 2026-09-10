@@ -20,6 +20,16 @@ Project-level handlers let you create custom hook handlers scoped to a specific 
 - Cross-project safety (destructive git, sed blocking)
 - Language-agnostic quality enforcement
 
+**Reference example**: this daemon dogfoods its own project-handler surface.
+`.claude/project-handlers/` in the hooks-daemon repository itself holds four
+live handlers built exactly the way this guide describes — including
+`daemon_restart_verifier` (Plan 00370), a handler that was ONCE a built-in
+and was deliberately downgraded here because its behaviour (verify this
+repo's own daemon restarts before this repo's own commit) is pure
+self-dogfooding, not something any other project could use. Read those
+files alongside this guide for a working, tested example of every pattern
+below.
+
 ---
 
 ## Quick Start

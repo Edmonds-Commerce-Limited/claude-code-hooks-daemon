@@ -128,7 +128,6 @@ class ConfigTemplate:
             "  # PreToolUse - Before tool execution\n"
             "  pre_tool_use:\n"
             "    # SAFETY HANDLERS (Priority 10-20)\n"
-            "    daemon_restart_verifier: {enabled: true, priority: 10}  # Suggest daemon restart verification (advisory)\n"
             "    destructive_git: {enabled: true, priority: 10}   # Block git reset --hard, clean -f\n"
             "    daemon_location_guard: {enabled: true, priority: 11}  # Prevent cd into .claude/hooks-daemon\n"
             "    sed_blocker: {enabled: true, priority: 10}       # Block sed (use Edit tool instead)\n"

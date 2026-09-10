@@ -591,6 +591,35 @@ def test_flags_only_the_orphan_when_mixed_with_live_handlers(tmp_path: Path) -> 
     assert "real_handler" not in messages
 
 
+_PROJECT_HANDLER_REL = ".claude/project-handlers/pre_tool_use/{name}.py"
+
+
+def test_a_project_handler_with_a_kebab_case_id_is_not_an_orphan(tmp_path: Path) -> None:
+    """Plan 00370: a project handler's marker is its `handler_id` (kebab-case,
+    matching the built-in display-name convention), while its module lives
+    under a snake_case filename (Python convention). The two spellings name
+    the SAME handler, so a marker must resolve against the hyphen form too,
+    not only an exact module-stem match.
+    """
+    repo = _make_repo(
+        tmp_path,
+        {
+            "CLAUDE.md": _claude_md_with_guidance("daemon-restart-verifier"),
+            _PROJECT_HANDLER_REL.format(name="daemon_restart_verifier"): "# handler\n",
+            # A src handlers dir must exist for the check to run at all
+            # (see test_inert_when_no_handlers_directory_can_be_found) —
+            # unrelated to the marker under test, just makes the directory
+            # exist so this test actually exercises the identity lookup.
+            _HANDLER_REL.format(name="some_other_handler"): "# handler\n",
+            "README.md": "# fixture\n",
+        },
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, report
+
+
 def test_an_uncommitted_handler_is_not_an_orphan(tmp_path: Path) -> None:
     """EXISTS, not is-committed.
 

@@ -147,7 +147,6 @@ The daemon ships with a large library of production handlers spanning every hook
 ### Workflow (Priority 36–55)
 
 - **Plan workflow guidance** (`plan_workflow`) — Advises on plan structure and conventions when plan files are written
-- **Daemon restart verifier** (`daemon_restart_verifier`) — Recommends verifying a clean daemon restart before committing
 - **Pipe blocker** (`pipe_blocker`) — Prevents expensive commands piped to `head`/`tail`
 - **Web search year** (`web_search_year`) — Warns when a search query carries an outdated year
 - **Git context injector** (`git_context_injector`) — Injects current git status as context on each prompt
