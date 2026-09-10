@@ -87,17 +87,26 @@ QA, CI or the release slate registering anything.
 
 ### Phase 3: Commit-stage gates cover the merge route
 
-- [ ] ⬜ **Task 3.1**: Write the failing test first — `git merge --no-ff x` is
+- [x] ✅ **Task 3.1**: Write the failing test first — `git merge --no-ff x` is
   matched by none of `plan_qa_commit_gate`, `docs_qa_commit_gate` or
   `staged_lint_gate`, and that is the hole.
-- [ ] ⬜ **Task 3.2**: Teach `GitFacts` to source its change set from a commit
-  RANGE (`ORIG_HEAD..HEAD`) as well as from the index, leaving every consumer
-  of `staged_changes()` — `commit_touches_plan` and its siblings — unchanged.
-- [ ] ⬜ **Task 3.3**: Add a PostToolUse handler that, after a `git merge` or
-  `git pull` that created a commit, runs the plan-QA and docs-QA checks
-  attributed to `ORIG_HEAD..HEAD`, and reports what the merge introduced. The
-  merge has already landed, so this is a failure report to repair, in the same
-  idiom as `lint_on_edit`.
+- [x] ✅ **Task 3.2**: **Not done as specified, and deliberately.** The task
+  proposed teaching `GitFacts` to source its change set from a commit RANGE so
+  the COMMIT-stage checks could be re-run against `ORIG_HEAD..HEAD`. That path
+  is subtler than it looks: those checks also read `staged_file_text` and
+  `head_file_text` for before/after comparisons, and post-merge `HEAD` is the
+  merge commit rather than the "before" side, so their semantics would have had
+  to be reinterpreted rather than just re-sourced. The handler instead runs the
+  SWEEP catalogues against the merged tree — which is simply what is on disk —
+  and FILTERS the findings by what `ORIG_HEAD..HEAD` changed. Same attribution,
+  no reinterpretation, and `GitFacts` is untouched.
+- [x] ✅ **Task 3.3**: `merge_qa_report` (PostToolUse, priority 34) runs after
+  a `git merge`, `git pull` or `git rebase` and reports only the plan-QA and
+  docs-QA findings attributable to what that operation introduced. Silent when
+  nothing moved and when nothing is attributable — pre-existing drift is not
+  re-surfaced on every merge, which is the noise failure that gets an advisory
+  ignored. The merge has already landed, so this is a failure report to repair,
+  in the same idiom as `lint_on_edit`.
 
 ## Success Criteria
 

@@ -464,6 +464,10 @@ handlers:
       # options:
       #   tail_bytes: 1048576                  # bounded transcript tail scanned per tool call (default shown)
 
+    merge_qa_report:  # Post-hoc plan/docs QA report on what a git merge/pull/rebase introduced (Plan 00373)
+      enabled: true   # On by default; silent unless plan/docs QA sweeps are active AND the operation introduced attributable drift.
+      priority: 34
+
     validate_eslint_on_write:  # Runs ESLint after file writes
       enabled: false           # Enable for automatic ESLint validation
       priority: 20

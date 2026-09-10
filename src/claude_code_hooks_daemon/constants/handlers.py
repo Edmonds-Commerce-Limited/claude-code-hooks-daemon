@@ -552,6 +552,16 @@ class HandlerID:
         config_key="model_downgrade_recorder",
         display_name="model-downgrade-recorder",
     )
+    # Merge QA report (PostToolUse) -- Plan 00373 Phase 3: `git merge`/`pull`/
+    # `rebase` create a commit without ever invoking `git commit`, so none of
+    # plan_qa_commit_gate/docs_qa_commit_gate/staged_lint_gate ever see it.
+    # This handler is the post-hoc backstop: reports only the plan-QA/docs-QA
+    # findings attributable to `ORIG_HEAD..HEAD`, silent otherwise.
+    MERGE_QA_REPORT = HandlerIDMeta(
+        class_name="MergeQaReportHandler",
+        config_key="merge_qa_report",
+        display_name="merge-qa-report",
+    )
 
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = HandlerIDMeta(

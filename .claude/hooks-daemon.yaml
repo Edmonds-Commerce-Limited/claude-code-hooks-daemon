@@ -679,6 +679,10 @@ handlers:
       # options:
       #   tail_bytes: 1048576  # bounded transcript tail scanned per PostToolUse
 
+    merge_qa_report:  # Dogfood: post-hoc plan/docs QA report on what a git merge/pull/rebase introduced (Plan 00373)
+      enabled: true  # On by default; silent unless plan/docs QA sweeps are active AND the operation introduced attributable drift.
+      priority: 34
+
   # SessionStart handlers (run when session starts)
   session_start:
     disclosure_reset_session_start:  # Reset per-agent rule-disclosure state on every SessionStart (Plan 00116 Phase 4)

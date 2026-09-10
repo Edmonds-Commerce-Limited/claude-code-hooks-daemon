@@ -219,6 +219,13 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "DocsQaSweepHandler": "T3 drift findings are worked through across the session",
     "ToolDisableAdvisorHandler": "T3 the named settings change awaits a user decision later",
     "PlanQaSweepHandler": "T3 drift findings are worked through across the session",
+    "MergeQaReportHandler": (
+        "T3 drift findings from what a merge/pull/rebase introduced are worked "
+        "through across the session, same as plan_qa_sweep/docs_qa_sweep; the "
+        "fire-time report alone would not teach the attribution rule (only "
+        "ORIG_HEAD..HEAD-touched findings are shown) or where the rest still "
+        "surfaces (the next SessionStart sweep)"
+    ),
     "PlanWorkflowAssetCheckerHandler": "T3 names a provisioning command to run later",
     "ProjectHandlerLoadCheckerHandler": "T3 'your guardrails are OFF' must persist",
     "GitHooksExecutableFixerHandler": "T3 the daemon changed file permissions on your behalf",

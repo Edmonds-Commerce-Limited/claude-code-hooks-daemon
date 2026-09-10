@@ -163,6 +163,13 @@ class Priority:
     # writer of a per-session signal file the ccy supervisor consumes)
     MODEL_DOWNGRADE_RECORDER = 33
 
+    # Merge QA report (Priority: 34 - PostToolUse advisory; Plan 00373 Phase
+    # 3, next free slot in the PostToolUse advisory band after
+    # model_downgrade_recorder. Shares 34 with the PreToolUse
+    # verification_result_gate the way staged_lint_gate/plan_qa_commit_gate
+    # share 43-44 -- disjoint events, so the slot never collides in practice)
+    MERGE_QA_REPORT = 34
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30
