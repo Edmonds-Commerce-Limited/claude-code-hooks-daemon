@@ -194,6 +194,30 @@ def get_project_path(override_path: Path | None = None) -> Path:
     sys.exit(1)
 
 
+def apply_global_project_root(args: argparse.Namespace) -> argparse.Namespace:
+    """Let a pre-subcommand ``--project-root`` survive the subparser (Plan 00374).
+
+    ``bin/hooks-daemon`` anchors every invocation by passing ``--project-root``
+    BEFORE the subcommand, and refuses to run at all rather than let the CLI
+    fall back to the working directory — "that would target whichever project
+    you happen to be standing in". Twenty-five subparsers declare their own
+    ``--project-root``, and argparse writes a subparser's defaults into the
+    namespace whether or not the flag was supplied, so that ``None`` silently
+    overwrote the anchor and the fallback happened anyway.
+
+    Splitting the dest is what makes the two layers distinguishable at all: a
+    subcommand-supplied value is now the only thing that can be sitting in
+    ``project_root``, so "did the caller override the anchor?" has an answer.
+    A subcommand value therefore still wins, which is the override the
+    wrapper's own comment promises; the anchor is used only when nothing
+    closer was named.
+    """
+    anchor = getattr(args, "global_project_root", None)
+    if anchor is not None and getattr(args, "project_root", None) is None:
+        args.project_root = anchor
+    return args
+
+
 def resolve_tree_root(args: argparse.Namespace) -> Path | None:
     """Resolve a project root for a command that needs a TREE, not an install.
 
@@ -5269,7 +5293,10 @@ def cmd_deploy_plan_workflow(args: argparse.Namespace) -> int:
         deploy_plan_workflow_if_enabled,
     )
 
-    project_root: Path = args.project_root
+    # Resolved HERE, not as an argparse default: a `default=Path.cwd()` sits in
+    # the namespace before apply_global_project_root runs, so it pre-empted the
+    # anchor bin/hooks-daemon passes ahead of the subcommand (Plan 00374).
+    project_root: Path = args.project_root or Path.cwd()
     config_path = project_root / ".claude" / "hooks-daemon.yaml"
 
     result = deploy_plan_workflow_if_enabled(project_root, config_path)
@@ -5303,7 +5330,9 @@ def cmd_agents(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.config.models import Config
     from claude_code_hooks_daemon.install import agent_assets
 
-    project_root: Path = args.project_root
+    # Same reason as cmd_deploy_plan_workflow: an argparse cwd default would
+    # pre-empt the wrapper's anchor (Plan 00374).
+    project_root: Path = args.project_root or Path.cwd()
     config_path = project_root / ".claude" / "hooks-daemon.yaml"
     config = Config.load_or_default(config_path)
     action: str = args.action
@@ -7070,8 +7099,17 @@ def main() -> int:
     )
 
     # Global arguments
+    #
+    # A SEPARATE dest, reconciled after parsing by apply_global_project_root
+    # (Plan 00374). Sharing `project_root` with the twenty-five subparsers that
+    # declare their own silently lost this value: argparse writes a subparser's
+    # defaults into the namespace whether or not the flag was supplied, so the
+    # subparser's None overwrote the anchor `bin/hooks-daemon` passes ahead of
+    # the subcommand — and the CLI fell back to auto-detection, which is the one
+    # behaviour that wrapper exists to refuse.
     parser.add_argument(
         "--project-root",
+        dest="global_project_root",
         type=Path,
         help="Override project root path (auto-detected by default)",
     )
@@ -8461,7 +8499,7 @@ def main() -> int:
     parser_deploy_plan.add_argument(
         "--project-root",
         type=Path,
-        default=Path.cwd(),
+        default=None,
         help="Project root (default: current directory)",
     )
     parser_deploy_plan.set_defaults(func=cmd_deploy_plan_workflow)
@@ -8486,7 +8524,7 @@ def main() -> int:
     parser_agents.add_argument(
         "--project-root",
         type=Path,
-        default=Path.cwd(),
+        default=None,
         help="Project root (default: current directory)",
     )
     parser_agents.set_defaults(func=cmd_agents)
@@ -8511,7 +8549,7 @@ def main() -> int:
     parser_bug_report.set_defaults(func=cmd_bug_report)
 
     # Parse arguments
-    args = parser.parse_args()
+    args = apply_global_project_root(parser.parse_args())
 
     # Execute command
     if not hasattr(args, "func"):

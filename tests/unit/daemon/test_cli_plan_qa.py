@@ -281,3 +281,69 @@ class TestProjectExcludePaths:
             _CONFIG_ENABLED + "daemon:\n  exclude_paths:\n    - 'CLAUDE/Plan/00001-first/**'\n"
         )
         assert cmd_plan_qa(_args(root, lint=target)) == 0
+
+
+class TestASweepNeverCertifiesATreeItNeverExamined:
+    """A missing plan directory is an operational error, not a clean tree.
+
+    ``cmd_plan_qa``'s own docstring already promises "2 on operational errors
+    (missing plan directory or lint target)", and the ``--lint`` branch fails
+    fast with the reason written out beside it: exiting 0 would certify
+    something that was never examined, and the exit code is what CI reads.
+    The sweep branch had no such guard — measured live, a scratch directory
+    with no plan tree printed "Plan QA: 0 findings — plan tree is clean." and
+    exited 0.
+
+    That matters more now than it did: Plan 00373 made the sweep a QA tool, so
+    this exit code is a release gate. A sweep that certifies an absent corpus
+    is the same defect the whole plan was filed about, one layer down.
+    """
+
+    def _rootless(self, tmp_path: Path, config_body: str = _CONFIG_ENABLED) -> Path:
+        """A configured git repo with NO plan directory at all."""
+        root = tmp_path / "repo"
+        (root / ".claude").mkdir(parents=True)
+        (root / ".claude" / "hooks-daemon.yaml").write_text(config_body)
+        subprocess.run(
+            ["git", "init", str(root)],
+            capture_output=True,
+            check=True,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        return root
+
+    def test_a_missing_plan_directory_is_operational_not_clean(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = self._rootless(tmp_path)
+
+        exit_code = cmd_plan_qa(_args(root, sweep=True))
+
+        captured = capsys.readouterr()
+        assert exit_code == 2
+        assert "plan tree is clean" not in captured.out.lower()
+        assert "CLAUDE/Plan" in captured.err
+
+    def test_json_mode_does_not_emit_a_clean_empty_array(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`[]` is exactly what a clean sweep prints, so it must not appear here."""
+        root = self._rootless(tmp_path)
+
+        exit_code = cmd_plan_qa(_args(root, sweep=True, json_output=True))
+
+        assert exit_code == 2
+        assert capsys.readouterr().out.strip() != "[]"
+
+    def test_disabling_the_plan_workflow_is_still_a_legitimate_pass(
+        self, tmp_path: Path
+    ) -> None:
+        """A project that declares it has no plan tree is not a broken one.
+
+        The guard must discriminate "configured for plans, none present" from
+        "explicitly not using plans" — otherwise every client without a plan
+        tree gets a red QA run for a corpus they never opted into.
+        """
+        root = self._rootless(tmp_path, _CONFIG_DISABLED)
+
+        assert cmd_plan_qa(_args(root, sweep=True)) == 0
