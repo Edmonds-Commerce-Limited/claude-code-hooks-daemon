@@ -16,9 +16,17 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from claude_code_hooks_daemon.core.worktree_reaping import WorktreeState, reap_worktree
+from claude_code_hooks_daemon.core.worktree_reaping import (
+    MINIMUM_AGE_SECONDS,
+    WorktreeState,
+    reap_worktree,
+)
 
 _Completed = subprocess.CompletedProcess[str]
+
+#: Comfortably clear of Plan 00372's recency window, so `_clean_state()` stays
+#: reapable purely on the axes this file's tests actually exercise.
+_OLD_ENOUGH_SECONDS = MINIMUM_AGE_SECONDS + 1
 
 
 def _ok(stdout: str = "") -> _Completed:
@@ -42,6 +50,8 @@ def _clean_state(
         uncommitted_paths=(),
         commits_ahead_of_base=0,
         unlanded_patches=0,
+        live_process_pids=(),
+        age_seconds=_OLD_ENOUGH_SECONDS,
     )
 
 
@@ -53,6 +63,8 @@ def _dirty_state(name: str = "agent-bbb-222") -> WorktreeState:
         uncommitted_paths=("x.py",),
         commits_ahead_of_base=3,
         unlanded_patches=1,
+        live_process_pids=(),
+        age_seconds=_OLD_ENOUGH_SECONDS,
     )
 
 

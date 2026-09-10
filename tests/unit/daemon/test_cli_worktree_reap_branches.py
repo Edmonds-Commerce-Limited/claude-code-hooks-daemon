@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.core.worktree_reaping import RunGit
 from claude_code_hooks_daemon.daemon.cli import cmd_worktree_reap
 
 _LISTING = """worktree /repo
@@ -76,6 +77,25 @@ def _args(**overrides: object) -> argparse.Namespace:
     return argparse.Namespace(**defaults)
 
 
+def _old_enough(_path: Path) -> float:
+    return 999_999.0
+
+
+def _nobody_home() -> dict[int, Path]:
+    return {}
+
+
+def _reap(args: argparse.Namespace, *, run_fn: RunGit) -> int:
+    """`cmd_worktree_reap` with Plan 00372's age/process axis held old/empty.
+
+    This file's subject is the orphaned-branch report, not that axis — held
+    old/empty by default so it stays silent here.
+    """
+    return cmd_worktree_reap(
+        args, run_fn=run_fn, age_fn=_old_enough, process_cwds_fn=_nobody_home
+    )
+
+
 @pytest.fixture
 def git() -> _FakeGit:
     return _FakeGit()
@@ -85,13 +105,13 @@ class TestTheReportNamesThem:
     def test_an_orphaned_branch_appears(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        cmd_worktree_reap(_args(), run_fn=git)
+        _reap(_args(), run_fn=git)
         assert "agent-orphan-2" in capsys.readouterr().out
 
     def test_a_branch_that_still_has_a_worktree_is_not_called_orphaned(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        cmd_worktree_reap(_args(), run_fn=git)
+        _reap(_args(), run_fn=git)
         out = capsys.readouterr().out
         orphan_lines = [line for line in out.splitlines() if "ORPHAN" in line]
         assert not any("agent-attached-1" in line for line in orphan_lines)
@@ -100,7 +120,7 @@ class TestTheReportNamesThem:
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """One that silently vanishes from the report looks handled."""
-        cmd_worktree_reap(_args(), run_fn=git)
+        _reap(_args(), run_fn=git)
         out = capsys.readouterr().out
         assert "agent-orphan-3" in out
         assert "not fully merged" in out
@@ -111,7 +131,7 @@ class TestReapDoesNotTouchBranches:
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Widening --reap would change what an existing caller does."""
-        cmd_worktree_reap(_args(reap=True), run_fn=git)
+        _reap(_args(reap=True), run_fn=git)
         deleted = [call[2] for call in git.branch_deletions]
         assert not any("agent-orphan" in target for target in deleted)
 
@@ -120,19 +140,19 @@ class TestActingOnBranchesNeedsItsOwnFlag:
     def test_the_merged_orphan_is_deleted(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        cmd_worktree_reap(_args(reap_branches=True), run_fn=git)
+        _reap(_args(reap_branches=True), run_fn=git)
         assert ("branch", "-d", "agent-orphan-2") in git.branch_deletions
 
     def test_the_unmerged_orphan_gets_no_git_command(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        cmd_worktree_reap(_args(reap_branches=True), run_fn=git)
+        _reap(_args(reap_branches=True), run_fn=git)
         assert not any("agent-orphan-3" in call[2] for call in git.branch_deletions)
 
     def test_no_branch_is_ever_deleted_with_capital_d(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        cmd_worktree_reap(_args(reap_branches=True), run_fn=git)
+        _reap(_args(reap_branches=True), run_fn=git)
         assert not any("-D" in call for call in git.calls)
 
 
@@ -141,5 +161,5 @@ class TestNarrowingToOneWorktree:
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """`--only` names a worktree, so branches are not what was asked about."""
-        cmd_worktree_reap(_args(only="agent-attached-1"), run_fn=git)
+        _reap(_args(only="agent-attached-1"), run_fn=git)
         assert "ORPHAN" not in capsys.readouterr().out
