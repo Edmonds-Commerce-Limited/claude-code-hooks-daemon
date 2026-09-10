@@ -58,6 +58,11 @@ dev = [
     # the client installer runs `uv pip install -e <dir>` with no [dev] extra,
     # so this never reaches a client project (scripts/install/venv.sh).
     "semgrep>=1.100",
+    # The pyright QA gate (Plan 00368). The PyPI package wraps the npm
+    # release and needs a `node` on PATH; pinned exactly because the gate
+    # is zero-errors and a new pyright release can add diagnostics, which
+    # must arrive as a deliberate bump, not as a red CI run one morning.
+    "pyright==1.1.413",
     # CONTRIBUTING.md instructs `pre-commit install`; without this the command
     # is not found on a fresh dev setup. The hooks themselves run the tools
     # above from this same environment (see .pre-commit-config.yaml), so there

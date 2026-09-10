@@ -48,6 +48,13 @@ while the runner ran considerably more.
 - **Format** (Black) / **Linter** (Ruff) — both auto-fix via
   `./scripts/qa/run_autofix.sh`
 - **Type Check** (MyPy) — strict mode; every function annotated
+- **Pyright** (`run_pyright_check.py`) — zero errors over what
+  `pyrightconfig.json` scopes, with the same binary and config the language
+  server runs, so any diagnostic an agent sees mid-edit is real. Installed as
+  the pinned PyPI `pyright` dev extra (needs `node`); a missing binary FAILS
+  the check with the install line, it never skips. Never reach zero with a
+  suppression comment or a rule downgrade — see
+  [development/LSP.md](development/LSP.md)
 - **Tests** (Pytest) — **95% coverage minimum**
 - **Security** (Bandit) — zero HIGH/MEDIUM/LOW issues; only B101 is filtered
 - **Dependencies** (Deptry) — missing (DEP001) and misplaced (DEP004)
@@ -606,6 +613,7 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 ./scripts/qa/run_format_check.sh
 ./scripts/qa/run_lint.sh
 ./scripts/qa/run_type_check.sh
+./scripts/qa/run_pyright_check.py --json
 ./scripts/qa/run_tests.sh
 ./scripts/qa/run_security_check.sh
 ./scripts/qa/run_dependency_check.sh

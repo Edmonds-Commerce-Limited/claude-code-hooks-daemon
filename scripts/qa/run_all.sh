@@ -112,6 +112,19 @@ else
 fi
 echo ""
 
+# Zero-errors pyright gate over what pyrightconfig.json scopes (Plan 00368):
+# the same binary and config the language server runs, so a diagnostic the
+# agent sees mid-edit is one this gate fails on too.
+echo "4b. Running Pyright..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/run_pyright_check.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Pyright FAILED"
+else
+    echo "✅ Pyright PASSED"
+fi
+echo ""
+
 echo "5. Running Tests with Coverage..."
 echo "----------------------------------------"
 if ! "${SCRIPT_DIR}/run_tests.sh"; then
@@ -334,6 +347,7 @@ results = {
     "Format Check": "untracked/qa/format.json",
     "Linter": "untracked/qa/lint.json",
     "Type Check": "untracked/qa/type_check.json",
+    "Pyright": "untracked/qa/pyright.json",
     "Tests": "untracked/qa/tests.json",
     "Security Check": "untracked/qa/security.json",
     "Dependencies": "untracked/qa/dependencies.json",

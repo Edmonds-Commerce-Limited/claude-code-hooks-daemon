@@ -298,6 +298,14 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="type_check.json",
         jq_hint="jq '.errors[] | {file, line, message}'",
     ),
+    # Zero-errors gate over what pyrightconfig.json scopes (Plan 00368): the
+    # same binary and config the language server uses, so a diagnostic the
+    # agent sees mid-edit is one this gate would fail on too.
+    "pyright": ToolConfig(
+        command=_python("run_pyright_check.py", "--json"),
+        json_file="pyright.json",
+        jq_hint="jq '.errors[] | {file, line, rule, message}'",
+    ),
     # The hint MUST name the array holding the detail, not the summary. It
     # pointed at `.summary` until Plan 00229 — sending a reader who wanted to
     # know WHAT failed back to the count they had already been shown. That is
@@ -458,6 +466,11 @@ def _summarize_lint(data: QaReport) -> str:
 def _summarize_type_check(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_errors", 0)
     return f"{total} errors"
+
+
+def _summarize_pyright(data: QaReport) -> str:
+    s = data.get("summary", {})
+    return f"{s.get('total_errors', 0)} errors ({s.get('files_analyzed', 0)} files analysed)"
 
 
 # How many failing test names to print inline. This output is read by an LLM on
@@ -627,6 +640,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "format": _summarize_format,
     "lint": _summarize_lint,
     "type_check": _summarize_type_check,
+    "pyright": _summarize_pyright,
     "tests": _summarize_tests,
     "security": _summarize_security,
     "dependencies": _summarize_dependencies,
