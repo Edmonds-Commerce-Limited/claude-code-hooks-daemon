@@ -9,6 +9,21 @@ from claude_code_hooks_daemon.constants import Priority, ToolName
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 
+
+def _instantiate(handler_cls: type[Handler], **kwargs: Any) -> Handler:
+    """Instantiate a Handler subclass through its base-class static type.
+
+    Several tests below deliberately define a Handler subclass missing one or
+    more abstract methods and assert it raises TypeError at construction
+    (Python's ABC enforcement). Calling the concrete class literal directly
+    makes pyright's reportAbstractUsage flag exactly that intended failure;
+    routing the call through this helper's `type[Handler]` parameter keeps the
+    instantiation genuinely un-suppressed while matching what is actually
+    under test: runtime ABC behaviour, not this call's static type.
+    """
+    return handler_cls(**kwargs)
+
+
 # Test Fixtures
 
 
@@ -21,7 +36,7 @@ class ConcreteHandler(Handler):
 
     def handle(self, hook_input: dict) -> HookResult:
         """Simple handle implementation."""
-        return HookResult(decision=Decision.ALLOW, context="Concrete handler executed")
+        return HookResult(decision=Decision.ALLOW, context=["Concrete handler executed"])
 
     def get_claude_md(self) -> str | None:
         """Return None for testing."""
@@ -87,7 +102,7 @@ class NonTerminalHandler(Handler):
 
     def handle(self, hook_input: dict) -> HookResult:
         """Handle implementation."""
-        return HookResult(decision=Decision.ALLOW, context="Non-terminal context")
+        return HookResult(decision=Decision.ALLOW, context=["Non-terminal context"])
 
     def get_claude_md(self) -> str | None:
         """Return None for testing."""
@@ -394,7 +409,7 @@ class TestHandlerAbstractMethods:
 
         # ABC prevents instantiation of incomplete subclasses
         with pytest.raises(TypeError, match="abstract"):
-            IncompleteHandler(name="incomplete")
+            _instantiate(IncompleteHandler, name="incomplete")
 
     def test_handle_not_implemented_raises_error(self):
         """Handler with missing handle() cannot be instantiated (ABC)."""
@@ -411,7 +426,7 @@ class TestHandlerAbstractMethods:
 
         # ABC prevents instantiation of incomplete subclasses
         with pytest.raises(TypeError, match="abstract"):
-            IncompleteHandler(name="incomplete")
+            _instantiate(IncompleteHandler, name="incomplete")
 
     def test_both_methods_not_implemented_raises_error(self):
         """Handler without both methods cannot be instantiated (ABC)."""
@@ -424,7 +439,7 @@ class TestHandlerAbstractMethods:
 
         # ABC prevents instantiation of incomplete subclasses
         with pytest.raises(TypeError, match="abstract"):
-            EmptyHandler(name="empty")
+            _instantiate(EmptyHandler, name="empty")
 
 
 # Subclass Behavior Tests
@@ -965,7 +980,7 @@ class TestHandlerAcceptanceTests:
 
         # Should raise TypeError because get_acceptance_tests() is not implemented
         with pytest.raises(TypeError, match="abstract"):
-            NoAcceptanceTestHandler(name="no-tests")
+            _instantiate(NoAcceptanceTestHandler, name="no-tests")
 
     def test_concrete_handler_must_implement_get_acceptance_tests(self):
         """Concrete handlers must implement get_acceptance_tests()."""
@@ -1049,7 +1064,7 @@ class TestHandlerGetClaudeMd:
 
         # Should raise TypeError because get_claude_md() is not implemented
         with pytest.raises(TypeError, match="abstract"):
-            NoClaudeMdHandler(name="no-claude-md")
+            _instantiate(NoClaudeMdHandler, name="no-claude-md")
 
     def test_concrete_handler_returning_none(self) -> None:
         """Concrete handler can implement get_claude_md() returning None."""

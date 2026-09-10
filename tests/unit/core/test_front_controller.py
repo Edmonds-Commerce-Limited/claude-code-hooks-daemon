@@ -48,7 +48,7 @@ def mock_non_terminal_handler():
     handler.terminal = False
     handler.matches.return_value = False
     handler.handle.return_value = HookResult(
-        decision=Decision.ALLOW, context="Non-terminal context"
+        decision=Decision.ALLOW, context=["Non-terminal context"]
     )
     return handler
 
@@ -287,7 +287,7 @@ class TestNonTerminalHandlerDispatch:
         handler1.terminal = False  # Non-terminal
         handler1.matches.return_value = True
         handler1.handle.return_value = HookResult(
-            decision=Decision.ALLOW, context="Context from handler1"
+            decision=Decision.ALLOW, context=["Context from handler1"]
         )
         handler1.config_key = "handler1"
 
@@ -320,7 +320,7 @@ class TestNonTerminalHandlerDispatch:
         handler1.terminal = False
         handler1.matches.return_value = True
         handler1.handle.return_value = HookResult(
-            decision=Decision.ALLOW, context="Context from handler1"
+            decision=Decision.ALLOW, context=["Context from handler1"]
         )
 
         handler2 = MagicMock(spec=Handler)
@@ -343,19 +343,19 @@ class TestNonTerminalHandlerDispatch:
         handler1.priority = 10
         handler1.terminal = False
         handler1.matches.return_value = True
-        handler1.handle.return_value = HookResult(decision=Decision.ALLOW, context="Context 1")
+        handler1.handle.return_value = HookResult(decision=Decision.ALLOW, context=["Context 1"])
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
         handler2.terminal = False
         handler2.matches.return_value = True
-        handler2.handle.return_value = HookResult(decision=Decision.ALLOW, context="Context 2")
+        handler2.handle.return_value = HookResult(decision=Decision.ALLOW, context=["Context 2"])
 
         handler3 = MagicMock(spec=Handler)
         handler3.priority = 30
         handler3.terminal = False
         handler3.matches.return_value = True
-        handler3.handle.return_value = HookResult(decision=Decision.ALLOW, context="Context 3")
+        handler3.handle.return_value = HookResult(decision=Decision.ALLOW, context=["Context 3"])
 
         front_controller.register(handler1)
         front_controller.register(handler2)
@@ -524,7 +524,7 @@ class TestContextAccumulation:
         handler1.terminal = False
         handler1.matches.return_value = True
         handler1.handle.return_value = HookResult(
-            decision=Decision.ALLOW, context="Context from handler1"
+            decision=Decision.ALLOW, context=["Context from handler1"]
         )
 
         handler2 = MagicMock(spec=Handler)
@@ -532,7 +532,7 @@ class TestContextAccumulation:
         handler2.terminal = False
         handler2.matches.return_value = True
         handler2.handle.return_value = HookResult(
-            decision=Decision.ALLOW, context="Context from handler2"
+            decision=Decision.ALLOW, context=["Context from handler2"]
         )
 
         handler3 = MagicMock(spec=Handler)
@@ -540,7 +540,7 @@ class TestContextAccumulation:
         handler3.terminal = True
         handler3.matches.return_value = True
         handler3.handle.return_value = HookResult(
-            decision=Decision.DENY, reason="Blocked", context="Terminal context"
+            decision=Decision.DENY, reason="Blocked", context=["Terminal context"]
         )
 
         front_controller.register(handler1)
@@ -560,19 +560,19 @@ class TestContextAccumulation:
         handler1.priority = 10
         handler1.terminal = False
         handler1.matches.return_value = True
-        handler1.handle.return_value = HookResult(decision=Decision.ALLOW, context="First")
+        handler1.handle.return_value = HookResult(decision=Decision.ALLOW, context=["First"])
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
         handler2.terminal = False
         handler2.matches.return_value = True
-        handler2.handle.return_value = HookResult(decision=Decision.ALLOW, context="Second")
+        handler2.handle.return_value = HookResult(decision=Decision.ALLOW, context=["Second"])
 
         handler3 = MagicMock(spec=Handler)
         handler3.priority = 30
         handler3.terminal = True
         handler3.matches.return_value = True
-        handler3.handle.return_value = HookResult(decision=Decision.ALLOW, context="Third")
+        handler3.handle.return_value = HookResult(decision=Decision.ALLOW, context=["Third"])
 
         front_controller.register(handler1)
         front_controller.register(handler2)
@@ -591,16 +591,14 @@ class TestContextAccumulation:
         handler1.priority = 10
         handler1.terminal = False
         handler1.matches.return_value = True
-        handler1.handle.return_value = HookResult(
-            decision=Decision.ALLOW, context=None
-        )  # No context
+        handler1.handle.return_value = HookResult(decision=Decision.ALLOW)  # No context
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
         handler2.terminal = True
         handler2.matches.return_value = True
         handler2.handle.return_value = HookResult(
-            decision=Decision.ALLOW, context="Terminal context"
+            decision=Decision.ALLOW, context=["Terminal context"]
         )
 
         front_controller.register(handler1)
@@ -618,16 +616,14 @@ class TestContextAccumulation:
         handler1.terminal = False
         handler1.matches.return_value = True
         handler1.handle.return_value = HookResult(
-            decision=Decision.ALLOW, context="Non-terminal context"
+            decision=Decision.ALLOW, context=["Non-terminal context"]
         )
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
         handler2.terminal = True
         handler2.matches.return_value = True
-        handler2.handle.return_value = HookResult(
-            decision=Decision.DENY, reason="Blocked", context=None
-        )
+        handler2.handle.return_value = HookResult(decision=Decision.DENY, reason="Blocked")
 
         front_controller.register(handler1)
         front_controller.register(handler2)
