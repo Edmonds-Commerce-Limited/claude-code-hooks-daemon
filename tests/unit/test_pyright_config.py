@@ -8,12 +8,17 @@ worktree's half-built branch, the dummy-client fixture, canary clones, and
 the venvs. Two sub-agents' in-progress files then surfaced as thousands of
 "unknown attribute" and "unresolved import" diagnostics against THIS
 checkout, drowning the real ones. Archived plan code and the deliberately
-broken test fixtures are noise of the same kind.
+broken test fixtures are noise of the same kind, as is the ccy supervisor's
+own ``plugins/`` runtime tree: vendored third-party Claude Code marketplace
+plugin code (``hookify``, ``security-guidance``, ``skill-creator``, ...)
+that ccy clones underneath ``.claude/ccy/``, never this project's code
+(Plan 00368 Task 3.1).
 """
 
 import json
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants import ProjectPath
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -22,9 +27,11 @@ _CONFIG = _REPO_ROOT / "pyrightconfig.json"
 # Trees that are never this checkout's live code: linked worktrees, venvs,
 # fixtures and canary clones (untracked/), the plan archive's historical
 # probes and archived code, the acceptance-test fixture files, the test
-# fixtures that are broken on purpose, and the reviewed vendored/build names
-# at any depth (the same set the lsp_noise_checker advisory derives its
-# expectation from, so this repo's own config satisfies its own handler).
+# fixtures that are broken on purpose, the ccy supervisor's own vendored
+# plugin-marketplace runtime tree (ProjectPath.CCY_PLUGINS_DIR), and the
+# reviewed vendored/build names at any depth (the same set the
+# lsp_noise_checker advisory derives its expectation from, so this repo's
+# own config satisfies its own handler).
 _REQUIRED_EXCLUDES = frozenset(
     {
         "untracked",
@@ -32,6 +39,7 @@ _REQUIRED_EXCLUDES = frozenset(
         "CLAUDE/AcceptanceTests/fixtures",
         "tests/fixtures",
         "remote-docs",
+        ProjectPath.CCY_PLUGINS_DIR,
     }
     | {f"**/{name}" for name in CORE_VENDORED_BUILD_DIR_NAMES}
 )

@@ -8,6 +8,7 @@
     "CLAUDE/AcceptanceTests/fixtures",
     "tests/fixtures",
     "remote-docs",
+    ".claude/ccy/plugins",
     "**/node_modules",
     "**/vendor",
     "**/third_party",

@@ -27,6 +27,7 @@ class DaemonPath:
     UNTRACKED_DIR = "untracked"
     VENV_DIR = "venv"
     SRC_DIR = "src"
+    CCY_DIR = "ccy"
 
     # File names
     CONFIG_FILE = "hooks-daemon.yaml"
@@ -108,3 +109,18 @@ class ProjectPath:
     # root rather than from a vendored copy under here (CLAUDE.md "Self-Install
     # Mode"), so exclusions keyed on this constant are inert in this repo.
     HOOKS_DAEMON_INSTALL_DIR = f"{DaemonPath.CLAUDE_DIR}/{DaemonPath.HOOKS_DAEMON_DIR}"
+
+    # The ccy supervisor's plugin runtime tree (Plan 00368 Task 3.1):
+    # `.claude/ccy/.gitignore` whitelists only a handful of top-level files
+    # (`ccy.env`, `claude-supervise.py`, ...), so everything under
+    # `.claude/ccy/plugins/` -- the `marketplaces/` clones of vendored
+    # third-party Claude Code plugins (e.g. `claude-plugins-official`), plus
+    # the `cache/`/`data/` a language-server plugin populates -- is runtime
+    # data ccy itself downloads, never this project's code. The single
+    # source both `pyrightconfig.json`'s pinned exclude list
+    # (`tests/unit/test_pyright_config.py`) and every language's
+    # `lsp_noise_checker` strategy (`required_excludes()`) read, so a
+    # language server is never pointed at another marketplace plugin's
+    # half-finished or deliberately-broken source and neither can drift from
+    # the other.
+    CCY_PLUGINS_DIR = f"{DaemonPath.CLAUDE_DIR}/{DaemonPath.CCY_DIR}/plugins"
