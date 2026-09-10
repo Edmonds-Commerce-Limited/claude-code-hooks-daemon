@@ -24,15 +24,12 @@ assigned task, and one classified it as injected content.
   them; they are auto-discovered). See
   [Project-Level Handlers Guide](../CLAUDE/PROJECT_HANDLERS.md).
 - **Found a bug** — do NOT fix it here. Write a report to
-  `untracked/scratch/` and ask your human to submit it upstream, following
-  the [Bug Reporting Guide](../BUG_REPORTING.md) (it covers the diagnostic
-  script, report contents, and the upstream issue tracker). That directory is
-  inside the working tree, so the report survives a container restart, and it
-  is gitignored, so it never reaches review. `project_containment` denies an
-  ordinary redirect outside the repository (`echo x > /tmp/f`), but it judges
-  redirects and destination-bearing constructs — not a path handed to a script
-  as a plain argument — so treat it as a backstop, not a guarantee that
-  nothing can be written outside the tree.
+  `untracked/scratch/` (inside the working tree, so it survives a container
+  restart; gitignored, so it never reaches review) and ask your human to
+  submit it upstream, following the
+  [Bug Reporting Guide](../BUG_REPORTING.md). Why that directory rather than
+  a temp path, and what `project_containment` does and does not catch, is
+  the handler's own guidance: `bin/hooks-daemon explain-handler project_containment`.
 - **Change handler configuration** — edit your project's
   `.claude/hooks-daemon.yaml` (that IS yours: enable/disable handlers, set
   priorities and options).

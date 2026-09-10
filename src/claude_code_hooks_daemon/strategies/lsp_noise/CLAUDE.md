@@ -20,19 +20,13 @@ there is no file to have gone stale against yet.
 
 ## Why the five strategies differ
 
-Verified against the official marketplace plugin configs
-(`anthropics/claude-plugins-official`'s `.claude-plugin/marketplace.json`,
-which carries no `settings`/`initializationOptions` for any language) and
-each tool's own docs, never assumed: Python (pyright) and
-TypeScript/JavaScript read a real project file (`pyrightconfig.json` /
-`tsconfig.json` `exclude`). Go (gopls) has no exclude list at all - the
-check is "does a non-project tree hold `.go` files inside the `go.mod`
-boundary". Rust (rust-analyzer) also has no exclude list, but workspace
-membership IS editable via `Cargo.toml`'s `[workspace] exclude`. PHP
-(intelephense) reads no project file whatsoever - client `settings` only -
-so the fix is a project-scope LSP plugin re-registering `.php`, scanned
-under `.claude/plugins/*/`. See each strategy's own docstring for the
-sourced detail.
+Each server offers a different project-level knob, or none, so no two
+strategies check the same thing — a real project file for Python and
+TypeScript, module/workspace membership for Go and Rust, and for PHP a
+project-scope LSP plugin because intelephense reads no project file at all.
+Every strategy's own module docstring carries the sourced reasoning,
+verified against the official marketplace plugin configs and each tool's
+docs rather than assumed. Read the strategy, not a summary here.
 
 ## Edit guards (this directory)
 
