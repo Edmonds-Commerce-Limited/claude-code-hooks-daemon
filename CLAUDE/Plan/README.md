@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00368: lsp is signal not noise](00368-lsp-is-signal-not-noise/PLAN.md) - In Progress (the language server analysed every worktree under `untracked/` and flooded the agent's context with other checkouts' errors; the exclude is in, and pyright becomes a zero-error QA gate with a session-start checker for a missing exclude or a stale server)
-
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
@@ -115,6 +113,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00368: lsp is signal not noise](Completed/00368-lsp-is-signal-not-noise/PLAN.md) - Complete + the archiving commit (3,011 language-server errors down to zero with no suppression anywhere: the non-project trees are excluded, pyright is a blocking QA gate, and a session-start checker tells any project in five languages exactly how to silence its own noise)
+
 - [00372: worktree reap two defects](Completed/00372-worktree-reap-two-defects/PLAN.md) - Complete + the archiving commit (a worktree with no commits yet passed every safety predicate vacuously, so a live agent's work was offered for deletion; and the branch delete had never once worked, passing a fully-qualified ref that `git branch -d` rejects)
 
 - [00371: qa acceptance probes detect a stale daemon](Completed/00371-qa-acceptance-probes-detect-a-stale-daemon/PLAN.md) - Complete + the archiving commit (the acceptance harness graded whatever code the running daemon loaded at startup, so it could pass a broken tree; a startup source fingerprint now makes every live-dispatch test fail by name on a stale daemon)
@@ -175,8 +175,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00343: flip the plan QA commit gate from warn to block](Completed/00343-plan-qa-commit-gate-warn-to-block/PLAN.md) - Complete at the delivery + archiving commits (a 253-commit replay found 18 would-be denials of which 7 blamed a commit for plan-tree state it never touched; six checks narrowed to BLOCK only what a commit introduced, replay then 11 denials with zero false positives, and the gate flipped to `block`)
 
-- [00341: plan status header rots behind shipped work](Completed/00341-plan-status-header-rots-behind-shipped-work/PLAN.md) - Complete at `9a0bf7a8` + the archiving commit (a single ticked box now falsifies a `Not Started` header, and shipping `src/` code for a plan named in the commit SUBJECT does too; the subject scoping came from a 250-commit replay that exposed a 25% false-positive shape argument had missed)
-
 ## Blocked / On Hold Plans
 
 - None. (00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
@@ -228,15 +226,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 372 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 334 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 335 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 15 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 14 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 15 + 334 + 13 = **362 folders**, spanning
+- **Folder-to-number reconciliation**: 14 + 335 + 13 = **362 folders**, spanning
   **359 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

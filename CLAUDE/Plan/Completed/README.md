@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00341: plan status header rots behind shipped work](00341-plan-status-header-rots-behind-shipped-work/PLAN.md) - Complete at `9a0bf7a8` + the archiving commit (a single ticked box now falsifies a `Not Started` header, and shipping `src/` code for a plan named in the commit SUBJECT does too; the subject scoping came from a 250-commit replay that exposed a 25% false-positive shape argument had missed)
+
 - [00340: release review followups v3621](00340-release-review-followups-v3621/PLAN.md) - Complete at `6d0aad13`…`c9dfd4a8` + the archiving commit (the v3.62.1 review's non-blocking remainder: a real `/model` picker confirmed the supervisor's blind Enter persists a modal's default, so a resubmit now follows its own escape within 2s)
 
 - [00338: deployed skill tree invisible to review](00338-deployed-skill-tree-invisible-to-review/PLAN.md) - Complete at the archiving commit (the `.claude/.gitignore` pattern is anchored to `/hooks-daemon/`, so the 21-file deployed skill tree is tracked like its five siblings; both directions pinned by tests, and source-to-deployed drift is now a check rather than an accident)
