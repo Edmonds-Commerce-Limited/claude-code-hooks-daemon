@@ -7,8 +7,10 @@ DBF (``CLAUDE.md`` Core Standard 15). Two handlers were described in
   *requires* them (``handlers/pre_tool_use/absolute_path.py:44`` returns
   ``not file_path.startswith("/")``).
 - ``:98`` "Daemon restart verifier — Blocks commits if the daemon cannot
-  restart cleanly". It is advisory: ``daemon_restart_verifier.py:42`` sets
-  ``terminal=False`` and ``:101`` returns ``Decision.ALLOW``.
+  restart cleanly". It was advisory: the built-in ``daemon_restart_verifier``
+  handler set ``terminal=False`` and returned ``Decision.ALLOW`` (since
+  re-homed as a project handler, Plan 00370 — the mismatch this test guards
+  against is unrelated to where the handler lives).
 
 Neither survives a spot-check, which makes them the cheapest possible
 credibility loss. The guard that should have caught them did not exist — yet
@@ -84,7 +86,7 @@ def _rules(report: dict) -> set[str]:
 
 
 def test_flags_blocking_claim_about_an_advisory_handler(tmp_path: Path) -> None:
-    """The ``daemon_restart_verifier`` class: prose claims it blocks; it advises."""
+    """The historical ``daemon_restart_verifier`` case: prose claimed it blocks; it advised."""
     root = _make_docs(
         tmp_path,
         "## What's Built In\n\n"

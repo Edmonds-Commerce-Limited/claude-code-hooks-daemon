@@ -1150,35 +1150,6 @@ handlers:
 
 ---
 
-#### daemon_restart_verifier
-
-| Property       | Value                     |
-| -------------- | ------------------------- |
-| **Config key** | `daemon_restart_verifier` |
-| **Priority**   | 10                        |
-| **Type**       | Advisory                  |
-| **Event**      | PreToolUse                |
-
-**Description:** Suggests verifying that the daemon can restart before committing code changes in the hooks daemon repository. This catches import errors and loading failures that unit tests miss. Only activates for git commit commands when working inside the daemon's own repository.
-
-**Example trigger:**
-
-```bash
-git commit -m "Add new handler"
-```
-
-**Config example:**
-
-```yaml
-handlers:
-  pre_tool_use:
-    daemon_restart_verifier:
-      enabled: true
-      priority: 10
-```
-
----
-
 ### Code Quality Handlers
 
 Code quality handlers prevent QA suppression comments and enforce development practices.
@@ -3909,7 +3880,6 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 
 | Config Key                 | Event            | Priority | What It Does                                   |
 | -------------------------- | ---------------- | -------- | ---------------------------------------------- |
-| `daemon_restart_verifier`  | PreToolUse       | 10       | Suggests daemon restart before commits         |
 | `verification_result_gate` | PreToolUse       | 34       | Verifier result unconsumed before a mutator    |
 | `bash_safe_mode`           | PreToolUse       | 36       | Opt-in safe-prelude forcer (ships disabled)    |
 | `staged_lint_gate`         | PreToolUse       | 43       | Cheap syntax check over staged files           |

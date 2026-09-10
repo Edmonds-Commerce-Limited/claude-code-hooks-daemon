@@ -620,7 +620,16 @@ def _known_handler_identities(root: Path) -> set[str]:
     # one CLAUDE.md guidance would otherwise be flagged for its own handler.
     for handlers_root in (root / _HANDLERS_DIR, root / _PROJECT_HANDLERS_DIR):
         if handlers_root.is_dir():
-            identities.update(path.stem for path in handlers_root.rglob(f"*{_PYTHON_SUFFIX}"))
+            for path in handlers_root.rglob(f"*{_PYTHON_SUFFIX}"):
+                identities.add(path.stem)
+                # A project handler's `handler_id` follows the built-in
+                # display-name convention (kebab-case, e.g.
+                # "daemon-restart-verifier"), while its filename follows
+                # Python convention (snake_case). The marker the injector
+                # writes is the handler_id, so the module-stem spelling
+                # alone misses every project handler whose id is not a
+                # literal copy of its filename — add the hyphenated form too.
+                identities.add(path.stem.replace("_", "-"))
 
     return identities
 

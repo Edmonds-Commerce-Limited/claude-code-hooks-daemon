@@ -248,7 +248,7 @@ Use these guidelines — when in doubt, **enable it**. Handlers can always be di
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | **Safety** (priority 10-22)       | `destructive_git`, `sed_blocker`, `absolute_path`, `error_hiding_blocker`, `security_antipattern`, `curl_pipe_shell`, `pipe_blocker`, `dangerous_permissions`, `lock_file_edit_blocker`, `pip_break_system`, `sudo_pip` | **Enable ALL** — these prevent data loss and security issues                |
 | **Code Quality** (priority 25-35) | `qa_suppression`, `tdd_enforcement`, `lint_on_edit`                                                                                                                                                                     | **Enable ALL** — prevents suppressed linting, enforces TDD, validates edits |
-| **Workflow** (priority 36-55)     | `npm_command`, `global_npm_advisor`, `gh_issue_comments`, `daemon_restart_verifier`                                                                                                                                     | **Enable ALL** — enforces best practices                                    |
+| **Workflow** (priority 36-55)     | `npm_command`, `global_npm_advisor`, `gh_issue_comments`                                                                                                                                                                | **Enable ALL** — enforces best practices                                    |
 | **Advisory** (priority 55-60)     | `british_english`, `web_search_year`                                                                                                                                                                                    | Enable based on project preferences                                         |
 | **Session/Lifecycle**             | `git_context_injector`, `version_check`, `optimal_config_checker`                                                                                                                                                       | **Enable ALL** — provides valuable context at zero cost                     |
 | **Planning**                      | `plan_workflow`, `plan_time_estimates`, `plan_qa_edit`, `plan_qa_commit_gate`, `plan_close_approval`, `markdown_organization`                                                                                           | Enable if using the planning workflow (see Planning section below)          |
@@ -274,7 +274,6 @@ handlers:
     lock_file_edit_blocker: {enabled: true, priority: 20}
     pip_break_system: {enabled: true, priority: 21}
     sudo_pip: {enabled: true, priority: 22}
-    daemon_restart_verifier: {enabled: true, priority: 23}
 
     # Code quality — enable for better code
     qa_suppression: {enabled: true, priority: 30}

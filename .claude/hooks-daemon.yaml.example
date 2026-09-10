@@ -169,10 +169,6 @@ handlers:
       enabled: true
       priority: 21
 
-    daemon_restart_verifier: # Verifies daemon restart after code changes
-      enabled: false       # Enable for daemon development projects
-      priority: 22
-
     ask_user_question_blocker: # Blocks AskUserQuestion so Claude works autonomously (for unattended workflows)
       enabled: false           # Enable for fully unattended operation
       priority: 23

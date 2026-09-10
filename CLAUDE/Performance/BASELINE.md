@@ -13,19 +13,18 @@ and
 
 ## p50 latency
 
-| Stage                                 | p50       | Notes                                            |
-| ------------------------------------- | --------- | ------------------------------------------------ |
-| PreToolUse event, end-to-end          | ~45 ms    | human-gated; tool turns are multi-second         |
-| bash forwarder (total spawns)         | ~43 ms    | 95% of the typical path                          |
-| — `jq` spawn                          | ~22-24 ms | once per wrapper; twice on status line           |
-| — `python3` transport spawn           | ~19-21 ms | irreducible CPython start per event              |
-| — `source init.sh`                    | ~13.2 ms  | before any daemon traffic                        |
-| — bash itself                         | ~2 ms     |                                                  |
-| daemon dispatch (Bash event)          | ~1.8 ms   | socket + JSON + pydantic + 38-handler chain      |
-| — `daemon_restart_verifier.matches()` | ~1.4 ms   | forks `git remote get-url origin` per Bash event |
-| — rest of dispatch chain              | ~30 µs    | 35 of 38 `matches()` < 2 µs each                 |
-| socket round-trip, no dispatch        | ~0.12 ms  | nothing to win here                              |
-| Status event (daemon-side render)     | ~15.75 ms | ~5 git forks/render, ~2-3 ms each                |
+| Stage                             | p50             | Notes                                                                                                                                                                                                 |
+| --------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PreToolUse event, end-to-end      | ~45 ms          | human-gated; tool turns are multi-second                                                                                                                                                              |
+| bash forwarder (total spawns)     | ~43 ms          | 95% of the typical path                                                                                                                                                                               |
+| — `jq` spawn                      | ~22-24 ms       | once per wrapper; twice on status line                                                                                                                                                                |
+| — `python3` transport spawn       | ~19-21 ms       | irreducible CPython start per event                                                                                                                                                                   |
+| — `source init.sh`                | ~13.2 ms        | before any daemon traffic                                                                                                                                                                             |
+| — bash itself                     | ~2 ms           |                                                                                                                                                                                                       |
+| daemon dispatch (Bash event)      | not re-measured | socket + JSON + pydantic + built-in handler chain; Plan 00370 removed the dominant cost below from the built-in chain entirely, so the ~1.8 ms figure no longer applies and needs a fresh measurement |
+| — rest of dispatch chain          | ~30 µs          | remaining `matches()` calls, most < 2 µs each                                                                                                                                                         |
+| socket round-trip, no dispatch    | ~0.12 ms        | nothing to win here                                                                                                                                                                                   |
+| Status event (daemon-side render) | ~15.75 ms       | ~5 git forks/render, ~2-3 ms each                                                                                                                                                                     |
 
 ## CPU / memory
 

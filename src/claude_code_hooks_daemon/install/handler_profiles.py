@@ -57,7 +57,6 @@ _RECOMMENDED_HANDLERS: Final[list[str]] = [
 ]
 
 _STRICT_ONLY_HANDLERS: Final[list[str]] = [
-    "daemon_restart_verifier",
     "lsp_enforcement",
     "npm_command",
     "british_english",

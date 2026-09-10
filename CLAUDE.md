@@ -505,7 +505,7 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 One line each; these fire with their own guidance when relevant. Full text: `bin/hooks-daemon explain-handler <name>`.
 
-<!-- handler: verify-daemon-restart -->
+<!-- handler: daemon-restart-verifier -->
 
 - daemon_restart_verifier — restart the daemon before committing
 
