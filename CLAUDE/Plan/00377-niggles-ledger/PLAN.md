@@ -47,12 +47,24 @@ authoritative rule:
 
 ### Phase 1: Open niggles
 
-- [ ] ⬜ **N1: `plan-qa --sweep` does not check journal entry ordering.** The
+- [x] ✅ **N1: `plan-qa --sweep` does not check journal entry ordering.** The
   journal preamble states the grammar "times increase down the file", and
-  nothing enforces it. Measured: a `00376` day-file whose entries ran
+  nothing enforced it. Measured: a `00376` day-file whose entries ran
   12:49 → 12:58 → 13:00 → 12:50 passed `plan-qa --sweep` with `0 findings`.
   The `journal-append-only` check correctly caught the EDIT that caused it, so
-  the gap is specifically in the sweep. Found while correcting that file.
+  the gap was specifically in the sweep. **Fixed**: new check
+  `journal-entry-ordering`, registered at EDIT and SWEEP, advise, honouring
+  `journal.mode: block`. Fenced blocks and the blockquoted grammar example are
+  not entries; equal times pass.
+
+  Two deliberate blind spots, each guarded by a test: archived plans are
+  skipped (`archive-immutability` forbids the edit that would fix them), and
+  day-files named before the rule shipped are grandfathered, mirroring Plan
+  00163 Decision 7's no-backfill. The second was not a convenience — running
+  the check over this repo showed the pre-existing journals have the narrative
+  order RIGHT and the clock readings wrong, so the only available "fix" was
+  inventing timestamps in an append-only record. A permanently unfixable
+  finding trains readers to ignore the check.
 
 - [x] ✅ **N2: the plan-dedupe scout cannot see completed plans.** It read
   only plans in the plan root and reported "Checked N live plans". For the

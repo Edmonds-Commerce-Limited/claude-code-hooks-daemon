@@ -100,6 +100,7 @@ class TestRegistryCatalogue:
             "path-existence",
             "journal-dayfile-naming",
             "journal-dayfile-is-today",
+            "journal-entry-ordering",
             "journal-append-only",
             "plan-doc-size",
             # Cross-file tree checks (dual COMMIT+SWEEP registration)
@@ -137,7 +138,8 @@ class TestRegistryCatalogue:
         # 8 original + 2 journal EDIT checks (Plan 00163) + plan-doc-size
         # (Plan 00190) + journal-dayfile-is-today (Plan 00197)
         # + index-row-length (Plan 00218) + index-no-log
-        assert len(by_stage[Stage.EDIT]) == 14
+        # + journal-entry-ordering (Plan 00377 N1)
+        assert len(by_stage[Stage.EDIT]) == 15
         # 5 commit-only + 5 dual tree checks + 2 journal COMMIT checks (Plan 00163)
         # + plan-shrink-without-journal (Plan 00190) + index-row-length (Plan 00218)
         # + index-no-log + archived-status-coherence (Plan 00286)
@@ -145,7 +147,8 @@ class TestRegistryCatalogue:
         # 3 sweep-only + 5 dual tree checks + 2 journal SWEEP checks (Plan 00163)
         # + index-row-length (Plan 00218) + index-no-log + 5 document-rule sweep
         # twins and the journal-dayfile-naming sweep twin (Plan 00230)
-        assert len(by_stage[Stage.SWEEP]) == 18
+        # + the journal-entry-ordering sweep twin (Plan 00377 N1)
+        assert len(by_stage[Stage.SWEEP]) == 19
 
     def test_dual_stage_checks_share_run_function(self) -> None:
         from claude_code_hooks_daemon.plan_qa.checks import all_checks
@@ -175,6 +178,7 @@ class TestRegistryCatalogue:
         post_audit_no_sins = {
             "journal-dayfile-naming",
             "journal-dayfile-is-today",
+            "journal-entry-ordering",
             "journal-append-only",
             "journal-folder-present",
             "journal-freshness",
