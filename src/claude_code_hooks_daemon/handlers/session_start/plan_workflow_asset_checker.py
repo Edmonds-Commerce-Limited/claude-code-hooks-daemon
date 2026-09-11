@@ -129,7 +129,8 @@ class PlanWorkflowAssetCheckerHandler(SessionStartHandlerBase):
         context.extend(f"  ❌ {entry}" for entry in missing)
         context += [
             "",
-            "Fix — (re)deploy the assets (idempotent; fills gaps only):",
+            "Fix — (re)deploy the assets (idempotent; client-owned files are "
+            "filled in only when absent, daemon-owned tooling is rewritten):",
             "",
             f"  {_deploy_cli_hint()}",
         ]
@@ -151,9 +152,13 @@ class PlanWorkflowAssetCheckerHandler(SessionStartHandlerBase):
             f"{daemon_cli_command_for_docs(_DEPLOY_SUBCOMMAND)}\n"
             "```\n"
             "\n"
-            "The deploy is idempotent (fills gaps only, never overwrites "
-            "client-owned files). Silent when `mkplan.bash` is present or the "
-            "workflow is disabled."
+            "The deploy is idempotent and never overwrites client-owned files "
+            "(`_TEMPLATE_.md`, the journal assets, `README.md`/`CLAUDE.md`) — "
+            "those are filled in only when absent. Daemon-owned tooling is the "
+            "opposite and deliberately so: `mkplan.bash` and `_planlib.inc.bash` "
+            "are rewritten on every run, so the command repairs a DRIFTED copy "
+            "as well as a missing one. Silent when `mkplan.bash` is present or "
+            "the workflow is disabled."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

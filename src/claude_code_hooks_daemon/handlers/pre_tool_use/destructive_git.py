@@ -13,6 +13,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
     SUBCOMMAND_SEPARATOR_CHARS,
 )
+from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
 
 # Generic reason used when a destructive pattern matches but warrants no
 # command-specific explanation (e.g. bare `git checkout .`).
@@ -268,21 +269,51 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         """Compiled destructive-command patterns (derived from the single mapping)."""
         return tuple(pattern for pattern, _reason in self._pattern_reasons)
 
+    @staticmethod
+    def _scan_target(command: str) -> str:
+        """The command with every span bash hands over as DATA blanked out.
+
+        A quoted-delimiter heredoc body and an inert `-m`/`-F` message value
+        are prose; the shell never parses them as syntax, so neither can be the
+        destructive command this handler exists to stop. Scanning the raw
+        string read them as one anyway (Plan 00377 N7): a commit message
+        describing a newly added `--force` flag was denied as a force push.
+
+        The mechanism is worth naming, because it is not "two words in one
+        string". The opener line was `git commit -F - <<'EOF' && git push
+        origin main`, so the heredoc BODY follows `git push` in the command
+        string, and `_GIT_PUSH_FORCE_PATTERN`'s `[^;&|]*?` excludes those three
+        separators but NOT newlines — the scan ran straight down into the body.
+        A second route needs no heredoc at all: the single-line patterns use
+        `.*`, which stays on one line but still matches inside a `-m` value, so
+        `git commit -m 'document --amend'` was denied too.
+
+        Both halves of `strip_inert_spans` are therefore required; blanking
+        only the heredoc leaves that second route open. Nothing a shell can
+        RUN is blanked — a substituting value (`-m "$(...)"`) and an UNQUOTED
+        `<<EOF` body are both left intact, because bash really does execute
+        them.
+        """
+        return strip_inert_spans(command)
+
     def _match_reason(self, command: str) -> str | None:
         """Return the reason for the first matching destructive pattern, or None."""
+        target = self._scan_target(command)
         for pattern, reason in self._pattern_reasons:
-            if pattern.search(command):
+            if pattern.search(target):
                 return reason
         return None
 
     def _match_rule_id(self, command: str) -> str | None:
         """Return the RuleID for the first matching destructive pattern, or None.
 
-        Mirrors ``_match_reason`` exactly (same ordered pattern list), so the
-        two can never disagree about which pattern matched first.
+        Mirrors ``_match_reason`` exactly — same ordered pattern list, and the
+        same blanked scan target — so the two can never disagree about which
+        pattern matched first, nor about what counted as a command.
         """
+        target = self._scan_target(command)
         for pattern, rule_id in self._pattern_rule_ids:
-            if pattern.search(command):
+            if pattern.search(target):
                 return rule_id
         return None
 
@@ -361,6 +392,19 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "| `git commit --amend` | Rewrites the previous commit — create a new commit instead |\n\n"
             "If the user needs to run one of these, ask them to do it manually. "
             "Do not attempt to work around the block.\n\n"
+            "**PROSE describing one of these is not one of these.** What bash hands "
+            "over as DATA is blanked before the command is judged, so a commit "
+            "message that documents `--force`, or a `<<'EOF'` heredoc body naming "
+            "`git reset --hard`, is not a destructive command and is not blocked. "
+            "That was not always true: a commit message describing a newly added "
+            "`--force` flag was denied as a force push, because the heredoc body "
+            "followed `git push` on the opener line and the pattern's character "
+            "class crossed the newline into it.\n\n"
+            "Two spans are deliberately still judged, because bash really does run "
+            "them: a message value containing a SUBSTITUTION "
+            '(`git commit -m "$(...)"` — double quotes do not stop expansion), and '
+            "an UNQUOTED `<<EOF` body. Quote the delimiter (`<<'EOF'`) whenever the "
+            "body is prose and this never bites.\n\n"
             "**To delete a branch, ALWAYS try `git branch -d` first.** It is allowed, "
             "it is battle-tested, and it refuses unless the branch is genuinely merged. "
             "Reach for anything else only once it has actually refused:\n\n"
@@ -580,6 +624,47 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                     r"merged",
                 ],
                 safety_notes="Uses non-existent branch - would fail harmlessly if executed",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="a commit message describing destructive flags is not a command",
+                command=(
+                    "git commit --dry-run --allow-empty "
+                    "-m 'documents --force and git reset --hard'"
+                ),
+                dispatch_as_bash=True,
+                description=(
+                    "Prose in a -m value is DATA, not shell syntax, so it must "
+                    "NOT be blocked. Regression test for Plan 00377 N7, where a "
+                    "commit message describing a newly added --force flag was "
+                    "denied as R-GIT-PUSH-FORCE."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes=("--dry-run --allow-empty: no commit is created, no side effects"),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="a substituting message value IS still judged",
+                command='[[ "git commit -m \\"$(git push --force)\\"" == 0 ]]',
+                dispatch_as_bash=True,
+                description=(
+                    "Bash expands $(...) inside DOUBLE quotes, so a message "
+                    "value carrying a substitution is not prose and stays "
+                    "blocked. The boundary that makes N7's exemption safe."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"overwrite remote history",
+                ],
+                safety_notes=(
+                    "No-op: [[ ... ]] evaluates to false (exit 1); the block "
+                    "prevents execution anyway, so no push is attempted"
+                ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

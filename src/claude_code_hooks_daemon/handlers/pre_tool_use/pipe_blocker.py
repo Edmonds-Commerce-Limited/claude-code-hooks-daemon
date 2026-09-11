@@ -36,8 +36,7 @@ from claude_code_hooks_daemon.utils.cli_command import (
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted,
-    strip_quoted_heredoc_bodies,
-    value_can_substitute,
+    strip_inert_spans,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,11 +86,6 @@ _ECHD_CAPTURE_DEFAULT_LINES = 20
 # Name of the deployed capture helper (Plan 00164 Phase 6). Its location is
 # owned by utils.cli_command (echd_capture_path), beside the CLI wrapper.
 _ECHD_CAPTURE_NAME = ECHD_CAPTURE_NAME
-
-# Redaction placeholder substituted for a -m/-F message VALUE before pipe
-# detection. Deliberately contains no "|" so it can never itself trigger a
-# false match.
-_MESSAGE_BODY_PLACEHOLDER = "<REDACTED>"
 
 # Sanity-check thresholds before templating a remediation block (Plan 00209
 # §1 / Task 1.2). Field report: a heredoc journal entry whose PROSE described
@@ -247,43 +241,6 @@ _BACKSLASH = "\\"
 # of the command, which is the pre-existing top-level behaviour.
 _TOP_LEVEL_CONTENT_START = 0
 
-# Matches a `-m`/`--message`/`-F`/`--file` flag immediately followed by its
-# VALUE, so the value's content can be excluded from pipe detection: these
-# flags carry human-authored prose (a commit/tag message, or a message-file
-# path), never shell syntax to execute. A literal "| tail" inside that prose
-# — e.g. this very handler's own CLAUDE.md example, quoted in a commit
-# message describing a fix for it — is DATA, not a pipe operator.
-#
-# Three value shapes, tried in order (DOTALL so "." spans newlines, needed
-# for the heredoc alternative's body):
-#   1. The canonical heredoc-embedded message idiom used throughout this
-#      repo: -m "$(cat <<'EOF' ... EOF)" (leading whitespace before the
-#      closing delimiter is tolerated — messages are often re-indented).
-#   2. A single- or double-quoted string (may itself span multiple literal
-#      newlines — bash allows that inside quotes).
-#   3. A bare word (e.g. -F commit-msg.txt) as a fallback.
-_MESSAGE_BODY_PATTERN = re.compile(
-    r"(?P<flag>(?<![\w-])(?:-m|--message|-F|--file))"
-    r"(?P<sep>=|\s+)"
-    r"(?P<value>"
-    r"\"\$\(cat\s+<<-?\s*'?(?P<delim>\w+)'?\s*\n.*?\n[ \t]*(?P=delim)[ \t]*\n?\s*\)\""
-    r"|'(?:[^'\\]|\\.)*'"
-    r'|"(?:[^"\\]|\\.)*"'
-    r"|\S+"
-    r")",
-    re.DOTALL,
-)
-
-# Commands whose -m/--message/-F/--file argument is human-authored PROSE
-# rather than an operand (Plan 00222). Scoping is required because the same
-# spelling means something else elsewhere: `python -m <module>` names a MODULE,
-# and blanking it reported the producer of `python -m pytest ... | tail` as the
-# redaction placeholder, handing the caller a remediation they cannot run.
-_MESSAGE_TAKING_COMMANDS: tuple[str, ...] = ("git", "hg", "svn", "jj")
-
-# Path separator, for reducing `/usr/bin/git` to `git` before that comparison.
-_PATH_SEPARATOR = "/"
-
 
 # Single generic teaching paragraph shared by both rules below (Plan 00116):
 # get_rules()'s Rule.verbose is a STATIC per-rule fallback used for the
@@ -324,23 +281,6 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str, str], ...] = (
         _pipe_verbose_content("head"),
     ),
 )
-
-
-def _segment_binary(command: str, index: int) -> str:
-    """Basename of the command word that owns the flag at ``index``.
-
-    Bounded by chain separators so a `git commit` earlier in the line cannot
-    lend its message-taking status to a later `python -m` in the same command.
-    """
-    start = _TOP_LEVEL_CONTENT_START
-    for separator in _CHAIN_SEPARATORS:
-        found = command.rfind(separator, _TOP_LEVEL_CONTENT_START, index)
-        if found != -1:
-            start = max(start, found + len(separator))
-    words = command[start:index].split()
-    if not words:
-        return ""
-    return words[0].rpartition(_PATH_SEPARATOR)[2]
 
 
 class PipeBlockerHandler(PreToolUseHandlerBase):
@@ -436,51 +376,19 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         if effective_languages:
             self._registry.filter_by_languages(effective_languages)
 
-    @staticmethod
-    def _strip_message_bodies(command: str) -> str:
-        """Blank out `-m`/`--message`/`-F`/`--file` VALUES before pipe scanning.
-
-        These flags carry human-authored prose (a commit/tag message, or a
-        message-file path), never shell syntax to execute. A literal
-        "| tail" inside that prose — e.g. a commit message documenting this
-        very handler — must never be mistaken for a real pipe operator.
-        Everything else in the command (including a REAL pipe elsewhere) is
-        left untouched.
-
-        Two conditions gate the blanking, both added by Plan 00222 after the
-        original unconditional form was found to hide a real pipe and to
-        mislabel an unrelated flag:
-
-        * the owning command must actually TAKE a message, so `python -m
-          <module>` keeps naming its real producer, and
-        * the value must not be able to execute, since bash substitutes inside
-          double quotes and blanking such a value conceals a live pipe.
-
-        A value that fails either test is returned untouched and scanned
-        normally, where Plan 00221's substitution attribution resolves the
-        producer INSIDE the substitution rather than the outer command.
-        """
-
-        def _blank_if_inert(match: re.Match[str]) -> str:
-            if _segment_binary(command, match.start()) not in _MESSAGE_TAKING_COMMANDS:
-                return match.group(0)
-            if value_can_substitute(match.group("value")):
-                return match.group(0)
-            return f"{match.group('flag')}{match.group('sep')}{_MESSAGE_BODY_PLACEHOLDER}"
-
-        return _MESSAGE_BODY_PATTERN.sub(_blank_if_inert, command)
-
     @classmethod
     def _strip_inert_spans(cls, command: str) -> str:
         """Blank every span bash will hand over as data rather than execute.
 
-        The heredoc half is delegated to ``shell_segmentation`` rather than kept
-        here. It is the same bash fact `enforce_llm_qa` needs before IT splits on
-        newlines, and that handler re-derived the false positive from scratch
-        because the rule lived in this file (Plan 00234 finding H-3). One
-        scanner, one set of rules — the reason that module exists at all.
+        Both halves now live in ``shell_segmentation``. The heredoc half moved
+        there first (Plan 00234 finding H-3, after `enforce_llm_qa` re-derived
+        the same false positive from scratch because the rule lived in this
+        file); the message half followed for the identical reason when
+        ``destructive_git`` needed it and could reach only the half that had
+        been shared (Plan 00377 N7). One scanner, one set of rules — the reason
+        that module exists at all.
         """
-        return strip_quoted_heredoc_bodies(cls._strip_message_bodies(command))
+        return strip_inert_spans(command)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if command pipes a non-whitelisted operation to tail/head.

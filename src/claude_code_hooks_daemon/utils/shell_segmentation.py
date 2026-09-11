@@ -121,6 +121,65 @@ _WORD_GROUPING_PREFIXES = "(){}`\\$"
 _COMMAND_WORD_PREFIXES: frozenset[str] = frozenset({"sudo"})
 
 
+#: Matches a `-m`/`--message`/`-F`/`--file` flag immediately followed by its
+#: VALUE, so the value can be excluded from a command scan. Three value shapes,
+#: tried in order (DOTALL so `.` spans newlines, needed for the heredoc
+#: alternative's body):
+#:   1. The canonical heredoc-embedded message idiom: -m "$(cat <<'EOF' … EOF)"
+#:      (leading whitespace before the closing delimiter is tolerated — messages
+#:      are often re-indented).
+#:   2. A single- or double-quoted string (may span literal newlines).
+#:   3. A bare word (e.g. `-F commit-msg.txt`) as a fallback.
+_MESSAGE_BODY_PATTERN = re.compile(
+    r"(?P<flag>(?<![\w-])(?:-m|--message|-F|--file))"
+    r"(?P<sep>=|\s+)"
+    r"(?P<value>"
+    r"\"\$\(cat\s+<<-?\s*'?(?P<delim>\w+)'?\s*\n.*?\n[ \t]*(?P=delim)[ \t]*\n?\s*\)\""
+    r"|'(?:[^'\\]|\\.)*'"
+    r'|"(?:[^"\\]|\\.)*"'
+    r"|\S+"
+    r")",
+    re.DOTALL,
+)
+
+#: What an inert message value is replaced with.
+_MESSAGE_BODY_PLACEHOLDER = "<REDACTED>"
+
+#: Commands whose `-m`/`--message`/`-F`/`--file` argument is human-authored
+#: PROSE rather than an operand (Plan 00222). Scoping is required because the
+#: same spelling means something else elsewhere: `python -m <module>` names a
+#: MODULE, and blanking it reported the producer of `python -m pytest … | tail`
+#: as the redaction placeholder — a remediation the caller cannot run.
+_MESSAGE_TAKING_COMMANDS: tuple[str, ...] = ("git", "hg", "svn", "jj")
+
+#: Separators that end one command and start the next, for attributing a flag
+#: to the command word that owns it.
+_CHAIN_SEPARATORS: tuple[str, ...] = ("&&", "||", ";", "\n")
+
+#: Path separator, for reducing `/usr/bin/git` to `git` before comparison.
+_PATH_SEPARATOR = "/"
+
+#: Where a top-level scan starts when no earlier separator is found.
+_SEGMENT_START = 0
+
+
+def _segment_binary(command: str, index: int) -> str:
+    """Basename of the command word that owns the flag at ``index``.
+
+    Bounded by chain separators so a `git commit` earlier in the line cannot
+    lend its message-taking status to a later `python -m` in the same command.
+    """
+    start = _SEGMENT_START
+    for separator in _CHAIN_SEPARATORS:
+        found = command.rfind(separator, _SEGMENT_START, index)
+        if found != -1:
+            start = max(start, found + len(separator))
+    words = command[start:index].split()
+    if not words:
+        return ""
+    return words[0].rpartition(_PATH_SEPARATOR)[2]
+
+
 def _command_word(word: str) -> str:
     """The command name bash would resolve ``word`` to.
 
@@ -167,6 +226,65 @@ def value_can_substitute(value: str) -> bool:
     if _QUOTED_HEREDOC_PATTERN.match(value):
         return False
     return _BACKTICK in value or any(opener in value for opener in _SUBSTITUTION_OPENERS)
+
+
+def strip_message_bodies(command: str) -> str:
+    """Blank every ``-m``/``--message``/``-F``/``--file`` VALUE bash cannot run.
+
+    These flags carry human-authored prose — a commit/tag message, or a path to
+    one — never shell syntax to execute. A guarded construct sitting in that
+    prose is DATA, and a handler that scans the raw string reads it as a
+    command: the field report for Plan 00377 N7 is a commit message describing
+    a ``--force`` flag, denied as though it were a force push.
+
+    Two conditions gate the blanking, both from Plan 00222, each added after the
+    unconditional form was measured to be wrong in the opposite direction:
+
+    * the owning command must actually TAKE a message, so ``python -m
+      <module>`` keeps naming a module rather than a redaction placeholder, and
+    * the value must not be able to execute — bash substitutes inside double
+      quotes, so blanking ``"$(...)"`` would CONCEAL a live command.
+
+    A value failing either test is returned untouched and scanned normally.
+
+    Args:
+        command: The raw Bash command string.
+
+    Returns:
+        ``command`` with each inert message value replaced by a placeholder.
+        Everything else, including a real command beside the message, is
+        untouched.
+    """
+
+    def _blank_if_inert(match: re.Match[str]) -> str:
+        if _segment_binary(command, match.start()) not in _MESSAGE_TAKING_COMMANDS:
+            return match.group(0)
+        if value_can_substitute(match.group("value")):
+            return match.group(0)
+        return f"{match.group('flag')}{match.group('sep')}{_MESSAGE_BODY_PLACEHOLDER}"
+
+    return _MESSAGE_BODY_PATTERN.sub(_blank_if_inert, command)
+
+
+def strip_inert_spans(command: str) -> str:
+    """Blank every span bash will hand over as data rather than execute.
+
+    The composition of :func:`strip_message_bodies` and
+    :func:`strip_quoted_heredoc_bodies` — the scan target a handler should
+    judge when it is asking "what command is being run?".
+
+    Both halves are required, and that is measured rather than assumed: for
+    Plan 00377 N7, blanking only the heredoc cleared the reported command while
+    leaving an ordinary one-line ``git commit -m 'document --amend'`` still
+    denied, because the single-line patterns match inside the message value.
+
+    Args:
+        command: The raw Bash command string.
+
+    Returns:
+        ``command`` with inert message values and quoted-heredoc bodies blanked.
+    """
+    return strip_quoted_heredoc_bodies(strip_message_bodies(command))
 
 
 def strip_quoted_heredoc_bodies(command: str) -> str:

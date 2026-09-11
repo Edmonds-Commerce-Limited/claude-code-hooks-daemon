@@ -111,7 +111,7 @@ authoritative rule:
   own deployed file of being hand-hacked. A drift check would most naturally
   live where the other whole-tree checks already run.
 
-- [ ] ⬜ **N7: `destructive_git` reads PROSE as the command.** A
+- [x] ✅ **N7: `destructive_git` reads PROSE as the command.** A
   `git commit -F - <<'EOF' … EOF && git push origin main` whose message
   described the new `agents install --force` flag was denied as
   `R-GIT-PUSH-FORCE`, though the `--force` was prose inside a quoted heredoc
@@ -143,30 +143,41 @@ authoritative rule:
   single-line patterns use `.*`, which stays on one line but still matches
   inside a `-m` value.
 
-  **Fix**: scan a copy with the inert spans blanked, exactly as
-  `pipe_blocker.matches` already does via `_strip_inert_spans`
-  (`strip_quoted_heredoc_bodies` ∘ message-body blanking). Both halves are
-  needed — blanking the heredoc alone leaves the `-m` rows failing. The
-  heredoc half is already shared in `utils/shell_segmentation`; the
-  message-body half is still private to `pipe_blocker` and should move
-  alongside it, which is the stated purpose of that module ("One scanner, one
-  set of rules, one place to fix").
+  **Fixed**: both verbs now judge `strip_inert_spans(command)`, so a
+  quoted-delimiter heredoc body and an inert `-m`/`-F` value are blanked before
+  any pattern runs. This covers every rule the handler enforces, not just
+  force-push. Both halves were needed — blanking only the heredoc left the two
+  `-m` rows above still denied, which is why the table was measured rather than
+  assumed.
 
-  Blast radius is wider than the inconvenience suggests: the deny message
+  The message-blanking half moved from `pipe_blocker` into
+  `utils/shell_segmentation`, beside the heredoc half already shared there;
+  `pipe_blocker` now calls the shared function instead of keeping its own copy.
+  That is the stated purpose of that module ("One scanner, one set of rules,
+  one place to fix"), and the same move Plan 00234 made for the heredoc half.
+
+  Nothing bash would actually RUN was exempted, and both boundaries have a test
+  and an acceptance test: a substituting message value (`-m "$(...)"`) and an
+  unquoted `<<EOF` body are still judged.
+
+  Blast radius was wider than the inconvenience suggested: the deny message
   asserts the command "PERMANENTLY DESTROYS data", which is flatly untrue of
   the command that ran, and a guard that cries wolf on prose is one an agent
   learns to route around.
 
-- [ ] ⬜ **N8: the plan-asset advisory describes the repair as "fills gaps
-  only".** `plan_workflow_asset_checker`'s `get_claude_md()` tells agents the
+- [x] ✅ **N8: the plan-asset advisory describes the repair as "fills gaps
+  only".** `plan_workflow_asset_checker`'s `get_claude_md()` told agents the
   deploy is "idempotent (fills gaps only, never overwrites client-owned
-  files)". The second clause is right; the first is wrong for exactly the files
-  that matter. `_deploy_mkplan` and `_deploy_planlib` overwrite
+  files)". The second clause is right; the first was wrong for exactly the
+  files that matter. `_deploy_mkplan` and `_deploy_planlib` overwrite
   unconditionally — their own docstrings say "overwritten on every upgrade …
-  to guarantee audit fixes reach the field". So an agent that reads the
-  advisory and then finds a DRIFTED `mkplan.bash` concludes the offered command
-  cannot help, when it is precisely the repair. Found while scoping N6, whose
-  remediation this sentence undercuts.
+  to guarantee audit fixes reach the field". So an agent that read the advisory
+  and then found a DRIFTED `mkplan.bash` concluded the offered command could
+  not help, when it is precisely the repair. Found while scoping N6, whose
+  remediation this sentence undercuts. **Fixed**: both the resident guidance
+  and the runtime advisory now state the ownership split — client-owned files
+  filled in only when absent, daemon-owned tooling rewritten — so the command
+  reads as a repair. Swept for other copies of the wording: none live.
 
 - [ ] ⬜ **N9: nothing notices when journal timestamps drift from the clock.**
   `journal-entry-ordering` (N1) enforces that times increase down the file, and
