@@ -111,6 +111,25 @@ authoritative rule:
   own deployed file of being hand-hacked. A drift check would most naturally
   live where the other whole-tree checks already run.
 
+- [ ] ⬜ **N7: `destructive_git` reads a commit MESSAGE as the command.** A
+  `git commit -F - <<'EOF' … EOF && git push origin main` whose message
+  described the new `agents install --force` flag was denied as
+  `R-GIT-PUSH-FORCE` — the guard saw `git push` and `--force` in one command
+  string and concluded `git push --force`, though the `--force` was prose
+  inside a quoted heredoc the shell expands nothing in.
+
+  Reproduced exactly once, on the commit that fixed N4. Splitting commit and
+  push into two calls is the workaround.
+
+  The fix already exists elsewhere in the codebase and is not being invented:
+  `sed_blocker` exempts a `git commit` message that mentions `sed`, and
+  `pipe_blocker` exempts a quoted-delimiter heredoc outright on the grounds
+  that the shell expands nothing in it. `destructive_git` needs the same
+  message/heredoc exemption. Note the blast radius is wider than the
+  inconvenience suggests: the deny message asserts the command "PERMANENTLY
+  DESTROYS data", which is flatly untrue of the command that ran, and a guard
+  that cries wolf on prose is one an agent learns to route around.
+
 - [ ] ⬜ **N3: `upgrade.md` never mentions post-upgrade tasks.** The
   agent-facing upgrade procedure omits the step entirely, so the tasks are not
   read even by an agent following the procedure exactly. (Tracked in Plan 00376
