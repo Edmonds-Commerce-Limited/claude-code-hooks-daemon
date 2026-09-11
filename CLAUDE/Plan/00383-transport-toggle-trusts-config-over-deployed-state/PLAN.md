@@ -54,51 +54,52 @@ byte-identical-by-default, so a converged project still pays nothing.
 
 ### Phase 1: Reproduce before fixing
 
-- [ ] ⬜ **Task 1.1**: A failing test for the shape verified by probe — config
+- [x] ✅ **Task 1.1**: A failing test for the shape verified by probe — config
   already at the target, a forwarder carrying the opposite state, and the
-  toggle leaving it untouched while reporting success.
-- [ ] ⬜ **Task 1.2**: A failing test for the same shape on `transport on`
+  toggle leaving it untouched while reporting success. The drift is built the
+  way it actually happens (move the config, leave the forwarders), so the
+  fixture cannot drift from the format the generator owns.
+- [x] ✅ **Task 1.2**: A failing test for the same shape on `transport on`
   (config already true, forwarders lacking the hot path), so the fix is not
   written for the `off` direction alone.
 
 ### Phase 2: Converge instead of short-circuiting
 
-- [ ] ⬜ **Task 2.1**: On a config match, run `regenerate_deployed_hooks` and
+- [x] ✅ **Task 2.1**: On a config match, run `regenerate_deployed_hooks` and
   treat a non-empty return as drift. An empty return is the clean no-op and
   must keep its current behaviour exactly — no restart, no probes.
-- [ ] ⬜ **Task 2.2**: When drift was repaired, restart and verify with the
+- [x] ✅ **Task 2.2**: When drift was repaired, restart and verify with the
   same probes the flip path uses, so the state is established rather than
   assumed. A reconcile that fails verification reports `verified=False` and
   does NOT auto-revert — the only state to revert to is the drift being
-  fixed, so restoring it would be wrong. Say so in the code, not just here.
-- [ ] ⬜ **Task 2.3**: Decide and pin what `transport on` does when it
-  reconciles while the relay binary is absent. The flip path provisions before
-  touching anything; a reconcile that regenerates a hot path pointing at no
-  binary would deploy a broken forwarder, so provisioning must gate the
-  enable-direction reconcile the same way.
-- [ ] ⬜ **Task 2.4**: Carry the distinction in the outcome rather than
-  overloading `changed` (which means "the config flipped" and is asserted as
-  such by existing tests). A reconcile leaves the config alone.
+  fixed, so restoring it would be wrong. Said in the code, not only here.
+- [x] ✅ **Task 2.3**: Decided and pinned — provisioning gates the
+  enable-direction reconcile, and the test asserts the refusal leaves the
+  forwarder without a hot path AND restarts nothing.
+- [x] ✅ **Task 2.4**: Carried as a new `reconciled` field rather than
+  overloading `changed`. A reconcile leaves the config alone, which the test
+  asserts directly by comparing the config text before and after.
 
 ### Phase 3: Say so
 
-- [ ] ⬜ **Task 3.1**: The CLI message distinguishes a clean no-op from a
+- [x] ✅ **Task 3.1**: The CLI message distinguishes a clean no-op from a
   repaired drift. `already disabled — nothing to do` must not be printed when
   something WAS done.
-- [ ] ⬜ **Task 3.2**: Release note, and a pointer recorded in Plan 00381's N1
-  so the ledger entry closes against this plan.
+- [x] ✅ **Task 3.2**: Release note
+  `35-transport-off-repairs-forwarders-that-drifted.md`, and the pointer is
+  recorded in Plan 00381's N1.
 
 ## Success Criteria
 
-- [ ] A config-matching toggle over drifted forwarders repairs them, verifies,
+- [x] A config-matching toggle over drifted forwarders repairs them, verifies,
   and reports the repair.
-- [ ] A converged project's toggle still writes nothing, restarts nothing and
+- [x] A converged project's toggle still writes nothing, restarts nothing and
   probes nothing — pinned by a test, not by inspection.
-- [ ] `transport on` cannot deploy a relay hot path with no relay binary behind
+- [x] `transport on` cannot deploy a relay hot path with no relay binary behind
   it.
-- [ ] Plan 00381 N1 carries a pointer to this plan.
-- [ ] Every release-bound consequence is in the pending-release holding area,
-  or this plan records why it has none.
+- [x] Plan 00381 N1 carries a pointer to this plan.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/35-transport-off-repairs-forwarders-that-drifted.md`.
 - [ ] Full QA passes and CI is green.
 
 ## Delivery & Milestones

@@ -278,6 +278,29 @@ class TestRunToggleReconcilesDeployedDrift:
         assert outcome.verified is None
         assert not state_file_path(project).exists()
 
+    def test_on_refuses_to_reconcile_a_hot_path_with_no_relay_binary_behind_it(
+        self, project: Path
+    ) -> None:
+        """A regenerated hot path NAMES the relay binary, so an enable-direction
+        reconcile has to clear provisioning first — otherwise repairing drift
+        deploys a forwarder pointing at something that is not there."""
+        relay_binary = project / ".claude" / "hooks-daemon" / "untracked" / "bin" / "hooks-relay"
+        relay_binary.unlink()
+        set_relay_enabled(_config_path(project), True)
+        calls: list[str] = []
+
+        outcome = run_toggle(
+            project,
+            enable=True,
+            restart_fn=lambda: calls.append("restart") or 0,
+            verify_fn=_passing_probes,
+        )
+
+        assert outcome.verified is False
+        assert any("relay_source" in failure for failure in outcome.failures)
+        assert "relay hot path" not in _forwarder_text(project)
+        assert calls == [], "nothing may be restarted when the refusal came first"
+
     def test_a_reconcile_that_fails_verification_does_not_revert_to_the_drift(
         self, project: Path
     ) -> None:
