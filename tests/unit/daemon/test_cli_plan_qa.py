@@ -100,7 +100,7 @@ class TestSweep:
         payload = json.loads(capsys.readouterr().out)
         assert isinstance(payload, list)
         entry = payload[0]
-        assert {"check_id", "level", "message", "remediation", "path"} <= set(entry)
+        assert {"check_id", "severity", "message", "remediation", "path"} <= set(entry)
 
     def test_missing_plan_dir_exits_two(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

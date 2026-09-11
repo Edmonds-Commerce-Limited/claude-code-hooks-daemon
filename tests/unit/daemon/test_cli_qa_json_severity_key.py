@@ -7,9 +7,11 @@ the corpus wrapper counted ``severity``, so plan findings fell out of the split
 while still counting toward the total, and it printed a summary contradicting
 itself (``3 findings (0 block, 0 advise)``).
 
-``severity`` is the surviving name. ``plan-qa`` emits ``level`` alongside it for
-a deprecation window because ``--json`` is documented public API, so a consumer
-parsing the old key keeps working.
+``severity`` is the one surviving name, emitted alone. There is deliberately no
+deprecation window: shipping both spellings at once would make the defect
+itself — two live names for one concept — correct by policy for a release, and
+invite a new reader to key on the one about to be removed. The break is taken
+once, declared under semver, and carried by an upgrade-time migration.
 """
 
 import argparse
@@ -25,7 +27,6 @@ from claude_code_hooks_daemon.docs_qa.types import Severity
 from claude_code_hooks_daemon.plan_qa.types import Level
 
 CANONICAL_SEVERITY_KEY = "severity"
-DEPRECATED_SEVERITY_KEYS = frozenset({"level"})
 SEVERITY_VALUES = frozenset(
     {member.value for member in Level} | {member.value for member in Severity}
 )
@@ -121,44 +122,40 @@ class TestTheCanonicalKey:
             assert finding[CANONICAL_SEVERITY_KEY] in SEVERITY_VALUES
 
 
-class TestTheDeprecationWindow:
-    def test_the_plan_verb_still_carries_the_old_key(
+class TestTheLegacySpellingIsGone:
+    def test_the_plan_verb_no_longer_emits_level(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """A consumer parsing ``level`` keeps working until Phase 2 drops it."""
+        """The break is taken once rather than softened into a window.
+
+        Emitting ``level`` beside ``severity`` would make the very defect this
+        closes — two live names for one concept — correct by policy, and let a
+        reader key on the spelling that is about to disappear.
+        """
         for finding in _plan_findings(tmp_path, capsys):
-            assert "level" in finding
-
-    def test_the_old_key_never_disagrees_with_the_new_one(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        for finding in _plan_findings(tmp_path, capsys):
-            assert finding["level"] == finding[CANONICAL_SEVERITY_KEY]
+            assert "level" not in finding
 
 
-class TestNeitherVerbCanInventAThirdName:
-    """The class guard: a future third spelling fails here rather than silently.
+class TestNeitherVerbCanInventASecondName:
+    """The class guard: a second spelling fails here rather than silently.
 
     Both readers of this output key on a name. Asserting the presence of
-    ``severity`` alone would still pass if a verb grew a third severity-valued
+    ``severity`` alone would still pass if a verb grew a second severity-valued
     field, which is precisely the failure this plan exists to close — so every
-    severity-valued key is enumerated, and anything beyond the canonical name
-    must be a declared deprecation.
+    severity-valued key is enumerated and the set must be exactly the one name.
     """
 
-    def test_the_plan_verb_names_no_undeclared_severity_key(
+    def test_the_plan_verb_names_severity_once_and_only_once(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         for finding in _plan_findings(tmp_path, capsys):
-            extra = _severity_bearing_keys(finding) - {CANONICAL_SEVERITY_KEY}
-            assert extra <= DEPRECATED_SEVERITY_KEYS
+            assert _severity_bearing_keys(finding) == {CANONICAL_SEVERITY_KEY}
 
-    def test_the_docs_verb_names_no_undeclared_severity_key(
+    def test_the_docs_verb_names_severity_once_and_only_once(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         for finding in _docs_findings(tmp_path, capsys):
-            extra = _severity_bearing_keys(finding) - {CANONICAL_SEVERITY_KEY}
-            assert extra <= DEPRECATED_SEVERITY_KEYS
+            assert _severity_bearing_keys(finding) == {CANONICAL_SEVERITY_KEY}
 
     def test_both_verbs_agree_on_the_canonical_name(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

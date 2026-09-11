@@ -1,4 +1,4 @@
-# Callout: `plan-qa --json` now names severity `severity`, like `docs-qa` always did
+# Callout: BREAKING — `plan-qa --json` renames `level` to `severity`
 
 **Plan**: 00375
 **Audience**: operators
@@ -13,10 +13,17 @@ still counting it toward the total, and one did: a QA wrapper counted
 `severity`, so every plan finding fell out of the severity split and it printed
 `3 findings (0 block, 0 advise)` — a summary contradicting itself.
 
-`plan-qa --json` now emits **both** keys with the same value. `severity` is the
-surviving name; `"level"` is deprecated and will be removed in a later release,
-recorded here so a consumer parsing it has a window to move. Nothing breaks
-today: a script reading `level` keeps working unchanged, and one reading
-`severity` now works against both verbs.
+`plan-qa --json` now emits `"severity"` and nothing else. `docs-qa --json` is
+unchanged.
 
-`docs-qa --json` is unchanged.
+**What to change**: anything parsing `plan-qa --json` should read `severity`
+where it read `level`. The values are identical, so this is a key rename and
+nothing more.
+
+**Why there is no deprecation window.** Emitting both spellings for a release
+would make the defect itself — two live names for one concept — correct by
+policy for that release, and invite a new reader to key on the one about to
+disappear. It would not avoid the break either: removing the key later is the
+same breaking change, merely deferred. So the break is taken once, declared
+honestly under semver, and carried by an upgrade-time migration rather than by
+a delay.

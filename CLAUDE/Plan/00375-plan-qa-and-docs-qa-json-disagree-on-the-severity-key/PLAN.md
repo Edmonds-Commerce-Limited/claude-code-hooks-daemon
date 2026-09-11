@@ -21,66 +21,81 @@ That was fixed at the reading end (`run_corpus_qa._severity_of` tries both
 keys, with a class guard asserting the split always sums to the total), so
 nothing is currently broken. The trap is still there for the next reader.
 
-Deferred rather than fixed inside Plan 00373 because `--json` is documented
-public API — CHANGELOG, `RELEASES/v3.32.0.md` and
+`--json` is documented public API — CHANGELOG, `RELEASES/v3.32.0.md` and
 `docs/guides/HANDLER_REFERENCE.md` all advertise it as "machine-readable
-output" — so renaming a key is a breaking change for anyone parsing it in CI,
-and belongs in a release with an upgrade note rather than smuggled into a QA
-plan. No in-repo consumer reads either key except the wrapper above, which
-handles both.
+output" — so renaming the key is a breaking change and is declared as one.
+
+**No deprecation window, by owner's decision.** The original plan emitted both
+spellings for a release. That was wrong on its own terms: two live names for
+one concept IS the defect, so a window makes the bug correct by policy for the
+duration and invites a new reader to key on the spelling about to disappear. It
+does not avoid the break either — removing the key later is the same breaking
+change, deferred. Under this project's own semver guidelines
+(`CLAUDE/development/RELEASING.md:966`, "Breaking API changes, removed
+features" = MAJOR) the deferral changes nothing about the version owed.
+
+The dual-key emission never shipped — it was staged in `UNRELEASED/` and
+removed before release — so released history goes straight from `level` to
+`severity`, with no version in which both were valid.
 
 ## Goals
 
-- One name for one concept across both verbs.
-- No silent break for an existing consumer parsing `plan-qa --json`.
+- One name for one concept across both verbs, with no interval in which two
+  are live.
+- The break declared honestly under semver and carried by an upgrade-time
+  migration rather than by a delay.
 
 ## Non-Goals
 
 - Changing the finding shape beyond the severity key.
-- Removing `run_corpus_qa._severity_of`'s tolerance. It should keep working
-  against an older installed daemon, and its class guard is the thing that
-  catches a future third name.
+- Removing `run_corpus_qa._severity_of`'s tolerance. It reads whichever key it
+  finds, so it still works against an OLDER installed daemon, which is a real
+  configuration — the wrapper is versioned with the repo, the installed daemon
+  is not.
+- Building the pre-upgrade migration surface itself. That is its own plan; this
+  one only supplies the breaking change that motivates it.
 
 ## Tasks
 
-### Phase 1: Converge, additively
+### Phase 1: Converge on one name
 
 - [x] ✅ **Task 1.1**: Decide the surviving name. `severity` wins: it is what
   `docs-qa` already emits, it is the more common term across tooling, and
   `Level` is the plan-QA *enum's* internal name rather than a description of
   the field. The enums agree on their values (`advise`, `block`), so only the
   key name ever differed.
-- [x] ✅ **Task 1.2**: `plan-qa --json` emits BOTH keys with the same value,
-  so no existing consumer breaks; `docs-qa` is untouched. The deprecation is
-  recorded in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/27-plan-qa-json-now-names-severity-like-docs-qa.md`.
-  No doc quoted either key name, so there was no doc truth to correct.
+- [x] ✅ **Task 1.2**: `plan-qa --json` emits `severity` and nothing else;
+  `docs-qa` is untouched. Declared BREAKING in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/27-plan-qa-json-now-names-severity-like-docs-qa.md`,
+  which states the migration. No doc quoted either key name, so there was no
+  doc truth to correct.
 - [x] ✅ **Task 1.3**: `tests/unit/daemon/test_cli_qa_json_severity_key.py`
-  drives both verbs and asserts they agree on the canonical name. Its class
-  guard enumerates every severity-VALUED key rather than asserting one is
-  present, so a future third spelling fails here instead of silently halving
+  drives both verbs and asserts they agree on the one name. Its class guard
+  enumerates every severity-VALUED key and requires the set to be exactly
+  `{"severity"}`, so a second spelling fails here instead of silently halving
   a reader's count.
 
-### Phase 2: Retire the old key
+### Phase 2: Release consequences
 
-**Entry condition**: the release containing callout 27 has SHIPPED. Until then
-this phase is blocked, not merely unstarted — dropping `"level"` while the
-dual-key emission is still unreleased would give consumers a zero-length
-deprecation window, which is the break this plan exists to avoid. A human
-starts a release; an agent never does.
-
-- [ ] ⬜ **Task 2.1**: In a later release, drop the deprecated key, with the
-  removal recorded in `CLAUDE/UPGRADES/`.
+- [ ] ⬜ **Task 2.1**: The release carrying this change is a MAJOR bump
+  (`CLAUDE/development/RELEASING.md:966`). A human starts the release; an agent
+  never does.
+- [ ] ⬜ **Task 2.2**: Ship a pre-upgrade migration task instructing the
+  upgrading agent to rewrite `level` → `severity` at any call site parsing
+  `plan-qa --json`, BEFORE the new version is installed. Blocked on the
+  pre-upgrade surface existing (see the pre-upgrade plan); until then the
+  release-notes callout is the only channel.
 
 ## Success Criteria
 
-- [x] Both verbs' `--json` output carries `severity` with the same values.
-- [x] A consumer parsing the old key still works during the deprecation
-  window.
-- [x] Full QA passes and CI is green — 29/29, 22,237 tests, 0 failed, pyright
-  0 errors over 1,582 files, coverage 95.3%; `plan_qa` reports
+- [x] Both verbs' `--json` output carries `severity`, and only `severity`.
+- [x] No released version exists in which two spellings are simultaneously
+  valid.
+- [x] Full QA passes and CI is green — `plan_qa` reports
   `0 findings (0 block, 0 advise)`, a split that agrees with its own total.
-- [ ] The deprecated key is gone (Phase 2, after the release ships).
+- [ ] The break is declared as MAJOR in the release that carries it.
+- [ ] A pre-upgrade migration rewrites affected call sites rather than
+  announcing the change to them.
 
 ## Delivery & Milestones
 

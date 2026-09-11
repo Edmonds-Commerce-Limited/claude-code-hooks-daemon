@@ -5512,13 +5512,11 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
         payload = [
             {
                 "check_id": finding.check_id,
-                # Plan 00375: "severity" is the name docs-qa already emits and
-                # the one both verbs converge on. "level" is the deprecated
-                # spelling, kept because --json is documented public API — a
-                # reader that knows only one name drops every finding from the
-                # other verb while still counting it toward the total.
+                # Plan 00375: "severity" is the one name both verbs use. It was
+                # briefly emitted alongside a legacy "level" spelling, but two
+                # live names for one concept IS the defect — a reader keys on
+                # one and silently drops every finding carrying the other.
                 "severity": finding.level.value,
-                "level": finding.level.value,
                 "message": finding.message,
                 "remediation": finding.remediation,
                 "path": finding.path,
