@@ -130,6 +130,35 @@ authoritative rule:
   DESTROYS data", which is flatly untrue of the command that ran, and a guard
   that cries wolf on prose is one an agent learns to route around.
 
+- [ ] ⬜ **N8: the plan-asset advisory describes the repair as "fills gaps
+  only".** `plan_workflow_asset_checker`'s `get_claude_md()` tells agents the
+  deploy is "idempotent (fills gaps only, never overwrites client-owned
+  files)". The second clause is right; the first is wrong for exactly the files
+  that matter. `_deploy_mkplan` and `_deploy_planlib` overwrite
+  unconditionally — their own docstrings say "overwritten on every upgrade …
+  to guarantee audit fixes reach the field". So an agent that reads the
+  advisory and then finds a DRIFTED `mkplan.bash` concludes the offered command
+  cannot help, when it is precisely the repair. Found while scoping N6, whose
+  remediation this sentence undercuts.
+
+- [ ] ⬜ **N9: nothing notices when journal timestamps drift from the clock.**
+  `journal-entry-ordering` (N1) enforces that times increase down the file, and
+  `journal-append-only` forbids rewriting an entry — but neither can see a run
+  of entries that is internally monotonic and uniformly WRONG. Measured in this
+  plan's own day-file: entries from `14:05` onward are ~70 minutes ahead of
+  real time (the `14:05`–`14:14` entries accompany commit `12119d14`, authored
+  `13:15`), because I estimated the clock instead of reading it. Nothing
+  reported it; it was caught only by chance when a later entry had to be
+  placed.
+
+  This is not cosmetic — the journal is the record used to reconstruct what
+  happened, and a timestamp an hour out silently breaks correlation with git
+  history, which is the one external clock available to check it against. That
+  also suggests the fix: compare the newest entry's `HH:MM` against the
+  day-file's last commit time and advise past a generous threshold. Not
+  backfilled, per N1's precedent — the readings are wrong but the order is
+  right, and the file is append-only.
+
 - [ ] ⬜ **N3: `upgrade.md` never mentions post-upgrade tasks.** The
   agent-facing upgrade procedure omits the step entirely, so the tasks are not
   read even by an agent following the procedure exactly. (Tracked in Plan 00376
