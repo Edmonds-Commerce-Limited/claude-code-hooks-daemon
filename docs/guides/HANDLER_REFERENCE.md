@@ -183,7 +183,15 @@ key seeded (comment-preserving) instead of a refusal. Any
 verification failure AUTO-REVERTS the previous state end-to-end (config +
 forwarders + daemon), re-verifies it with the same probes, and exits
 non-zero naming what failed — a toggle can never strand a session on a
-broken transport. Repeating the current state is a clean no-op.
+broken transport. Repeating the current state is a clean no-op only when the
+DEPLOYED forwarders already agree with the config (Plan 00383): the toggle
+regenerates them either way, and regeneration writes a file only when the
+generated content differs, so a converged project performs no write, no restart
+and no probes. When they disagree — an interrupted toggle, a hand-edited
+config, a checkout that moved one and not the other — the drift is repaired,
+the daemon restarted and the state verified, and the report says so instead of
+"nothing to do". That reconcile does NOT auto-revert on failure: the config
+never moved, so the only state to restore would be the drift itself.
 `transport status` reports the active rung, listener count, relay binary
 path/digest and the last toggle's verification result (persisted in the
 daemon's untracked dir).

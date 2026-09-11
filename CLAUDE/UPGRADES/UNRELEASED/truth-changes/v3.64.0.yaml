@@ -25,3 +25,19 @@ truth_changes:
       its recommended and current value inline, plus a count of informational
       options. A recommendation's migration Note is read from the file before
       enabling. `--full` prints the whole advisory inline.
+  - topic: hook-transport
+    was: >
+      Running `transport on`/`off` for the state the config already holds is a
+      clean no-op: it reports `relay already <state> — nothing to do`, exits 0
+      and changes nothing.
+    now: >
+      `transport on`/`off` verify the DEPLOYED forwarders rather than trusting
+      the config alone. When the forwarders already agree it is still a free
+      no-op — no write, no restart, no probes — but when they have drifted
+      (an interrupted toggle, a hand-edited config, a checkout that moved one
+      and not the other) they are regenerated, the daemon restarted and the
+      state verified, and the report names the repair instead of saying
+      nothing to do. That reconcile never auto-reverts, because the config
+      never moved and the only state to restore would be the drift itself.
+      Enabling is gated on the relay binary first, so a repair cannot deploy a
+      hot path with no binary behind it.
