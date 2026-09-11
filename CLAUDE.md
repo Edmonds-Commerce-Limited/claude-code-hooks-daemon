@@ -575,10 +575,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - hook_registration_checker — hooks configuration policy
 
-<!-- handler: plan-workflow-asset-checker -->
-
-- plan_workflow_asset_checker — plan tooling provisioning alert
-
 <!-- handler: project-handler-load-checker -->
 
 - project_handler_load_checker — project protection degraded alert
@@ -602,6 +598,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: docs-qa-sweep -->
 
 - docs_qa_sweep — documentation drift report at session start
+
+<!-- handler: plan-workflow-asset-checker -->
+
+- plan_workflow_asset_checker — plan tooling provisioning alert
 
 <!-- handler: standing-authorisations -->
 
