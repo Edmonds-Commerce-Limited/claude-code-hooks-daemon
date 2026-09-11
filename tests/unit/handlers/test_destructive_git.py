@@ -802,6 +802,99 @@ class TestDestructiveGitPushForceSeparatorScoping:
         assert "overwrite remote history" in reason
 
 
+class TestDestructiveGitPushBranchNameContainingDashF:
+    """GitHub issue #37: a branch named `...-f-...` is not a force push.
+
+    Reported in the field against 3.63.0: `git push origin
+    feature/lane-f-adoption` was denied with R-GIT-PUSH-FORCE, and renaming the
+    branch so the token read `-dimensions-` let the identical command through.
+
+    The `-f` alternative carried a trailing `\\b` but no LEADING boundary, so
+    the `f` in `lane-f-adoption` — followed by `-`, which is a word boundary —
+    matched. The `+`-refspec alternative beside it had guarded its leading
+    position with `(?<!\\S)` since Plan 00205; the flag alternative never did.
+    """
+
+    @pytest.fixture
+    def handler(self):
+        return DestructiveGitHandler()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git push origin feature/lane-f-adoption",
+            "git push --set-upstream origin feature/lane-f-adoption",
+            "git push origin fix-f-test",
+            "git push origin f-start",
+            "git push origin ends-in-f",
+        ],
+    )
+    def test_a_branch_name_carrying_f_is_not_a_force_push(self, handler, command):
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+        assert handler.matches(hook_input) is False, command
+
+    def test_follow_tags_is_not_a_force_push(self, handler):
+        """A long option that merely CONTAINS the letters is not `--force`."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push origin main --follow-tags"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_force_with_lease_is_not_a_force_push(self, handler):
+        """`--no-force-with-lease` NEGATES the lease; it must not read as one."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push origin main --no-force-with-lease"},
+        }
+        assert handler.matches(hook_input) is False
+
+
+class TestDestructiveGitPushGroupedShortFlags:
+    """The opposite defect, found while reproducing issue #37 — and worse.
+
+    Git groups short options (`git push -nq <remote>` is accepted by its own
+    parser, failing on the remote rather than on an unknown switch), so `-uf`,
+    `-fu` and `-nf` are all genuine force pushes. None of them matched: the
+    literal substring `-f` never appears in `-uf` or `-nf`, and in `-fu` the
+    `f` is followed by a word character so the trailing `\\b` fails.
+
+    A guard that MISSES a destructive command is worse than one that
+    over-matches, so these are pinned alongside the false positives above. The
+    fix suggested in the issue would have closed the false positives and left
+    every one of these open.
+    """
+
+    @pytest.fixture
+    def handler(self):
+        return DestructiveGitHandler()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git push -uf origin main",
+            "git push -fu origin main",
+            "git push -nf origin main",
+            "git push -qf origin main",
+        ],
+    )
+    def test_a_grouped_short_flag_carrying_f_is_a_force_push(self, handler, command):
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+        assert handler.matches(hook_input) is True, command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git push -n origin main",
+            "git push -q origin main",
+            "git push -u origin main",
+        ],
+    )
+    def test_a_grouped_short_flag_without_f_is_not(self, handler, command):
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+        assert handler.matches(hook_input) is False, command
+
+
 class TestDestructiveGitTagForceNotBlocked:
     """Plan 00200 (Task 6.4): pin the `git tag -f` false positive forever.
 

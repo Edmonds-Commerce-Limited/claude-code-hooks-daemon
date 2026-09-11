@@ -44,17 +44,37 @@ _GIT_INVOCATION = GIT_INVOCATION
 # `[^;&|]*?` consumes only characters within the push segment (never a command
 # separator), so a non-push `--force` later in a compound command — e.g.
 # `git push origin main; git worktree remove <path> --force` — is NOT matched.
-# Within the segment, three spellings all qualify as a destructive force push:
-#   - the long/short FLAGS: `--force`, `--force-with-lease`, `-f`
+#
+# EVERY alternative below guards its leading position with `(?<!\S)`, so each
+# must START a whitespace-delimited token rather than merely appear inside one.
+# The refspec branch has done this since Plan 00205; the flag branches did not,
+# and GitHub issue #37 is what that cost: `-f` inside `lane-f-adoption` matched,
+# because the `f` is followed by `-` and that counts as a word boundary. An
+# ordinary push was denied purely for its branch NAME.
+#
+# The two flag syntaxes need DIFFERENT rules, which is why they are separate
+# alternatives rather than one group behind a shared guard:
+#
+#   - a LONG option is forceful only when it is exactly `--force` or
+#     `--force-with-lease`. Matching a prefix would catch `--follow-tags`, and
+#     dropping the leading guard would catch `--no-force-with-lease`, which
+#     NEGATES the lease.
+#   - a SHORT cluster is any single-dash token containing `f`, whatever else
+#     rides along with it. Git groups short options — `git push -nq <remote>`
+#     is accepted by its own parser, failing on the remote rather than on an
+#     unknown switch — so `-uf`, `-fu` and `-nf` are all real force pushes.
+#     Requiring the literal `-f` missed every one of them: that substring does
+#     not occur in `-uf` at all, and in `-fu` the `f` is followed by a word
+#     character so a trailing `\b` fails. `(?!-)` keeps this branch off long
+#     options, leaving those to the rule above.
 #   - a `+`-prefixed REFSPEC (Plan 00205): `git push origin +main:main` forces
-#     the update exactly like `--force` and needs no flag at all. `(?<!\S)`
-#     requires the `+` to start a whitespace-delimited token (not merely
-#     appear inside one), so a branch name that happens to CONTAIN `+`
-#     (`git push origin feature+fix`) is never matched — only a `+` in the
-#     LEADING position of a refspec argument is the force marker.
+#     the update exactly like `--force` and needs no flag at all, so a branch
+#     name that merely CONTAINS `+` (`feature+fix`) is never matched.
 _GIT_PUSH_FORCE_PATTERN = (
     rf"{_GIT_INVOCATION}push\b[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?"
-    r"(?:(?:--force(?:-with-lease)?|-f)\b|(?<!\S)\+\S)"
+    r"(?:(?<!\S)--force(?:-with-lease)?\b"
+    r"|(?<!\S)-(?!-)[A-Za-z0-9]*f[A-Za-z0-9]*\b"
+    r"|(?<!\S)\+\S)"
 )
 
 # SINGLE SOURCE OF TRUTH: ordered (pattern, reason) pairs consumed by BOTH matches()
@@ -405,6 +425,18 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             '(`git commit -m "$(...)"` — double quotes do not stop expansion), and '
             "an UNQUOTED `<<EOF` body. Quote the delimiter (`<<'EOF'`) whenever the "
             "body is prose and this never bites.\n\n"
+            "**A force push is judged on the TOKEN, not on the letters.** Each force "
+            "marker must START a whitespace-delimited argument, so a BRANCH NAME "
+            "containing `-f-` is an ordinary push: `git push origin "
+            "feature/lane-f-adoption` is allowed, and so is one ending `-f`. The same "
+            "rule keeps `--follow-tags` and `--no-force-with-lease` out of it — the "
+            "latter negates the lease rather than asking for one.\n\n"
+            "**Grouped short flags ARE covered, so do not read `-f` as the only short "
+            "spelling.** Git groups short options, so `git push -uf origin main` is a "
+            "force push and is blocked, as are `-fu`, `-nf` and any other single-dash "
+            "cluster carrying an `f`. A cluster WITHOUT one (`-nq`, `-u`) is untouched. "
+            "Splitting the flag out does not change the verdict and is not a "
+            "workaround.\n\n"
             "**To delete a branch, ALWAYS try `git branch -d` first.** It is allowed, "
             "it is battle-tested, and it refuses unless the branch is genuinely merged. "
             "Reach for anything else only once it has actually refused:\n\n"
@@ -604,6 +636,24 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 expected_message_patterns=[
                     r"overwrite remote history",
                     r"destroy.*work",
+                ],
+                safety_notes="Uses non-existent branch name - would fail harmlessly if executed",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="git push -uf (grouped short force flag)",
+                command='echo "git push -uf origin NONEXISTENT_SAFE_TEST_BRANCH"',
+                dispatch_as_bash=True,
+                description=(
+                    "Blocks a force push spelled as a GROUPED short flag (issue #37). "
+                    "Git groups short options, so `-uf` is `-u -f`; requiring the "
+                    "literal `-f` missed it entirely"
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"overwrite remote history",
                 ],
                 safety_notes="Uses non-existent branch name - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
