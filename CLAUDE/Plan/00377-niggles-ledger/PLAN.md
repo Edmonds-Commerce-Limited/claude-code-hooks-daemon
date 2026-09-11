@@ -111,24 +111,51 @@ authoritative rule:
   own deployed file of being hand-hacked. A drift check would most naturally
   live where the other whole-tree checks already run.
 
-- [ ] ⬜ **N7: `destructive_git` reads a commit MESSAGE as the command.** A
+- [ ] ⬜ **N7: `destructive_git` reads PROSE as the command.** A
   `git commit -F - <<'EOF' … EOF && git push origin main` whose message
   described the new `agents install --force` flag was denied as
-  `R-GIT-PUSH-FORCE` — the guard saw `git push` and `--force` in one command
-  string and concluded `git push --force`, though the `--force` was prose
-  inside a quoted heredoc the shell expands nothing in.
+  `R-GIT-PUSH-FORCE`, though the `--force` was prose inside a quoted heredoc
+  the shell expands nothing in.
 
-  Reproduced exactly once, on the commit that fixed N4. Splitting commit and
-  push into two calls is the workaround.
+  **Mechanism (measured, and not what this entry first claimed).** The original
+  text said the guard "saw `git push` and `--force` in one command string and
+  joined them". That is wrong, and the real cause is more specific — the
+  opener line was `git commit -F - <<'EOF' && git push origin main`, so the
+  heredoc BODY physically follows `git push` in the command string, and
+  `_GIT_PUSH_FORCE_PATTERN`'s `[^;&|]*?` excludes the three separators but NOT
+  newlines. The scan therefore ran from `git push` straight down into the body
+  and found `--force` there.
 
-  The fix already exists elsewhere in the codebase and is not being invented:
-  `sed_blocker` exempts a `git commit` message that mentions `sed`, and
-  `pipe_blocker` exempts a quoted-delimiter heredoc outright on the grounds
-  that the shell expands nothing in it. `destructive_git` needs the same
-  message/heredoc exemption. Note the blast radius is wider than the
-  inconvenience suggests: the deny message asserts the command "PERMANENTLY
-  DESTROYS data", which is flatly untrue of the command that ran, and a guard
-  that cries wolf on prose is one an agent learns to route around.
+  That makes the defect wider than one pattern. Probed against the live
+  handler (`untracked/scratch/n7_probe.py`), three shapes are falsely denied
+  today and the real commands are unaffected:
+
+  | command                                     | today | correct |
+  | ------------------------------------------- | ----- | ------- |
+  | the field report above                      | DENY  | allow   |
+  | `python3 - <<'PY'` whose body names a reset | DENY  | allow   |
+  | `git commit -m 'document --amend'`          | DENY  | allow   |
+  | `git commit --amend -m 'fix typo'`          | DENY  | DENY    |
+  | `git push --force origin main`              | DENY  | DENY    |
+
+  The second row is not hypothetical: it blocked the probe written to
+  investigate this entry. The third comes from a different route — the
+  single-line patterns use `.*`, which stays on one line but still matches
+  inside a `-m` value.
+
+  **Fix**: scan a copy with the inert spans blanked, exactly as
+  `pipe_blocker.matches` already does via `_strip_inert_spans`
+  (`strip_quoted_heredoc_bodies` ∘ message-body blanking). Both halves are
+  needed — blanking the heredoc alone leaves the `-m` rows failing. The
+  heredoc half is already shared in `utils/shell_segmentation`; the
+  message-body half is still private to `pipe_blocker` and should move
+  alongside it, which is the stated purpose of that module ("One scanner, one
+  set of rules, one place to fix").
+
+  Blast radius is wider than the inconvenience suggests: the deny message
+  asserts the command "PERMANENTLY DESTROYS data", which is flatly untrue of
+  the command that ran, and a guard that cries wolf on prose is one an agent
+  learns to route around.
 
 - [ ] ⬜ **N8: the plan-asset advisory describes the repair as "fills gaps
   only".** `plan_workflow_asset_checker`'s `get_claude_md()` tells agents the
