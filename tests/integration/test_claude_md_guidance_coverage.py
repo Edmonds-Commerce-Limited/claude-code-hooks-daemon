@@ -227,6 +227,13 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "surfaces (the next SessionStart sweep)"
     ),
     "PlanWorkflowAssetCheckerHandler": "T3 names a provisioning command to run later",
+    "DeployedArtefactDriftHandler": (
+        "T3 the redeploy that clears a drift happens later in the session, and the "
+        "rule that decides WHICH side is wrong has to hold for every report: the "
+        "template owns core docs and plan tooling (they are overwritten "
+        "unconditionally, so deployed != template is always drift), while a "
+        "deliberately CUSTOMISED agent is not drift at all"
+    ),
     "ProjectHandlerLoadCheckerHandler": "T3 'your guardrails are OFF' must persist",
     "GitHooksExecutableFixerHandler": "T3 the daemon changed file permissions on your behalf",
     "LspNoiseCheckerHandler": (

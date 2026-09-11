@@ -4,6 +4,12 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00347: handlers raise on unstattable paths](00347-handlers-raise-on-unstattable-paths/PLAN.md) - Complete at `f17fabcd`…`c731add6` + the gate and archiving commit (pathlib does not ignore EACCES, so a caller-supplied path behind an unreadable parent RAISED and the guard silently stopped applying on the client default; the fallback is now a required argument because no single value is safe — `write_clobber_guard` needs `True`, `comment_size` `False`, `plan_qa_edit` `None`)
+
+- [00346: the QA venv ignores uv.lock](00346-pin-qa-toolchain-versions/PLAN.md) - Complete at `2de920a3`…`f8e852a1` + the archiving commit (the lockfile was committed and CI-gated while every provisioning path resolved `pyproject.toml` against PyPI instead; locking them fixed a live CI failure — `Format (black)` had been red on main because CI's floating black disagreed with the tree)
+
+- [00345: harness payloads for shell and call syntax tests](00345-harness-payloads-for-shell-and-call-syntax-tests/PLAN.md) - Complete at `b34ab4cd`…`23fb248f` + the archiving commit (94 → 199 of 228 dispatchable blocks now run automatically, and every remaining skip carries a reason a reader can act on)
+
 - [00343: flip the plan QA commit gate from warn to block](00343-plan-qa-commit-gate-warn-to-block/PLAN.md) - Complete at the delivery + archiving commits (a 253-commit replay found 18 would-be denials of which 7 blamed a commit for plan-tree state it never touched; six checks narrowed to BLOCK only what a commit introduced, replay then 11 denials with zero false positives, and the gate flipped to `block`)
 
 - [00342: prose guard does not reach stop handlers](00342-prose-guard-does-not-reach-stop-handlers/PLAN.md) - Complete at the delivery + archiving commits (the prose guard now scopes by base class and carries a Stop axis whose predicate is the marker SIDE EFFECT — `_denies()` would have passed vacuously; quoting a frozen phrase no longer arms cron suppression, and the unquoted residue is asserted as a recorded limit rather than left implicit)

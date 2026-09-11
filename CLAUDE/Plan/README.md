@@ -181,12 +181,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00348: project context leaks across test files](Completed/00348-project-context-leaks-across-test-files/PLAN.md) - Complete at `b8fc7c23`…the fixing commit (four test files patched `ProjectContext.daemon_untracked_dir` while an autouse fixture already had, and the two unwound in the wrong order — leaving the fixture's `tmp_path` on the singleton so an unrelated file failed next, accusing correct code)
 
-- [00347: handlers raise on unstattable paths](Completed/00347-handlers-raise-on-unstattable-paths/PLAN.md) - Complete at `f17fabcd`…`c731add6` + the gate and archiving commit (pathlib does not ignore EACCES, so a caller-supplied path behind an unreadable parent RAISED and the guard silently stopped applying on the client default; the fallback is now a required argument because no single value is safe — `write_clobber_guard` needs `True`, `comment_size` `False`, `plan_qa_edit` `None`)
-
-- [00346: the QA venv ignores uv.lock](Completed/00346-pin-qa-toolchain-versions/PLAN.md) - Complete at `2de920a3`…`f8e852a1` + the archiving commit (the lockfile was committed and CI-gated while every provisioning path resolved `pyproject.toml` against PyPI instead; locking them fixed a live CI failure — `Format (black)` had been red on main because CI's floating black disagreed with the tree)
-
-- [00345: harness payloads for shell and call syntax tests](Completed/00345-harness-payloads-for-shell-and-call-syntax-tests/PLAN.md) - Complete at `b34ab4cd`…`23fb248f` + the archiving commit (94 → 199 of 228 dispatchable blocks now run automatically, and every remaining skip carries a reason a reader can act on)
-
 ## Blocked / On Hold Plans
 
 - None. (00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
