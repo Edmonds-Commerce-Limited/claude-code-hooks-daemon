@@ -60,21 +60,21 @@ defect in the message.
 
 ### Phase 2: The reaper stops mistaking output for work
 
-- [ ] ⬜ **Task 2.1**: An uncommitted path that the MAIN checkout would ignore
+- [x] ✅ **Task 2.1**: An uncommitted path that the MAIN checkout would ignore
   does not count as work. Main's `.gitignore` is the authority on what is
   generated; a worktree pinned to an older commit carries a stale copy of it,
   which is exactly how this jam formed. Consulting main rather than a
   hardcoded list also covers generated paths added later.
-- [ ] ⬜ **Task 2.2**: Prove it on the real failure shape — a worktree whose
+- [x] ✅ **Task 2.2**: Prove it on the real failure shape — a worktree whose
   only uncommitted path is ignored in main must become reapable, and one with
   a genuinely modified tracked file must still be refused.
 
 ### Phase 3: The message routes to the right actor
 
-- [ ] ⬜ **Task 3.1**: Replace "remove it by hand" and "N need a human" in
+- [x] ✅ **Task 3.1**: Replace "remove it by hand" and "N need a human" in
   `core/worktree_reaping.py:264` and `daemon/cli.py:6094`. The reader is
   usually an agent, and the action is available to it. Name the command.
-- [ ] ⬜ **Task 3.2**: Say what to inspect FOR. "The work is accounted for"
+- [x] ✅ **Task 3.2**: Say what to inspect FOR. "The work is accounted for"
   gives no test; "no commits unmerged to base, and the uncommitted paths are
   generated output or already landed" does.
 

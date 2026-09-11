@@ -132,6 +132,41 @@ class TestTheRefusalExplainsItself:
         assert "7" in reason
 
 
+class TestTheRefusalRoutesToWhoeverIsReading:
+    """A message that misroutes the work is a defect in the message (Plan 00380).
+
+    The old text said "remove it by hand". Five worktrees — every one with zero
+    commits unmerged to main — were handed to the owner across several sessions
+    on the strength of that phrase, while no rule blocked their removal at all.
+    """
+
+    def test_it_does_not_claim_a_human_is_required(self) -> None:
+        reason = reap_refusal_reason(_state(uncommitted_paths=("a.py",))) or ""
+        lowered = reason.lower()
+        assert "by hand" not in lowered
+        assert "need a human" not in lowered
+        assert "needs a human" not in lowered
+
+    def test_it_says_removal_is_not_blocked(self) -> None:
+        """The false belief was that a hook reserved this to a human."""
+        reason = reap_refusal_reason(_state(uncommitted_paths=("a.py",))) or ""
+        assert "no hook blocks" in reason
+
+    def test_it_names_the_command_that_removes_the_worktree(self) -> None:
+        reason = reap_refusal_reason(_state(uncommitted_paths=("a.py",))) or ""
+        assert "git worktree remove --force" in reason
+
+    def test_it_gives_a_test_for_accounted_for_rather_than_the_phrase_alone(self) -> None:
+        """ "If the work is accounted for" told the reader nothing checkable."""
+        reason = reap_refusal_reason(_state(uncommitted_paths=("a.py",))) or ""
+        assert "git log --oneline" in reason
+
+    def test_it_still_says_why_the_command_will_not_decide(self) -> None:
+        """The rebase ambiguity is the real reason, and must survive the rewrite."""
+        reason = reap_refusal_reason(_state(uncommitted_paths=("a.py",))) or ""
+        assert "rebased commit" in reason
+
+
 class TestTheTwoRealShapesInThisRepo:
     """Vacuity guard: the predicate must actually split this repo's worktrees."""
 

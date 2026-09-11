@@ -6091,7 +6091,14 @@ def cmd_worktree_reap(
             unmerged += 1
 
     if not reap:
-        print(f"\n{len(states) - refused} reapable, {refused} need a human. Nothing was changed.")
+        # "need a human" was the wording here, and it was false: nothing about
+        # a refusal requires a human, and no rule blocks `git worktree remove`.
+        # Five worktrees were handed to the owner across several sessions on
+        # the strength of that phrase alone (Plan 00380).
+        print(
+            f"\n{len(states) - refused} reapable, {refused} refused pending "
+            "inspection. Nothing was changed."
+        )
         print("Re-run with --reap to remove the reapable ones and their branches.")
     if orphans and not reap_branches:
         print(

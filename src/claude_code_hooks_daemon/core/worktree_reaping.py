@@ -72,6 +72,13 @@ UNKNOWN_COUNT = -1
 #: space (`A  path`, `?? path`).
 _STATUS_PREFIX_WIDTH = 3
 
+#: The porcelain code for a path git knows nothing about. ONLY this code is a
+#: candidate for the generated-output filter below (Plan 00380): `git
+#: check-ignore` answers about a PATH and cannot see that the same path is
+#: tracked-and-modified inside the worktree, so allowing any other code would
+#: let a real modification to an ignorable path be discarded silently.
+_UNTRACKED_STATUS_CODE = "??"
+
 #: The two `git worktree list --porcelain` lines this module reads. Each record
 #: opens with `worktree <path>` and, unless the worktree is detached, carries a
 #: `branch refs/heads/<name>` line naming what it has checked out.
@@ -261,9 +268,13 @@ def reap_refusal_reason(state: WorktreeState) -> str | None:
     return (
         f"{state.name} is not safe to reap: "
         + "; ".join(problems)
-        + ". Inspect it and remove it by hand if the work is accounted for — "
-        "a rebased commit that already landed looks exactly like one that did "
-        "not, so this check cannot tell them apart."
+        + ". This is a refusal by THIS command, not a rule: no hook blocks "
+        "`git worktree remove --force <path>`, so whoever is reading this — "
+        "agent or human — can inspect and remove it. It is accounted for when "
+        "`git log --oneline <base>..<branch>` is empty AND every path listed "
+        "above is generated output or a change already on the base. The reason "
+        "this command will not decide that for you is that a rebased commit "
+        "which already landed looks exactly like one that did not."
     )
 
 
@@ -337,6 +348,52 @@ def _unlanded(result: GitResult) -> int:
     return sum(1 for line in result.stdout.splitlines() if line.startswith("+"))
 
 
+def _ignored_in_main(
+    repo_root: Path,
+    paths: tuple[str, ...],
+    run_fn: RunGit,
+) -> frozenset[str]:
+    """Which of ``paths`` the MAIN checkout's ignore rules would exclude.
+
+    Asked of ``repo_root`` rather than the worktree on purpose. A worktree's
+    ``.gitignore`` is whatever its pinned commit carried, so a generated path
+    added to the ignore list afterwards is invisible there — which is precisely
+    how four worktrees came to be held by the daemon's own report file. Main is
+    the current authority on what counts as generated.
+
+    An empty set on failure, so an unanswerable question can never widen what
+    gets reaped — the same doctrine as :data:`UNKNOWN_COUNT`.
+    """
+    if not paths:
+        return frozenset()
+    result = run_fn(repo_root, "check-ignore", *paths)
+    if result.returncode != 0:
+        # Exit 1 legitimately means "none of them", and any other failure means
+        # "no answer". Both land here, and both correctly drop nothing.
+        return frozenset()
+    return frozenset(line for line in result.stdout.splitlines() if line)
+
+
+def _work_paths(status: GitResult, repo_root: Path, run_fn: RunGit) -> tuple[str, ...]:
+    """Uncommitted paths that could be work, generated output excluded.
+
+    An unreadable status is not an empty one, so it becomes a sentinel that
+    keeps the refusal explicit and names why. The sentinel is a MESSAGE, not a
+    path, so it is never handed to ``git check-ignore``.
+    """
+    if status.returncode != 0:
+        return ("<git status failed, so the worktree could not be checked>",)
+
+    entries = [
+        (line[:2], line[_STATUS_PREFIX_WIDTH:]) for line in status.stdout.splitlines() if line
+    ]
+    untracked = tuple(path for code, path in entries if code == _UNTRACKED_STATUS_CODE)
+    generated = _ignored_in_main(repo_root, untracked, run_fn)
+    return tuple(
+        path for code, path in entries if not (code == _UNTRACKED_STATUS_CODE and path in generated)
+    )
+
+
 def collect_worktree_states(
     repo_root: Path,
     base_branch: str,
@@ -365,13 +422,7 @@ def collect_worktree_states(
     for entry in _worktree_entries(listing.stdout, repo_root):
         path = entry.path
         status = run_fn(path, "status", "--porcelain")
-        uncommitted = (
-            tuple(line[_STATUS_PREFIX_WIDTH:] for line in status.stdout.splitlines() if line)
-            if status.returncode == 0
-            # An unreadable status is not an empty one. A sentinel path keeps
-            # the refusal explicit and names why in the message.
-            else ("<git status failed, so the worktree could not be checked>",)
-        )
+        uncommitted = _work_paths(status, repo_root, run_fn)
         states.append(
             WorktreeState(
                 name=path.name,

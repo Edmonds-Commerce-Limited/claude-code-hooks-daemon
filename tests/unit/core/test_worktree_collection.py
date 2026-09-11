@@ -99,6 +99,10 @@ class _FakeGit:
             return self._answers.get("rev_list", _ok("0\n"))
         if args[0] == "cherry":
             return self._answers.get("cherry", _ok(""))
+        if args[0] == "check-ignore":
+            # Real `git check-ignore` exits 1 and prints nothing when no path
+            # is ignored, so the default answer models that, not an error.
+            return self._answers.get("check_ignore", _fail(stderr=""))
         raise AssertionError(f"unexpected git call: {args}")
 
 
@@ -184,6 +188,125 @@ class TestTheCleanReading:
         git = _FakeGit(cherry=_ok("- aaa landed\n- bbb landed\n"))
         state = collect_worktree_states(Path("/repo"), "main", run_fn=git)[0]
         assert state.unlanded_patches == 0
+
+
+class TestGeneratedOutputIsNotWork:
+    """The real failure (Plan 00380): four worktrees held by the daemon's own file.
+
+    `git status` runs INSIDE the worktree, so it applies that worktree's
+    `.gitignore` — which is pinned to whatever commit the worktree sits on. A
+    generated path added to the ignore list later is therefore invisible to it,
+    and the daemon's own `.claude/reports/…/ADVISORY.md` read as the agent's
+    unsaved work. Main's ignore rules are the current authority, so an UNTRACKED
+    path main would ignore is not work.
+    """
+
+    def test_an_untracked_path_main_ignores_does_not_count(self) -> None:
+        git = _FakeGit(
+            status=_ok("?? .claude/reports/\n"),
+            check_ignore=_ok(".claude/reports/\n"),
+        )
+        state = collect_worktree_states(Path("/repo"), "main", run_fn=git)[0]
+        assert state.uncommitted_paths == ()
+
+    def test_that_worktree_becomes_reapable(self) -> None:
+        """The whole point: five of these sat unreapable for days."""
+        git = _FakeGit(
+            status=_ok("?? .claude/reports/\n"),
+            check_ignore=_ok(".claude/reports/\n"),
+        )
+        state = collect_worktree_states(
+            Path("/repo"),
+            "main",
+            run_fn=git,
+            age_fn=_old_enough,
+            process_cwds_fn=_nobody_home,
+        )[0]
+        assert is_reapable(state)
+
+    def test_an_untracked_path_main_does_not_ignore_still_counts(self) -> None:
+        git = _FakeGit(status=_ok("?? real-work.py\n"))
+        state = collect_worktree_states(Path("/repo"), "main", run_fn=git)[0]
+        assert state.uncommitted_paths == ("real-work.py",)
+
+    def test_only_the_generated_one_is_dropped_from_a_mixed_worktree(self) -> None:
+        git = _FakeGit(
+            status=_ok("?? .claude/reports/\n?? real-work.py\n"),
+            check_ignore=_ok(".claude/reports/\n"),
+        )
+        state = collect_worktree_states(Path("/repo"), "main", run_fn=git)[0]
+        assert state.uncommitted_paths == ("real-work.py",)
+        assert not is_reapable(state)
+
+
+class TestOnlyUntrackedPathsCanBeDropped:
+    """The narrowing that keeps this safe.
+
+    `git check-ignore` answers about a PATH, and it cannot know that the path is
+    tracked-and-modified in the worktree. Were any status code eligible, a
+    modification to a file main happens to ignore would be silently discarded.
+    So only `??` is ever a candidate; a tracked change always still refuses.
+    """
+
+    def test_a_modified_tracked_path_survives_an_ignore_match(self) -> None:
+        git = _FakeGit(
+            status=_ok(" M .claude/reports/notes.md\n"),
+            check_ignore=_ok(".claude/reports/notes.md\n"),
+        )
+        state = collect_worktree_states(Path("/repo"), "main", run_fn=git)[0]
+        assert state.uncommitted_paths == (".claude/reports/notes.md",)
+        assert not is_reapable(state)
+
+    def test_a_staged_path_survives_an_ignore_match(self) -> None:
+        git = _FakeGit(
+            status=_ok("A  .claude/reports/added.md\n"),
+            check_ignore=_ok(".claude/reports/added.md\n"),
+        )
+        state = collect_worktree_states(Path("/repo"), "main", run_fn=git)[0]
+        assert state.uncommitted_paths == (".claude/reports/added.md",)
+
+    def test_a_deleted_tracked_path_survives_an_ignore_match(self) -> None:
+        git = _FakeGit(
+            status=_ok(" D .claude/reports/gone.md\n"),
+            check_ignore=_ok(".claude/reports/gone.md\n"),
+        )
+        state = collect_worktree_states(Path("/repo"), "main", run_fn=git)[0]
+        assert state.uncommitted_paths == (".claude/reports/gone.md",)
+
+
+class TestTheIgnoreQueryIsNeverReadAsPermissionToReap:
+    def test_a_failed_check_ignore_drops_nothing(self) -> None:
+        """Same doctrine as the counts: a failed call is never 'nothing to lose'."""
+        git = _FakeGit(status=_ok("?? .claude/reports/\n"), check_ignore=_fail())
+        state = collect_worktree_states(Path("/repo"), "main", run_fn=git)[0]
+        assert state.uncommitted_paths == (".claude/reports/",)
+        assert not is_reapable(state)
+
+    def test_a_failed_status_is_not_passed_to_check_ignore(self) -> None:
+        """The sentinel is a message, not a path — asking git about it is nonsense."""
+        git = _FakeGit(status=_fail())
+        state = collect_worktree_states(Path("/repo"), "main", run_fn=git)[0]
+        assert not is_reapable(state)
+        assert "check-ignore" not in {call[0] for call in git.calls}
+
+    def test_no_untracked_paths_means_no_ignore_query(self) -> None:
+        git = _FakeGit(status=_ok(" M src/thing.py\n"))
+        collect_worktree_states(Path("/repo"), "main", run_fn=git)
+        assert "check-ignore" not in {call[0] for call in git.calls}
+
+    def test_the_query_is_asked_of_the_main_checkout_not_the_worktree(self) -> None:
+        """A worktree's own rules are the stale ones — asking it changes nothing."""
+        seen: list[Path] = []
+
+        class _RecordingGit(_FakeGit):
+            def __call__(self, cwd: Path, *args: str, **kw: object):
+                if args[0] == "check-ignore":
+                    seen.append(cwd)
+                return super().__call__(cwd, *args, **kw)
+
+        git = _RecordingGit(status=_ok("?? .claude/reports/\n"))
+        collect_worktree_states(Path("/repo"), "main", run_fn=git)
+        assert seen and all(path == Path("/repo") for path in seen)
 
 
 class TestAFailedGitCallIsNeverReadAsClean:
