@@ -197,7 +197,7 @@ authoritative rule:
   backfilled, per N1's precedent — the readings are wrong but the order is
   right, and the file is append-only.
 
-- [ ] ⬜ **N10: the agent-ledger "DBF guard" asserts a tautology, and four
+- [x] ✅ **N10: the agent-ledger "DBF guard" asserts a tautology, and four
   shipped revisions went unledgered as a result.** Found while N6's drift
   question surfaced a live CUSTOMISED warning against
   `.claude/agents/hooks-daemon-docs-qa.md` — a file nobody had edited.
@@ -235,7 +235,8 @@ authoritative rule:
   missing. Nothing asks the real question: is every revision this template has
   ever had either current or ledgered?
 
-  **Graduated to [Plan 00378](../00378-agent-asset-ledger-guard-and-backfill/PLAN.md)**
+  **Graduated to [Plan 00378](../Completed/00378-agent-asset-ledger-guard-and-backfill/PLAN.md)
+  (now Complete)**
   — three distinct defects (a tautological guard, four unrepaired field states,
   no completeness check), a design decision about where the current md5 is
   pinned, and a change to a public dataclass. Too large for the ledger, so it

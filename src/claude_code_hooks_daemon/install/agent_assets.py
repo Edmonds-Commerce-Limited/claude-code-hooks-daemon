@@ -91,9 +91,15 @@ class AgentAssetSpec:
     Attributes:
         name: Namespaced (``hooks-daemon-*``) agent name; the bundled and
             deployed filename is ``<name>.md``.
-        version: Semantic version of the CURRENT bundled content. A ledger
-            unit test pins the bundled file's md5 to this version, so editing
-            the file without bumping the version fails QA loudly.
+        version: Semantic version of the CURRENT bundled content.
+        md5: Content md5 of the CURRENT bundled file, DECLARED here rather than
+            computed from it. That distinction is the whole point (Plan 00378):
+            while ``ledger()`` derived this value from the same file the test
+            compared it against, the check read ``content_md5(file) ==
+            content_md5(file)`` and could never fail — and four template
+            revisions shipped unledgered because nothing ever objected. A
+            declared digest is a witness: change the file without changing it
+            here and QA fails.
         gating_config_key: Dotted config key (for messages) that gates
             deployment of this agent.
         is_enabled: Reads the gating key from a loaded :class:`Config`.
@@ -105,6 +111,7 @@ class AgentAssetSpec:
 
     name: str
     version: str
+    md5: str
     gating_config_key: str
     is_enabled: Callable[[Config], bool]
     historic_versions: tuple[tuple[str, str], ...] = ()
@@ -159,6 +166,11 @@ _DEDUPE_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
     ("legacy-3", "892b875cafe304bb4fd52dd1ab1e6cd3"),
     ("legacy-2", "b65355647e0783576a33c1518307c2f1"),
     ("legacy-1", "a590da6b9f2d03e877856e6b9b56a0bd"),
+    # Plan 00378 backfill. Both shipped and neither was recorded, because the
+    # guard that should have caught it compared the file with itself. Labelled
+    # by the commit that shipped them so the claim stays checkable.
+    ("shipped-daa73a3c", "0bff2001a0aa282b98c455db1a33ab0f"),
+    ("shipped-06077503", "19551a26c2fdffc2f00bab3b56ecf7bf"),
 )
 
 #: Historic opus-security revisions. v1.0.0 enumerated its trigger vocabulary
@@ -168,6 +180,8 @@ _DEDUPE_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
 #: frozen as customised.
 _OPUS_SECURITY_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
     ("1.0.0", "9724c2afde95dd7f33a2e53a40849c1b"),
+    # Plan 00378 backfill: shipped by 86e4ab319, never recorded.
+    ("shipped-86e4ab319", "c300a7ed8e89860ee908e1a6d67363d4"),
 )
 
 #: Historic docs-qa revisions. v1.0.0 instructed writing a report file to
@@ -177,12 +191,24 @@ _OPUS_SECURITY_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
 #: than being frozen as customised.
 _DOCS_QA_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
     ("1.0.0", "98d4c311daada8526412c9d30433716f"),
+    # Plan 00378 backfill: shipped by 129aee179, never recorded. This is the
+    # revision that surfaced the whole defect — the daemon's own repository had
+    # it deployed and was told it had been hand-edited.
+    ("shipped-129aee179", "5185213319135de58988d4406569a250"),
 )
+
+#: Declared md5 of each CURRENT bundled template. Data, not a computation:
+#: deriving these from the files they guard is exactly the defect Plan 00378
+#: fixes. Update alongside any template edit — QA fails loudly otherwise.
+_DEDUPE_MD5: Final[str] = "cf623ccc04ab29ba47886c73dded893e"
+_OPUS_SECURITY_MD5: Final[str] = "63f8d6aac7a46a6bbbf2fab643d9df6e"
+_DOCS_QA_MD5: Final[str] = "30a36b6ce0ce8bbe856dd3f4966a2b5d"
 
 SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
     AgentAssetSpec(
         name=DEDUPE_AGENT_NAME,
         version="1.1.0",
+        md5=_DEDUPE_MD5,
         gating_config_key="plan_workflow.enabled",
         is_enabled=_plan_workflow_enabled,
         historic_versions=_DEDUPE_HISTORIC_VERSIONS,
@@ -190,6 +216,7 @@ SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
     AgentAssetSpec(
         name=OPUS_SECURITY_AGENT_NAME,
         version="1.1.0",
+        md5=_OPUS_SECURITY_MD5,
         gating_config_key="agents.opus_security.enabled",
         is_enabled=_opus_security_enabled,
         historic_versions=_OPUS_SECURITY_HISTORIC_VERSIONS,
@@ -197,6 +224,7 @@ SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
     AgentAssetSpec(
         name=DOCS_QA_AGENT_NAME,
         version="1.1.0",
+        md5=_DOCS_QA_MD5,
         gating_config_key="agents.docs_qa.enabled",
         is_enabled=_docs_qa_agent_enabled,
         historic_versions=_DOCS_QA_HISTORIC_VERSIONS,
@@ -241,16 +269,40 @@ def content_md5(text: str) -> str:
 def ledger() -> dict[str, dict[str, str]]:
     """Agent → version → content md5, covering EVERY shipped revision.
 
-    The current revision's md5 is computed from the bundled file (the single
-    source of truth for shipped content); historic revisions are recorded on
-    each spec.
+    Both the current and historic entries are DECLARED on the spec. The current
+    one used to be computed from the bundled file, which made the test guarding
+    it compare a value with itself (Plan 00378); a consumer of a self-derived
+    ledger can never detect an unrecorded edit, because the ledger silently
+    agrees with whatever is on disk.
     """
     book: dict[str, dict[str, str]] = {}
     for spec in SHIPPED_AGENTS:
-        entries = {spec.version: content_md5(spec_source_path(spec).read_text())}
+        entries = {spec.version: spec.md5}
         entries.update(dict(spec.historic_versions))
         book[spec.name] = entries
     return book
+
+
+def unpinned_agents() -> list[str]:
+    """Names of shipped agents whose DECLARED md5 disagrees with their file.
+
+    The real guard behind Plan 00378, extracted as a function so it can be
+    watched FAILING rather than only passing. Its predecessor lived inline in a
+    test, compared ``content_md5(file)`` with ``content_md5(file)``, and was
+    cited as coverage for four releases while four template revisions shipped
+    unrecorded.
+
+    Returns:
+        Empty when every declaration matches; otherwise the offending names.
+        A non-empty result means a template was edited without its md5 being
+        updated, so the edit would ship unledgered and freeze every deployment
+        made from it.
+    """
+    return [
+        spec.name
+        for spec in SHIPPED_AGENTS
+        if spec.md5 != content_md5(spec_source_path(spec).read_text())
+    ]
 
 
 def classify_agent(spec: AgentAssetSpec, project_root: Path) -> AgentAssetState:

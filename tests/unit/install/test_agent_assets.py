@@ -6,6 +6,7 @@ agents, the version/md5 ledger, the classification helper
 config-driven sync entry point.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -103,21 +104,54 @@ class TestLedger:
             assert spec.name in book
             assert spec.version in book[spec.name]
 
-    def test_current_ledger_entry_matches_bundled_file(self) -> None:
-        """DBF guard: editing a bundled agent without bumping its version and
-        re-recording its md5 must fail loudly here, never ship silently."""
-        book = ledger()
-        for spec in SHIPPED_AGENTS:
-            assert book[spec.name][spec.version] == content_md5(
-                spec_source_path(spec).read_text()
-            ), f"{spec.name}: bundled content does not match the ledger md5 for v{spec.version}"
+    def test_declared_md5_matches_the_bundled_file(self) -> None:
+        """DBF guard: editing a bundled agent without re-recording its md5 must
+        fail loudly here, never ship silently.
 
-    def test_dedupe_agent_carries_historic_versions(self) -> None:
-        """Every previously shipped dedupe-scout revision must be in the
-        ledger, or existing pristine installs would be classified customised
-        and never upgraded again."""
+        The md5 is DECLARED on the spec and compared against the file. Plan
+        00378: the previous form read ``content_md5(file)`` on both sides of
+        the ``==``, so it compared a value with itself and could not fail —
+        which is how four template revisions shipped unledgered.
+        """
+        for spec in SHIPPED_AGENTS:
+            assert spec.md5 == content_md5(
+                spec_source_path(spec).read_text()
+            ), f"{spec.name}: bundled content does not match the declared md5 for v{spec.version}"
+
+    def test_the_ledger_reports_the_declared_md5_not_the_file(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``ledger()`` must not re-derive the current entry from the file.
+
+        If it does, every consumer inherits the tautology — the declaration
+        stops being load-bearing and can rot without anything noticing. Proved
+        by declaring an md5 that is deliberately WRONG and asserting the ledger
+        reports it: a ledger reading the file would report the file's digest.
+        """
         spec = _spec(DEDUPE_AGENT_NAME)
-        assert len(spec.historic_md5s) >= 5
+        wrong = replace(spec, md5="0" * 32)
+        monkeypatch.setattr(agent_assets, "SHIPPED_AGENTS", (wrong,))
+        assert agent_assets.ledger()[spec.name][spec.version] == "0" * 32
+
+    def test_no_shipped_agent_is_unpinned(self) -> None:
+        assert agent_assets.unpinned_agents() == []
+
+    def test_the_guard_is_observed_failing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Watch the REAL check report a wrong declaration.
+
+        A guard nobody has seen fail is not known to work — this plan exists
+        because one was cited as coverage for four releases while asserting a
+        tautology. So the failure path is exercised through the same function
+        QA calls, not re-stated as an inline comparison that could drift from
+        it.
+        """
+        spec = _spec(DEDUPE_AGENT_NAME)
+        monkeypatch.setattr(agent_assets, "SHIPPED_AGENTS", (replace(spec, md5="0" * 32),))
+        assert agent_assets.unpinned_agents() == [spec.name]
+
+    def test_every_shipped_agent_declares_an_md5(self) -> None:
+        for spec in SHIPPED_AGENTS:
+            assert len(spec.md5) == 32, f"{spec.name}: md5 must be a 32-char digest"
 
     def test_opus_security_agent_ledgers_its_first_shipped_revision(self) -> None:
         """The v1.0.0 content md5 must stay in the ledger after the v1.1.0
@@ -151,6 +185,7 @@ class TestClassification:
         patched = AgentAssetSpec(
             name=spec.name,
             version=spec.version,
+            md5=spec.md5,
             gating_config_key=spec.gating_config_key,
             is_enabled=spec.is_enabled,
             historic_versions=(("legacy-1", content_md5(body)),),
@@ -185,6 +220,7 @@ class TestDeployAndRemove:
         patched = AgentAssetSpec(
             name=spec.name,
             version=spec.version,
+            md5=spec.md5,
             gating_config_key=spec.gating_config_key,
             is_enabled=spec.is_enabled,
             historic_versions=(("legacy-1", content_md5(body)),),

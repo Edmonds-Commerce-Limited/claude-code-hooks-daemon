@@ -800,6 +800,7 @@ class TestDedupeAgentDeployment:
         patched = AgentAssetSpec(
             name=real_spec.name,
             version=real_spec.version,
+            md5=real_spec.md5,
             gating_config_key=real_spec.gating_config_key,
             is_enabled=real_spec.is_enabled,
             historic_versions=(("legacy-test", content_md5(old_body)),),

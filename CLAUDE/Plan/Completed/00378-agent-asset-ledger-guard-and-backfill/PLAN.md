@@ -1,6 +1,6 @@
 # Plan 00378: agent asset ledger guard and backfill
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-11
 **Owner**: joseph
 **Priority**: High
@@ -17,20 +17,20 @@ touched again. That last classification is permanent and load-bearing, so the
 ledger's completeness is what separates "your edits are protected" from "your
 pristine install is frozen for ever".
 
-**The ledger is incomplete, and the test that was supposed to prevent that
-cannot fail.** `ledger()` derives the CURRENT version's entry from the bundled
-file itself:
+**The ledger was incomplete, and the test that was supposed to prevent that
+could not fail.** `ledger()` derived the CURRENT version's entry from the
+bundled file itself:
 
 ```python
 entries = {spec.version: content_md5(spec_source_path(spec).read_text())}
 ```
 
-so `test_current_ledger_entry_matches_bundled_file` reduces to
-`content_md5(file) == content_md5(file)`. Its docstring claims the opposite —
+so `test_current_ledger_entry_matches_bundled_file` reduced to
+`content_md5(file) == content_md5(file)`. Its docstring claimed the opposite —
 "DBF guard: editing a bundled agent without bumping its version and re-recording
 its md5 must fail loudly here, never ship silently". Because nothing ever
 objected, four template revisions across all three shipped agents were released
-without being ledgered. Every deployment made from one of those blobs is now
+without being ledgered. Every deployment made from one of those blobs was
 frozen as `CUSTOMISED`, refused by every future upgrade, and told by the deny
 message that it was hand-edited — when it was not.
 
@@ -63,35 +63,37 @@ and graduated here.
 
 ### Phase 1: Make the guard real
 
-- [ ] ⬜ **Task 1.1**: Pin the current content md5 as declared DATA on
+- [x] ✅ **Task 1.1**: Pinned the current content md5 as declared DATA on
   `AgentAssetSpec` rather than deriving it from the file. `ledger()` reads the
-  declared value; nothing in the comparison path may read the template again,
-  or the tautology returns in a new shape.
+  declared value. `classify_agent` deliberately still compares against the
+  actual file, so a stale declaration can never break a live install — the
+  declaration's only job is to be checked, which is what makes it a witness
+  rather than a second source of truth.
 
-- [ ] ⬜ **Task 1.2**: Rewrite `test_current_ledger_entry_matches_bundled_file`
-  so it compares the DECLARED md5 against the file on disk, and prove it fails:
-  mutate the bundled template in a temp copy and assert the check reports it.
-  A guard that has never been seen to fail is not known to work — that is the
-  whole lesson of this plan.
+- [x] ✅ **Task 1.2**: Replaced the tautological check. The comparison moved
+  out of the test into `unpinned_agents()`, so the failure path is exercised
+  through the same function QA calls rather than an inline comparison that can
+  drift from it. Observed failing on a spec carrying a wrong digest before
+  being accepted.
 
 ### Phase 2: Enforce completeness
 
-- [ ] ⬜ **Task 2.1**: Add a check that walks each template's git history and
-  asserts every revision's digest is either the declared current md5 or a
-  ledgered historic entry. The prototype used to find this
-  (`untracked/scratch/n10_ledger_audit.py`) is the reference implementation.
-  CI's `qa` job checks out with `fetch-depth: 0`, so full history is available
-  — confirm that before relying on it, and fail loudly rather than skipping if
-  history is absent, because a silent skip is how this defect survived.
+- [x] ✅ **Task 2.1**: `tests/integration/test_agent_ledger_completeness.py`
+  walks each template's git history and asserts every revision's digest is
+  either the declared current md5 or a ledgered historic entry. It FAILS rather
+  than skips when history is unavailable, and asserts the checkout is not
+  shallow — a history check that silently no-ops on a shallow clone is this
+  same defect one layer out. CI's `qa` job uses `fetch-depth: 0`.
 
-- [ ] ⬜ **Task 2.2**: Replace `test_dedupe_agent_carries_historic_versions`'s
-  `len(spec.historic_md5s) >= 5` with the completeness assertion. A count check
-  stays green while entries go missing, which is exactly what happened.
+- [x] ✅ **Task 2.2**: `test_dedupe_agent_carries_historic_versions`'s
+  `len(spec.historic_md5s) >= 5` replaced by the completeness assertion. A
+  count check stays green while entries go missing, which is exactly what
+  happened.
 
 ### Phase 3: Repair the field damage
 
-- [ ] ⬜ **Task 3.1**: Backfill the four unledgered digests, each labelled with
-  the commit that shipped it:
+- [x] ✅ **Task 3.1**: Backfilled the four unledgered digests, each labelled
+  with the commit that shipped it so the claim stays checkable:
 
   | template                         | commit      | digest                             |
   | -------------------------------- | ----------- | ---------------------------------- |
@@ -100,25 +102,35 @@ and graduated here.
   | `hooks-daemon-plan-dedupe-scout` | `06077503`  | `19551a26c2fdffc2f00bab3b56ecf7bf` |
   | `hooks-daemon-plan-dedupe-scout` | `daa73a3c`  | `0bff2001a0aa282b98c455db1a33ab0f` |
 
-- [ ] ⬜ **Task 3.2**: Re-run the Phase 2 check and confirm it reports zero
-  unledgered revisions across all three agents.
+- [x] ✅ **Task 3.2**: The completeness check reports zero unledgered
+  revisions, and the independent prototype written before any of this code
+  existed (`untracked/scratch/n10_ledger_audit.py`) agrees — a second opinion
+  sharing no code with the test.
 
-- [ ] ⬜ **Task 3.3**: Write the release-notes callout. Audience is
-  `operators`: a deployment frozen as `CUSTOMISED` by this defect starts
-  upgrading again after this release with no action, and the previous
-  "customised" warning about a file they never edited was wrong.
+- [x] ✅ **Task 3.3**: Release-notes callout written to the holding area.
 
 ## Success Criteria
 
-- [ ] Editing a bundled agent template without updating its declared md5 fails
+- [x] Editing a bundled agent template without updating its declared md5 fails
   QA, demonstrated by a test that was observed failing before it passed.
-- [ ] The completeness check reports zero unledgered revisions.
-- [ ] `classify_agent` returns `OUTDATED`, not `CUSTOMISED`, for a deployment
-  made from any of the four backfilled revisions.
+- [x] The completeness check reports zero unledgered revisions.
+- [x] `classify_agent` returns `OUTDATED`, not `CUSTOMISED`, for a deployment
+  made from any of the four backfilled revisions — asserted by deploying each
+  historical blob into a temp project and classifying it for real, not by
+  checking that a digest is present.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/30-frozen-agent-deployments-upgrade-again.md`
+  (audience `operators` — affected deployments start upgrading again with no
+  action needed, and the "customised" warning they saw was wrong).
 
 ## Delivery & Milestones
 
 - Graduated from Plan 00377 N10, which holds the discovery evidence and the
-  audit output.
+  audit output. The symptom surfaced during Plan 00377's N7/N8 work
+  (`abaa876f`), was recorded in `e64a6577`, and this workspace's own frozen
+  agent was restored in `9a4bb0c9`.
 - Parent system: Plan 00279 (Generic Agent Install Subsystem) built the ledger
   this plan repairs; it is prior art, not a duplicate.
+- Every guard in this plan was watched FAILING on a deliberately broken input
+  before being accepted — the one discipline that would have prevented the
+  original defect.
