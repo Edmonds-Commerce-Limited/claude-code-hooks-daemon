@@ -4,11 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00382: push force guard misreads flag boundaries](00382-push-force-guard-misreads-flag-boundaries/PLAN.md) - In Progress (GitHub #37: a branch named `...-f-...` was denied as a force push; reproducing it exposed the opposite defect too — grouped short flags `-uf`/`-fu`/`-nf` are real force pushes that were never blocked)
-
 - [00381: niggles ledger three](00381-niggles-ledger-three/PLAN.md) - In Progress (successor to Plan 00379; the open ledger for small verified defects — record in the turn found, fix here or graduate with a pointer)
-
-- [00380: worktree reap jammed by daemon own output](00380-worktree-reap-jammed-by-daemon-own-output/PLAN.md) - In Progress (five worktrees sat unreapable for days with zero commits unmerged to main; four were held by the daemon's OWN generated advisory reading as unsaved work, and the refusal text said "needs a human" when no hook ever blocked removal)
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
@@ -125,6 +121,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00382: push force guard misreads flag boundaries](Completed/00382-push-force-guard-misreads-flag-boundaries/PLAN.md) - Complete at `0edece84` + the archiving commit (GitHub #37 reported a branch named `...-f-...` denied as a force push; reproducing it exposed the opposite defect the reporter could not see — grouped short flags `-uf`/`-fu`/`-nf` are real force pushes that no release ever blocked. Long and short options now get separate rules: 14 cases, 6 wrong before, 0 after)
+
+- [00380: worktree reap jammed by daemon own output](Completed/00380-worktree-reap-jammed-by-daemon-own-output/PLAN.md) - Complete at `83fe7bf7`…`30583859` + the archiving commit (five worktrees sat unreapable for days with zero commits unmerged to main; four were held by the daemon's OWN generated advisory reading as unsaved work, and the refusal text said "needs a human" when no hook ever blocked `git worktree remove --force`)
+
 - [00379: niggles ledger two](Completed/00379-niggles-ledger-two/PLAN.md) - Complete + the archiving commit (five entries, all found by verifying a claim rather than hitting a symptom; shipped two guards — `index-retention-window` at the plan-QA commit gate and `plan-stats-arithmetic` in repo hygiene — each proved by breaking real data, not just fixtures)
 
 - [00377: niggles ledger](Completed/00377-niggles-ledger/PLAN.md) - Complete + the archiving commit (the first niggles ledger: eleven small defects recorded the turn they were found, nine fixed here and two graduated — N10 to Plan 00378, N3 to Plan 00376. The NEXT niggle opens a new ledger; SOP in `CLAUDE/PlanWorkflow.md`)
@@ -183,10 +183,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00351: permission test skips everywhere including non root ci](Completed/00351-permission-test-skips-everywhere-including-non-root-ci/PLAN.md) - Complete at `b4a5226b`…`065f9610` + the archiving commit (a `skipif` guarded on `Path("/").stat().st_uid == 0` asks who OWNS `/` rather than who is running — constant `True`, so the test had never executed anywhere)
 
-- [00350: ci builds the relay binary so transport gates run](Completed/00350-ci-builds-the-relay-binary-so-transport-gates-run/PLAN.md) - Complete at `5dc7bce1` + the archiving commit (14 transport gates skipped in CI because `untracked/bin/hooks-relay` is a gitignored artefact no runner had; CI now builds it, deliberately uncached)
-
-- [00349: agent worktrees accumulate unreaped](Completed/00349-agent-worktrees-accumulate-unreaped/PLAN.md) - Complete at `ae4794a7`…`f2167f20` + the archiving commit (21 stale `agent-*` worktrees; the reap took `git worktree list` from 22 lines to 7, with 6 refused because a rebased commit that already landed is indistinguishable from one that did not)
-
 ## Blocked / On Hold Plans
 
 - None. (00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
@@ -236,17 +232,17 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 378 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 382 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 341 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 343 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 18 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 18 + 341 + 13 = **372 folders**, spanning
+- **Folder-to-number reconciliation**: 16 + 343 + 13 = **372 folders**, spanning
   **369 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

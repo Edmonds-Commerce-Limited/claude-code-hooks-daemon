@@ -1,6 +1,6 @@
 # Plan 00382: push force guard misreads flag boundaries
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-11
 **Owner**: joseph
 **Priority**: High
@@ -87,7 +87,8 @@ or `--force-with-lease`. A SHORT cluster is any single-dash token containing
 - [x] Every spelling denied before this plan is still denied — 134 tests in the handler's own file, 799 across the wider destructive/safety/evasion selection.
 - [x] Every release-bound consequence is in the pending-release holding area:
   `UNRELEASED/release-notes/34-a-branch-named-f-is-not-a-force-push.md`.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green — 29/29 locally, CI run `34622852486`
+  succeeded on `4886817c`.
 - [x] Issue #37 is closed with an implementation summary naming the second defect (comment `5637561637`).
 
 ## Delivery & Milestones

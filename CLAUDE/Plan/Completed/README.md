@@ -4,6 +4,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00350: ci builds the relay binary so transport gates run](00350-ci-builds-the-relay-binary-so-transport-gates-run/PLAN.md) - Complete at `5dc7bce1` + the archiving commit (14 transport gates skipped in CI because `untracked/bin/hooks-relay` is a gitignored artefact no runner had; CI now builds it, deliberately uncached)
+
+- [00349: agent worktrees accumulate unreaped](00349-agent-worktrees-accumulate-unreaped/PLAN.md) - Complete at `ae4794a7`…`f2167f20` + the archiving commit (21 stale `agent-*` worktrees; the reap took `git worktree list` from 22 lines to 7, with 6 refused because a rebased commit that already landed is indistinguishable from one that did not)
+
 - [00348: project context leaks across test files](00348-project-context-leaks-across-test-files/PLAN.md) - Complete at `b8fc7c23`…the fixing commit (four test files patched `ProjectContext.daemon_untracked_dir` while an autouse fixture already had, and the two unwound in the wrong order — leaving the fixture's `tmp_path` on the singleton so an unrelated file failed next, accusing correct code)
 
 - [00347: handlers raise on unstattable paths](00347-handlers-raise-on-unstattable-paths/PLAN.md) - Complete at `f17fabcd`…`c731add6` + the gate and archiving commit (pathlib does not ignore EACCES, so a caller-supplied path behind an unreadable parent RAISED and the guard silently stopped applying on the client default; the fallback is now a required argument because no single value is safe — `write_clobber_guard` needs `True`, `comment_size` `False`, `plan_qa_edit` `None`)

@@ -1,6 +1,6 @@
 # Plan 00380: worktree reap jammed by daemon own output
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-11
 **Owner**: joseph
 **Priority**: High
@@ -80,13 +80,19 @@ defect in the message.
 
 ## Success Criteria
 
-- [ ] A worktree whose only uncommitted path is generated output is reported
-  reapable, and `--reap` removes it.
-- [ ] A worktree with genuinely uncommitted work is still refused.
-- [ ] `.claude/reports/` is untracked and ignored.
-- [ ] The refusal text names an action its reader can take, and a test pins
-  that it does not tell the reader a human is required.
-- [ ] Full QA passes and CI is green.
+- [x] A worktree whose only uncommitted path is generated output is reported
+  reapable, and `--reap` removes it — proved on the real failure shape with a
+  probe worktree pinned to `1e78c5eb`, which reproduced `?? .claude/reports/`.
+- [x] A worktree with genuinely uncommitted work is still refused — only
+  UNTRACKED paths can be dropped, pinned by `TestOnlyUntrackedPathsCanBeDropped`.
+- [x] `.claude/reports/` is untracked and ignored.
+- [x] The refusal text names an action its reader can take, and a test pins
+  that it does not tell the reader a human is required —
+  `TestTheRefusalRoutesToWhoeverIsReading`, 5 tests.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/33-worktree-reap-stops-refusing-on-its-own-output.md`.
+- [x] Full QA passes and CI is green — 29/29 locally, CI run `34622852486`
+  succeeded on `4886817c`.
 
 ## Delivery & Milestones
 
