@@ -4,10 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00383: transport toggle trusts config over deployed state](00383-transport-toggle-trusts-config-over-deployed-state/PLAN.md) - In Progress (graduated from Plan 00381 N1: `transport on`/`off` decide "already — nothing to do" from the config alone and never read the deployed forwarders, so a project whose config and forwarders disagree is told the relay is off while every hook still routes through it)
-
-- [00381: niggles ledger three](00381-niggles-ledger-three/PLAN.md) - In Progress (successor to Plan 00379; the open ledger for small verified defects — record in the turn found, fix here or graduate with a pointer)
-
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
@@ -123,6 +119,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00383: transport toggle trusts config over deployed state](Completed/00383-transport-toggle-trusts-config-over-deployed-state/PLAN.md) - Complete at `3a58ce16`…`3292cd09` + the archiving commit (`transport on`/`off` decided "already — nothing to do" from the config alone and never read the deployed forwarders, so a project whose config said the relay was off while its forwarders still carried the hot path was told so, exit 0)
+
+- [00381: niggles ledger three](Completed/00381-niggles-ledger-three/PLAN.md) - Complete + the archiving commit (one entry, graduated rather than fixed in place: a test class that could not pass alone turned out to be reporting a product defect, which became Plan 00383. The NEXT niggle opens ledger four; SOP in `CLAUDE/PlanWorkflow.md`)
+
 - [00382: push force guard misreads flag boundaries](Completed/00382-push-force-guard-misreads-flag-boundaries/PLAN.md) - Complete at `0edece84` + the archiving commit (GitHub #37 reported a branch named `...-f-...` denied as a force push; reproducing it exposed the opposite defect the reporter could not see — grouped short flags `-uf`/`-fu`/`-nf` are real force pushes that no release ever blocked. Long and short options now get separate rules: 14 cases, 6 wrong before, 0 after)
 
 - [00380: worktree reap jammed by daemon own output](Completed/00380-worktree-reap-jammed-by-daemon-own-output/PLAN.md) - Complete at `83fe7bf7`…`30583859` + the archiving commit (five worktrees sat unreapable for days with zero commits unmerged to main; four were held by the daemon's OWN generated advisory reading as unsaved work, and the refusal text said "needs a human" when no hook ever blocked `git worktree remove --force`)
@@ -181,10 +181,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00353: registry option injection clobbers compiled attributes](Completed/00353-registry-option-injection-clobbers-compiled-attributes/PLAN.md) - Complete at `883990ea` + the merge commit (the registry assigns each config option to `self._<key>` AFTER `__init__`, so `pipe_blocker`'s compiled `extra_whitelist` was overwritten with raw YAML strings and every piped command raised out of `matches()` — failing open, which silently disabled the whole handler for as long as the option was set)
 
-- [00352: agent branches outlive their worktrees](Completed/00352-agent-branches-outlive-their-worktrees/PLAN.md) - Complete at `f6f1069c`…`f587a7f0` + the archiving commit (a branch whose worktree had already gone was invisible to `worktree-reap`, which enumerates from `git worktree list`; `--reap-branches` reports and prunes them)
-
-- [00351: permission test skips everywhere including non root ci](Completed/00351-permission-test-skips-everywhere-including-non-root-ci/PLAN.md) - Complete at `b4a5226b`…`065f9610` + the archiving commit (a `skipif` guarded on `Path("/").stat().st_uid == 0` asks who OWNS `/` rather than who is running — constant `True`, so the test had never executed anywhere)
-
 ## Blocked / On Hold Plans
 
 - None. (00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
@@ -236,15 +232,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 383 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 343 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 345 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 17 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 15 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 17 + 343 + 13 = **373 folders**, spanning
+- **Folder-to-number reconciliation**: 15 + 345 + 13 = **373 folders**, spanning
   **370 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

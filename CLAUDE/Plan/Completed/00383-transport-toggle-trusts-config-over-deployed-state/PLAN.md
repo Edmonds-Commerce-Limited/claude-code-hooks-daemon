@@ -1,6 +1,6 @@
 # Plan 00383: transport toggle trusts config over deployed state
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-11
 **Owner**: joseph
 **Priority**: Medium
@@ -100,7 +100,8 @@ byte-identical-by-default, so a converged project still pays nothing.
 - [x] Plan 00381 N1 carries a pointer to this plan.
 - [x] Every release-bound consequence is in the pending-release holding area:
   `UNRELEASED/release-notes/35-transport-off-repairs-forwarders-that-drifted.md`.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green — 29/29 locally, CI run `34628257960`
+  succeeded on `3292cd09`.
 
 ## Delivery & Milestones
 

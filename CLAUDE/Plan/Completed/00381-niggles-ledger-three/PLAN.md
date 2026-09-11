@@ -1,6 +1,6 @@
 # Plan 00381: niggles ledger three
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-11
 **Owner**: joseph
 **Priority**: Medium
@@ -79,11 +79,17 @@ with a pointer rather than grown here.
 
 ## Success Criteria
 
-- [ ] Every entry above is fixed, or graduated to a named plan with a pointer
-  recorded in this ledger.
-- [ ] Every release-bound consequence is in the pending-release holding area, or
-  the entry records why it has none.
-- [ ] Full QA passes and CI is green.
+- [x] Every entry above is fixed, or graduated to a named plan with a pointer
+  recorded in this ledger — N1 graduated to Plan 00383, which shipped the fix
+  and closed N1's own symptom with no test change.
+- [x] N1's release-bound consequence is in the pending-release holding area
+  under the plan that took it on:
+  `UNRELEASED/release-notes/35-transport-off-repairs-forwarders-that-drifted.md`.
+  The ledger ships no release note of its own, because a graduated entry's
+  consequence belongs to the plan that fixed it, not to the ledger that found
+  it.
+- [x] Full QA passes and CI is green — 29/29 locally, CI run `34628257960`
+  succeeded on `3292cd09`.
 
 ## Delivery & Milestones
 

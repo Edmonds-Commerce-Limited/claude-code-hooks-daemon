@@ -4,6 +4,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00352: agent branches outlive their worktrees](00352-agent-branches-outlive-their-worktrees/PLAN.md) - Complete at `f6f1069c`…`f587a7f0` + the archiving commit (a branch whose worktree had already gone was invisible to `worktree-reap`, which enumerates from `git worktree list`; `--reap-branches` reports and prunes them)
+
+- [00351: permission test skips everywhere including non root ci](00351-permission-test-skips-everywhere-including-non-root-ci/PLAN.md) - Complete at `b4a5226b`…`065f9610` + the archiving commit (a `skipif` guarded on `Path("/").stat().st_uid == 0` asks who OWNS `/` rather than who is running — constant `True`, so the test had never executed anywhere)
+
 - [00350: ci builds the relay binary so transport gates run](00350-ci-builds-the-relay-binary-so-transport-gates-run/PLAN.md) - Complete at `5dc7bce1` + the archiving commit (14 transport gates skipped in CI because `untracked/bin/hooks-relay` is a gitignored artefact no runner had; CI now builds it, deliberately uncached)
 
 - [00349: agent worktrees accumulate unreaped](00349-agent-worktrees-accumulate-unreaped/PLAN.md) - Complete at `ae4794a7`…`f2167f20` + the archiving commit (21 stale `agent-*` worktrees; the reap took `git worktree list` from 22 lines to 7, with 6 refused because a rebased commit that already landed is indistinguishable from one that did not)
