@@ -603,6 +603,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - plan_workflow_asset_checker — plan tooling provisioning alert
 
+<!-- handler: deployed-artefact-drift -->
+
+- deployed_artefact_drift — a deployed file has moved away from its template
+
 <!-- handler: standing-authorisations -->
 
 - standing_authorisations — a project can record a standing request
