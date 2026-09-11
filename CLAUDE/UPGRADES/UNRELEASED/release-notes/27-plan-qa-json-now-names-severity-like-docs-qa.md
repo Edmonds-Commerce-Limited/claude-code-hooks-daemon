@@ -1,7 +1,7 @@
 # Callout: `plan-qa --json` now names severity `severity`, like `docs-qa` always did
 
 **Plan**: 00375
-**Audience**: anyone parsing `plan-qa --json`
+**Audience**: operators
 
 Two sibling verbs emitted the same concept under two names: `docs-qa --json`
 gave each finding a `"severity"`, `plan-qa --json` gave it a `"level"`. Same
