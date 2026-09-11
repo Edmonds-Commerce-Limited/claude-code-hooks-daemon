@@ -106,6 +106,28 @@ class TestTransportToggleWiring:
 
         assert exit_code == 0
         assert "already" in out
+        assert "nothing to do" in out
+
+    def test_a_reconciled_drift_is_not_reported_as_nothing_to_do(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The config held but the forwarders had drifted and were repaired
+        (Plan 00383). Printing "nothing to do" here would describe the config
+        while the operator asked about the transport."""
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.install.transport_toggle.run_toggle",
+            lambda *_a, **_k: ToggleOutcome(
+                action="off", changed=False, verified=True, reconciled=True
+            ),
+        )
+
+        exit_code = cmd_transport(_args(project, "off"))
+        out = capsys.readouterr().out
+
+        assert exit_code == 0
+        assert "nothing to do" not in out
+        assert "drifted" in out
+        assert "verified" in out
 
     def test_verification_failure_exits_nonzero_and_names_failures(
         self, project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

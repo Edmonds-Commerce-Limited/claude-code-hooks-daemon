@@ -5192,6 +5192,15 @@ def cmd_transport(args: argparse.Namespace) -> int:
         return 1
     if not outcome.changed:
         state = "enabled" if enable else "disabled"
+        if outcome.reconciled:
+            # "nothing to do" must never be printed when something WAS done:
+            # the config held, but the deployed forwarders disagreed with it
+            # and were brought back into line (Plan 00383).
+            print(
+                f"transport {outcome.action}: relay already {state} in config, but the "
+                "deployed forwarders had drifted — regenerated, daemon restarted, verified"
+            )
+            return 0
         print(f"transport {outcome.action}: relay already {state} — nothing to do")
         return 0
     print(

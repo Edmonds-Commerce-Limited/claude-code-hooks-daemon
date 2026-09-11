@@ -83,6 +83,11 @@ class ToggleOutcome:
     failures: list[str] = field(default_factory=list)
     reverted: bool = False
     revert_verified: bool | None = None
+    #: The config already held the requested value, but the DEPLOYED forwarders
+    #: disagreed with it and were brought back into line. Distinct from
+    #: ``changed``, which means the config itself moved — a reconcile leaves it
+    #: untouched.
+    reconciled: bool = False
 
     @property
     def succeeded(self) -> bool:
@@ -96,6 +101,7 @@ class ToggleOutcome:
             "failures": list(self.failures),
             "reverted": self.reverted,
             "revert_verified": self.revert_verified,
+            "reconciled": self.reconciled,
         }
 
 
@@ -317,6 +323,88 @@ def ensure_relay_binary(project_root: Path) -> str | None:
     return None
 
 
+def _converge_deployed_state(
+    project_root: Path,
+    hooks_dir: Path,
+    *,
+    action: str,
+    enable: bool,
+    restart: Callable[[], int],
+    verify: Callable[[bool], list[ProbeResult]],
+    provision: Callable[[], str | None],
+) -> ToggleOutcome:
+    """The config already holds the requested value — establish that state
+    rather than assuming it (Plan 00383).
+
+    This used to return immediately on a config match, which made the report a
+    claim about the config rather than about the transport: a project whose
+    ``relay_enabled: false`` sat beside forwarders still carrying the relay hot
+    path was told the relay was disabled, exit 0, while every hook still routed
+    through it. Config and deployment diverge without anyone doing anything
+    strange — an interrupted toggle, a hand-edited config, a checkout that
+    moves one and not the other, an upgrade that redeploys forwarders.
+
+    ``regenerate_deployed_hooks`` is both the detector and the repair: it
+    writes a file only when the generated content differs, and returns the
+    names it rewrote. So a converged project pays nothing here — no write, no
+    restart, no probes — and that is what keeps this safe to do on every
+    toggle rather than behind a flag.
+    """
+    if enable:
+        # The regenerated hot path NAMES the relay binary, so provisioning has
+        # to clear before anything is written: otherwise a reconcile deploys a
+        # forwarder pointing at a binary that is not there, which is the exact
+        # "green enable with no relay engaged" failure that made provisioning
+        # a precondition of the flip path in the first place. Disabling never
+        # references the binary, so it needs no such gate.
+        provision_error = provision()
+        if provision_error is not None:
+            outcome = ToggleOutcome(
+                action=action, changed=False, verified=False, failures=[provision_error]
+            )
+            _write_toggle_state(project_root, outcome)
+            return outcome
+
+    try:
+        rewritten = regenerate_deployed_hooks(project_root, hooks_dir)
+    except Exception as exc:
+        logger.warning("transport %s could not read the deployed forwarders: %s", action, exc)
+        outcome = ToggleOutcome(
+            action=action, changed=False, verified=False, failures=[f"{type(exc).__name__}: {exc}"]
+        )
+        _write_toggle_state(project_root, outcome)
+        return outcome
+
+    if not rewritten:
+        return ToggleOutcome(action=action, changed=False, verified=None)
+
+    failures: list[str] = []
+    try:
+        restart_rc = restart()
+        if restart_rc != 0:
+            failures.append(f"daemon-restart: exit code {restart_rc}")
+        else:
+            failures.extend(_failure_lines(verify(enable)))
+    except Exception as exc:
+        logger.warning("transport %s reconcile raised before verification: %s", action, exc)
+        failures.append(f"{type(exc).__name__}: {exc}")
+
+    # Deliberately NO auto-revert. The flip path reverts to the config state it
+    # moved away from; here the config never moved, so the only state to
+    # restore is the drift just repaired — reverting would reinstate the very
+    # defect this path exists to fix. A failure is reported and the repaired
+    # forwarders are left in place.
+    outcome = ToggleOutcome(
+        action=action,
+        changed=False,
+        verified=not failures,
+        failures=failures,
+        reconciled=True,
+    )
+    _write_toggle_state(project_root, outcome)
+    return outcome
+
+
 def run_toggle(
     project_root: Path,
     *,
@@ -357,18 +445,27 @@ def run_toggle(
     # seed the documented default instead of refusing.
     seed_relay_enabled_line(config_path)
 
+    provision = (
+        provision_fn if provision_fn is not None else lambda: ensure_relay_binary(project_root)
+    )
+
     current = read_relay_enabled(config_path)
     if current == enable:
-        return ToggleOutcome(action=action, changed=False, verified=None)
+        return _converge_deployed_state(
+            project_root,
+            hooks_dir,
+            action=action,
+            enable=enable,
+            restart=restart,
+            verify=verify,
+            provision=provision,
+        )
 
     if enable:
         # Defect D2: provisioning runs BEFORE anything is flipped, so a
         # build/download failure leaves the project completely untouched —
         # there is nothing to revert, and the failure is still reported
         # loudly with exit-code semantics identical to a probe failure.
-        provision = (
-            provision_fn if provision_fn is not None else lambda: ensure_relay_binary(project_root)
-        )
         provision_error = provision()
         if provision_error is not None:
             outcome = ToggleOutcome(

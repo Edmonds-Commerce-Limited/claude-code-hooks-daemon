@@ -15,7 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.install.forwarder_generator import INIT_SH_ANCHOR
+from claude_code_hooks_daemon.install.forwarder_generator import (
+    INIT_SH_ANCHOR,
+    regenerate_deployed_hooks,
+)
 from claude_code_hooks_daemon.install.transport_toggle import (
     _RESTART_TIMEOUT_SECONDS,
     ToggleOutcome,
@@ -169,16 +172,130 @@ class TestRunToggleNoOp:
         assert calls == []
         assert not state_file_path(project).exists()
 
-    def test_on_when_on_is_a_clean_no_op(self, project: Path) -> None:
+    def test_on_when_on_leaves_the_config_alone(self, project: Path) -> None:
+        """Named for what it actually pins. The fixture's forwarder carries no
+        relay guard, so with the config already ON this project is DRIFTED and
+        takes the reconcile path — see TestRunToggleReconcilesDeployedDrift.
+        What holds either way is that the config is not touched."""
         set_relay_enabled(_config_path(project), True)
+        before = _config_path(project).read_text()
+
         outcome = run_toggle(
             project,
             enable=True,
             restart_fn=lambda: 0,
             verify_fn=_passing_probes,
         )
+
         assert outcome.changed is False
         assert read_relay_enabled(_config_path(project)) is True
+        assert _config_path(project).read_text() == before
+
+
+def _drift_the_forwarders(project: Path, deployed_state: bool) -> None:
+    """Leave the forwarders describing ``deployed_state`` while the config says
+    the opposite — the real drift shape, built the way it actually happens.
+
+    Nothing here hand-writes guard text: the generator produces the deployed
+    side, so the fixture cannot drift from the format the generator owns.
+    """
+    config_path = _config_path(project)
+    wanted = read_relay_enabled(config_path)
+    set_relay_enabled(config_path, deployed_state)
+    regenerate_deployed_hooks(project, _hooks_dir(project))
+    set_relay_enabled(config_path, wanted)
+
+
+def _forwarder_text(project: Path) -> str:
+    return (_hooks_dir(project) / "pre-tool-use").read_text()
+
+
+class TestRunToggleReconcilesDeployedDrift:
+    """A toggle whose config ALREADY matches must still establish the state it
+    reports (Plan 00383).
+
+    The old behaviour decided "nothing to do" from the config alone and never
+    read the forwarders, so `transport off` returned 0 saying the relay was
+    disabled while every hook still routed through it.
+    """
+
+    def test_off_when_config_is_off_but_forwarders_still_route_through_relay(
+        self, project: Path
+    ) -> None:
+        _drift_the_forwarders(project, deployed_state=True)
+        assert "relay hot path" in _forwarder_text(project)
+        calls: list[str] = []
+
+        outcome = run_toggle(
+            project,
+            enable=False,
+            restart_fn=lambda: calls.append("restart") or 0,
+            verify_fn=_passing_probes,
+        )
+
+        assert "relay hot path" not in _forwarder_text(project)
+        assert calls == ["restart"]
+        assert outcome.reconciled is True
+        assert outcome.verified is True
+        assert outcome.changed is False, "the config never moved; only the deployment did"
+
+    def test_on_when_config_is_on_but_forwarders_lack_the_relay(self, project: Path) -> None:
+        set_relay_enabled(_config_path(project), True)
+        assert "relay hot path" not in _forwarder_text(project)
+        calls: list[str] = []
+
+        outcome = run_toggle(
+            project,
+            enable=True,
+            restart_fn=lambda: calls.append("restart") or 0,
+            verify_fn=_passing_probes,
+        )
+
+        assert "relay hot path" in _forwarder_text(project)
+        assert calls == ["restart"]
+        assert outcome.reconciled is True
+        assert outcome.verified is True
+
+    def test_a_converged_project_still_writes_restarts_and_probes_nothing(
+        self, project: Path
+    ) -> None:
+        """The fast path must stay free — this is what makes reconciling safe
+        to do on every toggle rather than behind a flag."""
+        regenerate_deployed_hooks(project, _hooks_dir(project))
+        before = _forwarder_text(project)
+        calls: list[str] = []
+
+        outcome = run_toggle(
+            project,
+            enable=False,
+            restart_fn=lambda: calls.append("restart") or 0,
+            verify_fn=lambda expect: calls.append("verify") or _passing_probes(expect),
+        )
+
+        assert calls == []
+        assert _forwarder_text(project) == before
+        assert outcome.reconciled is False
+        assert outcome.verified is None
+        assert not state_file_path(project).exists()
+
+    def test_a_reconcile_that_fails_verification_does_not_revert_to_the_drift(
+        self, project: Path
+    ) -> None:
+        """There is no prior state worth restoring: the only thing to revert TO
+        is the drift being repaired, so reverting would reinstate the defect."""
+        _drift_the_forwarders(project, deployed_state=True)
+
+        outcome = run_toggle(
+            project,
+            enable=False,
+            restart_fn=lambda: 0,
+            verify_fn=_failing_probes,
+        )
+
+        assert outcome.verified is False
+        assert outcome.reverted is False
+        assert "relay hot path" not in _forwarder_text(project)
+        assert any("pre-tool-use-json" in failure for failure in outcome.failures)
 
 
 class TestRunToggleSuccess:
