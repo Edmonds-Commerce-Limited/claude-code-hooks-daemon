@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00379: niggles ledger two](00379-niggles-ledger-two/PLAN.md) - In Progress (successor to Plan 00377, which closed with all eleven entries resolved; the open ledger for small verified defects — record in the turn found, fix here or graduate with a pointer)
-
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
@@ -121,6 +119,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00379: niggles ledger two](Completed/00379-niggles-ledger-two/PLAN.md) - Complete + the archiving commit (five entries, all found by verifying a claim rather than hitting a symptom; shipped two guards — `index-retention-window` at the plan-QA commit gate and `plan-stats-arithmetic` in repo hygiene — each proved by breaking real data, not just fixtures)
+
 - [00377: niggles ledger](Completed/00377-niggles-ledger/PLAN.md) - Complete + the archiving commit (the first niggles ledger: eleven small defects recorded the turn they were found, nine fixed here and two graduated — N10 to Plan 00378, N3 to Plan 00376. The NEXT niggle opens a new ledger; SOP in `CLAUDE/PlanWorkflow.md`)
 
 - [00375: `plan-qa` and `docs-qa` JSON disagree on the severity key](Completed/00375-plan-qa-and-docs-qa-json-disagree-on-the-severity-key/PLAN.md) - Complete + the archiving commit (one concept under two names — `docs-qa` emitted `severity`, `plan-qa` emitted `level` — converged on `severity` with no deprecation window, since two live names IS the defect)
@@ -181,8 +181,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00349: agent worktrees accumulate unreaped](Completed/00349-agent-worktrees-accumulate-unreaped/PLAN.md) - Complete at `ae4794a7`…`f2167f20` + the archiving commit (21 stale `agent-*` worktrees; the reap took `git worktree list` from 22 lines to 7, with 6 refused because a rebased commit that already landed is indistinguishable from one that did not)
 
-- [00348: project context leaks across test files](Completed/00348-project-context-leaks-across-test-files/PLAN.md) - Complete at `b8fc7c23`…the fixing commit (four test files patched `ProjectContext.daemon_untracked_dir` while an autouse fixture already had, and the two unwound in the wrong order — leaving the fixture's `tmp_path` on the singleton so an unrelated file failed next, accusing correct code)
-
 ## Blocked / On Hold Plans
 
 - None. (00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
@@ -234,15 +232,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 378 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 340 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 341 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 16 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 15 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 16 + 340 + 13 = **369 folders**, spanning
+- **Folder-to-number reconciliation**: 15 + 341 + 13 = **369 folders**, spanning
   **366 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

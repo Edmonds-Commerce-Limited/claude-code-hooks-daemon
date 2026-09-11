@@ -1,6 +1,6 @@
 # Plan 00379: niggles ledger two
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-11
 **Owner**: joseph
 **Priority**: Medium
@@ -127,13 +127,27 @@ against the files they cite. A claim nobody rechecks is where these hide.
 - [x] Every entry above is fixed, or graduated to a named plan with a pointer
   recorded in this ledger. All five (N1–N5) were fixed here; none needed
   graduating.
-- [x] `CLAUDE/UPGRADES/UNRELEASED/` is current for any entry whose fix changes
-  behaviour a user would notice —
-  `release-notes/32-an-archival-that-forgets-the-age-out-now-blocks.md` covers
-  N1, the only entry shipping a user-visible change.
-- [ ] Full QA passes and CI is green.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/32-an-archival-that-forgets-the-age-out-now-blocks.md`
+  covers N1, whose `index-retention-window` check BLOCKS at the commit gate in
+  client projects. The other four ship nothing a user sees: N4's rule is
+  repo-hygiene (invoked only by this repo's own `scripts/qa/llm_qa.py`), N5 is
+  a docstring, N2 and N3 are plan text.
+- [x] Full QA passes and CI is green — `QA_EXIT=0`, 29/29 checks, 22,371 tests
+  passed / 0 failed at 95.3% coverage; CI run 34613727728 concluded `success`
+  on `286795d7`.
 
 ## Delivery & Milestones
 
 - Successor to Plan 00377 (Completed), per the niggles SOP in
   `CLAUDE/PlanWorkflow.md`.
+- Delivered at `60a7576a` (ledger opened, N4 figures corrected), `0e9c3613`
+  (N2, N3), `23db306d` (N1, N5), `5d8382fb` (N4's rule), `286795d7` (release
+  note) + the archiving commit.
+- Two guards shipped, both proved by breaking real data rather than only
+  fixtures: `index-retention-window` (plan QA, COMMIT + SWEEP) and
+  `plan-stats-arithmetic` (repo hygiene).
+- N5 exists because N1's first cut was wrong in a way no fixture could show —
+  it read `readme.rows` (the main index MERGED with the archive) and reported
+  340 completed rows against a window of 30 on a tree correctly at 30. As a
+  COMMIT-stage BLOCK it would have denied every commit in the repository.
