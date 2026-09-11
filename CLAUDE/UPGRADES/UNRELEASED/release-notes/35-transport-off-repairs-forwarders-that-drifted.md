@@ -42,6 +42,15 @@ failure is reported and the repaired forwarders stay in place.
 that binary, so reconciling in the `on` direction without provisioning would
 deploy a forwarder pointing at something that is not there.
 
+**If you SCRIPT the toggle, note the exit code can now be non-zero where it was
+always 0.** Repeating the current state used to exit 0 unconditionally, because
+it checked nothing. It now reports the truth: if your deployed state is broken,
+repairing it and failing verification exits 1. That is the point of the change,
+but a script that treated `transport off` as an unconditional success will
+start seeing failures it previously could not see. Nothing inside the daemon
+invokes the toggle — it is operator-invoked only — so this affects your own
+automation if you have any.
+
 **How config and forwarders drift apart in the first place** — no one has to do
 anything strange: an interrupted toggle, a hand-edited config, a `git checkout`
 that moves one and not the other, or an upgrade that redeploys forwarders. If
