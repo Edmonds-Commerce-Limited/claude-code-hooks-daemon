@@ -19,6 +19,14 @@ hooks-daemon.env
 *.sock
 *.pid
 
+# Generated reports (config-migration advisories and the like). GENERATED, so
+# never tracked: a copy of this reached the index once by accident, and the
+# consequence was not a merge conflict but a jammed worktree reaper. A worktree
+# pinned to a commit from before that one carries a .gitignore without this
+# line, so the daemon's own output there reads as the agent's unsaved work and
+# `worktree-reap` refuses the worktree for ever (Plan 00380).
+reports/
+
 # Python cache
 __pycache__/
 *.pyc
