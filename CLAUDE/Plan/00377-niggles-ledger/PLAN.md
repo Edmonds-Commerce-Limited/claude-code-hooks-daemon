@@ -248,6 +248,24 @@ authoritative rule:
   deployed docs-qa agent was restored (`9a4bb0c9`), since it was provably a
   stale shipped blob rather than a local edit.
 
+- [ ] ⬜ **N11: the post-upgrade task index listed a file that did not exist.**
+  `UNRELEASED/post-upgrade-tasks/README.md` carried an index row for
+  `01-drop-hooks-daemon-python-workaround.md` while the directory held only
+  `README.md` — the task had been consumed by a release and the index was never
+  regenerated. The README asks for this by hand ("regenerate when
+  adding/removing tasks"), and nothing enforces it.
+
+  Found while filing Plan 00375's migration task into that directory. The
+  stale row is gone now, replaced by the real one, but the gap that produced it
+  is untouched: an index maintained by instruction drifts at exactly the moment
+  it matters, and this one describes work an upgrading agent is supposed to
+  perform. An agent reading it would have gone looking for a task file that is
+  not there.
+
+  Cheap to enforce — the index rows and the directory listing are both right
+  there, so a check can compare them the way the plan README's own index checks
+  already do.
+
 - [ ] ⬜ **N3: `upgrade.md` never mentions post-upgrade tasks.** The
   agent-facing upgrade procedure omits the step entirely, so the tasks are not
   read even by an agent following the procedure exactly. (Tracked in Plan 00376
