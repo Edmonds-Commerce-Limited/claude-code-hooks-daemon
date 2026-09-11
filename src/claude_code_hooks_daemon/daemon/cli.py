@@ -5308,6 +5308,43 @@ def cmd_deploy_plan_workflow(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_deploy_core_docs(args: argparse.Namespace) -> int:
+    """(Re)deploy the daemon-owned core documents on demand (Plan 00377 N5).
+
+    Core docs ship from ``install/templates/core/*.core.md`` and land at
+    ``CLAUDE/core/*.core.md``. Before this verb the only callers of
+    :func:`deploy_core_docs_if_enabled` were the install and upgrade shell
+    scripts, so editing a template left the deployed copy stale until the next
+    upgrade — silently, because nothing compares the two.
+    ``deploy-plan-workflow`` does not cover core docs and a restart does not
+    either, which is how three deployed artefacts in this repository came to
+    carry a sentence their templates no longer had.
+
+    Client-owned overrides are untouched; only daemon-owned files are
+    refreshed.
+
+    Args:
+        args: Parsed CLI arguments with ``project_root`` (Path or None).
+
+    Returns:
+        0 on success (including a config-disabled no-op); 1 on failure.
+    """
+    from claude_code_hooks_daemon.install.core_docs import deploy_core_docs_if_enabled
+
+    # Resolved HERE, not as an argparse default — see cmd_deploy_plan_workflow
+    # and Plan 00374: a `default=Path.cwd()` pre-empts the wrapper's anchor.
+    project_root: Path = args.project_root or Path.cwd()
+    config_path = project_root / ".claude" / "hooks-daemon.yaml"
+
+    result = deploy_core_docs_if_enabled(project_root, config_path)
+    for message in result.messages:
+        print(message)
+    if not result.success:
+        print("ERROR: core docs deployment failed", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_agents(args: argparse.Namespace) -> int:
     """Manage daemon-shipped agent assets (Plan 00279).
 
@@ -5371,7 +5408,9 @@ def cmd_agents(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
                 return 1
-            result = agent_assets.deploy_agent(named_spec, project_root)
+            result = agent_assets.deploy_agent(
+                named_spec, project_root, force=getattr(args, "force", False)
+            )
             # Warning-family messages are already emitted once via logging
             # (routed to stderr by the CLI); printing them again duplicates.
             if result.action is agent_assets.AgentAction.CUSTOMISED_WARNING:
@@ -8508,6 +8547,20 @@ def main() -> int:
     )
     parser_deploy_plan.set_defaults(func=cmd_deploy_plan_workflow)
 
+    # deploy-core-docs (Plan 00377 N5) — the dev-loop refresh for core docs,
+    # the equivalent of `agents install` for CLAUDE/core/*.core.md.
+    parser_deploy_core_docs = subparsers.add_parser(
+        "deploy-core-docs",
+        help="(Re)deploy daemon-owned CLAUDE/core/*.core.md from their templates",
+    )
+    parser_deploy_core_docs.add_argument(
+        "--project-root",
+        type=Path,
+        default=None,
+        help="Project root (default: current directory)",
+    )
+    parser_deploy_core_docs.set_defaults(func=cmd_deploy_core_docs)
+
     # agents (Plan 00279) — daemon-shipped agent-asset lifecycle
     parser_agents = subparsers.add_parser(
         "agents",
@@ -8530,6 +8583,13 @@ def main() -> int:
         type=Path,
         default=None,
         help="Project root (default: current directory)",
+    )
+    parser_agents.add_argument(
+        "--force",
+        action="store_true",
+        help="With `install <name>`: discard a CUSTOMISED local copy and "
+        "restore the shipped revision. Ignored by a bulk install, which "
+        "never clobbers local edits.",
     )
     parser_agents.set_defaults(func=cmd_agents)
 

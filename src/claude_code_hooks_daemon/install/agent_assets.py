@@ -273,14 +273,29 @@ def _customised_warning(spec: AgentAssetSpec, target: Path) -> str:
         f"(the current shipped revision is v{spec.version}). Hacking on "
         f"daemon-owned agents is strongly discouraged: your edits are invisible "
         f"to upgrades and prompt fixes will never reach this file. Copy it to a "
-        f"name of your own (dropping the 'hooks-daemon-' prefix), edit that "
-        f"copy, and restore this file with 'hooks-daemon agents install "
-        f"{spec.name}' after removing your customised version."
+        f"name of your own (dropping the 'hooks-daemon-' prefix) and edit that "
+        f"copy. To DISCARD the local edits and restore the shipped revision, "
+        f"run 'hooks-daemon agents install {spec.name} --force'. A plain "
+        f"install refuses on purpose, so a bulk refresh can never clobber your "
+        f"work — only naming the agent AND passing --force overwrites it."
     )
 
 
-def deploy_agent(spec: AgentAssetSpec, project_root: Path) -> AgentActionResult:
-    """Deploy/refresh one agent, honouring the never-clobber-customised rule."""
+def deploy_agent(
+    spec: AgentAssetSpec, project_root: Path, *, force: bool = False
+) -> AgentActionResult:
+    """Deploy/refresh one agent, honouring the never-clobber-customised rule.
+
+    ``force`` is the single, explicit escape from that rule (Plan 00377 N4).
+    It defaults to False so every IMPLICIT path — the bulk
+    :func:`sync_agents` refresh an upgrade runs — keeps refusing, which is the
+    protection worth having. Only a caller that named one agent AND asked to
+    overwrite gets to discard local edits, and the result says that it did.
+
+    Without it the refusal had no exit at all: the warning it printed advised
+    running ``agents install <name>``, which is the invocation that produced
+    the warning.
+    """
     state = classify_agent(spec, project_root)
     target = deployed_agent_path(spec, project_root)
     if state is AgentAssetState.CURRENT:
@@ -289,7 +304,7 @@ def deploy_agent(spec: AgentAssetSpec, project_root: Path) -> AgentActionResult:
             action=AgentAction.KEPT_CURRENT,
             message=f"{spec.name} already at v{spec.version} (kept)",
         )
-    if state is AgentAssetState.CUSTOMISED:
+    if state is AgentAssetState.CUSTOMISED and not force:
         message = _customised_warning(spec, target)
         logger.warning(message)
         return AgentActionResult(
@@ -299,7 +314,13 @@ def deploy_agent(spec: AgentAssetSpec, project_root: Path) -> AgentActionResult:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(spec_source_path(spec).read_text())
     target.chmod(_AGENT_FILE_MODE)
-    if state is AgentAssetState.OUTDATED:
+    if state is AgentAssetState.CUSTOMISED:
+        action = AgentAction.UPDATED
+        message = (
+            f"Restored {spec.name} to v{spec.version} — a CUSTOMISED local copy "
+            f"was discarded because --force was given"
+        )
+    elif state is AgentAssetState.OUTDATED:
         action = AgentAction.UPDATED
         message = f"Updated {spec.name} to v{spec.version} (previous shipped revision replaced)"
     else:

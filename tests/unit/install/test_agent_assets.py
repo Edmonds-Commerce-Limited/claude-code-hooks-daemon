@@ -209,6 +209,44 @@ class TestDeployAndRemove:
         assert "customis" in result.message.lower()
         assert "discouraged" in result.message.lower()
 
+    def test_the_warning_names_an_escape_that_actually_works(self, tmp_path: Path) -> None:
+        """Plan 00377 N4: it used to recommend the command that just refused.
+
+        The advice was "restore this file with `agents install <name>`" — which
+        is the invocation that produced the warning, so following it verbatim
+        fails again. A remediation that loops is worse than none: it reads as
+        actionable and costs a retry to disprove.
+        """
+        spec = _spec(OPUS_SECURITY_AGENT_NAME)
+        target = deployed_agent_path(spec, tmp_path)
+        target.parent.mkdir(parents=True)
+        target.write_text("my own hacked-up agent\n")
+        message = deploy_agent(spec, tmp_path).message
+        assert "--force" in message
+
+    def test_force_overwrites_a_customised_file(self, tmp_path: Path) -> None:
+        """Explicit opt-in is the one thing that may clobber local edits."""
+        spec = _spec(OPUS_SECURITY_AGENT_NAME)
+        target = deployed_agent_path(spec, tmp_path)
+        target.parent.mkdir(parents=True)
+        target.write_text("my own hacked-up agent\n")
+        result = deploy_agent(spec, tmp_path, force=True)
+        assert result.action is AgentAction.UPDATED
+        assert classify_agent(spec, tmp_path) is AgentAssetState.CURRENT
+
+    def test_force_says_it_replaced_a_customised_file(self, tmp_path: Path) -> None:
+        """Clobbering local edits is never silent, even when asked for."""
+        spec = _spec(OPUS_SECURITY_AGENT_NAME)
+        target = deployed_agent_path(spec, tmp_path)
+        target.parent.mkdir(parents=True)
+        target.write_text("my own hacked-up agent\n")
+        message = deploy_agent(spec, tmp_path, force=True).message
+        assert "customis" in message.lower()
+
+    def test_force_is_not_needed_for_an_absent_agent(self, tmp_path: Path) -> None:
+        spec = _spec(OPUS_SECURITY_AGENT_NAME)
+        assert deploy_agent(spec, tmp_path, force=True).action is AgentAction.DEPLOYED
+
     def test_remove_pristine(self, tmp_path: Path) -> None:
         spec = _spec(OPUS_SECURITY_AGENT_NAME)
         deploy_agent(spec, tmp_path)
