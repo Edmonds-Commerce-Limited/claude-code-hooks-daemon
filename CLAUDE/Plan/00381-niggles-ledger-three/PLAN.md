@@ -47,6 +47,24 @@ with a pointer rather than grown here.
   red, so this costs nothing today; it costs the next person who tries to run
   one failing class while debugging, which is exactly when a misleading failure
   is most expensive.
+  **Diagnosis sharpened after the first recording, which was shallower.** It is
+  not merely "a sibling leaves state". The module-scoped `client_project`
+  fixture seeds `relay_enabled: false` (`_fixture_config`) but copies the
+  forwarders from THIS repository's live `.claude/hooks/` — and this repo runs
+  with `relay_enabled: true`, so its `pre-tool-use` forwarder carries the relay
+  hot path twice. The fixture therefore starts INTERNALLY INCONSISTENT: config
+  says relay off, forwarders say relay on. `TestFreshClientConfig`'s first test
+  runs `transport off`, which reports "already" and regenerates nothing, so the
+  contradiction survives into the next test, whose
+  `assert "relay hot path" not in ...` then fails. Running the full module hides
+  it because the earlier classes toggle transport and regenerate the forwarders
+  as a side effect. So the precondition is really the HOST repository's
+  transport setting, normalised incidentally — the class would behave
+  differently on a checkout with `relay_enabled: false`.
+  **Worth checking while fixing, NOT yet verified and so not recorded as its own
+  entry:** whether `transport off` reporting "already" without reconciling
+  drifted forwarders is itself a product gap. If config and forwarders can
+  diverge, the toggle cannot repair them, which would matter beyond the test.
 
 ## Success Criteria
 

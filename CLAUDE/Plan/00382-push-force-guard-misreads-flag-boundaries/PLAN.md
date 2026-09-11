@@ -77,18 +77,18 @@ or `--force-with-lease`. A SHORT cluster is any single-dash token containing
 - [x] ✅ **Task 3.1**: The handler's `get_claude_md()` describes the three
   spellings that qualify. Add grouped short flags, since an agent reading it
   would otherwise believe `-uf` is not covered.
-- [ ] ⬜ **Task 3.2**: Release note, and close #37 with a summary that names
+- [x] ✅ **Task 3.2**: Release note, and close #37 with a summary that names
   the second defect the reporter did not know about.
 
 ## Success Criteria
 
-- [ ] `git push origin feature/lane-f-adoption` is allowed.
-- [ ] `git push -uf origin main` is denied.
-- [ ] Every spelling denied before this plan is still denied.
-- [ ] Every release-bound consequence is in the pending-release holding area:
-  `UNRELEASED/release-notes/<file>.md`.
+- [x] `git push origin feature/lane-f-adoption` is allowed — verified live through the daemon, not only against the regex.
+- [x] `git push -uf origin main` is denied — verified live; it was allowed in every release up to 3.63.0.
+- [x] Every spelling denied before this plan is still denied — 134 tests in the handler's own file, 799 across the wider destructive/safety/evasion selection.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/34-a-branch-named-f-is-not-a-force-push.md`.
 - [ ] Full QA passes and CI is green.
-- [ ] Issue #37 is closed with an implementation summary.
+- [x] Issue #37 is closed with an implementation summary naming the second defect (comment `5637561637`).
 
 ## Delivery & Milestones
 
