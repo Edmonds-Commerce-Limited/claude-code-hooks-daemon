@@ -279,6 +279,10 @@ class Priority:
     PLAN_QA_SWEEP = 57
     CCY_SUPERVISOR_INTEGRITY = 58
     PLAN_WORKFLOW_ASSET_CHECKER = 59
+    # Same band as its sibling above: that one reports an artefact that is
+    # ABSENT, this one an artefact that is PRESENT but no longer matches its
+    # template. A reader meeting both at once is meeting one story.
+    DEPLOYED_ARTEFACT_DRIFT = 59
     CONTRACT_STALENESS = 60
     SKILL_OPPORTUNITY_DETECTOR = 61
     SECRET_FILE_HYGIENE_CHECKER = 62

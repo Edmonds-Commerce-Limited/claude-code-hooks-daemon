@@ -742,6 +742,10 @@ handlers:
       enabled: true               # Silent unless plan_workflow enabled AND mkplan.bash absent
       priority: 59
 
+    deployed_artefact_drift:  # Report a deployed daemon-owned file that no longer matches its template (Plan 00377 N6)
+      enabled: true           # Silent unless a PRESENT artefact differs; absence is plan_workflow_asset_checker's report
+      priority: 59
+
     contract_staleness:  # Advise a hooks-contract refresh when Claude Code outruns the vendored audit (Plan 00271)
       enabled: true      # Silent unless installed Claude Code > META.json last_audited_claude_code_version
       priority: 60

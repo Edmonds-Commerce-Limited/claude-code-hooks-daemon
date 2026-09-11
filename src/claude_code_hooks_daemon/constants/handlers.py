@@ -684,6 +684,15 @@ class HandlerID:
         display_name="plan-workflow-asset-checker",
     )
 
+    # A deployed daemon-owned file (agent, core doc, plan tooling) no longer
+    # matches its template. Sibling of plan_workflow_asset_checker, which
+    # reports ABSENCE; this one reports DIFFERENCE.
+    DEPLOYED_ARTEFACT_DRIFT = HandlerIDMeta(
+        class_name="DeployedArtefactDriftHandler",
+        config_key="deployed_artefact_drift",
+        display_name="deployed-artefact-drift",
+    )
+
     CCY_SUPERVISOR_INTEGRITY = HandlerIDMeta(
         class_name="CcySupervisorIntegrityHandler",
         config_key="ccy_supervisor_integrity",

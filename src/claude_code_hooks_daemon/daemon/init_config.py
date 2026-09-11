@@ -312,6 +312,7 @@ class ConfigTemplate:
             "    plan_qa_sweep: {enabled: true, priority: 57}  # Plan-tree drift report (silent when clean)\n"
             "    ccy_supervisor_integrity: {enabled: true, priority: 58}  # Warn when the ccy supervisor is armed but its files are unsafe\n"
             "    plan_workflow_asset_checker: {enabled: true, priority: 59}  # Advise when plan_workflow is enabled but its assets are missing\n"
+            "    deployed_artefact_drift: {enabled: true, priority: 59}  # Report a deployed daemon-owned file that differs from its template\n"
             "    contract_staleness: {enabled: true, priority: 60}  # Advise a hooks-contract refresh when Claude Code outruns the vendored audit\n"
             "    remote_docs_staleness: {enabled: true, priority: 68}  # Report vendored remote docs past their stale_after date\n"
             "    skill_opportunity_detector: {enabled: false, priority: 61}  # TTL-gated advisory to run `skill-scan` (opt-in; reads transcripts)\n"

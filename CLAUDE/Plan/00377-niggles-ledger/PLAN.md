@@ -100,7 +100,7 @@ authoritative rule:
   dev-loop refresh for `CLAUDE/core/*.core.md`. Client-owned overrides are
   untouched; only daemon-owned files are rewritten.
 
-- [ ] ⬜ **N6: nothing reports that a deployed artefact has drifted from its
+- [x] ✅ **N6: nothing reports that a deployed artefact has drifted from its
   template.** N5's verb makes the drift FIXABLE; it does not make it visible,
   so a stale deployed file still goes unnoticed until someone happens to
   redeploy. Measured while fixing N5: the same stale header sentence was
@@ -110,6 +110,29 @@ authoritative rule:
   from "the template moved on", which is why its warning accused the daemon's
   own deployed file of being hand-hacked. A drift check would most naturally
   live where the other whole-tree checks already run.
+
+  **Fixed**: `deployed_artefact_drift`, a SessionStart advisory sitting in the
+  same priority band as `plan_workflow_asset_checker` — that one reports an
+  artefact that is ABSENT, this one an artefact that is PRESENT but no longer
+  matches its template. Each entry names the repair for its own surface.
+
+  **Presence is the signal**, which is what makes it quiet in the right places:
+  only artefacts on disk are compared, so a core document whose gate is off is
+  absent by design rather than drifted (the trap the N5 fixture fell into), and
+  an absent `mkplan.bash` stays the other handler's report so a project never
+  gets two messages about one problem.
+
+  The ownership split drives the remediation. Core docs and plan tooling are
+  rewritten unconditionally, so any difference is drift and no ledger is needed
+  — the part of this entry that looked hardest dissolved once the deploy
+  functions were read rather than assumed. Agents are the opposite: a
+  customised copy is never clobbered, so `classify_agent` decides which of the
+  two cases it is, and a `CUSTOMISED` one is named with the `--force` escape
+  rather than the plain command that would refuse it.
+
+  The "cannot distinguish" complaint above is now answered rather than merely
+  worked around: Plan 00378 completed the revision ledger, so `OUTDATED` and
+  `CUSTOMISED` mean what they say.
 
 - [x] ✅ **N7: `destructive_git` reads PROSE as the command.** A
   `git commit -F - <<'EOF' … EOF && git push origin main` whose message

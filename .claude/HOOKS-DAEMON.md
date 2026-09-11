@@ -84,7 +84,7 @@
 | 33 | model_downgrade_recorder | ADVISORY | Publish Claude Code's own automatic model-downgrade record, silently |
 | 34 | merge_qa_report | ADVISORY | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced |
 
-### SessionStart (22 handlers)
+### SessionStart (23 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -99,6 +99,7 @@
 | 56 | version_check | ADVISORY | Check daemon version against latest GitHub release on new sessions |
 | 57 | plan_qa_sweep | ADVISORY | Advisory SessionStart sweep over the plan tree (silent when clean) |
 | 58 | ccy_supervisor_integrity | ADVISORY | Advisory: warn when the ccy supervisor is armed but its files are unsafe |
+| 59 | deployed_artefact_drift | ADVISORY | Advise when a deployed daemon-owned file differs from its template |
 | 59 | plan_workflow_asset_checker | ADVISORY | Advise when plan_workflow is enabled but its assets are not provisioned |
 | 60 | contract_staleness | ADVISORY | Advise a vendored-contract refresh when Claude Code has moved on |
 | 61 | skill_opportunity_detector | ADVISORY | TTL-gated advisory pointing at the ``skill-scan`` CLI |
