@@ -1,6 +1,6 @@
 # Plan 00375: `plan-qa` and `docs-qa` JSON disagree on the severity key
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-10
 **Owner**: joseph
 **Priority**: Low
@@ -52,8 +52,13 @@ removed before release — so released history goes straight from `level` to
   finds, so it still works against an OLDER installed daemon, which is a real
   configuration — the wrapper is versioned with the repo, the installed daemon
   is not.
-- Building the pre-upgrade migration surface itself. That is its own plan; this
+- Building the pre-upgrade migration surface itself. That is Plan 00376; this
   one only supplies the breaking change that motivates it.
+- **Waiting for the release.** Struck as out of the definition of done per the
+  Plan Completion Checklist: a release is a human scope decision gated on the
+  state of main, never on a plan. This plan's release-bound consequences are
+  written into the holding area instead, where the release picks them up
+  mechanically.
 
 ## Tasks
 
@@ -75,16 +80,26 @@ removed before release — so released history goes straight from `level` to
   `{"severity"}`, so a second spelling fails here instead of silently halving
   a reader's count.
 
-### Phase 2: Release consequences
+### Phase 2: Hand the break to the release, and stop waiting for it
 
-- [ ] ⬜ **Task 2.1**: The release carrying this change is a MAJOR bump
-  (`CLAUDE/development/RELEASING.md:966`). A human starts the release; an agent
-  never does.
-- [ ] ⬜ **Task 2.2**: Ship a pre-upgrade migration task instructing the
-  upgrading agent to rewrite `level` → `severity` at any call site parsing
-  `plan-qa --json`, BEFORE the new version is installed. Blocked on the
-  pre-upgrade surface existing (see the pre-upgrade plan); until then the
-  release-notes callout is the only channel.
+- [x] ✅ **Task 2.1**: ~~The release carrying this change is a MAJOR bump~~ —
+  **struck as release-shaped.** A plan cannot perform a version bump; a human
+  starts a release and it bundles whatever is on main. What this plan owes is
+  that the break is *declared where the release reads it*, which callout 27
+  does in its title (`BREAKING`) and body. The release pipeline's own
+  breaking-change gate takes it from there.
+
+- [x] ✅ **Task 2.2**: The migration is written and staged, not deferred:
+  `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/01-rewrite-plan-qa-json-level-to-severity.md`
+  instructs the upgrading agent to rewrite `level` → `severity` at any call
+  site parsing `plan-qa --json`, marked `critical` because the failure mode is
+  silence — a consumer using `.get("level")` reports a clean tree that is not
+  clean.
+
+  It is a POST-upgrade task because that is the channel that exists today.
+  Running it BEFORE the upgrade lands is strictly better and is Plan 00376's
+  work; that plan will move this task earlier rather than change its substance,
+  so nothing here waits on it.
 
 ## Success Criteria
 
@@ -93,11 +108,21 @@ removed before release — so released history goes straight from `level` to
   valid.
 - [x] Full QA passes and CI is green — `plan_qa` reports
   `0 findings (0 block, 0 advise)`, a split that agrees with its own total.
-- [ ] The break is declared as MAJOR in the release that carries it.
-- [ ] A pre-upgrade migration rewrites affected call sites rather than
-  announcing the change to them.
+- [x] The break is declared where the release reads it, rather than this plan
+  waiting for a release to happen.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/27-plan-qa-json-now-names-severity-like-docs-qa.md`
+  (the BREAKING declaration) and
+  `UNRELEASED/post-upgrade-tasks/01-rewrite-plan-qa-json-level-to-severity.md`
+  (the call-site migration).
 
 ## Delivery & Milestones
 
 - Found by Plan 00373: the QA wrapper it added printed a severity split that
   contradicted its own total.
+- Phase 1 delivered at `3e1b9fc6` (with the `**Audience**` fix at `5a3c6730`)
+  and verified at `85083625`; the deprecation window was dropped at `6e4731f0`.
+- Closed without waiting for a release, per the Plan Completion Checklist's
+  "Definition of done: merged into main, never released". The substance the
+  release must carry is in the holding area; Plan 00376 will move the migration
+  from post-upgrade to pre-upgrade.

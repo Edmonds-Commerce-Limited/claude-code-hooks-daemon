@@ -85,9 +85,9 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-| File                                        | Type             | Severity | Applies to | One-line summary                                                                                                                           |
-| ------------------------------------------- | ---------------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `01-drop-hooks-daemon-python-workaround.md` | config-migration | optional | all        | Discovery now finds the newest `python3.NN` itself, so a `HOOKS_DAEMON_PYTHON` set to escape the old hardcoded candidate list is redundant |
+| File                                           | Type            | Severity | Applies to | One-line summary                                                                                                          |
+| ---------------------------------------------- | --------------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `01-rewrite-plan-qa-json-level-to-severity.md` | workflow-change | critical | all        | `plan-qa --json` now emits `severity` instead of `level`; a consumer still reading `level` silently reports zero findings |
 
 <!-- END TASK INDEX -->
 

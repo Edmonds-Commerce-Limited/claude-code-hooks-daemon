@@ -36,8 +36,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - Tiered size enforcement (advise → strong warn → hard block) at escalating thresholds via the existing `plan_qa` surfaces, plus consistent doc/SSoT touch-points — no new handler, no context flooding
 
-- [00375: `plan-qa` and `docs-qa` JSON disagree on the severity key](00375-plan-qa-and-docs-qa-json-disagree-on-the-severity-key/PLAN.md) - In Progress (same concept, two names — `docs-qa` emitted `severity`, `plan-qa` emitted `level`; converged on `severity` alone with no deprecation window, since two live names IS the defect; remaining work is the MAJOR declaration and a pre-upgrade migration via 00376)
-
 - [00377: niggles ledger](00377-niggles-ledger/PLAN.md) - In Progress (THE open niggles ledger — a small defect found in passing is recorded here in the same turn, never reported only in chat; exactly one is open at a time, and the next niggle after it closes opens a NEW one. SOP: `CLAUDE/PlanWorkflow.md` "The niggles ledger")
 
 - [00376: pre-upgrade phase with migration and confirm gate](00376-pre-upgrade-phase-with-migration-and-confirm-gate/PLAN.md) - Not Started (an upgrade tells a project what changed only after changing it; the one confirm gate is skipped for every agent run and fires post-checkout anyway, and `post-upgrade-tasks/` has no runner — replace deprecation windows with detect-and-migrate plus an agent-usable proceed/abort gate)
@@ -122,6 +120,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00375: `plan-qa` and `docs-qa` JSON disagree on the severity key](Completed/00375-plan-qa-and-docs-qa-json-disagree-on-the-severity-key/PLAN.md) - Complete + the archiving commit (one concept under two names — `docs-qa` emitted `severity`, `plan-qa` emitted `level` — converged on `severity` with no deprecation window, since two live names IS the defect)
 
 - [00378: agent asset ledger guard and backfill](Completed/00378-agent-asset-ledger-guard-and-backfill/PLAN.md) - Complete + the archiving commit (the ledger's guard compared the bundled file's digest with a value derived from that same file, so it could never fail; four revisions shipped unrecorded and froze those deployments as `CUSTOMISED`)
 
@@ -238,15 +238,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 378 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 338 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 339 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 17 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 17 + 338 + 13 = **368 folders**, spanning
+- **Folder-to-number reconciliation**: 16 + 339 + 13 = **368 folders**, spanning
   **365 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
