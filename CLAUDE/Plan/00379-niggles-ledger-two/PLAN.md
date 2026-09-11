@@ -40,7 +40,7 @@ against the files they cite. A claim nobody rechecks is where these hide.
 
 ### Phase 1: Recorded niggles
 
-- [ ] ⬜ **N1**: The plan-index retention window has no commit-time gate. The
+- [x] ✅ **N1**: The plan-index retention window has no commit-time gate. The
   30-row ceiling is enforced only by
   `tests/integration/test_plan_index_navigability.py::test_completed_rows_stay_within_the_retention_window`,
   which runs in full QA. Plan QA has a COMMIT-stage `terminal_state_atomic`
@@ -50,6 +50,14 @@ against the files they cite. A claim nobody rechecks is where these hide.
   ageing one out, reaching 33 rows, and `plan-qa --sweep` reported 0 findings
   throughout. Evidence: fixed in `1f00eab8`; the gap that let it happen three
   times is what this entry is about, not the row count.
+  FIXED: new plan-qa check `index-retention-window`, registered COMMIT +
+  SWEEP. Deliberately no EDIT — an archival is legitimately over the window
+  between adding the new row and removing the aged-out ones, so an EDIT block
+  would deny the first half of a correct archival. Same reasoning that keeps
+  `terminal-state-atomic` commit-only. `MAX_COMPLETED_ROWS` in the batch guard
+  now imports the shared `DEFAULT_COMPLETED_ROWS_MAX` instead of restating 30.
+  Proved end-to-end: a 31st row put back into the real index produced
+  `1 row overdue`, and removing it returned the sweep to clean.
 
 - [x] ✅ **N2**: Plan 00376 Task 3.1 describes a compound condition as if it
   were one branch. `scripts/upgrade_version.sh:808` reads
@@ -84,6 +92,23 @@ against the files they cite. A claim nobody rechecks is where these hide.
   block for 00379's birth; the figures are corrected in the same commit, but
   `stats_recount` validates the counts and not the prose sum, which is why a
   wrong ✅ survived a clean `plan-qa --sweep`.
+
+- [x] ✅ **N5**: `ReadmeIndex.rows` can describe a different file from
+  `ReadmeIndex.lines`, and only the PRODUCER said so. `plan_qa/context.py`
+  merges the archive index's rows into the instance handed to checks (so a
+  plan whose row has aged out still resolves for `row-folder-bijection`) while
+  leaving `lines` sourced from the primary file — documented in a comment in
+  `context.py`, and nowhere on the dataclass a check author actually reads.
+  Found by walking into it: `index-retention-window`'s first cut filtered
+  `rows` and reported 340 completed rows against a window of 30 on a tree that
+  was correctly at 30. That check is BLOCK at COMMIT, so it would have denied
+  every commit in the repository. Synthetic unit fixtures all passed — only
+  the real sweep exposed it.
+  FIXED: the constraint is now stated on `ReadmeIndex` itself, with the rule
+  for choosing (`rows` = whole corpus, `lines` = primary index's own text or
+  counts) and the measured failure as the warning. Regression test
+  `TestTheArchiveIndexIsNotCounted` builds a context with merged rows and
+  primary-only lines, which is the shape no earlier fixture had.
 
 ## Success Criteria
 

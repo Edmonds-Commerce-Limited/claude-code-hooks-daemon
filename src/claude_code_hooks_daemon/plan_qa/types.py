@@ -71,6 +71,15 @@ DEFAULT_PLAN_DOC_BLOCK_LINES: Final[int] = 900
 # drift this constant exists to remove.
 DEFAULT_INDEX_ROW_MAX_CHARS: Final[int] = 500
 
+# Plan-index completed-row retention window (Plan 00379 N1). The main index
+# keeps only the newest N completed rows; older ones move verbatim into
+# Completed/README.md, so the entry point to the tree stays navigable while no
+# row is ever lost.
+#
+# Same not-config-driven reasoning as the row limit above, and the same shared
+# ownership: the batch guard imports this constant rather than restating 30.
+DEFAULT_COMPLETED_ROWS_MAX: Final[int] = 30
+
 
 @dataclass(frozen=True)
 class PlanDocSizeLimits:

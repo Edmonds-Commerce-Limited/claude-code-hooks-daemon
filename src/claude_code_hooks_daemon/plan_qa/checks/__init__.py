@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.plan_qa.checks import (
     header_body_coherence,
     index_at_birth,
     index_no_log,
+    index_retention_window,
     index_row_length,
     journal_append_only,
     journal_completion_entry,
@@ -82,6 +83,9 @@ def all_checks() -> tuple[CheckSpec, ...]:
         # Plan-index shape — EDIT + COMMIT + SWEEP (Plan 00218)
         *index_row_length.CHECKS,
         *index_no_log.CHECKS,
+        # Plan-index retention window — COMMIT + SWEEP, no EDIT: a mid-archival
+        # write is legitimately over the window (Plan 00379 N1).
+        *index_retention_window.CHECKS,
         # Stage 2 — commit-gate-only checks
         index_at_birth.CHECK,
         counter_sanity.CHECK,

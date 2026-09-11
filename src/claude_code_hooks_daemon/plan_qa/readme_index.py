@@ -97,6 +97,21 @@ class ReadmeIndex:
     to no row at all. Keeping the lines here means the COMMIT and SWEEP
     surfaces measure the exact text this object was parsed from, rather than
     re-reading the file and risking a different answer.
+
+    **``rows`` and ``lines`` can describe DIFFERENT files, and a check must
+    choose deliberately** (Plan 00379 N1). ``plan_qa/context.py`` appends the
+    archive index's rows to the instance it hands checks, so a plan whose row
+    has aged out of the main index still resolves for ``row-folder-bijection``;
+    ``lines`` is left sourced from the primary file alone. So:
+
+    - a check about THE WHOLE CORPUS (does every folder have a row?) reads
+      ``rows``;
+    - a check about THE PRIMARY INDEX'S OWN text or counts reads ``lines``,
+      re-parsing it if it needs structure.
+
+    Getting this backwards is not a subtle miscount: ``index-retention-window``
+    filtered ``rows`` in its first cut and reported 340 completed rows against
+    a window of 30, on a tree that was correctly AT 30.
     """
 
     rows: tuple[ReadmeRow, ...]

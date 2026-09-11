@@ -35,7 +35,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from claude_code_hooks_daemon.plan_qa.types import DEFAULT_INDEX_ROW_MAX_CHARS
+from claude_code_hooks_daemon.plan_qa.types import (
+    DEFAULT_COMPLETED_ROWS_MAX,
+    DEFAULT_INDEX_ROW_MAX_CHARS,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INDEX = REPO_ROOT / "CLAUDE" / "Plan" / "README.md"
@@ -50,7 +53,11 @@ MAX_BYTES = 130_000
 # completed plans stay here; everything older lives verbatim in
 # CLAUDE/Plan/Completed/README.md. This is the cause-side guard (row count),
 # complementing the symptom-side byte ceiling above.
-MAX_COMPLETED_ROWS = 30
+#
+# IMPORTED, never redeclared (Plan 00379 N1): the plan-qa commit gate
+# index-retention-window enforces the same window, and a second literal here is
+# exactly how the two would drift apart.
+MAX_COMPLETED_ROWS = DEFAULT_COMPLETED_ROWS_MAX
 
 _COMPLETED_ROW_RE = re.compile(r"^- \[\d+")
 
