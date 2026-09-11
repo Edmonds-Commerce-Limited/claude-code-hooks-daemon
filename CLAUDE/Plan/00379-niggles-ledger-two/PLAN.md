@@ -82,7 +82,7 @@ against the files they cite. A claim nobody rechecks is where these hide.
   reachable only when a config key carries a migration Note, so an upgrade
   changing no config key never reaches it.
 
-- [ ] ⬜ **N4**: The Plan Statistics reconciliation carried an arithmetic check
+- [x] ✅ **N4**: The Plan Statistics reconciliation carried an arithmetic check
   that contradicted its own paragraph. It stated **365** distinct plan numbers
   and **13** folderless of **378** allocated, then verified with
   `364 + 13 = 377. ✅` — both terms off by one, and the ✅ asserting a sum that
@@ -92,6 +92,18 @@ against the files they cite. A claim nobody rechecks is where these hide.
   block for 00379's birth; the figures are corrected in the same commit, but
   `stats_recount` validates the counts and not the prose sum, which is why a
   wrong ✅ survived a clean `plan-qa --sweep`.
+  FIXED: new repo-hygiene rule `plan-stats-arithmetic`, which checks the
+  bullet's figures against EACH OTHER (folder sum adds up; folderless count
+  matches the numbers actually listed; the closing self-check's operands match
+  the stated distinct/folderless/allocated figures). Note what a simpler rule
+  would have missed: `364 + 13 = 377` is arithmetically TRUE, so validating
+  the sum alone passes it — the defect was that the operands contradicted
+  figures stated inches above. Deliberately in `scripts/qa/check_repo_hygiene.py`
+  and NOT in plan_qa: the reconciliation bullet is this repository's own index
+  convention, and plan_qa ships to client projects whose index has no such
+  section. Proved against the real defect: restoring `364 + 13 = 377. ✅`
+  produced two findings naming both wrong operands; reverting returned the
+  scan to clean.
 
 - [x] ✅ **N5**: `ReadmeIndex.rows` can describe a different file from
   `ReadmeIndex.lines`, and only the PRODUCER said so. `plan_qa/context.py`

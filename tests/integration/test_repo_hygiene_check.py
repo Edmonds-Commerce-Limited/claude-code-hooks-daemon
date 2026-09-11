@@ -853,3 +853,96 @@ def test_an_empty_task_directory_is_clean(tmp_path: Path) -> None:
     exit_code, report = _run_checker(repo)
 
     assert exit_code == 0, f"an empty task directory was flagged: {report['violations']}"
+
+
+_PLAN_INDEX = "CLAUDE/Plan/README.md"
+
+
+def _stats_index(
+    *,
+    folders: str = "16 + 340 + 13 = **369 folders**",
+    distinct: int = 366,
+    folderless: int = 13,
+    allocated: int = 379,
+    closing: str = "366 + 13 = 379. ✅",
+    listed: int = 13,
+) -> str:
+    """A plan index whose statistics section carries the reconciliation bullet."""
+    numbers = ", ".join(f"{900 + i:05d}" for i in range(listed))
+    return (
+        "# Plans Index\n\n## Plan Statistics\n\n"
+        f"- **Folder-to-number reconciliation**: {folders}, spanning\n"
+        f"  **{distinct} distinct plan numbers** — three numbers carry two folders\n"
+        f"  each. That leaves **{folderless}** of the {allocated} allocated numbers\n"
+        f"  with no folder: {numbers} — abandoned drafts.\n"
+        f"  {closing}\n"
+    )
+
+
+def test_flags_a_closing_sum_whose_operands_contradict_the_bullet(tmp_path: Path) -> None:
+    """The real defect: `364 + 13 = 377. ✅` under a bullet saying 365 and 378.
+
+    The arithmetic itself is TRUE — 364 + 13 really is 377 — so a generic
+    "sums must add up" rule would pass it. What is wrong is that both operands
+    disagree with the figures stated inches above, under a tick asserting the
+    check was done.
+    """
+    repo = _make_repo(
+        tmp_path,
+        {_PLAN_INDEX: _stats_index(distinct=365, allocated=378, closing="364 + 13 = 377. ✅")},
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1, "a closing sum contradicting its own bullet must fail the gate"
+    assert "plan-stats-arithmetic" in _rules(report)
+
+
+def test_flags_a_folder_sum_that_does_not_add_up(tmp_path: Path) -> None:
+    repo = _make_repo(
+        tmp_path,
+        {_PLAN_INDEX: _stats_index(folders="16 + 340 + 13 = **400 folders**")},
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1, "a folder sum that does not add up must fail the gate"
+    assert "plan-stats-arithmetic" in _rules(report)
+
+
+def test_flags_a_folderless_count_disagreeing_with_the_list(tmp_path: Path) -> None:
+    """The stated count and the numbers actually listed must agree."""
+    repo = _make_repo(tmp_path, {_PLAN_INDEX: _stats_index(folderless=13, listed=11)})
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1, "a folderless count disagreeing with its list must fail the gate"
+    assert "plan-stats-arithmetic" in _rules(report)
+
+
+def test_a_consistent_reconciliation_bullet_is_clean(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path, {_PLAN_INDEX: _stats_index()})
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, f"a consistent bullet was flagged: {report['violations']}"
+
+
+def test_an_index_without_the_reconciliation_bullet_is_clean(tmp_path: Path) -> None:
+    """A client project's plan index carries no such bullet — silence is correct."""
+    repo = _make_repo(
+        tmp_path,
+        {_PLAN_INDEX: "# Plans Index\n\n## Plan Statistics\n\n- **Active**: 4\n"},
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, f"an index without the bullet was flagged: {report['violations']}"
+
+
+def test_a_repo_without_a_plan_index_is_clean(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path, {})
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, f"a repo with no plan index was flagged: {report['violations']}"
