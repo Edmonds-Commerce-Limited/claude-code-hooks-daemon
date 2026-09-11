@@ -113,8 +113,13 @@ rather than only matching syntax.
 ### Phase 3: The gate that works for agents
 
 - [ ] ⬜ **Task 3.1**: Replace the TTY-only gate. A non-interactive caller must
-  get a real decision point, not a silent fall-through — the current `[ ! -t 0 ]`
-  branch at `upgrade_version.sh:808` is the bug to fix, not the pattern to copy.
+  get a real decision point, not a silent fall-through. `upgrade_version.sh:808`
+  is a COMPOUND condition —
+  `[[ "$*" == *"--skip-reading-confirmation"* ]] || [ ! -t 0 ]` — so it has two
+  skip paths and only ONE of them is the bug. The explicit flag is a deliberate
+  opt-out a caller asked for and must survive; it is the `[ ! -t 0 ]` INFERENCE
+  ("no terminal, therefore nobody to ask") that silently disarms the gate for
+  every agent. Remove the inference, keep the flag.
 - [ ] ⬜ **Task 3.2**: Define escalation: which changes an agent may accept on
   its own, and which require the owner. Breaking/MAJOR is the obvious
   escalation trigger. Reuse the existing one-shot approval-marker mechanism
@@ -132,8 +137,13 @@ rather than only matching syntax.
 - [ ] ⬜ **Task 4.2**: `install/upgrade_compatibility.py:351-373` scans only
   `CLAUDE/UPGRADES/v{major}/` and never `UNRELEASED/`, so unreleased breaking
   changes are invisible to compatibility checking.
-- [ ] ⬜ **Task 4.3**: `.claude/skills/hooks-daemon/upgrade.md` never mentions
-  post-upgrade tasks; the agent-facing upgrade procedure omits the step.
+- [ ] ⬜ **Task 4.3**: `.claude/skills/hooks-daemon/upgrade.md` has no STEP that
+  reads the post-upgrade tasks for the versions just crossed. Do not close this
+  on a grep: line 108 does say "follow any referenced post-upgrade task", but
+  that is a passing clause inside the config-advisory step, reachable only when
+  a config key happens to carry a migration Note. An upgrade that changes no
+  config key never reaches it, so the tasks go unread. What is missing is a
+  step of its own in the numbered procedure.
 
 ### Phase 5: Prove it on Plan 00375
 

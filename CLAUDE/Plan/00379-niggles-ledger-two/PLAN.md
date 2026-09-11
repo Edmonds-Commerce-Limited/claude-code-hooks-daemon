@@ -51,15 +51,17 @@ against the files they cite. A claim nobody rechecks is where these hide.
   throughout. Evidence: fixed in `1f00eab8`; the gap that let it happen three
   times is what this entry is about, not the row count.
 
-- [ ] ⬜ **N2**: Plan 00376 Task 3.1 describes a compound condition as if it
+- [x] ✅ **N2**: Plan 00376 Task 3.1 describes a compound condition as if it
   were one branch. `scripts/upgrade_version.sh:808` reads
   `[[ "$*" == *"--skip-reading-confirmation"* ]] || [ ! -t 0 ]` — two skip
   paths. The explicit flag is a deliberate opt-out that should survive; only
   the `[ ! -t 0 ]` TTY inference is the bug. As worded ("the current
   `[ ! -t 0 ]` branch at `upgrade_version.sh:808` is the bug to fix"), an
   implementer could remove both and delete a legitimate escape hatch.
+  FIXED: Task 3.1 now names the compound explicitly and says which half to
+  remove ("remove the inference, keep the flag").
 
-- [ ] ⬜ **N3**: Plan 00376 Task 4.3 states
+- [x] ✅ **N3**: Plan 00376 Task 4.3 states
   `.claude/skills/hooks-daemon/upgrade.md` "never mentions post-upgrade
   tasks". That is false: line 108 says "follow any referenced post-upgrade
   task". The SUBSTANCE of the task still stands — that mention is a passing
@@ -67,6 +69,10 @@ against the files they cite. A claim nobody rechecks is where these hide.
   directing the agent to read the post-upgrade tasks for the versions it just
   crossed. But an implementer grepping `post-upgrade` finds line 108, reads
   the claim as stale, and closes the task as already-done.
+  FIXED: Task 4.3 now states the missing thing as a STEP, warns against
+  closing on a grep, and names why line 108 does not cover it — that clause is
+  reachable only when a config key carries a migration Note, so an upgrade
+  changing no config key never reaches it.
 
 - [ ] ⬜ **N4**: The Plan Statistics reconciliation carried an arithmetic check
   that contradicted its own paragraph. It stated **365** distinct plan numbers
