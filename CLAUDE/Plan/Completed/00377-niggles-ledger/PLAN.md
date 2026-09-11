@@ -1,6 +1,6 @@
 # Plan 00377: niggles ledger
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-11
 **Owner**: joseph
 **Priority**: Medium
@@ -318,16 +318,37 @@ authoritative rule:
   reporting before being trusted. No release-bound consequence: the check
   guards this repository's own release staging and ships nothing to a client.
 
-- [ ] ⬜ **N3: `upgrade.md` never mentions post-upgrade tasks.** The
+- [x] ✅ **N3: `upgrade.md` never mentions post-upgrade tasks.** The
   agent-facing upgrade procedure omits the step entirely, so the tasks are not
-  read even by an agent following the procedure exactly. (Tracked in Plan 00376
-  Task 4.3 as part of the upgrade rework; listed here so the ledger is a
-  complete index of known small defects, and to be struck when 00376 lands it.)
+  read even by an agent following the procedure exactly.
+
+  **Struck to [Plan 00376](../00376-pre-upgrade-phase-with-migration-and-confirm-gate/PLAN.md)
+  Task 4.3**, which owns the upgrade rework this belongs to — the same
+  treatment N10 got. Not fixed here, and deliberately not left open here
+  either: a ledger holding one entry that another plan is committed to
+  delivering is the "sits In Progress with nothing left to do" state the Plan
+  Completion Checklist warns about, and it makes "is the slate clean?"
+  unanswerable.
+
+  This gained weight while the ledger was open, which is worth saying rather
+  than losing: Plan 00375 filed the first real post-upgrade task
+  (`01-rewrite-plan-qa-json-level-to-severity.md`, severity `critical`), so the
+  directory `upgrade.md` fails to mention is no longer hypothetical — an agent
+  following the procedure exactly would now miss a migration whose failure mode
+  is silence.
 
 ## Success Criteria
 
-- [ ] Every entry above is either fixed or graduated to its own plan.
-- [ ] No niggle in this repository exists only as chat output.
+- [x] Every entry above is either fixed or graduated to its own plan. Nine
+  fixed here (N1, N2, N4, N5, N6, N7, N8, N9, N11); two struck with pointers —
+  N10 to Plan 00378, N3 to Plan 00376 Task 4.3.
+- [x] No niggle in this repository exists only as chat output.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/28-repairing-a-drifted-deployed-artefact.md` (N4,
+  N5), `29-prose-describing-a-destructive-command.md` (N7) and
+  `31-a-drifted-deployed-file-now-tells-you.md` (N6). N8, N9 and N11 have none
+  — N8 corrects resident guidance the daemon regenerates, and N9 and N11 are
+  QA checks over this repository's own tree.
 
 ## Delivery & Milestones
 

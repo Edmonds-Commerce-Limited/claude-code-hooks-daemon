@@ -9,9 +9,9 @@ Directory shape: `NNNNN-description/PLAN.md` (+ supporting docs and
 
 ## Local conventions (this directory only)
 
-- **Niggles are recorded, never just reported**: append to the one open
-  niggles ledger (named in `README.md`) in the same turn — see
-  [core/PlanWorkflow.core.md](../core/PlanWorkflow.core.md), "The niggles ledger".
+- **Niggles are recorded, never just reported**: append in the same turn to the
+  open niggles ledger named in `README.md`; if none is open, `mkplan.bash` a new
+  one — see [core/PlanWorkflow.core.md](../core/PlanWorkflow.core.md).
 
 - **Plan sources**: a plan may originate from a GitHub issue — record
   `**GitHub Issue**: #N` in the PLAN.md header. On completion, comment an
