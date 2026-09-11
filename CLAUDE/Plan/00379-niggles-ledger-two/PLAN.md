@@ -124,10 +124,13 @@ against the files they cite. A claim nobody rechecks is where these hide.
 
 ## Success Criteria
 
-- [ ] Every entry above is fixed, or graduated to a named plan with a pointer
-  recorded in this ledger.
-- [ ] `CLAUDE/UPGRADES/UNRELEASED/` is current for any entry whose fix changes
-  behaviour a user would notice.
+- [x] Every entry above is fixed, or graduated to a named plan with a pointer
+  recorded in this ledger. All five (N1–N5) were fixed here; none needed
+  graduating.
+- [x] `CLAUDE/UPGRADES/UNRELEASED/` is current for any entry whose fix changes
+  behaviour a user would notice —
+  `release-notes/32-an-archival-that-forgets-the-age-out-now-blocks.md` covers
+  N1, the only entry shipping a user-visible change.
 - [ ] Full QA passes and CI is green.
 
 ## Delivery & Milestones
