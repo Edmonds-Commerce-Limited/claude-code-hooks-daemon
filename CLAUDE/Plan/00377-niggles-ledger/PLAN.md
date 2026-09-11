@@ -235,10 +235,17 @@ authoritative rule:
   missing. Nothing asks the real question: is every revision this template has
   ever had either current or ledgered?
 
-  **Graduating to its own plan** — three distinct defects (a tautological
-  guard, four unrepaired field states, no completeness check), a design
-  decision about where the current md5 is pinned, and a change to a public
-  dataclass. Too large for the ledger; see the plan filed for it.
+  **Graduated to [Plan 00378](../00378-agent-asset-ledger-guard-and-backfill/PLAN.md)**
+  — three distinct defects (a tautological guard, four unrepaired field states,
+  no completeness check), a design decision about where the current md5 is
+  pinned, and a change to a public dataclass. Too large for the ledger, so it
+  is struck from here per the Non-Goals above; the discovery evidence and audit
+  output stay in this plan's journal. Dedupe scout confirmed no existing plan
+  covers it (Plan 00279 built the subsystem and is prior art, not a duplicate).
+
+  One part was repairable immediately and is done: this workspace's own
+  deployed docs-qa agent was restored (`9a4bb0c9`), since it was provably a
+  stale shipped blob rather than a local edit.
 
 - [ ] ⬜ **N3: `upgrade.md` never mentions post-upgrade tasks.** The
   agent-facing upgrade procedure omits the step entirely, so the tasks are not
