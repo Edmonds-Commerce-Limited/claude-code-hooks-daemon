@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.plan_qa.checks import (
     journal_completion_entry,
     journal_dayfile_is_today,
     journal_dayfile_naming,
+    journal_entry_future_dated,
     journal_entry_ordering,
     journal_entry_with_progress,
     journal_folder_present,
@@ -63,6 +64,7 @@ def all_checks() -> tuple[CheckSpec, ...]:
         *path_existence.CHECKS,
         *journal_dayfile_naming.CHECKS,
         *journal_entry_ordering.CHECKS,
+        *journal_entry_future_dated.CHECKS,
         # Stage 1 — checks about the ACT OF WRITING, with no batch equivalent
         # by design (see common.WRITE_ACT_ONLY_RULES for the reason each).
         template_metadata.CHECK,

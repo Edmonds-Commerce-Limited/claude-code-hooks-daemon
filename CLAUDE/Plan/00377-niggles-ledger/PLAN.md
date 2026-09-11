@@ -202,7 +202,7 @@ authoritative rule:
   filled in only when absent, daemon-owned tooling rewritten — so the command
   reads as a repair. Swept for other copies of the wording: none live.
 
-- [ ] ⬜ **N9: nothing notices when journal timestamps drift from the clock.**
+- [x] ✅ **N9: nothing notices when journal timestamps drift from the clock.**
   `journal-entry-ordering` (N1) enforces that times increase down the file, and
   `journal-append-only` forbids rewriting an entry — but neither can see a run
   of entries that is internally monotonic and uniformly WRONG. Measured in this
@@ -219,6 +219,24 @@ authoritative rule:
   day-file's last commit time and advise past a generous threshold. Not
   backfilled, per N1's precedent — the readings are wrong but the order is
   right, and the file is append-only.
+
+  **Fixed**: `journal-entry-future-dated` compares the newest entry against the
+  wall clock and advises past 30 minutes. Only the FUTURE direction is judged —
+  writing up something that already happened is ordinary journalling, while a
+  time that has not arrived cannot be anything but a mistake.
+
+  **EDIT stage only, deliberately departing from N1's dual registration.** An
+  out-of-order entry can in principle be moved, so a sweep for it is
+  actionable; a wrong READING cannot be corrected once committed, so a sweep
+  here could only raise findings nobody is permitted to act on. The framework
+  enforces that reasoning rather than trusting it: the suite failed until the
+  rule was recorded in `WRITE_ACT_ONLY_RULES` with its justification.
+
+  Verified against the file that motivated it — this plan's own day-file — where
+  it reports the newest entry as `141 minutes ahead of the clock (14:30)`, while
+  `plan-qa --sweep` stays at 0 findings. That split is the design working: the
+  defect is surfaced to whoever is writing, without parking a permanent
+  unfixable finding in the tree.
 
 - [x] ✅ **N10: the agent-ledger "DBF guard" asserts a tautology, and four
   shipped revisions went unledgered as a result.** Found while N6's drift

@@ -151,6 +151,16 @@ WRITE_ACT_ONLY_RULES: Final[dict[str, str]] = {
         "Compares the would-be content against what the file already holds. "
         "There is no before/after to compare in a batch scan."
     ),
+    "journal_entry_future_dated": (
+        "Reports an entry timestamped ahead of the clock, which is only "
+        "correctable BEFORE the write lands. A batch scan meets the entry after "
+        "it is committed, when the journal's append-only contract forbids "
+        "changing the reading at all — so every finding it could raise would be "
+        "one nobody is permitted to act on, and an unfixable finding trains "
+        "readers to skim the check. Its sibling journal-entry-ordering DOES "
+        "sweep, because an out-of-order entry can at least in principle be "
+        "moved."
+    ),
     "journal_dayfile_is_today": (
         "Reports that a day-file dated other than today is being WRITTEN. "
         "Yesterday's day-file existing on disk is exactly what a journal is."

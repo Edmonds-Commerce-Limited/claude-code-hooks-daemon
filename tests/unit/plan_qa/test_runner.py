@@ -101,6 +101,7 @@ class TestRegistryCatalogue:
             "journal-dayfile-naming",
             "journal-dayfile-is-today",
             "journal-entry-ordering",
+            "journal-entry-future-dated",
             "journal-append-only",
             "plan-doc-size",
             # Cross-file tree checks (dual COMMIT+SWEEP registration)
@@ -139,7 +140,8 @@ class TestRegistryCatalogue:
         # (Plan 00190) + journal-dayfile-is-today (Plan 00197)
         # + index-row-length (Plan 00218) + index-no-log
         # + journal-entry-ordering (Plan 00377 N1)
-        assert len(by_stage[Stage.EDIT]) == 15
+        # + journal-entry-future-dated (Plan 00377 N9; EDIT only by design)
+        assert len(by_stage[Stage.EDIT]) == 16
         # 5 commit-only + 5 dual tree checks + 2 journal COMMIT checks (Plan 00163)
         # + plan-shrink-without-journal (Plan 00190) + index-row-length (Plan 00218)
         # + index-no-log + archived-status-coherence (Plan 00286)
@@ -179,6 +181,7 @@ class TestRegistryCatalogue:
             "journal-dayfile-naming",
             "journal-dayfile-is-today",
             "journal-entry-ordering",
+            "journal-entry-future-dated",
             "journal-append-only",
             "journal-folder-present",
             "journal-freshness",
