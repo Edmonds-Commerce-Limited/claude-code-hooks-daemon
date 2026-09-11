@@ -178,6 +178,34 @@ class TestTransportToggleWiring:
         assert "no state was changed" in captured.err.lower()
         assert "already" not in captured.out
 
+    def test_a_failed_reconcile_does_not_claim_nothing_was_changed(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A reconcile carries changed=False because the CONFIG did not move —
+        but the forwarders were regenerated, so the refused-before-flipping
+        line would be false (Plan 00383). Misreporting what was touched is the
+        class of defect this plan exists to fix."""
+        outcome = ToggleOutcome(
+            action="off",
+            changed=False,
+            verified=False,
+            failures=["pre-tool-use-json: response is not JSON: garbage"],
+            reconciled=True,
+        )
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.install.transport_toggle.run_toggle",
+            lambda *_a, **_k: outcome,
+        )
+
+        exit_code = cmd_transport(_args(project, "off"))
+        captured = capsys.readouterr()
+
+        assert exit_code == 1
+        assert "pre-tool-use-json" in captured.err
+        assert "no state was changed" not in captured.err.lower()
+        assert "AUTO-REVERTED" not in captured.err
+        assert "forwarders" in captured.err
+
     def test_toggle_error_exits_nonzero(
         self, project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:

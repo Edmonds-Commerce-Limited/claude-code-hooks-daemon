@@ -5184,6 +5184,19 @@ def cmd_transport(args: argparse.Namespace) -> int:
                     "daemon and forwarders before relying on any hook transport",
                     file=sys.stderr,
                 )
+        elif outcome.reconciled:
+            # changed=False here means the CONFIG did not move, but drifted
+            # forwarders WERE regenerated — claiming nothing was touched would
+            # send the reader looking in the wrong place (Plan 00383). No
+            # revert is offered on purpose: the only state to restore would be
+            # the drift this pass repaired.
+            print(
+                "The config was not changed, but drifted forwarders were regenerated and "
+                "left in place — they are NOT reverted, because the only prior state to "
+                "restore is the drift itself. Inspect the daemon and the deployed "
+                "forwarders before relying on any hook transport",
+                file=sys.stderr,
+            )
         elif not outcome.changed:
             print(
                 "No state was changed — the toggle refused before flipping anything",
