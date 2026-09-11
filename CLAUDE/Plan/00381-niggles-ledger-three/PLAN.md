@@ -32,7 +32,7 @@ with a pointer rather than grown here.
 
 ### Phase 1: Recorded niggles
 
-- [ ] ⬜ **N1**: `TestFreshClientConfig` in
+- [x] ✅ **N1** (graduated to Plan 00383): `TestFreshClientConfig` in
   `tests/acceptance/test_transport_toggle_cycle.py` cannot pass on its own. Run
   the class alone and
   `test_transport_on_with_absent_binary_and_null_source_refuses_untouched`
@@ -61,10 +61,21 @@ with a pointer rather than grown here.
   as a side effect. So the precondition is really the HOST repository's
   transport setting, normalised incidentally — the class would behave
   differently on a checkout with `relay_enabled: false`.
-  **Worth checking while fixing, NOT yet verified and so not recorded as its own
-  entry:** whether `transport off` reporting "already" without reconciling
-  drifted forwarders is itself a product gap. If config and forwarders can
-  diverge, the toggle cannot repair them, which would matter beyond the test.
+  **The product half is now VERIFIED, and GRADUATED to Plan 00383.** The open
+  question above — whether `transport off` reporting "already" without
+  reconciling is itself a product gap — was answered by asking the production
+  function directly with every side effect injected, so the result depends on
+  no daemon and not on this repo's own transport setting: config at
+  `relay_enabled: false` beside a forwarder carrying the relay hot path gives
+  `changed=False`, `verified=None`, ZERO side effects, forwarder untouched.
+  `install/transport_toggle.py:360-362` decides the no-op from the config alone
+  and never reads what is deployed, so it can never repair it — the operator is
+  told the relay is off, gets exit 0, and every hook still routes through it.
+  That is a production behaviour change owing tests, a release note and
+  guidance, so it graduates rather than growing here:
+  **Plan 00383 — transport toggle trusts config over deployed state.** The
+  test-isolation symptom that surfaced it is closed by the same fix, because
+  the fixture's contradiction is exactly the drift the toggle will reconcile.
 
 ## Success Criteria
 
