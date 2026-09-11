@@ -63,15 +63,24 @@ handles both.
 
 ### Phase 2: Retire the old key
 
+**Entry condition**: the release containing callout 27 has SHIPPED. Until then
+this phase is blocked, not merely unstarted — dropping `"level"` while the
+dual-key emission is still unreleased would give consumers a zero-length
+deprecation window, which is the break this plan exists to avoid. A human
+starts a release; an agent never does.
+
 - [ ] ⬜ **Task 2.1**: In a later release, drop the deprecated key, with the
   removal recorded in `CLAUDE/UPGRADES/`.
 
 ## Success Criteria
 
-- [ ] Both verbs' `--json` output carries `severity` with the same values.
-- [ ] A consumer parsing the old key still works during the deprecation
+- [x] Both verbs' `--json` output carries `severity` with the same values.
+- [x] A consumer parsing the old key still works during the deprecation
   window.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green — 29/29, 22,237 tests, 0 failed, pyright
+  0 errors over 1,582 files, coverage 95.3%; `plan_qa` reports
+  `0 findings (0 block, 0 advise)`, a split that agrees with its own total.
+- [ ] The deprecated key is gone (Phase 2, after the release ships).
 
 ## Delivery & Milestones
 
