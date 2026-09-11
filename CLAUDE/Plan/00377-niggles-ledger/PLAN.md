@@ -197,6 +197,49 @@ authoritative rule:
   backfilled, per N1's precedent — the readings are wrong but the order is
   right, and the file is append-only.
 
+- [ ] ⬜ **N10: the agent-ledger "DBF guard" asserts a tautology, and four
+  shipped revisions went unledgered as a result.** Found while N6's drift
+  question surfaced a live CUSTOMISED warning against
+  `.claude/agents/hooks-daemon-docs-qa.md` — a file nobody had edited.
+
+  `ledger()` computes the CURRENT version's md5 from the bundled file:
+  `entries = {spec.version: content_md5(spec_source_path(spec).read_text())}`.
+  So `test_current_ledger_entry_matches_bundled_file` compares
+  `content_md5(file)` with `content_md5(file)` and cannot fail — while its
+  docstring claims "editing a bundled agent without bumping its version and
+  re-recording its md5 must fail loudly here, never ship silently". A test that
+  reads as a safety net and is a no-op is worse than an absent one, because it
+  is cited as coverage.
+
+  Consequence, measured across every shipped agent's git history
+  (`untracked/scratch/n10_ledger_audit.py`):
+
+  | template      | revision    | digest        | state        |
+  | ------------- | ----------- | ------------- | ------------ |
+  | docs-qa       | `129aee179` | `5185213319…` | NOT ledgered |
+  | opus-security | `86e4ab319` | `c300a7ed8e…` | NOT ledgered |
+  | dedupe-scout  | `06077503`  | `19551a26c2…` | NOT ledgered |
+  | dedupe-scout  | `daa73a3c`  | `0bff2001a0…` | NOT ledgered |
+
+  A deployment made from any of those is classified `CUSTOMISED`, which freezes
+  it: upgrades refuse to touch it for ever, and the refusal tells the reader
+  they hand-edited a file they never opened. This workspace is in exactly that
+  state — its docs-qa agent is the `129aee179` blob, deployed 2026-08-31, and
+  the accusation is false.
+
+  The fourth row is mine: commit `4ef11224` (N2) edited the dedupe-scout
+  template and never touched `agent_assets.py`, because nothing objected.
+
+  Not a count check either — `test_dedupe_agent_carries_historic_versions`
+  asserts `len(spec.historic_md5s) >= 5`, which stays true while revisions go
+  missing. Nothing asks the real question: is every revision this template has
+  ever had either current or ledgered?
+
+  **Graduating to its own plan** — three distinct defects (a tautological
+  guard, four unrepaired field states, no completeness check), a design
+  decision about where the current md5 is pinned, and a change to a public
+  dataclass. Too large for the ledger; see the plan filed for it.
+
 - [ ] ⬜ **N3: `upgrade.md` never mentions post-upgrade tasks.** The
   agent-facing upgrade procedure omits the step entirely, so the tasks are not
   read even by an agent following the procedure exactly. (Tracked in Plan 00376
