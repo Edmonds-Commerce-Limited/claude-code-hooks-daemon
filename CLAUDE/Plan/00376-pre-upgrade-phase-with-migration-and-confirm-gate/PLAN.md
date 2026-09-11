@@ -9,13 +9,30 @@
 
 ## Overview
 
-An upgrade currently tells the project what changed only AFTER it has changed
-it. There is no phase in which an agent learns what is about to happen, does
-the preliminary work the new version requires, and decides — or escalates —
-whether to proceed. This plan adds that phase.
+A pre-upgrade phase already exists — Plan 00062 built it — but it validates
+only the user's CONFIG, and the confirmation gate it added never fires for an
+agent. So an upgrade still tells a project what its SOURCE must change only
+after the change has landed, and no agent ever reaches a decision point. This
+plan extends that phase rather than inventing one.
 
-The absence is not a gap in documentation; the machinery is genuinely missing
-and what looks like a gate is inert. Three measured facts:
+**Prior art, and the reason this is an extension**: Plan 00062 ("Breaking
+Changes Lifecycle", Complete) delivered `install/upgrade_compatibility.py`
+(its Phase 4) and the "confirm you have read the breaking-change docs" gate
+(its goal 6). Its Non-Goal — "Automatic config migration (too risky — user
+confirmation required)" — is upheld here: detection and proposal, never silent
+rewriting.
+
+**The bootstrapping constraint does NOT apply, verified.** It is natural to
+assume pre-upgrade instructions cannot be read before install because they ship
+with the incoming version. That is false here: `scripts/upgrade.sh` Step 6
+("Land the daemon dir on the target version FIRST (before Layer 2)") checks out
+the target, and Step 8 then delegates to `$DAEMON_DIR/scripts/upgrade_version.sh`
+— the NEW version's script. The whole incoming tree, including its upgrade
+manifests, is readable before anything is deployed; the existing compat check
+already relies on this, reading the new `CHANGELOG.md` from `$DAEMON_DIR`.
+"Pre-upgrade" here means pre-DEPLOY, not pre-fetch.
+
+Three measured facts drive the remaining work:
 
 - **The one confirmation gate that exists is dead for agents.** Step 5a of
   `scripts/upgrade_version.sh:733-861` prints "REQUIRED READING" and asks
@@ -67,18 +84,17 @@ rather than only matching syntax.
 
 ## Tasks
 
-### Phase 1: Make the incoming version readable before install
+### Phase 1: Establish where the phase runs
 
-- [ ] ⬜ **Task 1.1**: Establish how the upgrade reads the INCOMING version's
-  manifests without installing it. This is the bootstrapping constraint that
-  post-upgrade tasks do not have, and the reason this surface does not already
-  exist. Options to evaluate: fetch the manifest at the target ref only; stage
-  the checkout to a temp path and read before deploying; publish manifests as a
-  separately-fetchable artefact.
-- [ ] ⬜ **Task 1.2**: Decide the split between Layer 1
-  (`scripts/upgrade.sh`) and Layer 2 (`scripts/upgrade_version.sh`), given that
-  Layer 1 currently checks out at `:550` before Layer 2 runs at all. The
-  pre-upgrade phase has to land before that checkout.
+- [ ] ⬜ **Task 1.1**: Site the phase alongside the existing compat check in
+  Layer 2 (`scripts/upgrade_version.sh`, around the pre-install checks at
+  `:511` and compat at `:536-603`), which is already after checkout and before
+  any deploy. No new fetch mechanism is required — see the Overview.
+- [ ] ⬜ **Task 1.2**: Characterise what "abort" must undo at that point. The
+  daemon dir is ALREADY on the target checkout (`upgrade.sh:550`) while nothing
+  has been deployed — so an abort is not free, and the plan must define whether
+  it restores the previous ref or documents the daemon dir as intentionally
+  moved.
 
 ### Phase 2: The `pre-upgrade-tasks/` surface
 
@@ -104,8 +120,9 @@ rather than only matching syntax.
   escalation trigger. Reuse the existing one-shot approval-marker mechanism
   (`utils/one_shot_approval`, as used by `approve-plan-close` and
   `approve-merge`) rather than inventing a second idiom.
-- [ ] ⬜ **Task 3.3**: An abort must leave the install untouched — verify no
-  partial state, since today's checkout happens first.
+- [ ] ⬜ **Task 3.3**: An abort must leave the install in a state the next run
+  can proceed from, per Task 1.2 — the checkout has already happened, so
+  "untouched" is not achievable without an explicit restore.
 
 ### Phase 4: Fix what the survey exposed
 
