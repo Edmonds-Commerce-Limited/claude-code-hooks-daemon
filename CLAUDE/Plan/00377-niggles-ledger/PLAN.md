@@ -271,7 +271,7 @@ authoritative rule:
   deployed docs-qa agent was restored (`9a4bb0c9`), since it was provably a
   stale shipped blob rather than a local edit.
 
-- [ ] ⬜ **N11: the post-upgrade task index listed a file that did not exist.**
+- [x] ✅ **N11: the post-upgrade task index listed a file that did not exist.**
   `UNRELEASED/post-upgrade-tasks/README.md` carried an index row for
   `01-drop-hooks-daemon-python-workaround.md` while the directory held only
   `README.md` — the task had been consumed by a release and the index was never
@@ -288,6 +288,17 @@ authoritative rule:
   Cheap to enforce — the index rows and the directory listing are both right
   there, so a check can compare them the way the plan README's own index checks
   already do.
+
+  **Fixed**: `post-upgrade-index-drift`, a new rule in
+  `scripts/qa/check_repo_hygiene.py` — which already owns rules over the
+  holding area, so no new surface was invented. It reports BOTH directions: a
+  row naming a file that is gone (the case observed), and a task on disk with
+  no row. The second is the worse half — work nobody is told to do — and a
+  check that only looked for dead rows would have missed it entirely.
+
+  Verified against a throwaway root carrying both shapes, so the rule was seen
+  reporting before being trusted. No release-bound consequence: the check
+  guards this repository's own release staging and ships nothing to a client.
 
 - [ ] ⬜ **N3: `upgrade.md` never mentions post-upgrade tasks.** The
   agent-facing upgrade procedure omits the step entirely, so the tasks are not

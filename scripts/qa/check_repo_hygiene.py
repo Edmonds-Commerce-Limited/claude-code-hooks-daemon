@@ -117,6 +117,7 @@ RULE_SRC_TEST_STUB: Final[str] = "src-test-stub"
 RULE_IGNORED_PLAN_DOC: Final[str] = "ignored-plan-document"
 RULE_ORPHANED_GUIDANCE: Final[str] = "orphaned-handler-guidance"
 RULE_UNRELEASED_MANIFEST_DATE: Final[str] = "unreleased-manifest-date"
+RULE_POST_UPGRADE_INDEX_DRIFT: Final[str] = "post-upgrade-index-drift"
 
 _ALL_RULES: Final[tuple[str, ...]] = (
     RULE_TRACKED_ARTIFACT,
@@ -126,7 +127,27 @@ _ALL_RULES: Final[tuple[str, ...]] = (
     RULE_IGNORED_PLAN_DOC,
     RULE_ORPHANED_GUIDANCE,
     RULE_UNRELEASED_MANIFEST_DATE,
+    RULE_POST_UPGRADE_INDEX_DRIFT,
 )
+
+# ── post-upgrade-index-drift ───────────────────────────────────────────────
+# The post-upgrade-tasks README carries an index of the tasks beside it, and
+# asks in its own prose to be "regenerated when adding/removing tasks". Nothing
+# enforced that, so the index drifted the moment it mattered: a row for
+# `01-drop-hooks-daemon-python-workaround.md` outlived the release that
+# consumed the task, leaving the directory holding only the README while the
+# index advertised work an upgrading agent was told to perform (Plan 00377
+# N11).
+#
+# Both directions are defects and neither is noisier than the other. A row with
+# no file sends an agent looking for instructions that do not exist; a file with
+# no row is work nobody is told to do, which is the failure the index exists to
+# prevent.
+_POST_UPGRADE_TASKS_DIR: Final[str] = "CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks"
+_TASKS_README: Final[str] = "README.md"
+_TASK_SUFFIX: Final[str] = ".md"
+#: Index rows name their file in a leading backticked cell: `| \`NN-slug.md\` | … |`.
+_TASK_ROW_PATTERN: Final[re.Pattern[str]] = re.compile(r"^\|\s*`([^`]+\.md)`\s*\|")
 
 # ── unreleased-manifest-date ───────────────────────────────────────────────
 # A config-changes manifest is drafted under UNRELEASED/ during a cycle, where
@@ -560,6 +581,52 @@ def _is_src_test_stub(rel_path: str) -> bool:
     return basename.startswith(_TEST_SCRIPT_PREFIX) and basename.endswith(_PYTHON_SUFFIX)
 
 
+_REMEDIATION_POST_UPGRADE_INDEX_DRIFT: Final[str] = (
+    "Bring the task index in "
+    f"{_POST_UPGRADE_TASKS_DIR}/{_TASKS_README} back into line with the files "
+    "beside it: add a row for each task that has none, and delete the row for "
+    "any task that is gone. The index is what an upgrading agent reads to "
+    "decide what work the release asks of it, so a row naming a file that does "
+    "not exist sends it hunting, and a file with no row is work nobody is told "
+    "to do."
+)
+
+
+def post_upgrade_index_drift(root: Path) -> tuple[tuple[str, str], ...]:
+    """Rows naming an absent task, and task files absent from the index.
+
+    Returns:
+        ``(path, message)`` pairs, empty when the index and the directory agree
+        (including when the directory holds no tasks at all).
+    """
+    tasks_dir = root / _POST_UPGRADE_TASKS_DIR
+    readme = tasks_dir / _TASKS_README
+    if not readme.is_file():
+        return ()
+
+    on_disk = {
+        entry.name
+        for entry in tasks_dir.iterdir()
+        if entry.is_file() and entry.suffix == _TASK_SUFFIX and entry.name != _TASKS_README
+    }
+    indexed = {
+        match.group(1)
+        for match in (
+            _TASK_ROW_PATTERN.match(line)
+            for line in readme.read_text(encoding="utf-8").splitlines()
+        )
+        if match is not None
+    }
+
+    rel_readme = f"{_POST_UPGRADE_TASKS_DIR}/{_TASKS_README}"
+    findings: list[tuple[str, str]] = []
+    for name in sorted(indexed - on_disk):
+        findings.append((rel_readme, f"index row names '{name}', which is not in the directory"))
+    for name in sorted(on_disk - indexed):
+        findings.append((rel_readme, f"task '{name}' is on disk but absent from the index"))
+    return tuple(findings)
+
+
 def orphaned_guidance_handlers(root: Path) -> tuple[str, ...]:
     """Handler names whose CLAUDE.md guidance has no handler module on disk.
 
@@ -725,6 +792,16 @@ def scan(root: Path) -> Report:
                 path=rel_path,
                 message="plan document silently ignored by .gitignore",
                 remediation=_REMEDIATION_IGNORED_PLAN_DOC,
+            )
+        )
+
+    for rule_path, message in post_upgrade_index_drift(root):
+        report.violations.append(
+            Violation(
+                rule=RULE_POST_UPGRADE_INDEX_DRIFT,
+                path=rule_path,
+                message=message,
+                remediation=_REMEDIATION_POST_UPGRADE_INDEX_DRIFT,
             )
         )
 

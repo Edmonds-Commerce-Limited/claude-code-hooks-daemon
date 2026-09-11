@@ -788,3 +788,68 @@ def test_non_manifest_files_in_the_live_directory_are_ignored(tmp_path: Path) ->
     exit_code, report = _run_checker(repo)
 
     assert exit_code == 0, f"a non-manifest file was flagged: {report['violations']}"
+
+
+_TASKS_DIR = "CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks"
+
+
+def _tasks_readme(*rows: str) -> str:
+    """A task index carrying ``rows``, in the real README's table shape."""
+    header = "# Post-Upgrade Tasks\n\n| File | Type |\n| --- | --- |\n"
+    return header + "".join(f"| `{row}` | audit |\n" for row in rows)
+
+
+def test_flags_an_index_row_naming_a_task_that_is_gone(tmp_path: Path) -> None:
+    """The real case: a row outlived the release that consumed its task.
+
+    An agent reading the index goes looking for instructions that no longer
+    exist, and the index is precisely what tells it what the release asks.
+    """
+    repo = _make_repo(
+        tmp_path,
+        {f"{_TASKS_DIR}/README.md": _tasks_readme("01-gone.md")},
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1, "a row naming an absent task must fail the gate"
+    assert "post-upgrade-index-drift" in _rules(report)
+
+
+def test_flags_a_task_absent_from_the_index(tmp_path: Path) -> None:
+    """The inverse is the worse half: work nobody is told to do."""
+    repo = _make_repo(
+        tmp_path,
+        {
+            f"{_TASKS_DIR}/README.md": _tasks_readme(),
+            f"{_TASKS_DIR}/02-unindexed.md": "# Task\n",
+        },
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1, "an unindexed task must fail the gate"
+    assert "post-upgrade-index-drift" in _rules(report)
+
+
+def test_an_index_agreeing_with_its_directory_is_clean(tmp_path: Path) -> None:
+    repo = _make_repo(
+        tmp_path,
+        {
+            f"{_TASKS_DIR}/README.md": _tasks_readme("01-real.md"),
+            f"{_TASKS_DIR}/01-real.md": "# Task\n",
+        },
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, f"a correct index was flagged: {report['violations']}"
+
+
+def test_an_empty_task_directory_is_clean(tmp_path: Path) -> None:
+    """Between releases the directory holds only its README, and that is fine."""
+    repo = _make_repo(tmp_path, {f"{_TASKS_DIR}/README.md": _tasks_readme()})
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, f"an empty task directory was flagged: {report['violations']}"
