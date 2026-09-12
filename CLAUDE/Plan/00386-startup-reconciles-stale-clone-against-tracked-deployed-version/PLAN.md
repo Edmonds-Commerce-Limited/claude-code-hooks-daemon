@@ -222,3 +222,8 @@ and does not re-propose it as an obvious missing feature.
 - **Issue #38 should be closed with the plan**, not before it: the reporter's
   point 3 (self-update) was deliberately NOT built, so the closing comment has
   to say so rather than imply the issue was implemented as filed.
+- A PROGRESS comment is already posted on #38 (`issuecomment-5649476544`)
+  covering what shipped, what was ruled out and why, and the two things found
+  that the reporter did not report. It exists so the reporter is not left
+  waiting on delivered work — the failure IssueSdlc.md check 5 records. Do not
+  repost it; the close still needs its own comment.
