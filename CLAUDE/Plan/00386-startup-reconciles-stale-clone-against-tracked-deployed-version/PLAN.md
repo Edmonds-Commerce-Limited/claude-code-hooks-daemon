@@ -135,16 +135,29 @@ They share the tracked-marker reader, which is why Task 2.1 stays here.
 
 ### Phase 2: Detect and report (independent of the ruling)
 
-- [ ] ⬜ **Task 2.1**: A reusable reader for the tracked deployed version, built
+- [x] ✅ **Task 2.1**: A reusable reader for the tracked deployed version, built
   on the existing `generated_doc_hand_edit` regex rather than a second parser —
   two parsers for one line is how they drift apart.
-- [ ] ⬜ **Task 2.2**: Startup compares clone version against it, and a mismatch
+  → `utils/deployed_version.py`; the docs-QA check now imports the pattern from
+  there, and a test pins the identity.
+- [x] ✅ **Task 2.2**: Startup compares clone version against it, and a mismatch
   produces a specific failure naming both versions and the exact command. Pinned
   by a test that asserts the message contains both versions, since a generic
   message is the defect.
-- [ ] ⬜ **Task 2.3**: `upgrade` takes `from_version` from the tracked marker
+  → `init.sh`. The check had to live in bash: the daemon cannot report its own
+  absence, and a clone stale enough to fail startup often cannot resolve a venv,
+  so nothing here may import the package. That forces a SECOND copy of the
+  marker pattern, held to the Python one by a test that feeds both the same
+  header line. Ordered BEFORE `_is_daemon_installed`, because that check needs a
+  resolved interpreter and the real field case would otherwise be misreported as
+  "not installed".
+- [x] ✅ **Task 2.3**: `upgrade` takes `from_version` from the tracked marker
   when it is present and newer than the clone, falling back to the clone
   otherwise. Covered both ways.
+  → The marker is now read first and unconditionally, not only on the
+  freshly-cloned branch (which the reported case never took). The preference is
+  one-directional, so it can only shrink a range a stale clone inflated. This is
+  the THIRD reader of the header; a parametrised test asserts all three agree.
 
 ### Phase 3: Self-update — CANCELLED by the Task 1.1 ruling
 
@@ -155,26 +168,39 @@ and does not re-propose it as an obvious missing feature.
 
 ### Phase 4: Outbound — the tracked assets must not drift from what is installed
 
-- [ ] ⬜ **Task 4.1**: When the installed version changes, the deployed TRACKED
+- [x] ✅ **Task 4.1**: When the installed version changes, the deployed TRACKED
   artefacts are regenerated and the resulting diff is SURFACED for commit. Not
   committed automatically: the same ruling applies, and a commit is a bigger
   side effect than a restart.
-- [ ] ⬜ **Task 4.2**: Silent when nothing drifted. An outbound check that
+  → Mostly already shipped: `generated-doc-hand-edit`'s SWEEP half already
+  detected a marker that had fallen behind the running daemon and named the
+  regenerate command — verified live before changing anything. The gap was that
+  it never said the result must be COMMITTED, which for a tracked artefact is
+  the load-bearing half: the committed copy is what the next install deploys
+  from. Trackedness is asked of git rather than inferred, so the extra sentence
+  is never shown to a project whose generated doc is gitignored.
+- [x] ✅ **Task 4.2**: Silent when nothing drifted. An outbound check that
   speaks on every operation is one that gets ignored, which is how the original
   `daemon_startup_failed` message failed the reporter.
+  → Needed no work: the sweep already skips a doc whose marker matches and one
+  with no marker at all, both pinned by pre-existing tests. Recorded as verified
+  rather than ticked on assumption.
 
 ## Success Criteria
 
-- [ ] A clone older than the tracked deployed version produces a failure naming
+- [x] A clone older than the tracked deployed version produces a failure naming
   both versions and the remedy — verified by driving the real startup path, not
-  only a unit test.
-- [ ] `upgrade` on a stale clone computes its range from the tracked marker.
-- [ ] No new tracked file format is introduced.
-- [ ] The outbound half is covered: an installed-version change surfaces the
+  only a unit test. A client-shaped fixture with a genuinely unresolvable venv,
+  run through a real generated forwarder, reproduced the reporter's exact
+  versions; the matching-version control still produced the pre-existing
+  diagnosis unchanged.
+- [x] `upgrade` on a stale clone computes its range from the tracked marker.
+- [x] No new tracked file format is introduced.
+- [x] The outbound half is covered: an installed-version change surfaces the
   regenerated tracked-asset diff, and says nothing when nothing drifted.
-- [ ] Nothing in this plan upgrades, restarts or commits on its own — the Task
+- [x] Nothing in this plan upgrades, restarts or commits on its own — the Task
   1.1 ruling is pinned by test, not just by prose.
-- [ ] Every release-bound consequence is in the pending-release holding area, or
+- [x] Every release-bound consequence is in the pending-release holding area, or
   the plan records why it has none.
 - [ ] Full QA passes and CI is green.
 
