@@ -44,12 +44,28 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.deployed_version import (
+    TRACKED_VERSION_DOC_REL_PATH,
+    read_tracked_deployed_version,
+)
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 from claude_code_hooks_daemon.utils.merge_scope import (
     changed_path_is_or_is_under,
     changed_paths,
     is_git_merge_pull_rebase_command,
 )
+
+
+def _running_version() -> str:
+    """The version of the daemon serving this hook.
+
+    Wrapped in a function rather than imported as a constant so a test can state
+    a version without reaching into module globals.
+    """
+    from claude_code_hooks_daemon.version import __version__
+
+    return __version__
+
 
 #: Handler-code locations whose change makes the running daemon stale. The
 #: CONFIG file is not listed here because it is resolved from
@@ -108,14 +124,52 @@ class DaemonSyncAfterMergeHandler(PostToolUseHandlerBase):
         if not changed:
             return BlockingResult(decision=Decision.ALLOW)
 
+        sections: list[str] = []
         hits = self._stale_making_paths(project_root, changed)
-        if not hits:
+        if hits:
+            sections.extend([self._what_changed(hits), self._remedy()])
+        sections.extend(self._version_section(project_root, changed))
+        if not sections:
             return BlockingResult(decision=Decision.ALLOW)
 
-        return BlockingResult(
-            decision=Decision.ALLOW,
-            context=[_HEADER, self._what_changed(hits), self._remedy()],
-        )
+        return BlockingResult(decision=Decision.ALLOW, context=[_HEADER, *sections])
+
+    def _version_section(self, project_root: Path, changed: frozenset[str]) -> list[str]:
+        """Report a daemon-VERSION mismatch this operation introduced.
+
+        Gated on the marker file actually being touched. The doc is regenerated
+        on every upgrade, so "the file changed" is not "the version changed" --
+        conflating them would advise upgrading to the version already installed.
+        A version difference this operation did NOT introduce belongs to the
+        startup check (Plan 00386), not here.
+        """
+        if not changed_path_is_or_is_under(TRACKED_VERSION_DOC_REL_PATH, changed):
+            return []
+        tracked = read_tracked_deployed_version(project_root)
+        if tracked is None:
+            return []
+        running = _running_version()
+        if tracked == running:
+            return []
+
+        from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+
+        return [
+            f"DAEMON VERSION MISMATCH: this project's TRACKED assets were "
+            f"deployed from v{tracked}, but the daemon running here is "
+            f"v{running}. `.claude/hooks-daemon/` is gitignored, so the clone is "
+            f"per-checkout and a pull cannot update it.",
+            "Bring the clone up to the tracked version: "
+            + daemon_cli_command("upgrade")
+            + f" (the tracked marker says v{tracked} -- prefer it over the "
+            "clone's own version when choosing an upgrade range, or the "
+            "truth-changes and config-migration output covers a span already "
+            "reconciled in this repository).",
+            "Then close the loop the other way: the upgrade regenerates TRACKED "
+            "artefacts, so re-check `git status` and commit that diff. Left "
+            "uncommitted, the repository keeps describing a daemon it no longer "
+            "has. Nothing here is upgraded, regenerated or committed for you.",
+        ]
 
     def _stale_making_paths(self, project_root: Path, changed: frozenset[str]) -> list[str]:
         """Watched locations this operation actually touched, in report order."""
@@ -194,9 +248,24 @@ class DaemonSyncAfterMergeHandler(PostToolUseHandlerBase):
             "and a self-restart would drop the in-flight response. **Act on it — "
             "a config you pulled is not in force until you restart.**\n"
             "\n"
+            "It also reports a daemon-VERSION mismatch. `.claude/hooks-daemon/` "
+            "is gitignored, so the clone is per-checkout and a pull CANNOT update "
+            "it — a pull that moves the tracked assets to a newer version leaves "
+            "the clone behind, and a large enough gap makes the daemon refuse to "
+            "start with every safety handler inactive. The version the tracked "
+            "assets came from is read from `.claude/HOOKS-DAEMON.md`'s generated "
+            "header; both versions are named so the upgrade range is honest.\n"
+            "\n"
+            "That mismatch runs BOTH ways, so the advisory asks for two things: "
+            "upgrade the clone, then commit the tracked artefacts the upgrade "
+            "regenerates. Skip the second and the repository keeps describing a "
+            "daemon it no longer has.\n"
+            "\n"
             "Scope is `ORIG_HEAD..HEAD`, so it reports only what THIS operation "
-            "introduced and is silent otherwise — which is the usual outcome. A "
-            "pull performed in a DIFFERENT terminal is not seen at all.\n"
+            "introduced and is silent otherwise — which is the usual outcome. The "
+            "marker doc is regenerated on every upgrade, so a changed marker with "
+            "an unchanged version says nothing. A pull performed in a DIFFERENT "
+            "terminal is not seen at all.\n"
             "\n"
             "`options.watch_paths` lists the handler-code locations to watch "
             "(default `.claude/project-handlers`). The config file itself is "

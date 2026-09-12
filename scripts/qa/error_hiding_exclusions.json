@@ -3,6 +3,12 @@
   "description": "Intentional error-handling patterns exempt from the error-hiding audit. Prefer 'function' over 'lines': line numbers shift whenever anything above them is edited, function names do not. 'lines' remains necessary for module-level sites and shell scripts, where there is no enclosing function to key on. Each entry documents WHY the pattern is appropriate. Entries are themselves audited: an exclusion matching NO finding is reported as a 'stale-exclusion' violation, because it means either the entry drifted off its target (realign it) or the code was fixed (delete it) — and a drifted entry silently exempts an innocent site while the real finding resurfaces elsewhere looking new.",
   "exclusions": [
     {
+      "file": "utils/deployed_version.py",
+      "function": "read_tracked_deployed_version",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00389: same tolerant-read contract as utils/blockage_marker.py::read_marker directly analogous to it. A project that has never run generate-docs, one whose generated doc predates the version header, and one whose doc is unreadable are all NORMAL states, and all mean the same single thing to every caller: there is nothing to compare the running version against, so say nothing. The consumer is daemon_sync_after_merge, a PostToolUse advisory -- raising would propagate out of a hook and risk failing the user's tool call over a missing optional marker, which is a strictly worse outcome than the silence. The file-absent case is tested for before the read (is_file), so the caught OSError/UnicodeDecodeError band is genuinely the unreadable-or-undecodable one, logged at debug and covered by test_undecodable_bytes_are_none_not_an_error."
+    },
+    {
       "file": "daemon/controller.py",
       "function": "_sync_agent_assets",
       "rule": "log-and-continue",

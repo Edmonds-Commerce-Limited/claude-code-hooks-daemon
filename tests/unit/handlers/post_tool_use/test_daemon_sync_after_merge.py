@@ -119,6 +119,63 @@ class TestSilence:
         assert not result.context
 
 
+_TRACKED_VERSION_TARGET = (
+    "claude_code_hooks_daemon.handlers.post_tool_use."
+    "daemon_sync_after_merge.read_tracked_deployed_version"
+)
+_RUNNING_VERSION_TARGET = (
+    "claude_code_hooks_daemon.handlers.post_tool_use.daemon_sync_after_merge._running_version"
+)
+_MARKER_DOC = ".claude/HOOKS-DAEMON.md"
+
+
+def _handle_versions(changed: set[str], tracked: str | None, running: str) -> Any:
+    with (
+        patch(_PROJECT_ROOT_TARGET, return_value=_ROOT),
+        patch(_CONFIG_PATH_TARGET, return_value=_CONFIG),
+        patch(_CHANGED_PATHS_TARGET, return_value=frozenset(changed)),
+        patch(_TRACKED_VERSION_TARGET, return_value=tracked),
+        patch(_RUNNING_VERSION_TARGET, return_value=running),
+    ):
+        return _handler().handle(_pull())
+
+
+class TestVersionDriftInbound:
+    def test_a_newer_tracked_version_advises_an_upgrade_naming_both(self) -> None:
+        result = _handle_versions({_MARKER_DOC}, tracked="3.63.0", running="3.15.1")
+        context = "\n".join(result.context or [])
+        assert "3.63.0" in context and "3.15.1" in context, "both versions must be named"
+        assert "upgrade" in context.lower()
+
+    def test_an_identical_version_is_silent(self) -> None:
+        """The marker file is REGENERATED on every upgrade, so 'the file changed'
+        is not 'the version changed' -- conflating them would advise an upgrade
+        to the version already installed."""
+        result = _handle_versions({_MARKER_DOC}, tracked="3.63.0", running="3.63.0")
+        assert not result.context
+
+    def test_silent_when_the_marker_file_was_not_touched(self) -> None:
+        """A version difference that this operation did not introduce belongs to
+        the startup check, not here."""
+        result = _handle_versions({"README.md"}, tracked="3.63.0", running="3.15.1")
+        assert not result.context
+
+    def test_silent_when_no_tracked_marker_exists(self) -> None:
+        """A project that never generated the doc is a normal state."""
+        result = _handle_versions({_MARKER_DOC}, tracked=None, running="3.15.1")
+        assert not result.context
+
+
+class TestVersionDriftOutbound:
+    def test_a_version_change_also_asks_for_the_tracked_assets_to_be_updated(self) -> None:
+        """Both directions: once the installed version moves, the deployed
+        TRACKED artefacts describe a daemon that is no longer there."""
+        result = _handle_versions({_MARKER_DOC}, tracked="3.63.0", running="3.15.1")
+        context = "\n".join(result.context or []).lower()
+        assert "commit" in context
+        assert "regenerate" in context or "regenerated" in context
+
+
 class TestNeverActsOnItsOwn:
     def test_the_advisory_does_not_run_any_command(self) -> None:
         """Pins the owner's ruling by test rather than by prose: this handler

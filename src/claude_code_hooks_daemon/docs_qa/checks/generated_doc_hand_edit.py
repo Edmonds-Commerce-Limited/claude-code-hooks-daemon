@@ -57,20 +57,19 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
+from claude_code_hooks_daemon.utils.deployed_version import VERSION_MARKER_RE
 from claude_code_hooks_daemon.version import __version__ as _DAEMON_VERSION
 
 logger = logging.getLogger(__name__)
 
 CHECK_ID: Final[str] = "generated-doc-hand-edit"
 
-# Mirrors the exact header docs_generator.py._render_header() emits:
-# "> Generated on {today} (v{__version__}) by `generate-docs`. ...". Kept
-# narrow on purpose — this is the ONE marker shape this slice recognises;
-# any other generated doc (or a differently-worded header) is skipped
-# silently rather than guessed at.
-_VERSION_MARKER_RE: Final[re.Pattern[str]] = re.compile(
-    r"> Generated on \d{4}-\d{2}-\d{2} \(v(\d+\.\d+\.\d+)\) by"
-)
+# The marker pattern now lives in utils/deployed_version.py, because the
+# post-merge daemon-sync advisory reads the same header to learn which version
+# the project's TRACKED assets were deployed from (Plan 00386 Task 2.1). Aliased
+# rather than re-declared: one line, one parser. A test pins the identity, so
+# re-introducing a local copy fails loudly instead of drifting.
+_VERSION_MARKER_RE: Final[re.Pattern[str]] = VERSION_MARKER_RE
 
 
 def matched_manifest_entry(
