@@ -2684,3 +2684,79 @@ class TestNestedDependencyTreesAndDeclaredProjectsAtAnyDepth:
         assert "projects:" in verbose.reason
         assert terse.reason is not None
         assert "projects:" in terse.reason
+
+
+class TestMarkerStrippingPrefersTheEarliestMarkerInThePath:
+    """Plan 00390 N1 — a nested marker must not beat one at the path's root.
+
+    `normalize_path` strips everything before a "project marker" so an absolute
+    path classifies like a project-relative one. It iterated the MARKER LIST and
+    stopped at the first name it found anywhere in the path, so which marker won
+    was decided by list order rather than by position. `.claude/` is listed
+    before `untracked/`, so any path with a `.claude/` segment ANYWHERE was
+    re-rooted onto it — and `untracked/scratch/fixture/.claude/NOTE.md`, a file
+    plainly inside the allowed `untracked/` tree, was judged as `.claude/NOTE.md`
+    and denied.
+
+    That is a defect rather than a policy, and the function's own docstring is
+    what settles it: it says "find first OCCURRENCE of project markers", which is
+    positional. The implementation was ordinal.
+
+    It bites hardest in this repository, whose realistic fixtures ARE client
+    installs and so must contain a `.claude/` directory — while `untracked/` is
+    gitignored scratch where nothing written can rot anything.
+    """
+
+    @pytest.fixture
+    def handler(self) -> MarkdownOrganizationHandler:
+        return MarkdownOrganizationHandler()
+
+    def _write(self, path: str) -> dict[str, Any]:
+        return {"tool_name": "Write", "tool_input": {"file_path": path, "content": "# x"}}
+
+    def test_a_nested_claude_dir_does_not_re_root_an_untracked_path(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert (
+            handler.normalize_path("untracked/scratch/fixture/.claude/NOTE.md")
+            == "untracked/scratch/fixture/.claude/NOTE.md"
+        )
+
+    def test_such_a_write_is_allowed(self, handler: MarkdownOrganizationHandler) -> None:
+        """The behaviour the normalisation exists to produce."""
+        assert handler.matches(self._write("untracked/scratch/fixture/.claude/NOTE.md")) is False
+
+    def test_a_client_shaped_fixture_tree_is_allowed_throughout(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Every filename a real client install carries, in the tree this
+        repository builds its fixtures in."""
+        for name in ("HOOKS-DAEMON.md", "CLAUDE.md", "settings.md", "hooks-daemon.md"):
+            path = f"untracked/scratch/e2e/project/.claude/{name}"
+            assert handler.matches(self._write(path)) is False, path
+
+    def test_a_marker_at_the_path_root_still_wins_when_listed_last(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """`untracked/` is last in the marker list and `src/` is second; with
+        ordinal matching the nested `src/` won."""
+        assert (
+            handler.normalize_path("untracked/scratch/thing/src/notes.md")
+            == "untracked/scratch/thing/src/notes.md"
+        )
+
+    def test_a_genuinely_nested_marker_is_still_stripped(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """The control. Stripping is the whole point of this function — a path
+        with NO marker at its root must still be re-rooted onto the one it has,
+        or vendored documentation stops classifying."""
+        assert handler.normalize_path("vendor/org/pkg/docs/guide.md") == "docs/guide.md"
+
+    def test_a_claude_dir_at_the_path_root_is_judged_as_before(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Unchanged: this is the case the `.claude/` marker exists for, and
+        `.claude/NOTE.md` is not an allowed location."""
+        assert handler.normalize_path(".claude/NOTE.md") == ".claude/NOTE.md"
+        assert handler.matches(self._write(".claude/NOTE.md")) is True

@@ -322,17 +322,31 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             "eslint-rules/",
             "untracked/",
         ]
-        for marker in project_markers:
-            # The marker must start a PATH SEGMENT: at position 0, or straight
-            # after a "/". A bare substring search collapses any directory
-            # whose name merely ends with a marker into it -- "remote-docs/"
-            # became "docs/", classifying a separate top-level tree as the
-            # human docs tree (Plan 00326).
-            idx = self._segment_aligned_index(normalized, marker)
-            if idx is not None:
-                if idx > 0:
-                    normalized = normalized[idx:]
-                break
+        # The EARLIEST marker in the path wins, not the first in this list.
+        # Iterating the list and stopping at the first name found anywhere let
+        # LIST ORDER decide the root: `.claude/` is listed before `untracked/`,
+        # so `untracked/scratch/fixture/.claude/NOTE.md` -- plainly inside the
+        # allowed `untracked/` tree -- was re-rooted to `.claude/NOTE.md` and
+        # denied (Plan 00390 N1). Position is the only defensible tiebreak: a
+        # marker at the start of the path IS the project-relative root, and
+        # nothing nested under it can be a better one.
+        #
+        # The marker must also start a PATH SEGMENT: at position 0, or straight
+        # after a "/". A bare substring search collapses any directory whose
+        # name merely ends with a marker into it -- "remote-docs/" became
+        # "docs/", classifying a separate top-level tree as the human docs tree
+        # (Plan 00326).
+        indices = [
+            idx
+            for idx in (
+                self._segment_aligned_index(normalized, marker) for marker in project_markers
+            )
+            if idx is not None
+        ]
+        if indices:
+            earliest = min(indices)
+            if earliest > 0:
+                normalized = normalized[earliest:]
 
         return normalized
 
