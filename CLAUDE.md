@@ -238,6 +238,8 @@ Creating a production source file with `Write` is blocked until a corresponding 
 - Collocated: `{source_dir}/{module}.test.ts` (JS/TS projects)
 - Test subdirectory: `{source_dir}/__tests__/{module}.test.ts`
 
+**The separate-directory forms are searched in BOTH casings** — `tests/` and `Tests/`. On a case-sensitive filesystem those are different directories, and the uppercase form is the PHP/PSR-4 convention, so do NOT rename a project's `Tests/` to satisfy this gate. Only INFERRED locations get both casings; a directory you DECLARE (below) is searched exactly as you wrote it.
+
 **The deny message lists every location it searched.** If your project's real test directory is not in that list, no amount of retrying will satisfy the gate — the project needs to DECLARE the directory (below), not move the test.
 
 **A layout the resolvers cannot infer is declarable** via `handlers.pre_tool_use.tdd_enforcement.options.test_path_map` — a list of `{source_glob, test_dir, mirror?}` entries. `test_dir` is repository-root-relative (an absolute path is rejected). By default it is FLAT: the test filename is placed directly in it. With `mirror: true` the source's directory path after the glob's literal root (`src` for `src/**`) is reproduced under it, which is how a nested size-suite layout (`tests/Small/<mirror>`, `tests/Large/<mirror>`) is declared. Every declared root is searched and listed. This keeps enforcement ON and is the preferred fix, because a test that exists is worth more than an exemption:
