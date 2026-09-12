@@ -93,42 +93,53 @@ plan consumes it.
 
 ### Phase 1: Share the trigger, then advise on config drift
 
-- [ ] ⬜ **Task 1.1**: Extract the merge/pull/rebase detection and the
+- [x] ✅ **Task 1.1**: Extract the merge/pull/rebase detection and the
   `ORIG_HEAD..HEAD` changed-path query out of `merge_qa_report` into a shared
   helper, with `merge_qa_report` re-pointed at it and its tests still passing
   unchanged. Behaviour-preserving refactor first, new behaviour second.
-- [ ] ⬜ **Task 1.2**: A new advisory handler matching the same operations,
+  → `utils/merge_scope.py`; `merge_qa_report`'s 29 tests passed unchanged, and
+  15 new tests pin the boundaries the old ones left implicit (`git pullimaginary`
+  is not `git pull`; `project-handlers-old/` is not under `project-handlers`).
+- [x] ✅ **Task 1.2**: A new advisory handler matching the same operations,
   reporting when the changed paths include the daemon config or handler code.
   Must name WHICH paths changed — an advisory that says "config changed"
   without saying what is one a reader cannot act on.
-- [ ] ⬜ **Task 1.3**: Silent when nothing relevant changed, pinned by test.
+  → `handlers/post_tool_use/daemon_sync_after_merge.py`, priority 35.
+- [x] ✅ **Task 1.3**: Silent when nothing relevant changed, pinned by test.
   This handler runs on every pull, so the quiet path is the common one.
 
 ### Phase 2: Version drift, inbound
 
-- [ ] ⬜ **Task 2.1**: Consume Plan 00386's tracked-version reader; if the pull
+- [x] ✅ **Task 2.1**: Consume Plan 00386's tracked-version reader; if the pull
   changed the marker and the tracked version differs from the running one,
   advise with BOTH versions and the upgrade command.
-- [ ] ⬜ **Task 2.2**: Do not confuse "marker file changed" with "version
+  → `utils/deployed_version.py`. The pattern was already in
+  `docs_qa/checks/generated_doc_hand_edit.py`; it MOVED there rather than being
+  copied, and a test pins the identity so a re-introduced local copy fails loudly.
+- [x] ✅ **Task 2.2**: Do not confuse "marker file changed" with "version
   changed" — a regenerated marker whose version is identical must stay silent.
+  The marker is rewritten on every upgrade, so the file changing is the common
+  case and conflating the two would advise upgrading to the installed version.
 
 ### Phase 3: Version drift, outbound
 
-- [ ] ⬜ **Task 3.1**: When the installed version changes, surface the
+- [x] ✅ **Task 3.1**: When the installed version changes, surface the
   regenerated tracked-artefact diff for commit, so the repository does not keep
-  describing a daemon it no longer has.
+  describing a daemon it no longer has. Carried by the version section's closing
+  line rather than a separate advisory: the two directions are one story to the
+  reader, and splitting them would produce two messages about one pull.
 
 ## Success Criteria
 
-- [ ] A pull changing `.claude/hooks-daemon.yaml` advises a restart and names the
+- [x] A pull changing `.claude/hooks-daemon.yaml` advises a restart and names the
   file; a pull changing nothing relevant says nothing.
-- [ ] A pull changing the tracked version marker to a different version advises
+- [x] A pull changing the tracked version marker to a different version advises
   an upgrade naming both versions; an identical version stays silent.
-- [ ] Nothing restarts, upgrades or commits automatically — pinned by test, not
-  prose.
-- [ ] `merge_qa_report`'s existing tests pass unchanged after the extraction,
+- [x] Nothing restarts, upgrades or commits automatically — pinned by test, not
+  prose (`TestNeverActsOnItsOwn` asserts `subprocess.run` is never called).
+- [x] `merge_qa_report`'s existing tests pass unchanged after the extraction,
   proving the refactor was behaviour-preserving.
-- [ ] Every release-bound consequence is in the pending-release holding area.
+- [x] Every release-bound consequence is in the pending-release holding area.
 - [ ] Full QA passes and CI is green.
 
 ## Delivery & Milestones

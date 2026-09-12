@@ -152,6 +152,46 @@ config_changes:
       migration_note: >-
         On by default; no action needed to adopt. Disable with
         handlers.post_tool_use.merge_qa_report.enabled: false.
+    - key: handlers.post_tool_use.daemon_sync_after_merge
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PostToolUse advisory handler (Plan 00389), ships enabled at
+        priority 35, ADVISORY / NON_TERMINAL / GIT tagged. The daemon reads
+        its config once at startup and imports every handler module once at
+        `initialise()` -- it never hot-reloads. So a `git pull` that brings
+        in someone else's `hooks-daemon.yaml` or project-handler code leaves
+        the project believing it is protected by a config that is committed
+        but not loaded, and nothing said so. The same pull can also move the
+        daemon VERSION recorded in the tracked `.claude/HOOKS-DAEMON.md`
+        marker while the gitignored `.claude/hooks-daemon/` clone stays put;
+        the first symptom of that is the daemon refusing to start, with every
+        safety handler inactive. This handler shares
+        `merge_qa_report`'s trigger (`git merge|pull|rebase`, attributed via
+        `git diff --name-only ORIG_HEAD HEAD`), so it reports only what THIS
+        operation introduced. It ADVISES and never acts -- it names the exact
+        restart or upgrade command and both version numbers, and runs
+        nothing itself, because the daemon serves this hook in-process and a
+        self-restart would kill the process still owing a response. Silent
+        when the operation touched nothing the daemon cares about, which is
+        the common case.
+      example_yaml: |
+        handlers:
+          post_tool_use:
+            daemon_sync_after_merge:
+              enabled: true
+              priority: 35
+              options:
+                watch_paths:
+                  - ".claude/project-handlers"
+      migration_note: >-
+        On by default; no action needed to adopt. SET `options.watch_paths`
+        if your project overrides `project_handlers.path` -- that value is
+        not injected here, so the default would watch the wrong directory
+        and a pull changing your handler code would go unreported. The
+        config file itself is always watched and is resolved from the
+        running daemon, so it needs no entry. Disable with
+        handlers.post_tool_use.daemon_sync_after_merge.enabled: false.
   renamed: []
   removed:
     - key: handlers.pre_tool_use.daemon_restart_verifier

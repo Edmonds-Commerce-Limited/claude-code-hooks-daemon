@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-09-11 (v3.63.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-09-12 (v3.63.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
@@ -68,7 +68,7 @@
 | 58 | flaggable_work_advisor | ADVISORY | Advise delegating safeguard-flaggable work BEFORE opening the content |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
 
-### PostToolUse (11 handlers)
+### PostToolUse (12 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -83,8 +83,9 @@
 | 32 | budget_exhaustion_detector | ADVISORY | Advisory PostToolUse handler that flags budget/quota-exhaustion messaging |
 | 33 | model_downgrade_recorder | ADVISORY | Publish Claude Code's own automatic model-downgrade record, silently |
 | 34 | merge_qa_report | ADVISORY | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced |
+| 35 | daemon_sync_after_merge | ADVISORY | Advise a restart when a merge/pull/rebase changed daemon config or handlers |
 
-### SessionStart (23 handlers)
+### SessionStart (24 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -111,6 +112,7 @@
 | 67 | config_optimisation_reminder | ADVISORY | Remind the agent when the config-optimisation review is stale |
 | 68 | remote_docs_staleness | ADVISORY | Report vendored documents that are stale or no longer parse |
 | 69 | lsp_noise_checker | ADVISORY | Advise when a project's LSP config lets noise into the diagnostics stream |
+| 70 | persistent_cron_assertor | NON-TERMINAL | State the project's declared crons and instruct a CronList reconcile |
 
 ### PreCompact (2 handlers)
 
