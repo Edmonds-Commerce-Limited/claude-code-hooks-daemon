@@ -1,6 +1,7 @@
 # Plan 00365: markdown_organization — a declared project at any depth, nested vendor trees, existing-file edits
 
 **Status**: Complete
+**GitHub Issue**: #36
 **Created**: 2026-09-09
 **Owner**: joseph
 **Priority**: High
@@ -102,5 +103,8 @@ an earlier allowed write), and editing it moves nothing.
 
 ## Delivery & Milestones
 
-- Filed from the field report the day after v3.63.0 shipped.
+- Filed from the field report the day after v3.63.0 shipped — the field report
+  is GitHub issue #36, recorded here retrospectively (Plan 00385 N2). Omitting
+  the number is why the issue stayed open for three days after the fix landed.
 - Fix at `a8111e72`; merged to main at `84c623ae`.
+- Issue #36 commented and closed once the fix was re-verified against `main`.

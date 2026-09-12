@@ -67,6 +67,38 @@ with a pointer rather than grown here.
   file is not a shipped artefact — nothing under `src/` references it, and the
   daemon restart left the edit intact rather than regenerating over it.
 
+- [x] ✅ **N2**: A plan opened FROM a GitHub issue did not record the issue
+  number, so the issue stayed open for three days after being fixed and the
+  reporter was never told.
+  `CLAUDE/Plan/CLAUDE.md` requires `**GitHub Issue**: #N` in the header of any
+  plan that originates from an issue, and requires commenting and closing it on
+  completion. Plan 00365's Delivery section says only "Filed from the field
+  report the day after v3.63.0 shipped" — no number.
+  The evidence is exact: issue #36 was filed at `2026-09-09T16:25:38Z`, the fix
+  landed in `a8111e72` at `2026-09-09T16:43:34+00:00`, and the plan was archived
+  at `17:02:27` the same day. Eighteen minutes from report to fix, then three
+  days of silence, because the one field that closes the loop was never filled
+  in. Found while triaging #36 under the issue-SDLC loop, which re-derived from
+  scratch what the plan already knew.
+  Nothing enforces the convention — it is prose in a directory `CLAUDE.md`, and
+  a plan citing "a field report" in prose reads as compliant.
+  **Fixed on both halves, and the systemic half needed no new guard.** The
+  record is corrected: Plan 00365 now carries `**GitHub Issue**: #36` and says
+  in its Delivery section why the omission mattered (an archived plan was edited
+  deliberately, which `archive-immutability` advises on rather than forbids).
+  Issue #36 is commented and closed.
+  A plan-header lint was considered and deliberately NOT built. The systemic
+  risk — a fixed issue sitting open because a plan forgot to name it — is
+  already covered by the hourly issue-SDLC loop from Plan 00384, which re-triages
+  every open issue against current `main`. That is not a theory: the loop is
+  exactly what found this one, three days later, by re-deriving from scratch
+  what Plan 00365 already knew. A heuristic guard on plan prose would be noisier
+  and would still only fire at plan-write time, whereas the loop catches the
+  case no matter how the issue was orphaned. The same sweep closed #27 and #28
+  for the same reason.
+  No release-bound consequence: nothing shipped changed. The only edits are a
+  plan record and three GitHub issue closures.
+
 ## Success Criteria
 
 - [ ] Every entry above is fixed, or graduated to a named plan with a pointer
