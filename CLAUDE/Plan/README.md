@@ -6,7 +6,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00388: failsafe marker wiped by other crons in multi cron sessions](00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md) - Not Started (`[awaiting-human]` never suppresses a tick in a session with more than one cron — any non-failsafe tick reads as "the owner is back" and clears the marker and cadence; reproduced against the real handler, blocked on an owner ruling between three approaches)
 
-- [00386: startup reconciles stale clone against tracked deployed version](00386-startup-reconciles-stale-clone-against-tracked-deployed-version/PLAN.md) - Not Started (GitHub #38: a stale gitignored clone met newer tracked assets and every safety handler was inactive for a whole session under `--dangerously-skip-permissions`; blocked on an owner ruling — self-update the clone, or detect and fail loudly only)
+- [00386: startup reconciles stale clone against tracked deployed version](00386-startup-reconciles-stale-clone-against-tracked-deployed-version/PLAN.md) - In Progress (GitHub #38: a stale gitignored clone met newer tracked assets and every safety handler was inactive for a whole session under `--dangerously-skip-permissions`; owner ruled detect-and-advise, never self-update, and widened it to reconcile in both directions)
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 

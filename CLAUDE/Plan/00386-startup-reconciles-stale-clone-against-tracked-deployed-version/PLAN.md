@@ -1,6 +1,6 @@
 # Plan 00386: startup reconciles stale clone against tracked deployed version
 
-**Status**: Not Started
+**Status**: In Progress
 **GitHub Issue**: #38
 **Created**: 2026-09-12
 **Owner**: joseph
@@ -83,6 +83,25 @@ taken by the triage loop:
 
 **Decision needed**: ship the loud-failure subset only, or also the self-update.
 
+### RULED — detect and advise, never self-update
+
+The owner ruled directly: **advise loudly and name the exact command; do not
+auto-upgrade or auto-restart.** So the self-update in the issue's point 3 is out
+of scope, and points 1, 2, 4 and 5 — a tracked marker, the comparison, a specific
+failure naming both versions, and an honest `from_version` — are the whole plan.
+
+The owner also widened the scope in the same breath: reconciliation must run in
+**both directions**. Inbound, the stale clone is brought up to the version the
+tracked assets declare. Outbound, once the installed version changes, the
+deployed TRACKED artefacts go stale and their regenerated diff must be surfaced
+for commit rather than left drifting. The outbound half is what stops a repo
+whose committed assets no longer describe the daemon actually installed.
+
+A second trigger arrived with the ruling and is tracked separately in Plan 00389:
+a `git pull` is the moment this mismatch is CREATED, so it is the cheapest place
+to catch it. This plan keeps the startup detection; 00389 adds the post-pull one.
+They share the tracked-marker reader, which is why Task 2.1 stays here.
+
 ## Goals
 
 - Startup compares the clone's version against the version the project's tracked
@@ -98,15 +117,21 @@ taken by the triage loop:
 - Changing what `version_check` does. Comparing against the latest GitHub release
   is a different, legitimate question — this plan adds a second comparison rather
   than repurposing the first.
-- Self-updating the clone, unless the owner rules for it above.
+- Self-updating the clone, or self-restarting the daemon. Ruled out by the owner
+  in Task 1.1, not merely unscoped.
+- Committing the regenerated tracked artefacts automatically. Phase 4 surfaces
+  the diff; a human commits it.
+- The post-pull trigger, which is Plan 00389. This plan owns the startup
+  trigger and the shared tracked-marker reader.
 
 ## Tasks
 
 ### Phase 1: Owner decision
 
-- [ ] ⬜ **Task 1.1**: Owner rules on self-update vs loud-failure-only. Nothing
-  below is started until this is answered, because it decides whether Phase 3
-  exists at all.
+- [x] ✅ **Task 1.1**: RULED by the owner — detect and advise loudly naming the
+  exact command; never auto-upgrade and never auto-restart. Phase 3 is therefore
+  cancelled rather than scoped, and reconciliation runs in both directions (see
+  the ruling above).
 
 ### Phase 2: Detect and report (independent of the ruling)
 
@@ -121,10 +146,22 @@ taken by the triage loop:
   when it is present and newer than the clone, falling back to the clone
   otherwise. Covered both ways.
 
-### Phase 3: Self-update — ONLY if the owner rules for it
+### Phase 3: Self-update — CANCELLED by the Task 1.1 ruling
 
-- [ ] ⬜ **Task 3.1**: Scope to be written after Task 1.1. Left deliberately
-  empty rather than speculatively designed.
+Not deferred, cancelled. The owner ruled against a daemon that upgrades or
+restarts itself, so there is nothing here to scope later. Left visible rather
+than deleted so a future reader sees the option was considered and rejected,
+and does not re-propose it as an obvious missing feature.
+
+### Phase 4: Outbound — the tracked assets must not drift from what is installed
+
+- [ ] ⬜ **Task 4.1**: When the installed version changes, the deployed TRACKED
+  artefacts are regenerated and the resulting diff is SURFACED for commit. Not
+  committed automatically: the same ruling applies, and a commit is a bigger
+  side effect than a restart.
+- [ ] ⬜ **Task 4.2**: Silent when nothing drifted. An outbound check that
+  speaks on every operation is one that gets ignored, which is how the original
+  `daemon_startup_failed` message failed the reporter.
 
 ## Success Criteria
 
@@ -133,6 +170,10 @@ taken by the triage loop:
   only a unit test.
 - [ ] `upgrade` on a stale clone computes its range from the tracked marker.
 - [ ] No new tracked file format is introduced.
+- [ ] The outbound half is covered: an installed-version change surfaces the
+  regenerated tracked-asset diff, and says nothing when nothing drifted.
+- [ ] Nothing in this plan upgrades, restarts or commits on its own — the Task
+  1.1 ruling is pinned by test, not just by prose.
 - [ ] Every release-bound consequence is in the pending-release holding area, or
   the plan records why it has none.
 - [ ] Full QA passes and CI is green.
