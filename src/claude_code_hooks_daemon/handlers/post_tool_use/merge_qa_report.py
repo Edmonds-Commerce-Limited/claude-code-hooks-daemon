@@ -38,7 +38,6 @@ project-relative.
 
 from __future__ import annotations
 
-import re
 from datetime import date
 from pathlib import Path
 from typing import Any, Final
@@ -67,24 +66,16 @@ from claude_code_hooks_daemon.plan_qa.runner import run_stage as run_plan_stage
 from claude_code_hooks_daemon.plan_qa.types import Finding as PlanFinding
 from claude_code_hooks_daemon.plan_qa.types import Stage as PlanStage
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
-from claude_code_hooks_daemon.utils.command_evasion import (
-    ENV_PREFIX,
-    GIT_INVOCATION,
-    normalise_line_continuations,
+from claude_code_hooks_daemon.utils.git_repo import GitRepo
+from claude_code_hooks_daemon.utils.merge_scope import (
+    changed_path_is_or_is_under as _changed_path_is_or_is_under,
 )
-from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+from claude_code_hooks_daemon.utils.merge_scope import changed_paths as _changed_paths
+from claude_code_hooks_daemon.utils.merge_scope import (
+    is_git_merge_pull_rebase_command as _is_git_merge_pull_rebase_command,
+)
 
 _CWD_FIELD: Final[str] = "cwd"
-
-# A newline separates commands exactly as `;` does (same lesson
-# `staged_lint_gate`/`verification_result_gate` already encode), and
-# `&&`/`||`/`|` each start a new command span within a statement.
-_SEGMENT_SEPARATORS: Final[tuple[str, ...]] = ("||", "&&", "|", ";", "\n")
-
-_GIT_MERGE_PULL_REBASE_PATTERN: Final[re.Pattern[str]] = re.compile(
-    rf"^\s*{ENV_PREFIX}{GIT_INVOCATION}(?:merge|pull|rebase)(?=\s|$)"
-)
 
 _SWEEP_MODE_ADVISE: Final[str] = "advise"
 _MARKDOWN_SUFFIX: Final[str] = ".md"
@@ -102,41 +93,6 @@ _HEADER: Final[str] = (
     "merge/pull/rebase introduced -- pre-existing drift is unaffected and "
     "still surfaces at the next SessionStart sweep."
 )
-
-
-def _is_git_merge_pull_rebase_command(command: str) -> bool:
-    """Whether any segment of ``command`` is a ``git merge``/``pull``/``rebase``.
-
-    Evasion-resistant via the same fragments `staged_lint_gate` uses: global
-    options (`git -C`), an `env`/`VAR=` prefix, and line continuations
-    (normalised before segmenting).
-    """
-    normalised = normalise_line_continuations(command)
-    for segment in split_unquoted(normalised, _SEGMENT_SEPARATORS):
-        if _GIT_MERGE_PULL_REBASE_PATTERN.search(segment.strip()):
-            return True
-    return False
-
-
-def _changed_paths(project_root: Path) -> frozenset[str]:
-    """Repo-relative paths ``ORIG_HEAD..HEAD`` touched; empty when unavailable.
-
-    Empty covers every silent case in ONE return: ``ORIG_HEAD`` absent (git
-    exits non-zero — unknown revision), git failing outright (also non-zero),
-    and ``ORIG_HEAD`` resolving to the same commit as ``HEAD`` (nothing to
-    diff, empty stdout). A caller need only check truthiness.
-    """
-    result = run_git(project_root, "diff", "--name-only", "ORIG_HEAD", "HEAD")
-    if result.returncode != 0:
-        return frozenset()
-    return frozenset(line.strip() for line in result.stdout.splitlines() if line.strip())
-
-
-def _changed_path_is_or_is_under(candidate: str, changed: frozenset[str]) -> bool:
-    """Whether some changed path equals ``candidate`` or is nested under it."""
-    normalised = candidate.rstrip("/")
-    prefix = normalised + "/"
-    return any(path == normalised or path.startswith(prefix) for path in changed)
 
 
 def _plan_finding_attributable(
