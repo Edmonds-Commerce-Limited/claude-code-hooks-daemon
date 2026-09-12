@@ -586,6 +586,10 @@ handlers:
       enabled: true     # Python, TypeScript/JavaScript, Go, Rust, PHP; advisory, silent when the exclude is complete and no server predates it
       priority: 69
 
+    persistent_cron_assertor:  # Re-state the crons declared under persistent_crons so a new session can re-create them (Plan 00384)
+      enabled: true            # Silent unless persistent_crons.enabled AND a job is declared; Claude Code crons are session-only, so they need re-creating each session
+      priority: 70
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     disclosure_reset_pre_compact:  # Reset per-agent rule-disclosure state before compaction (Plan 00116 Phase 4)
