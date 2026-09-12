@@ -170,6 +170,14 @@ class Priority:
     # share 43-44 -- disjoint events, so the slot never collides in practice)
     MERGE_QA_REPORT = 34
 
+    # Daemon sync after merge (Priority: 35 - PostToolUse advisory; Plan 00389,
+    # the next free slot after merge_qa_report and deliberately adjacent to it:
+    # both fire on the same merge/pull/rebase and share utils/merge_scope, so a
+    # reader finding one should find the other. merge_qa_report reports what the
+    # operation did to the PLAN/DOCS trees; this reports what it did to the
+    # daemon's own config and version.
+    DAEMON_SYNC_AFTER_MERGE = 35
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30

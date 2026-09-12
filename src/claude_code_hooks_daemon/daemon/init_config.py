@@ -284,6 +284,7 @@ class ConfigTemplate:
             "    budget_exhaustion_detector: {enabled: true, priority: 32}  # Advisory when a tool response shows budget/quota exhaustion (opt-out)\n"
             "    model_downgrade_recorder: {enabled: true, priority: 33}  # Publish <session>.model-downgrade so the ccy supervisor can tell a machine downgrade from your own /model (opt-out)\n"
             "    merge_qa_report: {enabled: true, priority: 34}  # Post-hoc plan/docs QA report on what a git merge/pull/rebase introduced (fires only when plan/docs QA sweeps are active)\n"
+            "    daemon_sync_after_merge: {enabled: true, priority: 35}  # A merge/pull/rebase that changed daemon config or handler code leaves the running daemon stale -- advises a restart, naming the paths\n"
             "\n"
             "  # PermissionRequest - Auto-approve decisions\n"
             "  permission_request:\n"

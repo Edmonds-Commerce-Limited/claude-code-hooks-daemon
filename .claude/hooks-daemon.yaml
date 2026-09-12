@@ -683,6 +683,12 @@ handlers:
       enabled: true  # On by default; silent unless plan/docs QA sweeps are active AND the operation introduced attributable drift.
       priority: 34
 
+    daemon_sync_after_merge:  # Dogfood: a pull can bring in daemon config the running daemon never loads (Plan 00389)
+      enabled: true  # Silent unless the operation actually changed daemon config or handler code.
+      priority: 35
+      # This repo is the self-install, so `.claude/project-handlers` IS the
+      # project-handlers path -- the default is correct here and needs no override.
+
   # SessionStart handlers (run when session starts)
   session_start:
     disclosure_reset_session_start:  # Reset per-agent rule-disclosure state on every SessionStart (Plan 00116 Phase 4)

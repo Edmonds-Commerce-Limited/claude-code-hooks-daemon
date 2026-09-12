@@ -71,7 +71,9 @@ class TestChangedPaths:
 
 class TestChangedPathIsOrIsUnder:
     def test_exact_match(self) -> None:
-        assert changed_path_is_or_is_under(".claude/hooks-daemon.yaml", frozenset({".claude/hooks-daemon.yaml"}))
+        assert changed_path_is_or_is_under(
+            ".claude/hooks-daemon.yaml", frozenset({".claude/hooks-daemon.yaml"})
+        )
 
     def test_nested_under_a_directory(self) -> None:
         assert changed_path_is_or_is_under(

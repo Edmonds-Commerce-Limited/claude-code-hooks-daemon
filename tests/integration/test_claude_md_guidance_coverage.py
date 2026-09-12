@@ -226,6 +226,14 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "ORIG_HEAD..HEAD-touched findings are shown) or where the rest still "
         "surfaces (the next SessionStart sweep)"
     ),
+    "DaemonSyncAfterMergeHandler": (
+        "T3 the remedy happens after the advisory — the agent runs the restart "
+        "itself, because the handler runs INSIDE the daemon serving the hook and "
+        "cannot restart it without dropping the in-flight response. The durable "
+        "rule is the one the fire-time report cannot teach: a pulled config is "
+        "not in force until a restart, so an unacted advisory leaves the project "
+        "believing in protections the process is not applying"
+    ),
     "PlanWorkflowAssetCheckerHandler": "T3 names a provisioning command to run later",
     "PersistentCronAssertorHandler": (
         "T3 the reconcile happens after the advisory — the agent has to run CronList "

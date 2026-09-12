@@ -562,6 +562,11 @@ class HandlerID:
         config_key="merge_qa_report",
         display_name="merge-qa-report",
     )
+    DAEMON_SYNC_AFTER_MERGE = HandlerIDMeta(
+        class_name="DaemonSyncAfterMergeHandler",
+        config_key="daemon_sync_after_merge",
+        display_name="daemon-sync-after-merge",
+    )
 
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = HandlerIDMeta(

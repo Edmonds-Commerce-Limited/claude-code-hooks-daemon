@@ -468,6 +468,16 @@ handlers:
       enabled: true   # On by default; silent unless plan/docs QA sweeps are active AND the operation introduced attributable drift.
       priority: 34
 
+    daemon_sync_after_merge:  # A pull can bring in daemon config the running daemon never loads (Plan 00389)
+      enabled: true   # On by default; silent unless the operation actually changed daemon config or handler code.
+      priority: 35
+      # options:
+      #   watch_paths:                      # Handler-code locations whose change makes the daemon stale.
+      #     - ".claude/project-handlers"     # Default. The config file itself is always watched, resolved
+      #                                      # from the running daemon. SET THIS if your project uses a
+      #                                      # non-default `project_handlers.path` -- it is not injected
+      #                                      # here, so the default would watch the wrong directory.
+
     validate_eslint_on_write:  # Runs ESLint after file writes
       enabled: false           # Enable for automatic ESLint validation
       priority: 20
