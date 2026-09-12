@@ -26,6 +26,19 @@ from claude_code_hooks_daemon.handlers.session_start.persistent_cron_assertor im
 )
 
 
+class _RootedPersistentCronAssertorHandler(PersistentCronAssertorHandler):
+    """Test double declaring `_workspace_root` so it is a known instance attribute.
+
+    The handler reads it dynamically via `getattr(self, "_workspace_root", None)`,
+    so assigning it inside `__init__` mirrors that rather than reaching into the
+    instance from outside — the same shape `test_tool_disable_advisor` uses.
+    """
+
+    def __init__(self, root: Path) -> None:
+        super().__init__()
+        self._workspace_root = root
+
+
 def _handler(monkeypatch: pytest.MonkeyPatch, config: Config) -> PersistentCronAssertorHandler:
     handler = PersistentCronAssertorHandler()
     monkeypatch.setattr(handler, "_load_config", lambda: config)
@@ -66,8 +79,7 @@ class TestItStaysSilentUnlessAsked:
     def test_an_unreadable_config_degrades_to_silence(self, tmp_path: Path) -> None:
         """A config the daemon already reports as invalid must not raise out of
         the SessionStart chain and take every other advisory down with it."""
-        handler = PersistentCronAssertorHandler()
-        handler._workspace_root = str(tmp_path)
+        handler = _RootedPersistentCronAssertorHandler(tmp_path)
         assert handler.matches({}) is False
 
 
