@@ -258,7 +258,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  376 + 13 = 389. ✅
+  377 + 13 = 390. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267

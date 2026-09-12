@@ -89,6 +89,31 @@ _warn() { echo -e "${_YELLOW}WARN${_NC} $1"; }
 _info() { echo -e "${_BLUE}>>>${_NC} $1"; }
 _fail() { _err "$1"; exit 1; }
 
+#
+# _version_lt() - True when $1 sorts strictly before $2 (semver, no `v` prefix)
+#
+# Pure bash rather than `sort -V`: this script is fetched standalone and exec'd
+# from a temp file (see tests/integration/test_upgrade_sh_tmp_self_contained.py),
+# so it cannot source a shared library and must not add a portability question
+# it can answer itself. Both arguments are X.Y.Z by construction at every call
+# site — one comes from the marker regex, the other from pyproject.toml.
+#
+_version_lt() {
+    [ "$1" = "$2" ] && return 1
+
+    local -a left right
+    IFS=. read -r -a left <<< "$1"
+    IFS=. read -r -a right <<< "$2"
+
+    local i
+    for i in 0 1 2; do
+        local l="${left[i]:-0}" r="${right[i]:-0}"
+        if (( l < r )); then return 0; fi
+        if (( l > r )); then return 1; fi
+    done
+    return 1
+}
+
 # ============================================================
 # Python version detection
 # ============================================================
@@ -338,12 +363,23 @@ _ok "Daemon directory: $DAEMON_DIR"
 # version that generated it, which is the version the client last ran. If
 # even that is absent the FROM side is unknown and stays empty; Layer 2
 # then says so rather than guessing.
+#
+# Plan 00386 Task 2.3 (GitHub issue #38): the marker is read FIRST and
+# unconditionally, not only when the daemon dir was cloned here. A leftover
+# clone is exactly the case the issue reported — a v3.15.1 clone sat beside
+# tracked assets deployed from v3.60.0, the `elif` below took the CLONE's
+# version, and `check-truth-changes --from 3.15.1` emitted 73 entries of
+# already-reconciled history instead of the true 5.
+#
 FROM_VERSION=""
+_TRACKED_VERSION=""
+_DOCS_STAMP_FILE="$PROJECT_ROOT/.claude/HOOKS-DAEMON.md"
+if [ -f "$_DOCS_STAMP_FILE" ]; then
+    _TRACKED_VERSION="$(awk 'match($0, /Generated on [^(]*\(v[0-9]+\.[0-9]+\.[0-9]+\)/) { s = substr($0, RSTART, RLENGTH); sub(/.*\(/, "", s); sub(/\)$/, "", s); print s; exit }' "$_DOCS_STAMP_FILE")"
+fi
+
 if [ "$_DAEMON_DIR_CLONED_HERE" = "true" ]; then
-    _DOCS_STAMP_FILE="$PROJECT_ROOT/.claude/HOOKS-DAEMON.md"
-    if [ -f "$_DOCS_STAMP_FILE" ]; then
-        FROM_VERSION="$(awk 'match($0, /Generated on [^(]*\(v[0-9]+\.[0-9]+\.[0-9]+\)/) { s = substr($0, RSTART, RLENGTH); sub(/.*\(/, "", s); sub(/\)$/, "", s); print s; exit }' "$_DOCS_STAMP_FILE")"
-    fi
+    FROM_VERSION="$_TRACKED_VERSION"
     if [ -n "$FROM_VERSION" ]; then
         _ok "Previous version read from the committed HOOKS-DAEMON.md: $FROM_VERSION"
     else
@@ -353,6 +389,24 @@ elif [ -f "$DAEMON_DIR/pyproject.toml" ]; then
     FROM_VERSION="$(awk -F'"' '/^version[[:space:]]*=/ {print $2; exit}' "$DAEMON_DIR/pyproject.toml")"
     if [ -n "$FROM_VERSION" ] && [[ ! "$FROM_VERSION" =~ ^v ]]; then
         FROM_VERSION="v$FROM_VERSION"
+    fi
+    #
+    # Prefer the marker ONLY when it is NEWER than the clone. FROM_VERSION
+    # decides which truth-changes and config-migrations the PROJECT still owes,
+    # and the project's docs and config were last reconciled by whatever
+    # deployed them — the marker — not by whatever code happens to sit in the
+    # gitignored clone.
+    #
+    # The "newer" guard is deliberately one-directional: it can only ever SHRINK
+    # a range that a stale clone had inflated, never grow one. A clone AHEAD of
+    # the marker means the marker is the stale half (an upgrade that never
+    # regenerated the docs), and trusting it there would re-report work already
+    # done — the very failure this fixes, in the opposite direction.
+    #
+    if [ -n "$_TRACKED_VERSION" ] && [ -n "$FROM_VERSION" ] \
+        && _version_lt "${FROM_VERSION#v}" "${_TRACKED_VERSION#v}"; then
+        _warn "Installed clone is $FROM_VERSION but this project's tracked assets were deployed from $_TRACKED_VERSION; using the tracked version as the upgrade FROM side"
+        FROM_VERSION="$_TRACKED_VERSION"
     fi
 fi
 # Layer 2 reads this for its "Current version" line and the upgrade-guide
