@@ -36,8 +36,17 @@ logger = logging.getLogger(__name__)
 
 # Path mapping constants for the src->tests path-mapping helpers
 _TEST_DIR = "tests"
+_TEST_DIR_UPPERCASE = "Tests"
 _TEST_UNIT_DIR = "unit"
 _SRC_DIR = "src"
+
+# Casings the INFERRED resolvers search, in priority order. On a case-sensitive
+# filesystem `tests/` and `Tests/` are different directories, and the uppercase
+# form is the PHP/PSR-4 convention -- so inferring only the lowercase name left
+# a correctly-placed test unsearched and blocked a source file that had one.
+# A DECLARED location (`test_path_map`, `layout.test_dirs`) gets no variant: the
+# project typed that directory, so there is nothing to guess at.
+_INFERRED_TEST_DIRS: tuple[str, ...] = (_TEST_DIR, _TEST_DIR_UPPERCASE)
 
 # Test location style constants (Plan 00076: collocated test support)
 _TEST_LOCATION_SEPARATE = "separate"
@@ -472,6 +481,12 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
 
         Returns paths in priority order (most specific to least specific).
         Controlled by _effective_test_locations config.
+
+        Each separate-directory resolver runs once per casing in
+        _INFERRED_TEST_DIRS, so a project whose tests live in an uppercase
+        `Tests/` is searched too. That is strictly additive: the gate blocks
+        when NO candidate exists, so a longer search list can only remove a
+        false block, never create one.
         """
         candidates: list[Path] = []
         source_filename = Path(source_path).name
@@ -492,36 +507,53 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         # `test_path_map` and, like that map, is not gated on the inference
         # style selector (Plan 00362).
         for layout_candidate in self._map_layout_mirror_paths(source_path, test_filename):
-            if layout_candidate not in candidates:
-                candidates.append(layout_candidate)
+            self._append_unique(candidates, layout_candidate)
 
-        # Separate test directory strategies (mirror, unit, fallback)
+        # Separate test directory strategies (mirror, unit, fallback), resolved
+        # once per casing. Lowercase runs first, so it stays the primary
+        # suggestion in the deny message and the established ordering holds.
         if _TEST_LOCATION_SEPARATE in effective_locations:
-            # Strategy 1: Mirror mapping (PHP PSR-4, Java, etc.)
-            if _SRC_DIR in path_parts:
-                mirror_path = self._map_src_to_tests_mirror(path_parts, test_filename)
-                if mirror_path is not None:
-                    candidates.append(mirror_path)
+            for test_dir in _INFERRED_TEST_DIRS:
+                # Strategy 1: Mirror mapping (PHP PSR-4, Java, etc.)
+                if _SRC_DIR in path_parts:
+                    mirror_path = self._map_src_to_tests_mirror(path_parts, test_filename, test_dir)
+                    if mirror_path is not None:
+                        self._append_unique(candidates, mirror_path)
 
-            # Strategy 2: Current mapping (Python convention - strip package)
-            if _SRC_DIR in path_parts:
-                current_path = self._map_src_to_test_path(path_parts, test_filename)
-                if current_path is not None:
-                    candidates.append(current_path)
+                # Strategy 2: Current mapping (Python convention - strip package)
+                if _SRC_DIR in path_parts:
+                    current_path = self._map_src_to_test_path(path_parts, test_filename, test_dir)
+                    if current_path is not None:
+                        self._append_unique(candidates, current_path)
 
-            # Strategy 3: Fallback mapping
-            fallback_path = self._map_fallback_test_path(source_path, path_parts, test_filename)
-            candidates.append(fallback_path)
+                # Strategy 3: Fallback mapping
+                fallback_path = self._map_fallback_test_path(
+                    source_path, path_parts, test_filename, test_dir
+                )
+                self._append_unique(candidates, fallback_path)
 
         # Collocated: test file next to source file
         if _TEST_LOCATION_COLLOCATED in effective_locations:
-            candidates.append(self._map_collocated_test_path(source_path, test_filename))
+            self._append_unique(
+                candidates, self._map_collocated_test_path(source_path, test_filename)
+            )
 
         # Test subdirectory: __tests__/ next to source file
         if _TEST_LOCATION_TEST_SUBDIR in effective_locations:
-            candidates.append(self._map_test_subdir_path(source_path, test_filename))
+            self._append_unique(candidates, self._map_test_subdir_path(source_path, test_filename))
 
         return candidates
+
+    @staticmethod
+    def _append_unique(candidates: list[Path], candidate: Path) -> None:
+        """Queue ``candidate`` unless an identical path is already queued.
+
+        Two resolvers can land on the same path -- a declared ``test_dir`` that
+        names what a resolver would infer anyway, for instance. Listing it twice
+        in the deny message reads as two places to look when there is one.
+        """
+        if candidate not in candidates:
+            candidates.append(candidate)
 
     def _declared_test_dirs(self) -> list[DeclaredTestDir]:
         """Parse ``test_path_map`` once, lazily.
@@ -637,11 +669,15 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         return [anchor / root / mirrored / test_filename for root in roots]
 
     @staticmethod
-    def _map_src_to_tests_mirror(path_parts: tuple[str, ...], test_filename: str) -> Path | None:
-        """Map src/{package}/{subdir}/.../file to tests/{package}/{subdir}/.../test_file.
+    def _map_src_to_tests_mirror(
+        path_parts: tuple[str, ...], test_filename: str, test_dir: str = _TEST_DIR
+    ) -> Path | None:
+        """Map src/{package}/{subdir}/.../file to <test_dir>/{package}/{subdir}/.../test_file.
 
-        Mirrors the FULL src/ structure under tests/ (no package stripping).
-        Handles PHP PSR-4, Java standard layout, and other full-mirror conventions.
+        Mirrors the FULL src/ structure under the test directory (no package
+        stripping). Handles PHP PSR-4, Java standard layout, and other
+        full-mirror conventions. ``test_dir`` is the conventional name in one
+        of the casings the caller searches (_INFERRED_TEST_DIRS).
 
         Example:
             src/SupFeeds/Logging/DTO/File.php
@@ -665,15 +701,17 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
             # after_src[:-1] = ALL subdirectories to mirror (including package)
             # after_src[-1] = filename (replaced with test_filename)
             sub_dirs = after_src[:-1]
-            test_file_path = workspace_root / _TEST_DIR
+            test_file_path = workspace_root / test_dir
             for sub_dir in sub_dirs:
                 test_file_path = test_file_path / sub_dir
             return test_file_path / test_filename
         return None
 
     @staticmethod
-    def _map_src_to_test_path(path_parts: tuple[str, ...], test_filename: str) -> Path | None:
-        """Map src/{package}/{subdir}/.../file to tests/unit/{subdir}/.../test_file."""
+    def _map_src_to_test_path(
+        path_parts: tuple[str, ...], test_filename: str, test_dir: str = _TEST_DIR
+    ) -> Path | None:
+        """Map src/{package}/{subdir}/.../file to <test_dir>/unit/{subdir}/.../test_file."""
         src_idx = path_parts.index(_SRC_DIR)
 
         # Workspace root is everything before src/
@@ -692,18 +730,21 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
             # after_src[1:-1] = subdirectories to mirror
             # after_src[-1] = filename (replaced with test_filename)
             sub_dirs = after_src[1:-1]
-            test_file_path = workspace_root / _TEST_DIR / _TEST_UNIT_DIR
+            test_file_path = workspace_root / test_dir / _TEST_UNIT_DIR
             for sub_dir in sub_dirs:
                 test_file_path = test_file_path / sub_dir
             return test_file_path / test_filename
         elif len(after_src) == 2:
-            # src/{package}/file.ext -> tests/unit/test_file.ext
-            return workspace_root / _TEST_DIR / _TEST_UNIT_DIR / test_filename
+            # src/{package}/file.ext -> <test_dir>/unit/test_file.ext
+            return workspace_root / test_dir / _TEST_UNIT_DIR / test_filename
         return None
 
     @staticmethod
     def _map_fallback_test_path(
-        source_path: str, path_parts: tuple[str, ...], test_filename: str
+        source_path: str,
+        path_parts: tuple[str, ...],
+        test_filename: str,
+        test_dir: str = _TEST_DIR,
     ) -> Path:
         """Fallback path mapping for non-src/ structures."""
         try:
@@ -712,7 +753,7 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         except ValueError:
             controller_dir = Path(source_path).parent.parent.parent
 
-        return controller_dir / _TEST_DIR / test_filename
+        return controller_dir / test_dir / test_filename
 
     @staticmethod
     def _map_collocated_test_path(source_path: str, test_filename: str) -> Path:
@@ -746,6 +787,11 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
             "- Separate mirror: `tests/unit/{subdir}/test_{module}.py`\n"
             "- Collocated: `{source_dir}/{module}.test.ts` (JS/TS projects)\n"
             "- Test subdirectory: `{source_dir}/__tests__/{module}.test.ts`\n\n"
+            "**The separate-directory forms are searched in BOTH casings** — `tests/` and "
+            "`Tests/`. On a case-sensitive filesystem those are different directories, and "
+            "the uppercase form is the PHP/PSR-4 convention, so do NOT rename a project's "
+            "`Tests/` to satisfy this gate. Only INFERRED locations get both casings; a "
+            "directory you DECLARE (below) is searched exactly as you wrote it.\n\n"
             "**The deny message lists every location it searched.** If your project's real "
             "test directory is not in that list, no amount of retrying will satisfy the gate "
             "— the project needs to DECLARE the directory (below), not move the test.\n\n"

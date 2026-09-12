@@ -1595,14 +1595,21 @@ class TestDeclaredTestPathMap:
     PHPStan rules with a worked `RuleTestCase` example, so giving that up would
     be a real loss.
 
-    The layout under test is the reporter's, exactly: rules in
-    `apps/app/qaConfig/PHPStan/Rules/` (no `src/` segment anywhere, so both
-    mirror resolvers bail) with tests in `apps/app/qaConfig/Tests/` (capital T,
-    the only directory their `phpunit.xml` scans, so a test in either
-    hook-accepted alternative would never be executed).
+    The layout under test is the reporter's, one directory deeper: rules in
+    `apps/app/qaConfig/PHPStan/Rules/Policy/` (no `src/` segment anywhere, so
+    both mirror resolvers bail) with tests in `apps/app/qaConfig/Tests/`
+    (capital T, the only directory their `phpunit.xml` scans, so a test in
+    either hook-accepted alternative would never be executed).
+
+    The extra directory is load-bearing. The fallback resolver walks a FIXED
+    three parents up, so at the reporter's own depth it lands on `qaConfig/`
+    and now reaches `qaConfig/Tests/` unaided -- that shallow case is pinned in
+    `TestConventionalUppercaseTestsDirIsInferred`. One level deeper it lands on
+    `qaConfig/PHPStan/` instead, which is what a declaration, and only a
+    declaration, can reach: inference here is anchored, not a search.
     """
 
-    _RULE_REL = ("apps", "app", "qaConfig", "PHPStan", "Rules", "SampleColumnPolicy.php")
+    _RULE_REL = ("apps", "app", "qaConfig", "PHPStan", "Rules", "Policy", "SampleColumnPolicy.php")
     _TEST_REL = ("apps", "app", "qaConfig", "Tests", "SampleColumnPolicyTest.php")
     _SOURCE_GLOB = "**/qaConfig/PHPStan/Rules/**"
     _TEST_DIR = "apps/app/qaConfig/Tests"
@@ -1652,7 +1659,8 @@ class TestDeclaredTestPathMap:
         Pinned as a regression test rather than deleted once green, because the
         whole justification for a config surface is that no amount of inference
         finds this directory: both mirror resolvers are gated on a `src/` path
-        segment, and the fallback yields lowercase `tests/`.
+        segment, and the fallback is anchored a fixed three parents up, which
+        at this depth is `qaConfig/PHPStan/` -- in either casing.
         """
         self._place_real_test(tmp_path)
         handler = TddEnforcementHandler()
@@ -1813,6 +1821,31 @@ class TestDeclaredTestPathMap:
         result = handler.handle(self._write(self._rule(tmp_path)))
         assert result.decision == "deny"
 
+    def test_a_declared_test_dir_is_searched_only_in_the_casing_declared(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A DECLARATION is used exactly as typed, casing included.
+
+        The inferred resolvers also search an uppercase `Tests/` because they
+        are GUESSING at a convention. A `test_path_map` entry is not a guess:
+        the project typed that directory, so searching a second casing would be
+        searching somewhere it did not ask for, and would report a location in
+        the deny message that its own test runner does not scan.
+        """
+        self._anchor_project_root(monkeypatch, tmp_path)
+        declared = tmp_path / "apps" / "app" / "Tests" / "SampleColumnPolicyTest.php"
+        other_casing = tmp_path / "apps" / "app" / "tests" / "SampleColumnPolicyTest.php"
+        other_casing.parent.mkdir(parents=True, exist_ok=True)
+        other_casing.write_text("<?php\n\nclass SampleColumnPolicyTest {}\n")
+
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [{"source_glob": self._SOURCE_GLOB, "test_dir": "apps/app/Tests"}]
+
+        result = handler.handle(self._write(self._rule(tmp_path)))
+        assert result.decision == "deny", "the declared casing is the only one declared"
+        assert str(declared) in (result.reason or "")
+        assert str(other_casing) not in (result.reason or "")
+
     def test_several_declarations_all_contribute_in_config_order(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1900,7 +1933,13 @@ class TestDeclaredTestPathMapWorkspaceAnchoring:
 
         `web/` here has nothing marking it a project -- with no `projects:`
         entry the resolver must NOT guess a boundary at `web/`, so the only
-        candidate is the repo-root-anchored path, exactly as before this task.
+        DECLARED candidate is the repo-root-anchored path.
+
+        Asserted against `_map_declared_test_paths` rather than against the
+        full candidate list: the inferred fallback resolver independently
+        reaches `web/qaConfig/Tests/` (three parents up from the rule, in the
+        conventional uppercase casing), so the full list can no longer tell a
+        wrongly-anchored DECLARATION apart from an ordinary inference.
         """
         self._anchor_project_root(monkeypatch, tmp_path)
         rule = tmp_path / "web" / "qaConfig" / "PHPStan" / "Rules" / "SampleColumnPolicy.php"
@@ -1912,10 +1951,13 @@ class TestDeclaredTestPathMapWorkspaceAnchoring:
 
         strategy = handler._registry.get_strategy(str(rule))
         assert strategy is not None
+        test_filename = strategy.compute_test_filename(rule.name)
         candidates = handler._get_test_file_paths(str(rule), strategy)
 
-        assert candidates[0] == tmp_path / self._TEST_DIR / candidates[0].name
-        assert tmp_path / "web" / self._TEST_DIR not in [c.parent for c in candidates]
+        assert candidates[0] == tmp_path / self._TEST_DIR / test_filename
+        assert handler._map_declared_test_paths(str(rule), test_filename) == [
+            tmp_path / self._TEST_DIR / test_filename
+        ]
 
     def test_absolute_test_dir_is_skipped_with_a_warning(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -2403,6 +2445,24 @@ class TestLayoutTestDirsAsMirrorRoots:
 
         assert not any("Small" in c.parts for c in self._candidates(handler, source))
 
+    def test_a_nested_root_is_searched_only_in_the_casing_declared(self, tmp_path: Path) -> None:
+        """`layout.test_dirs` is a declaration too, so no casing variant applies.
+
+        The inferred `tests/<mirror>` resolver also searches `Tests/<mirror>`
+        because it is guessing at a convention; a declared root is not a guess.
+        """
+        _place_test(tmp_path / "Tests" / "Small" / "PackageType" / "OptimiseProbeTest.php")
+        handler = TddEnforcementHandler()
+        handler._project_layout = self._layout(("tests", "tests/Small"))
+        source = tmp_path.joinpath(*self._SOURCE_REL)
+
+        result = handler.handle(_php_write(source))
+        assert result.decision == "deny", "the declared casing is the only one declared"
+        assert str(tmp_path.joinpath(*self._SMALL_REL)) in (result.reason or "")
+        assert str(tmp_path / "Tests" / "Small" / "PackageType" / "OptimiseProbeTest.php") not in (
+            result.reason or ""
+        )
+
     def test_layout_mirror_roots_rank_after_declared_map_before_inference(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -2416,3 +2476,98 @@ class TestLayoutTestDirsAsMirrorRoots:
         assert candidates[0] == tmp_path / "tests" / "Flat" / "OptimiseProbeTest.php"
         assert candidates[1] == tmp_path.joinpath(*self._SMALL_REL)
         assert candidates[2] == tmp_path / "tests" / "PackageType" / "OptimiseProbeTest.php"
+
+
+class TestConventionalUppercaseTestsDirIsInferred:
+    """The INFERRED resolvers search `Tests/` as well as `tests/`.
+
+    On a case-sensitive filesystem those are two different directories, and an
+    uppercase `Tests/` is the PHP/PSR-4 convention. Inferring only the lowercase
+    name makes a correctly-placed test invisible: every candidate misses, the
+    gate blocks a source file whose test already exists, and the only escape
+    left is turning the handler off for every other file in the project too.
+
+    The field layout, exactly: `qaConfig/PHPStan/Rules/<Rule>.php` tested at
+    `qaConfig/Tests/<Rule>Test.php` -- three parents up, which is precisely
+    where the fallback resolver already looks, in the other casing.
+    """
+
+    _RULE_REL = (
+        "apps",
+        "app",
+        "qaConfig",
+        "PHPStan",
+        "Rules",
+        "CrossContextReadQueryWriteRule.php",
+    )
+    _TEST_NAME = "CrossContextReadQueryWriteRuleTest.php"
+
+    @staticmethod
+    def _qa_config(tmp_path: Path) -> Path:
+        return tmp_path / "apps" / "app" / "qaConfig"
+
+    def test_an_uppercase_tests_sibling_satisfies_the_gate(self, tmp_path: Path) -> None:
+        """The reported defect: a real test in `qaConfig/Tests/` was never searched."""
+        _place_test(self._qa_config(tmp_path) / "Tests" / self._TEST_NAME)
+        handler = TddEnforcementHandler()
+        rule = tmp_path.joinpath(*self._RULE_REL)
+
+        assert handler.matches(_php_write(rule)), "the gate must still fire, this is not an escape"
+        assert handler.handle(_php_write(rule)).decision == "allow"
+
+    def test_the_lowercase_sibling_still_satisfies_the_gate(self, tmp_path: Path) -> None:
+        """Additive only: the casing that already resolved keeps resolving."""
+        _place_test(self._qa_config(tmp_path) / "tests" / self._TEST_NAME)
+        handler = TddEnforcementHandler()
+        rule = tmp_path.joinpath(*self._RULE_REL)
+
+        assert handler.handle(_php_write(rule)).decision == "allow"
+
+    def test_both_casings_are_named_in_the_deny_message(self, tmp_path: Path) -> None:
+        """A reporter who cannot see where it looked cannot tell why it blocked."""
+        handler = TddEnforcementHandler()
+        rule = tmp_path.joinpath(*self._RULE_REL)
+
+        result = handler.handle(_php_write(rule))
+        reason = result.reason or ""
+        lower = str(self._qa_config(tmp_path) / "tests" / self._TEST_NAME)
+        upper = str(self._qa_config(tmp_path) / "Tests" / self._TEST_NAME)
+
+        assert result.decision == "deny"
+        assert lower in reason
+        assert upper in reason
+        assert reason.index(lower) < reason.index(upper), "lowercase stays the primary suggestion"
+
+    def test_an_uppercase_mirror_of_src_satisfies_the_gate(self, tmp_path: Path) -> None:
+        """The `src/` mirror resolver gets the same treatment as the fallback."""
+        _place_test(tmp_path / "Tests" / "PackageType" / "OptimiseProbeTest.php")
+        handler = TddEnforcementHandler()
+        source = tmp_path / "src" / "PackageType" / "OptimiseProbe.php"
+
+        assert handler.matches(_php_write(source)), "the gate must still fire"
+        assert handler.handle(_php_write(source)).decision == "allow"
+
+    def test_an_uppercase_unit_subdir_satisfies_the_gate(self, tmp_path: Path) -> None:
+        """The package-stripping resolver is parametrised on the same name."""
+        _place_test(tmp_path / "Tests" / "unit" / "OptimiseProbeTest.php")
+        handler = TddEnforcementHandler()
+        source = tmp_path / "src" / "PackageType" / "OptimiseProbe.php"
+
+        assert handler.handle(_php_write(source)).decision == "allow"
+
+    def test_a_test_missing_in_both_casings_still_denies(self, tmp_path: Path) -> None:
+        """Only WHERE the gate looks changes; WHEN it blocks does not."""
+        handler = TddEnforcementHandler()
+        rule = tmp_path.joinpath(*self._RULE_REL)
+
+        assert handler.matches(_php_write(rule))
+        assert handler.handle(_php_write(rule)).decision == "deny"
+
+    def test_a_collocated_only_project_gets_no_separate_candidates(self, tmp_path: Path) -> None:
+        """The variants live inside the `separate` style, so the selector still selects."""
+        _place_test(self._qa_config(tmp_path) / "Tests" / self._TEST_NAME)
+        handler = TddEnforcementHandler()
+        handler._test_locations = [_TEST_LOCATION_COLLOCATED]
+        rule = tmp_path.joinpath(*self._RULE_REL)
+
+        assert handler.handle(_php_write(rule)).decision == "deny"
