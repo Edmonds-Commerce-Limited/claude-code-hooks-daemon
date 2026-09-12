@@ -38,10 +38,31 @@ keeping:
 **The reporter's stated blocker does not exist, and that materially shrinks the
 work.** They concluded there is "no tracked marker of the version the deployed
 assets came from", having grepped for `DAEMON_VERSION|daemon_version|installed_version`.
-The marker is there, spelled differently: `docs_generator.py` writes
-`> Generated on {date} (v{__version__}) by \`generate-docs\``into the tracked`.claude/HOOKS-DAEMON.md`, and `generate-docs`runs on the upgrade path. A parser for that exact line already exists too —`docs_qa/checks/generated_doc_hand_edit.py`matches`r"> Generated on \\d{4}-\\d{2}-\\d{2} (v(\\d+.\\d+.\\d+)) by"\` with the version
-captured. So steps 2, 4 and 5 below are implementable today with no new file
-format.
+The marker is there, spelled as prose rather than as a key. `docs_generator.py`
+writes this line into the tracked `.claude/HOOKS-DAEMON.md`, and `generate-docs`
+runs on the upgrade path:
+
+```text
+> Generated on 2026-09-11 (v3.63.0) by `generate-docs`. Regenerate: ...
+```
+
+A parser for that exact line already ships too, in the docs-QA check that
+detects hand-edits of generated documents — with the version in a capture group:
+
+```python
+r"> Generated on \d{4}-\d{2}-\d{2} \(v(\d+\.\d+\.\d+)\) by"
+```
+
+So steps 2, 4 and 5 below are implementable today with no new file format.
+
+**The marker being TRACKED in client installs — the load-bearing assumption —
+was checked rather than assumed.** `.claude/.gitignore` excludes the clone
+(`/hooks-daemon/`), backups, env files, sockets, PIDs, `reports/`, caches and
+venvs. `HOOKS-DAEMON.md` appears nowhere in it, so it is a tracked deployed
+asset like the rest. The reporter confirms it from the other side, describing it
+as "tracked but records no version either". That matters because if clients
+ignored the file this approach would collapse at implementation time instead of
+here.
 
 ## The open question — this is why the plan is Not Started
 

@@ -44,20 +44,32 @@ Every refinement traces to a specific issue. None is a tidy-up.
   report" with no number. Eighteen minutes to fix, three days of silence. The
   check tells you to search the git log around the issue's timestamp, and to
   retro-fit `**GitHub Issue**: #N` so the next sweep does not re-derive it.
+
 - [x] ✅ **Task 1.2**: Triage check 6 — verify the reporter's stated BLOCKER,
   not only their suggested fix. #38 concluded no tracked version marker existed,
   having grepped for the wrong spelling; the marker and a parser for it both
   already shipped. A wrong blocker is more expensive than a wrong fix because it
   inflates the apparent size of the work.
+
 - [x] ✅ **Task 1.3**: A publishing caution in the triage-comment step. Quoting
   a concrete vendor path out of #36's body was denied by `sensitive_content` —
   the guard checks what the loop PUBLISHES even though it never saw what the
   reporter filed, and this repository is public. Describe the shape instead.
+
 - [x] ✅ **Task 1.4**: Step 8 now says to read the RUN's conclusion rather than
   the watcher's exit code. A `timeout … gh run watch` that expires exits 124, and
   in a chain the chain reports the last command's status — which read an
   `in_progress` run as green during this very sweep. Same failure shape as the
   `QA_EXIT` trap already documented in Step 5, so it is stated as such.
+
+- [x] ✅ **Task 1.5**: Audited every command, path and label the runbook names,
+  because a runbook that cites a wrong command fails at the worst possible
+  moment and nothing else in QA checks prose for that.
+  `scripts/setup_worktree.sh`, `scripts/qa/llm_qa.py`, `CLAUDE/Plan/mkplan.bash`,
+  `CLAUDE/Worktree.md` and `CLAUDE/UPGRADES/UNRELEASED/release-notes/` all
+  resolve; `hooks-daemon worktree-reap` is a real subcommand (`--help` exits 0);
+  and all three labels — `agent-triaged`, `agent-working`, `agent-needs-human` —
+  exist on the repository.
 
 ## Success Criteria
 
@@ -65,6 +77,8 @@ Every refinement traces to a specific issue. None is a tidy-up.
   and #38, the publishing caution cites #36, and the CI caution cites the
   in-session misread.
 - [x] The loop's bounds are unchanged: one issue per tick, stops at merged.
+- [x] Every command, path and label the runbook names resolves — audited in
+  Task 1.5 rather than assumed, since no QA check reads prose for stale commands.
 - [x] No release-bound consequence — `CLAUDE/development/IssueSdlc.md` is a
   repo-internal contributor document and ships to no client.
 - [ ] Full QA passes and CI is green.
