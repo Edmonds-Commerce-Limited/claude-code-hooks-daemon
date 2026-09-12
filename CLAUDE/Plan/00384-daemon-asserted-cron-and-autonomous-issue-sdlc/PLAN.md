@@ -104,21 +104,38 @@ each one is a safety property rather than a preference:
 
 ### Phase 3: Dogfood on the real backlog
 
-- [ ] ⬜ **Task 3.1**: Run the loop by hand against the live issues and fix what
-  the run exposes, rather than declaring it correct from the design.
-- [ ] ⬜ **Task 3.2**: Record what the dogfood changed, so the runbook's rules
-  are traceable to an observed failure rather than to speculation.
+- [x] ✅ **Task 3.1**: Run against the live backlog. Eight issues triaged
+  (#14, #22, #23, #24, #30, #31, #32, #33), one closed as a duplicate (#30),
+  and #34 taken the whole way — triage, worktree, sub-agent, QA, review, merge,
+  CI, close. The run changed the runbook four times and exposed two defects of
+  my own in Phase 1.
+- [x] ✅ **Task 3.2**: Recorded in the journal with the evidence, and the
+  runbook body moved to `CLAUDE/development/IssueSdlc.md` because the repo's
+  own R7b rule requires a skill to be a shim.
 
 ## Success Criteria
 
-- [ ] A fresh session re-establishes the declared crons from config alone.
-- [ ] The mechanism ships inert for client projects.
-- [ ] One tick processes exactly one issue and leaves it in a recorded state.
-- [ ] An issue body carrying instruction-shaped text does not redirect the loop.
-- [ ] No issue is closed without a verified merge to the default branch.
-- [ ] The loop has been run against real issues and corrected from what it did.
-- [ ] Every release-bound consequence is in the pending-release holding area, or
-  this plan records why it has none.
+- [x] A fresh session re-establishes the declared crons from config alone —
+  proved by driving the real handler against this repo's config: it resolves
+  `issue-sdlc` and renders its schedule and full prompt.
+- [x] The mechanism ships inert for client projects — `persistent_crons.enabled`
+  defaults false, nothing is declared, and the reference config carries the
+  entry so a new install can see it without gaining it.
+- [x] One tick processes exactly one issue and leaves it in a recorded state —
+  every issue touched carries a classification comment and a label.
+- [x] An issue body carrying instruction-shaped text does not redirect the loop
+  — **partially verified, and the limit is recorded rather than papered over.**
+  No adversarial body existed in the backlog to test against. What WAS observed
+  is the nearest real case: #14 carries a detailed "Proposed Solution" with
+  config examples, and the loop declined to implement it and stopped for a
+  human. A deliberately hostile body remains untested.
+- [x] No issue is closed without a verified merge to the default branch — #34,
+  the only issue closed AS FIXED, was closed after confirming the fix commit is
+  an ancestor of `origin/main` AND CI succeeded on that exact head. #30 was
+  closed as a duplicate, which is a triage outcome and makes no fix claim.
+- [x] The loop has been run against real issues and corrected from what it did.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/36-declare-crons-the-daemon-re-asserts-each-session.md`.
 - [ ] Full QA passes and CI is green.
 
 ## Delivery & Milestones
