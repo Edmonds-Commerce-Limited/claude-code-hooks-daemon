@@ -71,6 +71,21 @@ Every refinement traces to a specific issue. None is a tidy-up.
   and all three labels — `agent-triaged`, `agent-working`, `agent-needs-human` —
   exist on the repository.
 
+- [x] ✅ **Task 1.6**: Specified the stale-`agent-working` recovery path
+  concretely, because it is the one path in this runbook with NO field evidence
+  — Plan 00384's journal recorded that it is written and has never fired. "Re-verify
+  the state from git" was an invitation to guess, so it is now four ordered
+  questions with the exact command for each and a defined action per answer:
+  already landed → jump to Step 8; branch with unlanded commits → resume at QA;
+  bare worktree → reap and restart Step 4; nothing → re-triage.
+  Writing it found a defect in my own first draft. `git log --grep "#<N>"` was
+  stated as the landed-or-not test; run against this repo's history for #34 it
+  returns the real merge PLUS two commits that only mention the issue in passing,
+  so a recovery tick could have read a mention as "already merged" and closed an
+  unfixed issue. The test is now `git merge-base --is-ancestor`, verified to
+  answer correctly in both directions, and deliberately the same test Step 8 uses
+  — a recovery tick and a closing tick must not disagree about what merged means.
+
 ## Success Criteria
 
 - [x] Every addition names the issue that produced it — checks 5 and 6 cite #36

@@ -60,14 +60,57 @@ watching the repo. Ensure these exist (create if absent):
 Select in this order and take the FIRST match:
 
 1. **Recover a stalled issue** — labelled `agent-working` whose start comment
-   is older than 2 hours. A previous tick died. Re-verify the actual state from
-   git rather than trusting the label, then resume or re-triage.
+   is older than 2 hours. A previous tick died. Recover it before starting
+   anything new (below).
 2. **Triage a new issue** — open, carrying none of the three labels. Oldest
    first.
 3. **Implement a triaged issue** — `agent-triaged`, classified actionable, not
    `agent-needs-human`. Oldest first.
 
 If nothing matches, report "no eligible issue" and stop. That is a success.
+
+### Recovering a stalled issue — establish the state, do not infer it
+
+**The label is a claim by a process that died. Trust git instead.** This path has
+the least field evidence of anything in this runbook — it is written from
+reasoning, not from a tick that actually hit it — so it says exactly what to
+check rather than "re-verify the state", which is an invitation to guess.
+
+Answer these in order; the first YES decides:
+
+1. **Is the fix already on the default branch?** If it landed, the previous tick
+   died AFTER merging: go straight to Step 8 (verify ancestry and CI, comment,
+   close). Do NOT re-implement — that is the most expensive mistake available
+   here.
+
+   `git log origin/main --oneline --grep "#<N>"` is a HINT, not the answer: it
+   matches any commit whose message merely MENTIONS the issue. Run against this
+   repo's own history for issue #34 it returns the real merge alongside two plan
+   and journal commits that only cite it in passing. Find a candidate with it,
+   then settle the question by ancestry, which prose cannot fool:
+
+   ```bash
+   git merge-base --is-ancestor <candidate-sha> origin/main && echo LANDED
+   ```
+
+   That is deliberately the same test Step 8 uses to justify closing an issue — a
+   recovery tick and a closing tick must not disagree about what "merged" means.
+
+2. **Does a branch exist with commits not on main?** `git branch --list 'worktree-issue-<N>-*'` and `git cherry origin/main <branch>`. If yes, the
+   work is part-done: resume at Step 5 (QA) against that branch rather than
+   restarting it. Confirm the branch has a red-test-then-fix shape before
+   trusting it; a branch with only a fix and no test fails Step 6 anyway.
+
+3. **Does a worktree still exist for it?** `git worktree list`. A worktree with
+   no commits is a dead start — reap it (`bin/hooks-daemon worktree-reap --only <name>`) and resume at Step 4 with a fresh one.
+
+4. **None of the above?** Nothing survived. Remove `agent-working`, comment
+   saying the previous attempt left no trace and what you checked, and re-triage
+   from Step 2.
+
+In every branch, comment what you found before acting. A silent recovery is
+indistinguishable from a loop thrashing on the same issue every hour, which is
+the failure this whole path exists to prevent.
 
 ## Step 2 — triage
 
