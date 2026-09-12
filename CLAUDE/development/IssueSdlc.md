@@ -98,6 +98,20 @@ of them is how an autonomous loop does damage while looking productive.
    treating the issue as one unit. #34 made two suggestions: one had already
    shipped as the `test_path_map` option, the other was still a real defect.
    Fix what remains; say plainly what already exists.
+5. **Was a plan filed FROM this issue and never linked back?** Search the git
+   log around the issue's creation timestamp before concluding anything. #36 was
+   filed at 16:25 and fixed at 16:43 the same day by a plan that recorded its
+   origin as "the field report" with no number — so nothing closed the loop and
+   the reporter waited three days for work that was already done. When you find
+   one, retro-fit `**GitHub Issue**: #N` to that plan as well as closing the
+   issue, or the next sweep re-derives it all again.
+6. **Verify the reporter's stated BLOCKER, not just their suggested fix.** The
+   rule that a suggestion is a hypothesis applies equally to "this cannot be
+   done because X is missing" — and a wrong blocker costs more, because it makes
+   the work look bigger than it is. #38 concluded no tracked version marker
+   existed, having grepped for `daemon_version|installed_version`; the marker is
+   there, spelled as prose in a generated-doc header, and a parser for it already
+   shipped. Both facts were one search away and they removed a whole phase.
 
 ### Classify into exactly one
 
@@ -128,6 +142,14 @@ Record the classification and the reasoning in an issue comment, then label
 future tick, and a human, must be able to see why. Keep it proportionate: a
 comment that floods the ticket makes the issue's state unfindable, which is
 the defect issue #264 exists to cap.
+
+**Do not paste concrete names or paths out of an issue body into your comment.**
+A reporter may name a client, a host or an internal package; this repository is
+public, and `sensitive_content` checks what YOU publish even though it never saw
+what they filed. Writing #36's comment hit exactly this — a quoted vendor path
+was denied against the secret word list. Describe the shape instead
+(`vendor/<org>/<pkg>/vendor/<org>/<pkg>/docs/x.md`), which is what makes the
+point anyway. If a comment is denied, reword it; never go looking for the term.
 
 ## Step 3 — plan
 
@@ -208,6 +230,14 @@ Then reap the worktree: `bin/hooks-daemon worktree-reap`.
 1. The fix commit is an ancestor of the default branch.
 2. CI on that head concluded `success`. A `cancelled` run is a supersession by
    a later push, not a failure — re-check the newer run.
+
+**Read the RUN's conclusion, never the watcher's exit code.** This is the same
+trap as `QA_EXIT` in Step 5, and it bites here too: `timeout 900 gh run watch --exit-status` that runs out of time exits 124, and if it is the middle of a
+`&&`/newline chain the chain reports the LAST command's status instead. A run
+still `in_progress` was read as green that way during this loop's own dogfood.
+Query the run itself — `gh run view <id> --json status,conclusion` — and treat
+anything other than `completed` + `success` as not-yet-verified. Per-job status
+is worth a look too: four green jobs and one still running is not a green run.
 
 If CI is red, the issue stays open: fix forward with a new commit.
 
