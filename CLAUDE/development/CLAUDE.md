@@ -6,6 +6,7 @@ directory is part of the agent tree — the audience split is defined in
 
 | File                                             | Route here for                                                                             |
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| [CcySupervisor.md](CcySupervisor.md)             | The ccy supervisor's edit-to-live contract: verifying the `--worker` reload                |
 | [CLIENT-MODE-TESTING.md](CLIENT-MODE-TESTING.md) | Verifying changes in a real client install fixture                                         |
 | [DOC-CONVENTIONS.md](DOC-CONVENTIONS.md)         | Markdown conventions for tracked docs                                                      |
 | [IssueSdlc.md](IssueSdlc.md)                     | Taking ONE GitHub issue from triage to merged-and-closed (`/issue-sdlc`, hourly cron)      |

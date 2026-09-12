@@ -14,4 +14,4 @@ behaviour — never assume it did, and never restart the whole ccy session just
 to reload the worker.
 
 The hot-reload contract and verification procedure live in
-[.claude/ccy/CLAUDE.md](../ccy/CLAUDE.md).
+[CLAUDE/development/CcySupervisor.md](../../CLAUDE/development/CcySupervisor.md).

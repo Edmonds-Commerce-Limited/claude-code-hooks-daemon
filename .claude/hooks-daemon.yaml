@@ -1210,9 +1210,12 @@ documentation:
       - glob: ".claude/rules/plan-dir.md"
         generator: "bin/hooks-daemon restart (redeploys install/directory_role_rules.py)"
     registered_module_docs:
-      # Canonical home for the ccy supervisor hot-reload contract
-      # (Plan 00284 Task 3.2 slice E — promoted from
-      # .claude/rules/ccy-supervisor-dogfooding.md).
+      # Registered so R7d does not read this as a routing table. It is NOT the
+      # canonical home for the ccy hot-reload contract any more: an untracked
+      # file is a dead link in every fresh clone, and ccy's startup gate refuses
+      # to launch when anything in .claude/ccy/ is tracked, so the contract
+      # moved to CLAUDE/development/CcySupervisor.md. The entry stays because
+      # the file is still present on machines whose ccy install mounts it.
       - ".claude/ccy/CLAUDE.md"
     resident_at_imports: ["CLAUDE.md"]
 

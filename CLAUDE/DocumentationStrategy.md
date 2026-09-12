@@ -28,10 +28,13 @@ of the tree model here: which markdown belongs in each directory, and what
 enforces it. Capture mechanics for the vendored tree — the provenance schema and
 the fidelity rule — are in [CLAUDE/RemoteDocs.md](RemoteDocs.md).
 
-One sub-folder `CLAUDE.md` in this repository is a registered module-local
-canonical home rather than a routing table under R7d:
-[.claude/ccy/CLAUDE.md](../.claude/ccy/CLAUDE.md), which owns the ccy
-supervisor hot-reload contract.
+The ccy supervisor's hot-reload contract is owned by
+[CLAUDE/development/CcySupervisor.md](development/CcySupervisor.md). It was
+previously a registered module-local canonical home at `.claude/ccy/CLAUDE.md`,
+which R7d would otherwise read as a routing table — but that file cannot be
+tracked (ccy's startup gate refuses to launch when anything in `.claude/ccy/`
+is), so an untracked canonical home was a dead link in every fresh clone. A
+canonical home has to be one the reader actually receives.
 
 ## What this project keeps outside the corpus
 

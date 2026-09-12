@@ -31,7 +31,7 @@ with a pointer rather than grown here.
 
 ### Phase 1: Recorded niggles
 
-- [ ] ⬜ **N1**: Two TRACKED documents link to an UNTRACKED file, so every
+- [x] ✅ **N1**: Two TRACKED documents link to an UNTRACKED file, so every
   fresh clone and every new worktree gets two dead links.
   `.claude/rules/ccy-supervisor-dogfooding.md` points at `../ccy/CLAUDE.md` and
   `CLAUDE/DocumentationStrategy.md` points at `../.claude/ccy/CLAUDE.md`. The
@@ -44,9 +44,28 @@ with a pointer rather than grown here.
   Advise severity, so nothing blocks today; the cost is that the main checkout
   can never see it, which is the worst place for a defect to hide. Either the
   file should be tracked, or the two pointers should stop promising it.
-  **Not yet decided which**, and that is the open question: the file reads as
-  the supervisor's own contract, and whether it belongs in the repository or
-  stays a per-machine artefact is an ownership call, not a typo.
+  **Decided on evidence, and only one branch was actually available.** Tracking
+  the file is impossible, not merely unattractive: `.claude/ccy/.gitignore`
+  records in its own comment that `CLAUDE.md` is deliberately not whitelisted
+  because ccy's startup gate refuses to launch when anything in `.claude/ccy/`
+  is tracked, and prescribes a history rewrite plus a force push as the only
+  remedy (the defect report for the ccy maintainers is
+  `untracked/fedora-desktop-ccy-CLAUDE-bug.md`). Rewriting the file in place was
+  ruled out too — it is bind-mounted as `/root/.claude/CLAUDE.md`, the owner's
+  GLOBAL instructions for every project, so editing it here would change
+  unrelated projects' behaviour.
+  So the repo side moved instead: the contract now lives at
+  `CLAUDE/development/CcySupervisor.md`, registered in the development routing
+  table, and both pointers target it. The `registered_module_docs` entry stays
+  (it keeps R7d from reading the local file as a routing table) with its comment
+  corrected — it no longer claims to be the canonical home.
+  The general lesson, worth more than the fix: **a canonical home must be one
+  the reader actually receives.** An untracked canonical is invisible exactly
+  where the reader most needs it, and invisible to the checkout that would
+  report it.
+  No release-bound consequence: every file touched is repo-internal. The rule
+  file is not a shipped artefact — nothing under `src/` references it, and the
+  daemon restart left the edit intact rather than regenerating over it.
 
 ## Success Criteria
 
