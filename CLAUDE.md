@@ -565,6 +565,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - merge_qa_report — post-hoc plan/docs QA report after a merge
 
+<!-- handler: daemon-sync-after-merge -->
+
+- daemon_sync_after_merge — a pull can leave the daemon stale
+
 <!-- handler: ccy-supervisor-integrity -->
 
 - ccy_supervisor_integrity — keep the ccy supervisor properly set up
