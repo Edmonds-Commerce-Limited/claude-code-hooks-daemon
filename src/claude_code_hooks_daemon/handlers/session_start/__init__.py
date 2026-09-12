@@ -12,6 +12,7 @@ from .hook_registration_checker import HookRegistrationCheckerHandler
 from .lsp_noise_checker import LspNoiseCheckerHandler
 from .model_fallback_detector import ModelFallbackDetectorHandler
 from .optimal_config_checker import OptimalConfigCheckerHandler
+from .persistent_cron_assertor import PersistentCronAssertorHandler
 from .plan_qa_sweep import PlanQaSweepHandler
 from .project_handler_load_checker import ProjectHandlerLoadCheckerHandler
 from .remote_docs_staleness import RemoteDocsStalenessHandler
@@ -36,6 +37,7 @@ __all__ = [
     "LspNoiseCheckerHandler",
     "ModelFallbackDetectorHandler",
     "OptimalConfigCheckerHandler",
+    "PersistentCronAssertorHandler",
     "PlanQaSweepHandler",
     "ProjectHandlerLoadCheckerHandler",
     "RemoteDocsStalenessHandler",

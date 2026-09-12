@@ -227,6 +227,14 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "surfaces (the next SessionStart sweep)"
     ),
     "PlanWorkflowAssetCheckerHandler": "T3 names a provisioning command to run later",
+    "PersistentCronAssertorHandler": (
+        "T3 the reconcile happens after the advisory — the agent has to run CronList "
+        "and CronCreate itself — and the rule that decides what to do with the report "
+        "holds for every session: it lists what the project DECLARED, never what is "
+        "absent, because the daemon cannot read Claude Code's session memory. Without "
+        "that stated, an agent treats the list as a to-create list and stacks a "
+        "duplicate job every session"
+    ),
     "DeployedArtefactDriftHandler": (
         "T3 the redeploy that clears a drift happens later in the session, and the "
         "rule that decides WHICH side is wrong has to hold for every report: the "

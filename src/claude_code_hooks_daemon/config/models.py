@@ -1782,6 +1782,100 @@ class ToolPolicyConfig(BaseModel):
         return {entry.tool: entry.reason for entry in self.never_want}
 
 
+class PersistentCronConfig(BaseModel):
+    """One cron a project wants re-established in every session (Plan 00384).
+
+    Attributes:
+        id: Stable identifier, used to recognise the job in ``CronList``.
+        schedule: Standard 5-field cron expression, local time.
+        prompt: The text enqueued when the job fires.
+        enabled: Whether this individual job is asserted.
+        description: Human-facing note about what the job is for.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, description="Stable identifier for this declared job")
+    schedule: str = Field(description="Standard 5-field cron expression, local time")
+    prompt: str = Field(min_length=1, description="Prompt enqueued when the job fires")
+    enabled: bool = Field(default=True, description="Whether this job is asserted")
+    description: str = Field(default="", description="What this job is for")
+
+    @field_validator("id", "prompt")
+    @classmethod
+    def reject_blank(cls, value: str) -> str:
+        """A whitespace-only id or prompt passes ``min_length`` but is useless.
+
+        An empty prompt is not harmless: it would fire on schedule and cost a
+        full model turn to read and answer with nothing, which is exactly the
+        waste the failsafe cron's own back-off exists to avoid.
+        """
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("schedule")
+    @classmethod
+    def require_five_fields(cls, value: str) -> str:
+        """Reject a malformed schedule at config load.
+
+        The alternative is a job that silently never fires, discovered only by
+        noticing work that did not happen — the most expensive way to learn it.
+        """
+        if len(value.split()) != 5:
+            raise ValueError(
+                f"schedule must be a 5-field cron expression (got {value!r}); "
+                "e.g. '23 * * * *' for hourly at 23 past"
+            )
+        return value
+
+
+class PersistentCronsConfig(BaseModel):
+    """Crons this project wants asserted at every session start (Plan 00384).
+
+    Claude Code's ``CronCreate`` cannot persist a job: ``durable`` has no
+    effect, jobs live in session memory only, and recurring jobs auto-expire
+    after 7 days. A job that must always exist therefore has to be declared
+    somewhere durable and re-created each session — that declaration is this.
+
+    Ships inert, in BOTH directions: the section is off by default, and a
+    project that declares nothing has nothing asserted.
+
+    Attributes:
+        enabled: Master switch for the whole mechanism.
+        jobs: The declared jobs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=False, description="Master switch for cron assertion")
+    jobs: list[PersistentCronConfig] = Field(
+        default_factory=list, description="Declared crons to assert each session"
+    )
+
+    @model_validator(mode="after")
+    def reject_duplicate_ids(self) -> Self:
+        """Two jobs sharing an id cannot both be asserted — a reader checking
+        ``CronList`` could not tell which of them was already present."""
+        seen: set[str] = set()
+        for job in self.jobs:
+            if job.id in seen:
+                raise ValueError(f"duplicate persistent cron id: {job.id!r}")
+            seen.add(job.id)
+        return self
+
+    def active_jobs(self) -> list[PersistentCronConfig]:
+        """The jobs to assert: none while the section switch is off.
+
+        The section switch deliberately overrides each job's own flag, so
+        turning the mechanism off is one reliable action rather than an audit
+        of every declaration.
+        """
+        if not self.enabled:
+            return []
+        return [job for job in self.jobs if job.enabled]
+
+
 class PromotionConfig(BaseModel):
     """Data-driven handler promotion policy (Plan 00116 Decision I).
 
@@ -1871,6 +1965,7 @@ class Config(BaseModel):
     ccy: CcyConfig = Field(default_factory=CcyConfig)
     worktree: WorktreeConfig = Field(default_factory=WorktreeConfig)
     tool_policy: ToolPolicyConfig = Field(default_factory=ToolPolicyConfig)
+    persistent_crons: PersistentCronsConfig = Field(default_factory=PersistentCronsConfig)
     claude_md: ClaudeMdConfig = Field(default_factory=ClaudeMdConfig)
     pseudo_events: dict[str, dict[str, Any]] = Field(
         default_factory=dict,

@@ -788,6 +788,10 @@ handlers:
       enabled: true     # Python, TypeScript/JavaScript, Go, Rust, PHP; advisory, silent when the exclude is complete and no server predates it
       priority: 69
 
+    persistent_cron_assertor:  # Re-state the crons declared in persistent_crons so each new session can re-create them (Plan 00384)
+      enabled: true            # Silent unless persistent_crons.enabled and at least one job is declared; states declarations, never asserts what is absent
+      priority: 70
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     disclosure_reset_pre_compact:  # Reset per-agent rule-disclosure state before compaction (Plan 00116 Phase 4)

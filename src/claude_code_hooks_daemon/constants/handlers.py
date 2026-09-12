@@ -739,6 +739,16 @@ class HandlerID:
         config_key="tool_disable_advisor",
         display_name="tool-disable-advisor",
     )
+    # Persistent-cron assertor (SessionStart handler) -- Plan 00384: Claude
+    # Code crons are session-only (durable has no effect, recurring jobs expire
+    # after 7 days), so a cron a project wants ALWAYS present has to be
+    # re-established each session. Declares, never verifies: the daemon cannot
+    # read session memory, so it instructs a CronList reconcile.
+    PERSISTENT_CRON_ASSERTOR = HandlerIDMeta(
+        class_name="PersistentCronAssertorHandler",
+        config_key="persistent_cron_assertor",
+        display_name="persistent-cron-assertor",
+    )
     # Monorepo detector (SessionStart handler) -- Plan 00296 Task 3.4: manifests
     # below the repo root with none at it is the signature of an unconfigured
     # monorepo. Advises only -- never resolves a boundary itself.

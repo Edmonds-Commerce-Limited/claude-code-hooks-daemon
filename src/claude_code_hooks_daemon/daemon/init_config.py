@@ -323,6 +323,7 @@ class ConfigTemplate:
             "    monorepo_detector: {enabled: true, priority: 66}  # Advise on an unconfigured monorepo shape (manifests found below the repo root, none at it)\n"
             "    config_optimisation_reminder: {enabled: true, priority: 67}  # Remind to re-run the config-optimisation review after an upgrade; silent once a run is recorded against the current version\n"
             "    lsp_noise_checker: {enabled: true, priority: 69}  # Every supported language (Python, TypeScript/JavaScript, Go, Rust, PHP): advise when its server isn't told to exclude a tree that is not project code, or its process predates that check\n"
+            "    persistent_cron_assertor: {enabled: true, priority: 70}  # Re-state crons declared under persistent_crons so a new session can re-create them (Claude Code crons are session-only: durable has no effect and recurring jobs expire after 7 days). Inert until persistent_crons.enabled is true AND a job is declared, so this ships silent\n"
             "\n"
             "  # SessionEnd - no handlers ship today (cleanup removed in Plan 00237)\n"
             "  session_end: {}\n"

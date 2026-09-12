@@ -307,6 +307,11 @@ class Priority:
     # priority after remote_docs_staleness (68), so ADVISORY_MAX widens by
     # one again.
     LSP_NOISE_CHECKER = 69
+    # Plan 00384 Task 1.3: persistent-cron assertion -- next free SessionStart
+    # priority after lsp_noise_checker (69), so ADVISORY_MAX widens by one
+    # again. Deliberately last: re-establishing crons is session housekeeping,
+    # and it must not push a finding about the code ahead of it off the top.
+    PERSISTENT_CRON_ASSERTOR = 70
 
     # Advisory handlers (Priority: 55-65)
     CRITICAL_THINKING_ADVISORY = 55
@@ -361,7 +366,7 @@ class PriorityRange:
     # (Plan 00308), 68 for remote_docs_staleness (Plan 00326) and 69 for
     # lsp_noise_checker (Plan 00368). Documented in root CLAUDE.md's Priority
     # Ranges.
-    ADVISORY_MAX = 69
+    ADVISORY_MAX = 70
 
     LOGGING_MIN = 100
     LOGGING_MAX = 199
