@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00390: niggles ledger five](00390-niggles-ledger-five/PLAN.md) - In Progress (the OPEN niggles ledger — record small defects here the turn they are found; ledgers 00377/00379/00381/00385 are all closed. N1: `markdown_organization` denies a `.md` under `untracked/` when a `.claude/` segment sits deeper in the path, though its own message lists `./untracked/` as allowed)
+- [00390: niggles ledger five](00390-niggles-ledger-five/PLAN.md) - In Progress (the OPEN niggles ledger — record small defects here the turn they are found; ledgers 00377/00379/00381/00385 are all closed. N1 fixed: `normalize_path` let MARKER-LIST order pick a path's root instead of position, so a nested `.claude/` beat an `untracked/` prefix — its own docstring said "first occurrence", settling it as accident not policy)
 
 - [00389: git pull reconciles daemon config and version](00389-git-pull-reconciles-daemon-config-and-version/PLAN.md) - In Progress (a pull can bring in daemon config, handler code or a whole new version and the running daemon never notices — config is cached at startup and handlers are imported once; advisory only by owner ruling, since a daemon that restarted itself would kill the process still owing a hook response)
 

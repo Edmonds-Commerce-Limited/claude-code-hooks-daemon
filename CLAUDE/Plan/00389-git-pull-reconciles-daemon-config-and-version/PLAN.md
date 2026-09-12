@@ -149,3 +149,12 @@ plan consumes it.
   hooks daemon version — we need to ensure the tracked repo is updated as well".
 - Sibling of Plan 00386, which owns the startup trigger and the shared
   tracked-version reader. Same defect, two moments to catch it.
+- Delivered at `263c18f2` (shared trigger extracted), `6af4fc3a` (config-drift
+  advisory), `d47ef80a` (version drift, both directions) and `fece90e2`
+  (regenerated tracked doc + release-bound consequences).
+- **READY TO CLOSE — awaiting a human.** Full QA is 29/29 and CI is GREEN at
+  `3c2854f4`, so the last success criterion is met in fact. It is left unticked
+  deliberately: ticking it completes the body, which the `header-body-coherence`
+  gate then requires be matched by a `Complete` header — and closing a plan is
+  human-approved in this project (`plan_workflow.close_requires_human_approval`).
+  Tick it as part of closing, not before.

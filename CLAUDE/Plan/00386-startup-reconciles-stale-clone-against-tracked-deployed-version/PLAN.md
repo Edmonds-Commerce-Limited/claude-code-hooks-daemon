@@ -210,3 +210,15 @@ and does not re-propose it as an obvious missing feature.
   labelled `agent-needs-human` because the headline ask is an owner decision.
 - The reporter's "no tracked marker" blocker was checked and found not to hold;
   the marker and a parser for it both already exist.
+- Delivered at `d47ef80a` (Task 2.1, the shared reader), `d8fbe390` (Task 2.2,
+  startup names both versions), `2d8d3b66` (Task 2.3, honest `from_version`) and
+  `df3670d0` (Phase 4, the outbound commit instruction).
+- **READY TO CLOSE — awaiting a human.** Full QA is 29/29 and CI is GREEN at
+  `3c2854f4`, so the last success criterion is met in fact. It is left unticked
+  deliberately: ticking it completes the body, which the `header-body-coherence`
+  gate then requires be matched by a `Complete` header — and closing a plan is
+  human-approved in this project (`plan_workflow.close_requires_human_approval`).
+  Tick it as part of closing, not before.
+- **Issue #38 should be closed with the plan**, not before it: the reporter's
+  point 3 (self-update) was deliberately NOT built, so the closing comment has
+  to say so rather than imply the issue was implemented as filed.

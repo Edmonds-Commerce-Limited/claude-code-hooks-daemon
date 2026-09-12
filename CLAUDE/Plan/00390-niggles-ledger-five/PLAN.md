@@ -39,7 +39,7 @@ sure nothing is dropped, not to force every fix into one plan.
 
 ### Phase 1: Entries
 
-- [ ] ⬜ **N1**: `markdown_organization` denies a `.md` write under
+- [x] ✅ **N1**: `markdown_organization` denies a `.md` write under
   `untracked/` when a `.claude/` segment appears deeper in the path, even though
   its own deny message lists `./untracked/` as an allowed location.
 
@@ -56,19 +56,31 @@ sure nothing is dropped, not to force every fix into one plan.
   need protecting, and the cost is that the honest way to build a fixture is
   blocked while a Bash redirect (which no content guard inspects) is not.
 
-  **Not yet diagnosed**: whether the `.claude/` branch is evaluated before the
-  allow-list prefix by design or by accident. Fix should establish which, since
-  "deliberate" would mean the deny MESSAGE is the thing that is wrong.
+  **Diagnosed — accident, not design.** `normalize_path` iterated the MARKER
+  LIST and stopped at the first name found anywhere in the path, so list order
+  decided the root. `.claude/` precedes `untracked/`, so the nested segment won.
+  The function's own docstring settles the intent: it says "find first
+  OCCURRENCE of project markers", which is positional, while the implementation
+  was ordinal — so the deny message was right and the code was wrong.
+
+  **Fixed**: the earliest segment-aligned marker in the path wins. Two of the
+  six new tests were green beforehand and are kept as controls, so the fix
+  cannot have been bought by loosening the stripping the function exists to do.
 
 ## Success Criteria
 
-- [ ] Every entry above is either fixed with a regression test, or graduated to
+- [x] Every entry above is either fixed with a regression test, or graduated to
   a named plan and that plan is linked from the entry.
-- [ ] No entry is closed on reasoning alone — each fix is proved against the
-  case that was actually observed.
+- [x] No entry is closed on reasoning alone — each fix is proved against the
+  case that was actually observed. N1 was re-run as the ORIGINAL denied write,
+  through the real handler, after the fix.
 - [ ] Full QA passes and CI is green.
 
 ## Delivery & Milestones
 
 - Opened because ledgers 00377/00379/00381/00385 are all closed and a new niggle
   was found, per the SOP in `CLAUDE/core/PlanWorkflow.core.md`.
+- N1 fixed at `7e0756af`.
+- **This ledger stays OPEN while it is the current one.** It is not "finished"
+  when its entries are: it closes when a successor opens, which is what the SOP
+  means by the next niggle opening a new ledger. Record new entries here.
