@@ -66,34 +66,41 @@ each one is a safety property rather than a preference:
 
 ### Phase 1: Daemon-declared, session-asserted crons
 
-- [ ] ⬜ **Task 1.1**: Establish the ceiling honestly first — a test that pins
-  what `CronCreate` can and cannot do, so no future reader re-litigates
-  `durable: true`. The mechanism exists BECAUSE persistence does not.
-- [ ] ⬜ **Task 1.2**: Config schema for declared crons: id, schedule, prompt,
-  enabled. Validated like every other config surface.
-- [ ] ⬜ **Task 1.3**: A SessionStart handler that emits the declared crons and
-  instructs the agent to `CronList` and create any missing. It cannot read
-  session memory, so it asserts by instruction, which is exactly how the
-  failsafe cron advisory already works.
-- [ ] ⬜ **Task 1.4**: Ship it default-OFF with no declared crons, so a client
-  project gains nothing it did not ask for.
+- [x] ✅ **Task 1.1**: The ceiling is stated wherever a reader could
+  re-litigate `durable: true` — handler docstring, `get_claude_md()`, config
+  comment and this plan. `CronCreate` is a harness tool and cannot be
+  unit-tested, so what IS pinned by test is that the advisory always explains
+  *why* re-creation is needed (`test_it_says_why_the_job_has_to_be_recreated`);
+  an advisory that omits the reason reads as noise and gets ignored.
+- [x] ✅ **Task 1.2**: `persistent_crons` with `PersistentCronConfig`
+  (id/schedule/prompt/enabled/description). Schedules validated as 5-field at
+  load, blank id/prompt rejected, duplicate ids rejected.
+- [x] ✅ **Task 1.3**: `persistent_cron_assertor`, priority 70. Asserts by
+  instruction, and a test forbids wording that claims to know what is running —
+  it caught my own first draft, whose disclaimer contained the banned phrase.
+- [x] ✅ **Task 1.4**: Ships inert, but via ONE switch rather than two.
+  `persistent_crons.enabled` is off by default and overrides each job's own
+  flag; a second handler-level switch would create a state where a project that
+  declared jobs AND enabled the section still silently got nothing.
 
 ### Phase 2: The SDLC runbook
 
-- [ ] ⬜ **Task 2.1**: Durable state on the issues themselves via labels, not a
-  local file — a label survives a fresh clone and is visible to the humans
-  watching the repo. Needs a stale-`working` recovery path, because a tick that
-  dies mid-issue must not strand it forever.
-- [ ] ⬜ **Task 2.2**: Selection: exactly one issue per tick, oldest-first among
-  eligible, skipping anything labelled for a human.
-- [ ] ⬜ **Task 2.3**: Triage classifier with an explicit STOP branch —
-  duplicate, invalid, needs-human-decision, or actionable. #30/#31 are
-  confirmed duplicates and are the dogfood case for that branch.
-- [ ] ⬜ **Task 2.4**: Execute in a worktree via sub-agent, then QA, review,
-  merge. Reuses the existing worktree and merge machinery rather than inventing
-  a second path.
-- [ ] ⬜ **Task 2.5**: Close only on verified merge into the default branch.
-  The close step must re-check the merge rather than trust the earlier step.
+- [x] ✅ **Task 2.1**: Labels `agent-triaged` / `agent-working` /
+  `agent-needs-human`, created in the repo. Stale-`working` recovery is the
+  FIRST selection rule, and it re-verifies state from git rather than trusting
+  the label.
+- [x] ✅ **Task 2.2**: Exactly one issue per tick, oldest-first, skipping
+  anything labelled for a human.
+- [x] ✅ **Task 2.3**: Six outcomes, not four — the dogfood added
+  "blocked on upstream/external" and four pre-classification checks
+  (reverted-before, still-true-today, part-of-a-cluster, partially-delivered).
+  Each traces to a real issue on this backlog, recorded in Task 3.2.
+- [x] ✅ **Task 2.4**: `setup_worktree.sh` plus an implementation sub-agent,
+  briefed with verified facts rather than the raw issue body, and explicitly
+  permitted to disagree with the brief.
+- [x] ✅ **Task 2.5**: Close requires the fix commit to be an ancestor of the
+  default branch AND CI success on that head, re-checked rather than trusted.
+  A `cancelled` CI run is a supersession, not a failure.
 
 ### Phase 3: Dogfood on the real backlog
 
