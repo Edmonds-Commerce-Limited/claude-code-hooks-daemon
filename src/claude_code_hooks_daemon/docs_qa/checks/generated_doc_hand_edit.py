@@ -58,6 +58,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Severity,
 )
 from claude_code_hooks_daemon.utils.deployed_version import VERSION_MARKER_RE
+from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.version import __version__ as _DAEMON_VERSION
 
 logger = logging.getLogger(__name__)
@@ -127,7 +128,32 @@ def _extract_marker_version(text: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _staleness_finding(rel_path: str, marker_version: str, entry: GeneratedDocEntry) -> Finding:
+def _is_tracked(project_root: Path, rel_path: str) -> bool:
+    """Does git track ``rel_path``? ``False`` when it cannot say.
+
+    Asked of git rather than inferred, because trackedness is git's fact and a
+    project may place a generated doc on either side of its `.gitignore`. A
+    non-zero exit covers both "not tracked" and "not a git repository at all",
+    and both mean the same thing here: do not append advice about committing.
+    """
+    result = run_git(project_root, "ls-files", "--error-unmatch", "--", rel_path)
+    return result.returncode == 0
+
+
+def _staleness_finding(
+    rel_path: str, marker_version: str, entry: GeneratedDocEntry, *, tracked: bool
+) -> Finding:
+    remediation = f"Regenerate `{rel_path}` with: `{entry.generator}`"
+    if tracked:
+        # Plan 00386 Phase 4 — the OUTBOUND half of GitHub issue #38. A TRACKED
+        # generated doc that is regenerated and left uncommitted is back to
+        # stale on the next checkout, because the committed copy is what the
+        # next install deploys from. "Regenerate" alone does not say that.
+        remediation += (
+            f", then COMMIT the result — `{rel_path}` is tracked, so an "
+            f"uncommitted regeneration leaves the repository still describing a "
+            f"daemon it no longer has."
+        )
     return Finding(
         check_id=CHECK_ID,
         severity=Severity.ADVISE,
@@ -135,7 +161,7 @@ def _staleness_finding(rel_path: str, marker_version: str, entry: GeneratedDocEn
             f"`{rel_path}` looks stale: it embeds v{marker_version} but the "
             f"daemon is v{_DAEMON_VERSION}."
         ),
-        remediation=f"Regenerate `{rel_path}` with: `{entry.generator}`",
+        remediation=remediation,
         path=rel_path,
     )
 
@@ -173,7 +199,14 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         if marker_version is None or marker_version == _DAEMON_VERSION:
             continue
         rel_path = str(abs_path.relative_to(context.project_root))
-        findings.append(_staleness_finding(rel_path, marker_version, entry))
+        findings.append(
+            _staleness_finding(
+                rel_path,
+                marker_version,
+                entry,
+                tracked=_is_tracked(context.project_root, rel_path),
+            )
+        )
     return findings
 
 
