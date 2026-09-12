@@ -118,10 +118,15 @@ Read the issue **including comments** (`gh issue view N --json ...,comments`;
 a bare `gh issue view` is blocked here precisely because comments carry half
 the context).
 
-### Four checks before classifying
+### Six checks before classifying
 
 Every one of these was a live finding on this repo's own backlog. Skipping any
 of them is how an autonomous loop does damage while looking productive.
+
+Checks 1–4 came from Plan 00384's first dogfood; 5 and 6 from Plan 00387's sweep
+of the whole backlog. **If you add a seventh, renumber this heading** — it said
+"Four" for a while after there were six, which is precisely the drift that lets
+a skimming reader stop early.
 
 1. **Has this already been built and deliberately REVERTED?** Read the whole
    comment thread, not just the body. Issue #14 carries a detailed "Proposed
@@ -199,6 +204,13 @@ point anyway. If a comment is denied, reword it; never go looking for the term.
 Dispatch the `hooks-daemon-plan-dedupe-scout` agent first. If a plan already
 covers it, update that plan rather than filing a second.
 
+**Declare where its output goes, in the dispatch prompt** (Plan 00307). At this
+point no plan folder exists yet, so the scout is not plan work: tell it to keep
+its answer short and inline, and to write to
+`untracked/agent-reports/{yymmdd}-{agent-name}-{model}.md` if it has more. Omit
+this and `dispatch_declaration` advises on every single tick — it did on this
+loop's own scout dispatch, which then needed a follow-up message to fix.
+
 Otherwise `CLAUDE/Plan/mkplan.bash "<kebab name>"`, record
 `**GitHub Issue**: #N` in the header, add the index row, and update the Plan
 Statistics. Commit and push the plan before implementing.
@@ -222,7 +234,14 @@ Dispatch an implementation sub-agent into that worktree with:
 - an explicit TDD requirement: a failing test reproducing the defect BEFORE the
   fix, with the failure output quoted back in its report;
 - permission to disagree. A sub-agent that concludes the brief is wrong should
-  say so rather than implement it.
+  say so rather than implement it. This is not a courtesy: on #34 the sub-agent
+  rejected the approach in the brief and rejected "all existing tests still
+  pass" as unachievable, and was right on both counts;
+- the report destination. Here a plan folder DOES exist, so name it:
+  `<plan-folder>/subagent-reports/{yymmdd}-{agent-name}-{model}.md`. Long-form
+  output goes to a FILE — a sub-agent's return travels over a bounded channel
+  that silently elides an oversized inline report, so an undeclared long report
+  is not just untidy, it can arrive truncated without saying so.
 
 **Reproduce before fixing, always.** A fix with no red test is a guess. If the
 defect cannot be reproduced, that is a triage answer, not a licence to change

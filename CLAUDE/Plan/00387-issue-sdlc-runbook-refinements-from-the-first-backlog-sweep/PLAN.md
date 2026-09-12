@@ -86,6 +86,21 @@ Every refinement traces to a specific issue. None is a tidy-up.
   answer correctly in both directions, and deliberately the same test Step 8 uses
   — a recovery tick and a closing tick must not disagree about what merged means.
 
+- [x] ✅ **Task 1.7**: Read the whole runbook end-to-end as a reader would,
+  which is the only way to catch what piecemeal edits break. Two defects found,
+  neither visible from any single edit:
+  the section heading still said "Four checks before classifying" after two more
+  were added — a skimming reader would have stopped at four, so it now says Six
+  and carries an explicit instruction to renumber;
+  and Steps 3 and 4 both tell you to dispatch a sub-agent without declaring
+  where its output goes. `dispatch_declaration` advised on this loop's own scout
+  dispatch today, which then needed a follow-up message to repair. Both steps now
+  declare it — `untracked/agent-reports/` for the scout, since no plan folder
+  exists yet, and `<plan-folder>/subagent-reports/` for the implementation agent,
+  where one does. The reason is recorded too: an oversized inline report is
+  silently elided by the return channel, so the omission can truncate evidence
+  rather than merely look untidy.
+
 ## Success Criteria
 
 - [x] Every addition names the issue that produced it — checks 5 and 6 cite #36
