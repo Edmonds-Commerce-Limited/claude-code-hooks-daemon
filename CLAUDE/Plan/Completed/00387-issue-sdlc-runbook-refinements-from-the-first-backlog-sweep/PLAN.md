@@ -1,6 +1,6 @@
 # Plan 00387: issue sdlc runbook refinements from the first backlog sweep
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-12
 **Owner**: joseph
 **Priority**: Medium
@@ -111,7 +111,10 @@ Every refinement traces to a specific issue. None is a tidy-up.
   Task 1.5 rather than assumed, since no QA check reads prose for stale commands.
 - [x] No release-bound consequence — `CLAUDE/development/IssueSdlc.md` is a
   repo-internal contributor document and ships to no client.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green — full QA 29/29 with `QA_EXIT=0`, and CI
+  run `34711431456` concluded `success` on `f7fe8e7b`, all five jobs green. Read
+  from the run rather than a watcher's exit code, which is the rule Task 1.4
+  added to the runbook after that exact misread happened here.
 
 ## Delivery & Milestones
 

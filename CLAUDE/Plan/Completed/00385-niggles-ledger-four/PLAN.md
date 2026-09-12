@@ -1,6 +1,6 @@
 # Plan 00385: niggles ledger four
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-12
 **Owner**: joseph
 **Priority**: Medium
@@ -105,7 +105,10 @@ with a pointer rather than grown here.
   recorded in this ledger.
 - [ ] Every release-bound consequence is in the pending-release holding area, or
   the entry records why it has none.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green — full QA 29/29 with `QA_EXIT=0`, and CI
+  run `34711431456` concluded `success` on `f7fe8e7b` with all five jobs green
+  (Shell, Daemon load, and QA on Python 3.11/3.12/3.13). Read from the run
+  itself, not from a watcher's exit code.
 
 ## Delivery & Milestones
 

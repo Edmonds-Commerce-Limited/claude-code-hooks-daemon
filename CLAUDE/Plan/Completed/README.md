@@ -4,6 +4,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00355: supervisor announces every keystroke it sends](00355-supervisor-announces-every-keystroke-it-sends/PLAN.md) - Complete at `e105530e` + the follow-on supervisor commits and the archiving commit (the ESC injected to flush a stalled compaction was silent; every keystroke the supervisor sends now raises the status-line banner on the tick that sends it, and repeats collapse to a tally like `esc (20), compact (15)`)
+
+- [00354: docs qa stale counterpart index](00354-docs-qa-stale-counterpart-index/PLAN.md) - Complete at `82bbd550`…`644ba92c` + the merge commit (the EDIT path reused every COUNTERPART index record without revalidating `mtime_ns`/`size`, so `duplicate-block` cited spans whose content had moved or gone and missed duplicates against files changed since the last sweep; `quote-source-stale` shared the shape, because the dividing line is the stage rather than the check)
+
 - [00353: registry option injection clobbers compiled attributes](00353-registry-option-injection-clobbers-compiled-attributes/PLAN.md) - Complete at `883990ea` + the merge commit (the registry assigns each config option to `self._<key>` AFTER `__init__`, so `pipe_blocker`'s compiled `extra_whitelist` was overwritten with raw YAML strings and every piped command raised out of `matches()` — failing open, which silently disabled the whole handler for as long as the option was set)
 
 - [00352: agent branches outlive their worktrees](00352-agent-branches-outlive-their-worktrees/PLAN.md) - Complete at `f6f1069c`…`f587a7f0` + the archiving commit (a branch whose worktree had already gone was invisible to `worktree-reap`, which enumerates from `git worktree list`; `--reap-branches` reports and prunes them)

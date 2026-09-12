@@ -4,11 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00387: issue sdlc runbook refinements from the first backlog sweep](00387-issue-sdlc-runbook-refinements-from-the-first-backlog-sweep/PLAN.md) - In Progress (what the first full sweep of the backlog taught the loop: two new triage checks, a publishing caution, and reading a CI run's conclusion rather than the watcher's exit code — each traced to the issue that produced it)
-
 - [00386: startup reconciles stale clone against tracked deployed version](00386-startup-reconciles-stale-clone-against-tracked-deployed-version/PLAN.md) - Not Started (GitHub #38: a stale gitignored clone met newer tracked assets and every safety handler was inactive for a whole session under `--dangerously-skip-permissions`; blocked on an owner ruling — self-update the clone, or detect and fail loudly only)
-
-- [00385: niggles ledger four](00385-niggles-ledger-four/PLAN.md) - In Progress (successor to Plan 00381; the open ledger for small verified defects — record in the turn found, fix here or graduate with a pointer)
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
@@ -125,6 +121,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00387: issue sdlc runbook refinements from the first backlog sweep](Completed/00387-issue-sdlc-runbook-refinements-from-the-first-backlog-sweep/PLAN.md) - Complete at `377456ac`…`f7fe8e7b` + the archiving commit (a whole-backlog sweep showed three of four untriaged issues were already fixed, so the loop's real output is a closed issue carrying evidence — two new triage checks, a concrete stale-`agent-working` recovery path, and reading a CI run rather than the watcher)
+
+- [00385: niggles ledger four](Completed/00385-niggles-ledger-four/PLAN.md) - Complete at `15300324`…`655fbfbf` + the archiving commit (two entries, both fixed: an untracked canonical home left two tracked docs dead in every fresh clone — a canonical home must be one the reader actually receives; and a plan filed FROM an issue that never named it, so a fix sat untold for three days)
+
 - [00384: daemon asserted cron and autonomous issue sdlc](Completed/00384-daemon-asserted-cron-and-autonomous-issue-sdlc/PLAN.md) - Complete at `43984e74`…`f6fc3d34` + the archiving commit (`CronCreate` cannot persist a job — `durable` has no effect — so the daemon declares crons in config and re-asserts them at SessionStart; the declared `issue-sdlc` tick carries ONE open issue from triage to merged-and-closed, with releases still human-gated)
 
 - [00383: transport toggle trusts config over deployed state](Completed/00383-transport-toggle-trusts-config-over-deployed-state/PLAN.md) - Complete at `3a58ce16`…`3292cd09` + the archiving commit (`transport on`/`off` decided "already — nothing to do" from the config alone and never read the deployed forwarders, so a project whose config said the relay was off while its forwarders still carried the hot path was told so, exit 0)
@@ -183,10 +183,6 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - [00357: a ValueError escapes glob expansion and fails a security guard open](Completed/00357-glob-expansion-valueerror-escapes-fail-open/PLAN.md) - Complete at `ce95acae` + the archiving commit (`Path.glob` is a generator, so the `ValueError` fired on iteration OUTSIDE the `try` and the quarantine artefact read guard was skipped for the whole tool call; the guard now wraps the consumption, proven by tests that failed pre-fix)
 
-- [00355: supervisor announces every keystroke it sends](Completed/00355-supervisor-announces-every-keystroke-it-sends/PLAN.md) - Complete at `e105530e` + the follow-on supervisor commits and the archiving commit (the ESC injected to flush a stalled compaction was silent; every keystroke the supervisor sends now raises the status-line banner on the tick that sends it, and repeats collapse to a tally like `esc (20), compact (15)`)
-
-- [00354: docs qa stale counterpart index](Completed/00354-docs-qa-stale-counterpart-index/PLAN.md) - Complete at `82bbd550`…`644ba92c` + the merge commit (the EDIT path reused every COUNTERPART index record without revalidating `mtime_ns`/`size`, so `duplicate-block` cited spans whose content had moved or gone and missed duplicates against files changed since the last sweep; `quote-source-stale` shared the shape, because the dividing line is the stage rather than the check)
-
 ## Blocked / On Hold Plans
 
 - None. (00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
@@ -238,15 +234,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 387 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 346 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 348 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 18 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 18 + 346 + 13 = **377 folders**, spanning
+- **Folder-to-number reconciliation**: 16 + 348 + 13 = **377 folders**, spanning
   **374 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
