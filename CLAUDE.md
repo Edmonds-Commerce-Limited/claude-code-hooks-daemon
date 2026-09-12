@@ -607,6 +607,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - deployed_artefact_drift — a deployed file has moved away from its template
 
+<!-- handler: persistent-cron-assertor -->
+
+- persistent_cron_assertor — declared crons are re-established each session
+
 <!-- handler: standing-authorisations -->
 
 - standing_authorisations — a project can record a standing request
