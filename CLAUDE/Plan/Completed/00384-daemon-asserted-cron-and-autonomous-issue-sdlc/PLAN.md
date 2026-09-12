@@ -1,6 +1,6 @@
 # Plan 00384: daemon asserted cron and autonomous issue sdlc
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-12
 **Owner**: joseph
 **Priority**: High
@@ -136,7 +136,10 @@ each one is a safety property rather than a preference:
 - [x] The loop has been run against real issues and corrected from what it did.
 - [x] Every release-bound consequence is in the pending-release holding area:
   `UNRELEASED/release-notes/36-declare-crons-the-daemon-re-asserts-each-session.md`.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green — full QA on `main` 29/29 with `QA_EXIT=0`
+  (the wrapper's own status is not the verdict), and CI run `34706767431`
+  succeeded on `f6fc3d34`, the exact head carrying this plan's last content
+  commit.
 
 ## Delivery & Milestones
 

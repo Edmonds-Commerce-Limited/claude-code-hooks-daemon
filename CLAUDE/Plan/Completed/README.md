@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00353: registry option injection clobbers compiled attributes](00353-registry-option-injection-clobbers-compiled-attributes/PLAN.md) - Complete at `883990ea` + the merge commit (the registry assigns each config option to `self._<key>` AFTER `__init__`, so `pipe_blocker`'s compiled `extra_whitelist` was overwritten with raw YAML strings and every piped command raised out of `matches()` — failing open, which silently disabled the whole handler for as long as the option was set)
+
 - [00352: agent branches outlive their worktrees](00352-agent-branches-outlive-their-worktrees/PLAN.md) - Complete at `f6f1069c`…`f587a7f0` + the archiving commit (a branch whose worktree had already gone was invisible to `worktree-reap`, which enumerates from `git worktree list`; `--reap-branches` reports and prunes them)
 
 - [00351: permission test skips everywhere including non root ci](00351-permission-test-skips-everywhere-including-non-root-ci/PLAN.md) - Complete at `b4a5226b`…`065f9610` + the archiving commit (a `skipif` guarded on `Path("/").stat().st_uid == 0` asks who OWNS `/` rather than who is running — constant `True`, so the test had never executed anywhere)
