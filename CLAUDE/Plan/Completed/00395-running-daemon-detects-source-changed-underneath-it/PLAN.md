@@ -1,6 +1,6 @@
 # Plan 00395: running daemon detects source changed underneath it
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-13
 **Owner**: joseph
 **Priority**: High
@@ -216,8 +216,10 @@ with the existing stdlib reader. Normalise the `v` prefix and tolerate the
   `config-changes` entry. No truth-change entry, and the journal records why —
   this is additive, so no documented truth becomes false.
 
-- [ ] Full QA passes and CI is green. Full QA 29/29 PASSED locally on the
-  content of `f912c15b`; CI on that sha is pending.
+- [x] Full QA passes and CI is green. Full QA 29/29 PASSED locally, and CI
+  concluded `success` on BOTH commits: `f912c15b` (all of the code) and
+  `953f9bd6` (HEAD). Both ran to completion rather than one superseding the
+  other, which is Plan 00393's concurrency fix behaving as documented.
 
 ## Delivery & Milestones
 
@@ -230,3 +232,16 @@ with the existing stdlib reader. Normalise the `v` prefix and tolerate the
   generalise from one sample — is the reusable lesson.
 - That failure is itself the subject of a follow-up: can the daemon detect a
   plan written without reading the docs that own its domain?
+- Closed at `f912c15b` (code, tests, config, release-bound consequences) and
+  `953f9bd6` (this document and the journal). Both CI-green.
+- Two decisions were taken against the letter of this plan and are recorded in
+  the journal rather than smoothed over: the handler reads
+  `ProjectContext.self_install_mode()` rather than the `DaemonConfig` field
+  named in the design section (the design's binding constraint was "no
+  controller change", and that is kept), and it takes the priority slot Plan
+  00223 deliberately held, which is safe only because this handler is silent
+  whenever the versions match.
+- One accepted limitation, deliberately not hidden: a `daemon_version` that
+  `metadata.py` accepts but the stricter stamp parser rejects makes the check
+  fail open and say NOTHING, even on a real version change. Unreachable via
+  `scripts/upgrade.sh`, which always writes `<ref>.<sha>` together.
