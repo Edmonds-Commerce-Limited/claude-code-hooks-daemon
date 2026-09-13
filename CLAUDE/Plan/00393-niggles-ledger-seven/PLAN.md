@@ -39,8 +39,9 @@ sure nothing is dropped, not to force every fix into one plan.
 
 ### Phase 1: Entries
 
-- [ ] ⬜ **N1** — the FAILSAFE recovery cron is the one cron `persistent_crons`
-  does not declare, and it is the most safety-critical of the three.
+- [x] ✅ **N1** — GRADUATED to [Plan 00394](../00394-failsafe-cron-coverage-starts-at-first-plan-write/PLAN.md).
+  The FAILSAFE recovery cron is the one cron `persistent_crons` does not
+  declare, and it is the most safety-critical of the three.
 
   **Observed.** `persistent_crons.jobs` in `.claude/hooks-daemon.yaml:1025-1037`
   declares exactly one job:
@@ -71,10 +72,26 @@ sure nothing is dropped, not to force every fix into one plan.
   three-way provenance split). Declaring the watchdog would mean fixing wording
   the daemon currently leaves open on purpose, so the two are not one decision.
 
-  **Not yet diagnosed**: whether leaving the failsafe cron undeclared was a
-  deliberate call in Plan 00384 or simply never considered. That reading of
-  00384's plan and journal is the first task, and it decides whether this is a
-  defect or a documented design choice.
+  **Diagnosed, and it is why this graduated rather than being fixed here.** It
+  was a reasoned decision, not an oversight. Plan 00384 considered the failsafe
+  cron and justified leaving it out: "`recovery_cron_advisor` already
+  establishes this shape for the failsafe cron." Half of that holds — the
+  advisor does supply a daemon-authored verbatim prompt — but "this shape" was
+  defined in the same sentence as *asserting at SessionStart*, and the advisor
+  is a PostToolUse handler gated on a plan-lifecycle moment:
+
+  ```text
+  persistent_cron_assertor  -> handlers/session_start/   fires every session
+  recovery_cron_advisor     -> handlers/post_tool_use/   fires on a plan write
+  grep failsafe|recovery handlers/session_start/  -> no match
+  ```
+
+  So coverage begins at the first plan-file write, not at session start, and any
+  stall before that is uncovered with no symptom other than a session that never
+  resumes. Graduated because the fix is an owner call between three options with
+  materially different blast radii — a config edit to this repo, a new
+  SessionStart handler, or a daemon-default declared job — and because it means
+  correcting a claim in an archived plan.
 
   **How it was found.** Investigating whether a terminal crash had exercised the
   cron declaration machinery. It had not — the session was RESUMED, not
