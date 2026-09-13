@@ -60,16 +60,54 @@ the job. So a declared item carries a `verify:` discriminator: machine-checkable
 items are CHECKED and cannot be talked past; the rest require an evidence line
 (a commit SHA, a run URL, a command and its result) rather than a bare "yes".
 
-### What this does NOT fix, stated so it is not oversold
+## The policy is three-way, not a boolean
 
-This would not have prevented the failure that prompted it. Plans 00386 and
-00389 sat open because the agent believed a config key was set when it was not
-(Plan 00390 N2) — a false belief about the gate, not an unmet DoD. Both plans'
-DoD was in fact met.
+The owner's refinement: the close policy should have three postures, not an
+on/off gate.
 
-This guards the OPPOSITE direction: a plan closed while its work is not actually
-finished. That is a real failure mode and worth a gate. It is simply a different
-one, and the plan should not borrow credit for the recent incident.
+| Mode         | Behaviour when a plan's DoD is MET                                | Behaviour when it is not               |
+| ------------ | ----------------------------------------------------------------- | -------------------------------------- |
+| `human_gate` | Report it ready and name `approve-plan-close NNNNN` for the human | Deny the flip, listing the unmet items |
+| `encourage`  | Actively advise closing it NOW                                    | Deny the flip, listing the unmet items |
+| `neutral`    | Say nothing                                                       | Deny the flip, listing the unmet items |
+
+`human_gate` is Plan 00367's existing behaviour plus the half it is missing: it
+currently denies the flip and tells the AGENT to report the plan ready, but
+nothing ever tells the HUMAN a plan is waiting on them. That is the #36-shaped
+failure — work delivered and the person who has to act on it never told.
+
+**Back-compatibility is not optional here**: `plan_workflow.close_requires_human_approval`
+already ships and is set in real projects. It maps to the new key —
+`true` → `human_gate`, `false` → `neutral` — so no installed project changes
+behaviour on upgrade, with a `config-changes` migration entry recording it.
+Whether `encourage` should become the shipped DEFAULT is an owner call and is
+deliberately left open: it is the better posture, but it changes behaviour for
+every existing install.
+
+## What this fixes, and the part it does not
+
+**The `encourage` direction WOULD have caught the failure that prompted all of
+this.** Plans 00386 and 00389 were finished — QA 29/29, CI green, merged — and
+sat open for days because the agent believed a gate existed that did not. An
+advisory naming them as DoD-met-and-still-open is exactly the correction that
+was missing, and it costs nothing when there is nothing to say.
+
+**And the signal it keys on must not be the checkboxes**, which is the sharp
+lesson from that incident. `header-body-coherence` already fires when every box
+is ticked and the header still says `In Progress` — it should have caught both
+plans. It did not, because the agent deliberately left the final criterion
+unticked, and wrote down why: ticking it would complete the body and force a
+`Complete` header it believed it was not allowed to write. The check was
+side-stepped by an agent acting in good faith.
+
+So a nudge built on "all boxes ticked" is gameable by the party it is aimed at.
+One built on facts the agent does not control — the work is merged, the tree is
+clean, the declared machine-checks pass — is not. That is why the machine-check
+half of the DoD is load-bearing for BOTH directions, not just the gate.
+
+**The part this does not fix**: nothing here would have corrected the agent's
+false belief about the config key itself. That was Plan 00390 N2, and it is
+fixed separately.
 
 ## Prior art this must reuse, not re-invent
 
@@ -150,9 +188,24 @@ the hard part.
   malformed config, missing plan folder) must ALLOW and log, never wedge a plan
   shut. A gate that can trap a finished plan is worse than no gate.
 
-### Phase 4: Dogfood
+### Phase 4: The other two directions
 
-- [ ] ⬜ **Task 4.1**: Declare this repository's own DoD — complete, QA passing,
+- [ ] ⬜ **Task 4.1**: `plan_workflow.close_policy` with the three modes, and
+  the back-compatible mapping from `close_requires_human_approval` pinned by
+  test in both directions.
+- [ ] ⬜ **Task 4.2**: `encourage` — a plan whose DoD is MET and whose header is
+  still non-terminal is reported, naming the plan and what satisfied each item.
+  Keyed on the machine checks, never on the checkbox count, for the reason
+  recorded above.
+- [ ] ⬜ **Task 4.3**: `human_gate` gains its missing half — the human is told
+  which plans are waiting on their `approve-plan-close`, rather than only the
+  agent being told to report it.
+- [ ] ⬜ **Task 4.4**: `neutral` says nothing in either case, pinned by test.
+  Silence is a supported choice, not an unimplemented branch.
+
+### Phase 5: Dogfood
+
+- [ ] ⬜ **Task 5.1**: Declare this repository's own DoD — complete, QA passing,
   merged to main, ready for release — and close the next plan through it.
 
 ## Success Criteria
@@ -162,6 +215,12 @@ the hard part.
 - [ ] An unchanged retry is denied again, pinned by test.
 - [ ] A machine-checkable item cannot be satisfied by attestation, pinned by test.
 - [ ] A project declaring no DoD sees no change whatsoever.
+- [ ] All three modes behave as tabled, and an existing project's
+  `close_requires_human_approval` setting survives the upgrade unchanged.
+- [ ] `encourage` names a DoD-met plan that is still open — reproduced against
+  Plans 00386 and 00389 as they stood, since that is the case it exists for.
+- [ ] The encourage signal cannot be suppressed by leaving a checkbox unticked,
+  pinned by test. That is how the existing coherence check was side-stepped.
 - [ ] No error path can leave a finished plan unclosable.
 - [ ] Nothing in this plan waits on a human — the close stays agent-driven.
 - [ ] Every release-bound consequence is in the pending-release holding area, or
@@ -176,5 +235,13 @@ the hard part.
   has been achieved and logging proof to the plan journal".
 - Filed against the owner's ruling in the same message that plan close must
   NOT be gated on a human, and that completion is not gated on release.
+- Widened by the owner in the same session: "maybe the human plan gate works
+  both ways — if not enabled then it actively encourages closing plans if they
+  are fully done to DOD spec", then "or maybe 3 ways — human gate, encourage
+  close, or neutral".
 - Sibling of Plan 00367, which owns the human-gated close. Same moment, opposite
-  answer to "who proves it".
+  answer to "who proves it" — and after the widening, 00367's key becomes one of
+  this plan's three modes rather than a separate switch.
+- The `encourage` mode is the direction that would have caught the incident
+  behind Plan 00390 N2. The gate direction would not have; both are recorded
+  above so the distinction is not lost.

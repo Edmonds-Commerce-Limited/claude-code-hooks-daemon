@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00391: plan close requires proven definition of done](00391-plan-close-requires-proven-definition-of-done/PLAN.md) - Not Started (closing a plan is where an agent grades its own homework; a project declares its DoD in config and the terminal status flip is denied until each item is CHECKED or attested with evidence in the plan's JOURNAL/ — the agent-satisfiable counterpart to Plan 00367's human gate)
+- [00391: plan close requires proven definition of done](00391-plan-close-requires-proven-definition-of-done/PLAN.md) - Not Started (a project declares its DoD in config; the close is denied until each item is CHECKED or attested with evidence in the plan's JOURNAL/, and a three-way policy — human_gate, encourage, neutral — subsumes Plan 00367's boolean. `encourage` is the direction that would have caught 00386/00389 sitting finished-but-open)
 
 - [00390: niggles ledger five](00390-niggles-ledger-five/PLAN.md) - In Progress (the OPEN niggles ledger — record small defects here the turn they are found; ledgers 00377/00379/00381/00385 are all closed. N1 fixed: `normalize_path` let MARKER-LIST order pick a path's root instead of position, so a nested `.claude/` beat an `untracked/` prefix — its own docstring said "first occurrence", settling it as accident not policy)
 
