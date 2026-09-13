@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00362: client upgrade report — fix all known defects](00362-client-upgrade-report-fix-all-known-defects/PLAN.md) - Complete + the archiving commit (the stability-release ledger: all eight client findings and every defect recorded in a live plan fixed or ruled out, v3.62.1's missing bootstrap assets repaired, full QA 26/26)
+
 - [00361: supervisor worker crash loop visibility and backoff](00361-supervisor-worker-crash-loop-visibility-and-backoff/PLAN.md) - Complete at `da5b7258` + the archiving commit (a worker death is logged with its exit code and source fingerprint, a crash loop is held to a backoff and logged once, and the fallback transitions are logged; verified live)
 
 - [00360: pending release notes holding area](00360-pending-release-notes-holding-area/PLAN.md) - Complete (a plan closes by leaving its callout in `UNRELEASED/release-notes/`, the project-only gate denies a Complete flip without the holding-area criterion, the release folds the callouts in and moves them with an ABORT if any remain, and `release-slate-check` lists them without changing its verdict)

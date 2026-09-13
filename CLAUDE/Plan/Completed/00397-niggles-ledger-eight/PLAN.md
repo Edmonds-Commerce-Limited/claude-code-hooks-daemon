@@ -1,6 +1,6 @@
 # Plan 00397: niggles ledger eight
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-13
 **Owner**: joseph
 **Priority**: Medium
@@ -39,7 +39,8 @@ sure nothing is dropped, not to force every fix into one plan.
 
 ### Phase 1: Entries
 
-- [ ] ⬜ **N1** — A Tab-completed `/compact` is never recognised as a human
+- [x] ✅ **N1** — GRADUATED to [Plan 00399](../00399-supervisor-does-not-see-tab-completed-slash-commands/PLAN.md).
+  A Tab-completed `/compact` is never recognised as a human
   compact, because the raw-input tap only ever sees the bytes the human
   actually typed.
 
@@ -84,7 +85,8 @@ sure nothing is dropped, not to force every fix into one plan.
 
   **Fix is not obvious enough to apply unilaterally** — matching a `/comp`
   prefix would fire on any future `/comp…` command, and the tap cannot see
-  which entry autocomplete actually selected. Needs a ruling; see the journal.
+  which entry autocomplete actually selected. The ruling and its three options
+  now live in Plan 00399, which also carries the tmux-input-path question.
 
 - [x] ✅ **N2** — RESOLVED as NOT A DEFECT, recorded so it is not re-investigated
   from scratch: supervisor auto-compaction is healthy, and tmux is not in the
@@ -132,7 +134,8 @@ sure nothing is dropped, not to force every fix into one plan.
   line: identical, and tmux changes nothing about N1; different, and tmux
   re-encodes input in a way N1's fix must account for.
 
-- [ ] ⬜ **N3** — the `not idle` gate blocks compaction at EVERY band, including
+- [x] ✅ **N3** — GRADUATED to [Plan 00398](../00398-critical-compaction-blocked-by-the-idle-gate/PLAN.md).
+  The `not idle` gate blocks compaction at EVERY band, including
   CRITICAL, and a non-empty input box is enough to hold it there. This is the
   strongest candidate for the owner's reported symptom (sessions climbing to
   "COMPACT NOW" without compacting) and it supersedes N2's comfortable reading.
@@ -183,15 +186,20 @@ sure nothing is dropped, not to force every fix into one plan.
 
   **That indistinguishability is itself part of the defect.** A gate that can
   suppress a CRITICAL compaction should say so at the time; whatever the fix to
-  the gate, the `not idle` NOOP should carry the tier and percentage.
+  the gate, the `not idle` NOOP should carry the tier and percentage. That is
+  Task 1.2 of Plan 00398, kept independent of the ruling so it lands either way.
 
 ## Success Criteria
 
-- [ ] Every entry above is fixed with a regression test, graduated to a named
+- [x] Every entry above is fixed with a regression test, graduated to a named
   plan linked from the entry, or — the third outcome, added because N2 is one —
   investigated to a conclusion of NOT A DEFECT with the evidence recorded, so
   the question is answered once rather than re-opened by the next reader.
-- [ ] No entry is closed on reasoning alone. N2 was closed on the decision log
+- [x] This plan has no release-bound consequences: it changed no shipped code
+  at all. N2 closed on evidence, N1 and N3 graduated to Plans 00399 and 00398,
+  and the fixes themselves — with whatever release notes they owe — belong to
+  those plans. The only artefacts here are plan documents.
+- [x] No entry is closed on reasoning alone. N2 was closed on the decision log
   (176 historical compact injections, the most recent firing at 50% the day
   before), a live sidecar reading of 24% against a 40% red threshold, and the
   in-container process ancestry — not on an argument that it ought to be fine.
@@ -203,3 +211,12 @@ sure nothing is dropped, not to force every fix into one plan.
   Never reopen a closed one."
 - **Close this ledger when its entries are resolved.** Do not hold it open as a
   standing fixture.
+- Closed at `92b9bdb4`…`ff26a6ee` + the archiving commit. One entry resolved as
+  NOT A DEFECT, two graduated: N1 to Plan 00399, N3 to Plan 00398.
+- Worth recording, because the ledger nearly stalled on a misreading of its own
+  rules: N1 and N3 were left open as "blocked on an owner ruling" when needing a
+  ruling is precisely what GRADUATION is for. The Overview says so — "Graduating
+  is a success: the ledger's job is to make sure nothing is dropped, not to
+  force every fix into one plan" — and the journal had already concluded N1
+  "graduates rather than being decided here". Holding the ledger open added
+  nothing the graduated plans do not carry better.
