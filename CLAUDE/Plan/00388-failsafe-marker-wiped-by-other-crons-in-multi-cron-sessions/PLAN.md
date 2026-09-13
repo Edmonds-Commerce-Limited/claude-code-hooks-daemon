@@ -117,6 +117,14 @@ where every open issue is parked on a human costs a full model turn every hour,
 indefinitely. Observed with all seven open issues carrying `agent-needs-human`,
 so all three of the runbook's selection rules miss.
 
+**Confirmed a second time, an hour later, on an identical label set** (#14, #22,
+#23, #24, #31, #32, #33 — every one `agent-needs-human`, none `agent-working`,
+none unlabelled). That matters for the ruling: a single observation could be a
+momentary state, but an unchanged backlog across two consecutive ticks shows the
+cost is standing rather than transient, and it recurs every hour until a human
+acts. The tick itself is behaving correctly each time — it is a successful tick
+by the runbook — which is precisely why nothing surfaces the accumulating cost.
+
 **It is the same mechanism, not merely a similar one.** Suppressing that cron
 with the existing `[awaiting-human]` marker needs the handler to recognise the
 issue-sdlc tick as automated — which is exactly the question this plan is
