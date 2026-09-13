@@ -67,11 +67,38 @@ sure nothing is dropped, not to force every fix into one plan.
   six new tests were green beforehand and are kept as controls, so the fix
   cannot have been bought by loosening the stripping the function exists to do.
 
+- [ ] ⬜ **N2**: The generated `CLAUDE.md` rules table states an INERT handler's
+  rule as a present-tense fact about this project, so an agent reads a gate that
+  cannot fire as one that governs it.
+
+  **Observed**: `CLAUDE.md:479` (daemon-generated) carries
+  `R-PLAN-CLOSE-APPROVAL` with the Why column reading "This project requires a
+  human to close a plan; the daemon enforces that rather than leaving it to a
+  sentence in a document". That project does not require it:
+  `.claude/hooks-daemon.yaml:1051` sets
+  `plan_workflow.close_requires_human_approval: false`, and
+  `plan_close_approval.py:110-111` returns `False` from `matches()` before
+  anything else when the key is off. The handler is `enabled: true` with the
+  config comment "Inert while the key is false", so the registry loads it and
+  `get_rules()` contributes the row regardless of whether it can ever fire.
+
+  **The cost is measured, not hypothetical.** This is what made the agent
+  believe Plans 00386 and 00389 could not be closed without
+  `approve-plan-close`. Two finished plans sat open across a multi-day cron run,
+  the belief was written into both plan documents as fact, and the owner was
+  briefed to run two commands that would have done nothing. The handler's own
+  `Blocked` column is accurate ("while `...` is on"), which is exactly why the
+  Why column reads as confirmation rather than as a conditional.
+
+  **Not the same as R-MERGE-TO-MAIN-APPROVAL**, whose sibling key IS true here —
+  that row is honest. The defect is stating a conditional rule unconditionally,
+  not the existence of either gate.
+
 ## Success Criteria
 
-- [x] Every entry above is either fixed with a regression test, or graduated to
+- [ ] Every entry above is either fixed with a regression test, or graduated to
   a named plan and that plan is linked from the entry.
-- [x] No entry is closed on reasoning alone — each fix is proved against the
+- [ ] No entry is closed on reasoning alone — each fix is proved against the
   case that was actually observed. N1 was re-run as the ORIGINAL denied write,
   through the real handler, after the fix.
 - [ ] Full QA passes and CI is green.
