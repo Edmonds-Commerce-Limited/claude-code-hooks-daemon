@@ -96,12 +96,17 @@ sure nothing is dropped, not to force every fix into one plan.
 
 ## Success Criteria
 
-- [ ] Every entry above is either fixed with a regression test, or graduated to
-  a named plan and that plan is linked from the entry.
-- [ ] No entry is closed on reasoning alone — each fix is proved against the
-  case that was actually observed.
-- [ ] Every release-bound consequence is in the pending-release holding area, or
-  this plan records why it has none.
+- [x] Every entry above is either fixed with a regression test, or graduated to
+  a named plan and that plan is linked from the entry. N1 graduated to Plan
+  00388, Tasks 2.4 and 2.5.
+- [x] No entry is closed on reasoning alone. N1 was not fixed, so what had to be
+  proved was the DIAGNOSIS: the saturation was observed against the real label
+  set (seven issues, all `agent-needs-human`, all three selection rules missing),
+  and the dependency on Plan 00388 was read out of
+  `failsafe_cron_blockage_suppressor.py:269` rather than inferred from the
+  handler's docstring.
+- [x] This plan has no release-bound consequences: no code changed. N1 was
+  recorded and graduated, so nothing a client installs or runs is different.
 - [ ] Full QA passes and CI is green.
 
 ## Delivery & Milestones
