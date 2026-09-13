@@ -136,7 +136,7 @@ could ship first. Recorded as options, not a recommendation.
 
 ## Delivery & Milestones
 
-- Graduated from [Plan 00393](../00393-niggles-ledger-seven/PLAN.md) N1, which
+- Graduated from [Plan 00393](../Completed/00393-niggles-ledger-seven/PLAN.md) N1, which
   recorded the asymmetry; the diagnosis that turned it from "looks like an
   oversight" into "a reasoned decision resting on a mis-stated equivalence" is
   what made it too large for the ledger.

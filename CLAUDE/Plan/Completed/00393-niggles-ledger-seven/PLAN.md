@@ -1,6 +1,6 @@
 # Plan 00393: niggles ledger seven
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-13
 **Owner**: joseph
 **Priority**: Medium
@@ -39,7 +39,7 @@ sure nothing is dropped, not to force every fix into one plan.
 
 ### Phase 1: Entries
 
-- [x] ✅ **N1** — GRADUATED to [Plan 00394](../00394-failsafe-cron-coverage-starts-at-first-plan-write/PLAN.md).
+- [x] ✅ **N1** — GRADUATED to [Plan 00394](../../00394-failsafe-cron-coverage-starts-at-first-plan-write/PLAN.md).
   The FAILSAFE recovery cron is the one cron `persistent_crons` does not
   declare, and it is the most safety-critical of the three.
 
@@ -56,15 +56,15 @@ sure nothing is dropped, not to force every fix into one plan.
   All three were live in this session. Only `issue-sdlc` has config backing;
   the other two exist because an agent acted on an advisory.
 
-  **Why this looks like an oversight rather than a design choice.** Plan 00384
-  built `persistent_crons` *because* `CronCreate` cannot persist a job —
-  `durable` has no effect and recurring jobs expire after 7 days. The mechanism
-  exists to make a wanted cron survive the start of a new session. The failsafe
-  recovery cron is the one whose absence is least visible and most costly: it is
-  the net that resumes a session stalled by a rate limit, an API error or a
-  usage limit. If a new session starts and the agent does not act on
-  `recovery_cron_advisor`'s output, there is no recovery coverage at all, and
-  nothing reports that — the symptom is a session that simply never resumes.
+  **Why the omission matters.** Plan 00384 built `persistent_crons` *because*
+  `CronCreate` cannot persist a job — `durable` has no effect and recurring jobs
+  expire after 7 days. The mechanism exists to make a wanted cron survive the
+  start of a new session. The failsafe recovery cron is the one whose absence is
+  least visible and most costly: it is the net that resumes a session stalled by
+  a rate limit, an API error or a usage limit. If a new session starts and the
+  agent does not act on `recovery_cron_advisor`'s output, there is no recovery
+  coverage at all, and nothing reports that — the symptom is a session that
+  simply never resumes.
 
   **The counter-argument, recorded so the ruling is made on both.** The failsafe
   prompt is already daemon-authored verbatim by `recovery_cron_advisor`, and the
@@ -72,13 +72,14 @@ sure nothing is dropped, not to force every fix into one plan.
   three-way provenance split). Declaring the watchdog would mean fixing wording
   the daemon currently leaves open on purpose, so the two are not one decision.
 
-  **Diagnosed, and it is why this graduated rather than being fixed here.** It
-  was a reasoned decision, not an oversight. Plan 00384 considered the failsafe
-  cron and justified leaving it out: "`recovery_cron_advisor` already
-  establishes this shape for the failsafe cron." Half of that holds — the
-  advisor does supply a daemon-authored verbatim prompt — but "this shape" was
-  defined in the same sentence as *asserting at SessionStart*, and the advisor
-  is a PostToolUse handler gated on a plan-lifecycle moment:
+  **Diagnosed, and it is why this graduated rather than being fixed here.** The
+  entry opened on the hypothesis that the omission was an oversight, and reading
+  Plan 00384 overturned that: it considered the failsafe cron and justified
+  leaving it out — "`recovery_cron_advisor` already establishes this shape for
+  the failsafe cron." Half of that holds. The advisor does supply a
+  daemon-authored verbatim prompt, but "this shape" was defined in the same
+  sentence as *asserting at SessionStart*, and the advisor is a PostToolUse
+  handler gated on a plan-lifecycle moment:
 
   ```text
   persistent_cron_assertor  -> handlers/session_start/   fires every session
@@ -99,8 +100,8 @@ sure nothing is dropped, not to force every fix into one plan.
   call. Chasing why "session-only" had not bitten is what exposed that two of
   the three crons have no declaration to fall back on when it eventually does.
 
-- [x] ✅ **N2** — FIXED. CI on `main` cancelled its own runs, destroying the
-  evidence two documented mechanisms depend on.
+- [x] ✅ **N2** — FIXED at `ed00e582`. CI on `main` cancelled its own runs,
+  destroying the evidence two documented mechanisms depend on.
 
   **Observed**: 13 of the last 20 CI runs concluded `cancelled`, including three
   consecutively while closing plans in one session:
@@ -131,19 +132,34 @@ sure nothing is dropped, not to force every fix into one plan.
   gets a result; a PR branch keeps the cheap behaviour. Free on this repository
   — it is public, so standard runners are not metered.
 
-  **Verification**: this is observable rather than unit-testable. The commit
-  carrying the fix is itself the first check — its run must complete rather than
-  be cancelled by whatever lands next.
+  **Verified in production, which is the only way this one can be tested.**
+  `ee4aab64` completed `success` despite `ed00e582` being pushed on top of it —
+  the first run on main to survive a following push. The line directly below it
+  in the same listing, `bbe5b331`, was cancelled by exactly that sequence under
+  the old config. `ed00e582` then queued and ran rather than pre-empting it.
+
+  **The trade-off, stated rather than buried**: runs on main now serialise, so
+  wall-clock time to a result grows when several pushes land together. That is
+  the right trade because a fast result that is destroyed before anything reads
+  it has no value, but it is a real cost and not a free win.
 
 ## Success Criteria
 
-- [ ] Every entry above is either fixed with a regression test, or graduated to
-  a named plan and that plan is linked from the entry.
-- [ ] No entry is closed on reasoning alone: each names what was OBSERVED, with
-  evidence someone else could re-check.
-- [ ] Every release-bound consequence is in the pending-release holding area, or
-  this plan records why it has none.
-- [ ] Full QA passes and CI is green.
+- [x] Every entry above is either fixed with a regression test, or graduated to
+  a named plan and that plan is linked from the entry. N1 graduated to Plan
+  00394; N2 fixed at `ed00e582`, whose verification is observational because a
+  workflow's concurrency behaviour cannot be exercised by a unit test.
+- [x] No entry is closed on reasoning alone. N1's diagnosis was read out of the
+  handler directories and `matches()` rather than inferred from docstrings, and
+  it overturned the hypothesis the entry opened with. N2 was measured (13 of 20
+  runs cancelled) and its fix confirmed by a run that survived a following push.
+- [x] This plan's one code change has no release-bound consequence:
+  `.github/workflows/` is repo-internal CI and is not deployed to client
+  projects — checked against `scripts/install.sh` and `scripts/upgrade.sh`,
+  whose only `.github` references are download URLs. Nothing a client installs
+  or runs is different, so the holding area gets no note.
+- [x] Full QA passes and CI is green. Full QA 29/29 PASSED and CI concluded
+  `success` on `ed00e582` — the exact commit this closes on.
 
 ## Delivery & Milestones
 
@@ -153,3 +169,9 @@ sure nothing is dropped, not to force every fix into one plan.
 - **Close this ledger when its entries are resolved.** Do not hold it open as a
   standing fixture, and do not hold it open to accumulate a fuller set — a
   one-entry ledger that closes is working correctly.
+- Both entries are resolved, so this ledger closes. The next niggle runs
+  `mkplan.bash` for ledger eight rather than reopening this one.
+- Worth recording for whoever reads this next: neither entry was found by the
+  work the session set out to do. N1 came from a question the owner asked about
+  crons, and N2 from a hook challenging a hedge in an earlier message. Both had
+  been sitting in plain sight for the whole session.
