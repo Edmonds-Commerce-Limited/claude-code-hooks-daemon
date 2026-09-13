@@ -39,7 +39,8 @@ sure nothing is dropped, not to force every fix into one plan.
 
 ### Phase 1: Entries
 
-- [ ] ⬜ **N1**: The `issue-sdlc` cron has no no-op backoff, so a saturated
+- [x] ✅ **N1** — GRADUATED to [Plan 00388](../00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md)
+  (Tasks 2.4 and 2.5). The `issue-sdlc` cron has no no-op backoff, so a saturated
   backlog costs a full model turn every hour, indefinitely. The failsafe cron
   has TWO mechanisms for exactly this; the issue cron has none.
 
@@ -70,11 +71,28 @@ sure nothing is dropped, not to force every fix into one plan.
   at all. They interact (00388's fix would make the marker work; this would give
   the issue cron its own reason to stand down) but neither subsumes the other.
 
-  **Not yet diagnosed to a fix.** The cheap version is a cadence backoff
-  mirroring Plan 00337. The more truthful version is that the loop can KNOW it is
-  saturated — the selection rules are evaluated against labels it already reads —
-  so it could stand down until the label set changes rather than guessing from a
-  timer. Which of those is right is design, so this entry may well graduate.
+  **Diagnosed, and it is why this graduated rather than being fixed here.**
+  Suppressing this cron with the existing `[awaiting-human]` marker needs the
+  handler to recognise an `issue-sdlc` tick as automated — and that is the exact
+  question Plan 00388 is blocked on. The suppressor decides it at
+  `failsafe_cron_blockage_suppressor.py:269`:
+
+  ```python
+  is_cron_prompt = isinstance(prompt, str) and CANONICAL_CRON_PROMPT_MARKER in prompt
+  ```
+
+  `CANONICAL_CRON_PROMPT_MARKER` is the literal `"FAILSAFE RECOVERY CHECK"`, so
+  no other cron can ever satisfy it, and any prompt that fails it CLEARS the
+  marker. The two defects are therefore one mechanism:
+
+  - Fix 00388 alone → the marker survives, but still suppresses only the
+    failsafe cron; this one keeps burning a turn an hour.
+  - Fix this alone → impossible; the marker it depends on is wiped by this very
+    cron before it can be read.
+
+  Graduated rather than given its own plan because it adds a second CONSUMER of
+  a ruling the owner already has to make, not a second decision. Folding it in
+  means one ruling covers both crons instead of this resurfacing later.
 
 ## Success Criteria
 

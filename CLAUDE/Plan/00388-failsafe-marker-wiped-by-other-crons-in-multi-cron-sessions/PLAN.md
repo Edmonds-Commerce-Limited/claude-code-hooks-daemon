@@ -109,6 +109,30 @@ Recorded as an option, not a ruling. It is offered because it removes a
 constraint the original framing treated as fixed, not to pre-empt the owner's
 choice.
 
+## A second consumer arrived — the ruling question is UNCHANGED
+
+Plan 00392 N1 graduated into this plan rather than becoming a third one. The
+finding: the `issue-sdlc` cron has no stand-down mechanism at all, so a backlog
+where every open issue is parked on a human costs a full model turn every hour,
+indefinitely. Observed with all seven open issues carrying `agent-needs-human`,
+so all three of the runbook's selection rules miss.
+
+**It is the same mechanism, not merely a similar one.** Suppressing that cron
+with the existing `[awaiting-human]` marker needs the handler to recognise the
+issue-sdlc tick as automated — which is exactly the question this plan is
+blocked on. And it could not work before this plan's fix anyway, because the
+marker is wiped by that very cron. Neither can ship usefully without the other:
+
+- Fix this plan alone, and the marker survives but still suppresses only the
+  failsafe cron — the issue cron keeps burning a turn an hour.
+- Fix N1 alone, and the marker it depends on is cleared before it can be read.
+
+**What this does NOT change is the decision in front of the owner.** The
+question is still "how does the handler tell a human prompt from an automated
+tick?", and the candidate approaches are unchanged. What is added is a second
+CONSUMER of whatever answer is chosen, so one ruling covers both crons instead
+of this resurfacing as a separate decision later.
+
 ## Goals
 
 - `[awaiting-human]` actually suppresses ticks in a session with several crons.
@@ -139,12 +163,23 @@ choice.
 - [ ] ⬜ **Task 2.2**: Implement the chosen rule, keeping every fail-open path.
 - [ ] ⬜ **Task 2.3**: Cover the cadence half explicitly — it rides the same
   branch and would otherwise be fixed by accident rather than on purpose.
+- [ ] ⬜ **Task 2.4**: Apply the chosen rule to EVERY declared cron, not just
+  the failsafe one, so an `[awaiting-human]` marker stands the `issue-sdlc` tick
+  down too (Plan 00392 N1, graduated here). Suppression currently keys on the
+  literal `FAILSAFE RECOVERY CHECK` at `failsafe_cron_blockage_suppressor.py:269`,
+  which is why no other cron can ever be suppressed by it.
+- [ ] ⬜ **Task 2.5**: Pin that a suppressed `issue-sdlc` tick still resumes on
+  a genuine human prompt. The failure to avoid is inverted here: a permanently
+  stood-down issue loop is a backlog nobody is working, which is worse than an
+  hourly no-op.
 
 ## Success Criteria
 
 - [ ] An armed marker survives a watchdog tick and an `issue-sdlc` tick, and is
   still cleared by a genuine human prompt.
 - [ ] The cadence file behaves the same way under those same three prompts.
+- [ ] An armed marker stands the `issue-sdlc` tick down as well as the failsafe
+  one, and BOTH resume on a genuine human prompt.
 - [ ] Every fail-open path is unchanged: no marker, wrong session, expired marker
   and missing project context all still ALLOW.
 - [ ] Every release-bound consequence is in the pending-release holding area, or
