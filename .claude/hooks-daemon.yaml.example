@@ -646,6 +646,15 @@ handlers:
           - id: commit-push-cadence
             enabled: false
 
+    daemon_upgrade_detector:  # Notice the INSTALLED daemon version changing underneath a running process (Plan 00395)
+      # Compares what this process loaded against `.daemon-metadata.json` in
+      # the CURRENT venv, re-resolved fresh every turn. Silent when they
+      # match; advises a restart (never self-restarts) when they differ.
+      # Dormant when daemon.self_install_mode is true -- only a client
+      # install with a deployed clone can be upgraded underneath it.
+      enabled: true
+      priority: 58
+
   # Other hook events
   permission_request:
     auto_approve_reads:  # Auto-approves read-only file operations

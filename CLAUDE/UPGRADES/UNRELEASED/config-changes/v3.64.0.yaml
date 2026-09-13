@@ -192,6 +192,50 @@ config_changes:
         config file itself is always watched and is resolved from the
         running daemon, so it needs no entry. Disable with
         handlers.post_tool_use.daemon_sync_after_merge.enabled: false.
+    - key: handlers.user_prompt_submit.daemon_upgrade_detector
+      recommended: true
+      dormant: false
+      description: >-
+        NEW UserPromptSubmit advisory handler (Plan 00395), ships enabled at
+        priority 58, ADVISORY / NON_TERMINAL tagged. The daemon loads its code
+        once at startup and never hot-reloads, so when a DIFFERENT session or
+        process on the same filesystem upgrades this project's installed
+        daemon, the running one keeps serving what it loaded -- every safety
+        handler in it the old version -- and nothing reported it. The existing
+        checks all key on something happening IN this session
+        (`check-source-fresh` during a QA sweep, `daemon_restart_verifier` on a
+        source edit, `daemon_sync_after_merge` on a pull), so an upgrade run
+        from a second terminal is invisible to all of them. This handler
+        compares the version THIS process imported
+        (`claude_code_hooks_daemon.version.__version__`) against the installed
+        one in the venv's `.daemon-metadata.json`, and is SILENT when they
+        match -- an advisory every turn for a fact that changes at most once
+        per upgrade would be worse than the defect. It re-RESOLVES the venv on
+        every check rather than remembering a path: the venv directory is
+        fingerprint-keyed, so an upgrade that changes the fingerprint inputs
+        creates a NEW venv directory, and a remembered path (or `sys.prefix`,
+        which still points at the OLD venv inside the running process) would
+        read untouched metadata and report fresh forever. It ADVISES and never
+        acts -- it names both versions and the restart command and runs
+        nothing, because it executes INSIDE the daemon serving the very hook
+        that triggered it and a self-restart would drop the response that
+        session is waiting on. Fail-open throughout: missing, unreadable,
+        malformed or unparseable metadata all mean "cannot tell" and allow the
+        hook through. Reports `is_dormant()` when `daemon.self_install_mode` is
+        true, so a self-install checkout does not announce it as policy.
+      example_yaml: |
+        handlers:
+          user_prompt_submit:
+            daemon_upgrade_detector:
+              enabled: true
+              priority: 58
+      migration_note: >-
+        On by default; no action needed to adopt. Relevant only to a CLIENT
+        project with an installed `.claude/hooks-daemon/` clone -- in a
+        self-install checkout the daemon runs from `src/` in the repository
+        itself, there is nothing deployed for another session to replace, and
+        the handler is dormant. Disable with
+        handlers.user_prompt_submit.daemon_upgrade_detector.enabled: false.
   renamed: []
   removed:
     - key: handlers.pre_tool_use.daemon_restart_verifier

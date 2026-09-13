@@ -171,24 +171,22 @@ with the existing stdlib reader. Normalise the `v` prefix and tolerate the
 
 ### Phase 2: Build
 
-- [ ] ⬜ **Task 2.1**: A failing test first: a daemon started against one venv,
-  then an upgrade that writes a NEW fingerprint-keyed venv, must be reported
-  stale. That is the case a remembered-path check passes wrongly, so it is the
-  test that must exist before the check is written.
-- [ ] ⬜ **Task 2.2**: A second failing test for the in-place case — same venv,
-  `.daemon-metadata.json` rewritten with a new `daemon_version`.
-- [ ] ⬜ **Task 2.3**: Implement using the existing `read_daemon_metadata` and
-  venv resolution. No second metadata reader.
-- [ ] ⬜ **Task 2.4**: Pin that the advisory names the restart command and that
-  nothing restarts itself.
-- [ ] ⬜ **Task 2.5**: Pin the fail-open contract: unreadable, missing or
-  malformed metadata must never block a hook. `read_daemon_metadata` already
-  collapses those to `None`.
-- [ ] ⬜ **Task 2.6**: Dormant in self-install mode — a test that the handler
-  stays silent when `daemon.self_install_mode` is true, plus `CanBeDormant` so
-  the generated `CLAUDE.md` does not announce it there either.
-- [ ] ⬜ **Task 2.7**: Pin that a matching version is SILENT. An advisory on
-  every user turn when nothing has changed would be worse than the defect.
+- [x] ✅ **Task 2.1**: `TestReReResolvesTheVenvEachCall` drives the SAME handler
+  instance across two calls, adding the new fingerprint-keyed venv only between
+  them, so a cached-path implementation genuinely fails it.
+- [x] ✅ **Task 2.2**: `TestReportsStaleWhenMetadataRewrittenInPlace` — same venv
+  directory, `.daemon-metadata.json` rewritten with a new `daemon_version`.
+- [x] ✅ **Task 2.3**: Implemented on `read_daemon_metadata` and
+  `resolve_existing_venv_python`. No second metadata reader.
+- [x] ✅ **Task 2.4**: `TestAdvisoryContent` pins both versions plus
+  `daemon_cli_command("restart")`; the handler only ever returns text.
+- [x] ✅ **Task 2.5**: `TestFailOpen` — no venv, no metadata, malformed, empty,
+  and an uninitialised `ProjectContext` all ALLOW silently.
+- [x] ✅ **Task 2.6**: Dormant when `daemon.self_install_mode` is true, via
+  `CanBeDormant`. Verified in production, not just in test: after a daemon
+  restart `grep daemon_upgrade_detector CLAUDE.md` returns nothing.
+- [x] ✅ **Task 2.7**: `TestMatchingVersionIsSilent` — a matching version
+  produces `context == []`, not merely a quieter message.
 
 ## Success Criteria
 

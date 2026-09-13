@@ -54,6 +54,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import pkgutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -234,6 +235,16 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "not in force until a restart, so an unacted advisory leaves the project "
         "believing in protections the process is not applying"
     ),
+    "DaemonUpgradeDetectorHandler": (
+        "T3 same shape as daemon_sync_after_merge: the remedy happens after "
+        "the advisory, because the handler runs INSIDE the daemon serving "
+        "the hook and a self-restart would drop the response this session "
+        "is waiting on. The trigger is different (another session's "
+        "upgrade, checked on every turn, not just after a git operation "
+        "this session ran), so the standing rule -- act on it now, nothing "
+        "restarts itself -- must be resident rather than assumed already "
+        "covered by that other section"
+    ),
     "PlanWorkflowAssetCheckerHandler": "T3 names a provisioning command to run later",
     "PersistentCronAssertorHandler": (
         "T3 the reconcile happens after the advisory — the agent has to run CronList "
@@ -274,18 +285,48 @@ _EARNS_GUIDANCE: dict[str, str] = {
     ),
 }
 
+
+@dataclass(frozen=True)
+class _DormancyExemption:
+    """A recorded claim: this repository's config holds the value that keeps
+    a handler dormant, and if it drifts, the handler's guidance must reach
+    CLAUDE.md.
+
+    ``dormant_value`` is the boolean ``dotted_key`` must currently equal for
+    the handler to STAY dormant here — not always ``False``. The first two
+    exemptions below are dormant when their gate is OFF (``False``); Plan
+    00395's is dormant when ``daemon.self_install_mode`` is ON (``True``),
+    the inverted sense, because that handler exists to warn a CLIENT install
+    about an upgrade racing a running daemon, and this repository IS the
+    daemon rather than a client of it. Recording the polarity explicitly
+    (rather than assuming "dormant means the flag reads False") is what lets
+    one drift-check cover both shapes.
+    """
+
+    dotted_key: str
+    dormant_value: bool
+
+
 # Handlers that EARN resident guidance and produce it, but whose section is
 # absent from this repository's CLAUDE.md on purpose: a config key leaves them
 # unable to fire here, so the generator omits them rather than announcing a
 # gate the project has switched off (Plan 00390 N2).
 #
-# The value is the dotted config key that governs it. That is not decoration —
+# The value names the dotted config key that governs it, plus the value that
+# keeps it dormant. That is not decoration —
 # `test_every_dormancy_exemption_is_still_true` reads the key out of this
-# repository's own `.claude/hooks-daemon.yaml` and fails if it has been turned
-# on, so an exemption cannot quietly outlive the reason for it.
-_DORMANT_IN_THIS_PROJECT: dict[str, str] = {
-    "MergeToMainApprovalHandler": "worktree.merge_to_main_requires_human_approval",
-    "PlanCloseApprovalHandler": "plan_workflow.close_requires_human_approval",
+# repository's own `.claude/hooks-daemon.yaml` and fails if it no longer
+# matches, so an exemption cannot quietly outlive the reason for it.
+_DORMANT_IN_THIS_PROJECT: dict[str, _DormancyExemption] = {
+    "MergeToMainApprovalHandler": _DormancyExemption(
+        "worktree.merge_to_main_requires_human_approval", dormant_value=False
+    ),
+    "PlanCloseApprovalHandler": _DormancyExemption(
+        "plan_workflow.close_requires_human_approval", dormant_value=False
+    ),
+    "DaemonUpgradeDetectorHandler": _DormancyExemption(
+        "daemon.self_install_mode", dormant_value=True
+    ),
 }
 
 
@@ -760,8 +801,8 @@ class TestTheDormancyExemptionsAreStillTrue:
     A named exemption is a claim about this repository's config, and a claim
     that nobody re-checks is how the original defect arose: CLAUDE.md asserted
     a gate was in force long after it was switched off. These tests read the
-    real config file, so turning either key on breaks the build rather than
-    silently leaving a handler's guidance dropped.
+    real config file, so a drift away from the recorded dormant value breaks
+    the build rather than silently leaving a handler's guidance dropped.
     """
 
     @staticmethod
@@ -783,14 +824,23 @@ class TestTheDormancyExemptionsAreStillTrue:
 
     @pytest.mark.parametrize("class_name", sorted(_DORMANT_IN_THIS_PROJECT))
     def test_every_dormancy_exemption_is_still_true(self, class_name: str) -> None:
-        dotted_key = _DORMANT_IN_THIS_PROJECT[class_name]
-        value = self._config_value(dotted_key)
-        assert value is not True, (
+        exemption = _DORMANT_IN_THIS_PROJECT[class_name]
+        value = self._config_value(exemption.dotted_key)
+        # A key ABSENT from the YAML reads as `None` here (this is a raw YAML
+        # read, not the Pydantic-defaulted config), and every dotted key
+        # exempted so far defaults to `False` when unset. So `None` and
+        # `False` both satisfy a `dormant_value=False` claim (the ordinary
+        # "not on disk, hence off" case), but only an EXPLICIT `True` on disk
+        # satisfies a `dormant_value=True` claim -- absence there would mean
+        # the flag is actually off, i.e. NOT dormant.
+        still_dormant = value is True if exemption.dormant_value else value is not True
+        assert still_dormant, (
             f"{class_name} is exempted from CLAUDE.md guidance coverage because "
-            f"`{dotted_key}` switches it off in this project — but that key is now "
-            f"TRUE. The handler can fire, so its guidance must reach CLAUDE.md: "
-            f"remove it from _DORMANT_IN_THIS_PROJECT and restart the daemon to "
-            f"regenerate the block."
+            f"`{exemption.dotted_key}` == {exemption.dormant_value} keeps it "
+            f"dormant in this project — but the config now reads {value!r}. The "
+            f"handler can fire, so its guidance must reach CLAUDE.md: remove it "
+            f"from _DORMANT_IN_THIS_PROJECT and restart the daemon to regenerate "
+            f"the block."
         )
 
     @pytest.mark.parametrize("class_name", sorted(_DORMANT_IN_THIS_PROJECT))

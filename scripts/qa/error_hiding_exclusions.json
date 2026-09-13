@@ -1133,6 +1133,12 @@
       "function": "default_worktree_age",
       "rule": "return-none-on-error",
       "reason": "Plan 00372: WorktreeState.age_seconds is typed float | None precisely so an unreadable .git pointer file (OSError -- permissions, or a worktree removed mid-scan) reads as UNKNOWN rather than as a fabricated age. reap_refusal_reason treats None exactly like this module's existing UNKNOWN_COUNT sentinel for commits_ahead_of_base/unlanded_patches: refused, never read as 'old enough'. Raising here would abort collection for every OTHER worktree in the same run over one unreadable pointer file, which is strictly worse than the current one-worktree-refused outcome."
+    },
+    {
+      "file": "handlers/user_prompt_submit/daemon_upgrade_detector.py",
+      "function": "_resolve_installed_daemon_version",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00395: the owner's standing ruling is fail-open everywhere -- no metadata, no venv, no project context, or an unparseable version string must never block a prompt, only ever mean 'nothing to compare against, say nothing'. The RuntimeError catch covers ProjectContext not yet initialised (mirrors model_downgrade_recorder.py::publish above); the ValueError catch covers install_stamp.parse_install_stamp rejecting a daemon_version that passed metadata.py's own (looser) schema regex but not the stamp parser's stricter ref/sha shape. Both are logged nowhere because both are ORDINARY states (missing metadata is the overwhelmingly common case: nothing has ever been upgraded), the same posture daemon/metadata.py::read_daemon_metadata documents for the exact same file two directories over."
     }
   ]
 }

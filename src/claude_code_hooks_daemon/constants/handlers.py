@@ -584,6 +584,15 @@ class HandlerID:
         config_key="standing_authorisations",
         display_name="standing-authorisations",
     )
+    # Plan 00395: notices when the INSTALLED daemon version has changed
+    # underneath a running process (a different session/process upgraded
+    # this project's installation while this one kept serving what it
+    # loaded at startup). Dormant in self-install mode.
+    DAEMON_UPGRADE_DETECTOR = HandlerIDMeta(
+        class_name="DaemonUpgradeDetectorHandler",
+        config_key="daemon_upgrade_detector",
+        display_name="daemon-upgrade-detector",
+    )
     BRITISH_ENGLISH = HandlerIDMeta(
         class_name="BritishEnglishHandler",
         config_key="british_english",

@@ -324,10 +324,17 @@ class Priority:
     # Advisory handlers (Priority: 55-65)
     CRITICAL_THINKING_ADVISORY = 55
     IDLE_HOUSEKEEPING_ADVISORY = 56
-    # Last of the UserPromptSubmit advisories deliberately (Plan 00223): the
-    # injected context block sits AFTER the user's prompt, so a higher number
-    # is the recency position within it.
+    # Deliberately high among the UserPromptSubmit advisories (Plan 00223):
+    # the injected context block sits AFTER the user's prompt, so a higher
+    # number is the recency position within it.
     STANDING_AUTHORISATIONS = 57
+    # Plan 00395, placed after standing_authorisations even though Plan 00223
+    # chose that recency slot deliberately. Safe because this handler is
+    # SILENT whenever the versions match, so on almost every turn it adds
+    # nothing to the block and 00223's position is preserved in practice. On
+    # the rare turn it speaks, a stale-daemon notice is what is worth reading
+    # closest to the prompt.
+    DAEMON_UPGRADE_DETECTOR = 58
     NITPICK_DISMISSIVE = 10
     NITPICK_HEDGING = 20
     DAEMON_DOCS_GUARD = 57

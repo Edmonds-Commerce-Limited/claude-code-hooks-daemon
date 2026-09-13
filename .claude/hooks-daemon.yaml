@@ -848,6 +848,14 @@ handlers:
         max_passes_per_session: 1
         reports_dir: "untracked/reports"
 
+    daemon_upgrade_detector:  # Plan 00395: notice the INSTALLED daemon version
+      # changing underneath this running process (another session/process
+      # upgraded it on the same filesystem). Silent when versions match.
+      # Dormant here: self_install_mode is true (see `daemon:` above), so
+      # there is no separately deployed clone for another session to upgrade.
+      enabled: true
+      priority: 58
+
     standing_authorisations:  # Plan 00223: replay authorisations THIS project recorded.
       # Delivered on UserPromptSubmit because Phase 1 measured it as the only
       # channel that keeps pace with a system prompt re-sent every request:
