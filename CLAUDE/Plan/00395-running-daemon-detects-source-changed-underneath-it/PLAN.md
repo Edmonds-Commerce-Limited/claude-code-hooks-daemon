@@ -190,25 +190,34 @@ with the existing stdlib reader. Normalise the `v` prefix and tolerate the
 
 ## Success Criteria
 
-- [ ] In self-install mode the handler is silent and is not announced as active
-  policy in the generated `CLAUDE.md`.
+- [x] In self-install mode the handler is silent and is not announced as active
+  policy in the generated `CLAUDE.md`. Verified on the running daemon, not only
+  in test: after a restart, `grep daemon_upgrade_detector CLAUDE.md` returns
+  nothing.
 
-- [ ] An unchanged version produces no output at all.
+- [x] An unchanged version produces no output at all — `context == []`, not a
+  quieter message.
 
-- [ ] A running daemon whose installed version changed reports itself stale
-  without being asked.
+- [x] A running daemon whose installed version changed reports itself stale
+  without being asked, on the next UserPromptSubmit.
 
-- [ ] It reports stale when the upgrade created a NEW venv, proven by a test
-  that fails against a remembered-path-only check.
+- [x] It reports stale when the upgrade created a NEW venv, proven by a test
+  that drives ONE handler instance across two calls, so a remembered-path
+  implementation fails it rather than passing on a fresh construction.
 
-- [ ] The advisory names the restart command and nothing restarts itself.
+- [x] The advisory names the restart command and nothing restarts itself; the
+  handler only ever returns text.
 
-- [ ] A missing or malformed metadata file allows the hook through.
+- [x] A missing, empty, malformed or unparseable metadata file allows the hook
+  through, as does an uninitialised `ProjectContext`.
 
-- [ ] Every release-bound consequence is in the pending-release holding area, or
-  this plan records why it has none.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  release note `40-a-running-daemon-notices-its-own-upgrade.md` and a
+  `config-changes` entry. No truth-change entry, and the journal records why —
+  this is additive, so no documented truth becomes false.
 
-- [ ] Full QA passes and CI is green.
+- [ ] Full QA passes and CI is green. Full QA 29/29 PASSED locally on the
+  content of `f912c15b`; CI on that sha is pending.
 
 ## Delivery & Milestones
 
