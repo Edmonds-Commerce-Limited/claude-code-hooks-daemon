@@ -78,6 +78,37 @@ Three candidate approaches:
 None is obviously right and the control is safety-adjacent, so the issue-SDLC
 runbook's own stopping rule applies: stop and ask rather than guess.
 
+### Checked since: where each cron's prompt actually comes from
+
+The three approaches were assessed against an assumption about provenance that
+turns out to be wrong in a way that changes the answer. The three crons in this
+session do NOT fall into two groups, but three:
+
+| Cron                | Where its prompt text comes from                                                                                                                                                       |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| failsafe recovery   | **Daemon-authored verbatim** — `recovery_cron_advisor` prints it under "Paste the following text verbatim as the cron prompt"                                                          |
+| issue-sdlc          | **Declared in config** — `persistent_crons.jobs[].prompt` in `.claude/hooks-daemon.yaml`                                                                                               |
+| background watchdog | **Agent-composed** — `background_process_tracker` describes what the cron should DO and leaves the wording to the agent, which is why no copy of that prompt exists anywhere in `src/` |
+
+That third row is the whole difficulty, and it is the cron that actually cleared
+the marker. It also means:
+
+- **Approach 1 covers issue-sdlc only.** Confirmed, as the plan already said.
+- **Approach 2 covers failsafe and issue-sdlc, but not the watchdog** — the
+  daemon never writes that prompt, so it cannot put a sentinel in it.
+
+**This suggests an approach 2′ the original three did not include**: have
+`background_process_tracker` supply its cron prompt VERBATIM, exactly as
+`recovery_cron_advisor` already does for the failsafe. Then every cron the
+daemon causes to exist carries daemon-authored text, and the sentinel in
+approach 2 covers all of them — the remaining gap shrinks to a cron someone
+invents with no daemon involvement at all, which is a much smaller and more
+honest exposure than "an ad-hoc cron".
+
+Recorded as an option, not a ruling. It is offered because it removes a
+constraint the original framing treated as fixed, not to pre-empt the owner's
+choice.
+
 ## Goals
 
 - `[awaiting-human]` actually suppresses ticks in a session with several crons.
@@ -95,9 +126,9 @@ runbook's own stopping rule applies: stop and ask rather than guess.
 
 ### Phase 1: Owner decision
 
-- [ ] ⬜ **Task 1.1**: Owner picks one of the three approaches, or names a
-  fourth. Nothing below starts until then: the choice determines the test matrix,
-  not merely the implementation.
+- [ ] ⬜ **Task 1.1**: Owner picks one of the three approaches, approach 2′, or
+  names another. Nothing below starts until then: the choice determines the test
+  matrix, not merely the implementation.
 
 ### Phase 2: Fix, once decided
 
