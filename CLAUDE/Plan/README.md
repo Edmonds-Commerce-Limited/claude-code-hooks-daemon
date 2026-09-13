@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00391: plan close requires proven definition of done](00391-plan-close-requires-proven-definition-of-done/PLAN.md) - Not Started (closing a plan is where an agent grades its own homework; a project declares its DoD in config and the terminal status flip is denied until each item is CHECKED or attested with evidence in the plan's JOURNAL/ — the agent-satisfiable counterpart to Plan 00367's human gate)
+
 - [00390: niggles ledger five](00390-niggles-ledger-five/PLAN.md) - In Progress (the OPEN niggles ledger — record small defects here the turn they are found; ledgers 00377/00379/00381/00385 are all closed. N1 fixed: `normalize_path` let MARKER-LIST order pick a path's root instead of position, so a nested `.claude/` beat an `untracked/` prefix — its own docstring said "first occurrence", settling it as accident not policy)
 
 - [00388: failsafe marker wiped by other crons in multi cron sessions](00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md) - Not Started (`[awaiting-human]` never suppresses a tick in a session with more than one cron — any non-failsafe tick reads as "the owner is back" and clears the marker and cadence; reproduced against the real handler, blocked on an owner ruling between three approaches)
@@ -234,27 +236,27 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 390 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 391 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 350 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 17 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 18 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 17 + 350 + 13 = **380 folders**, spanning
-  **377 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 18 + 350 + 13 = **381 folders**, spanning
+  **378 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  390 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  391 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  377 + 13 = 390. ✅
+  378 + 13 = 391. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
