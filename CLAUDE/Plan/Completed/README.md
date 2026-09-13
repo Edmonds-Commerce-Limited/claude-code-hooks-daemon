@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00358: a worktree venv can silently test the WRONG source tree](00358-worktree-venv-tests-wrong-source-tree/PLAN.md) - Complete (a test session now refuses to start when the package resolves outside the invoking checkout, naming both paths and the setup script; the `worktree_create` guidance says a fresh worktree has no venv)
+
 - [00357: a ValueError escapes glob expansion and fails a security guard open](00357-glob-expansion-valueerror-escapes-fail-open/PLAN.md) - Complete at `ce95acae` + the archiving commit (`Path.glob` is a generator, so the `ValueError` fired on iteration OUTSIDE the `try` and the quarantine artefact read guard was skipped for the whole tool call; the guard now wraps the consumption, proven by tests that failed pre-fix)
 
 - [00356: secret guard bracket glob false positive](00356-secret-guard-bracket-glob-false-positive/PLAN.md) - Complete (a bracket expression at a token's edge was read as an open wildcard, so an ordinary jq array subscript was denied; fixed and merged by a worktree sub-agent, whose incidental finding shipped as Plan 00357)

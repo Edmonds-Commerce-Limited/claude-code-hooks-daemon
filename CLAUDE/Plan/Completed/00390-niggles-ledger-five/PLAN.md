@@ -1,6 +1,6 @@
 # Plan 00390: niggles ledger five
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-12
 **Owner**: joseph
 **Priority**: Medium
@@ -128,7 +128,14 @@ sure nothing is dropped, not to force every fix into one plan.
   case that was actually observed. N1 was re-run as the ORIGINAL denied write,
   through the real handler, after the fix. N2 was proved by regenerating the
   real `CLAUDE.md` and confirming the row it wrongly carried is gone.
-- [ ] Full QA passes and CI is green.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/39-a-gate-you-switched-off-is-no-longer-announced-as-policy.md`
+  — N2 changes what ships in a client's generated `CLAUDE.md`, so a project
+  with either approval key at its default will see those rows disappear on the
+  next restart. N1 needs none: it corrected a handler's path handling to match
+  its own documented behaviour, so nothing a client relies on changes.
+- [x] Full QA passes and CI is green — 29/29 locally, CI green at `abf11eb0`,
+  which sits directly on the N2 code fix `915f168b`.
 
 ## Delivery & Milestones
 
@@ -142,6 +149,14 @@ sure nothing is dropped, not to force every fix into one plan.
   is also OFF by default and OFF here — which is exactly the policy the owner
   stated they wanted, already shipped. The defect was the generated block
   claiming otherwise.
-- **This ledger stays OPEN while it is the current one.** It is not "finished"
-  when its entries are: it closes when a successor opens, which is what the SOP
-  means by the next niggle opening a new ledger. Record new entries here.
+- **CORRECTION — an earlier revision of this line was wrong.** It said this
+  ledger "stays OPEN while it is the current one" and closes only when a
+  successor opens. The canonical SOP in `CLAUDE/core/PlanWorkflow.core.md` says
+  the opposite: "When every entry is resolved, close and archive the ledger. Do
+  not keep a ledger open as a permanent fixture," and "The next niggle found
+  opens a NEW ledger. Never reopen a closed one." Ledgers 00377, 00379, 00381
+  and 00385 are all Complete and archived, so four precedents agree with the SOP
+  and not with the note. It was the only reason this ledger was still open.
+- Both entries are resolved, so this ledger closes. The next niggle runs
+  `mkplan.bash` for ledger six rather than reopening this one — reopening a
+  terminal plan breaks the archive's atomicity guarantees.
