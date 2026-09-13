@@ -128,9 +128,34 @@ sure nothing is dropped, not to force every fix into one plan.
   release gate needs.
 
   **Fix**: `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}`. A push
-  to main now QUEUES behind a running job instead of killing it, so every sha
-  gets a result; a PR branch keeps the cheap behaviour. Free on this repository
-  — it is public, so standard runners are not metered.
+  to main now QUEUES behind a running job instead of killing it; a PR branch
+  keeps the cheap behaviour. Free on this repository — it is public, so standard
+  runners are not metered.
+
+  **CORRECTION — an earlier revision of this entry overclaimed the result.** It
+  said the fix means "every sha gets a result". That is false and was written
+  without being checked. Observed four pushes later:
+
+  ```text
+  8682b3df  pending       <- newest, queued
+  268cbc77  cancelled     <- was pending, superseded
+  57d6b435  cancelled     <- was pending, superseded
+  a64dca90  in_progress   <- RUNNING, survived all three pushes
+  ```
+
+  What the fix actually guarantees is narrower and is still the thing that
+  mattered: **a RUNNING job is never killed**, so a run that starts, finishes.
+  Queued runs are still superseded — only the newest pending run per concurrency
+  group survives. Intermediate commits on main therefore may still have no CI
+  result.
+
+  That is acceptable for the defect this entry was about, because Plan 00359's
+  gate needs HEAD's exact sha to be green and HEAD is always the newest pending
+  run, which does execute. It is NOT acceptable as a description, which is why
+  the claim is corrected here rather than left to mislead the next reader. The
+  precise mechanism for the pending-run supersession is GitHub's own concurrency
+  behaviour and is stated here as the explanation for what was observed, not as
+  something this plan verified against the documentation.
 
   **Verified in production, which is the only way this one can be tested.**
   `ee4aab64` completed `success` despite `ed00e582` being pushed on top of it —
