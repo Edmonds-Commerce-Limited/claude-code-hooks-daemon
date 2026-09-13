@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00359: the release pipeline checks the slate is clean before it starts](00359-release-slate-clean-gate/PLAN.md) - Complete at `7f0f6f40`…`268dab5b` + the archiving commit (`release-slate-check` runs as Stage 0 of `/release`: HEAD's exact sha must be CI-green, mid-work plans and unlanded branches stop for a human, and `accept-wip` is the only way to proceed over them)
+
 - [00358: a worktree venv can silently test the WRONG source tree](00358-worktree-venv-tests-wrong-source-tree/PLAN.md) - Complete (a test session now refuses to start when the package resolves outside the invoking checkout, naming both paths and the setup script; the `worktree_create` guidance says a fresh worktree has no venv)
 
 - [00357: a ValueError escapes glob expansion and fails a security guard open](00357-glob-expansion-valueerror-escapes-fail-open/PLAN.md) - Complete at `ce95acae` + the archiving commit (`Path.glob` is a generator, so the `ValueError` fired on iteration OUTSIDE the `try` and the quarantine artefact read guard was skipped for the whole tool call; the guard now wraps the consumption, proven by tests that failed pre-fix)

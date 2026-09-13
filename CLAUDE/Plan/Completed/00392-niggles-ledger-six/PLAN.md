@@ -1,6 +1,6 @@
 # Plan 00392: niggles ledger six
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-13
 **Owner**: joseph
 **Priority**: Medium
@@ -39,7 +39,7 @@ sure nothing is dropped, not to force every fix into one plan.
 
 ### Phase 1: Entries
 
-- [x] ✅ **N1** — GRADUATED to [Plan 00388](../00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md)
+- [x] ✅ **N1** — GRADUATED to [Plan 00388](../../00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md)
   (Tasks 2.4 and 2.5). The `issue-sdlc` cron has no no-op backoff, so a saturated
   backlog costs a full model turn every hour, indefinitely. The failsafe cron
   has TWO mechanisms for exactly this; the issue cron has none.
@@ -107,7 +107,9 @@ sure nothing is dropped, not to force every fix into one plan.
   handler's docstring.
 - [x] This plan has no release-bound consequences: no code changed. N1 was
   recorded and graduated, so nothing a client installs or runs is different.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green. Full QA 29/29 PASSED, and CI concluded
+  `success` on `836164e9` — the exact commit this ledger closes on, not an
+  ancestor of it.
 
 ## Delivery & Milestones
 
@@ -120,3 +122,6 @@ sure nothing is dropped, not to force every fix into one plan.
 - **Close this ledger when its entries are resolved.** Do not hold it open as a
   standing fixture — that error is what kept ledger 00390 open after its work
   was finished.
+- Its one entry is resolved by graduation, so this ledger closes with a single
+  entry. A ledger is not worth holding open to accumulate a fuller set: the next
+  niggle runs `mkplan.bash` for ledger seven rather than reopening this one.
