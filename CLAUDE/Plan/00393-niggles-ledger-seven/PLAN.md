@@ -99,6 +99,42 @@ sure nothing is dropped, not to force every fix into one plan.
   call. Chasing why "session-only" had not bitten is what exposed that two of
   the three crons have no declaration to fall back on when it eventually does.
 
+- [x] ✅ **N2** — FIXED. CI on `main` cancelled its own runs, destroying the
+  evidence two documented mechanisms depend on.
+
+  **Observed**: 13 of the last 20 CI runs concluded `cancelled`, including three
+  consecutively while closing plans in one session:
+
+  ```text
+  ee4aab64  in_progress
+  bbe5b331  cancelled   <- killed by the ee4aab64 push
+  a83593eb  cancelled   <- killed by the bbe5b331 push
+  20511016  cancelled   <- killed by the a83593eb push
+  836164e9  success     <- survived only because nothing followed it for 20 min
+  ```
+
+  **Cause**, `.github/workflows/qa.yml:10-12`: `concurrency.group` is
+  `qa-${{ github.ref }}`, which is `refs/heads/main` for EVERY push to main, with
+  `cancel-in-progress: true`. So each push killed the previous run.
+
+  **Why it is a defect here and not a sensible default.** Cancelling superseded
+  runs is correct when only the newest commit matters. Two mechanisms in this
+  repository need the opposite: Plan 00359's `release-slate-check` requires
+  HEAD's EXACT sha to be CI-green, and plan completion criteria cite a specific
+  commit. Combined with the standing authorisation to push after each logical
+  unit, the configuration and the workflow were in direct conflict — the rule
+  that says "never hold a push" guaranteed the destruction of the evidence the
+  release gate needs.
+
+  **Fix**: `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}`. A push
+  to main now QUEUES behind a running job instead of killing it, so every sha
+  gets a result; a PR branch keeps the cheap behaviour. Free on this repository
+  — it is public, so standard runners are not metered.
+
+  **Verification**: this is observable rather than unit-testable. The commit
+  carrying the fix is itself the first check — its run must complete rather than
+  be cancelled by whatever lands next.
+
 ## Success Criteria
 
 - [ ] Every entry above is either fixed with a regression test, or graduated to

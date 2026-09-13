@@ -9,7 +9,13 @@ on:
 
 concurrency:
   group: qa-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a run on the default branch. Plan 00359's release-slate gate
+  # requires HEAD's EXACT sha to be CI-green, and plan completion criteria cite
+  # a specific commit, so a cancelled run on main destroys the only evidence
+  # either one can use. Superseded runs are still cancelled on a PR branch,
+  # where only the tip matters. With this false, a later push QUEUES behind the
+  # running job rather than killing it, so every sha on main gets a result.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   qa:
