@@ -4,6 +4,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00357: a ValueError escapes glob expansion and fails a security guard open](00357-glob-expansion-valueerror-escapes-fail-open/PLAN.md) - Complete at `ce95acae` + the archiving commit (`Path.glob` is a generator, so the `ValueError` fired on iteration OUTSIDE the `try` and the quarantine artefact read guard was skipped for the whole tool call; the guard now wraps the consumption, proven by tests that failed pre-fix)
+
+- [00356: secret guard bracket glob false positive](00356-secret-guard-bracket-glob-false-positive/PLAN.md) - Complete (a bracket expression at a token's edge was read as an open wildcard, so an ordinary jq array subscript was denied; fixed and merged by a worktree sub-agent, whose incidental finding shipped as Plan 00357)
+
 - [00355: supervisor announces every keystroke it sends](00355-supervisor-announces-every-keystroke-it-sends/PLAN.md) - Complete at `e105530e` + the follow-on supervisor commits and the archiving commit (the ESC injected to flush a stalled compaction was silent; every keystroke the supervisor sends now raises the status-line banner on the tick that sends it, and repeats collapse to a tally like `esc (20), compact (15)`)
 
 - [00354: docs qa stale counterpart index](00354-docs-qa-stale-counterpart-index/PLAN.md) - Complete at `82bbd550`…`644ba92c` + the merge commit (the EDIT path reused every COUNTERPART index record without revalidating `mtime_ns`/`size`, so `duplicate-block` cited spans whose content had moved or gone and missed duplicates against files changed since the last sweep; `quote-source-stale` shared the shape, because the dividing line is the stage rather than the check)

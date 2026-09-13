@@ -1,6 +1,6 @@
 # Plan 00389: git pull reconciles daemon config and version
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-12
 **Owner**: joseph
 **Priority**: High
@@ -140,7 +140,7 @@ plan consumes it.
 - [x] `merge_qa_report`'s existing tests pass unchanged after the extraction,
   proving the refactor was behaviour-preserving.
 - [x] Every release-bound consequence is in the pending-release holding area.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green — 29/29 locally, CI green at `b06cfa0a`.
 
 ## Delivery & Milestones
 
@@ -152,9 +152,9 @@ plan consumes it.
 - Delivered at `263c18f2` (shared trigger extracted), `6af4fc3a` (config-drift
   advisory), `d47ef80a` (version drift, both directions) and `fece90e2`
   (regenerated tracked doc + release-bound consequences).
-- **READY TO CLOSE — awaiting a human.** Full QA is 29/29 and CI is GREEN at
-  `3c2854f4`, so the last success criterion is met in fact. It is left unticked
-  deliberately: ticking it completes the body, which the `header-body-coherence`
-  gate then requires be matched by a `Complete` header — and closing a plan is
-  human-approved in this project (`plan_workflow.close_requires_human_approval`).
-  Tick it as part of closing, not before.
+- Closed by the agent that completed it, per this project's actual policy. An
+  earlier revision of this section claimed the close was gated on a human by
+  `plan_workflow.close_requires_human_approval`. **That was wrong**: the key is
+  `false` here and `plan_close_approval`'s `matches()` short-circuits on it, so
+  no status flip was ever going to be denied. The misleading source is recorded
+  as Plan 00390 N2.

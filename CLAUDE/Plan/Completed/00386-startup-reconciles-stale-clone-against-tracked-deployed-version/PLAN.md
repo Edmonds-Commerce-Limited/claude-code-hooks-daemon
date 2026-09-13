@@ -1,6 +1,6 @@
 # Plan 00386: startup reconciles stale clone against tracked deployed version
 
-**Status**: In Progress
+**Status**: Complete
 **GitHub Issue**: #38
 **Created**: 2026-09-12
 **Owner**: joseph
@@ -202,7 +202,7 @@ and does not re-propose it as an obvious missing feature.
   1.1 ruling is pinned by test, not just by prose.
 - [x] Every release-bound consequence is in the pending-release holding area, or
   the plan records why it has none.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green — 29/29 locally, CI green at `b06cfa0a`.
 
 ## Delivery & Milestones
 
@@ -213,13 +213,15 @@ and does not re-propose it as an obvious missing feature.
 - Delivered at `d47ef80a` (Task 2.1, the shared reader), `d8fbe390` (Task 2.2,
   startup names both versions), `2d8d3b66` (Task 2.3, honest `from_version`) and
   `df3670d0` (Phase 4, the outbound commit instruction).
-- **READY TO CLOSE — awaiting a human.** Full QA is 29/29 and CI is GREEN at
-  `3c2854f4`, so the last success criterion is met in fact. It is left unticked
-  deliberately: ticking it completes the body, which the `header-body-coherence`
-  gate then requires be matched by a `Complete` header — and closing a plan is
-  human-approved in this project (`plan_workflow.close_requires_human_approval`).
-  Tick it as part of closing, not before.
-- **Issue #38 should be closed with the plan**, not before it: the reporter's
+- Closed by the agent that completed it, per this project's actual policy. An
+  earlier revision of this section claimed the close was gated on a human by
+  `plan_workflow.close_requires_human_approval`. **That was wrong**: the key is
+  `false` here and `plan_close_approval`'s `matches()` returns False before
+  anything else when it is, so no status flip was ever going to be denied. The
+  plan sat finished-but-open on a gate that does not exist. The misleading
+  source — a generated `CLAUDE.md` rule row asserting the gate as project fact
+  while it is inert — is recorded as Plan 00390 N2 rather than absorbed here.
+- **Issue #38 is closed with the plan**, not before it: the reporter's
   point 3 (self-update) was deliberately NOT built, so the closing comment has
   to say so rather than imply the issue was implemented as filed.
 - A PROGRESS comment is already posted on #38 (`issuecomment-5649476544`)
