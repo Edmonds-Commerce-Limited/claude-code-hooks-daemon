@@ -106,6 +106,18 @@ class PlanCloseApprovalHandler(PreToolUseHandlerBase):
         )
         self._formatter = RuleFormatter()
 
+    def is_dormant(self) -> bool:
+        """Whether config leaves this handler unable to fire (Plan 00390 N2).
+
+        The generated CLAUDE.md listed this rule's Why -- "This project
+        requires a human to close a plan" -- under headings promising active
+        handlers and enforced rules, while the key was false. Two finished
+        plans sat open on a gate that was switched off. Reported here so the
+        generator can leave a dormant handler out entirely; it mirrors
+        ``matches()``'s first line, and a test pins the two together.
+        """
+        return not self._close_requires_human_approval
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         if not self._close_requires_human_approval:
             return False

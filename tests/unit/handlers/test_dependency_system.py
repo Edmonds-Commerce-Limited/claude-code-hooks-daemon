@@ -439,3 +439,45 @@ def test_config_no_handler_options_uses_defaults() -> None:
     assert config.plan_workflow.enabled is False
     assert config.plan_workflow.directory == "CLAUDE/Plan"
     assert config.plan_workflow.workflow_docs == "CLAUDE/PlanWorkflow.md"
+
+
+def _generated_block(tmp_path: Path, *, key_on: bool) -> str:
+    """The real CLAUDE.md block, from registry-registered handlers.
+
+    Plan 00390 N2. The stub-based tests in
+    ``tests/unit/core/test_claude_md_injector.py`` prove the injector honours
+    ``is_dormant()``; they cannot prove the daemon's own handlers report it
+    truthfully, because that depends on the registry having injected the
+    config value BEFORE the injector walks the chain. This drives the real
+    path end to end so an ordering regression fails here rather than shipping
+    a CLAUDE.md that announces a gate the project switched off -- or, worse,
+    silently drops one it switched on.
+    """
+    from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+    registry = HandlerRegistry()
+    registry.discover()
+    router = EventRouter()
+    registry.register_all(
+        router,
+        config={"pre_tool_use": _make_pre_tool_use_config(plan_close_approval={"enabled": True})},
+        plan_workflow=PlanWorkflowConfig(enabled=True, close_requires_human_approval=key_on),
+    )
+    handlers = list(router.get_chain(EventType.PRE_TOOL_USE).handlers)
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    claude_md = tmp_path / "CLAUDE.md"
+    claude_md.write_text("# P\n")
+    ClaudeMdInjector(workspace_root=tmp_path, handlers=handlers).inject()
+    return claude_md.read_text(encoding="utf-8")
+
+
+def test_the_close_gate_is_announced_only_when_the_project_turned_it_on(
+    tmp_path: Path,
+) -> None:
+    """Both directions, because only the pair rules out the trivial fixes."""
+    on_block = _generated_block(tmp_path / "on", key_on=True)
+    off_block = _generated_block(tmp_path / "off", key_on=False)
+
+    assert "R-PLAN-CLOSE-APPROVAL" in on_block
+    assert "R-PLAN-CLOSE-APPROVAL" not in off_block

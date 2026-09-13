@@ -187,3 +187,22 @@ class TestGate:
         assert first.reason is not None and second.reason is not None
         assert len(second.reason) < len(first.reason)
         assert "approve-merge worktree-plan-00367" in second.reason
+
+
+class TestItDeclaresItselfDormantWhenTheKeyIsOff:
+    """Plan 00390 N2 — the sibling gate gets the same treatment.
+
+    Its key IS on in this repository, so this row is honest here. It is wired
+    anyway because the defect is stating a conditional rule unconditionally,
+    which bites any project that leaves the key off.
+    """
+
+    def test_dormant_when_the_key_is_off(self) -> None:
+        handler = MergeToMainApprovalHandler()
+        handler._merge_to_main_requires_human_approval = False
+        assert handler.is_dormant() is True
+
+    def test_not_dormant_when_the_key_is_on(self) -> None:
+        handler = MergeToMainApprovalHandler()
+        handler._merge_to_main_requires_human_approval = True
+        assert handler.is_dormant() is False

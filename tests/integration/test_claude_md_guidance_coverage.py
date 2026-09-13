@@ -274,6 +274,21 @@ _EARNS_GUIDANCE: dict[str, str] = {
     ),
 }
 
+# Handlers that EARN resident guidance and produce it, but whose section is
+# absent from this repository's CLAUDE.md on purpose: a config key leaves them
+# unable to fire here, so the generator omits them rather than announcing a
+# gate the project has switched off (Plan 00390 N2).
+#
+# The value is the dotted config key that governs it. That is not decoration —
+# `test_every_dormancy_exemption_is_still_true` reads the key out of this
+# repository's own `.claude/hooks-daemon.yaml` and fails if it has been turned
+# on, so an exemption cannot quietly outlive the reason for it.
+_DORMANT_IN_THIS_PROJECT: dict[str, str] = {
+    "MergeToMainApprovalHandler": "worktree.merge_to_main_requires_human_approval",
+    "PlanCloseApprovalHandler": "plan_workflow.close_requires_human_approval",
+}
+
+
 # Handlers that correctly return None. The reason is the point: it is what a
 # future auditor reads instead of re-deriving the verdict by hand.
 _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
@@ -625,7 +640,8 @@ class TestGuidanceActuallyReachesClaudeMd:
         missing = sorted(
             f"{class_name} (name={classes[class_name]().name})"
             for class_name in _EARNS_GUIDANCE
-            if classes[class_name]().name not in present
+            if class_name not in _DORMANT_IN_THIS_PROJECT
+            and classes[class_name]().name not in present
         )
 
         assert not missing, (
@@ -736,3 +752,74 @@ class TestGuidanceActuallyReachesClaudeMd:
 
         assert arming_like, "the guard's regex no longer recognises an arming-like phrase"
         assert [q for q in arming_like if q not in _HUMAN_BLOCKED_EXAMPLES]
+
+
+class TestTheDormancyExemptionsAreStillTrue:
+    """Plan 00390 N2.
+
+    A named exemption is a claim about this repository's config, and a claim
+    that nobody re-checks is how the original defect arose: CLAUDE.md asserted
+    a gate was in force long after it was switched off. These tests read the
+    real config file, so turning either key on breaks the build rather than
+    silently leaving a handler's guidance dropped.
+    """
+
+    @staticmethod
+    def _config_value(dotted_key: str) -> Any:
+        """Read a dotted key out of this repository's own daemon config."""
+        import yaml
+
+        config_path = _project_root() / ".claude" / "hooks-daemon.yaml"
+        node: Any = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        for part in dotted_key.split("."):
+            if not isinstance(node, dict) or part not in node:
+                return None
+            node = node[part]
+        return node
+
+    def test_the_config_file_is_readable_at_all(self) -> None:
+        """Vacuity guard: a key lookup that always returns None proves nothing."""
+        assert self._config_value("plan_workflow.enabled") is True
+
+    @pytest.mark.parametrize("class_name", sorted(_DORMANT_IN_THIS_PROJECT))
+    def test_every_dormancy_exemption_is_still_true(self, class_name: str) -> None:
+        dotted_key = _DORMANT_IN_THIS_PROJECT[class_name]
+        value = self._config_value(dotted_key)
+        assert value is not True, (
+            f"{class_name} is exempted from CLAUDE.md guidance coverage because "
+            f"`{dotted_key}` switches it off in this project — but that key is now "
+            f"TRUE. The handler can fire, so its guidance must reach CLAUDE.md: "
+            f"remove it from _DORMANT_IN_THIS_PROJECT and restart the daemon to "
+            f"regenerate the block."
+        )
+
+    @pytest.mark.parametrize("class_name", sorted(_DORMANT_IN_THIS_PROJECT))
+    def test_every_exempted_handler_actually_declares_dormancy(self, class_name: str) -> None:
+        """The exemption must be backed by the mechanism, not just by this list.
+
+        Checked through ``CanBeDormant`` rather than ``hasattr``: it is the
+        protocol the generator itself tests against, so this asserts the same
+        contract the production path uses instead of a lookalike.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import CanBeDormant
+
+        classes = _discover_handler_classes()
+        handler = classes[class_name]()
+        assert isinstance(handler, CanBeDormant), (
+            f"{class_name} is listed as dormant in this project, but it does not "
+            f"implement is_dormant(), so the CLAUDE.md generator has no way to know "
+            f"that — its section would be dropped for some OTHER reason."
+        )
+        assert handler.is_dormant() is True
+
+    @pytest.mark.parametrize("class_name", sorted(_DORMANT_IN_THIS_PROJECT))
+    def test_a_dormant_handler_still_earns_guidance(self, class_name: str) -> None:
+        """Dormant is not the same as exempt, and the two lists must not blur.
+
+        A dormant handler still EARNS resident guidance — it would be written
+        the moment the project turned the key on. Listing it in
+        `_EXEMPT_FROM_GUIDANCE` instead would wrongly record it as a handler
+        with nothing to say.
+        """
+        assert class_name in _EARNS_GUIDANCE
+        assert class_name not in _EXEMPT_FROM_GUIDANCE

@@ -67,7 +67,7 @@ sure nothing is dropped, not to force every fix into one plan.
   six new tests were green beforehand and are kept as controls, so the fix
   cannot have been bought by loosening the stripping the function exists to do.
 
-- [ ] ⬜ **N2**: The generated `CLAUDE.md` rules table states an INERT handler's
+- [x] ✅ **N2**: The generated `CLAUDE.md` rules table states an INERT handler's
   rule as a present-tense fact about this project, so an agent reads a gate that
   cannot fire as one that governs it.
 
@@ -90,17 +90,44 @@ sure nothing is dropped, not to force every fix into one plan.
   `Blocked` column is accurate ("while `...` is on"), which is exactly why the
   Why column reads as confirmation rather than as a conditional.
 
-  **Not the same as R-MERGE-TO-MAIN-APPROVAL**, whose sibling key IS true here —
-  that row is honest. The defect is stating a conditional rule unconditionally,
-  not the existence of either gate.
+  **The sibling gate had it too.** An earlier revision of this entry claimed
+  `R-MERGE-TO-MAIN-APPROVAL` was honest because its key "is true here". It is
+  not: there is no `worktree:` section in `.claude/hooks-daemon.yaml` at all, so
+  `merge_to_main_requires_human_approval` takes its declared default `False`.
+  The claim came from reading one grep line of a comment that continues onto the
+  next and says "inert here since that key is false (default)" — the config
+  comment was right and the reading was wrong. Both rows were removed.
+
+  **Fixed**: an optional `CanBeDormant` protocol. A handler that config has
+  switched off reports `is_dormant()`, and the CLAUDE.md generator leaves it out
+  of the block entirely rather than listing it under headings that call it
+  active and its rules enforced. Default-active, because most handlers gate on
+  their INPUT, which is undecidable at generation time.
+
+  **A smaller fix was available and rejected**: reword the Why column so it
+  reads conditionally instead of removing the row. It is one string per handler
+  and touches no mechanism. It was rejected because the row would still sit
+  under a heading reading "All other ENFORCED rules" while enforcing nothing,
+  and because resident guidance is not free — this block is read in full at the
+  start of every session, and the guidance-coverage suite's own measurement puts
+  it at ~73 KB / ~18,300 tokens here. A section for a handler that cannot fire
+  fails that suite's stated criterion outright rather than marginally.
+
+  Proved against the real path, not only stubs: a test registers the handler
+  through the actual registry with the key ON and OFF and asserts the row is
+  present then absent. The ON half is the important one — it is what stops this
+  fix silently deleting a gate a project really did turn on. `.claude/HOOKS-DAEMON.md`
+  was checked and left alone: its row already reads "while the key is on", which
+  is a conditional a reader cannot mistake for policy.
 
 ## Success Criteria
 
-- [ ] Every entry above is either fixed with a regression test, or graduated to
+- [x] Every entry above is either fixed with a regression test, or graduated to
   a named plan and that plan is linked from the entry.
-- [ ] No entry is closed on reasoning alone — each fix is proved against the
+- [x] No entry is closed on reasoning alone — each fix is proved against the
   case that was actually observed. N1 was re-run as the ORIGINAL denied write,
-  through the real handler, after the fix.
+  through the real handler, after the fix. N2 was proved by regenerating the
+  real `CLAUDE.md` and confirming the row it wrongly carried is gone.
 - [ ] Full QA passes and CI is green.
 
 ## Delivery & Milestones
@@ -108,6 +135,13 @@ sure nothing is dropped, not to force every fix into one plan.
 - Opened because ledgers 00377/00379/00381/00385 are all closed and a new niggle
   was found, per the SOP in `CLAUDE/core/PlanWorkflow.core.md`.
 - N1 fixed at `7e0756af`.
+- N2 found while answering the owner's question "close requires human approval —
+  is this a first class feature?". It is: a config key, a dedicated handler, a
+  CLI subcommand, a one-shot marker store shared with the worktree gate, a
+  docs-QA check that stops docs prescribing unenforced gates, and a rule ID. It
+  is also OFF by default and OFF here — which is exactly the policy the owner
+  stated they wanted, already shipped. The defect was the generated block
+  claiming otherwise.
 - **This ledger stays OPEN while it is the current one.** It is not "finished"
   when its entries are: it closes when a successor opens, which is what the SOP
   means by the next niggle opening a new ledger. Record new entries here.

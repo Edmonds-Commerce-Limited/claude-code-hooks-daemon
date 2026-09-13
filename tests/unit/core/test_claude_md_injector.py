@@ -1571,3 +1571,114 @@ class TestTheBlockSettlesTheConflictWithAHarnessInstruction:
         """Stated next to the Bash-write boundary, not filed somewhere unrelated."""
         block = self._block(tmp_path)
         assert block.index("not seen by the content guards") < block.index("does not override")
+
+
+class _DormantCapableStub(_StubHandler):
+    """A stub that can report itself configured-off, like the approval gates.
+
+    Separate from ``_StubHandler`` deliberately: the base stub declares no
+    ``is_dormant`` at all, which is the back-compatibility case every other
+    test in this file exercises by accident and one below exercises on purpose.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        claude_md: "str | None",
+        rules: "list[Any] | None" = None,
+        *,
+        dormant: bool = False,
+    ) -> None:
+        super().__init__(name, claude_md, rules)
+        self._dormant = dormant
+
+    def is_dormant(self) -> bool:
+        return self._dormant
+
+
+def _a_rule() -> Any:
+    """A rule whose Why column asserts something about THIS project."""
+    from claude_code_hooks_daemon.constants.rule_ids import RuleID
+    from claude_code_hooks_daemon.core.rule import Rule
+
+    return Rule(
+        rule_id=RuleID.PLAN_CLOSE_APPROVAL,
+        blocked="a thing while the key is on",
+        why="This project requires a human to close a plan",
+        fix="Ask a human",
+        verbose="The long form nobody reads until it fires.",
+    )
+
+
+class TestADormantHandlerIsNotAnnouncedAsEnforced:
+    """Plan 00390 N2.
+
+    The block's own headings promise the reader that what follows is `active
+    in this project` and lists `All other enforced rules`. A handler that is
+    loaded but configured into inertness enforces nothing, so announcing its
+    rule there states a policy the project does not have — which is exactly
+    how two finished plans came to sit open on a gate that was switched off.
+    """
+
+    @staticmethod
+    def _block(tmp_path: Path, handlers: "list[Any]") -> str:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# P\n")
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=handlers).inject()
+        return claude_md.read_text(encoding="utf-8")
+
+    def test_a_dormant_handlers_rule_row_is_absent(self, tmp_path: Path) -> None:
+        block = self._block(
+            tmp_path,
+            [_DormantCapableStub("gate", None, [_a_rule()], dormant=True)],
+        )
+        assert "This project requires a human to close a plan" not in block
+
+    def test_a_dormant_handler_is_not_listed_among_the_active_handlers_either(
+        self, tmp_path: Path
+    ) -> None:
+        """Prose and rules are one decision: an inert handler contributes nothing.
+
+        Asserted through ``handler_names_in_guidance`` rather than by searching
+        for the prose text. A non-promoted handler's prose is SUMMARISED to a
+        one-line advisory entry, never kept verbatim, so "the prose is absent"
+        is true of every such handler and would have passed without the fix.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import handler_names_in_guidance
+
+        block = self._block(
+            tmp_path,
+            [_DormantCapableStub("gate", "## gate\n\nSome guidance.", dormant=True)],
+        )
+        assert "gate" not in handler_names_in_guidance(block)
+
+    def test_an_active_handler_with_the_same_rule_is_still_announced(self, tmp_path: Path) -> None:
+        """The control. Without it the fix could be `never emit rule rows`."""
+        block = self._block(
+            tmp_path,
+            [_DormantCapableStub("gate", None, [_a_rule()], dormant=False)],
+        )
+        assert "This project requires a human to close a plan" in block
+
+    def test_a_handler_that_does_not_declare_dormancy_is_treated_as_active(
+        self, tmp_path: Path
+    ) -> None:
+        """Back-compat: the protocol is optional, and absence means enforcing."""
+        block = self._block(tmp_path, [_StubHandler("gate", None, [_a_rule()])])
+        assert "This project requires a human to close a plan" in block
+
+    def test_a_dormant_handler_does_not_suppress_its_neighbours(self, tmp_path: Path) -> None:
+        """Skipping one handler must not drop the rest of the block."""
+        from claude_code_hooks_daemon.core.claude_md_injector import handler_names_in_guidance
+
+        block = self._block(
+            tmp_path,
+            [
+                _DormantCapableStub("gate", None, [_a_rule()], dormant=True),
+                _StubHandler("loud", "## loud\n\nNeighbour guidance."),
+            ],
+        )
+        assert handler_names_in_guidance(block) == ["loud"]
+        assert "This project requires a human to close a plan" not in block

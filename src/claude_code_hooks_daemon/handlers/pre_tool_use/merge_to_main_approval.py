@@ -191,6 +191,15 @@ class MergeToMainApprovalHandler(PreToolUseHandlerBase):
         )
         self._formatter = RuleFormatter()
 
+    def is_dormant(self) -> bool:
+        """Whether config leaves this handler unable to fire (Plan 00390 N2).
+
+        Mirrors ``matches()``'s first line so the CLAUDE.md generator can omit
+        a gate the project has switched off, rather than announcing its rule
+        under headings that promise enforcement.
+        """
+        return not self._merge_to_main_requires_human_approval
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         if not self._merge_to_main_requires_human_approval:
             return False

@@ -226,3 +226,40 @@ class TestGate:
         assert first.reason is not None and second.reason is not None
         assert len(second.reason) < len(first.reason)
         assert "approve-plan-close 00042" in second.reason
+
+
+class TestItDeclaresItselfDormantWhenTheKeyIsOff:
+    """Plan 00390 N2.
+
+    The generated CLAUDE.md rule row said "This project requires a human to
+    close a plan" while the key was false and `matches()` short-circuited on
+    it. An agent read that as policy and left two finished plans open. The
+    handler now reports its own inertness so the generator can leave it out.
+    """
+
+    def test_dormant_when_the_key_is_off(self) -> None:
+        handler = PlanCloseApprovalHandler()
+        handler._close_requires_human_approval = False
+        assert handler.is_dormant() is True
+
+    def test_not_dormant_when_the_key_is_on(self) -> None:
+        handler = PlanCloseApprovalHandler()
+        handler._close_requires_human_approval = True
+        assert handler.is_dormant() is False
+
+    def test_dormancy_agrees_with_what_matches_actually_does(self) -> None:
+        """The two must not drift: dormancy is a CLAIM about `matches()`.
+
+        Asserted against a payload that satisfies every other condition, so a
+        False here can only come from the config short-circuit.
+        """
+        handler = PlanCloseApprovalHandler()
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        hook_input = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "/repo/CLAUDE/Plan/00001-x/PLAN.md"},
+        }
+        for key_on in (True, False):
+            handler._close_requires_human_approval = key_on
+            assert handler.matches(hook_input) is key_on
+            assert handler.is_dormant() is not key_on

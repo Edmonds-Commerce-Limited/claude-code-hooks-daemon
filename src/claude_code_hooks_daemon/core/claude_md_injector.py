@@ -206,6 +206,28 @@ class HasRules(Protocol):
         ...
 
 
+@runtime_checkable
+class CanBeDormant(Protocol):
+    """Protocol for handlers that can be configured into inertness.
+
+    A handler is DORMANT when it is loaded and enabled but a config key makes
+    its ``matches()`` short-circuit, so it can never fire in this project.
+    The block this module writes promises the reader that the handlers in it
+    are "active in this project" and that the table lists "All other ENFORCED
+    rules" — a dormant handler satisfies neither, and announcing its rule
+    states a policy the project does not have.
+
+    Optional and default-active: a handler that does not declare
+    ``is_dormant`` is treated as enforcing, which is the right default because
+    most handlers are gated on their INPUT rather than on config, and
+    input-gating is undecidable here.
+    """
+
+    def is_dormant(self) -> bool:
+        """Whether config has made this handler unable to fire."""
+        ...
+
+
 @dataclass(frozen=True, slots=True)
 class _CollectedTiers:
     """Handler guidance sorted into the three Decision I injection tiers.
@@ -619,6 +641,11 @@ class ClaudeMdInjector:
 
         for handler in self._handlers:
             if not isinstance(handler, HasClaudeMd):
+                continue
+            # A handler config has switched off enforces nothing, so it is
+            # left out entirely rather than listed under headings that call it
+            # active and its rules enforced (Plan 00390 N2).
+            if isinstance(handler, CanBeDormant) and handler.is_dormant():
                 continue
             content = handler.get_claude_md()
             rules = handler.get_rules() if isinstance(handler, HasRules) else []
