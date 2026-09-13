@@ -78,6 +78,21 @@ on any inode change. An mtime-gated check therefore fails silently at exactly th
 moment it is needed — an installer-style redeploy — which is worse than no check,
 because it reports freshness it did not verify.
 
+**And the correct gate is cheap enough to need no cleverness.** Measured on this
+package's 535 `.py` files:
+
+```text
+ctime sweep over all 535 files:  0.64 ms
+full sha256 hash of all 535:     8.25 ms
+```
+
+So the honest gate costs about a thirteenth of the comparison it guards, and
+0.64 ms is negligible against a hook dispatch. That removes the usual reason for
+reaching for mtime or for a throttle: the design does not have to trade
+correctness for cost, because the correct version is already cheap. These
+numbers are a starting point for Task 2.3, not a substitute for measuring the
+real integrated path.
+
 The same trap is already documented for the ccy supervisor's worker reload
 (`.claude/ccy/` contract: "A redeploy that preserves mtime can change the
 CONTENT without advancing mtime"), so this is the second appearance of one root
