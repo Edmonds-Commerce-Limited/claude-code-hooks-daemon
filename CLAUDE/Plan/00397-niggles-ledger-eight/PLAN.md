@@ -86,7 +86,7 @@ sure nothing is dropped, not to force every fix into one plan.
   prefix would fire on any future `/comp…` command, and the tap cannot see
   which entry autocomplete actually selected. Needs a ruling; see the journal.
 
-- [ ] ⬜ **N2** — NOT A DEFECT, recorded so the question is not re-investigated
+- [x] ✅ **N2** — RESOLVED as NOT A DEFECT, recorded so it is not re-investigated
   from scratch: supervisor auto-compaction is healthy, and tmux is not in the
   path.
 
@@ -115,9 +115,14 @@ sure nothing is dropped, not to force every fix into one plan.
 
 ## Success Criteria
 
-- [ ] Every entry above is either fixed with a regression test, or graduated to
-  a named plan and that plan is linked from the entry.
-- [ ] No entry is closed on reasoning alone.
+- [ ] Every entry above is fixed with a regression test, graduated to a named
+  plan linked from the entry, or — the third outcome, added because N2 is one —
+  investigated to a conclusion of NOT A DEFECT with the evidence recorded, so
+  the question is answered once rather than re-opened by the next reader.
+- [ ] No entry is closed on reasoning alone. N2 was closed on the decision log
+  (176 historical compact injections, the most recent firing at 50% the day
+  before), a live sidecar reading of 24% against a 40% red threshold, and the
+  in-container process ancestry — not on an argument that it ought to be fine.
 
 ## Delivery & Milestones
 
