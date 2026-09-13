@@ -1,6 +1,6 @@
 # Plan 00395: running daemon detects source changed underneath it
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-13
 **Owner**: joseph
 **Priority**: High
@@ -102,16 +102,49 @@ The owner's standing ruling: **advise loudly, name the command; never
 auto-restart, never auto-upgrade.** That is what Plans 00386 and 00389 shipped.
 This plan decides where the check runs, not what it does when it fires.
 
-## The open question — where the check runs
+## SETTLED — this is only relevant to a CLIENT install
 
-Much narrower now that the signal is one small file:
+Owner ruling, and a constraint neither earlier revision had: **in self-install
+mode this check is irrelevant and must be dormant.** In self-install the daemon
+runs from `src/` in the repository itself — there is no deployed artefact for
+another session to upgrade underneath it, and the in-session cases are already
+covered by `daemon_restart_verifier` and `check-source-fresh`. The gap is real
+only where `.claude/hooks-daemon/` is an installed clone that an upgrade
+replaces.
 
-1. **On hook dispatch.** A re-resolve plus a small JSON read is cheap enough to
-   need no gate. Catches the mid-session case, which is the reported problem.
-2. **SessionStart only.** Cheaper still, but a session already in flight never
-   re-checks — which is exactly the reported case, so this is insufficient alone.
-3. **Writer announces.** `scripts/upgrade.sh` signals any running daemon. Exact
-   and nearly free, but only covers changes made through that script.
+So the handler reads `daemon.self_install_mode` (`config/models.py:1576`) and is
+dormant when true, via `CanBeDormant` (Plan 00390) so a self-install project's
+generated `CLAUDE.md` does not announce it as active policy either.
+
+## SETTLED — where the check runs
+
+**UserPromptSubmit.** Once per user turn: cheap enough to need no gate, catches
+the mid-session case that motivated the plan, and puts the advisory where the
+agent actually reads it. Rejected alternatives, recorded:
+
+- **On hook dispatch** — many times per turn for a fact that changes at most
+  once per upgrade. All cost, no extra coverage.
+- **SessionStart only** — a session already in flight never re-checks, which is
+  exactly the reported case.
+- **Writer announces** (`scripts/upgrade.sh` signals running daemons) — exact
+  and nearly free, but only covers upgrades run through that script. Worth
+  revisiting as a complement, not as the primary.
+
+## The signal — no startup bookkeeping needed
+
+The handler runs INSIDE the daemon process, so the version the process imported
+IS its startup state. No controller change is required:
+
+```text
+in-memory  claude_code_hooks_daemon.version.__version__   what this process loaded
+on-disk    .daemon-metadata.json -> daemon_version        what is installed NOW
+```
+
+Resolve the CURRENT venv with `resolve_existing_venv_python()` rather than
+`sys.prefix` — after a fingerprint-keyed upgrade the running process's own
+prefix still points at the OLD venv, whose metadata may be untouched. Read it
+with the existing stdlib reader. Normalise the `v` prefix and tolerate the
+`vX.Y.Z+<ref>.<sha>` guarded-branch form.
 
 ## Goals
 
@@ -132,10 +165,11 @@ Much narrower now that the signal is one small file:
 
 ### Phase 1: Owner decision
 
-- [ ] ⬜ **Task 1.1**: Owner picks the placement — option 1, 2, 3, or a
-  combination.
+- [x] ✅ **Task 1.1**: Placement and scope RULED by the owner: UserPromptSubmit,
+  and dormant in self-install mode because the check is only relevant to a
+  client project with an installed clone.
 
-### Phase 2: Build, once decided
+### Phase 2: Build
 
 - [ ] ⬜ **Task 2.1**: A failing test first: a daemon started against one venv,
   then an upgrade that writes a NEW fingerprint-keyed venv, must be reported
@@ -150,17 +184,32 @@ Much narrower now that the signal is one small file:
 - [ ] ⬜ **Task 2.5**: Pin the fail-open contract: unreadable, missing or
   malformed metadata must never block a hook. `read_daemon_metadata` already
   collapses those to `None`.
+- [ ] ⬜ **Task 2.6**: Dormant in self-install mode — a test that the handler
+  stays silent when `daemon.self_install_mode` is true, plus `CanBeDormant` so
+  the generated `CLAUDE.md` does not announce it there either.
+- [ ] ⬜ **Task 2.7**: Pin that a matching version is SILENT. An advisory on
+  every user turn when nothing has changed would be worse than the defect.
 
 ## Success Criteria
 
+- [ ] In self-install mode the handler is silent and is not announced as active
+  policy in the generated `CLAUDE.md`.
+
+- [ ] An unchanged version produces no output at all.
+
 - [ ] A running daemon whose installed version changed reports itself stale
   without being asked.
+
 - [ ] It reports stale when the upgrade created a NEW venv, proven by a test
   that fails against a remembered-path-only check.
+
 - [ ] The advisory names the restart command and nothing restarts itself.
+
 - [ ] A missing or malformed metadata file allows the hook through.
+
 - [ ] Every release-bound consequence is in the pending-release holding area, or
   this plan records why it has none.
+
 - [ ] Full QA passes and CI is green.
 
 ## Delivery & Milestones
