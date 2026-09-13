@@ -107,11 +107,83 @@ sure nothing is dropped, not to force every fix into one plan.
   therefore runs roughly 2.6x longer between automatic compactions than it did
   on the smaller window, with no configuration having changed.
 
-  **tmux is outside the container and not in the supervisor's path.** Process
-  ancestry inside the container is `tini(1) -> claude-supervise.py(2) -> claude(83)`, with `TMUX`/`TMUX_PANE` unset and no tmux server socket. Any
-  tmux wraps the container's stdio from the outside; it does not sit between
-  the PTY host and its child. The `/comp` truncation in N1 is also visible
-  from 2026-09-08, so it predates any recent change of terminal wrapper.
+  **tmux is outside the container and not in the INJECTION path.** Process
+  ancestry inside the container is `tini(1) -> claude-supervise.py(2) -> claude(84)`, with `TMUX`/`TMUX_PANE` unset and no process whose `comm` is
+  tmux (checked against `/proc/*/comm`, not a `ps | grep` that matches its own
+  argv). tmux wraps the container's stdio from the outside; it does not sit
+  between the PTY host and its child, so nothing the supervisor INJECTS passes
+  through it. The `/comp` truncation in N1 is also visible from 2026-09-08, so
+  it predates the change of terminal wrapper.
+
+  **CORRECTION — an earlier revision of this entry said "not in the supervisor's
+  path", full stop, and that was one step further than the evidence went.**
+  tmux IS in the INPUT path: a human keystroke now travels keyboard -> tmux ->
+  container stdin -> the supervisor's raw-input tap -> the child. Confirmed
+  empirically rather than by argument — `TERM` inside the container changed
+  from `xterm-256color` to `tmux-256color` when the session was re-wrapped,
+  which is tmux's own terminal type leaking in. Since the input tap is exactly
+  what N1 turns on, tmux cannot be ruled out as an INFLUENCE on N1's byte
+  stream, only as a cause of the auto-compaction symptom this entry settles.
+
+  **The distinction is testable, and the test is free.** The worker writes a
+  `diagnostic typed-slash observed:` line for every submitted `/`-line. The
+  pre-tmux captures are on record (`command='/comp' len=14`, `len=31`). The
+  next Tab-completed `/compact` typed under tmux produces a directly comparable
+  line: identical, and tmux changes nothing about N1; different, and tmux
+  re-encodes input in a way N1's fix must account for.
+
+- [ ] ⬜ **N3** — the `not idle` gate blocks compaction at EVERY band, including
+  CRITICAL, and a non-empty input box is enough to hold it there. This is the
+  strongest candidate for the owner's reported symptom (sessions climbing to
+  "COMPACT NOW" without compacting) and it supersedes N2's comfortable reading.
+
+  **Observed**, `.claude/ccy/claude-supervise.py:3962` (`_evaluate_monitor`),
+  gates in evaluation order:
+
+  ```python
+  if not reading.red:               -> NOOP "not red (tier=…)"
+  if foreground_ambiguous:          -> NOOP
+  if not idle:                      -> NOOP  _REASON_BUSY_COMPOSING   # every band
+  urgent = reading.compact_urgent or reading.critical
+  if not urgent and not work_idle:  -> NOOP                           # lower band only
+  ```
+
+  The class docstring (line 3898) says `work_idle` "only gates the LOWER red
+  band: an elevated-band or critical reading compacts regardless of
+  `work_idle`". That is true OF `work_idle` and is why it misleads: `idle` is a
+  SEPARATE, absolute gate sitting above the band split, so the documented
+  "critical acts promptly" property is silently conditional on the input box
+  being empty.
+
+  `idle` is False on "a human keystroke / non-empty input box" (line 3910).
+
+  **Measured**, this repository's decision log:
+
+  ```text
+  session busy (composing)   20260
+  total decision lines       25834      (78% of all decisions)
+  would inject /compact        174
+  ```
+
+  **The supervisor can hold its own gate shut.** It injects `/goal` text that
+  can sit unsubmitted, which is exactly a non-empty input box:
+
+  ```text
+  would-resubmit: own line may still be unsubmitted in the input box (/goal) -> pressing [enter]
+  noop: goal clear pending but own line still in the input box
+  ```
+
+  **What is NOT established, stated so the next reader does not assume it.**
+  How often `session busy (composing)` coincided with a RED reading cannot be
+  determined from this log: that line records no percentage, so a tick blocked
+  at 8% and one blocked at CRITICAL are indistinguishable in the record. The
+  20260 figure is the frequency of the GATE, not of a missed compaction. The
+  owner's independent observation of sessions reaching COMPACT NOW supplies the
+  other half, but it is their observation and not something this log proves.
+
+  **That indistinguishability is itself part of the defect.** A gate that can
+  suppress a CRITICAL compaction should say so at the time; whatever the fix to
+  the gate, the `not idle` NOOP should carry the tier and percentage.
 
 ## Success Criteria
 
