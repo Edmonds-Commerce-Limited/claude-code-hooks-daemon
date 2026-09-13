@@ -10,185 +10,167 @@
 ## Overview
 
 A daemon loads its code once and serves it for the life of the process. When a
-DIFFERENT session or process on the same filesystem upgrades or edits that
-installation — a `/hooks-daemon upgrade`, a `git pull`, another agent editing a
-handler — **the running daemon keeps serving the code it loaded at startup and
-never says so.** Every safety handler in the process is then the OLD version,
-and the only symptom is behaviour that silently does not match the tree.
+DIFFERENT session or process on the same filesystem upgrades that installation,
+**the running daemon keeps serving what it loaded at startup and never says
+so.** Every safety handler in the process is then the old version, and the only
+symptom is behaviour that silently does not match what is installed.
 
-The detection itself is already built and correct. What is missing is that
-nothing invokes it while the daemon is alive.
+The verified gap: `DaemonController._source_fingerprint` is assigned once in
+`initialise()` (`controller.py:312`) and thereafter only read
+(`controller.py:1120`, the health response). The only automatic caller of the
+staleness comparison is `scripts/qa/run_smoke_test.sh` during a full QA sweep.
+Nothing re-checks while the daemon is alive.
 
-## What already exists — this is a wiring gap, not a new capability
+## CORRECTION — the first revision of this plan was built on ground I never established
 
-Plan 00371 shipped the whole primitive:
+**This section stays.** The first revision proposed a per-dispatch ctime sweep
+over all 535 `.py` files plus a sha256 fingerprint comparison. That is the wrong
+instrument for the reported problem, and the reason is worth recording because
+the mistake is repeatable.
 
-| Piece                                       | Where                                               |
-| ------------------------------------------- | --------------------------------------------------- |
-| `compute_source_fingerprint(*roots)`        | sha256 over every `.py` the daemon would load       |
-| `compute_current_project_fingerprint(root)` | what a freshly-started daemon WOULD load            |
-| `describe_fingerprint_mismatch(run, cur)`   | the comparison, with a `STALE DAEMON` diagnostic    |
-| `DaemonController._source_fingerprint`      | recorded at startup, served over `_system`/`health` |
-| `bin/hooks-daemon check-source-fresh`       | CLI verb wrapping the comparison                    |
-
-Two facts establish the gap, both read out of the code rather than inferred:
-
-1. **`_source_fingerprint` is assigned once** in `initialise()`
-   (`controller.py:312`) and thereafter only READ (`controller.py:1120`, the
-   health response). The daemon never recomputes it, so it cannot notice its own
-   source moving.
-2. **The only automatic caller is `scripts/qa/run_smoke_test.sh`**, which runs
-   as part of a full QA sweep. Grepping every caller of
-   `describe_fingerprint_mismatch` and `compute_current_project_fingerprint`
-   returns `cli.py` and nothing else — no SessionStart handler, no dispatch
-   path, no timer.
-
-So a stale daemon is discovered only by running full QA or by a human typing the
-CLI verb. Neither happens in the scenario that motivates this plan.
-
-## Why the three adjacent plans do not cover it
-
-Checked against the plan tree (and confirmed by the dedupe scout across 18 live
-and 353 archived plans):
-
-- **00386** — a stale CLONE reconciled at STARTUP, before the daemon runs.
-- **00389** — a `git pull` performed IN THE CURRENT SESSION; advisory only, and
-  its own index row records that it "sees an in-session pull only".
-- **00371** — the startup fingerprint, built for QA acceptance probes.
-
-This plan is the space between them: an already-running daemon noticing an
-out-of-band change made by someone else.
-
-## The cheap gate is a trap, and it was measured rather than assumed
-
-Any live check needs a gate, because hashing every `.py` in the package on each
-hook dispatch is far too expensive. The obvious gate is mtime. **It does not
-work for the redeploy shapes that cause this bug**, and neither does inode
-comparison. Measured directly — a `cp -p` over a file with different content:
+The owner reported a **version** being updated underneath a running daemon. The
+daemon already records the installed version and already reads it at startup:
 
 ```text
-before cp -p:  mtime=1789311874  ctime=1789311874  ino=425451172
-after  cp -p:  mtime=1789311874  ctime=1789311875  ino=425451172
-content:       changed
+.daemon-metadata.json  (inside the venv)
+  daemon_version   vX.Y.Z, or vX.Y.Z+<ref>.<sha> for a guarded branch install
+  lock_hash        sha256:<64 hex>
+  written_at       timestamp
+  # docstring: "read by the daemon on every startup"
 ```
 
-mtime unchanged, inode unchanged, **ctime advanced**. `cp -p` and `rsync -a`
-preserve mtime deliberately; no flag preserves ctime, because the kernel sets it
-on any inode change. An mtime-gated check therefore fails silently at exactly the
-moment it is needed — an installer-style redeploy — which is worse than no check,
-because it reports freshness it did not verify.
+An upgrade writes that file. So "has my version changed underneath me?" is a
+re-resolve plus one small JSON read — not a sweep over the whole package.
 
-**And the correct gate is cheap enough to need no cleverness.** Measured on this
-package's 535 `.py` files:
+**How the first revision went wrong**: it began by grepping `src/` for an
+adjacent mechanism, found Plan 00371's source fingerprints, and designed around
+the first mechanism it met rather than establishing how the daemon is actually
+deployed and versioned. It then sampled ONE deployment mode — this
+self-install repo, where `.claude/hooks-daemon/` has no `.git` — and generalised
+from it, without reading `CLAUDE/LLM-INSTALL.md` or `CLAUDE/SELF_INSTALL.md`,
+which own that fact and are listed in `CLAUDE/CLAUDE.md`'s routing table. There
+are two modes: a client project holds a gitignored CLONE at
+`.claude/hooks-daemon/`; this repo is self-install and the Layer 2 installer
+aborts if it detects that mode.
 
-```text
-ctime sweep over all 535 files:  0.64 ms
-full sha256 hash of all 535:     8.25 ms
-```
+Investment then compounded the error — a cost measurement and a full design were
+committed on top of the unestablished foundation before anyone checked it.
 
-So the honest gate costs about a thirteenth of the comparison it guards, and
-0.64 ms is negligible against a hook dispatch. That removes the usual reason for
-reaching for mtime or for a throttle: the design does not have to trade
-correctness for cost, because the correct version is already cheap. These
-numbers are a starting point for Task 2.3, not a substitute for measuring the
-real integrated path.
+## The mechanism, established rather than assumed
 
-The same trap is already documented for the ccy supervisor's worker reload
-(`.claude/ccy/` contract: "A redeploy that preserves mtime can change the
-CONTENT without advancing mtime"), so this is the second appearance of one root
-cause and the fix should be shared rather than re-derived.
+Read out of `CLAUDE/SELF_INSTALL.md` ("Venv layout"), `metadata.py` and
+`scripts/upgrade.sh`:
+
+- The venv is **fingerprint-keyed**: `untracked/venv-{slug}-py{MM}-{fingerprint}/`,
+  composed by `paths.py` (`python_venv_fingerprint()`, `get_daemon_venv_path()`).
+- `.daemon-metadata.json` lives INSIDE that venv and is written atomically
+  (`.tmp` then `Path.replace()`), so a reader never sees a half-written file.
+- `scripts/upgrade.sh` emits metadata at the tail of an upgrade, resolving the
+  venv by globbing `untracked/venv-*py3*/bin/python`, first match wins.
+
+**The subtlety that decides the design**: because the venv name embeds a
+fingerprint, an upgrade that changes the fingerprint inputs creates a NEW venv
+directory rather than rewriting the old one. A check that re-reads the path it
+remembered at startup would therefore see an untouched file and report fresh.
+The check must **re-resolve** the venv path and compare that too.
+
+## Two tiers, and only one of them is this plan's business
+
+| Tier | Question                                                           | Signal                                                                                    | Status                                                            |
+| ---- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| 1    | Has the installed VERSION changed under me?                        | re-resolve venv + `.daemon-metadata.json` (`daemon_version`, `written_at`, resolved path) | **this plan**                                                     |
+| 2    | Has SOURCE changed without a version change (an uncommitted edit)? | the Plan 00371 fingerprint                                                                | already exists as `check-source-fresh`, `daemon_restart_verifier` |
+
+Tier 2 matters mainly when dogfooding this repo, and it is already served. This
+plan must not quietly re-solve it.
+
+## The ctime finding — kept, but scoped honestly
+
+Measured, and still true: a `cp -p` over changed content left **mtime AND inode
+unchanged** while ctime advanced (`mtime=…874` before and after, `ctime=…874 → …875`). So an mtime- or inode-gated staleness check silently misses an
+installer-style redeploy.
+
+**This does not apply to tier 1** — reading a small JSON file needs no gate at
+all. It is recorded here because it is a real trap that would bite anyone who
+later builds tier 2 as a live check, and because the ccy supervisor's worker
+reload already documents the same trap. It is evidence for a future decision,
+not a justification for this one.
 
 ## The action on detection is ALREADY RULED — do not re-open it
 
-The owner's standing ruling on this class of problem is **advise loudly, name the
-command; never auto-restart, never auto-upgrade**. That is the behaviour Plans
-00386 and 00389 shipped, and it applies here unchanged. This plan decides WHERE
-the check runs, not what it does when it fires.
+The owner's standing ruling: **advise loudly, name the command; never
+auto-restart, never auto-upgrade.** That is what Plans 00386 and 00389 shipped.
+This plan decides where the check runs, not what it does when it fires.
 
 ## The open question — where the check runs
 
-1. **SessionStart handler.** Cheapest, reuses the CLI comparison as-is, one hash
-   sweep per session. Catches "another session upgraded it since I last started"
-   — but NOT the motivating case, because a session already in flight never
-   re-checks. Useful, insufficient alone.
-2. **Gated check on hook dispatch.** Stat a small set of sentinel paths, compare
-   **ctime** (never mtime alone), and do the full hash only when something moved.
-   Catches the mid-session case, which is the actual request. Cost must be
-   measured, not assumed — it lands on the hot path.
-3. **Periodic self-check in the daemon.** A timer recomputing the fingerprint
-   every N seconds. Thorough and off the hot path, but adds a thread and can
-   report staleness at a moment when nothing is listening.
-4. **Writer announces instead of readers polling.** `scripts/upgrade.sh` and the
-   install path signal any running daemon directly. Near-zero cost and exact,
-   but only covers changes made THROUGH those scripts — a manual `git pull` or
-   another agent's edit is missed.
+Much narrower now that the signal is one small file:
 
-These are not exclusive: 4 is the cheapest correct signal for the common case and
-2 is the backstop for everything else. 1 is worth having regardless.
+1. **On hook dispatch.** A re-resolve plus a small JSON read is cheap enough to
+   need no gate. Catches the mid-session case, which is the reported problem.
+2. **SessionStart only.** Cheaper still, but a session already in flight never
+   re-checks — which is exactly the reported case, so this is insufficient alone.
+3. **Writer announces.** `scripts/upgrade.sh` signals any running daemon. Exact
+   and nearly free, but only covers changes made through that script.
 
 ## Goals
 
-- A daemon whose on-disk source has changed since it started says so, without
-  being asked, while it is still running.
-- The staleness gate is robust against mtime-preserving redeploys.
-- The existing fingerprint comparison is reused, not reimplemented.
-- On detection: advise loudly and name the restart command. Never self-restart.
+- A running daemon whose installed version changed says so, unasked, while it is
+  still running.
+- The check survives an upgrade that creates a NEW fingerprint-keyed venv.
+- It reuses the existing metadata reader rather than inventing a second one.
+- On detection: advise loudly, name the restart command, never self-restart.
 
 ## Non-Goals
 
-- Auto-restarting or hot-reloading the daemon. Explicitly ruled out by the
-  owner's standing position.
-- Making config changes detectable. The fingerprint hashes `.py` files only; the
-  project yaml is read solely to resolve `project_handlers.enabled`/`.path`, so
-  toggling project handlers moves the fingerprint but ordinary config edits do
-  not. Plan 00389 owns config drift — this plan must not silently half-cover it.
-- Replacing Plan 00386's startup reconciliation or 00389's in-session pull
-  advisory.
+- Auto-restarting or hot-reloading. Ruled out by the owner's standing position.
+- Re-solving tier 2. `check-source-fresh` and `daemon_restart_verifier` own it.
+- Config drift. `.daemon-metadata.json` does not track `hooks-daemon.yaml`
+  contents; Plan 00389 owns config drift and this plan must not half-cover it.
 
 ## Tasks
 
 ### Phase 1: Owner decision
 
-- [ ] ⬜ **Task 1.1**: Owner picks the placement — option 1, 2, 3, 4, or a
-  combination. The choice decides the test matrix and whether the hot path is
-  touched at all.
+- [ ] ⬜ **Task 1.1**: Owner picks the placement — option 1, 2, 3, or a
+  combination.
 
 ### Phase 2: Build, once decided
 
-- [ ] ⬜ **Task 2.1**: A failing test first: a daemon running against a tree
-  whose source is then replaced **with mtime preserved** must be reported stale.
-  That is the case an mtime gate passes wrongly, so it is the test that has to
-  exist before any gate is written.
-- [ ] ⬜ **Task 2.2**: Implement the chosen placement, reusing
-  `describe_fingerprint_mismatch` rather than a second comparison.
-- [ ] ⬜ **Task 2.3**: If the hot path is touched, MEASURE the per-dispatch cost
-  and record the number. An unmeasured hot-path check is a regression waiting to
-  be discovered by someone else.
-- [ ] ⬜ **Task 2.4**: Pin that the advisory names the restart command and never
-  restarts anything.
-- [ ] ⬜ **Task 2.5**: Factor the ctime-based staleness gate so the ccy
-  supervisor's worker reload can use the same one — same root cause, currently
-  solved twice.
+- [ ] ⬜ **Task 2.1**: A failing test first: a daemon started against one venv,
+  then an upgrade that writes a NEW fingerprint-keyed venv, must be reported
+  stale. That is the case a remembered-path check passes wrongly, so it is the
+  test that must exist before the check is written.
+- [ ] ⬜ **Task 2.2**: A second failing test for the in-place case — same venv,
+  `.daemon-metadata.json` rewritten with a new `daemon_version`.
+- [ ] ⬜ **Task 2.3**: Implement using the existing `read_daemon_metadata` and
+  venv resolution. No second metadata reader.
+- [ ] ⬜ **Task 2.4**: Pin that the advisory names the restart command and that
+  nothing restarts itself.
+- [ ] ⬜ **Task 2.5**: Pin the fail-open contract: unreadable, missing or
+  malformed metadata must never block a hook. `read_daemon_metadata` already
+  collapses those to `None`.
 
 ## Success Criteria
 
-- [ ] A running daemon whose source is replaced out-of-band reports itself stale
+- [ ] A running daemon whose installed version changed reports itself stale
   without being asked.
-- [ ] It still reports stale when the replacement PRESERVED mtime, proven by a
-  test that fails against an mtime-only gate.
+- [ ] It reports stale when the upgrade created a NEW venv, proven by a test
+  that fails against a remembered-path-only check.
 - [ ] The advisory names the restart command and nothing restarts itself.
-- [ ] If the hot path is touched, the added per-dispatch cost is measured and
-  recorded in this plan.
+- [ ] A missing or malformed metadata file allows the hook through.
 - [ ] Every release-bound consequence is in the pending-release holding area, or
   this plan records why it has none.
 - [ ] Full QA passes and CI is green.
 
 ## Delivery & Milestones
 
-- Raised by the owner: the daemon detects when it is out of date, but not when
-  it has been updated underneath it by another session on the same filesystem.
-- Investigation found the capability already shipped in Plan 00371 and simply
-  never wired to an automatic caller, which makes this a wiring plan rather than
-  a new subsystem.
-- The ctime-versus-mtime finding was measured in a scratch probe rather than
-  taken from memory, because the whole plan turns on the gate being trustworthy.
+- Raised by the owner: the daemon detects being out of date, but not being
+  updated underneath it by another session on the same filesystem.
+- First revision (`a64dca90`, `57d6b435`) designed a package-wide fingerprint
+  sweep without establishing the deployment model, and was corrected after the
+  owner challenged it. The correction is kept in this document rather than
+  quietly rewritten, because the failure mode — design before ground truth, then
+  generalise from one sample — is the reusable lesson.
+- That failure is itself the subject of a follow-up: can the daemon detect a
+  plan written without reading the docs that own its domain?

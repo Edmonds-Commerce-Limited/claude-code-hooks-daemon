@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00395: running daemon detects source changed underneath it](00395-running-daemon-detects-source-changed-underneath-it/PLAN.md) - Not Started (a daemon upgraded by ANOTHER session keeps serving the code it loaded at startup and never says so; the fingerprint comparison already exists from Plan 00371 but only a full QA run invokes it. Measured: `cp -p` preserves mtime AND inode, so the obvious cheap gate misses the exact case it exists for — ctime does not)
+- [00395: running daemon detects source changed underneath it](00395-running-daemon-detects-source-changed-underneath-it/PLAN.md) - Not Started (a daemon upgraded by ANOTHER session keeps serving what it loaded at startup and never says so; the signal is one read of `.daemon-metadata.json`, re-resolved because a fingerprint-keyed upgrade may write a NEW venv the remembered path never sees)
 
 - [00394: failsafe cron coverage starts at first plan write](00394-failsafe-cron-coverage-starts-at-first-plan-write/PLAN.md) - Not Started (the cron that resumes a stalled session is established by a PostToolUse handler gated on a plan write, so a session has no recovery net until it touches a plan file; Plan 00384 left it undeclared believing `recovery_cron_advisor` already asserted at SessionStart, and it does not. Blocked on an owner ruling between three options)
 
