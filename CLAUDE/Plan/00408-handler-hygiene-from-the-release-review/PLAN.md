@@ -68,6 +68,27 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   pattern of "fixed in one, missed in the neighbour" recurred four times in the
   review that produced this plan.
 
+### Phase 3b: A stats check no fast gate can see
+
+- [ ] ⬜ **Task 3.2**: Port `plan-stats-arithmetic` from
+  `scripts/qa/check_repo_hygiene.py` into the daemon's `plan-qa` checks, so the
+  session sweep, the edit-time lint and the commit gate all see it. Graduated
+  from [Plan 00407](../00407-niggles-ledger-twelve/PLAN.md) N11.
+
+  The case for it is a measured recurrence, not a preference. Plan 00405 N4
+  fixed the plan index's closing self-check; one release later the same line in
+  the same file was stale again, and `plan-qa --sweep`, the commit gate and
+  `tests/unit/` all reported clean against it. Only a full `tests/` run fails,
+  so the defect reaches CI every time — the fast gates an agent actually runs
+  between edits are blind to exactly the file they most often edit.
+
+  Consider also whether the bullet's closing line should be GENERATED rather
+  than hand-maintained. A hand-derived figure carrying a ✅ that asserts it was
+  verified is the specific shape that went stale twice; a check that catches it
+  sooner is worth more than a third correction, and generating it would end the
+  class outright. Either remedy closes this — prefer whichever leaves fewer
+  hand-maintained numbers behind.
+
 ### Phase 4: The sub-bar items, carried so they are not lost
 
 - [ ] ⬜ **Task 3.1**: Four items the reviewer put below the filing bar, each

@@ -49,18 +49,14 @@ class TestTheAdvisoryNeverRaises:
         """The TOCTOU: the QA run finished and unlinked the lock."""
         _lock_file(tmp_path)
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.cli.os.open", side_effect=FileNotFoundError
-        ):
+        with patch("claude_code_hooks_daemon.daemon.cli.os.open", side_effect=FileNotFoundError):
             assert _qa_run_lock_holder(tmp_path) is None
 
     def test_a_lock_owned_by_another_user_is_survived(self, tmp_path: Path) -> None:
         """It is opened O_RDWR, so another user's lock raises EACCES."""
         _lock_file(tmp_path)
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.cli.os.open", side_effect=PermissionError
-        ):
+        with patch("claude_code_hooks_daemon.daemon.cli.os.open", side_effect=PermissionError):
             assert _qa_run_lock_holder(tmp_path) is None
 
     def test_a_filesystem_that_cannot_flock_is_survived(self, tmp_path: Path) -> None:
@@ -77,9 +73,7 @@ class TestTheAdvisoryNeverRaises:
         _lock_file(tmp_path)
 
         with (
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.fcntl.flock", side_effect=BlockingIOError
-            ),
+            patch("claude_code_hooks_daemon.daemon.cli.fcntl.flock", side_effect=BlockingIOError),
             patch.object(Path, "read_text", side_effect=OSError),
         ):
             assert _qa_run_lock_holder(tmp_path) is None
@@ -90,7 +84,5 @@ class TestAHeldLockIsStillReported:
         """The control: degrading on error must not stop it answering."""
         _lock_file(tmp_path)
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.cli.fcntl.flock", side_effect=BlockingIOError
-        ):
+        with patch("claude_code_hooks_daemon.daemon.cli.fcntl.flock", side_effect=BlockingIOError):
             assert _qa_run_lock_holder(tmp_path) == "4242"

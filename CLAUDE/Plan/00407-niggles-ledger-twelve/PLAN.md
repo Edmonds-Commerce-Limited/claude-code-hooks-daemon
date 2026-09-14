@@ -201,10 +201,46 @@ rather than an edit.
   finishing in between unlinks the file. Unknown now degrades to "no warning",
   the only answer an advisory can safely give when it cannot tell.
 
+- [x] ✅ **N11**: the plan index's closing self-check went stale again — the
+  SAME line, in the same file, that [Plan 00405](../Completed/00405-niggles-ledger-eleven/PLAN.md)
+  N4 already fixed one release ago.
+
+  **Found by CI**, not by a local gate, which is the entry's point. The
+  reconciliation bullet was recounted to 398 folders over **395 distinct**
+  numbers against a counter of **408**, and the line under it still read
+  `393 + 13 = 406. ✅` — the previous release's figures, still carrying their
+  tick.
+
+  Recounted from disk rather than patched to match, per the checker's own
+  remediation: 24 + 361 + 13 = 398 folders, 395 distinct numbers, the
+  duplicate-number set exactly `00034/00039/00041`, and the 13 folderless
+  numbers exactly the set `comm` produces against the counter. Only the
+  arithmetic line was stale, so `395 + 13 = 408. ✅` is the whole fix.
+
+  **Why it recurred, which is the part worth recording.** 00405 corrected the
+  numbers; nothing changed about how they are maintained. The bullet is
+  hand-derived data with a tick that asserts it was verified, and the tick is
+  what makes a stale line worse than no line.
+
+  **The gate that would have caught it does not run where the edit happens.**
+  `plan-stats-arithmetic` lives only in `scripts/qa/check_repo_hygiene.py` and
+  its integration test — it is NOT one of the daemon's `plan-qa` checks. So
+  `plan-qa --sweep` reported 0 findings against a README that was already
+  wrong, and so did the commit gate, and so did `tests/unit/`. The only thing
+  that fails is a full `tests/` run. That is why a defect fixed one release ago
+  reached CI again unchallenged: every fast gate an agent actually runs is
+  blind to it.
+
+  Porting the rule to `plan-qa` — where the session sweep, the edit lint and
+  the commit gate would all see it — is the structural fix, and is graduated to
+  [Plan 00408](../00408-handler-hygiene-from-the-release-review/PLAN.md) rather
+  than absorbed into a release being cut.
+
 ## Success Criteria
 
 - [x] ✅ Every entry above is in a terminal state: N1–N5, N7, N9 and N10 fixed;
-  N6 and N8 graduated to Plan 00408.
+  N11 fixed with its structural half graduated; N6 and N8 graduated to
+  Plan 00408.
 
 - [ ] 🔄 Full QA passes and CI is green for every entry closed.
 
