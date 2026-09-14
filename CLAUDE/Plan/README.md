@@ -4,9 +4,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00400: niggles ledger nine](00400-niggles-ledger-nine/PLAN.md) - In Progress (the open niggles ledger; ledger eight is complete so this one opens. N1: the QA suite writes into the LIVE supervisor runtime dir — test lines interleave with real decisions in `untracked/supervise/decision.log`, and the daemon mints a `socket-stdin-test` sidecar live. Diagnostic contamination only: Plan 00166's own-session filter keeps it out of the decision path, verified at both call sites)
+
 - [00399: supervisor does not see tab completed slash commands](00399-supervisor-does-not-see-tab-completed-slash-commands/PLAN.md) - Not Started (Tab autocomplete expands `/comp` inside Claude Code and emits no keystrokes, so the raw-input tap never sees `/compact` and the supervisor fails to DEFER — risking a duplicate inject, never a missed compaction. Blocked on a ruling between three options)
 
-- [00398: critical compaction blocked by the idle gate](00398-critical-compaction-blocked-by-the-idle-gate/PLAN.md) - Not Started (`_evaluate_monitor` checks `not idle` BEFORE the urgent/critical split, so a non-empty input box suppresses compaction at EVERY band — the supervisor can hold that gate shut with its own unsubmitted `/goal` text. Blocked on a ruling between four options)
+- [00398: critical compaction blocked by the idle gate](00398-critical-compaction-blocked-by-the-idle-gate/PLAN.md) - In Progress (`_evaluate_monitor` checks `not idle` BEFORE the urgent/critical split, so a non-empty input box suppresses compaction at EVERY band, unboundedly — measured at 20,755 blocked ticks against 281 for the keystroke floor. Owner ruling: bound the gate on text STABILITY, flushing a box unchanged for 120s)
 
 - [00396: detect a plan written without reading its domain docs](00396-detect-a-plan-written-without-reading-its-domain-docs/PLAN.md) - Not Started (a plan was filed about deployment by a session that had read none of the deployment docs; the signature is mechanical — a PLAN.md filled about domain X with zero reads of X's owning docs — and `write_clobber_guard` already tracks per-session reads. Advisory, inert until a project declares a topic map)
 
