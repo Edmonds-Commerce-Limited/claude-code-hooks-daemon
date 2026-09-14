@@ -93,6 +93,8 @@ from claude_code_hooks_daemon.daemon.validation import (
 from claude_code_hooks_daemon.daemon.venv_lock import VenvLockTimeout, venv_lock
 from claude_code_hooks_daemon.docs_qa.comment_finder import DEFAULT_MIN_BLOCK_LINES
 from claude_code_hooks_daemon.install.install_stamp import read_install_stamp
+from claude_code_hooks_daemon.install.release_notes import load_release_notes_between
+from claude_code_hooks_daemon.issue_report.build import build_report
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.hook_registration import (
@@ -7304,6 +7306,136 @@ def cmd_bug_report(args: argparse.Namespace) -> int:
     return 0
 
 
+_ISSUE_REPORT_DIR_NAME = "issue-reports"
+
+
+def _issue_report_daemon_root() -> Path:
+    """Where the installed daemon lives, in either layout.
+
+    `src/claude_code_hooks_daemon/daemon/cli.py` sits three directories below
+    the daemon root, which is this repository in self-install and
+    `.claude/hooks-daemon/` in a client. Derived from the module rather than
+    from the project root, because those two are the same directory in only one
+    of the two layouts.
+    """
+    return Path(__file__).resolve().parent.parent.parent.parent
+
+
+def _issue_report_load_fields(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """Read the declared fields, or say why they could not be read.
+
+    Returns ``(fields, error)`` rather than raising: a stack trace out of a
+    report generator tells the reporter nothing they can act on, and this is
+    the command someone runs when things are already going wrong.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return None, f"could not read {path}: {exc.strerror}"
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return None, f"{path} is not valid JSON: {exc}"
+    if not isinstance(parsed, dict):
+        # `json.loads` returns a list or a scalar just as happily, and `.get`
+        # on either raises far away from here.
+        return None, f"{path} must contain a JSON object of fields, not {type(parsed).__name__}"
+    return parsed, None
+
+
+def cmd_issue_report(args: argparse.Namespace) -> int:
+    """Generate a filable upstream issue body from declared fields.
+
+    Differs from ``bug-report`` in kind, not degree: that command writes a
+    LOCAL diagnostic and scrubs what it gathered, while this one gathers only
+    what :class:`ReportFields` names and refuses outright when a check fails.
+    The tracker is PUBLIC and an issue cannot be retracted, so a refused report
+    leaves no file at all.
+
+    Args:
+        args: Parsed arguments — ``fields`` (a JSON file), ``output``,
+            ``latest`` (the newest known release) and ``project_root``.
+
+    Returns:
+        0 when a document was written, 1 on any refusal or unreadable input.
+    """
+    override = getattr(args, "project_root", None)
+    project_path = get_project_path(Path(override) if override else None)
+    fields_path = Path(args.fields)
+
+    data, error = _issue_report_load_fields(fields_path)
+    if data is None:
+        print(f"Cannot generate an issue report: {error}")
+        return 1
+
+    from claude_code_hooks_daemon.version import __version__ as installed
+
+    daemon_root = _issue_report_daemon_root()
+    latest = getattr(args, "latest", None)
+
+    notes: dict[str, str] = {}
+    if latest:
+        try:
+            notes = {
+                note.version: note.content for note in load_release_notes_between(installed, latest)
+            }
+        except ValueError as exc:
+            # An unparseable or inverted range is the reporter's input, not a
+            # fault: reported, and the currency gate then refuses on its own
+            # terms rather than this raising out of the command.
+            print(f"Could not read release notes between {installed} and {latest}: {exc}")
+
+    report = build_report(
+        data,
+        project_root=project_path,
+        daemon_root=daemon_root,
+        daemon_version=installed,
+        install_mode=(
+            "self-install"
+            if _bug_report_self_install_mode(project_path / ".claude" / "hooks-daemon.yaml")
+            else "normal"
+        ),
+        # Deliberately no hostname: see `ReportFields`, where its absence is
+        # the guarantee rather than something scrubbed away later.
+        platform_text=(
+            f"{platform.system()} {platform.machine()}, Python {platform.python_version()}"
+        ),
+        generated_at=datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d"),
+        release_notes=notes,
+        latest_version=latest,
+        home=Path.home(),
+    )
+
+    if report.problems:
+        print(f"This report cannot be filed yet — {len(report.problems)} thing(s) to fix:\n")
+        for problem in report.problems:
+            print(f"  - {problem.reason}\n")
+        return 1
+
+    output_target: str | None = getattr(args, "output", None)
+    if output_target == "-":
+        print(report.document)
+        return 0
+
+    if output_target is None:
+        reports_dir = project_path / "untracked" / _ISSUE_REPORT_DIR_NAME
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.datetime.now(tz=datetime.UTC).strftime("%Y%m%d-%H%M%S")
+        output_path = reports_dir / f"issue-report-{stamp}.md"
+    else:
+        output_path = Path(output_target)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    output_path.write_text(report.document)
+    print(f"Issue report written to: {output_path}")
+    print(
+        "\nRead it before filing. It carries no hostname, no config dump and no logs — "
+        "check the prose you wrote says nothing it should not, then file it with "
+        f"`gh issue create --body-file {output_path}`."
+    )
+    return 0
+
+
 def _bug_report_git_remote(project_path: Path) -> str | None:
     """The origin URL, which names the client and often a private host."""
     result = run_git(project_path, "remote", "get-url", "origin", timeout=Timeout.GIT_CONTEXT)
@@ -7963,6 +8095,44 @@ def main() -> int:
     )
     _add_report_offload_arguments(parser_check_truth, default_subdir=_REPORT_OFFLOAD_TRUTH_SUBDIR)
     parser_check_truth.set_defaults(func=cmd_check_truth_changes)
+
+    # issue-report command (Plan 00403) — a filable upstream issue body
+    parser_issue_report = subparsers.add_parser(
+        "issue-report",
+        help=(
+            "Build an upstream issue body from declared fields, refusing one that "
+            "carries client material or fails a verification gate (exit 1 on refusal)"
+        ),
+    )
+    parser_issue_report.add_argument(
+        "--fields",
+        dest="fields",
+        metavar="PATH",
+        required=True,
+        help="JSON file of declared fields (summary, expected, observed, reproduction, ...)",
+    )
+    parser_issue_report.add_argument(
+        "--output",
+        dest="output",
+        metavar="PATH",
+        default=None,
+        help="Where to write the report ('-' for stdout; default untracked/issue-reports/)",
+    )
+    parser_issue_report.add_argument(
+        "--latest",
+        dest="latest",
+        metavar="VERSION",
+        default=None,
+        help="Newest released version, if known — enables the version-currency check",
+    )
+    parser_issue_report.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_issue_report.set_defaults(func=cmd_issue_report)
 
     # reference-repos command (Plan 00401) — freshness of governed clones
     parser_reference_repos = subparsers.add_parser(

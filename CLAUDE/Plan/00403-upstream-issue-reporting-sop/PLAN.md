@@ -127,15 +127,15 @@ finding in it — the owner's rule, made checkable.
 
 ### Phase 2: The redacting generator
 
-- [ ] 🔄 **Task 2.1**: Assemble a report from controlled fields; scrub project
+- [x] ✅ **Task 2.1**: Assemble a report from controlled fields; scrub project
   root, `$HOME`, git remote, branch and hostname to placeholders while
-  preserving daemon-internal paths. **Assembly landed**: `ReportFields` is the
-  entire input surface, so the hostname is never collected rather than scrubbed
-  out, and a test asserts each banned field name is absent from the class —
-  output can be scrubbed into looking clean, a field never collected cannot
-  come back. Scrubbing runs before the digest, so the provenance header vouches
-  for the bytes actually filed. **Outstanding**: the CLI verb that collects the
-  fields.
+  preserving daemon-internal paths. `ReportFields` is the entire input surface,
+  so the hostname is never collected rather than scrubbed out, and a test
+  asserts each banned field name is absent from the class — output can be
+  scrubbed into looking clean, a field never collected cannot come back.
+  Scrubbing runs before the digest, so the provenance header vouches for the
+  bytes actually filed. Shipped as `hooks-daemon issue-report --fields`, which
+  refuses with EVERY reason at once and leaves no file behind when it does.
 - [x] ✅ **Task 2.2**: Require a minimal synthetic reproduction; refuse one
   referencing any path outside `untracked/scratch/`, with the "cannot reproduce
   synthetically" escape that carries no client data. Daemon-internal paths are
@@ -153,15 +153,15 @@ finding in it — the owner's rule, made checkable.
 
 ### Phase 3: The verification gates
 
-- [ ] 🔄 **Task 3.1**: Version currency — resolve installed versus latest; when
+- [x] ✅ **Task 3.1**: Version currency — resolve installed versus latest; when
   older, scan the release notes between them for the named subsystem and refuse
-  if it changed. **Decision landed** as a pure function over notes the caller
-  supplies; `install.release_notes.load_release_notes_between` already provides
-  them. Two asymmetries are deliberate: being AHEAD of the newest tag is fine
-  (a contributor on the default branch is not behind), and being unable to
-  check is a refusal rather than a pass — an unchecked install and a
-  checked-and-clean one must never render the same. **Outstanding**: wiring it
-  to the real installed/latest resolution.
+  if it changed. Two asymmetries are deliberate: being AHEAD of the newest tag
+  is fine (a contributor on the default branch is not behind), and being unable
+  to check is a refusal rather than a pass — an unchecked install and a
+  checked-and-clean one must never render the same. Wired into the CLI verb
+  with `--latest`; the lookup is an INPUT rather than a network call, because a
+  report generator that needed a working remote would fail exactly when the
+  daemon is misbehaving, which is when it gets run.
 - [ ] ⬜ **Task 3.2**: Configuration ruled out — surface the named handler's
   options and require a stated reason per option. The "stated reason" half is
   already enforced: `assemble_report` refuses a report with no
