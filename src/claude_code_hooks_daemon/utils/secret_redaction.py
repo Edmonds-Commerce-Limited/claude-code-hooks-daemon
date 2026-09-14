@@ -196,6 +196,20 @@ def _resolve_active_path() -> Path | None:
     to ``None`` (feature inert), matching the sanctioned fail-open contract
     already used by ``context_sidecar``/``compaction_signal``/
     ``payload_capture`` for daemon-adjacent, best-effort I/O.
+
+    ``ValueError`` is part of that promise and not an afterthought: it is what
+    an UNUSABLE CONFIG raises. ``Config.load`` raises it for an unsupported
+    suffix, and pydantic's ``ValidationError`` subclasses it, so a config
+    holding one key this schema does not know -- a legacy spelling, or a newer
+    daemon's -- arrives here as a ``ValueError``. Catching only ``OSError`` and
+    ``RuntimeError`` let that escape a boundary every leak-vector site calls on
+    a live path, so a config the daemon merely could not READ took down the
+    event being routed (Plan 00405 N9).
+
+    It is logged at WARNING rather than debug, unlike its siblings: going inert
+    means no terms are matched, so the fail-open contract trades a crash for a
+    quietly weakened guard, and that trade should be visible to whoever can fix
+    the config.
     """
     global _ACTIVE_PATH_RESOLVED, _ACTIVE_PATH
     if _ACTIVE_PATH_RESOLVED:
@@ -219,6 +233,18 @@ def _resolve_active_path() -> Path | None:
         _ACTIVE_PATH = resolve_secret_word_list_path(configured, project_root)
     except (OSError, RuntimeError) as exc:
         logger.debug("Could not resolve secret word list path: %s", exc)
+        _ACTIVE_PATH = None
+    except ValueError as exc:
+        # Louder than its siblings on purpose. Those mean "nothing configured",
+        # which is the ordinary case; this means the config IS there and cannot
+        # be read, which an operator can fix -- and until they do, redaction and
+        # the sensitive-content guard have no terms, so the degradation is
+        # security-relevant and must not be a debug line nobody reads.
+        logger.warning(
+            "Secret redaction is INERT: project config unreadable (%s). "
+            "No terms will be matched or redacted until it validates.",
+            exc,
+        )
         _ACTIVE_PATH = None
     return _ACTIVE_PATH
 

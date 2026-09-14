@@ -6,6 +6,7 @@ value this module returns except the term list itself (which callers must
 never surface directly — only an index into it).
 """
 
+import logging
 from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import patch
@@ -347,6 +348,57 @@ class TestActiveSecretTerms:
             ),
         ):
             assert sr.get_active_secret_terms() == ("beta",)
+
+    def test_a_config_that_fails_schema_validation_goes_inert_rather_than_raising(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A config the model REJECTS must make the feature inert, not raise.
+
+        `get_active_secret_terms` is documented as never raising, and every
+        caller is a leak-vector site on a live path -- the router, the front
+        controller's error log, payload capture, the transcript archiver. The
+        resolver caught `OSError` and `RuntimeError`, but pydantic's
+        `ValidationError` is a `ValueError`, so a config carrying a key the
+        installed schema does not know propagated straight through the
+        "never raises" boundary and out of whatever was being routed.
+
+        Without the fix this test does not fail an assertion -- it ERRORS with
+        that ValidationError, which is the defect stated exactly.
+        """
+        # `track_plans_in_project` belongs under `options:`; at handler level it
+        # is an extra field and HandlerConfig forbids extras.
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text(
+            'version: "1.0"\n'
+            "handlers:\n"
+            "  pre_tool_use:\n"
+            "    markdown_organization:\n"
+            "      enabled: true\n"
+            "      track_plans_in_project: CLAUDE/Plan\n"
+        )
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext._initialized", True
+            ),
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+                return_value=tmp_path,
+            ),
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.config_path",
+                return_value=tmp_path / ".claude" / "hooks-daemon.yaml",
+            ),
+        ):
+            with caplog.at_level(logging.WARNING, logger=sr.logger.name):
+                assert sr.get_active_secret_terms() == ()
+
+        # Going inert means no terms are matched, which weakens the guard this
+        # module exists to power -- so it is reported at WARNING, not debug.
+        assert any(
+            record.levelno == logging.WARNING and "INERT" in record.getMessage()
+            for record in caplog.records
+        )
 
 
 @pytest.fixture(autouse=True)

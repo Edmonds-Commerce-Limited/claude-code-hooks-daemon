@@ -294,7 +294,8 @@ rather than an edit.
   gap is tightened, or its false positive becomes the hole N7 just closed.
   Dedupe scout checked 23 live plans: no existing plan covered it.
 
-- [ ] 🔄 **N9**: a test that passes in its file and fails on its own.
+- [x] ✅ **N9**: a test that passes in its file and fails on its own — and the
+  daemon defect hiding underneath it.
 
   **Found**: running `pytest tests/integration/ -k plan` while closing Plan
   00403, to check the archival had not broken anything.
@@ -307,37 +308,34 @@ rather than an edit.
     Extra inputs are not permitted [input_value='CLAUDE/Plan']
   ```
 
-  The whole file passes 18/18 and the full suite passes 30/30, so the test
-  depends on something an earlier test in the same file leaves behind. It is
-  not a symptom of this session's changes — confirmed by running the file — and
-  the config keys it writes are top-level where the model forbids extras.
+  **The defect**: `get_active_secret_terms()` is documented "never raises" and
+  is called from every leak-vector site on a live path — the router, the front
+  controller's error log, payload capture, the transcript archiver. Its
+  resolver caught `OSError` and `RuntimeError`, but pydantic's
+  `ValidationError` subclasses `ValueError`, so a config holding one key the
+  installed schema does not know — a legacy spelling, or a newer daemon's —
+  escaped that boundary and took down the event being ROUTED. Fixed by catching
+  `ValueError`, which is the fail-open contract the docstring already promised.
 
-  **Why it is worth an entry.** The failure mode is the inverse of N5, which
-  passed alone and broke the suite; this passes in the suite and breaks alone.
-  Both make a green run mean less than it appears to, and this one specifically
-  makes `pytest -k` — the first thing anyone reaches for when narrowing down a
-  failure — untrustworthy in that file.
+  **Why it hid**: the resolver caches for the process lifetime and no autouse
+  fixture resets it, so whichever test routes FIRST pays the cost — in the file
+  a predecessor with a valid config, alone this test, which has just written an
+  invalid one. That cache, not `ProjectContext`, was the carrier, which is why
+  the fixture-reset reading looked wrong. The inverse of N5: both make a green
+  run mean less than it appears, and this one made `pytest -k` untrustworthy.
 
-  What is established, and the five candidates already RULED OUT, are in
-  [N9-ORDER-DEPENDENT-TEST.md](N9-ORDER-DEPENDENT-TEST.md) — it is
-  deterministic rather than flaky, it genuinely passes when preceded, and
-  neither discovery, registration, `register_all(config=…)` nor
-  `ProjectContext.initialize()` reproduces the flip in a fresh process.
-
-  Recorded rather than fixed: what remains is the conftest fixture interaction,
-  which is a different job from closing Plan 00403 and should not be guessed
-  at — the guess that looked certain here was already wrong once, in N3.
+  The stack that settled it, and the six ruled-out hypotheses, are in
+  [N9-ORDER-DEPENDENT-TEST.md](N9-ORDER-DEPENDENT-TEST.md).
 
 ## Success Criteria
 
-- [ ] 🔄 Every entry above is in a terminal state. N1, N2, N4, N5, N6 and N7
+- [x] ✅ Every entry above is in a terminal state. N1, N2, N4, N5, N6, N7 and N9
   fixed; N3 ruled NOT A DEFECT with the mechanism that explains it; N8
-  graduated to Plan 00406. **N9 is open** — a test that passes in its file and
-  fails in isolation, which needs the fixture ordering read.
-- [x] ✅ Full QA passes and CI is green for every entry closed so far. Full QA
-  30/30 at `786f4dc5`; CI green on `e40f91a4` and `38c97c45`. The archival
-  commit that followed changes plan documents only, and `plan_qa`, `docs_qa`,
-  `repo_hygiene` and the plan-index navigability tests all pass over it.
+  graduated to Plan 00406.
+- [ ] 🔄 Full QA passes and CI is green for every entry closed so far. Full QA
+  reached 30/30 at `9c332e83`, but N9 landed a SOURCE change after that run, so
+  this is deliberately back open: the run that closes it must postdate the
+  `secret_redaction` fix. Re-verification is the last thing owed here.
 
 ## Delivery & Milestones
 
