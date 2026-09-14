@@ -140,6 +140,29 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   precisely how the mistake propagated. Verify the behaviour before changing
   it; the fix is the same one-line removal if it reproduces.
 
+- [ ] ⬜ **Task 3.5**: `pushd` walks past `R-DAEMON-DIR-CD`. The pattern
+  anchors on `\bcd`, and `pushd .claude/hooks-daemon` changes the working
+  directory exactly as `cd` does.
+
+  Found while verifying Plan 00407 N12's fix rather than by reading the code:
+  a probe of sixteen spellings a shell would really execute denied fifteen —
+  `bash -c`, `bash -lc`, `sh -c`, `env bash -c`, `eval`, a leading variable
+  assignment, `$( )`, backticks, a subshell, a line continuation, a quoted or
+  single-quoted path, a trailing slash and an expansion-built path — and
+  allowed `pushd`.
+
+  **Pre-existing, not this release's regression**: `git show v3.63.0:…/daemon_location_guard.py` carries the same `\bcd` anchor, so the
+  shipped version never matched it either. That is why it is graduated rather
+  than fixed inside a release being cut, which is the same call made for N8 —
+  and treating two identical situations differently because one file was
+  edited more recently would not be a principle.
+
+  It deserves priority over N8 nonetheless: N8 needs a deliberately quoted
+  operand, whereas `pushd` is a spelling an agent emits naturally. Pinned by a
+  strict xfail so it fails loudly if fixed by accident. The fix is one token —
+  `\b(?:cd|pushd)` — but check `popd` and the `-` form too, and check whether
+  the deny message still reads correctly when the command was not `cd`.
+
 ### Phase 4: The sub-bar items, carried so they are not lost
 
 - [ ] ⬜ **Task 3.1**: Four items the reviewer put below the filing bar, each

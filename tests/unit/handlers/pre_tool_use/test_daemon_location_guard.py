@@ -323,3 +323,22 @@ class TestAQuotedStringCanItselfBeACommand:
         command = "sh -c 'cd .claude/hooks-daemon'"
 
         assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "Known BEHAVIOUR gap, Plan 00408 Task 3.5: the pattern anchors on `\\bcd`, "
+            "so `pushd` changes directory without matching. It is NOT this release's "
+            "regression -- `git show v3.63.0:` carries the same anchor, so the shipped "
+            "version never matched it either, which is why it was graduated rather than "
+            "fixed inside a release being cut (the same call made for Plan 00407 N8). "
+            "Found by probing sixteen spellings a shell really executes: fifteen were "
+            "denied and this one was not. Flips to a plain pass when 00408 lands; fails "
+            "loudly if 'fixed' by accident."
+        ),
+    )
+    def test_pushd_into_the_daemon_dir_is_matched(self) -> None:
+        handler = DaemonLocationGuardHandler()
+        command = "pushd .claude/hooks-daemon"
+
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
