@@ -1984,7 +1984,17 @@ handlers:
 | `git` is never intercepted | The remedy this handler PRINTS is a `git` command. A handler that blocks the command it just told you to run cannot be satisfied.                 |
 | Un-checkable never blocks  | No remote, no upstream or a detached HEAD is reported once by the sweep and never gates a read — a deliberately unreachable clone stays readable. |
 
-**`NOT VERIFIED` is not the same verdict as stale.** "Nobody has checked" and "this is out of date" call for different responses; collapsing them would either cry wolf about repos that are fine or give false comfort about repos nobody looked at. Run `hooks-daemon reference-repos` to refresh and clear it.
+**Three answers, not two:**
+
+| Answer                   | Means                                                         | Blocks?              |
+| ------------------------ | ------------------------------------------------------------- | -------------------- |
+| stale                    | checked, and behind or off its default branch                 | yes, per `mode`      |
+| `NOT VERIFIED`           | no in-date reading exists — nobody has checked                | yes, per `mode`      |
+| `COULD NOT BE CONFIRMED` | a sweep ran and could not reach the remote (or there is none) | never — context only |
+
+"Nobody has checked" and "this is out of date" call for different responses; collapsing them would either cry wolf about repos that are fine or give false comfort about repos nobody looked at. Run `hooks-daemon reference-repos` to refresh and clear the first two.
+
+The third is the quiet one. An offline sweep fetches nothing, so the commit counts come off the refs already on disk, `behind` reads 0, and every report stays silent — which reads exactly like an all-clear. The gate says it once per repo per session, at the moment of the read, and never blocks: no command makes an unreachable remote reachable.
 
 **Configuration lives in the top-level `reference_repos:` block, not in this handler's options** — one block feeds the SessionStart sweep, this backstop and the `reference-repos` CLI, so the three cannot disagree. See `reference_repos` in the top-level configuration section for `roots`, `exclude`, `mode`, `auto_pull` and `cache_ttl_minutes`.
 

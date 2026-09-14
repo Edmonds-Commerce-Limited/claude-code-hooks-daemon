@@ -18,6 +18,15 @@ Two rendering decisions carry real weight:
     Collapsing them would either cry wolf about repos that are fine or give
     false comfort about repos nobody looked at.
 
+There is a THIRD answer, and it is the one a reader is most likely to mistake
+for an all-clear: a sweep ran, and it could not reach the remote (or there is no
+remote to reach). ``behind`` then says 0 because the refs on disk say 0, nothing
+needs attention, and every report stays quiet. :func:`unconfirmed_note` exists so
+one surface can say it out loud — the PreToolUse gate, at the moment someone
+actually reads the clone, which is the only moment the fact matters. It is a
+NOTE and never a block: an unreachable remote is usually permanent, and there is
+no command a reader could run to make it reachable.
+
 The remediation command is load-bearing twice: it is the instruction a reader
 follows, and Phase 4 must EXEMPT it from interception — a handler that blocks
 the command it just told you to run makes itself impossible to satisfy.
@@ -40,6 +49,18 @@ NOT_VERIFIED_HEADLINE: Final[str] = "reference repo freshness NOT VERIFIED"
 _NOT_VERIFIED_DETAIL: Final[str] = (
     "no in-date reading exists (the cache is missing, expired or unusable), so these "
     "repos may be out of date. Run `hooks-daemon reference-repos` to refresh and see."
+)
+
+#: Deliberately NOT a paraphrase of :data:`NOT_VERIFIED_HEADLINE`. "Nobody
+#: checked" and "we checked and the remote did not answer" are different facts
+#: with different remedies, and a reader who meets both in one session must be
+#: able to tell them apart at a glance.
+UNCONFIRMED_HEADLINE: Final[str] = "reference repo freshness COULD NOT BE CONFIRMED"
+
+_UNCONFIRMED_DETAIL: Final[str] = (
+    "a sweep ran, but this clone's contents were never compared against an upstream, so "
+    "treat what it contains as unconfirmed rather than current. This is not a fault to "
+    "fix; `hooks-daemon reference-repos` retries the fetch if the cause was temporary."
 )
 
 
@@ -90,6 +111,31 @@ def repo_line(state: RepoState, *, project_root: Path | None = None) -> str:
     if not problems:
         return f"{name} — up to date"
     return f"{name} — {'; '.join(problems)}"
+
+
+def unconfirmed_note(state: RepoState, *, project_root: Path | None = None) -> str | None:
+    """Say that this reading was never confirmed, or ``None`` when it was.
+
+    Returns ``None`` for a repo that WAS confirmed — including one confirmed to
+    be stale. Staleness is a separate, actionable finding that the reporting
+    surfaces already state loudly; saying both about one repo would bury the
+    half that can be acted on under the half that cannot.
+
+    Args:
+        state: The reading to describe.
+        project_root: Used to shorten a path that lives inside the project.
+
+    Returns:
+        A multi-line note, or ``None`` when the reading was confirmed against
+        an upstream.
+    """
+    if state.verified:
+        return None
+    return (
+        f"{_ICON}  {UNCONFIRMED_HEADLINE}\n\n"
+        f"  {repo_line(state, project_root=project_root)}\n\n"
+        f"  {_UNCONFIRMED_DETAIL}"
+    )
 
 
 def remediation_command(state: RepoState) -> str | None:

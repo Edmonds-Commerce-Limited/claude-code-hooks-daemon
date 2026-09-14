@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.reference_repos.cache import write_cache
 from claude_code_hooks_daemon.reference_repos.model import Checkability, RepoState
 from claude_code_hooks_daemon.reference_repos.report import (
     NOT_VERIFIED_HEADLINE,
+    UNCONFIRMED_HEADLINE,
     remediation_command,
 )
 
@@ -49,6 +50,7 @@ def _state(
     branch: str = "main",
     checkability: Checkability = Checkability.CHECKABLE,
     dirty: bool = False,
+    fetch_failed: bool = False,
 ) -> RepoState:
     return RepoState(
         path=path,
@@ -59,6 +61,7 @@ def _state(
         behind=behind,
         ahead=0,
         dirty=dirty,
+        fetch_failed=fetch_failed,
     )
 
 
@@ -486,6 +489,115 @@ class TestNotVerified:
         write_cache(tmp_path, [_state(known)])
 
         result = handler.handle(_read(unknown / "x.py"))
+
+        assert result.decision == Decision.DENY
+
+
+class TestAnUnconfirmedReading:
+    """The silent case: a sweep ran and confirmed nothing.
+
+    An offline session fetches nothing, so ``behind`` reads 0 off the refs
+    already on disk, nothing needs attention, and the sweep stays quiet by
+    design. Before this, the read path was quiet too — so an agent could spend
+    a whole session reasoning from clones no one had checked, with no signal
+    anywhere. The gate says it once per repo, at the moment of the read.
+    """
+
+    def test_a_failed_fetch_is_reported_when_the_repo_is_read(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        repo = _repo(tmp_path)
+        write_cache(tmp_path, [_state(repo, fetch_failed=True)])
+
+        result = handler.handle(_read(repo / "x.py"))
+
+        assert UNCONFIRMED_HEADLINE in "\n".join(result.context)
+
+    def test_it_never_denies_even_under_mode_block(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """There is no command that makes an unreachable remote reachable.
+
+        Denying here would make a clone with a deliberately invalid origin — the
+        canary this project keeps — permanently unreadable, and the only way out
+        would be turning the whole system off.
+        """
+        handler._reference_repos = ReferenceReposConfig(mode="block")
+        repo = _repo(tmp_path)
+        write_cache(tmp_path, [_state(repo, fetch_failed=True)])
+
+        result = handler.handle(_read(repo / "x.py"))
+
+        assert result.decision == Decision.ALLOW
+
+    def test_an_uncheckable_repo_is_reported_the_same_way(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """No remote to reach and a remote that did not answer are one fact here."""
+        repo = _repo(tmp_path)
+        write_cache(tmp_path, [_state(repo, checkability=Checkability.NO_REMOTE)])
+
+        result = handler.handle(_read(repo / "x.py"))
+
+        assert UNCONFIRMED_HEADLINE in "\n".join(result.context)
+
+    def test_it_speaks_once_per_repo_per_session(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        repo = _repo(tmp_path)
+        write_cache(tmp_path, [_state(repo, fetch_failed=True)])
+
+        first = handler.handle(_read(repo / "x.py"))
+        second = handler.handle(_read(repo / "y.py"))
+
+        assert first.context != []
+        assert second.context == []
+
+    def test_a_different_session_hears_it_too(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """The daemon outlives any one session, so 'once' must not be daemon-wide."""
+        repo = _repo(tmp_path)
+        write_cache(tmp_path, [_state(repo, fetch_failed=True)])
+
+        handler.handle(_read(repo / "x.py"))
+        other = handler.handle(_read(repo / "x.py", session=_OTHER_SESSION))
+
+        assert UNCONFIRMED_HEADLINE in "\n".join(other.context)
+
+    def test_a_confirmed_current_repo_says_nothing(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        repo = _repo(tmp_path)
+        _fresh_cache(tmp_path)
+
+        result = handler.handle(_read(repo / "x.py"))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_a_stale_repo_still_gets_the_stale_verdict_not_a_note(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """Behind AND unfetchable: the actionable half must not be buried."""
+        repo = _repo(tmp_path)
+        write_cache(tmp_path, [_state(repo, behind=3, fetch_failed=True)])
+
+        result = handler.handle(_read(repo / "x.py"))
+
+        assert result.decision == Decision.DENY
+        assert UNCONFIRMED_HEADLINE not in result.reason
+
+    def test_the_note_does_not_spend_the_repos_one_block(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """Otherwise an unreachable remote at 09:00 silences a real staleness at 09:05."""
+        repo = _repo(tmp_path)
+        write_cache(tmp_path, [_state(repo, fetch_failed=True)])
+        handler.handle(_read(repo / "x.py"))
+
+        write_cache(tmp_path, [_state(repo, behind=2)])
+        result = handler.handle(_read(repo / "x.py"))
 
         assert result.decision == Decision.DENY
 

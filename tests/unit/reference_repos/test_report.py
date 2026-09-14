@@ -19,9 +19,11 @@ from pathlib import Path
 from claude_code_hooks_daemon.reference_repos.model import Checkability, RepoState
 from claude_code_hooks_daemon.reference_repos.report import (
     NOT_VERIFIED_HEADLINE,
+    UNCONFIRMED_HEADLINE,
     remediation_command,
     repo_line,
     report_lines,
+    unconfirmed_note,
 )
 
 _ROOT = Path("/workspace")
@@ -181,6 +183,22 @@ class TestTheWholeReport:
         """Silence is correct for a project that has not adopted the convention."""
         assert report_lines([], project_root=_ROOT) == []
 
+    def test_a_sweep_that_confirmed_nothing_never_claims_an_all_clear(self) -> None:
+        """The offline machine. Every fetch failed, so every count came off disk.
+
+        "All 2 up to date" here would be the exact false comfort this package
+        exists to prevent — a confident sentence about repos nothing checked.
+        """
+        lines = report_lines(
+            [
+                _state(fetch_failed=True),
+                _state(path=Path("/workspace/untracked/repos/b"), fetch_failed=True),
+            ],
+            project_root=_ROOT,
+        )
+
+        assert lines == ["📚  reference repos: 2 governed, none verifiable"]
+
     def test_not_verified_is_reported_distinctly_from_stale(self) -> None:
         """These demand different things and must never read the same.
 
@@ -264,3 +282,61 @@ class TestTheWholeReport:
         assert "alpha" in body
         assert "canary" not in body
         assert "fine" not in body
+
+
+class TestTheUnconfirmedNote:
+    """The third answer, distinct from both "up to date" and "stale".
+
+    A repo can be perfectly current and still be one nobody CONFIRMED: the
+    remote was unreachable, or there is no remote to reach. That is not a
+    problem to fix, so it never demands attention and never blocks — but a
+    reader about to reason from the contents deserves to know it, and the
+    sweep's report deliberately stays silent about it.
+    """
+
+    def test_a_confirmed_repo_produces_no_note(self) -> None:
+        assert unconfirmed_note(_state(), project_root=_ROOT) is None
+
+    def test_a_confirmed_repo_that_is_merely_stale_produces_no_note(self) -> None:
+        """Stale is a DIFFERENT answer, and the gate says that one itself."""
+        assert unconfirmed_note(_state(behind=4), project_root=_ROOT) is None
+
+    def test_a_failed_fetch_produces_a_note(self) -> None:
+        note = unconfirmed_note(_state(fetch_failed=True), project_root=_ROOT)
+
+        assert note is not None
+        assert UNCONFIRMED_HEADLINE in note
+
+    def test_the_note_names_the_repo_the_way_every_other_surface_does(self) -> None:
+        note = unconfirmed_note(_state(fetch_failed=True), project_root=_ROOT)
+
+        assert note is not None
+        assert "untracked/repos/alpha" in note
+
+    def test_the_note_carries_the_reason_rather_than_a_bare_headline(self) -> None:
+        """'Could not be confirmed' with no 'why' is a puzzle, not a report."""
+        note = unconfirmed_note(_state(fetch_failed=True), project_root=_ROOT)
+
+        assert note is not None
+        assert repo_line(_state(fetch_failed=True), project_root=_ROOT) in note
+
+    def test_an_uncheckable_repo_produces_a_note_too(self) -> None:
+        """No remote is also 'nobody confirmed this', by a different route."""
+        note = unconfirmed_note(_state(checkability=Checkability.NO_REMOTE), project_root=_ROOT)
+
+        assert note is not None
+        assert "no remote configured" in note
+
+    def test_the_note_never_reads_as_an_instruction_to_fix_the_repo(self) -> None:
+        """There is nothing to fix. Advice to fix it would be advice to nowhere."""
+        note = unconfirmed_note(_state(checkability=Checkability.NO_REMOTE), project_root=_ROOT)
+
+        assert note is not None
+        assert "fix:" not in note
+
+    def test_the_note_does_not_reuse_the_nobody_swept_headline(self) -> None:
+        """Two different facts must not arrive wearing the same sentence."""
+        note = unconfirmed_note(_state(fetch_failed=True), project_root=_ROOT)
+
+        assert note is not None
+        assert NOT_VERIFIED_HEADLINE not in note

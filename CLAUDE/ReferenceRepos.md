@@ -64,15 +64,26 @@ reference_repos:
 stale repo in a given session is denied with a runnable `fix:` command, and the
 retry goes through. The block is there to inform, not to obstruct.
 
-## Two verdicts that are NOT the same
+## Three verdicts that are NOT the same
 
-| Verdict        | Meaning                                       | What to do                                |
-| -------------- | --------------------------------------------- | ----------------------------------------- |
-| stale          | Checked, and it IS behind / on a wrong branch | Run the printed `fix:` command            |
-| `NOT VERIFIED` | Nobody checked — no in-date cache reading     | `hooks-daemon reference-repos` to refresh |
+| Verdict                  | Meaning                                       | What to do                                  | Blocks?             |
+| ------------------------ | --------------------------------------------- | ------------------------------------------- | ------------------- |
+| stale                    | Checked, and it IS behind / on a wrong branch | Run the printed `fix:` command              | Yes, per `mode`     |
+| `NOT VERIFIED`           | Nobody checked — no in-date cache reading     | `hooks-daemon reference-repos` to refresh   | Yes, per `mode`     |
+| `COULD NOT BE CONFIRMED` | A sweep ran and never reached an upstream     | Nothing — note the contents are unconfirmed | Never; context only |
 
-Collapsing them would either cry wolf about repos that are fine, or give false
-comfort about repos nobody looked at.
+Collapsing the first two would either cry wolf about repos that are fine, or
+give false comfort about repos nobody looked at.
+
+The third exists because of a gap that was silent in every direction. When a
+fetch fails, `behind` is computed from the refs already on disk, so it reads 0;
+nothing needs attention, so the session-start sweep says nothing; and the read
+path had nothing to say either. An offline session could therefore spend hours
+reasoning from clones nobody had checked, with no signal anywhere. The gate now
+says it once per repo per session, at the moment of the read — and never blocks,
+because there is no command a reader could run to make an unreachable remote
+reachable. It is tracked separately from the `block_once` record, so a note at
+09:00 cannot silence a genuine staleness found at 09:05.
 
 ## The un-fetchable carve-out, and why it is not a contradiction
 

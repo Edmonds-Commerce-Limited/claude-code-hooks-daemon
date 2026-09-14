@@ -49,6 +49,7 @@ from claude_code_hooks_daemon.reference_repos.report import (
     display_path,
     remediation_command,
     repo_line,
+    unconfirmed_note,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     command_word,
@@ -157,6 +158,12 @@ _MODE_BLOCK: Final[str] = "block"
 #: session (Plan 00127), so an unbounded map is a slow leak; evicting the oldest
 #: costs at most one extra advisory in a session nobody has touched in a while.
 _MAX_TRACKED_SESSIONS: Final[int] = 64
+
+#: Namespaces the "could not be confirmed" note apart from the block_once record
+#: for the same repo. Two things are said at most once per repo per session and
+#: they are NOT the same thing; one key for both would let the harmless one
+#: silence the one that matters.
+_UNCONFIRMED_KEY_PREFIX: Final[str] = "unconfirmed:"
 
 
 _STALE_RULE = Rule(
@@ -438,57 +445,89 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
                 return deepest
         return None
 
-    def _already_reported(self, session_id: str, subject: Path) -> bool:
-        return str(subject) in self._reported.get(session_id, set())
+    def _already_reported(self, session_id: str, key: str) -> bool:
+        return key in self._reported.get(session_id, set())
 
-    def _record(self, session_id: str, subject: Path) -> None:
+    def _record(self, session_id: str, key: str) -> None:
         if session_id not in self._reported and len(self._reported) >= _MAX_TRACKED_SESSIONS:
             self._reported.pop(next(iter(self._reported)))
-        self._reported.setdefault(session_id, set()).add(str(subject))
+        self._reported.setdefault(session_id, set()).add(key)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
+        """Judge every governed checkout this call reaches into.
+
+        Three answers, in descending order of what a reader must act on:
+        nothing has checked this repo, this repo is out of date, or this repo's
+        reading was never confirmed against an upstream. The first two are
+        findings and obey the configured mode; the third is a NOTE that never
+        blocks — see :func:`unconfirmed_note` for why blocking on it would make
+        an unreachable clone permanently unreadable.
+        """
         config = self._reference_repos
         project_root = self.project_root_reader()
         session_id = str(hook_input.get("session_id") or "")
 
         known = cached_states(project_root, ttl_seconds=config.cache_ttl_minutes * 60)
 
+        notes: list[str] = []
         for path in self._touched_paths(hook_input, project_root):
             subject = self._subject(path, project_root, known)
             if subject is None:
                 # Under a governed root but not inside any checkout — a loose
                 # file, a scratch directory, the root itself. Nothing to judge.
                 continue
-            message = self._problem(subject, known, project_root)
-            if message is None:
-                continue
-            return self._verdict(message, session_id, subject, config.mode)
 
-        return GatingResult(decision=Decision.ALLOW)
+            if known is None or subject not in known:
+                message = self._not_verified(subject, project_root)
+                return self._verdict(message, session_id, subject, config.mode)
 
-    def _problem(
-        self, subject: Path, known: dict[Path, RepoState] | None, project_root: Path
+            state = known[subject]
+            if state.needs_attention:
+                message = self._stale(state, project_root)
+                return self._verdict(message, session_id, subject, config.mode)
+
+            note = self._unconfirmed(state, subject, session_id, project_root)
+            if note is not None:
+                notes.append(note)
+
+        return GatingResult(decision=Decision.ALLOW, context=notes)
+
+    def _unconfirmed(
+        self, state: RepoState, subject: Path, session_id: str, project_root: Path
     ) -> str | None:
-        """What is wrong with this repo, or ``None`` when nothing is.
+        """The note for a repo nobody could confirm, at most once per session.
 
-        A missing reading and a stale reading get DIFFERENT sentences AND
-        different rule IDs on purpose: "nobody checked" and "this is out of
-        date" call for different responses, and collapsing them would either
-        cry wolf or give false comfort. Two rules means `explain-rule` can
-        answer each on its own terms.
+        Tracked under its OWN key rather than the subject alone. Sharing the key
+        would let a note at the start of a session spend that repo's single
+        block, so a genuine staleness discovered minutes later would arrive as
+        quiet context instead of stopping anyone.
         """
-        if known is None or subject not in known:
-            detail = (
-                f"{NOT_VERIFIED_HEADLINE}: no in-date reading exists for "
-                f"{display_path(subject, project_root)}, so what it contains may not be "
-                "what you think it is."
-            )
-            return f"{self._formatter.verbose(_NOT_VERIFIED_RULE)}\n\n{detail}"
-
-        state = known[subject]
-        if not state.needs_attention:
+        note = unconfirmed_note(state, project_root=project_root)
+        if note is None:
             return None
+        key = f"{_UNCONFIRMED_KEY_PREFIX}{subject}"
+        if self._already_reported(session_id, key):
+            return None
+        self._record(session_id, key)
+        return note
 
+    def _not_verified(self, subject: Path, project_root: Path) -> str:
+        """Nobody has checked this repo.
+
+        A DIFFERENT sentence and a different rule ID from :meth:`_stale`, on
+        purpose: "nobody checked" and "this is out of date" call for different
+        responses, and collapsing them would either cry wolf or give false
+        comfort. Two rules means `explain-rule` can answer each on its own terms.
+        """
+        detail = (
+            f"{NOT_VERIFIED_HEADLINE}: no in-date reading exists for "
+            f"{display_path(subject, project_root)}, so what it contains may not be "
+            "what you think it is."
+        )
+        return f"{self._formatter.verbose(_NOT_VERIFIED_RULE)}\n\n{detail}"
+
+    def _stale(self, state: RepoState, project_root: Path) -> str:
+        """This repo was checked, and it is not what the reader thinks it is."""
         lines = [
             self._formatter.verbose(_STALE_RULE),
             "",
@@ -524,10 +563,10 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         # because the daemon is shared (Plan 00127) — a daemon-wide count would
         # let one session consume every other session's single warning, which is
         # the bug Plan 00277 fixed for lsp_enforcement.
-        if self._already_reported(session_id, subject):
+        if self._already_reported(session_id, str(subject)):
             return GatingResult(decision=Decision.ALLOW, context=[message])
 
-        self._record(session_id, subject)
+        self._record(session_id, str(subject))
         return GatingResult.deny(message)
 
     # ------------------------------------------------------------- self-report
@@ -554,7 +593,13 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
             "all — no remote, no upstream, detached HEAD — never blocks anything.\n\n"
             "`NOT VERIFIED` means something different from stale: nobody has checked, usually "
             "because no sweep has run this session. Run `hooks-daemon reference-repos` to "
-            "fetch every governed repo and refresh the reading."
+            "fetch every governed repo and refresh the reading.\n\n"
+            "**`COULD NOT BE CONFIRMED` is a third answer, and it never blocks.** A sweep ran "
+            "and could not compare this clone against an upstream — the remote was unreachable, "
+            "or there is none. The repo may be perfectly current; nothing confirmed it, and the "
+            "commit counts you would otherwise see came off the refs already on disk. It is "
+            "said once per repo per session as context, because there is no command that makes "
+            "an unreachable remote reachable and a block you cannot clear is not a block."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
