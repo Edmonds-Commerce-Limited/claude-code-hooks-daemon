@@ -318,8 +318,15 @@ rather than an edit.
   makes `pytest -k` — the first thing anyone reaches for when narrowing down a
   failure — untrustworthy in that file.
 
-  Recorded rather than fixed here: it needs the fixture ordering read, which is
-  a different job from closing 00403.
+  What is established, and the five candidates already RULED OUT, are in
+  [N9-ORDER-DEPENDENT-TEST.md](N9-ORDER-DEPENDENT-TEST.md) — it is
+  deterministic rather than flaky, it genuinely passes when preceded, and
+  neither discovery, registration, `register_all(config=…)` nor
+  `ProjectContext.initialize()` reproduces the flip in a fresh process.
+
+  Recorded rather than fixed: what remains is the conftest fixture interaction,
+  which is a different job from closing Plan 00403 and should not be guessed
+  at — the guess that looked certain here was already wrong once, in N3.
 
 ## Success Criteria
 
