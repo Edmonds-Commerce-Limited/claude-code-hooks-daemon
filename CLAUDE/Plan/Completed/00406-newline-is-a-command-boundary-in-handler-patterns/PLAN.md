@@ -1,6 +1,6 @@
 # Plan 00406: newline is a command boundary in handler patterns
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: High
@@ -19,7 +19,7 @@ newline reverses the verdict. Two spellings of one shell structure disagreeing
 is a fact about the implementation, never about the policy, which is what makes
 each of these a defect rather than a tuning preference.
 
-Graduated from [Plan 00405](../Completed/00405-niggles-ledger-eleven/PLAN.md) N8. Its N6
+Graduated from [Plan 00405](../00405-niggles-ledger-eleven/PLAN.md) N8. Its N6
 fixed the first instance found (`plan_number_helper`) and its N7 fixed the
 opposite-direction defect the survey turned up — a mid-token line continuation
 that evaded every guard. This plan is the remaining false positives.
@@ -154,7 +154,8 @@ Tightening first converts its false positive into a hole — the same trap Plan
   opposite of the truth once the class changed. `merge_to_main_approval`'s was
   updated too: it is unaffected in OUTCOME (it captures a target rather than
   denying on a flag) but shares the constant.
-- [ ] ⬜ Full QA passes and CI is green.
+- [x] ✅ Full QA passes (30/30) and CI is green on all three Python versions at
+  `a391132e`.
 - [x] ✅ Release-bound consequences are in `CLAUDE/UPGRADES/UNRELEASED/` before
   the status flips: `release-notes/47-a-newline-ends-the-command-being-judged.md`,
   which names all four denials and the one deliberate heredoc behaviour change.

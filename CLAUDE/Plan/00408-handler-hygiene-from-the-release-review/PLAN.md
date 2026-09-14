@@ -11,7 +11,7 @@
 
 Quality findings from the v3.64.0 release code-review gate that are NOT
 user-visible breakage. They were deliberately graduated out of
-[Plan 00407](../00407-niggles-ledger-twelve/PLAN.md) N6 rather than fixed
+[Plan 00407](../Completed/00407-niggles-ledger-twelve/PLAN.md) N6 rather than fixed
 inside a release being cut: every one of them is internal consistency or cost,
 none changes a verdict a user receives, and a release is the wrong moment to
 take on a broad mechanical edit.
@@ -54,7 +54,7 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
 - [ ] ⬜ **Task 3.0**: `destructive_git` does not recognise a QUOTED operand:
   `git checkout "--" f.txt` is allowed where the unquoted spelling is denied,
   and bash removes the quotes before git ever sees them. Graduated from
-  [Plan 00407](../00407-niggles-ledger-twelve/PLAN.md) N8.
+  [Plan 00407](../Completed/00407-niggles-ledger-twelve/PLAN.md) N8.
 
   Two things make it a task rather than an emergency. It pre-dates the release
   — the plain quoted form fails identically with no `-m` present, which is how
@@ -73,7 +73,7 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
 - [ ] ⬜ **Task 3.2**: Port `plan-stats-arithmetic` from
   `scripts/qa/check_repo_hygiene.py` into the daemon's `plan-qa` checks, so the
   session sweep, the edit-time lint and the commit gate all see it. Graduated
-  from [Plan 00407](../00407-niggles-ledger-twelve/PLAN.md) N11.
+  from [Plan 00407](../Completed/00407-niggles-ledger-twelve/PLAN.md) N11.
 
   The case for it is a measured recurrence, not a preference. Plan 00405 N4
   fixed the plan index's closing self-check; one release later the same line in
@@ -89,12 +89,31 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   class outright. Either remedy closes this — prefer whichever leaves fewer
   hand-maintained numbers behind.
 
+- [ ] ⬜ **Task 3.2b**: `docs-qa`'s `pointer-resolves` check does not reach
+  plans under `Completed/`, so a link broken BY archival is invisible to it.
+
+  Measured, not suspected: archiving Plans 00406 and 00407 turned four
+  `../00408-…` links and two `../Completed/00405-…` links dead — an archived
+  plan's own relative paths all shift by one level — and a full
+  `docs-qa --sweep` immediately afterwards reported "0 findings — documentation
+  corpus is clean". The dead links were found by checking each target by hand.
+
+  This is the same shape as Task 3.2: the failure is silence, and the check
+  that would speak is the one that does not run here. Archival is exactly when
+  these links break, and archival is a step an agent performs unattended.
+
+  Decide deliberately whether `archive-immutability` is the reason for the
+  exclusion — if archived plans are not to be edited, a dead link in one is
+  arguably permanent by design. If so, the check belongs at archival TIME
+  (verify every link in the moved folder resolves after the `git mv`) rather
+  than in the sweep. Either answer closes this; leaving it unexamined does not.
+
 ### Phase 3c: An allowlist of commands that do not run their argument
 
 - [ ] ⬜ **Task 3.3**: `echo 'git merge x'` and `echo 'cd .claude/hooks-daemon'`
   are matched as real commands by `merge_to_main_approval` and
   `daemon_location_guard`. Graduated from
-  [Plan 00407](../00407-niggles-ledger-twelve/PLAN.md) N12.
+  [Plan 00407](../Completed/00407-niggles-ledger-twelve/PLAN.md) N12.
 
   This is the accepted cost of closing that entry's hole, not an oversight.
   `echo 'X'` and `bash -c 'X'` are structurally identical — a command with a

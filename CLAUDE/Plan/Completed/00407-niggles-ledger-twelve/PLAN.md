@@ -1,6 +1,6 @@
 # Plan 00407: niggles ledger twelve
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: Medium
@@ -12,7 +12,7 @@
 The open niggles ledger. Small defects get recorded here the turn they are
 found, so that noticing something and doing something about it are never the
 same decision. Ledger eleven
-([Plan 00405](../Completed/00405-niggles-ledger-eleven/PLAN.md)) is complete, so
+([Plan 00405](../00405-niggles-ledger-eleven/PLAN.md)) is complete, so
 this one opens.
 
 An entry is either fixed in place, ruled NOT A DEFECT with the evidence that
@@ -134,7 +134,7 @@ rather than an edit.
   handler switched off. The residual is now stated there rather than unnoticed.
 
 - [x] ✅ **N6**: two review findings graduated rather than fixed here —
-  see [Plan 00408](../00408-handler-hygiene-from-the-release-review/PLAN.md).
+  see [Plan 00408](../../00408-handler-hygiene-from-the-release-review/PLAN.md).
 
   Neither is user-visible breakage, so neither belongs in a release being cut:
   raw hook-field literals where `HookInputField` is declared the single source
@@ -165,7 +165,7 @@ rather than an edit.
   (`-m` is valueless) are all deliberately absent, each for a stated reason.
 
 - [x] ✅ **N8**: a QUOTED destructive operand is not recognised — graduated to
-  [Plan 00408](../00408-handler-hygiene-from-the-release-review/PLAN.md).
+  [Plan 00408](../../00408-handler-hygiene-from-the-release-review/PLAN.md).
 
   Found while testing N7 and worth separating from it precisely because the
   first reading was wrong: `git checkout -m "--" f.txt` survived the N7 fix,
@@ -175,7 +175,7 @@ rather than an edit.
   naming 00408, so it fails loudly if it is ever fixed by accident.
 
 - [x] ✅ **N9**: the "never raises" boundary still raised on the commonest
-  unreadable config, and this entry corrects [Plan 00405](../Completed/00405-niggles-ledger-eleven/PLAN.md)'s
+  unreadable config, and this entry corrects [Plan 00405](../00405-niggles-ledger-eleven/PLAN.md)'s
   own N9 fix.
 
   That fix widened the catch to `ValueError`, reasoning that pydantic's
@@ -202,7 +202,7 @@ rather than an edit.
   the only answer an advisory can safely give when it cannot tell.
 
 - [x] ✅ **N11**: the plan index's closing self-check went stale again — the
-  SAME line, in the same file, that [Plan 00405](../Completed/00405-niggles-ledger-eleven/PLAN.md)
+  SAME line, in the same file, that [Plan 00405](../00405-niggles-ledger-eleven/PLAN.md)
   N4 already fixed one release ago.
 
   **Found by CI**, not by a local gate, which is the entry's point. The
@@ -233,7 +233,7 @@ rather than an edit.
 
   Porting the rule to `plan-qa` — where the session sweep, the edit lint and
   the commit gate would all see it — is the structural fix, and is graduated to
-  [Plan 00408](../00408-handler-hygiene-from-the-release-review/PLAN.md) rather
+  [Plan 00408](../../00408-handler-hygiene-from-the-release-review/PLAN.md) rather
   than absorbed into a release being cut.
 
 - [x] ✅ **N12**: my own N2 and N3 fixes opened an evasion hole in the two
@@ -277,7 +277,7 @@ rather than an edit.
   apart needs an allowlist of commands that do not execute their argument,
   which is new machinery rather than a correction, and this release is being
   cut — graduated to
-  [Plan 00408](../00408-handler-hygiene-from-the-release-review/PLAN.md).
+  [Plan 00408](../../00408-handler-hygiene-from-the-release-review/PLAN.md).
 
   Release note `48-…` was amended rather than left: it told users a `cd` inside
   a single-quoted string was no longer matched, which this correction makes
@@ -290,7 +290,9 @@ rather than an edit.
   fixed; N11 fixed with its structural half graduated; N6 and N8 graduated to
   Plan 00408.
 
-- [ ] 🔄 Full QA passes and CI is green for every entry closed.
+- [x] ✅ Full QA passes (30/30) and CI is green on all three Python versions at
+  `a391132e`. Both gates earned their place here rather than rubber-stamping:
+  the QA run is what found N12, and CI is what found N11.
 
 - [x] ✅ Release-bound consequences are in `CLAUDE/UPGRADES/UNRELEASED/` before
   the status flips, and only the ones a user can actually have seen.

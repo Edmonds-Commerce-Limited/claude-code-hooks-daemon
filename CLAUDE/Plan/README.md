@@ -4,11 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00407: niggles ledger twelve](00407-niggles-ledger-twelve/PLAN.md) - In Progress (the open ledger; ledger eleven is closed. Ten entries from using the release pipeline and from its own code-review gate — including N7, where inserting `-m` disabled R-GIT-CHECKOUT-DISCARD and permanently discarded a working-tree change, a regression caught before it shipped)
-
 - [00408: handler hygiene from the release review](00408-handler-hygiene-from-the-release-review/PLAN.md) - Not Started (the non-user-visible half of the v3.64.0 review: raw hook-field literals where `HookInputField` is the declared SSoT, `merge_qa_report` building the docs corpus on the hook budget while a sibling argues against exactly that, and four sub-bar items carried so they are not lost. Graduated from 00407 N6)
-
-- [00406: newline is a command boundary in handler patterns](00406-newline-is-a-command-boundary-in-handler-patterns/PLAN.md) - Not Started (four blocking handlers judge the NEXT line as part of the command they are matching, because their separator class omits `\n` — `git push origin main` ⏎ `grep -f x y` is denied as a force push, and `git branch -d` is denied by the rule that recommends it. Joining the same two lines with `&&` reverses every verdict. Graduated from 00405 N8)
 
 - [00402: restart path leaves generated handler doc stale](00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md) - Not Started (a restart regenerates the `CLAUDE.md` block but never `.claude/HOOKS-DAEMON.md`, which sat a whole handler short for days and no test could see it. Regenerating on restart is the WRONG fix — that file's marker is the deployed-from version `upgrade.sh` reads. Graduated from 00400 N6; blocked on a ruling)
 
@@ -137,6 +133,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00407: niggles ledger twelve](Completed/00407-niggles-ledger-twelve/PLAN.md) - Complete at `1eefc55b`…`a391132e` + the archiving commit (twelve entries, all terminal; N7 was a release REGRESSION disabling R-GIT-CHECKOUT-DISCARD, and N12 corrected this plan's own N2/N3 fixes, which blanked quoted literals and let `bash -c` walk past two guards)
+
+- [00406: newline is a command boundary in handler patterns](Completed/00406-newline-is-a-command-boundary-in-handler-patterns/PLAN.md) - Complete at `f9b78828` + the archiving commit (four blocking handlers judged the NEXT line as part of the command they matched; the `&&` control turned a hunch into an implementation fact)
+
 - [00405: niggles ledger eleven](Completed/00405-niggles-ledger-eleven/PLAN.md) - Complete at `de143c9d`…`03610440` + the archiving commit (nine entries, all terminal. Chasing N6's newline-crossing regex outwards found N7: a word split across two lines evaded EVERY blocking guard, because the shell JOINS a continuation where the daemon substituted a space. N9 looked like a test-ordering quirk and was a "never raises" boundary that raised mid-route. N8 graduated to 00406)
 
 - [00403: upstream issue reporting sop](Completed/00403-upstream-issue-reporting-sop/PLAN.md) - Complete at `6787874f`…`47f315cd` + the archiving commit (one procedure for reporting a daemon defect to this PUBLIC repo: a generator that never COLLECTS the hostname, remote, env file, config or logs, a gate refusing any body it did not build, issue forms mirroring its fields, and `--web` kept open as the hole that keeps the gate honest)
@@ -193,10 +193,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00371: qa acceptance probes detect a stale daemon](Completed/00371-qa-acceptance-probes-detect-a-stale-daemon/PLAN.md) - Complete + the archiving commit (the acceptance harness graded whatever code the running daemon loaded at startup, so it could pass a broken tree; a startup source fingerprint now makes every live-dispatch test fail by name on a stale daemon)
 
-- [00370: daemon restart verifier becomes a project handler](Completed/00370-daemon-restart-verifier-becomes-a-project-handler/PLAN.md) - Complete + the archiving commit (a handler that only ever fired inside this repository left the shared built-in library and became this repo's own project-handler reference example, with the retired key still validating cleanly in a client config)
-
-- [00369: status line explained command](Completed/00369-status-line-explained-command/PLAN.md) - Complete + the archiving commit (every status-line handler now describes its own glyphs, how to read them and what the value means right now, surfaced by `hooks-daemon status-line-explained`)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -250,15 +246,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 408 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 361 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 363 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 24 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 22 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 24 + 361 + 13 = **398 folders**, spanning
+- **Folder-to-number reconciliation**: 22 + 363 + 13 = **398 folders**, spanning
   **395 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

@@ -4,6 +4,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00370: daemon restart verifier becomes a project handler](00370-daemon-restart-verifier-becomes-a-project-handler/PLAN.md) - Complete + the archiving commit (a handler that only ever fired inside this repository left the shared built-in library and became this repo's own project-handler reference example, with the retired key still validating cleanly in a client config)
+
+- [00369: status line explained command](00369-status-line-explained-command/PLAN.md) - Complete + the archiving commit (every status-line handler now describes its own glyphs, how to read them and what the value means right now, surfaced by `hooks-daemon status-line-explained`)
+
 - [00368: lsp is signal not noise](00368-lsp-is-signal-not-noise/PLAN.md) - Complete + the archiving commit (3,011 language-server errors down to zero with no suppression anywhere: the non-project trees are excluded, pyright is a blocking QA gate, and a session-start checker tells any project in five languages exactly how to silence its own noise)
 
 - [00367: deployed docs in sync with daemon workflow](00367-deployed-docs-in-sync-with-daemon-workflow/PLAN.md) - Complete + the archiving commit (a deployed core doc that told agents a human must approve a step no config key backs is now blocked by the `unenforced-approval-gate` docs-QA check, and both gates became real opt-in keys, default off)
