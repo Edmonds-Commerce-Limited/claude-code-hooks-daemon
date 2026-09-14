@@ -41,13 +41,44 @@ critical reading compacts regardless of `work_idle`". Every word is true of
 `work_idle`, and the sentence reads as "critical always compacts" — while the
 absolute `idle` gate above it goes unmentioned.
 
-**The supervisor can hold its own gate shut.** It injects `/goal` text that can
-sit unsubmitted, which IS a non-empty input box:
+## CORRECTION 3 — "the supervisor can hold its own gate shut" is FALSE, and it voids option 3
+
+An earlier revision of this plan claimed the supervisor blocks its own
+compaction by leaving `/goal` text unsubmitted in the box. **That is wrong**,
+and it was the entire premise of option 3 — the option the owner ruled a "no
+brainer". Establishing it before building is what caught it.
+
+Both halves of the gate derive from HUMAN keystrokes ONLY:
 
 ```text
-would-resubmit: own line may still be unsubmitted in the input box (/goal) -> pressing [enter]
-noop: goal clear pending but own line still in the input box
+can_inject = facts.idle and facts.input_line_empty          (4611)
+  facts.idle            = _is_idle(activity, …)             (6348)
+  facts.input_line_empty= activity.line.is_empty            (6382)
+  worker ANDs            line_recognizer.is_empty           (5743)
+
+activity.record(forwarded)  <- called in ONE place: the stdin read loop (6195),
+                               on bytes the HUMAN typed and that are forwarded
+                               to the child. The worker's recognizer is fed the
+                               SAME bytes via raw_tap (6200).
 ```
+
+The supervisor's own injections are written to `master_fd` by a different path
+and feed NEITHER tracker. So supervisor-authored text in the box does not make
+`input_line_empty` False, cannot trip `_REASON_BUSY_COMPOSING`, and **never
+blocks a compaction**.
+
+**Where the false evidence came from**: the `own line may still be unsubmitted`
+and `goal clear pending but own line still in the input box` log lines are real,
+but they belong to the GOAL-CLEAR and RESUBMIT paths, which track supervisor
+text separately via `machine.own_line_pending()`. They were read as evidence
+about the COMPACT path. Two different gates, conflated.
+
+**Consequence.** Option 3 targets a case that cannot occur, so it fixes nothing
+and must not be built. All 277 red-blocked and 4 urgent-blocked ticks were
+HUMAN-caused — text in the box, or a keystroke inside the idle floor. The real
+choice is therefore between options 1, 2 and 4, every one of which trades
+against the human's unsent text. That is precisely Plan 00168's H2, recorded as
+BY DESIGN, so revisiting it needs a fresh ruling made on accurate premises.
 
 ## Why the gate exists — the trade-off any fix must pay
 
@@ -113,17 +144,21 @@ which omits the suffix the sibling path at 4697 adds.
 
 ### Phase 1: Owner decision
 
-- [x] ✅ **Task 1.1**: RULED by the owner — **option 3, with option 2 as the
-  follow-on**. Verbatim: "3 is a no brainer / 2 flushing the box via hitting
-  return is probably better than hitting escape".
+- [ ] 🔄 **Task 1.1**: RULING RECEIVED BUT VOIDED BY CORRECTION 3 — a fresh one
+  is needed. The owner ruled verbatim: "3 is a no brainer / 2 flushing the box
+  via hitting return is probably better than hitting escape".
 
-  Option 3 (bypass `idle` when the box holds only SUPERVISOR-authored text) is
-  adopted and is the buildable half: strictly safe, destroys nothing a human
-  typed, and fixes the case the supervisor itself causes.
+  **Option 3 cannot be built.** It was described as bypassing the gate when the
+  box holds only supervisor-authored text — but supervisor text never trips the
+  gate at all, so there is nothing to bypass. The ruling was sound given the
+  description; the description was wrong. Recorded rather than quietly
+  re-scoped, because the owner decided on a premise this plan supplied.
 
-  **A concern was raised against the Enter-flush and is NOT resolved — see Task
-  1.3.** It must not be built on the strength of this ruling alone, because the
-  ruling was given before the objection existed.
+  **What survives**: every blocked tick is HUMAN text or a recent human
+  keystroke, so options 1, 2 and 4 are the live set and each one costs the
+  human's unsent input. Task 1.3's objection to Enter-flush stands and now
+  matters more, because option 2 is no longer the follow-on — it is a candidate
+  for the primary.
 
   The original options, kept for the record:
 
