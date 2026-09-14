@@ -535,6 +535,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
+<!-- handler: budget-exhaustion-detector -->
+
+- budget_exhaustion_detector — hidden agent budgets are surfaced
+
 <!-- handler: goal-injection -->
 
 - goal_injection — plan-start goal signal for the ccy supervisor
@@ -558,10 +562,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: daemon-sync-after-merge -->
 
 - daemon_sync_after_merge — a pull can leave the daemon stale
-
-<!-- handler: budget-exhaustion-detector -->
-
-- budget_exhaustion_detector — hidden agent budgets are surfaced
 
 <!-- handler: ccy-supervisor-integrity -->
 
