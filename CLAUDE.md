@@ -611,6 +611,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - persistent_cron_assertor — declared crons are re-established each session
 
+<!-- handler: reference-repo-sweep -->
+
+- reference_repo_sweep — reference clones are made fresh before you read them
+
 <!-- handler: standing-authorisations -->
 
 - standing_authorisations — a project can record a standing request
