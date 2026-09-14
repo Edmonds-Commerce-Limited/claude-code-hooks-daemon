@@ -1929,6 +1929,78 @@ class ClaudeMdConfig(BaseModel):
     promotion: PromotionConfig = Field(default_factory=PromotionConfig)
 
 
+class ReferenceReposConfig(BaseModel):
+    """Freshness governance for reference repositories (Plan 00401).
+
+    Reference clones kept under ``untracked/repos/`` are read by agents as
+    though current. This block governs the checking of that assumption.
+
+    ``enabled`` ships TRUE, and that is safe because discovery finds nothing
+    when the configured root does not exist — a project that never adopted the
+    convention gets silence with no config at all. Shipping it off would mean
+    every project that DOES adopt the convention must first discover a switch
+    before the protection does anything, which is exactly the reported failure:
+    reasoning from a weeks-old checkout and never being told.
+
+    ``roots`` are repository-relative and may NOT resolve to the repository
+    root. A root of ``.`` would sweep the whole project and govern the
+    project's OWN repository, which Plans 00178/00179 already handle and this
+    one explicitly does not.
+
+    Attributes:
+        enabled: Master switch for discovery, the sweep and enforcement
+        roots: Repository-relative directories to sweep for git checkouts
+        exclude: Glob patterns (the project's single glob dialect) to skip
+        mode: Enforcement posture for the PreToolUse backstop — ``block_once``
+            denies the first read of each stale repo per session and then gets
+            out of the way, which is the owner's ruling and the default
+        auto_pull: Whether SessionStart may fast-forward a repo it has proven
+            safe — clean, not ahead, not diverged. Never touches anything else
+        cache_ttl_minutes: How long a freshness reading stays trustworthy.
+            Past this, a read is NOT VERIFIED rather than assumed fresh
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True, description="Enable reference-repo freshness checks")
+    roots: list[str] = Field(
+        default_factory=lambda: ["untracked/repos"],
+        description="Repository-relative directories swept for governed checkouts",
+    )
+    exclude: list[str] = Field(
+        default_factory=list,
+        description="Glob patterns for checkouts to leave ungoverned",
+    )
+    mode: Literal["block_once", "block", "advise", "off"] = Field(
+        default="block_once",
+        description="PreToolUse enforcement posture for a stale or unverified repo",
+    )
+    auto_pull: bool = Field(
+        default=True,
+        description="Let SessionStart fast-forward a repo when that is provably safe",
+    )
+    cache_ttl_minutes: Annotated[int, Field(ge=1)] = Field(
+        default=15,
+        description="Minutes a freshness reading stays valid before reading as NOT VERIFIED",
+    )
+
+    @field_validator("roots")
+    @classmethod
+    def validate_roots(cls, value: list[str]) -> list[str]:
+        """Reject absolute, escaping, and repository-root values."""
+        normalised: list[str] = []
+        for root in value:
+            candidate = _normalise_repo_relative_path(root, "reference_repos.roots entry")
+            if candidate == ".":
+                raise ValueError(
+                    "reference_repos.roots entry must name a directory beneath the "
+                    "repository, not the repository root itself — a root of '.' would "
+                    "sweep the whole project and govern its own repository"
+                )
+            normalised.append(candidate)
+        return normalised
+
+
 class Config(BaseModel):
     """Root configuration model for hooks daemon.
 
@@ -1955,6 +2027,7 @@ class Config(BaseModel):
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     project_handlers: ProjectHandlersConfig = Field(default_factory=ProjectHandlersConfig)
     plan_workflow: PlanWorkflowConfig = Field(default_factory=PlanWorkflowConfig)
+    reference_repos: ReferenceReposConfig = Field(default_factory=ReferenceReposConfig)
     documentation: DocumentationConfig = Field(default_factory=DocumentationConfig)
     layout: LayoutConfig = Field(default_factory=LayoutConfig)
     projects: list[ProjectConfig] = Field(

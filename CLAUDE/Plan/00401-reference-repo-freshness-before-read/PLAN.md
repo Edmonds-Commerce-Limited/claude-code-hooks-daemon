@@ -175,11 +175,23 @@ Each is a rule the implementation must not be able to violate:
 
 ### Phase 2: Config
 
-- [ ] ⬜ **Task 2.1**: Typed top-level `reference_repos` block following
-  `PlanWorkflowQaJournalConfig` (`config/models.py:487-558`): `enabled`,
-  `roots` (default `["untracked/repos"]`), `exclude`, `mode`
-  (`block_once` default, `block`, `advise`, `off`), `auto_pull`,
-  `cache_ttl_minutes`. `extra=forbid`, `Literal` for mode.
+- [x] ✅ **Task 2.1**: Typed top-level `reference_repos` block following
+  `PlanWorkflowQaJournalConfig`: `enabled`, `roots` (default
+  `["untracked/repos"]`), `exclude`, `mode` (`block_once` default, `block`,
+  `advise`, `off`), `auto_pull`, `cache_ttl_minutes`. `extra=forbid`, `Literal`
+  for mode, `ge=1` on the TTL (a zero TTL expires instantly, so every read would
+  be NOT VERIFIED).
+
+  `enabled` ships **TRUE**, which is safe because discovery finds nothing when
+  the root is absent — a project that never adopted the convention gets silence
+  with zero config. Shipping it off would make every adopting project hunt for a
+  switch before the protection did anything, which is the reported failure.
+
+  `roots` reuse `normalise_repo_relative_path` (absolute and `..` rejected) plus
+  one rule of their own: a root resolving to `.` is REJECTED, because it would
+  sweep the whole project and govern the project's own repository — which
+  Plans 00178/00179 already handle and this plan's Non-Goals exclude. 23 tests;
+  validated against this project's live config.
 
 ### Phase 3: SessionStart sweep (does the network work)
 
