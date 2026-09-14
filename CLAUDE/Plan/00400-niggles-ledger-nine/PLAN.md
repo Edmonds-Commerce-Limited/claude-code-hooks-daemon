@@ -336,18 +336,55 @@ rather than an edit.
   end-to-end without performing the very restart it exists to discourage, so the
   detector is verified live and the message by test.
 
+- [x] ✅ **N6**: FIXED (documentation) / GRADUATED to
+  [Plan 00402](../00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md)
+  (behaviour) — a daemon restart regenerates the `<hooksdaemon>` block in
+  `CLAUDE.md` but NEVER `.claude/HOOKS-DAEMON.md`. The restart's auto-commit is
+  scoped `git commit --only CLAUDE.md`, and `DocsGenerator` — the sole writer of
+  the other file — is reached only from `cmd_generate_docs`.
+
+  **Observed, not theorised**: `.claude/HOOKS-DAEMON.md` sat dated `2026-09-13`
+  announcing "UserPromptSubmit (5 handlers)" against six registered, omitting
+  `daemon_upgrade_detector` (priority 58) that Plan 00395 shipped. A doc naming
+  this project's protections understated them, across many restarts.
+
+  **Nothing could see it.** `tests/conftest.py` forbids tests from writing that
+  file; the docs-QA staleness check compares only the embedded version marker
+  against `__version__`, so drift WITHIN a version — which is every in-repo
+  handler addition — is invisible by construction; and the one rule that reads
+  the file, `undocumented-blocking-handler`, is by its own docstring "a floor,
+  not a ceiling" and could not see an ADVISORY handler.
+
+  **The obvious fix is wrong**, which is why the behaviour graduated rather than
+  being patched here: that file's `> Generated on … (vX.Y.Z)` header is the only
+  record of the version the tracked assets were DEPLOYED from, parsed by
+  `utils/deployed_version.py:46` and read by `scripts/upgrade.sh:378` to derive
+  the upgrade's FROM side. Regenerating on restart would stamp today's date and
+  the running version over it. Plan 00336 Task 3.1 recorded this same asymmetry
+  and fixed only the upgrade path, leaving this half.
+
+  **Fixed here**: `regen-docs.md` claimed "A `restart` already regenerates both
+  artifacts on startup" — false, and it is the sentence that would stop anyone
+  looking. Corrected in the `src/` source and the deployed `.claude/` copy, kept
+  byte-identical so the drift check stays meaningful.
+
+  **How it surfaced**: the restart that cleared this ledger's own QA failures
+  produced an auto-commit touching `CLAUDE.md` alone, which is the asymmetry
+  visible in one diff.
+
 ## Success Criteria
 
 - [x] Every entry above reaches a terminal state (fixed / not-a-defect /
   graduated) with its evidence recorded — N1 fixed (sidecar half ruled not a
   defect), N2 fixed, N3 comment fixed and behaviour ruled not a defect, N4 fixed,
-  N5 fixed.
+  N5 fixed, N6 documentation fixed and behaviour graduated to Plan 00402.
 - [x] Any fix with a behavioural surface is covered by a test that fails against
-  today's code — N1, N2, N4 and N5 each shipped a RED-first test. **N3 is the
-  stated exception and is not ticked silently**: its fix is a comment correction,
-  which has no behaviour to assert. Inventing a test that greps the comment's
-  wording would pin prose, not behaviour, and would break on the next honest
-  rewording.
+  today's code — N1, N2, N4 and N5 each shipped a RED-first test. **N3 and N6 are
+  the stated exceptions and are not ticked silently**: each was fixed by
+  correcting prose (a comment, a skill doc), which has no behaviour to assert.
+  Inventing a test that greps the wording would pin prose, not behaviour, and
+  would break on the next honest rewording. N6's BEHAVIOURAL half is not waived —
+  it carries a RED-first test as Task 1.1 of Plan 00402, where the fix belongs.
 - [ ] Full QA passes and CI is green.
 - [ ] The plan is archived into the holding area (`Completed/`) with the README
   row and statistics updated in the same commit.
