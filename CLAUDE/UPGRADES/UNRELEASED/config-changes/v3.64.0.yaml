@@ -236,6 +236,106 @@ config_changes:
         itself, there is nothing deployed for another session to replace, and
         the handler is dormant. Disable with
         handlers.user_prompt_submit.daemon_upgrade_detector.enabled: false.
+    - key: reference_repos
+      recommended: true
+      dormant: false
+      description: >-
+        NEW top-level block (Plan 00401) governing freshness of reference
+        clones kept under `untracked/repos/` -- a convention where read-only
+        clones of upstream repositories are tracked so an agent consults real
+        source instead of recalling it. The reported failure is that agents
+        read such a clone WITHOUT pulling, reason from a checkout weeks behind,
+        and produce conclusions that carry no error and no failing test: stale
+        reasoning is indistinguishable from correct reasoning at the point it
+        is produced, which is why nothing caught it. One checker feeds three
+        surfaces -- a SessionStart sweep that does the network work, a
+        PreToolUse backstop that reads only the cache, and the
+        `hooks-daemon reference-repos` CLI -- so they cannot drift apart about
+        what "stale" means. `enabled` ships true and that is safe because
+        discovery finds nothing when the root does not exist, so a project that
+        never adopted the convention gets silence with no config at all;
+        shipping it OFF would mean every project that DOES adopt it must first
+        discover a switch before the protection does anything, which is exactly
+        the reported failure. `roots` are repository-relative and may not
+        resolve to the repository root -- a root of `.` would govern the
+        project's own repository, which Plans 00178/00179 already handle.
+        `auto_pull` fast-forwards only what is provably safe (clean tree, no
+        local commits, fast-forward only) and reports everything else
+        untouched: the one real clone measured while designing this was `ahead
+        1` with uncommitted changes, where a blind pull would conflict or
+        destroy work. `cache_ttl_minutes` bounds how long a reading stays
+        trustworthy -- past it a read is NOT VERIFIED rather than assumed
+        fresh, because "nobody has checked this" and "this is stale" are
+        different facts and collapsing them either cries wolf or gives false
+        comfort.
+      example_yaml: |
+        reference_repos:
+          enabled: true
+          roots: ["untracked/repos"]
+          exclude: []
+          mode: block_once      # block_once | block | advise | off
+          auto_pull: true
+          cache_ttl_minutes: 15
+      migration_note: >-
+        On by default and inert unless `untracked/repos/` (or a configured
+        root) actually contains git checkouts, so no action is needed to adopt.
+        Set `mode: advise` to report without denying, or `enabled: false` to
+        switch the whole subsystem off. Note the default branch is resolved
+        from `origin/HEAD` rather than assumed to be `main`, and a clone whose
+        origin cannot be reached -- deliberately, as with a remote replaced by
+        an invalid URL so a push cannot happen by accident -- reads as
+        UNCONFIRMED rather than stale, so it is never locked out of being read.
+    - key: handlers.pre_tool_use.reference_repo_freshness
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PreToolUse handler (Plan 00401), ships enabled at priority 39,
+        denying a READ of a governed reference clone that is stale or off its
+        default branch. It performs NO network I/O, and that is forced by
+        measurement rather than preferred: a fetch and pull inside a hook can
+        consume the entire 30s socket budget for ONE repo and a project can
+        have several, reproducing the `socket_timeout` failure the daemon
+        already has dedicated error text for. It therefore reads only the
+        cached reading written by the SessionStart sweep. Git is never
+        intercepted -- `git` at the head of any segment in a command chain is
+        exempt anywhere -- because the remedy the denial prints is
+        `git -C <clone> pull --ff-only`, and a gate that blocked the fix it
+        recommends would be unusable. Two rule IDs, deliberately distinct:
+        `R-REFERENCE-REPO-STALE` for a clone that is behind or off-branch, and
+        `R-REFERENCE-REPO-NOT-VERIFIED` for one with no in-date reading. Scope,
+        enforcement posture and auto-pull live in the TOP-LEVEL
+        `reference_repos:` block rather than here, so the sweep, this backstop
+        and the CLI cannot disagree.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            reference_repo_freshness:
+              enabled: true
+              priority: 39
+      migration_note: >-
+        On by default; no action needed to adopt. Enforcement posture is
+        `reference_repos.mode`, not a handler option. Disable with
+        handlers.pre_tool_use.reference_repo_freshness.enabled: false.
+    - key: handlers.session_start.reference_repo_sweep
+      recommended: true
+      dormant: false
+      description: >-
+        NEW SessionStart handler (Plan 00401), ships enabled at priority 71 --
+        last, because it is the only SessionStart handler that may fetch for
+        several repositories. It fetches every governed clone, fast-forwards
+        the ones it can prove are safe, and writes the cached reading the
+        PreToolUse backstop later reads. Silent when every governed clone is
+        current, and silent when there are none.
+      example_yaml: |
+        handlers:
+          session_start:
+            reference_repo_sweep:
+              enabled: true
+              priority: 71
+      migration_note: >-
+        On by default; no action needed to adopt. This is where the network
+        work happens, so disabling it while leaving the PreToolUse backstop on
+        leaves every clone reading NOT VERIFIED once the cache expires.
   renamed: []
   removed:
     - key: handlers.pre_tool_use.daemon_restart_verifier

@@ -1,6 +1,6 @@
 # Plan 00401: reference repo freshness before read
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: High
@@ -254,7 +254,15 @@ Each is a rule the implementation must not be able to violate:
 - [x] ✅ One checker backs all three surfaces. Proven twice in the build: the
   false all-clear was fixed in `report.py` alone and corrected every surface,
   and `display_path` was promoted rather than copied into the handler.
-- [ ] ⬜ Full QA passes and CI is green.
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/41-a-reference-clone-is-fresh-before-you-read-it.md`
+  for the callout, and three `recommended: true` entries in
+  `UNRELEASED/config-changes/v3.64.0.yaml` — the `reference_repos` block and
+  both new handlers — so the upgrade advisory promotes them to existing installs
+  rather than letting a whole subsystem ship dormant. No truth-change: this adds
+  behaviour rather than falsifying a documented one.
+- [x] ✅ Full QA passes and CI is green — 30/30 checks locally (23,076 tests,
+  95.1% coverage) and CI green on Python 3.11, 3.12 and 3.13.
 
 ## Delivery & Milestones
 
