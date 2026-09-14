@@ -240,7 +240,7 @@ which omits the suffix the sibling path at 4697 adds.
   not on elapsed non-emptiness. Recorded above with both caveats: branch 2 is
   unreachable and must not be built, and branch 3 costs a turn.
 
-- [ ] ⬜ **Task 1.2**: Give the input-box deferral line (4685) the
+- [x] ✅ **Task 1.2** DONE — band suffix added to the deferral line; `test_critical_deferral_carries_the_band_suffix` RED then GREEN. The `evaluate()` docstring now states the `idle` gate's unconditional scope. Original scope:: Give the input-box deferral line (4685) the
   `_noop_band_suffix` its sibling at 4697 already has, so the two log shapes
   agree and a suppressed CRITICAL cannot hide in the deferral stream. This is
   what forced the whole investigation to reason from run-lengths rather than
@@ -248,42 +248,49 @@ which omits the suffix the sibling path at 4697 adds.
 
 ### Phase 2: Text-stability tracking
 
-- [ ] ⬜ **Task 2.1**: A failing test first: a box whose content is UNCHANGED
+- [x] ✅ **Task 2.1** DONE — `TestHumanInputLineStability` — 6 tests including the continuous-typing-never-abandoned case. Original scope:: A failing test first: a box whose content is UNCHANGED
   across 120s of ticks is reported abandoned, while a box that changes on any
   tick inside the window is NOT. The changing case is the one a naive
   "non-empty for 120s" timer gets wrong, so it must exist before the code.
-- [ ] ⬜ **Task 2.2**: Track content stability on `HumanInputLine` — a
+- [x] ✅ **Task 2.2** DONE — `_last_changed_at` stamped only on a real buffer change; `_DEFAULT_INPUT_LINE_ABANDON_SECONDS = 120.0`. Original scope:: Track content stability on `HumanInputLine` — a
   fingerprint of the buffer plus the monotonic time it last CHANGED. Not a
   timer started when the box first went non-empty: a human typing continuously
   for three minutes must never be judged abandoned.
-- [ ] ⬜ **Task 2.3**: Wire abandonment into the compact path only, leaving the
+- [x] ✅ **Task 2.3** DONE — wired to the compact path only; the 2s idle floor untouched. Original scope:: Wire abandonment into the compact path only, leaving the
   2s idle floor untouched. `_DEFAULT_IDLE_FLOOR_SECONDS` is correct and is not
   in scope.
 
 ### Phase 3: Acting on an abandoned box
 
-- [ ] ⬜ **Task 3.1**: A failing test: at red-or-worse with an abandoned box, the
+- [x] ✅ **Task 3.1** DONE — `TestAbandonedInputBoxFlush` plus an end-to-end `supervise()` run proving submit-then-compact. Original scope:: A failing test: at red-or-worse with an abandoned box, the
   supervisor submits the pending text and then compacts, in that order.
-- [ ] ⬜ **Task 3.2**: Implement, reusing the existing resubmit/Enter machinery
+- [x] ✅ **Task 3.2** DONE — reuses the existing resubmit payload and injection path — no second keystroke path. Original scope:: Implement, reusing the existing resubmit/Enter machinery
   rather than a second keystroke path.
-- [ ] ⬜ **Task 3.3**: Pin that the submit happens exactly ONCE per abandoned
+- [x] ✅ **Task 3.3** DONE — `_abandoned_box_handled` one-shot, reset only when the box stops reading abandoned. Original scope:: Pin that the submit happens exactly ONCE per abandoned
   episode. A re-submitting loop against a box the Enter did not clear is the
   failure mode this whole area already has history with (`/compact` stall →
   `[esc]` flush), and it must not be reintroduced.
-- [ ] ⬜ **Task 3.4**: Update `TestH2InputBoxGuardBlocksEvenCritical` in
+- [x] ✅ **Task 3.4** DONE — `TestH2InputBoxGuardBlocksEvenCritical` updated WITH a docstring recording that Plan 00168's decision was revisited, plus a contrasting test. Original scope:: Update `TestH2InputBoxGuardBlocksEvenCritical` in
   `tests/unit/supervise/test_compaction_gap_repro.py`. It encodes Plan 00168's
   deliberate decision, so it must be changed with a comment recording that the
   decision was revisited — never quietly deleted.
 
 ### Phase 4: The latent clear-byte gaps
 
-- [ ] ⬜ **Task 4.1**: Failing tests that Ctrl-W (0x17) and Ctrl-K (0x0B) leave
+- [x] ✅ **Task 4.1** DONE — 7 tests in `TestHumanInputLineClearByteGaps`, 5 initially RED. Original scope:: Failing tests that Ctrl-W (0x17) and Ctrl-K (0x0B) leave
   the tracker permanently non-empty, and that a bracketed-paste start with no
   end swallows a subsequent Enter.
-- [ ] ⬜ **Task 4.2**: Decide each on its merits. Ctrl-W/Ctrl-K do NOT clear the
+- [x] ✅ **Task 4.2** DONE — Ctrl-W modelled as readline word-delete; Ctrl-K a no-op under this parser's existing cursor-at-end assumption; paste latch bounded at 65536 bytes. Original scope:: Decide each on its merits. Ctrl-W/Ctrl-K do NOT clear the
   whole line in a real shell, so treating them as clear bytes would be wrong;
   the honest fix is to model them (word-delete / kill-to-end) or to bound the
   paste latch. Recorded as a real choice rather than assumed.
+
+## Review
+
+The implementation and test review lives in **[REVIEW.md](REVIEW.md)** — what
+was checked against the code rather than taken from the implementation report,
+what the tests pin (including the one case where this acts on live human text),
+the live dogfooding evidence, and the risks accepted rather than resolved.
 
 ## Success Criteria
 
