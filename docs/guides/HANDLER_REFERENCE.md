@@ -1608,12 +1608,12 @@ permanently — while an over-redacted report costs one round trip.
 **What it does NOT touch**, because a gate that blocks ordinary work gets
 switched off:
 
-| Left alone                            | Why                                                                                   |
-| ------------------------------------- | ------------------------------------------------------------------------------------- |
-| Issues on your own repository         | Nothing to do with this daemon. The target comes from `--repo`/`-R`, never a mention. |
-| `gh issue comment`, `list` and `view` | No generator produces a comment body; `sensitive_content` scans one for secret terms. |
-| The daemon's own repository           | It stands down in self-install, so the project's own issue workflow is unaffected.    |
-| `--web`                               | It files nothing — it opens GitHub's form, which states the rule and needs two ticks. |
+| Left alone                            | Why                                                                                                |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Issues on your own repository         | Nothing to do with this daemon. The target comes from `--repo`/`-R`, never a mention.              |
+| `gh issue comment`, `list` and `view` | No generator produces a comment body; `sensitive_content` scans one for secret terms.              |
+| The daemon's own repository           | It stands down in self-install, so the project's own issue workflow is unaffected.                 |
+| `--web`                               | It files nothing — it opens GitHub's forms, which state the rule; the defect form needs two ticks. |
 
 `--web` is the deliberate hole, and it is what keeps the gate honest. Someone
 who genuinely cannot run the generator — a defect that stops the CLI, a machine

@@ -117,10 +117,12 @@ machine without the install — `--web` is allowed and is the fallback:
 gh issue create --repo Edmonds-Commerce-Limited/claude-code-hooks-daemon --web
 ```
 
-It files nothing; it opens GitHub's own issue form, which states the same rule
-and cannot be submitted without ticking two acknowledgements. Do not reach for
-it to skip steps 1–3 — the checks are then yours to do by hand, and they are
-the part that decides whether there is a defect at all.
+It files nothing; it opens GitHub's issue chooser. Pick **Daemon defect**: it
+asks for the generator's fields and cannot be submitted without ticking two
+acknowledgements. (**Something else** states the same rule but asks for no
+structure and has no acknowledgements.) Do not reach for `--web` to skip steps
+1–3 — the checks are then yours to do by hand, and they are the part that
+decides whether there is a defect at all.
 
 ## Related
 

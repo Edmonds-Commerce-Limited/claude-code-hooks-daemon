@@ -147,8 +147,10 @@ gh issue create --repo Edmonds-Commerce-Limited/claude-code-hooks-daemon --web
 ```
 
 `--web` is explicitly allowed by the filing gate. It files nothing — it opens
-the form, which cannot be submitted without ticking two acknowledgements, so a
-person is in the loop by construction.
+the chooser, and the **Daemon defect** form cannot be submitted without ticking
+two acknowledgements, so a person is in the loop by construction. Pick that
+form rather than **Something else**: the free-text one states the same rule but
+asks for no structure and has no acknowledgements to tick.
 
 That is the route for a machine without the install, a defect that stops the
 CLI itself, or anyone reporting from outside a project.

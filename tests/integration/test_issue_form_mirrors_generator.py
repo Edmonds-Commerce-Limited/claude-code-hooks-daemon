@@ -133,6 +133,44 @@ class TestTheRedactionRuleReachesAWebReporter:
     def test_the_defect_form_points_at_the_generator(self) -> None:
         assert "issue-report" in _all_text(_load(_DEFECT_FORM))
 
+    def test_the_defect_form_keeps_exactly_two_required_acknowledgements(self) -> None:
+        """Five documents promise this, and nothing else checks it.
+
+        `issue_filing_gate` allows `--web` — a deliberate hole — and the reason
+        given for it, in the handler source, its deny message, its CLAUDE.md
+        guidance, `BUG_REPORTING.md`, the bundled skill and the release
+        callout, is that a human meets two acknowledgements before anything is
+        published. Delete a checkbox here and every one of those becomes a
+        false promise about a PUBLIC tracker, silently.
+
+        The count is asserted exactly rather than as "at least one": a third
+        acknowledgement is not a free improvement either, because the same
+        documents say two.
+        """
+        required = [
+            option
+            for element in _load(_DEFECT_FORM)["body"]
+            if element.get("type") == "checkboxes"
+            for option in element["attributes"]["options"]
+            if option.get("required") is True
+        ]
+
+        assert len(required) == 2
+
+    def test_the_catch_all_form_carries_the_rule_without_checkboxes(self) -> None:
+        """Deliberate, and the reason the prose elsewhere had to be made precise.
+
+        A free-text form asks for no structure — that is the whole point of it,
+        and adding ticks would recreate the barrier it exists to remove. So the
+        "two acknowledgements" promise is true of the DEFECT form only, and
+        every document making it now says which form it means.
+        """
+        has_checkboxes = any(
+            element.get("type") == "checkboxes" for element in _load(_OTHER_FORM)["body"]
+        )
+
+        assert has_checkboxes is False
+
 
 class TestRouting:
     def test_blank_issues_are_off(self) -> None:

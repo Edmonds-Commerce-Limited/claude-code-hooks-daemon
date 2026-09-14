@@ -231,10 +231,10 @@ class TestABodyTheGeneratorProduced:
 class TestTheBrowserFallback:
     """`--web` is ALLOWED, and that is a deliberate hole in the gate.
 
-    It opens GitHub's own issue form in a browser — the one place the redaction
-    rule is stated to a human, and one that cannot be submitted without ticking
-    the two acknowledgements. Nothing reaches the tracker until a person has
-    read those and clicked, so the human is in the loop by construction.
+    It opens GitHub's own issue forms in a browser — the one place the redaction
+    rule is stated to a human, and the defect form cannot be submitted without
+    ticking two acknowledgements. Nothing reaches the tracker until a person has
+    read them and clicked, so the human is in the loop by construction.
 
     Denying it would leave someone who genuinely cannot run the generator — a
     defect that stops the CLI, a machine without the install — with no route at

@@ -106,9 +106,12 @@ _STDIN_BODY: Final[str] = "-"
 
 #: Opens GitHub's own issue form in a browser instead of filing anything. This
 #: is a DELIBERATE hole in the gate, and it is the escape hatch that keeps the
-#: gate honest: the form is the one place the redaction rule is stated to a
-#: human, it cannot be submitted without ticking two acknowledgements, and
-#: nothing reaches the tracker until a person has read them and clicked.
+#: gate honest: the forms are the one place the redaction rule is stated to a
+#: human, the defect form cannot be submitted without ticking two
+#: acknowledgements, and nothing reaches the tracker until a person has read
+#: them and clicked. Stated that precisely because the free-text form carries
+#: the rule but no checkboxes, and a safety property this file overstates is
+#: one a reader will rely on.
 #:
 #: Denying it would leave someone who genuinely cannot run the generator — a
 #: defect that stops the CLI, a machine without the install — with no route at
@@ -157,9 +160,9 @@ _RULE = Rule(
         "where the checks still run over it.\n\n"
         "**If you genuinely cannot run the generator** -- a defect that stops the CLI, a "
         "machine without the install -- use `--web`. It is allowed: it files nothing, it "
-        "opens GitHub's own issue form, and that form states the same rule and cannot be "
-        "submitted without ticking two acknowledgements, so a person is in the loop by "
-        "construction.\n\n"
+        "opens GitHub's own issue forms, every one of them states the same rule, and the "
+        "defect form cannot be submitted without ticking two acknowledgements -- so a "
+        "person is in the loop by construction.\n\n"
         "Issues on your OWN repository are untouched by this rule, and so is every "
         "`gh issue comment`, `list` and `view` -- including against this tracker."
     ),
@@ -294,10 +297,10 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
     def _segment_problems(self, segment: str, hook_input: dict[str, Any]) -> list[str]:
         """Why this filing cannot go ahead, or an empty list when it may."""
         if _WEB_FLAG.search(segment):
-            # Files nothing: it opens GitHub's own form, where a human meets the
-            # rule and has to tick two acknowledgements before anything is
-            # published. See _WEB_FLAG for why this hole is the one that keeps
-            # the gate honest rather than the one that defeats it.
+            # Files nothing: it opens GitHub's own forms, where a human meets
+            # the rule before anything is published. See _WEB_FLAG for why this
+            # hole is the one that keeps the gate honest rather than the one
+            # that defeats it.
             return []
 
         matches = list(_BODY_FILE.finditer(segment))
@@ -374,8 +377,9 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
             "the generator built — not that the prose you wrote inside it is safe to "
             "publish. That judgement is still yours.\n\n"
             "**`--web` is allowed**, and is the fallback when the generator genuinely "
-            "cannot run. It files nothing: it opens GitHub's own issue form, which states "
-            "the same rule and cannot be submitted without ticking two acknowledgements.\n\n"
+            "cannot run. It files nothing: it opens GitHub's own issue forms, which state "
+            "the same rule, and the defect form cannot be submitted without ticking two "
+            "acknowledgements.\n\n"
             "In the daemon's own repository this handler stands down entirely, so the "
             "project's own issue workflow is unaffected."
         )
