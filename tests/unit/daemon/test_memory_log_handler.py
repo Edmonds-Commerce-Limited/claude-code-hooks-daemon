@@ -211,6 +211,30 @@ class TestMemoryLogHandler:
         logs = handler.get_logs()
         assert logs == []
 
+    def test_get_logs_elides_arguments_when_asked(self) -> None:
+        """Plan 00403: the shareable rendering keeps the template, not the values.
+
+        `bug-report` publishes this window; `hooks-daemon logs` does not. Both
+        read the same buffer, so the difference has to be a request-time
+        choice rather than a property of what was stored.
+        """
+        handler = MemoryLogHandler(max_records=10)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler.emit(
+            logging.LogRecord(
+                name="mylogger",
+                level=logging.DEBUG,
+                pathname="test.py",
+                lineno=10,
+                msg="hook_input: %s",
+                args=({"session_name": "Q4 payroll fix"},),
+                exc_info=None,
+            )
+        )
+
+        assert "Q4 payroll fix" not in handler.get_logs(elide_arguments=True)[0]
+        assert "Q4 payroll fix" in handler.get_logs()[0], "the operator's own view is unchanged"
+
     def test_get_logs_formatting(self) -> None:
         """get_logs should use handler's formatter."""
         handler = MemoryLogHandler(max_records=10)

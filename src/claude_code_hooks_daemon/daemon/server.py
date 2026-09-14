@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.log_elision import elide_record_arguments
 from claude_code_hooks_daemon.utils.scratch_dir import ensure_scratch_dir
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms, redact_text
 from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
@@ -376,12 +377,22 @@ class LegacyController(Protocol):
         ...
 
 
-def get_memory_logs(count: int | None = None, level: str | None = None) -> list[str]:
+def get_memory_logs(
+    count: int | None = None,
+    level: str | None = None,
+    *,
+    elide_arguments: bool = False,
+) -> list[str]:
     """Get logs from memory buffer.
 
     Args:
         count: Number of recent logs to return (None = all)
         level: Minimum log level to filter by (None = all)
+        elide_arguments: Render each record from its format string with the
+            interpolated runtime values removed, for a caller that will
+            PUBLISH the result (Plan 00403). Applied on both paths below: a
+            level filter narrows which records are returned and says nothing
+            about what any one of them carries, so the two are independent.
 
     Returns:
         List of formatted log strings
@@ -405,9 +416,11 @@ def get_memory_logs(count: int | None = None, level: str | None = None) -> list[
         if count is not None:
             records = records[-count:]
         matching = [record for record in records if record.levelno >= threshold]
+        if elide_arguments:
+            matching = [elide_record_arguments(record) for record in matching]
         return [_memory_log_handler.format(record) for record in matching]
 
-    return _memory_log_handler.get_logs(count)
+    return _memory_log_handler.get_logs(count, elide_arguments=elide_arguments)
 
 
 def get_log_count() -> int:
@@ -1415,7 +1428,8 @@ class HooksDaemon:
         if action == "get_logs":
             count = hook_input.get("count")
             level = hook_input.get("level")
-            logs = get_memory_logs(count, level)
+            elide_arguments = bool(hook_input.get("elide_arguments", False))
+            logs = get_memory_logs(count, level, elide_arguments=elide_arguments)
             result = {"logs": logs, "count": get_log_count()}
             response = {"result": result}
 

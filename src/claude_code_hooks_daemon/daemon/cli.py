@@ -7217,7 +7217,19 @@ def cmd_bug_report(args: argparse.Namespace) -> int:
             socket_path,
             {
                 "event": "_system",
-                "hook_input": {"action": "get_logs", "count": _BUG_REPORT_LOG_LINES},
+                "hook_input": {
+                    "action": "get_logs",
+                    "count": _BUG_REPORT_LOG_LINES,
+                    # Plan 00403 Task 1.5. Scrubbing rewrites paths, the remote
+                    # and the hostname; it cannot reach what the daemon logged
+                    # INSIDE a payload. Two of these records dump a whole
+                    # `hook_input` — the verbatim Bash command, `session_name`,
+                    # `session_id`, `prompt_id` — and a 100-line window is
+                    # whatever the user was doing moments earlier, so what it
+                    # holds is not predictable. Capture less, rather than
+                    # scrub harder afterwards.
+                    "elide_arguments": True,
+                },
             },
         )
         if logs_resp and "result" in logs_resp:

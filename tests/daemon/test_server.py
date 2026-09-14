@@ -5,6 +5,7 @@ Comprehensive test suite following TDD principles.
 
 import asyncio
 import json
+import logging
 import os
 import tempfile
 import time
@@ -1312,6 +1313,44 @@ class TestMemoryLogFunctions:
 
         # Restore handler
         server._memory_log_handler = original_handler
+
+    @pytest.mark.parametrize("level", [None, "DEBUG"])
+    def test_get_memory_logs_elides_arguments_on_every_path(self, level: str | None) -> None:
+        """Plan 00403: `get_memory_logs` has two returns, and both must elide.
+
+        A level filter narrows WHICH records come back and says nothing about
+        what any one of them carries, so the two are independent — but they are
+        separate code paths, and the filtered one is easy to add a guarantee to
+        the unfiltered one and forget.
+        """
+        from claude_code_hooks_daemon.daemon import server
+        from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
+        from claude_code_hooks_daemon.daemon.server import get_memory_logs
+
+        handler = MemoryLogHandler(max_records=10)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler.emit(
+            logging.LogRecord(
+                name="mylogger",
+                level=logging.ERROR,
+                pathname="test.py",
+                lineno=10,
+                msg="hook_input: %s",
+                args=({"session_name": "Q4 payroll fix"},),
+                exc_info=None,
+            )
+        )
+
+        original_handler = server._memory_log_handler
+        server._memory_log_handler = handler
+        try:
+            elided = get_memory_logs(level=level, elide_arguments=True)
+            verbatim = get_memory_logs(level=level)
+        finally:
+            server._memory_log_handler = original_handler
+
+        assert "Q4 payroll fix" not in elided[0]
+        assert "Q4 payroll fix" in verbatim[0], "the operator's own view is unchanged"
 
     def test_get_log_count_before_init(self) -> None:
         """Test get_log_count before daemon is initialized."""

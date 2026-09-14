@@ -7,6 +7,8 @@ Log cleanup happens asynchronously after responses are sent.
 import logging
 from collections import deque
 
+from claude_code_hooks_daemon.utils.log_elision import elide_record_arguments
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,11 +47,18 @@ class MemoryLogHandler(logging.Handler):
             logger.error("Unexpected error in memory log handler: %s", e, exc_info=True)
             self.handleError(record)
 
-    def get_logs(self, count: int | None = None) -> list[str]:
+    def get_logs(self, count: int | None = None, *, elide_arguments: bool = False) -> list[str]:
         """Get formatted log messages from buffer.
 
         Args:
             count: Number of recent logs to return (None = all)
+            elide_arguments: Render each record from its format string with the
+                interpolated runtime values removed. Off by default, because
+                an operator reading their own daemon's logs on their own
+                machine has nothing to be protected from. Bug reports turn it
+                on: they are generated to be shared on a public tracker, and a
+                log window is whatever the user happened to be doing moments
+                earlier rather than anything predictable (Plan 00403).
 
         Returns:
             List of formatted log strings
@@ -58,7 +67,9 @@ class MemoryLogHandler(logging.Handler):
         if count is not None:
             records = records[-count:]
 
-        return [self.format(record) for record in records]
+        if not elide_arguments:
+            return [self.format(record) for record in records]
+        return [self.format(elide_record_arguments(record)) for record in records]
 
     def clear(self) -> None:
         """Clear all logs from memory buffer."""

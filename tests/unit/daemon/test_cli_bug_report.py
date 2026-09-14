@@ -18,7 +18,7 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.core.project_context import ProjectContext
-from claude_code_hooks_daemon.daemon.cli import cmd_bug_report
+from claude_code_hooks_daemon.daemon.cli import _BUG_REPORT_LOG_LINES, cmd_bug_report
 from claude_code_hooks_daemon.utils.report_scrubbing import PROJECT_ROOT_PLACEHOLDER
 
 
@@ -398,6 +398,55 @@ class TestBugReportWithDaemon:
         content = output_file.read_text()
         assert "RUNNING" in content
         assert "12345" in content
+
+
+class TestTheLogWindowIsNarrowed:
+    """Plan 00403 Task 1.5: what the log capture emits, not how hard it is scrubbed.
+
+    Scrubbing rewrites the project root, `$HOME`, the git remote and the
+    hostname. It cannot reach what the daemon logged INSIDE a payload — and
+    running the scrubbed command against this repository showed whole
+    `hook_input` dumps in the window: the verbatim Bash command, `session_name`
+    (free text a user wrote), `session_id`, `prompt_id`, `tool_use_id`.
+
+    A 100-line window holds whatever the user was doing in the seconds before
+    they asked for a report, so what it contains is not predictable and cannot
+    be reasoned about after the fact. The daemon is asked for less instead.
+    """
+
+    @staticmethod
+    def _captured_log_request(tmp_path: Path) -> dict[str, Any]:
+        project = _make_project(tmp_path)
+        args = _make_args(project, output=str(tmp_path / "report.md"))
+        seen: list[dict[str, Any]] = []
+
+        def _record(socket_path: Path, request: dict[str, Any]) -> dict[str, Any]:
+            if request.get("hook_input", {}).get("action") == "get_logs":
+                seen.append(request)
+            return _mock_daemon_responses(socket_path, request)
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
+                side_effect=_record,
+            ),
+        ):
+            assert cmd_bug_report(args) == 0
+
+        assert seen, "the report must actually ask the daemon for logs"
+        return seen[0]
+
+    def test_the_report_asks_for_arguments_to_be_elided(self, tmp_path: Path) -> None:
+        request = self._captured_log_request(tmp_path)
+
+        assert request["hook_input"]["elide_arguments"] is True
+
+    def test_the_window_is_still_bounded(self, tmp_path: Path) -> None:
+        """Eliding arguments is not a licence to widen the capture."""
+        request = self._captured_log_request(tmp_path)
+
+        assert request["hook_input"]["count"] == _BUG_REPORT_LOG_LINES
 
 
 def _mock_daemon_responses(socket_path: Path, request: dict[str, Any]) -> dict[str, Any]:
