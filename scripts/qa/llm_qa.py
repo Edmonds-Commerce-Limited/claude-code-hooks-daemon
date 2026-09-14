@@ -341,6 +341,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="skill_references.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "github_urls": ToolConfig(
+        command=_python("check_github_urls.py", "--json"),
+        json_file="github_urls.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
     "canonical_callers": ToolConfig(
         command=_bash("run_canonical_callers_check.sh"),
         json_file="canonical_callers.json",
@@ -548,6 +553,11 @@ def _summarize_skill_refs(data: QaReport) -> str:
     return f"{total} violations"
 
 
+def _summarize_github_urls(data: QaReport) -> str:
+    total = data.get("summary", {}).get("total_violations", 0)
+    return f"{total} violations"
+
+
 def _summarize_smoke_test(data: QaReport) -> str:
     s = data.get("summary", {})
     passed = s.get("passed_probes", 0)
@@ -672,6 +682,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "error_hiding": _summarize_error_hiding,
     "shell_audit": _summarize_shell_audit,
     "skill_refs": _summarize_skill_refs,
+    "github_urls": _summarize_github_urls,
     "canonical_callers": _summarize_canonical_callers,
     "capture_corruption": _summarize_capture_corruption,
     "python_var_guidance": _summarize_python_var_guidance,

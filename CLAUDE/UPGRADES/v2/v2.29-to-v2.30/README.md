@@ -255,8 +255,10 @@ If you encounter issues during upgrade:
 
 4. **Report issue**:
 
-   - GitHub: https://github.com/anthropics/claude-code-hooks-daemon/issues
-   - Include: version info, error output, daemon logs
+   - GitHub: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
+   - Include: version info, error output, daemon logs — **redacted**. That
+     repository is public; strip absolute paths carrying a username, your git
+     remote, branch names and anything from an `.env` before posting.
 
 ## References
 
