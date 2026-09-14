@@ -21,6 +21,10 @@ from claude_code_hooks_daemon.issue_report.assemble import (
     ReportProblem,
     assemble_report,
 )
+from claude_code_hooks_daemon.issue_report.citation import (
+    CitationVerdict,
+    check_source_citation,
+)
 from claude_code_hooks_daemon.issue_report.currency import CurrencyVerdict, assess_currency
 from claude_code_hooks_daemon.issue_report.provenance import (
     GENERATOR_COMMAND,
@@ -44,6 +48,7 @@ __all__ = [
     "PROVENANCE_MARKER",
     "SCRATCH_PREFIX",
     "AssembledReport",
+    "CitationVerdict",
     "ConfigConsideration",
     "CurrencyVerdict",
     "ProvenanceProblem",
@@ -54,6 +59,7 @@ __all__ = [
     "assess_currency",
     "body_digest",
     "check_reproduction",
+    "check_source_citation",
     "render_document",
     "split_document",
     "verify_document",

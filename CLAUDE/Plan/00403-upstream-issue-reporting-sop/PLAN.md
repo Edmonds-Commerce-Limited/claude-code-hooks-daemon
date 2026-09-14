@@ -164,8 +164,15 @@ finding in it — the owner's rule, made checkable.
   to the real installed/latest resolution.
 - [ ] ⬜ **Task 3.2**: Configuration ruled out — surface the named handler's
   options and require a stated reason per option.
-- [ ] ⬜ **Task 3.3**: Source cited — require a `file:line` in the daemon source
-  and verify it resolves in the installed version.
+- [x] ✅ **Task 3.3**: Source cited — require a `file:line` in the daemon source
+  and verify it resolves in the installed version. A citation that does not
+  resolve means the reporter read a different version, a fork, or nothing, and
+  all three change how the rest of the report should be read. It is a lower
+  bound, not a proof — a resolving line proves the line exists, not that
+  anybody understood it — and the module says so rather than implying more.
+  Containment is checked after resolution, because
+  `src/claude_code_hooks_daemon/../../../etc/passwd` satisfies the prefix test
+  as text while pointing outside the tree.
 
 ### Phase 4: The filing gate (client installs only)
 
