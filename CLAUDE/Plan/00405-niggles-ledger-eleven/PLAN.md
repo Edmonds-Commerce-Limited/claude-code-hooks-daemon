@@ -179,6 +179,17 @@ rather than an edit.
   nothing wrong. The coverage figure is still printed, which makes it look
   like a run happened.
 
+  **It had been failing CI for four commits before anyone looked.** `gh run list` showed `failure` — not `cancelled`, which is what concurrency eviction
+  reports — on every push since the file was introduced, on all three Python
+  versions, with the same collection error. Local targeted runs stayed green
+  throughout, so nothing in the working loop contradicted them.
+
+  **The process lesson, which is the durable part.** Committing and pushing
+  after each unit of work is the standing instruction and is right; reading CI
+  after each push is the half that was missing. A red run says something a
+  local run structurally cannot, and four of them went unread because each
+  local check had just passed.
+
   **Fixed**: renamed to `test_package_exports.py`, which names the behaviour
   rather than the file under test and is a better name anyway. The reason is in
   the new file's docstring so nobody renames it back.
