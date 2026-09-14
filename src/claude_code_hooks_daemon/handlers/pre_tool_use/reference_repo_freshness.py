@@ -46,7 +46,11 @@ from claude_code_hooks_daemon.reference_repos.report import (
     remediation_command,
     repo_line,
 )
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    split_unquoted,
+    strip_message_bodies,
+    strip_quoted_heredoc_bodies,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +138,13 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         if tool_name != ToolName.BASH:
             return []
 
-        command = str(tool_input.get("command") or "")
+        # Strip the spans the SHELL never treats as commands before segmenting.
+        # Without this, `_CHAIN_SEPARATORS` (which includes "\n") turns every
+        # line of a `git commit -F - <<'EOF'` message into its own "segment", so
+        # prose merely NAMING a governed repo parses as a read of it. That is
+        # not hypothetical: it denied the commit shipping this handler's docs.
+        raw_command = str(tool_input.get("command") or "")
+        command = strip_message_bodies(strip_quoted_heredoc_bodies(raw_command))
         found: list[Path] = []
         for segment in split_unquoted(command, _CHAIN_SEPARATORS):
             words = segment.split()

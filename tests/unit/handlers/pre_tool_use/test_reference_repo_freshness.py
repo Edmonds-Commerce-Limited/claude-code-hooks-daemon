@@ -514,6 +514,60 @@ class TestCallsItMustNotJudge:
         assert handler.matches(_bash("cat untracked/repos/alpha/x.md && ")) is True
 
 
+class TestTextIsNotACommand:
+    """Regression: this handler blocked the commit that shipped its own docs.
+
+    `_CHAIN_SEPARATORS` includes "\\n", so every LINE of a `git commit -F -`
+    heredoc became its own "segment". A prose line mentioning
+    `untracked/repos/php-qa-ci` therefore parsed as a command reading a governed
+    repo, and the commit was denied. Nothing was being read at all.
+
+    The shell never treats these spans as commands, and neither may this
+    handler — `shell_segmentation` already has the strippers for exactly this.
+    """
+
+    def test_a_commit_message_body_naming_a_governed_repo_is_not_a_read(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        _repo(tmp_path)
+        command = (
+            "git commit -F - <<'MSGEOF'\n"
+            "Document the convention\n"
+            "\n"
+            "The canary lives at untracked/repos/php-qa-ci and is never pulled.\n"
+            "MSGEOF"
+        )
+
+        assert handler.matches(_bash(command)) is False
+
+    def test_an_inline_git_message_naming_a_governed_repo_is_not_a_read(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        _repo(tmp_path)
+
+        assert handler.matches(_bash("git commit -m 'note untracked/repos/alpha'")) is False
+
+    def test_a_quoted_heredoc_body_is_never_scanned(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """A quoted delimiter makes the body literal text being WRITTEN."""
+        _repo(tmp_path)
+        command = "cat > notes.md <<'EOF'\nsee untracked/repos/alpha for details\nEOF"
+
+        assert handler.matches(_bash(command)) is False
+
+    def test_a_real_read_on_a_later_line_still_engages(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """Stripping inert spans must not blind the handler to actual commands."""
+        _repo(tmp_path)
+        command = (
+            "git commit -m 'mentions untracked/repos/alpha'\ncat untracked/repos/alpha/README.md"
+        )
+
+        assert handler.matches(_bash(command)) is True
+
+
 class TestSubjectResolution:
     def test_a_call_scoped_to_the_root_itself_is_handled(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler

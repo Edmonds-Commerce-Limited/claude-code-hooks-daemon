@@ -226,24 +226,35 @@ Each is a rule the implementation must not be able to violate:
 
 ### Phase 6: Documentation
 
-- [ ] ⬜ **Task 6.1**: Document the convention and the handler in the agent tree,
-  including the un-fetchable carve-out, so the canary rule and this system are
-  not read as contradicting each other.
+- [x] ✅ **Task 6.1**: `CLAUDE/ReferenceRepos.md` documents the convention, the
+  three surfaces and the un-fetchable carve-out, with a reciprocal section in
+  `CLIENT-MODE-TESTING.md`. Both state the rule the carve-out exists for: do
+  NOT restore the canary's origin to clear a freshness report — that trades the
+  safety property for a tidier report. `docs/guides/HANDLER_REFERENCE.md` gained
+  the `reference_repo_freshness` section and summary row.
 
 ## Success Criteria
 
-- [ ] A stale governed repo cannot be read without the agent being told, in the
-  configured mode.
-- [ ] The canary (`untracked/repos/php-qa-ci`, invalid origin, dirty, ahead) is
-  reported and NEVER blocked and NEVER pulled — covered by a test built from its
-  real shape.
-- [ ] No PreToolUse code path performs network I/O — asserted by a test, not by
-  convention.
-- [ ] `default_branch` is resolved from `origin/HEAD`, so a repo whose default is
-  not `main` is not falsely reported.
-- [ ] The remediation command printed by a deny message is itself allowed.
-- [ ] One checker backs all three surfaces; a behaviour change needs one edit.
-- [ ] Full QA passes and CI is green.
+- [x] ✅ A stale governed repo cannot be read without the agent being told, in
+  the configured mode.
+- [x] ✅ The canary (`untracked/repos/php-qa-ci`, unreachable origin, dirty) is
+  reported and NEVER blocked and NEVER pulled. Running the CLI against the REAL
+  canary is what exposed the one defect worth having: its local refs say "not
+  behind", so the report counted it as fresh and printed `all 1 up to date` for
+  a repo whose fetch had failed with exit 128. `RepoState.verified` now
+  separates "confirmed against its remote" from "checkable".
+- [x] ✅ No PreToolUse code path performs network I/O — asserted by
+  `test_the_handler_never_performs_network_io`, which monkeypatches
+  `subprocess.run`/`Popen`/`check_output` to raise.
+- [x] ✅ `default_branch` is resolved from `origin/HEAD`, so a repo whose default
+  is not `main` is not falsely reported.
+- [x] ✅ The remediation command printed by a deny message is itself allowed —
+  the test builds it from `remediation_command()`, so the exemption and the
+  printed remedy cannot drift apart.
+- [x] ✅ One checker backs all three surfaces. Proven twice in the build: the
+  false all-clear was fixed in `report.py` alone and corrected every surface,
+  and `display_path` was promoted rather than copied into the handler.
+- [ ] ⬜ Full QA passes and CI is green.
 
 ## Delivery & Milestones
 

@@ -133,6 +133,22 @@ Rules (same spirit as the fixture's design rules):
 5. **The canary is read-out only**: findings go into the driving plan's
    JOURNAL in *this* repository; nothing is recorded in the clone.
 
+### The canary and the reference-repo freshness system
+
+The canary lives under `untracked/repos/`, which is also the directory the
+freshness system governs — see [ReferenceRepos.md](../ReferenceRepos.md). The
+two look like they contradict each other and do not.
+
+Rule 1 above makes the canary permanently un-fetchable **on purpose**. The
+freshness system's matching carve-out is that a repo which cannot be checked
+never blocks a read and never nags: it is reported as unverifiable, once, and
+otherwise left alone. Nothing will ever pull it, and a dirty canary is never
+touched.
+
+**Do not restore the canary's origin to clear a freshness report.** That would
+trade the safety property this whole section exists to guarantee for a tidier
+report. Seeing the canary named as unverifiable is the system working.
+
 ## When this is required
 
 Verify in client mode — not just self-install — whenever a change touches:
