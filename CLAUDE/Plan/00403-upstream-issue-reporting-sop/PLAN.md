@@ -130,9 +130,14 @@ finding in it — the owner's rule, made checkable.
 - [ ] ⬜ **Task 2.1**: Assemble a report from controlled fields; scrub project
   root, `$HOME`, git remote, branch and hostname to placeholders while
   preserving daemon-internal paths.
-- [ ] ⬜ **Task 2.2**: Require a minimal synthetic reproduction; refuse one
+- [x] ✅ **Task 2.2**: Require a minimal synthetic reproduction; refuse one
   referencing any path outside `untracked/scratch/`, with the "cannot reproduce
-  synthetically" escape that carries no client data.
+  synthetically" escape that carries no client data. Daemon-internal paths are
+  kept, because a report that could not cite the handler's source would be
+  useless; absolute paths are refused whatever they point at, since the prefix
+  is what identifies. Running the checker over realistic prose rather than the
+  fixtures found a Windows drive path passing clean through a rule built
+  entirely around `/`.
 - [ ] ⬜ **Task 2.3**: Emit a provenance header (the remote-docs pattern) the
   filing gate can verify.
 
