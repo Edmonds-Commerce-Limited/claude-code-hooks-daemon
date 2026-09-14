@@ -46,7 +46,9 @@ truth_changes:
       `hooks-daemon` skill drives it with args `issue-report`. A client
       project's `gh issue create` against that tracker is DENIED unless the
       body came from the generator (`R-UPSTREAM-ISSUE-UNVERIFIED-BODY`);
-      issues on your own repository are untouched.
+      issues on your own repository are untouched, and so is `--web`, which
+      files nothing and opens GitHub's own issue forms — the fallback when the
+      generator genuinely cannot run.
   - topic: daemon-cli
     id: daemon-version-flag
     was: >
