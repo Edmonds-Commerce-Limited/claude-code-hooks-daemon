@@ -32,7 +32,7 @@ rather than an edit.
 
 ### Phase 1: Entries
 
-- [ ] ⬜ **N1**: The QA suite writes into the LIVE supervisor runtime directory.
+- [x] ✅ **N1**: The QA suite writes into the LIVE supervisor runtime directory.
 
   **Found**: while reading `untracked/supervise/decision.log` as forensic
   evidence for [Plan 00398](../00398-critical-compaction-blocked-by-the-idle-gate/PLAN.md).
@@ -73,10 +73,34 @@ rather than an edit.
   because the test lines have a distinct shape, but that is luck rather than
   isolation.
 
-  **Not yet ruled**: whether the fix belongs in the tests (point them at a tmp
-  runtime dir) or in the daemon (refuse to mint a sidecar for a session id with
-  `window_size: 0`). Needs a look at how the fixtures resolve the untracked dir
-  before proposing either.
+  **RESOLVED — and the two halves turned out to have different answers.**
+
+  **The sidecar half is NOT A DEFECT.** `tests/integration/test_forwarder_socket_stdin.py`
+  runs the DEPLOYED forwarder against the LIVE daemon on purpose — that is
+  precisely what it tests (the transport when stdin is a socket). The sidecar is
+  the daemon correctly serving a genuine request. It is inert for decisions
+  (Plan 00166's own-session filter) and `reap_stale_sidecars` removes it after
+  its TTL, so it self-heals. Isolating that test would mean not testing the
+  thing it exists to test.
+
+  **The decision-log half WAS a defect, now FIXED.**
+  `test_cli.py::TestSystemPythonRuntime` runs the real supervisor script as a
+  subprocess, so unlike the in-process tests it cannot pass `--log`. With no
+  isolated `CLAUDE_PROJECT_DIR` it inherited the developer's, and
+  `_resolve_decision_log(None)` resolved to the LIVE
+  `untracked/supervise/decision.log`.
+
+  **Measured scale**: the live log already held **1,132** `SUPERVISED_OK`
+  lines — this had happened 1,132 times, interleaved with genuine supervisor
+  decisions in the file used as primary forensic evidence for Plan 00398.
+
+  **Fix**: an `_isolated_env` helper redirecting `CLAUDE_PROJECT_DIR` into
+  `tmp_path` for every subprocess in that class, which isolates the whole
+  untracked tree. Proven by measurement rather than asserted: the live log held
+  1,132 such lines before the run and 1,132 after. Added
+  `test_supervising_writes_no_log_outside_the_isolated_project_dir`, which
+  asserts the log lands under `tmp_path` — the isolation is load-bearing, so it
+  is checked rather than trusted.
 
 - [x] ✅ **N2**: FIXED — a test whose result depended on the time of day, red on
   `main` and not noticed.

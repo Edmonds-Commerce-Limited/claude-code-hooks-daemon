@@ -118,9 +118,23 @@ class TestNoDaemonImport:
 
 
 class TestSystemPythonRuntime:
-    """The script must run clean under the container's system python3 (no venv)."""
+    """The script must run clean under the container's system python3 (no venv).
 
-    def test_runs_under_system_python3_with_no_runtime_warning(self) -> None:
+    These run the REAL script as a subprocess, so unlike the in-process tests
+    above they cannot pass `--log`. Without an isolated `CLAUDE_PROJECT_DIR`
+    they inherit the developer's, and `_resolve_decision_log(None)` then points
+    at the LIVE `untracked/supervise/decision.log` — every run appended
+    `supervisor active … wrapping: ['echo', 'SUPERVISED_OK']` to the real
+    supervisor's forensic log, interleaved with genuine decisions. That log is
+    the primary evidence for supervisor behaviour, so `_isolated_env` redirects
+    the whole untracked tree into `tmp_path`.
+    """
+
+    @staticmethod
+    def _isolated_env(tmp_path: Path) -> dict[str, str]:
+        return {**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path)}
+
+    def test_runs_under_system_python3_with_no_runtime_warning(self, tmp_path: Path) -> None:
         result = subprocess.run(  # nosec B603 - fixed argv list, no shell
             [
                 "/usr/bin/python3",
@@ -132,15 +146,32 @@ class TestSystemPythonRuntime:
             capture_output=True,
             text=True,
             timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+            env=self._isolated_env(tmp_path),
         )
 
         assert result.returncode == 0
         assert "SUPERVISED_OK" in result.stdout
         assert "RuntimeWarning" not in result.stderr
 
-    def test_usage_error_exits_two_under_system_python3(self) -> None:
+    def test_supervising_writes_no_log_outside_the_isolated_project_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """The isolation above is load-bearing, so assert it rather than trust it."""
+        subprocess.run(  # nosec B603 - fixed argv list, no shell
+            ["/usr/bin/python3", str(SCRIPT_PATH), "--", "echo", "SUPERVISED_OK"],
+            capture_output=True,
+            text=True,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+            env=self._isolated_env(tmp_path),
+            check=True,
+        )
+
+        assert (tmp_path / "untracked" / "supervise" / "decision.log").is_file()
+
+    def test_usage_error_exits_two_under_system_python3(self, tmp_path: Path) -> None:
         result = subprocess.run(  # nosec B603 - fixed argv list, no shell
             ["/usr/bin/python3", str(SCRIPT_PATH)],
+            env=self._isolated_env(tmp_path),
             capture_output=True,
             text=True,
             timeout=_SUBPROCESS_TIMEOUT_SECONDS,
