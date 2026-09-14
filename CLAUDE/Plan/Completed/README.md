@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00366: supervisor own line follow up](00366-supervisor-own-line-follow-up/PLAN.md) - Complete + the archiving commit (an armed `/goal` pasted mid-turn was never submitted and sat in the input box for eight hours; the supervisor now remembers its own typed line, presses Enter for it at the next lull, holds the text families while it is pending, and the goal cap is a rolling hour rather than a process lifetime)
+
 - [00365: markdown_organization — a declared project at any depth](00365-markdown-organization-nested-vendor-and-existing-file-edits/PLAN.md) - Complete at `a8111e72` + the archiving commit (field report: an `Edit` of an existing `.md` two `vendor/` levels deep was denied with no escape hatch; a `projects:` root now wins at any depth, nested vendor trees strip through, a repo-root-anchored extra pattern matches, and an existing `.md` is never a location violation)
 
 - [00364: v3.63.0 release review follow-ups](00364-release-review-followups-v3630/PLAN.md) - Complete at `0560b5ff`…`b56c2621` + the archiving commit (every non-blocking Step 10 finding fixed: venv-lock misreport, slate check reading a git failure as clean, plan-QA gate spawning `git diff` per plan, bracket-range cost, lint temp dirs, dead pipe_blocker tests; a worktree's hooks reach its own daemon; project handler off priority 20; QA audits and runner work from a worktree)

@@ -1,6 +1,6 @@
 # Plan 00404: niggles ledger ten
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: Medium
@@ -91,10 +91,18 @@ rather than an edit.
 
 ## Success Criteria
 
-- [ ] ⬜ Every entry reaches a terminal state: fixed, ruled not-a-defect, or
-  graduated to its own plan.
-- [ ] ⬜ Each fixed entry is pinned by a test that fails against the old code.
-- [ ] ⬜ Full QA passes and CI is green.
+- [x] ✅ Every entry reaches a terminal state: N1 fixed in place.
+- [x] ✅ Each fixed entry is pinned by a test that fails against the old code —
+  `test_a_chmod_failure_skips_one_socket_rather_than_aborting_startup` fails
+  the unfixed code with `0 == 31 - 1`.
+- [x] ✅ Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/42-one-unsecurable-socket-no-longer-costs-them-all.md`.
+  No config-change (the fix adds no options) and no truth-change (no documented
+  behaviour became false — the documented contract was already "best-effort per
+  socket", which is what the `chmod` was violating).
+- [x] ✅ Full QA passes and CI is green — 30/30 checks locally, and CI green on
+  Python 3.11, 3.12 and 3.13. 3.11 is the one that matters: it is the version
+  whose timing exposed the race in the first place.
 
 ## Delivery & Milestones
 
