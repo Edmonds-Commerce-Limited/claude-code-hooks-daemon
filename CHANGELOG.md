@@ -139,7 +139,8 @@ it._
   `deploy-core-docs` is the equivalent refresh for `CLAUDE/core/*.core.md`,
   previously deployable only via a full install/upgrade.
 
-- **A new SessionStart advisory reports a drifted daemon-owned file (Plan
+- **A new SessionStart advisory, `deployed_artefact_drift`, reports a drifted
+  daemon-owned file (Plan
   00377).** Compares every deployed agent, core document and plan-tooling
   script against the template it came from and names the command that
   repairs it; silent when nothing has drifted. A drifted AGENT is reported

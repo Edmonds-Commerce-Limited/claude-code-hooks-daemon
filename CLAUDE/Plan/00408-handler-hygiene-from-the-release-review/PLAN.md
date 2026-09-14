@@ -163,6 +163,31 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   `\b(?:cd|pushd)` — but check `popd` and the `-` form too, and check whether
   the deny message still reads correctly when the command was not `cd`.
 
+### Phase 3d: Release-documentation leftovers from the v3.64.0 gates
+
+- [ ] ⬜ **Task 3.6**: Four documentation NITs the v3.64.0 Step 7 review raised
+  and the release did not take. Recorded here because the review report lives
+  under `untracked/agent-reports/`, which is gitignored — a finding that exists
+  only in an untracked file is a finding that is already lost.
+
+  - `CLAUDE/UPGRADES/v3/v3.63.0-to-v3.64.0/release-notes/` has no `20-` and two
+    files numbered `24-`. Nothing is missing (`20-` was consumed by the v3.63.0
+    cycle) and the count of 48 is right, but the directory cannot be indexed by
+    number. Renumber if that is ever wanted.
+  - GitHub issue **#38** is uncredited while **#37** is credited, for two
+    externally-reported defects in the same release. Pick one convention.
+  - The v3.63.0→v3.64.0 upgrade guide contains no markdown links at all, where
+    its predecessor linked CHANGELOG and RELEASES. If links are added, the
+    prefix from three levels down is `../../../../` — the depth is the thing
+    that goes wrong here.
+  - Two small shipped changes are in no release document: the `hooks-daemon`
+    skill description gaining `optimise`/`bug-report`, and the `regen-docs.md`
+    correction at `397cdde3`.
+
+  None is user-visible breakage, which is why none held the release. Fold them
+  into the next release's documentation pass rather than amending a published
+  one.
+
 ### Phase 4: The sub-bar items, carried so they are not lost
 
 - [ ] ⬜ **Task 3.1**: Four items the reviewer put below the filing bar, each
