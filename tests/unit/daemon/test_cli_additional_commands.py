@@ -8,6 +8,8 @@ Covers critical paths in:
 """
 
 import argparse
+import fcntl
+import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -800,6 +802,67 @@ class TestCmdLogsFollow:
 
 class TestCmdRestart:
     """Tests for cmd_restart command."""
+
+    @staticmethod
+    def _installed_root(tmp_path: Path) -> Path:
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "hooks-daemon").mkdir()
+        (claude_dir / "hooks-daemon.yaml").write_text("version: '1.0'\n")
+        return tmp_path
+
+    def test_restart_warns_while_a_qa_run_holds_the_lock(self, tmp_path: Path) -> None:
+        """Plan 00400 N5: restarting mid-QA errors tests that use the live daemon.
+
+        The daemon_restart_verifier advisory recommends a restart on every
+        commit, so two individually-correct instructions combine into a broken
+        QA result with no signal that they conflict. Warn, never refuse -- an
+        operator may genuinely need to restart regardless.
+        """
+        root = self._installed_root(tmp_path)
+        lock = root / "untracked" / "qa" / ".llm_qa.lock"
+        lock.parent.mkdir(parents=True)
+        lock.write_text("pid=4242\n")
+
+        args = argparse.Namespace(project_root=root)
+
+        held_fd = os.open(lock, os.O_RDWR)
+        fcntl.flock(held_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            with (
+                patch("claude_code_hooks_daemon.daemon.cli.cmd_stop", return_value=0),
+                patch("claude_code_hooks_daemon.daemon.cli.cmd_start", return_value=0),
+                patch("time.sleep"),
+                patch("builtins.print") as mock_print,
+            ):
+                assert cmd_restart(args) == 0
+        finally:
+            fcntl.flock(held_fd, fcntl.LOCK_UN)
+            os.close(held_fd)
+
+        printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
+        assert "QA run" in printed
+        assert "4242" in printed
+
+    def test_restart_is_silent_when_the_qa_lock_is_free(self, tmp_path: Path) -> None:
+        """A lock FILE on disk is not a lock HELD -- flock decides, not existence."""
+        root = self._installed_root(tmp_path)
+        lock = root / "untracked" / "qa" / ".llm_qa.lock"
+        lock.parent.mkdir(parents=True)
+        lock.write_text("pid=4242\n")
+
+        args = argparse.Namespace(project_root=root)
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.cmd_stop", return_value=0),
+            patch("claude_code_hooks_daemon.daemon.cli.cmd_start", return_value=0),
+            patch("time.sleep"),
+            patch("builtins.print") as mock_print,
+        ):
+            assert cmd_restart(args) == 0
+
+        printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
+        assert "QA run" not in printed
 
     def test_restart_calls_stop_and_start(self, tmp_path: Path) -> None:
         """cmd_restart calls cmd_stop then cmd_start."""

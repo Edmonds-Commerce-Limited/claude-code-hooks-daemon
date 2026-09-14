@@ -27,6 +27,7 @@ Provides:
 import argparse
 import asyncio
 import datetime
+import fcntl
 import importlib.util
 import json
 import logging
@@ -39,7 +40,7 @@ import subprocess  # nosec B404 - subprocess used for daemon management (systemc
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 logger = logging.getLogger(__name__)
 
@@ -1642,6 +1643,69 @@ def _print_mode_advisory(pre_mode: dict[str, Any]) -> None:
     print(f"\nTo restore previous mode:\n{restore_cmd}")
 
 
+#: Where the QA runner takes its whole-suite lock, relative to the project root.
+#: Duplicated rather than imported: `scripts/qa/llm_qa.py` is a script, not an
+#: importable package, and the daemon must not grow a dependency on the QA
+#: harness to print an advisory.
+_QA_RUN_LOCK_RELPATH: Final[str] = "untracked/qa/.llm_qa.lock"
+
+
+def _qa_run_lock_holder(project_root: Path) -> str | None:
+    """Return the pid recorded in the QA run lock, or None when nothing holds it.
+
+    Held-ness is decided by a NON-BLOCKING ``flock`` attempt, never by the file
+    existing — the kernel releases an ``flock`` when its holder exits, so a lock
+    FILE on disk says nothing about whether a lock is HELD. The QA runner's own
+    refusal message makes the same point, and inverting it here would warn on
+    every restart after any QA run had ever happened.
+    """
+    lock_path = project_root / _QA_RUN_LOCK_RELPATH
+    if not lock_path.is_file():
+        return None
+
+    fd = os.open(lock_path, os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        # Contention is the ANSWER here, not an error: a run holds the lock.
+        # Only this errno means held; anything else propagates rather than
+        # being misreported as a busy suite.
+        holder = lock_path.read_text(encoding="utf-8").strip() or "unknown"
+        return holder.removeprefix("pid=")
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return None
+    finally:
+        os.close(fd)
+
+
+def _warn_if_qa_run_in_progress(args: argparse.Namespace) -> None:
+    """Warn — never refuse — when a restart would land mid-QA (Plan 00400 N5).
+
+    This project's suite exercises the daemon it runs under, so restarting
+    pulls the socket and pid file out from under the integration tests that use
+    them. They surface as ``errored`` rather than ``failed``, which reads as
+    infrastructure flakiness rather than as a consequence of the restart.
+
+    It matters because ``daemon_restart_verifier`` recommends a restart on every
+    commit: two individually-correct instructions combine into a broken QA
+    result with nothing connecting them. Advisory only — an operator may need to
+    restart regardless, and a refusal here would be a new way to get stuck.
+    """
+    project_root = getattr(args, "project_root", None)
+    if project_root is None:
+        return
+    holder = _qa_run_lock_holder(Path(project_root))
+    if holder is None:
+        return
+    print(
+        f"WARNING: a QA run is in progress (lock held by pid {holder}). Restarting now "
+        "removes the socket and pid file that its integration tests use, which shows up "
+        "as 'errored' tests rather than failures. Restarting anyway.",
+        file=sys.stderr,
+    )
+
+
 def cmd_restart(args: argparse.Namespace) -> int:
     """Restart daemon (stop + start).
 
@@ -1654,6 +1718,8 @@ def cmd_restart(args: argparse.Namespace) -> int:
     Returns:
         0 if daemon restarted successfully, 1 otherwise
     """
+    _warn_if_qa_run_in_progress(args)
+
     # Query current mode before stopping (best-effort, ignore failures)
     pre_mode = _get_current_mode(args)
 

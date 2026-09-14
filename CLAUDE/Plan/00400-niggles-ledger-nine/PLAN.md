@@ -287,6 +287,55 @@ rather than an edit.
   the exact payload re-emitted. Previously it produced `BUDGET EXHAUSTION DETECTED … Matched text: 'exceeded the {SOCKET_TIMEOUT_SECONDS:g}s budget'`;
   now it produces nothing.
 
+- [x] ✅ **N5**: FIXED — restarting the daemon during a QA run errored
+  integration tests with nothing warning, while the project's own advisory
+  recommends restarting.
+
+  **Found**: a full QA run returned `22641 passed, 0 failed, 4 errored`. All four
+  talk to live daemon infrastructure:
+
+  ```text
+  test_server.py::test_daemon_handles_invalid_pid_file_content
+  test_ensure_venv_lock.py::TestConcurrentStartersBuildOnce::test_twenty_iterations_never_double_build
+  test_forwarder_jq_free.py::test_control_characters_survive_round_trip[no-jq]
+  test_forwarder_jq_free.py::test_stop_block_exits_2_with_reason[subagent-stop-with-jq]
+  ```
+
+  I had restarted the daemon mid-run to load the N4 fix, pulling the socket and
+  pid file out from under them.
+
+  **Verified rather than assumed**: re-running those files with no restart in
+  flight gives **47 passed**. Self-inflicted, not a regression.
+
+  **Why this is a defect and not just my mistake.** The `daemon_restart_verifier`
+  advisory fires on every commit recommending a restart, and this session followed
+  it. Two correct instructions — "restart before committing" and "run full QA" —
+  combine into a broken result, with no signal that they conflict. The error
+  signature is also misleading: `errored` rather than `failed`, with zero
+  failures, which reads as infrastructure flakiness rather than "you did this".
+
+  This is the mirror of N1. There, tests wrote into live runtime state; here,
+  live runtime state was changed under tests that legitimately depend on it. Both
+  follow from the same property — this repo's suite exercises the daemon it runs
+  under — and neither direction is written down anywhere.
+
+  **FIXED**: `hooks-daemon restart` now WARNS (never refuses — an operator may
+  need to restart regardless, and a refusal would be a new way to get stuck)
+  when `untracked/qa/.llm_qa.lock` is currently held, naming the holding pid.
+
+  Held-ness is a non-blocking `flock` attempt, NOT the file existing — the
+  kernel drops an `flock` when its holder exits, so a lock file on disk says
+  nothing about whether a lock is held. Inverting that would warn on every
+  restart after any QA run had ever happened, which is the bug that makes a
+  warning worthless. The QA runner's own refusal message already makes this
+  point; the second test pins it.
+
+  **Verified live, not only by unit test**: probed against the real lock while a
+  QA run was in flight and it returned `1396027`, which `ps` confirms is
+  `python3 ./scripts/qa/llm_qa.py all`. The warning itself cannot be exercised
+  end-to-end without performing the very restart it exists to discourage, so the
+  detector is verified live and the message by test.
+
 ## Success Criteria
 
 - [x] Every entry above reaches a terminal state (fixed / not-a-defect /
