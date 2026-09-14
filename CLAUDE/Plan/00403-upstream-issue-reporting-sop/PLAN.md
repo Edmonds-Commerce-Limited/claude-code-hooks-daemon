@@ -163,7 +163,13 @@ finding in it — the owner's rule, made checkable.
   checked-and-clean one must never render the same. **Outstanding**: wiring it
   to the real installed/latest resolution.
 - [ ] ⬜ **Task 3.2**: Configuration ruled out — surface the named handler's
-  options and require a stated reason per option.
+  options and require a stated reason per option. The "stated reason" half is
+  already enforced: `assemble_report` refuses a report with no
+  `config_considered`. The "surface the options" half is COUPLED to the CLI
+  verb and cannot be done as a pure function — there is no standalone
+  enumeration to call, because a handler's options are resolved from config at
+  registration time (`HandlerRegistry.register_all`). Do it with the verb, not
+  before it.
 - [x] ✅ **Task 3.3**: Source cited — require a `file:line` in the daemon source
   and verify it resolves in the installed version. A citation that does not
   resolve means the reporter read a different version, a fork, or nothing, and
