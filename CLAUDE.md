@@ -610,10 +610,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - plan_workflow_asset_checker — plan tooling provisioning alert
 
-<!-- handler: deployed-artefact-drift -->
-
-- deployed_artefact_drift — a deployed file has moved away from its template
-
 <!-- handler: persistent-cron-assertor -->
 
 - persistent_cron_assertor — declared crons are re-established each session
@@ -621,6 +617,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: reference-repo-sweep -->
 
 - reference_repo_sweep — reference clones are made fresh before you read them
+
+<!-- handler: deployed-artefact-drift -->
+
+- deployed_artefact_drift — a deployed file has moved away from its template
 
 <!-- handler: standing-authorisations -->
 
