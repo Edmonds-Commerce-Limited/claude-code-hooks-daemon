@@ -225,6 +225,28 @@ class TestTheGitExemption:
 
         assert handler.matches(_bash("git -C untracked/repos/alpha status")) is False
 
+    def test_navigating_in_and_then_running_git_is_exempt(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """Task 4.3 says `-C <repo>` OR "run from inside it", and both must hold.
+
+        Exempting only the `-C` form would mean a reader who does the obvious
+        thing — cd in, then fix the repo — is blocked while doing exactly what
+        the deny message asked for.
+        """
+        _repo(tmp_path)
+
+        assert handler.matches(_bash("cd untracked/repos/alpha && git pull --ff-only")) is False
+
+    def test_a_read_riding_behind_a_cd_and_a_git_still_engages(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """The exemption covers a git-only chain, not any chain containing git."""
+        _repo(tmp_path)
+        command = "cd untracked/repos/alpha && git pull --ff-only && cat README.md"
+
+        assert handler.matches(_bash(command)) is True
+
     def test_a_non_git_command_in_the_same_chain_still_engages(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
     ) -> None:

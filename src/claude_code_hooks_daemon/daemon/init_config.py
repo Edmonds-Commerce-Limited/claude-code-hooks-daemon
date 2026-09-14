@@ -222,6 +222,7 @@ class ConfigTemplate:
             '        #   - "^docs/.*\\\\.md$"\n'
             "\n"
             "    lsp_enforcement: {enabled: false, priority: 38}  # Steer toward LSP tools instead of Grep\n"
+            "    reference_repo_freshness: {enabled: true, priority: 39}  # Gate reads of a stale reference clone (see reference_repos below)\n"
             "\n"
             "    # WORKFLOW HANDLERS (Priority 36-55)\n"
             "    # Vendored remote docs must declare their source. Inert until the\n"
@@ -308,6 +309,7 @@ class ConfigTemplate:
             "    git_filemode_checker: {enabled: true, priority: 53}  # Warn when git core.fileMode=false\n"
             "    gitignore_safety_checker: {enabled: true, priority: 54}  # Warn when required .claude/ paths are not gitignored\n"
             "    git_upstream_checker: {enabled: true, priority: 56, options: {mode: warn, auto_fetch: true}}  # Full fetch + advise pull when behind upstream\n"
+            "    reference_repo_sweep: {enabled: true, priority: 71}  # Fetch governed reference clones; silent when all are current\n"
             "    suggest_status_line: {enabled: true, priority: 55}  # Suggest status line setup\n"
             "    version_check: {enabled: true, priority: 55}  # Check for daemon updates on new sessions\n"
             "    plan_qa_sweep: {enabled: true, priority: 57}  # Plan-tree drift report (silent when clean)\n"

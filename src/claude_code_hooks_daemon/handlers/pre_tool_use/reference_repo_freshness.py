@@ -70,6 +70,10 @@ _CHAIN_SEPARATORS: Final[tuple[str, ...]] = ("&&", "||", ";", "|", "\n")
 #: The one command word that is never intercepted. See the module docstring.
 _EXEMPT_COMMAND: Final[str] = "git"
 
+#: Words that only MOVE, and read nothing themselves. They matter because a
+#: chain of navigation plus git is the second form of the remedy.
+_NAVIGATION_COMMANDS: Final[frozenset[str]] = frozenset({"cd", "pushd", "popd"})
+
 #: The three modes handled explicitly. ``block_once`` is deliberately absent:
 #: it is the fall-through, so an unrecognised mode degrades to the documented
 #: default rather than to silence.
@@ -81,6 +85,25 @@ _MODE_BLOCK: Final[str] = "block"
 #: session (Plan 00127), so an unbounded map is a slow leak; evicting the oldest
 #: costs at most one extra advisory in a session nobody has touched in a while.
 _MAX_TRACKED_SESSIONS: Final[int] = 64
+
+
+def _is_git_only_chain(segments: list[list[str]]) -> bool:
+    """True when the whole chain does nothing but navigate to a repo and run git.
+
+    ``git -C <repo> pull`` was exempt from the start; ``cd <repo> && git pull``
+    was not, which left a reader who does the obvious thing — navigate in, then
+    fix the repo — blocked while doing exactly what the deny message asked for.
+    Plan 00401 Task 4.3 names both forms.
+
+    Scoped to a chain that is ONLY navigation and git: a `cd` that is followed
+    by a read still engages, so `cd <repo> && git pull && cat x` is judged, not
+    excused by the git segment sitting in front of the read.
+    """
+    if not any(words[0] == _EXEMPT_COMMAND for words in segments):
+        return False
+    return all(
+        words[0] in _NAVIGATION_COMMANDS or words[0] == _EXEMPT_COMMAND for words in segments
+    )
 
 
 class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
@@ -145,11 +168,17 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         # not hypothetical: it denied the commit shipping this handler's docs.
         raw_command = str(tool_input.get("command") or "")
         command = strip_message_bodies(strip_quoted_heredoc_bodies(raw_command))
+        segments = [
+            words
+            for words in (segment.split() for segment in split_unquoted(command, _CHAIN_SEPARATORS))
+            if words
+        ]
+
+        if _is_git_only_chain(segments):
+            return []
+
         found: list[Path] = []
-        for segment in split_unquoted(command, _CHAIN_SEPARATORS):
-            words = segment.split()
-            if not words:
-                continue
+        for words in segments:
             if words[0] == _EXEMPT_COMMAND:
                 continue
             found.extend(self._governed_words(words[1:], project_root))
