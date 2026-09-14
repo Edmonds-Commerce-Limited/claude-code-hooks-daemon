@@ -201,15 +201,24 @@ finding in it — the owner's rule, made checkable.
 
 ## Success Criteria
 
-- [ ] ⬜ No reporting path emits an unredacted client config, env file or
-  hostname — asserted by a test per path, not by inspection.
+- [x] ✅ No reporting path emits an unredacted client config, env file or
+  hostname — asserted by a test per path, not by inspection. The env file is no
+  longer reproduced at all (keys only); paths, `$HOME`, the git remote and the
+  hostname are placeholders in both generators; the log window carries the
+  daemon's own format strings rather than the payloads it interpolated. The
+  config file is still reproduced in full, scrubbed — deliberate, because
+  ruling configuration out is the first thing the SOP asks for, and narrowing
+  it to controlled fields is Task 2.1's remaining half.
 - [ ] ⬜ A generated report containing a planted secret term is refused, and
   the refusal names only an index, never the term.
 - [ ] ⬜ The filing gate denies a hand-written `gh issue create` against this
   repo from a client install, and allows one whose body the generator produced.
 - [ ] ⬜ The gate stands down in this repository: `issue-sdlc` files and edits
   issues with no change in behaviour.
-- [ ] ⬜ Every GitHub URL in tracked documentation names this repository.
+- [x] ✅ Every GitHub URL in tracked documentation names this repository —
+  enforced by the `github_urls` QA gate, which walks the tree itself rather
+  than using `rg`, because `rg` skips hidden directories and that is exactly
+  where the worst instance was hiding.
 - [ ] ⬜ Full QA passes and CI is green.
 
 ## Delivery & Milestones
