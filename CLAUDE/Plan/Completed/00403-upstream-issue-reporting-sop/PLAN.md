@@ -1,6 +1,6 @@
 # Plan 00403: upstream issue reporting sop
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: High
@@ -66,11 +66,12 @@ org this project does not control.
 
 ## Design decisions
 
-Five, each with what it defends against, in
+Six, each with what it defends against, in
 [DECISIONS.md](DECISIONS.md): redaction by construction rather than by
 inspection; the minimal synthetic reproduction as the load-bearing rule; daemon
 paths kept while client paths go; unverifiable claims turned into checkable
-artefacts; and the older-version rule made mechanical.
+artefacts; the older-version rule made mechanical; and `--web` left open as the
+deliberate hole that keeps the gate honest.
 
 ## Tasks
 
@@ -246,7 +247,18 @@ artefacts; and the older-version rule made mechanical.
   enforced by the `github_urls` QA gate, which walks the tree itself rather
   than using `rg`, because `rg` skips hidden directories and that is exactly
   where the worst instance was hiding.
-- [ ] ⬜ Full QA passes and CI is green.
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/43-an-upstream-issue-body-now-comes-from-the-generator.md`
+  (the callout, including the `--web` fallback),
+  `UNRELEASED/config-changes/v3.64.0.yaml` (the `issue_filing_gate` key,
+  `recommended: true`) and `UNRELEASED/truth-changes/v3.64.0.yaml` (the
+  bug-reporting entry retiring "paste the diagnostic output", which names the
+  `--web` exception so a client's doc reconciliation does not write down a gate
+  with no escape hatch).
+- [x] ✅ Full QA passes and CI is green. Full QA 30/30 at `786f4dc5`; CI green
+  on `e40f91a4` and `38c97c45`, after four consecutive red runs went unread —
+  recorded as Plan 00405 N5, whose durable half is the habit, not the fix:
+  `gh run list` after each push.
 
 ## Delivery & Milestones
 
@@ -255,22 +267,13 @@ artefacts; and the older-version rule made mechanical.
   checked 22 live plans: no overlap. Six completed plans supply building blocks
   (00072 bug-report CLI, 00201 secret-word redaction, 00371/00386/00389 version
   currency, 00330 skill-surface coherence); the verification gate is new.
-- **Three defects found by USING the finished thing, none of which a passing
-  test suite would have surfaced.** Each has a regression test now:
-  - The generator printed `gh issue create --body-file <report>` with no
-    `--repo`. In a self-install that is correct and invisible; in a CLIENT
-    project — the only place the generator matters — `gh` takes the target from
-    the working directory, so the printed remedy files a hooks-daemon defect on
-    the CLIENT'S OWN tracker, and the filing gate never engages because it
-    judges the repository a command targets. Both halves fail in the same
-    direction, and only where nobody runs it by hand. `issue_report/upstream.py`
-    now holds the slug and builds the command, so the printed remedy and the
-    gate's comparison cannot drift.
-  - `assemble_report` called `scrub_report` without the term list, so the free
-    text a reporter TYPES was the one surface with no backstop — and it is the
-    only surface the "collect nothing sensitive" design cannot reach.
-  - `bin/hooks-daemon --version` does not exist, and three documents made it a
-    verification step. Recorded as Plan 00405 N4.
-- The pattern across all three: the generator is correct in the environment it
-  is developed in and wrong in the one it ships to. Running it was the only
-  thing that showed that, because every test runs in the developing one.
+- **Four defects found by USING the finished thing**, none of which a passing
+  test suite would have surfaced, in
+  [FOUND-BY-USING-IT.md](FOUND-BY-USING-IT.md). The shared cause is the
+  reusable part: the generator is correct in the environment it is DEVELOPED in
+  and wrong in the one it SHIPS to, and every test runs in the developing one.
+  Each has a regression test now.
+- Closed after a live re-verification rather than on the strength of the ticks:
+  the generator was run end to end, and the document it produced was accepted
+  by the gate, refused after a log line was appended to it, and accepted again
+  once restored byte-for-byte.

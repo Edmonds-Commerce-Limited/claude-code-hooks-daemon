@@ -37,7 +37,7 @@ rather than an edit.
   fold in.
 
   **Found**: running the wider suite while building
-  [Plan 00403](../00403-upstream-issue-reporting-sop/PLAN.md)'s Task 4.1. Both
+  [Plan 00403](../Completed/00403-upstream-issue-reporting-sop/PLAN.md)'s Task 4.1. Both
   faults were in a file committed earlier the same day, and the targeted test
   runs done at the time never touched
   `tests/integration/test_pending_release_notes_holding_area.py`.
@@ -89,8 +89,9 @@ rather than an edit.
 
   **Fixed** in `6787874f`: `391 + 13 = 404. ✅`.
 
-- [ ] 🔄 **N3**: `secret_file_guard` matches a dotted PYTHON MODULE PATH against
-  its protected-path globs, and did so inconsistently.
+- [x] ✅ **N3**: `secret_file_guard` matches a dotted PYTHON MODULE PATH against
+  its protected-path globs — ruled NOT A DEFECT once the apparent inconsistency
+  was explained.
 
   **Found**: writing a new module under `issue_report/` while building Plan
   00403\. The module's own file was created without complaint; an `Edit` whose
@@ -108,19 +109,32 @@ rather than an edit.
   a coincidence of the separator. Erring toward blocking is the right default
   for this handler, so the fnmatch is defensible on its own.
 
-  **What is NOT yet established, and is the part worth investigating.** The
-  same write that was denied also contains
-  `claude_code_hooks_daemon.utils.secret_redaction` — an existing module whose
-  dotted path matches `*.secret*` by exactly the same reasoning — and that
-  token was not named in the deny. Two tokens of the same shape, one reported
-  and one not, in one input. Either the guard stops at the first match (in
-  which case the message should say so, because "matched on this token" reads
-  as exhaustive), or the two are treated differently and the reason matters.
+  **The open question was whether two tokens of the same shape were treated
+  differently.** The same denied write also contained
+  `claude_code_hooks_daemon.utils.secret_redaction`, whose dotted path matches
+  `*.secret*` by identical reasoning, and that token was not named.
 
-  **Worked around, not fixed**: the new module is named `block_words.py`, after
-  the list's own filename, which is arguably the better name anyway. The
-  workaround is recorded in its docstring so nobody renames it back. The
-  inconsistency above is the open part of this entry.
+  **Answer: they were never the same shape.** The exemption in
+  `find_protected_mention_detail` is POSITIONAL and keyed on an IMPORT
+  STATEMENT — it deletes the span an `import` / `from … import` occupies, so a
+  module path is exempt exactly where it is imported.
+  `…utils.secret_redaction` sat in that position and still does, at
+  `issue_report/block_words.py:42`. The reported token did not.
+
+  Evidence, the verification table and the secondary finding (the scan does
+  stop at the first match, so the deny message is non-exhaustive) are in
+  [N3-IMPORT-EXEMPTION.md](N3-IMPORT-EXEMPTION.md). Order does not decide which
+  token is named; position does.
+
+  **Why leaving it open beat guessing.** First-match-wins was plausible AND
+  true, and it was still the wrong answer to the question asked. Writing it
+  down while merely plausible would have left the entry reading as settled
+  while pointing at the wrong cause, and the positional import exemption —
+  the thing an author actually needs to know — would never have been found.
+
+  **Kept**: the module stays `block_words.py`, named after the list's own
+  filename, which is the better name regardless. Its docstring records why, so
+  nobody renames it back into the glob.
 
 - [x] ✅ **N4**: Three documents told the reader to run a flag that does not
   exist.
@@ -198,7 +212,7 @@ rather than an edit.
   the next as one command, and denied a listing of ONE named plan.
 
   **Found**: listing the documents of
-  [Plan 00403](../00403-upstream-issue-reporting-sop/PLAN.md) while closing it
+  [Plan 00403](../Completed/00403-upstream-issue-reporting-sop/PLAN.md) while closing it
   out. The plan number is written in the path, so the command cannot be
   discovering one.
 
@@ -243,86 +257,75 @@ rather than an edit.
   actually does turned up something much worse than the false positive being
   chased.
 
-  **Evidence, from bash itself rather than from memory:**
+  **Evidence** in
+  [N7-CONTINUATION-EVIDENCE.md](N7-CONTINUATION-EVIDENCE.md): what bash
+  actually does with a backslash-newline, the five spellings that reached the
+  real `DestructiveGitHandler` as harmless text, and why the existing tests
+  could not see it.
 
-  ```text
-  ec\<newline>ho joined   ->  prints "joined"   (the token is `echo`)
-  echo a\<newline>b       ->  prints "ab"
-  ```
+  In short: bash REMOVES a backslash-newline and joins the halves into one
+  word; `normalise_line_continuations` substituted a SPACE, which splits it. So
+  `git pu\<newline>sh --force` arrived as `git pu sh --force` and matched
+  nothing, while bash ran the force push. Every guard reading through
+  `get_bash_command` was evadable this way.
 
-  The shell REMOVES a backslash-newline and joins the halves into one word.
-  `normalise_line_continuations` substituted a SPACE, which splits the word
-  instead. Against the real `DestructiveGitHandler`:
+  **Fixed**: the continuation is removed rather than replaced, and the converse
+  is asserted too — `git\<newline>push` is `gitpush` to the shell, runs
+  nothing, and must STOP being reported as a force push. Confirmed in the
+  running daemon, not only in tests.
 
-  | command                           | before | bash runs           |
-  | --------------------------------- | ------ | ------------------- |
-  | `git push --force origin main`    | DENY   | a force push        |
-  | `git pu\<newline>sh --force …`    | ALLOW  | the same force push |
-  | `git push --fo\<newline>rce …`    | ALLOW  | the same force push |
-  | `gi\<newline>t push --force …`    | ALLOW  | the same force push |
-  | `git re\<newline>set --hard HEAD` | ALLOW  | a hard reset        |
-
-  Every guard reading a command through `get_bash_command` was evadable by
-  splitting any word across two lines — `destructive_git`, `sed_blocker`,
-  `pipe_blocker`, all of them.
-
-  **Why it survived so long, which is the part worth keeping.** The helper's
-  own docstring states the correct rule — "the shell removes it and joins the
-  lines" — directly above code that substituted a space. Both the summary line
-  and every existing test wrote the continuation BETWEEN tokens
-  (`git \<newline> reset`), where the author has already typed the separating
-  space and joining is indistinguishable from substituting. Inside a word they
-  are opposites: there the continuation is glue, not whitespace. The framing
-  "a line continuation is whitespace" is true in the tested position and false
-  in the untested one, and the tests were written from the framing.
-
-  **Fixed**: the continuation is removed rather than replaced. The converse is
-  now asserted too — `git\<newline>push` is `gitpush` to the shell, runs
-  nothing, and must STOP being reported as a force push, so losing that match
-  is the fix working. Mid-token spellings were added to
-  `test_blocking_handler_evasion.py`, whose header had named only the
-  between-token form.
-
-- [ ] 🔄 **N8**: the same newline blindness, in the other direction — four
+- [x] ✅ **N8**: the same newline blindness, in the other direction — four
   handlers deny an unrelated command on the NEXT line.
 
   **Found**: the survey that produced N7. Seven sites use a negated separator
   class that omits `\n`, or a `\s+` in front of one, against a RAW multi-line
-  command. Four are defects; each has the same control — joining the two lines
-  with `&&` instead of a newline reverses the verdict, so it is an
+  command. Four are defects, one is not, one is unaffected — each verified
+  against the handler's own `matches()`, with the same control throughout:
+  joining the two lines with `&&` reverses the verdict, so it is an
   implementation fact rather than a policy.
 
-  | site                         | evidence                                                                           |
-  | ---------------------------- | ---------------------------------------------------------------------------------- |
-  | `destructive_git` push-force | `git push origin main` ⏎ `grep -f patterns.txt notes.txt` → denied as a force push |
-  | `destructive_git` update-ref | `git update-ref refs/heads/backup HEAD` ⏎ `git branch -d refs/heads/old` → denied  |
-  | `ancestry_preserving_merge`  | `git merge origin/main` ⏎ `echo --squash is what we avoid` → denied                |
-  | `daemon_location_guard`      | bare `cd` ⏎ `.claude/hooks-daemon/bin/hooks-daemon status` → denied                |
-
-  The `-f` in the first row belongs to `grep`. The second denies `git branch -d`, which is the SAFE delete the daemon's own rules table tells you to use
-  instead of `-D`. The third denies prose that merely names the flag. The
-  fourth denies exactly what its own deny message tells you to do instead.
-
-  Each site carries a comment asserting the boundary holds and naming only
-  `;`, `&` and `|` — including one added by the earlier fix for this very
-  class. The comments are load-bearing: each is the reason the next reader does
-  not re-check.
-
-  Cleared, so the next person does not re-derive it:
-  `compile_command_name_pattern` also crosses newlines, but its contract
-  requires a caller-supplied single segment and a newline is itself a segment
-  separator; `merge_to_main_approval` is unaffected (verified, not assumed).
-
-  **Graduated** rather than fixed here: four blocking handlers, patterns whose
-  loosening has evasion consequences, and an ordering constraint —
+  **Graduated to
+  [Plan 00406](../00406-newline-is-a-command-boundary-in-handler-patterns/PLAN.md)**,
+  which carries the four sites, what each wrongly denies, the two cleared
+  candidates and the ordering constraint. Graduated rather than fixed here
+  because it is four blocking handlers, patterns whose loosening has evasion
+  consequences, and a fix whose two halves must land in order —
   `daemon_location_guard` must be routed through `get_bash_command` BEFORE its
-  gap is tightened, or the false positive becomes a hole. Dedupe scout checked
-  23 live plans: no existing plan covers it.
+  gap is tightened, or its false positive becomes the hole N7 just closed.
+  Dedupe scout checked 23 live plans: no existing plan covered it.
+
+- [ ] 🔄 **N9**: a test that passes in its file and fails on its own.
+
+  **Found**: running `pytest tests/integration/ -k plan` while closing Plan
+  00403, to check the archival had not broken anything.
+
+  ```text
+  tests/integration/test_handler_config_blocking.py::
+    TestMarkdownOrganizationHandlerIntegration::test_planning_mode_redirect_e2e
+  ValidationError: 2 validation errors for Config
+    Extra inputs are not permitted [input_value='CLAUDE/PlanWorkflow.md']
+    Extra inputs are not permitted [input_value='CLAUDE/Plan']
+  ```
+
+  The whole file passes 18/18 and the full suite passes 30/30, so the test
+  depends on something an earlier test in the same file leaves behind. It is
+  not a symptom of this session's changes — confirmed by running the file — and
+  the config keys it writes are top-level where the model forbids extras.
+
+  **Why it is worth an entry.** The failure mode is the inverse of N5, which
+  passed alone and broke the suite; this passes in the suite and breaks alone.
+  Both make a green run mean less than it appears to, and this one specifically
+  makes `pytest -k` — the first thing anyone reaches for when narrowing down a
+  failure — untrustworthy in that file.
+
+  Recorded rather than fixed here: it needs the fixture ordering read, which is
+  a different job from closing 00403.
 
 ## Success Criteria
 
-- [ ] ⬜ Every entry above is in a terminal state: fixed, ruled not-a-defect,
-  or graduated to its own plan.
+- [x] ✅ Every entry above is in a terminal state: N1, N2, N4, N5, N6 and N7
+  fixed; N3 ruled NOT A DEFECT with the mechanism that explains it; N8
+  graduated to Plan 00406.
 - [ ] ⬜ Full QA passes and CI is green.
 
 ## Delivery & Milestones
@@ -330,3 +333,17 @@ rather than an edit.
 - Opened when ledger ten closed. N1 and N2 were both found by running a wider
   test suite than the change under way needed — neither produced a symptom
   anybody would have hit, and both would have surfaced first at a release.
+- **N6 → N7 → N8 is the chain worth remembering.** N6 was one handler denying
+  something harmless. Asking whether its SHAPE recurred, rather than just
+  fixing it, found four more of the same (N8) and then one of the opposite
+  kind: N7, where a word split across two lines evaded every blocking guard.
+  The false positive was the visible symptom and the hole was the expensive
+  defect, and nothing about N6 suggested the second existed — only surveying
+  for the shape did.
+- **Two habits did the work, and neither is cleverness.** Running the real
+  thing rather than reasoning about it: bash itself settled what a line
+  continuation does, against a docstring and an implementation that disagreed
+  with each other. And pairing every claim with a control: the `&&` spelling of
+  each N8 command, which turns "this block feels wrong" into a fact no
+  judgement call can absorb.
+- Full QA 30/30 at `786f4dc5`, over the tree carrying every entry above.

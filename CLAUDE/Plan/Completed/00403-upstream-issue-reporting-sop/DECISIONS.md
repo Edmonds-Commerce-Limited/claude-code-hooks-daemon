@@ -1,8 +1,35 @@
 # Plan 00403: the design decisions, and what each one is defending against
 
-Five decisions shape everything in this plan. Each is here rather than in
+Six decisions shape everything in this plan. Each is here rather than in
 `PLAN.md` because each is reasoning a future reader needs to re-derive if they
 are considering changing the thing it explains.
+
+## `--web` is allowed, and that hole is what keeps the gate honest
+
+Decided after the Success Criteria were written, so it is recorded here rather
+than inferred from the code.
+
+`--web` files nothing. It opens GitHub's own issue forms, and the **Daemon
+defect** form cannot be submitted without ticking two acknowledgements, so
+nothing reaches the tracker until a person has read the redaction rule and
+clicked. The human is in the loop by construction rather than by a digest.
+
+Denying it would leave someone who genuinely cannot run the generator — a
+defect that stops the CLI, a machine without the install, anyone reporting from
+outside a project — with no route at all except working around the gate. **A
+gate whose only escape is evasion teaches evasion**, which is the same reason
+`reference_repo_freshness` never intercepts `git`. The deny message names
+`--web`, so the fallback is discoverable at the moment it is needed rather than
+only in a document nobody is reading yet.
+
+Two boundaries keep the hole from becoming the defeat. A `--web` segment buys
+no cover for a sibling segment: `gh issue create --web && gh issue create --body "…"` is still denied, because the gate judges every filing in the
+command rather than the first. And the acknowledgement claim is stated
+precisely — it is true of the DEFECT form, while `2-other.yml` carries the same
+rule but no checkboxes, deliberately, since ticks would recreate the barrier a
+free-text form exists to remove. Overstating that would have been the same
+error the provenance header avoids by calling itself tamper EVIDENCE rather
+than authentication. Two tests now pin the count to the forms themselves.
 
 ## Redaction is by construction, not by inspection
 
