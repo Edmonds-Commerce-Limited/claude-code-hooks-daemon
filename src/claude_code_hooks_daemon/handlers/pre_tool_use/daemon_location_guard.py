@@ -106,10 +106,16 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
         # past by quoting. Blanking literals answers "what is this command's
         # TARGET?" — it cannot answer "is there a command here at all?".
         #
-        # The cost is that `echo 'cd .claude/hooks-daemon'` matches. That is the
-        # same false positive `destructive_git` carries, and it is the safe
-        # error: over-denying a harmless `echo` costs a rephrase, under-denying
-        # a real `bash -c` costs the rule.
+        # The cost is wider than `echo '...'` and is stated in full so the next
+        # reader re-litigates the trade-off actually made: a `grep`/`rg` FOR this
+        # rule's own text matches, as do the commit spellings `-am 'x'`, `-m"x"`
+        # and `-m'x'` (which `_MESSAGE_BODY_PATTERN` does not recognise as
+        # message flags) and a `gh ... --body 'x'`. That surface is NOT new —
+        # v3.63.0 searched the raw command with no blanking at all, so it denied
+        # every one of them too — but it means the N3 fix reaches a quoted
+        # heredoc and stops there. Recognising those flag spellings is Plan
+        # 00408; re-adding literal blanking is not the answer, because that is
+        # what let `bash -c` through.
         executable = strip_inert_spans(command)
         return bool(_CD_INTO_DAEMON_DIR.search(executable))
 

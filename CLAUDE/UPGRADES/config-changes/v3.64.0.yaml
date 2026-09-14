@@ -1,5 +1,5 @@
 version: "3.64.0"
-date: "UNRELEASED"
+date: "2026-09-14"
 breaking: false
 config_changes:
   added:
@@ -380,6 +380,83 @@ config_changes:
         handlers.pre_tool_use.issue_filing_gate.enabled: false -- but note that
         the thing being disabled is the only check standing between a
         hand-written body and a public tracker that cannot retract it.
+    - key: persistent_crons
+      recommended: false
+      dormant: true
+      description: >-
+        NEW top-level block (Plan 00384, `enabled` defaults false). Claude Code
+        crons do NOT survive a session: `durable` has no effect, jobs live in
+        session memory only, and a recurring job auto-expires after seven days.
+        So a project that wants a recurring job has to re-create it by hand in
+        every new session, which is exactly the kind of step that gets skipped.
+        This block lets the project DECLARE the jobs it always wants -- each
+        with a `name`, a `schedule` and the `prompt` to enqueue -- and the
+        `persistent_cron_assertor` handler re-states them at SessionStart so
+        they are re-established rather than silently missing. The daemon cannot
+        read session memory, so it reports what the project DECLARED rather
+        than which jobs are actually running: reconcile by listing the live
+        crons first and creating only the ones absent, because a duplicate
+        fires twice an hour and costs a model turn each time.
+      example_yaml: |
+        persistent_crons:
+          enabled: true
+          jobs:
+            - name: issue-sdlc
+              schedule: "23 * * * *"
+              description: One open GitHub issue through the delivery lifecycle
+              prompt: |
+                Invoke the `issue-sdlc` skill and follow it exactly.
+      migration_note: >-
+        Dormant by default, so no action is needed and nothing changes for a
+        project that adds nothing. This is the one new feature in this release
+        that a project must opt into BY HAND to use at all -- there is no
+        default job list. Add the block with `enabled: true` and one entry per
+        job you want re-asserted each session.
+    - key: handlers.session_start.persistent_cron_assertor
+      recommended: true
+      dormant: false
+      description: >-
+        NEW SessionStart handler (Plan 00384), ships enabled at priority 70,
+        PLANNING tagged. Reports the jobs declared under `persistent_crons` so
+        they can be reconciled against the live ones. Inert when that block is
+        absent or `enabled: false`, which is the default -- so a project that
+        never declares a cron never hears from it.
+      example_yaml: |
+        handlers:
+          session_start:
+            persistent_cron_assertor:
+              enabled: true
+              priority: 70
+      migration_note: >-
+        On by default; no action needed. It says nothing at all until you
+        declare `persistent_crons`, so adopting it is a consequence of adopting
+        that block rather than a separate decision.
+    - key: handlers.session_start.deployed_artefact_drift
+      recommended: true
+      dormant: false
+      description: >-
+        NEW SessionStart advisory handler (Plan 00377), ships enabled at
+        priority 59, PLANNING tagged. A daemon-owned file deployed into your
+        project -- a
+        hook script, a skill, the plan scaffolder -- can drift from the
+        template it came from, by a hand edit or an interrupted upgrade, and
+        nothing said so: the file still exists, so every check that asks
+        whether it is PRESENT passes. This reports the drifted files and the
+        command that repairs them. It reads the configured plan directory
+        rather than assuming `CLAUDE/Plan`, so a project that moved its plans
+        still gets a report instead of silence (Plan 00407 N4).
+      example_yaml: |
+        handlers:
+          session_start:
+            deployed_artefact_drift:
+              enabled: true
+              priority: 59
+      migration_note: >-
+        On by default; no action needed to adopt. It is advisory and never
+        blocks. If it reports a file you deliberately customised, repair is a
+        choice rather than an instruction -- but prefer moving the
+        customisation into config or a project handler, because a hand-edited
+        deployed file is overwritten by the next upgrade.
   renamed: []
   removed:
     - key: handlers.pre_tool_use.daemon_restart_verifier

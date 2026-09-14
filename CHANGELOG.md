@@ -7,6 +7,479 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.64.0] - 2026-09-14
+
+_A dogfooding-driven hardening release. Four separate false-positive/false-
+negative classes in the command-judging guards are closed — a heredoc or
+`-m`/`-F` message VALUE read as a command, a multi-line command convicted past
+its own end, a backslash-newline word-split that evaded every guard, and a
+malformed or unreadable config silently taking an event down. The daemon now
+also notices staleness in things it depends on but cannot itself observe: a
+second session upgrading its own installed clone, a `git pull` that left
+config or handler code unloaded, a reference clone read without pulling
+first, and a QA/acceptance run graded by a daemon that predates the working
+tree. One breaking change ships, carried by a mandatory post-upgrade task:
+`plan-qa --json` renames `level` to `severity`. Attribution below cites a
+plan as the TRACKING plan for a work area, not as the origin of every fix in
+it._
+
+### Added
+
+- **`self_matching_process_probe` gained `R-WAIT-ON-WRAPPER-PID` (Plan
+  00363).** A Bash command that backgrounds a job behind a wrapper (`setsid`,
+  `nohup sh -c`, `timeout`, `env`) and then waits on `$!` is denied or
+  advised: the pid captured is very often the wrapper's, not the job's, and
+  `setsid` in particular forks and exits its parent at once, so `kill -0 $!`
+  reports the job finished while it is still running. The message names the
+  three remedies — a pidfile the job writes itself, `pgrep -P <wrapper-pid>`,
+  or waiting on a log marker.
+
+- **`lsp_noise_checker`, a new SessionStart advisory (Plan 00368).** One
+  check per supported language present (Python, TypeScript/JavaScript, Go,
+  Rust, PHP) reports a language server that is not told to exclude trees the
+  daemon knows are not project code (the runtime directory, the plan
+  directory, vendored/build trees, the remote-docs tree), with that
+  language's exact fix, plus a companion check for a language-server process
+  that started before its config was last written. Silent when nothing needs
+  fixing. Paired with making `pyright` a QA gate in this repository, driving
+  the injected-diagnostics noise it reports on to zero without a single
+  suppression.
+
+- **A human-approval gate for closing a plan, and for merging into main,
+  both opt-in (Plan 00367).** `plan_workflow.close_requires_human_approval`
+  (default `false`) arms the new `plan_close_approval` handler, which denies
+  an agent's flip of a `PLAN.md` `**Status**:` to Complete/Cancelled/
+  Superseded and names the human's route (`hooks-daemon approve-plan-close NNNNN`, a one-shot marker). `worktree.merge_to_main_requires_human_approval`
+  (default `false`) arms `merge_to_main_approval` the same way for a
+  `git merge`/`gh pr merge` into main. A new docs-QA check,
+  `unenforced-approval-gate`, blocks a daemon-owned core document from
+  prescribing a human-approval step that names no enforcing config key.
+
+- **`merge_qa_report`, a new PostToolUse advisory (Plan 00373).** Every
+  commit-time QA gate keys on a `git commit`, and a `git merge`/`pull`/
+  `rebase` creates a commit without ever invoking one — a real merge
+  resurrected an archived plan folder and its plan-QA findings reached main
+  unremarked. This handler runs after such an operation and reports the
+  plan-QA/docs-QA findings attributable to what it actually introduced, via
+  `ORIG_HEAD..HEAD`; silent when nothing moved. `plan-qa --sweep` and
+  `docs-qa --sweep` are also now registered QA tools in their own right —
+  **any** finding at either severity now fails the QA gate, closing the gap
+  where drift in either corpus survived a fully green QA run, CI run and
+  release-slate check.
+
+- **`daemon_sync_after_merge`, a new PostToolUse advisory (Plan 00389).** The
+  daemon imports its config and every handler module once, at startup, and
+  never hot-reloads — so a `git pull` bringing in a colleague's
+  `hooks-daemon.yaml` or new project-handler code leaves the project
+  protected by a config that is committed but not loaded, with nothing
+  saying so. Shares `merge_qa_report`'s trigger and attribution; names the
+  changed paths and the restart command, and separately catches the tracked
+  `.claude/HOOKS-DAEMON.md` version marker moving out of step with the
+  gitignored installed clone.
+
+- **`daemon_upgrade_detector`, a new UserPromptSubmit advisory (Plan
+  00395).** Catches the gap none of the session-scoped checks can: a
+  *different* session or process upgrading this project's installed daemon
+  while the current one keeps serving the code it already loaded. Compares
+  the in-memory version against the venv's `.daemon-metadata.json` on every
+  turn, re-resolving the fingerprint-keyed venv path each time rather than
+  trusting a remembered one; silent when they match, dormant in a
+  self-install checkout.
+
+- **`reference_repos`, a new top-level config block, `reference_repo_freshness`
+  and `reference_repo_sweep` handlers, and `hooks-daemon reference-repos`
+  (Plan 00401).** Governs freshness of read-only reference clones under
+  `untracked/repos/`: a SessionStart sweep fetches and fast-forwards what it
+  can prove is safe and caches the reading; a PreToolUse gate denies a READ
+  of a clone that is stale or off its default branch, reading only that
+  cache (no network I/O on the hot path); a third verdict, "unconfirmed",
+  covers a clone that is deliberately un-fetchable (an `origin` replaced
+  with an invalid URL) so it is never locked out of being read. One checker
+  feeds all three surfaces.
+
+- **`issue_filing_gate` and `hooks-daemon issue-report` (Plan 00403).** A
+  `gh issue create` against the hooks-daemon repository's own tracker is
+  denied unless `--body-file` names a document the new generator produced
+  and nobody has edited since. The generator collects a controlled field set
+  and never gathers a hostname, git remote, `.env`, config dump or logs at
+  all — a guarantee a scrub-the-output pass cannot make — and refuses to
+  write a file at all when required fields are missing or do not resolve
+  against the installed version. `BUG_REPORTING.md` is now the whole
+  procedure; the install/update guides' instruction to attach diagnostic
+  output "to any bug report" is removed as actively unsafe.
+
+- **`persistent_crons` and `persistent_cron_assertor` (Plan 00384).** Claude
+  Code crons cannot persist — every job lives in session memory and expires
+  after 7 days regardless of `durable`. A project can now DECLARE the crons
+  it always wants under `persistent_crons.jobs`, and a new SessionStart
+  handler re-states the declaration at the start of every session so they
+  can be re-created; it states what was declared, never what is missing,
+  since the daemon cannot read Claude Code's session memory. Off by default.
+
+- **`hooks-daemon status-line-explained` (Plan 00369).** Explains every
+  status-line segment in a project — glyph, general meaning, how to read it,
+  and its current value — closing a gap `explain-rule`/`explain-handler`
+  could not reach, since a status-line segment declares no blocking rule.
+
+- **The daemon reports a content fingerprint of the code it loaded at
+  startup over the `_system`/`health` socket action, and `hooks-daemon check-source-fresh` (Plan 00371).** The acceptance harness dispatches
+  through the live daemon socket, so a daemon that predates the working tree
+  used to produce both a false failure (denying correct code because the
+  daemon still ran the old, broken version) and the more dangerous false
+  pass (a genuinely broken tree sailing through because a stale daemon still
+  answered with the old, correct code). Every socket-dispatched acceptance
+  test now compares fingerprints first and fails loudly, by name, before any
+  probe-specific assertion runs. QA stays read-only — nothing here restarts
+  the daemon automatically.
+
+- **`hooks-daemon agents install <name> --force` and `hooks-daemon deploy-core-docs` (Plan 00377).** A daemon-owned deployed file that no
+  longer matches any shipped revision could previously not be repaired: the
+  daemon refused to touch it and named the very command that had just
+  refused. `--force` is the explicit escape for an agent, and
+  `deploy-core-docs` is the equivalent refresh for `CLAUDE/core/*.core.md`,
+  previously deployable only via a full install/upgrade.
+
+- **A new SessionStart advisory reports a drifted daemon-owned file (Plan
+  00377).** Compares every deployed agent, core document and plan-tooling
+  script against the template it came from and names the command that
+  repairs it; silent when nothing has drifted. A drifted AGENT is reported
+  differently, since agents (unlike core docs) are never clobbered — the
+  advisory consults the revision ledger and names whether a plain refresh or
+  the explicit `--force` applies.
+
+- **`index-retention-window`, a new plan QA check (Plan 00379).** The main
+  plan index keeps only the 30 highest-numbered completed rows, ageing older
+  ones into `Completed/README.md` in the same commit as the archival that
+  displaces them — until now nothing enforced that at commit time, and three
+  consecutive archival commits in this repository skipped it. Runs at the
+  commit gate and in the sweep; not enforced at edit time, since an archival
+  is legitimately over the window between its two constituent writes.
+
+- **Startup now names both versions when a `.claude/hooks-daemon/` clone has
+  drifted from the tracked assets it deployed (Plan 00386).** Previously a
+  version mismatch (a leftover old clone meeting newer tracked config, or
+  the reverse) answered every hook with `daemon_startup_failed` and pointed
+  at `logs`/`restart` — neither of which fixes a version mismatch. Both
+  directions are now named with the exact upgrade or regenerate command;
+  silent whenever the two agree or either cannot be read.
+
+- **`hooks-daemon restart` warns when a QA run is in progress (Plan 00400
+  N5).** This project's suite exercises the daemon it runs under, so a restart
+  mid-run pulls the socket out from under the integration tests using it, and
+  they surface as `errored` — which reads as infrastructure flakiness rather
+  than as a consequence of the restart. The warning names the pid holding
+  `untracked/qa/.llm_qa.lock`. It never refuses: held-ness is decided by a
+  non-blocking `flock` rather than by the lock FILE existing, and anything it
+  cannot determine degrades to no warning, because a refusal here would be a
+  new way to get stuck on the most-used recovery verb.
+
+- **`check-config-migrations` and `check-truth-changes` gain
+  `--include-unreleased` (Plan 00392).** Both read the versioned manifests
+  under `CLAUDE/UPGRADES/`; the flag also folds in anything still sitting in
+  `UNRELEASED/`, so a daemon checkout that is ahead of its last tag can be
+  reconciled against what it actually carries.
+
+### Changed
+
+- **The config package has one validator (Plan 00172).**
+  `claude_code_hooks_daemon.config` no longer exports `ConfigSchema` — a
+  second, never-run, hand-maintained JSON-schema validator that only
+  understood 3 of the daemon's 31 wired event types. `ConfigValidator`,
+  `HandlersConfig` and `PluginConfig.event_type` all now derive their
+  event-type coverage from the same wired-event catalogue, pinned by a test.
+- **`check-truth-changes` and `check-config-migrations` write their full
+  report to a file and print a bounded summary instead of the whole thing
+  inline (Plan 00329).** A canary upgrade across the full v3 span delivered
+  143 KB of combined stdout, of which roughly sixty of seventy-three
+  truth-change entries never reached the agent past Claude Code's exit-1
+  truncation — silently, with nothing saying so. `check-truth-changes` also
+  now writes one self-contained `chunk-NN-<topic>.md` file per topic, and
+  the upgrade skill dispatches one subagent per chunk in parallel. `--full`
+  restores the inline form on both commands.
+- **A handler can report itself dormant, and the generated `CLAUDE.md` omits
+  a dormant handler's row entirely (Plan 00390).** A handler that is loaded
+  and enabled but switched off by a config key (`plan_close_approval` with
+  its gate key at its default `false`, for example) used to be listed in
+  the project's own instructions as active policy, with its rule's rationale
+  stated as present-tense fact — indistinguishable from a project that
+  really did enforce it. Both new opt-in approval gates (Plan 00367) report
+  it; if your project leaves either key at its default, those rows
+  disappear from `CLAUDE.md` on the next restart. Nothing about enforcement
+  changes — the rows were describing a gate that was already off.
+- **BREAKING: `plan-qa --json` renames `level` to `severity` (Plan 00375).**
+  `docs-qa --json` and `plan-qa --json` described the same finding shape
+  under two different key names, and that already produced a live defect: a
+  reader keyed on one name silently drops every finding from the other verb
+  while still counting it toward the total. `plan-qa --json` now emits
+  `severity` and nothing else; `docs-qa --json` is unchanged. Shipped with
+  no deprecation window, deliberately — emitting both spellings for a
+  release would make the two-names defect itself correct by policy for that
+  release. See `CLAUDE/UPGRADES/v3/v3.63.0-to-v3.64.0/post-upgrade-tasks/ 01-rewrite-plan-qa-json-level-to-severity.md` for the mandatory call-site
+  migration task.
+
+### Fixed
+
+- **The v3.63.0 release-review ledger worked to zero (Plan 00364):**
+  `hooks-daemon repair` no longer blames a missing `uv` for a venv-build-lock
+  failure; `release-slate-check` no longer reads a failed git listing
+  (branches ahead, live worktrees) as a clean slate, exiting `1` with
+  `Slate: UNDETERMINED` instead; `/hooks-daemon optimise`'s enabled/disabled
+  scoring now shares one predicate with handler registration instead of a
+  second, incomplete copy, and a handler whose constructor raises is
+  reported `could not be assessed` rather than aborting the whole verb; an
+  acceptance-test declaration-conflict error now names the field the author
+  actually wrote; the Kotlin/Rust lint strategies write to a private,
+  unguessable per-process temp directory instead of a fixed guessable path
+  (closing a symlink-redirect route on a multi-user host), and
+  `secret_file_guard` checks its bracket-range expansion cap before
+  materialising the range instead of after; the plan-QA commit gate asks git
+  what is staged once per commit instead of once per plan folder (363
+  subprocesses down to 1, on this repository); a non-UTF8 `PLAN.md` no
+  longer raises out of the commit gate; `settings.json` is written through a
+  temp file and renamed into place; `transport verify` names a down daemon
+  instead of reporting the failure as a broken exit-code translation;
+  `echd-capture --help` stops trailing into inline rationale, and its
+  last-resort capture directory is a fresh private `mktemp -d` rather than a
+  fixed world-writable name.
+
+- **A worktree's hooks now reach the worktree's own daemon (Plan 00364).**
+  A deployed relay forwarder's hot path bakes absolute paths, so a linked
+  worktree — which inherits `.claude/hooks/*` byte for byte — dialled the
+  MAIN checkout's socket and was answered by the main checkout's daemon,
+  judged by another checkout's config and handlers with no error anywhere.
+  The guard now records the hooks directory it was generated for and falls
+  through to `init.sh` when running from a different checkout.
+
+- **The QA audits no longer pass by scanning nothing (Plan 00364).**
+  `audit_error_hiding.py` and `audit_capture_corruption.py` matched their
+  exclusion patterns against each file's ABSOLUTE path, so a checkout merely
+  *living* under a matching directory name (a git worktree under
+  `untracked/worktrees/<branch>/`) excluded itself entirely and reported a
+  clean scan having looked at nothing; both now judge paths relative to the
+  tree being scanned, and the error-hiding audit now fails loudly when it
+  collected zero candidate files. `scripts/qa/llm_qa.py` also stops
+  hardcoding the retired pre-v3.7.0 venv path.
+
+- **`setup_worktree.sh` runs to the end, and its venv can run QA (Plan
+  00364).** Its editable-install check ran `pip show` from a uv-managed venv
+  that ships no `pip`, silently aborting the script under `set -e` right
+  after "Venv created" and before `.claude/hooks-daemon.env` was written;
+  and the venv it built carried no `dev` extra, so `import pytest` failed in
+  every fresh worktree. Both fixed.
+
+- **A daemon restart in a git worktree no longer regenerates and commits
+  `CLAUDE.md` on the worktree's own branch (Plan 00364).** The generated
+  `<hooksdaemon>` block conflicted with the main checkout's own version on
+  every merge back; the startup injection now skips a linked worktree, and
+  `bin/hooks-daemon regenerate-docs` remains available to recover a
+  conflict-marked block by hand.
+
+- **`markdown_organization` now lets a declared `projects:` entry win at any
+  depth, and editing an existing `.md` is never a location violation (Plan
+  00365).** A sub-project two `vendor/` levels deep, installed from source,
+  was denied with no escape; a `projects:` declaration is now consulted
+  before the built-in `vendor/`/`node_modules/` inference, dependency
+  inference now repeats through nested trees, and editing a `.md` file that
+  already exists is no longer judged as a NEW-file location violation. An
+  `extra_allowed_markdown_paths` pattern spelled from the REPOSITORY root
+  (`^vendor/org/pkg/`) now matches as well; the package-relative spelling
+  keeps working, so an existing entry needs no change.
+
+- **The upgrade route now works from a fresh clone of a client repository
+  (Plan 00291).** A teammate cloning an existing client repo gets its
+  committed config but no gitignored `.claude/hooks-daemon/` checkout or
+  venv — a state the documented upgrade route used to refuse outright.
+  `scripts/upgrade.sh` now clones the daemon fresh, reads the previous
+  version from the committed `.claude/HOOKS-DAEMON.md`, and skips the
+  daemon-stop step when there is nothing to stop.
+
+- **Hooks now reach a daemon whose socket fell back to the runtime
+  directory, and install/upgrade always act on the given project (Plan
+  00291).** When a project path is too long for the AF_UNIX socket limit,
+  the daemon relocates its socket and PID file to the runtime directory —
+  but the hook launcher only followed the socket there, so it decided no
+  daemon of ours was running and every hook failed while `status` showed
+  RUNNING. Both install and upgrade orchestrators also now anchor to the
+  project root they were given instead of the shell's current directory.
+
+- **The supervisor follows up a line it typed but did not submit (Plan
+  00366).** When the supervisor's own Enter fails to submit an injected
+  `/goal`, `continue` or `/effort` line, it now remembers this as its own
+  pending line and presses Enter for it (at most twice, 15s apart) at the
+  next lull, logging each attempt; a human's own Enter clears the record
+  with no keystroke. The goal-injection cap is also now a rolling one-hour
+  budget rather than five per process lifetime.
+
+- **The bracket-trick rewrite in `self_matching_process_probe` now names the
+  actual offending text, and covers every spelling of a pattern in a command
+  (Plan 00363).** A probe followed by an unescaped fallback message
+  (`|| echo "no <name>"`) kept self-matching on the fallback text even after
+  the probe itself was bracket-tricked, with the deny previously offering no
+  further rewrite; it now names the exact text still responsible.
+
+- **`hooks-daemon worktree-reap` no longer risks reaping a worktree that
+  just started, and its branch delete now actually works (Plan 00372).** A
+  freshly-created worktree with no history of its own looked identical to a
+  finished one and was listed as safe to reap; it is now also checked for a
+  live process and an under-15-minutes age. The reap-success branch delete
+  passed `git branch -d` a fully-qualified `refs/heads/<name>` ref, which
+  git rejects outright, so every reaped worktree kept its branch with a
+  self-contradicting message — now fixed.
+
+- **`bin/hooks-daemon`'s `--project-root` anchor now actually reaches the
+  command (Plan 00374).** Twenty-five subcommands declare their own
+  `--project-root`, and argparse's subparser default (`None`) silently
+  overwrote the wrapper's injected value; two more subcommands defaulted the
+  flag to the working directory outright. Running the wrapper by absolute
+  path from another directory now acts on the wrapper's own project, as
+  documented.
+
+- **A commit message describing `--force` is no longer read as a force push
+  (Plan 00377).** `destructive_git` judged raw command text, so a heredoc
+  BODY or an `-m`/`-F` message VALUE that merely documented a flag —
+  including the `git commit -F - <<'EOF' && git push origin main` idiom —
+  could be denied as the command it described. Inert heredoc bodies and
+  message values are now blanked before the command is judged, across every
+  rule the handler enforces; a message carrying a genuine command
+  SUBSTITUTION, or an unquoted `<<EOF` body, still blocks correctly.
+
+- **Agent deployments wrongly frozen as "customised" upgrade again (Plan
+  00378).** Four shipped revisions across all three built-in agents were
+  never recorded in the ledger that decides whether a deployed file is
+  merely outdated or genuinely edited, so a pristine file installed during
+  one of those windows was permanently misclassified and refused every
+  upgrade. The digest check that should have caught this compared a value
+  against itself and could not fail; it now compares a declared digest
+  against the file, and a second check walks each template's full git
+  history to catch a future gap the same way.
+
+- **`worktree-reap` stops refusing worktrees over files its own `.gitignore`
+  update cannot see (Plan 00380).** `git status` runs inside each worktree
+  against that worktree's PINNED `.gitignore`, so a generated path ignored
+  only after the worktree was created reads as unsaved work forever; an
+  untracked path the MAIN checkout would ignore no longer counts. Only
+  untracked paths are ever dropped — a modified tracked file still refuses
+  regardless of any ignore rule. `.claude/reports/` is now itself gitignored
+  as one such generated path.
+
+- **`transport on`/`off` now establish the deployed state they report
+  instead of trusting the config alone (Plan 00383).** A config match used
+  to return `already <state> — nothing to do` without ever reading the
+  deployed `.claude/hooks/*` forwarders, so a drifted deployment (an
+  interrupted toggle, a hand-edited config, a checkout that moved one and
+  not the other) could report success while every hook kept routing through
+  the wrong transport. A drifted state is now regenerated, the daemon
+  restarted, and the result verified; a converged project still pays
+  nothing. Scripted callers should note the exit code can now be non-zero
+  where it was previously always 0.
+
+- **One unsecurable per-event socket no longer takes the whole daemon down
+  (Plan 00404).** Binding each of the daemon's 31 per-event sockets is
+  create-then-`chmod`; the `chmod` sat one line outside the per-socket
+  `except OSError: continue` guard that binding already had, so a single
+  failed `chmod` — reproducible by a concurrent daemon start racing the
+  events-directory cleanup — propagated out of `start()` and failed
+  daemon startup entirely. The `chmod` now shares the same best-effort
+  guard: one event drops to the legacy socket, the other thirty keep
+  theirs.
+
+- **A plan-folder-scoped glob on the NEXT line is no longer read as a
+  discovery scan, and a `\<newline>` line continuation is now handled (Plan
+  00405).** `plan_number_helper` denied listing the files of one named plan
+  folder — whose number is already in the path — because an `echo` on one
+  line could reach across the newline and borrow a glob character from an
+  unrelated next line.
+
+- **An unreadable or malformed config no longer takes the whole event down
+  (Plan 00405).** Secret-redaction's word-list resolver reads the project's
+  config and was documented as never raising, but only caught `OSError`/
+  `RuntimeError` — not pydantic's `ValidationError` (a `ValueError`) or
+  `yaml.YAMLError` (neither). A config holding one unrecognised key, a
+  syntax error, or a legacy/newer-schema spelling therefore failed the tool
+  call being routed. Malformed config is now a reported configuration error
+  from `Config.load` itself; an unusable config now makes redaction inert
+  (logged at WARNING, since that is a real weakening) rather than crashing.
+
+- **A newline now ends the command being judged, across four blocking
+  handlers (Plan 00406).** Their "stays inside this sub-command" character
+  class listed `;`, `&` and `|` but not the newline, so a pattern could run
+  past the end of its own line and convict the next one: a force-push deny
+  on a LATER line's unrelated `grep -f`, a force-branch-delete deny on a
+  safe `git branch -d`, a squash-merge deny on the word `--squash` inside an
+  `echo`, and a daemon-directory-`cd` deny on the command the deny message
+  itself recommends running. Joining the two lines with `&&` always
+  reversed the verdict, which was the tell. An unquoted heredoc body is now
+  scanned line by line rather than blanked, so a flag inside the body no
+  longer attaches to the command that opened it.
+
+- **Four guards corrected by the release review (Plan 00407):** a `git merge` named only in a commit message BODY (including the `git commit -m "$(cat <<'EOF' … EOF)"` idiom) is no longer read by `merge_to_main_approval`
+  as a real merge; a `cd` named in prose inside a quoted heredoc is no
+  longer read by `daemon_location_guard` as a real directory change (both
+  fixes stop precisely at the heredoc boundary — a quoted STRING can itself
+  be a command, e.g. `bash -c "cd .claude/hooks-daemon"`, so blanking those
+  too would have opened a real hole); `deployed_artefact_drift` now reads
+  the project's configured plan directory instead of a hardcoded
+  `CLAUDE/Plan`, instead of going silently blind for any other layout; and
+  **SECURITY**, `issue_filing_gate` now covers `gh`'s DEFAULT repository
+  resolution (the git remotes of the working directory) when neither
+  `--repo` nor `GH_REPO` is given — previously a bare `gh issue create`
+  typed inside this repository's own vendored `.claude/hooks-daemon/` clone
+  filed an unverified body against the public tracker while the gate stood
+  by.
+
+- **`budget_exhaustion_detector` no longer reads its own source as a budget
+  hit (Plan 00400 N4).** An unexpanded placeholder in a `ps` listing means the
+  text came from SOURCE, not from a process that had actually exhausted a
+  budget, so the detector fired on the code describing the condition rather
+  than on the condition.
+
+- **The supervisor's input-box gate is bounded on text STABILITY, not on how
+  long the box has been non-empty (Plan 00398).** A box that keeps changing is
+  someone typing; a box that has stopped changing is a line left sitting. Timing
+  how long it had been non-empty conflated the two, so a slow typist could be
+  interrupted while a genuinely stalled line waited.
+
+### Security
+
+- **A word split across two lines by a backslash-newline no longer evades
+  every blocking guard (Plan 00405).** The shell REMOVES a line continuation
+  and joins the two halves into one word (`git pu\`+newline+`sh --force` runs
+  `git push --force`); the daemon substituted a SPACE instead, splitting the
+  word into two tokens that matched nothing. Every guard reading a Bash
+  command through the shared command reader — including `destructive_git` —
+  was evadable this way; the continuation is now removed, matching the shell.
+
+- **Clustered short flags are now recognised as force pushes, and a branch
+  name containing `-f-` is not (Plan 00382, reported as issue #37).**
+  `git push -uf origin main` — and `-fu`, `-nf` — were NOT force-push matches
+  in any prior release, because the literal `-f` never appears in a
+  short-option cluster. The other direction was a false positive:
+  `git push origin feature/lane-f-adoption` was denied with no force flag
+  anywhere in it. Force markers must now START a whitespace-delimited
+  argument, which fixes both.
+
+- **`issue_filing_gate` covers `gh`'s DEFAULT repository resolution (Plan
+  00407).** With neither `--repo` nor `GH_REPO` given, `gh` reads the base
+  repository from the working directory's remotes — and every client install
+  carries a clone of this repository under `.claude/hooks-daemon/`. A bare
+  `gh issue create` typed inside that clone therefore filed a hand-written,
+  unverified body against a PUBLIC tracker while the gate stood by, which is
+  the one failure the gate exists to prevent and cannot be retracted after the
+  fact. The full entry, with the other three guards corrected by the same
+  review, is under Fixed above.
+
+### Removed
+
+- **`daemon_restart_verifier` built-in handler removed (Plan 00370).** Its
+  `matches()` only ever fired inside the hooks-daemon repository itself, so
+  it never did anything for a client project. It is now a project-level
+  handler in this repository's own `.claude/project-handlers/pre_tool_use/`
+  — dogfooding the project-handler surface instead of shipping a pure
+  self-check in the shared library. The key is registered in
+  `RETIRED_HANDLERS`, so a leftover
+  `handlers.pre_tool_use.daemon_restart_verifier` entry in your config
+  validates cleanly and is simply ignored.
+
 ## [3.63.0] - 2026-09-09
 
 _A stability push: the client-upgrade-report defect ledger (Plan 00362, 26

@@ -17,6 +17,7 @@ the ``.git`` entry, never guessed from the path.
 
 from __future__ import annotations
 
+import logging
 import re
 import shlex
 from pathlib import Path
@@ -41,6 +42,8 @@ from claude_code_hooks_daemon.utils.git_repo import GitRepo, is_linked_worktree
 from claude_code_hooks_daemon.utils.git_sync import current_branch, default_branch
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
 from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
+
+logger = logging.getLogger(__name__)
 
 _CONFIG_KEY: Final[str] = "worktree.merge_to_main_requires_human_approval"
 _APPROVE_SUBCOMMAND: Final[str] = "approve-merge"
@@ -114,17 +117,55 @@ _RULE_VERBOSE = (
 )
 
 
-def _segment_tokens(segment: str) -> list[str]:
+def _shlex_tokens(text: str) -> list[str] | None:
+    """Shell-tokenise ``text``, or ``None`` when its quoting is unbalanced.
+
+    ``None`` is an ANSWER rather than a swallowed failure: unbalanced quoting is
+    an expected input here (see ``_segment_tokens``), and the caller acts on it
+    by trying the next strategy.
+    """
+    tokens: list[str] | None = None
     try:
-        return shlex.split(segment)
-    except ValueError:
-        # Unbalanced quoting, which is ORDINARY here rather than malformed
-        # input: a merge inside `bash -c "git merge x"` is matched within the
-        # enclosing literal, so the slice carries that literal's closing quote
-        # and no opener. `shlex` refuses it, and the fallback split would then
-        # report the branch as `x"` — close enough to look right and wrong
-        # enough to miss a recorded approval for `x` (Plan 00407 N12).
-        return [token.strip("\"'") for token in segment.split()]
+        tokens = shlex.split(text)
+    except ValueError as exc:
+        logger.debug("Merge segment is not balanced shell quoting (%s): %r", exc, text)
+        tokens = None
+    return tokens
+
+
+def _segment_tokens(segment: str) -> list[str]:
+    """Tokenise a matched merge segment into words, quoting removed.
+
+    Unbalanced quoting is ORDINARY here rather than malformed input: a merge
+    inside ``bash -c "git merge x"`` is matched INSIDE the enclosing literal, so
+    the slice carries that literal's closing quote and no opener. Balancing the
+    SEGMENT and re-tokenising is what keeps the branch NAME right.
+
+    Splitting on whitespace instead is what the first fix did, and it was wrong
+    in a way that mattered: a multi-word ``-m`` message became several tokens,
+    ``_first_positional`` skips exactly ONE token after a valued flag, and the
+    branch came back as the message's SECOND WORD. So
+    ``git merge -m 'merge plan 00407' worktree-plan-00407`` reported ``plan`` —
+    and so did ``git merge -m 'another plan here' some/other-branch``. Two
+    unrelated merges sharing one approval key means the one-shot approval a
+    human granted for the first is consumed by the second (Plan 00407 N12
+    review).
+    """
+    tokens = _shlex_tokens(segment)
+    if tokens is not None:
+        return tokens
+
+    trimmed = segment.rstrip()
+    if trimmed[-1:] in ('"', "'"):
+        balanced = _shlex_tokens(trimmed[:-1])
+        if balanced is not None:
+            return balanced
+
+    # Still untokenisable. Split on whitespace so the merge is at least still
+    # DETECTED: naming the wrong branch denies THIS merge, whereas returning
+    # nothing would make `merge_target` answer None and stand the gate down
+    # altogether — the one outcome worse than a wrong name.
+    return [token.strip("\"'") for token in segment.split()]
 
 
 def _first_positional(tokens: list[str]) -> str | None:
@@ -168,11 +209,16 @@ def merge_target(command: str) -> str | None:
     literals answers "what is this command's TARGET?"; it cannot answer "is
     there a command here at all?".
 
-    What that costs is ``echo 'git merge x'`` reading as a merge — the same
-    false positive ``destructive_git`` carries, and the safe direction for a
-    gate. Telling it apart from ``bash -c`` needs an allowlist of commands that
-    do not execute their argument, which is new machinery rather than a
-    correction (Plan 00408).
+    What that costs is stated in full rather than as ``echo 'git merge x'``
+    alone, so the trade-off a future reader re-litigates is the one made: a
+    ``grep``/``rg`` FOR a merge command matches, as do ``git commit -am 'x'``,
+    ``-m"x"`` and ``-m'x'`` (spellings ``_MESSAGE_BODY_PATTERN`` does not
+    recognise as message flags) and ``gh ... --body 'x'``. It is the safe
+    direction for a gate, and it bites only where the key is switched on.
+    Telling an inert ``echo`` apart from ``bash -c`` needs an allowlist of
+    commands that do not execute their argument, and recognising those flag
+    spellings is a separate widening — both are Plan 00408, and neither is
+    re-adding literal blanking, which is what let ``bash -c`` through.
 
     Because one copy is both matched and re-sliced, offsets need no
     reconciliation — the earlier two-pass form had to re-slice from the

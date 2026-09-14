@@ -285,6 +285,39 @@ class TestAQuotedStringCanItselfBeAMerge:
         """
         assert merge_target(f'bash -c "git merge {self._BRANCH}"') == self._BRANCH
 
+    def test_a_multi_word_message_does_not_become_the_branch(self) -> None:
+        """The branch must survive a quoted `-m` inside a `bash -c` literal.
+
+        The segment is matched INSIDE the enclosing literal, so it carries that
+        literal's closing quote and no opener. `shlex` refuses the unbalanced
+        result, and a whitespace fallback tore the message into separate tokens:
+        `_first_positional` skips exactly ONE token after a valued flag, so the
+        branch came back as the message's SECOND WORD.
+        """
+        command = "bash -c \"git merge --no-ff -m 'merge plan 00407' worktree-plan-00407\""
+
+        assert merge_target(command) == "worktree-plan-00407"
+
+    def test_two_merges_with_similar_messages_do_not_share_an_approval_key(self) -> None:
+        """The collision that made it matter, not just the wrong name.
+
+        Both of these reported `plan`. A human approving `plan` for the first
+        recorded a one-shot marker that the SECOND consumed, so a merge nobody
+        approved went through — the approval store's identity being wrong is
+        the one thing this handler exists to get right.
+        """
+        first = "bash -c \"git merge -m 'merge plan 00407' worktree-plan-00407\""
+        second = "bash -c \"git merge -m 'another plan here' some/other-branch\""
+
+        assert merge_target(first) == "worktree-plan-00407"
+        assert merge_target(second) == "some/other-branch"
+        assert merge_target(first) != merge_target(second)
+
+    def test_a_gh_pr_number_survives_a_quoted_subject(self) -> None:
+        command = "bash -c \"gh pr merge --subject 'ship it' 12\""
+
+        assert merge_target(command) == "12"
+
     def test_an_echo_naming_a_merge_is_matched_and_that_is_the_accepted_cost(
         self,
     ) -> None:

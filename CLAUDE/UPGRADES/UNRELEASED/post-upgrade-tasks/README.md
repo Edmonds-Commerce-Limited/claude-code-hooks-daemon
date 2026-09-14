@@ -85,9 +85,9 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-| File                                           | Type            | Severity | Applies to | One-line summary                                                                                                          |
-| ---------------------------------------------- | --------------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `01-rewrite-plan-qa-json-level-to-severity.md` | workflow-change | critical | all        | `plan-qa --json` now emits `severity` instead of `level`; a consumer still reading `level` silently reports zero findings |
+_No tasks are queued for the next release._ Add a row here when you add a task
+file beside this README; the release moves both out into the versioned upgrade
+guide and empties this table again.
 
 <!-- END TASK INDEX -->
 
