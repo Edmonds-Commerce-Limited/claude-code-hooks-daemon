@@ -138,6 +138,40 @@ Neither is evidenced in this log. Both are cheap to cover with a unit test and
 would produce exactly the unbounded runs measured above, so they are worth
 testing whether or not they turn out to be the cause.
 
+## RULED — bound the gate on TEXT STABILITY, not on elapsed non-emptiness
+
+Owner ruling, verbatim: "if the text is the same after X seconds then we regards
+it as captured text by accident or something / lets say 120 to give it plenty of
+safety / if its purely supervisor text, then no need to be soft - just clear it
+and force it through / if its human text - if not changed after 120 seconds then
+we can submit it then do the compact".
+
+**The primitive is right and is adopted.** "Unchanged for 120s" separates a human
+mid-sentence from abandoned text, which "non-empty" cannot. The gate keeps doing
+its job for the seconds it was designed for and stops holding for ever.
+
+### Branch 2 (supervisor text) is UNREACHABLE — do not build it
+
+Supervisor-authored text never trips this gate. `activity.record(forwarded)` has
+exactly one call site (the stdin read loop, 6195) and feeds only human bytes;
+the worker's recognizer is fed the same bytes via `raw_tap`. Injections are
+written to `master_fd` by another path and register in neither tracker. This is
+the same premise that voided option 3 — recorded again here because the ruling
+restated it, so a future reader does not implement a branch that cannot fire.
+
+### Branch 3 (submit human text) — adopted, with its cost recorded
+
+Submitting does not merely empty the box: it starts a TURN. That grows context
+and drives `work_idle` False, so the compaction being unblocked is delayed by
+exactly that turn — at CRITICAL, the wrong direction. Accepted anyway because
+the alternative destroys the human's words, and text unchanged for 120s is
+plausibly a complete message whose Enter was forgotten, where submitting is what
+the human wanted.
+
+**Open sub-question, not blocking**: at CRITICAL specifically, capture-then-clear
+(record the text, Esc, compact immediately) spends no turn and still preserves
+the words. Worth revisiting if the submit-path turn cost shows up in practice.
+
 ## Why the gate exists — the trade-off any fix must pay
 
 The gate is not arbitrary. Injecting into a TUI that has half-typed human text
@@ -202,61 +236,54 @@ which omits the suffix the sibling path at 4697 adds.
 
 ### Phase 1: Owner decision
 
-- [ ] 🔄 **Task 1.1**: RULING RECEIVED BUT VOIDED BY CORRECTION 3 — a fresh one
-  is needed. The owner ruled verbatim: "3 is a no brainer / 2 flushing the box
-  via hitting return is probably better than hitting escape".
+- [x] ✅ **Task 1.1**: RULED — bound the gate on TEXT STABILITY (120s unchanged),
+  not on elapsed non-emptiness. Recorded above with both caveats: branch 2 is
+  unreachable and must not be built, and branch 3 costs a turn.
 
-  **Option 3 cannot be built.** It was described as bypassing the gate when the
-  box holds only supervisor-authored text — but supervisor text never trips the
-  gate at all, so there is nothing to bypass. The ruling was sound given the
-  description; the description was wrong. Recorded rather than quietly
-  re-scoped, because the owner decided on a premise this plan supplied.
+- [ ] ⬜ **Task 1.2**: Give the input-box deferral line (4685) the
+  `_noop_band_suffix` its sibling at 4697 already has, so the two log shapes
+  agree and a suppressed CRITICAL cannot hide in the deferral stream. This is
+  what forced the whole investigation to reason from run-lengths rather than
+  bands.
 
-  **What survives**: every blocked tick is HUMAN text or a recent human
-  keystroke, so options 1, 2 and 4 are the live set and each one costs the
-  human's unsent input. Task 1.3's objection to Enter-flush stands and now
-  matters more, because option 2 is no longer the follow-on — it is a candidate
-  for the primary.
+### Phase 2: Text-stability tracking
 
-  The original options, kept for the record:
+- [ ] ⬜ **Task 2.1**: A failing test first: a box whose content is UNCHANGED
+  across 120s of ticks is reported abandoned, while a box that changes on any
+  tick inside the window is NOT. The changing case is the one a naive
+  "non-empty for 120s" timer gets wrong, so it must exist before the code.
+- [ ] ⬜ **Task 2.2**: Track content stability on `HumanInputLine` — a
+  fingerprint of the buffer plus the monotonic time it last CHANGED. Not a
+  timer started when the box first went non-empty: a human typing continuously
+  for three minutes must never be judged abandoned.
+- [ ] ⬜ **Task 2.3**: Wire abandonment into the compact path only, leaving the
+  2s idle floor untouched. `_DEFAULT_IDLE_FLOOR_SECONDS` is correct and is not
+  in scope.
 
-  1. **CRITICAL bypasses `idle`.** Compacts regardless. Simplest, matches the
-     docstring's existing promise — and can discard or corrupt whatever the
-     human had half-typed.
-  2. **CRITICAL flushes first.** Reuse the existing `[esc]`/resubmit machinery
-     to clear the box, then compact. Preserves the no-inject-into-a-busy-TUI
-     rule, at the cost of more moving parts on the most safety-critical path.
-  3. **Distinguish WHOSE text is in the box.** The supervisor already knows
-     when the unsubmitted line is its OWN (`own line may still be unsubmitted`).
-     Bypassing `idle` when the box holds only supervisor-authored text is
-     strictly safe — it destroys nothing a human typed. Narrower than 1, and
-     does not fix a human who wandered off mid-sentence at CRITICAL.
-  4. **Report only.** Leave the gate, make the suppression loud.
+### Phase 3: Acting on an abandoned box
 
-- [ ] ⬜ **Task 1.2**: NARROWED by the correction above. The general NOOP path
-  already carries the band. Give the INPUT-BOX DEFERRAL line (4685) the same
-  `_noop_band_suffix` its sibling at 4697 has, so the two log shapes agree and
-  neither can hide a suppressed CRITICAL.
+- [ ] ⬜ **Task 3.1**: A failing test: at red-or-worse with an abandoned box, the
+  supervisor submits the pending text and then compacts, in that order.
+- [ ] ⬜ **Task 3.2**: Implement, reusing the existing resubmit/Enter machinery
+  rather than a second keystroke path.
+- [ ] ⬜ **Task 3.3**: Pin that the submit happens exactly ONCE per abandoned
+  episode. A re-submitting loop against a box the Enter did not clear is the
+  failure mode this whole area already has history with (`/compact` stall →
+  `[esc]` flush), and it must not be reintroduced.
+- [ ] ⬜ **Task 3.4**: Update `TestH2InputBoxGuardBlocksEvenCritical` in
+  `tests/unit/supervise/test_compaction_gap_repro.py`. It encodes Plan 00168's
+  deliberate decision, so it must be changed with a comment recording that the
+  decision was revisited — never quietly deleted.
 
-- [ ] ⬜ **Task 1.3**: RULING NEEDED — Enter-flush vs Esc-flush for option 2,
-  raised AFTER the owner ruled and therefore still open.
+### Phase 4: The latent clear-byte gaps
 
-  **The objection.** Enter does not clear the box, it SUBMITS. At CRITICAL that
-  means a fragment is sent to the model, a turn starts, context GROWS, and
-  `work_idle` goes False — so compaction is delayed by exactly the turn the
-  fragment bought. Enter makes the problem worse at the only moment it is
-  urgent. Esc clears, leaving the very next tick free to compact.
-
-  **Why the owner's instinct is still right.** Esc destroys what the human
-  typed, and nothing records it.
-
-  **Proposed resolution, not yet ruled**: capture the box contents into the
-  decision log (or a recoverable scratch file), THEN Esc. The text survives, no
-  turn is spent, and compaction happens on the next tick. This needs its own
-  decision because it adds a write of human-authored text to a log.
-
-  Note this is orthogonal to Task 1.1: option 3 covers the supervisor's OWN
-  text and needs no flush at all, so it ships without waiting on this.
+- [ ] ⬜ **Task 4.1**: Failing tests that Ctrl-W (0x17) and Ctrl-K (0x0B) leave
+  the tracker permanently non-empty, and that a bracketed-paste start with no
+  end swallows a subsequent Enter.
+- [ ] ⬜ **Task 4.2**: Decide each on its merits. Ctrl-W/Ctrl-K do NOT clear the
+  whole line in a real shell, so treating them as clear bytes would be wrong;
+  the honest fix is to model them (word-delete / kill-to-end) or to bound the
+  paste latch. Recorded as a real choice rather than assumed.
 
 ## Success Criteria
 
