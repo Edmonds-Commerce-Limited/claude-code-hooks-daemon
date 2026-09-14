@@ -39,7 +39,11 @@ DEFAULT_MAX_DEPTH: Final[int] = 4
 #: The entry that marks a checkout. Tested for EXISTENCE, never for being a
 #: directory: a worktree and a submodule both carry a ``.git`` FILE, and an
 #: ``is_dir()`` test would silently skip exactly those.
-_GIT_ENTRY: Final[str] = ".git"
+#: What marks a directory as a checkout. Public because the PreToolUse gate
+#: asks the same question of a path the walk never reached -- and a second
+#: spelling of ".git" is exactly the drift this package exists to avoid.
+GIT_ENTRY: Final[str] = ".git"
+_GIT_ENTRY: Final[str] = GIT_ENTRY
 
 
 def _is_checkout(path: Path) -> bool:

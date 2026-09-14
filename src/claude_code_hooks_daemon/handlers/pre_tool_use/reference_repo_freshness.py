@@ -29,7 +29,8 @@ unusable rather than merely wrong:
 """
 
 import logging
-from pathlib import Path, PurePosixPath
+import shlex
+from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import ReferenceReposConfig
@@ -41,6 +42,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.reference_repos.cache import cached_states
+from claude_code_hooks_daemon.reference_repos.discovery import GIT_ENTRY as _GIT_ENTRY
 from claude_code_hooks_daemon.reference_repos.model import RepoState
 from claude_code_hooks_daemon.reference_repos.report import (
     NOT_VERIFIED_HEADLINE,
@@ -49,6 +51,7 @@ from claude_code_hooks_daemon.reference_repos.report import (
     repo_line,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    command_word,
     split_unquoted,
     strip_message_bodies,
     strip_quoted_heredoc_bodies,
@@ -67,7 +70,74 @@ _PATH_FIELD_BY_TOOL: Final[dict[str, str]] = {
 
 #: Shell operators that separate one command from the next. A chain is judged
 #: per segment so a `git` segment cannot launder a read riding alongside it.
-_CHAIN_SEPARATORS: Final[tuple[str, ...]] = ("&&", "||", ";", "|", "\n")
+#: ``||`` is listed before ``|`` so the longer operator matches first.
+_CHAIN_SEPARATORS: Final[tuple[str, ...]] = ("&&", "||", ";", "\n")
+
+#: Split SEPARATELY from the chain, because position within a pipeline matters:
+#: only the first stage runs against the working directory, and the rest read
+#: the previous stage's stdout.
+_PIPE_SEPARATORS: Final[tuple[str, ...]] = ("|",)
+
+#: Commands that take a path but never read what is inside it. Denying these
+#: over a stale repo answers a question nobody asked -- there is no sense in
+#: which `rm -rf <repo>` needs the repo to be up to date first.
+_NON_READING_COMMANDS: Final[frozenset[str]] = frozenset(
+    {
+        "rm",
+        "rmdir",
+        "mkdir",
+        "touch",
+        "echo",
+        "printf",
+        "ln",
+        "chmod",
+        "chown",
+        "mktemp",
+        "install",
+        "gh",
+        "true",
+        "false",
+        "test",
+    }
+)
+
+#: Commands that read whatever directory they are run from. Used ONLY for the
+#: `cd <repo> && <read>` inference, where no path is named and the working
+#: directory is the only thing that says which repo is being read. A positive
+#: list rather than "anything unrecognised": this is an inference, and an
+#: inference that fires on every unknown word fires on shell noise too.
+_READING_COMMANDS: Final[frozenset[str]] = frozenset(
+    {
+        "cat",
+        "bat",
+        "head",
+        "tail",
+        "less",
+        "more",
+        "rg",
+        "grep",
+        "egrep",
+        "fgrep",
+        "ag",
+        "ack",
+        "find",
+        "ls",
+        "tree",
+        "awk",
+        "wc",
+        "diff",
+        "jq",
+        "sort",
+        "cut",
+        "file",
+        "stat",
+        "python",
+        "python3",
+        "node",
+        "bash",
+        "sh",
+    }
+)
 
 #: The one command word that is never intercepted. See the module docstring.
 _EXEMPT_COMMAND: Final[str] = "git"
@@ -124,32 +194,21 @@ _NOT_VERIFIED_RULE = Rule(
 )
 
 
-def _command_word(word: str) -> str:
-    """The bare command name, with any path or quoting stripped.
+def _tokenise(segment: str) -> list[str]:
+    """Split one command into words the way the SHELL would.
 
-    ``/usr/bin/git`` and ``git`` are the same program, and this handler's
-    exemption is the only thing keeping the remedy it prints runnable — so a
-    respelling must not cost the exemption and deny a legitimate fix.
+    ``str.split()`` cuts ``cat "a/some file.md"`` at the space and yields a word
+    that is not the path anyone typed. ``shlex`` splits on the same boundaries
+    bash does and drops the quotes, so the path arrives intact.
+
+    Falls back to a whitespace split when ``shlex`` refuses the string (an
+    unbalanced quote, most often mid-edit). Over-splitting can only cost a
+    match; raising here would cost the user their tool call.
     """
-    return PurePosixPath(word.strip("\"'")).name
-
-
-def _is_git_only_chain(segments: list[list[str]]) -> bool:
-    """True when the whole chain does nothing but navigate to a repo and run git.
-
-    ``git -C <repo> pull`` was exempt from the start; ``cd <repo> && git pull``
-    was not, which left a reader who does the obvious thing — navigate in, then
-    fix the repo — blocked while doing exactly what the deny message asked for.
-    Plan 00401 Task 4.3 names both forms.
-
-    Scoped to a chain that is ONLY navigation and git: a `cd` that is followed
-    by a read still engages, so `cd <repo> && git pull && cat x` is judged, not
-    excused by the git segment sitting in front of the read.
-    """
-    heads = [_command_word(words[0]) for words in segments]
-    if _EXEMPT_COMMAND not in heads:
-        return False
-    return all(head in _NAVIGATION_COMMANDS or head == _EXEMPT_COMMAND for head in heads)
+    try:
+        return shlex.split(segment, comments=False)
+    except ValueError:
+        return segment.split()
 
 
 class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
@@ -215,20 +274,65 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         # not hypothetical: it denied the commit shipping this handler's docs.
         raw_command = str(tool_input.get("command") or "")
         command = strip_message_bodies(strip_quoted_heredoc_bodies(raw_command))
-        segments = [
-            words
-            for words in (segment.split() for segment in split_unquoted(command, _CHAIN_SEPARATORS))
-            if words
-        ]
+        return self._governed_reads(command, project_root)
 
-        if _is_git_only_chain(segments):
-            return []
+    def _governed_reads(self, command: str, project_root: Path) -> list[Path]:
+        """The governed checkouts this command would actually READ.
 
+        Three distinctions the first version collapsed, each of which produced a
+        false positive on an ordinary command:
+
+        ``naming a path is not reading it``
+            ``rm -rf <repo>`` and ``echo see <repo>`` mention a repo without
+            reading a byte of it, and answering them with "run `git pull` first"
+            is advice about a different command than the one being run.
+
+        ``a pipe SINK does not read the repo``
+            In ``cd <repo> && git log | cat`` the ``cat`` reads git's stdout,
+            not the checkout, so it must not resurrect a chain that is otherwise
+            pure ``git``.
+
+        ``cd establishes context, it does not read``
+            A ``cd`` alone touches nothing. It only matters once a later reading
+            command runs with no path of its own — which is exactly how
+            ``cd <repo> && rg pattern .`` reads a repo it never names.
+        """
         found: list[Path] = []
-        for words in segments:
-            if _command_word(words[0]) == _EXEMPT_COMMAND:
-                continue
-            found.extend(self._governed_words(words[1:], project_root))
+        # `cwd` persists ACROSS chain segments, because a `cd` does: in
+        # `cd <repo> && rg x` the two halves are separate segments and the
+        # second really does run inside the first's directory.
+        cwd: Path | None = None
+        for chain in split_unquoted(command, _CHAIN_SEPARATORS):
+            for stage_index, stage in enumerate(split_unquoted(chain, _PIPE_SEPARATORS)):
+                words = _tokenise(stage)
+                if not words:
+                    continue
+                head = command_word(words[0])
+
+                if head == _EXEMPT_COMMAND:
+                    continue
+                if head in _NAVIGATION_COMMANDS:
+                    cwd = next(iter(self._governed_words(words[1:], project_root)), None)
+                    continue
+                if head in _NON_READING_COMMANDS:
+                    continue
+
+                named = self._governed_words(words[1:], project_root)
+                if named:
+                    found.extend(named)
+                elif cwd is not None and stage_index == 0 and head in _READING_COMMANDS:
+                    # A reading command with no path of its own, run from inside
+                    # a governed repo. Three conditions, each load-bearing:
+                    #
+                    # - only the FIRST stage of a pipeline; the rest read stdin;
+                    # - only a command KNOWN to read. Inferring it from "not a
+                    #   command I recognise" fired on the `HEREDOC_BODY`/`EOF`
+                    #   placeholders that heredoc stripping leaves behind, which
+                    #   is how this branch first blocked a plain `git commit`.
+                    #   An unrecognised reader is still caught by a named path,
+                    #   which is the primary signal; only this inference is
+                    #   narrowed.
+                    found.append(cwd)
         return found
 
     @staticmethod
@@ -288,19 +392,31 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         if config is None or not config.enabled or config.mode == _MODE_OFF:
             return False
         project_root = self.project_root_reader()
-        return bool(self._touched_paths(hook_input, project_root))
+        return any(
+            self._subject(path, project_root, None) is not None
+            for path in self._touched_paths(hook_input, project_root)
+        )
 
     # ----------------------------------------------------------------- verdict
 
-    def _subject(self, path: Path, project_root: Path, known: dict[Path, RepoState] | None) -> Path:
-        """The governed repo a touched path belongs to.
+    def _subject(
+        self, path: Path, project_root: Path, known: dict[Path, RepoState] | None
+    ) -> Path | None:
+        """The governed CHECKOUT a touched path belongs to, or ``None``.
 
-        Resolved from the cache when the repo is known. When it is not — a clone
-        made after the sweep, or no cache at all — the convention's own shape
-        gives the answer: one checkout per directory directly under a governed
-        root. That keeps the block_once key stable across several reads of the
-        same unknown repo, which is what stops one clone producing a block per
-        file read.
+        ``None`` matters more than the happy path. The first version invented a
+        subject for any path under a root — the root itself, a loose note, a
+        plain subdirectory — and then reported it as unverified. Nothing could
+        ever clear that: :mod:`discovery` only records directories carrying a
+        ``.git``, so no sweep and no CLI run could ever put those subjects in
+        the cache, and the reader was handed a ``fix:`` command incapable of
+        working. Under ``mode: block`` it was a permanent dead end, and it
+        denied ``ls untracked/repos`` in this repository.
+
+        So a path is governed only when a real checkout contains it. The cache
+        answers first (deepest wins, for a checkout nested inside another), and
+        a ``.git`` on disk answers second — which is what keeps a clone made
+        after the sweep governed rather than invisible.
         """
         if known:
             containing = [repo for repo in known if self._within(path, repo)]
@@ -308,9 +424,19 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
                 return max(containing, key=lambda repo: len(repo.parts))
 
         for root in self._roots(project_root):
-            if self._within(path, root) and path != root:
-                return root / path.relative_to(root).parts[0]
-        return path
+            if not self._within(path, root):
+                continue
+            # Walk DOWN from the root towards the path, taking the deepest
+            # ancestor that is actually a checkout.
+            candidate = root
+            deepest: Path | None = None
+            for part in path.relative_to(root).parts:
+                candidate = candidate / part
+                if (candidate / _GIT_ENTRY).exists():
+                    deepest = candidate
+            if deepest is not None:
+                return deepest
+        return None
 
     def _already_reported(self, session_id: str, subject: Path) -> bool:
         return str(subject) in self._reported.get(session_id, set())
@@ -329,6 +455,10 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
 
         for path in self._touched_paths(hook_input, project_root):
             subject = self._subject(path, project_root, known)
+            if subject is None:
+                # Under a governed root but not inside any checkout — a loose
+                # file, a scratch directory, the root itself. Nothing to judge.
+                continue
             message = self._problem(subject, known, project_root)
             if message is None:
                 continue

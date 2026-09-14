@@ -180,8 +180,14 @@ def _segment_binary(command: str, index: int) -> str:
     return words[0].rpartition(_PATH_SEPARATOR)[2]
 
 
-def _command_word(word: str) -> str:
+def command_word(word: str) -> str:
     """The command name bash would resolve ``word`` to.
+
+    Public because a second handler now needs it (Plan 00401's reference-repo
+    gate, which compares a segment's head against ``git``). That handler shipped
+    a private copy first, and the copy was weaker in exactly the way this
+    docstring warns about -- it reduced only the basename, so ``(cd`` stayed
+    ``(cd`` and a subshell escaped the comparison.
 
     Quoting is a property of the SHELL SYNTAX, not of the command being named:
     ``"bash"``, ``'bash'``, ``ba"sh"``, ``\\bash`` and ``(bash`` all invoke
@@ -375,7 +381,7 @@ def quoted_heredoc_receivers(command: str) -> list[str]:
     receivers: list[str] = []
     for segment in _heredoc_receiving_segments(command):
         receivers.extend(
-            _command_word(word) for word in segment.split() if word and not word.startswith("-")
+            command_word(word) for word in segment.split() if word and not word.startswith("-")
         )
     return receivers
 
@@ -435,7 +441,7 @@ def quoted_heredoc_command_words(command: str) -> list[str]:
         for word in segment.split():
             if not word or word.startswith("-"):
                 continue
-            resolved = _command_word(word)
+            resolved = command_word(word)
             # An EMPTY resolution means the word was pure grouping punctuation
             # (`{`, `(`), which `_WORD_GROUPING_PREFIXES` strips entirely. It
             # names no command, so accepting it as the command word matched ''

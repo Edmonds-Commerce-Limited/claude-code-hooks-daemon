@@ -294,6 +294,26 @@ class TestJsonOutput:
         payload = json.loads(capsys.readouterr().out)
         assert "pull --ff-only" in payload["repos"][0]["remediation"]
 
+    def test_json_reports_a_failed_fetch(
+        self, tmp_path: Path, stub_refresh, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The machine surface must not restore the false all-clear.
+
+        The text report was fixed to stop counting an unfetchable repo as up to
+        date; this encoder was hand-written separately and still emitted
+        `behind: 0` with nothing to say the number was never confirmed. CI reads
+        THIS one.
+        """
+        root = _project(tmp_path)
+        repo = _repo(root)
+        stub_refresh(alpha=_state(repo, fetch_failed=True))
+
+        cmd_reference_repos(_args(root, json_output=True))
+
+        entry = json.loads(capsys.readouterr().out)["repos"][0]
+        assert entry["fetch_failed"] is True
+        assert entry["verified"] is False
+
     def test_json_lists_every_repo_including_uncheckable_ones(
         self, tmp_path: Path, stub_refresh, capsys: pytest.CaptureFixture[str]
     ) -> None:

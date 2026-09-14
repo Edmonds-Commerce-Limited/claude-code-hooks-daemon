@@ -161,7 +161,13 @@ def cached_states(
     path = cache_path(project_root)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
+        # ValueError, not json.JSONDecodeError: UnicodeDecodeError is ALSO a
+        # ValueError and is raised by read_text before json ever sees the bytes.
+        # The narrower band let it escape into the front controller, which
+        # ALLOWS the operation -- so a single non-UTF-8 byte in an untracked
+        # cache file turned the gate off. Failing open is the one direction
+        # this design must never fail.
         return None
 
     if not isinstance(payload, dict):

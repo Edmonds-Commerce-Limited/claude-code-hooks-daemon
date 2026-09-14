@@ -5604,6 +5604,12 @@ def cmd_reference_repos(args: argparse.Namespace) -> int:
                             "behind": state.behind,
                             "ahead": state.ahead,
                             "dirty": state.dirty,
+                            # Without these two a repo whose fetch FAILED reads
+                            # as `behind: 0, needs_attention: false` and exits
+                            # 0 -- the false all-clear, restored on the one
+                            # surface CI actually parses.
+                            "fetch_failed": state.fetch_failed,
+                            "verified": state.verified,
                             "needs_attention": state.needs_attention,
                             "remediation": remediation_command(state),
                         }

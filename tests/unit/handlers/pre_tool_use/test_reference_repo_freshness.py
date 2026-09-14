@@ -25,6 +25,7 @@ import pytest
 from pydantic import ValidationError
 
 from claude_code_hooks_daemon.config.models import ReferenceReposConfig
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.pre_tool_use.reference_repo_freshness import (
@@ -65,6 +66,15 @@ def _repo(root: Path, name: str = "alpha") -> Path:
     path = root / "untracked" / "repos" / name
     (path / ".git").mkdir(parents=True)
     return path
+
+
+def _fresh_cache(root: Path, name: str = "alpha") -> None:
+    """An in-date cache recording one perfectly current governed repo.
+
+    The point of several tests below: even with nothing whatsoever wrong, the
+    handler used to deny reads of non-checkout paths under the root.
+    """
+    write_cache(root, [_state(root / "untracked" / "repos" / name)])
 
 
 def _read(path: Path, session: str = _SESSION) -> dict[str, Any]:
@@ -647,21 +657,192 @@ class TestTextIsNotACommand:
         assert handler.matches(_bash(command)) is True
 
 
-class TestSubjectResolution:
-    def test_a_call_scoped_to_the_root_itself_is_handled(
+class TestOnlyRealCheckoutsAreGoverned:
+    """Regression: a path under a root that is NOT a checkout was gated.
+
+    The worst defect this handler had. Discovery only ever caches directories
+    carrying a `.git` (discovery.py), so a subject invented for a non-checkout
+    path can never appear in any cache — no sweep and no CLI run could clear it.
+    The reader was handed a `fix:` command that was incapable of working, which
+    under `mode: block` is a permanent dead end.
+
+    Reported by review with a live reproduction: `ls untracked/repos` was denied
+    in this repository with a fresh, in-date cache sitting on disk.
+    """
+
+    def test_listing_the_root_itself_is_not_a_read_of_any_repo(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
     ) -> None:
-        """`rg pattern untracked/repos` names no single repo.
-
-        There is nothing to attribute the reading to, so the root becomes its own
-        subject rather than the handler inventing a repo that was never named.
-        """
         _repo(tmp_path)
+        _fresh_cache(tmp_path)
 
-        result = handler.handle(_bash("rg pattern untracked/repos"))
+        assert handler.matches(_bash("ls untracked/repos")) is False
+
+    def test_a_loose_file_under_the_root_is_not_a_repo(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        _repo(tmp_path)
+        notes = tmp_path / "untracked" / "repos" / "NOTES.md"
+        notes.write_text("not a checkout", encoding="utf-8")
+        _fresh_cache(tmp_path)
+
+        assert handler.matches(_read(notes)) is False
+
+    def test_a_plain_subdirectory_under_the_root_is_not_a_repo(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        _repo(tmp_path)
+        scratch = tmp_path / "untracked" / "repos" / "scratch"
+        scratch.mkdir()
+        _fresh_cache(tmp_path)
+
+        assert handler.matches(_read(scratch / "x.md")) is False
+
+    def test_a_real_checkout_is_still_governed(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """The narrowing must not blind the handler to actual repos."""
+        repo = _repo(tmp_path)
+
+        assert handler.matches(_read(repo / "src" / "x.py")) is True
+
+    def test_a_clone_made_after_the_sweep_is_still_governed(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """It is on disk as a checkout but in no cache — the NOT VERIFIED case."""
+        _repo(tmp_path, "alpha")
+        fresh = _repo(tmp_path, "cloned-midsession")
+        _fresh_cache(tmp_path)
+
+        result = handler.handle(_read(fresh / "x.py"))
 
         assert result.decision == Decision.DENY
         assert NOT_VERIFIED_HEADLINE in result.reason
+
+
+class TestCommandsThatCannotRead:
+    """Regression: a governed path in ANY argument position counted as a read.
+
+    Naming a repo is not reading it. Denying `rm -rf <repo>` with "run
+    `git pull` first" is advice that makes no sense for the command being run.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rm -rf untracked/repos/alpha",
+            "mkdir -p untracked/repos/alpha-new",
+            "echo see untracked/repos/alpha for details",
+            "gh repo clone o/x untracked/repos/alpha",
+            "touch untracked/repos/alpha/marker",
+        ],
+    )
+    def test_a_non_reading_command_does_not_engage(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler, command: str
+    ) -> None:
+        _repo(tmp_path)
+
+        assert handler.matches(_bash(command)) is False
+
+    def test_a_reading_command_on_the_same_path_still_engages(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """The counterweight: narrowing must not turn the gate off."""
+        _repo(tmp_path)
+
+        assert handler.matches(_bash("cat untracked/repos/alpha/x.md")) is True
+
+
+class TestQuotedArgumentsAreTokenisedProperly:
+    def test_a_path_with_a_space_is_extracted_whole(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """`str.split()` cut this at the space and matched `.../alpha/some`.
+
+        The old test asserted only that the command ENGAGED, which it did — via
+        a truncated path that happened to still sit under the root. It passed
+        for the wrong reason, so it is now asserted on the extracted path.
+        """
+        repo = _repo(tmp_path)
+
+        touched = handler._touched_paths(
+            _bash('cat "untracked/repos/alpha/some file.md"'), tmp_path
+        )
+
+        assert touched == [repo / "some file.md"]
+
+
+class TestGitOnlyChainShapes:
+    """Regression: three git-only shapes were intercepted.
+
+    The deny message itself promises "`git` is NEVER intercepted", so any shape
+    that slips through makes the handler's own explanation untrue.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -C untracked/repos/alpha pull --ff-only",
+            "/usr/bin/git -C untracked/repos/alpha pull",
+            "cd untracked/repos/alpha && git pull --ff-only",
+            "(cd untracked/repos/alpha && git pull)",
+            "cd untracked/repos/alpha && git log | cat",
+            "cd untracked/repos/alpha && git commit -F - <<'EOF'\nmsg\nEOF",
+        ],
+    )
+    def test_a_git_only_chain_is_never_intercepted(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler, command: str
+    ) -> None:
+        _repo(tmp_path)
+
+        assert handler.matches(_bash(command)) is False
+
+    def test_navigating_in_and_then_reading_still_engages(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """`cd <repo> && rg x` reads it without ever naming a governed path."""
+        _repo(tmp_path)
+
+        assert handler.matches(_bash("cd untracked/repos/alpha && rg pattern .")) is True
+
+
+class TestMalformedInputDegrades:
+    def test_an_unbalanced_quote_does_not_raise(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """`shlex` refuses this; a PreToolUse hook must not.
+
+        Half-typed commands reach hooks all the time. Raising here would cost
+        the user their tool call over a quote they were still in the middle of.
+        """
+        _repo(tmp_path)
+
+        assert handler.matches(_bash("cat 'untracked/repos/alpha/x.md")) is True
+
+    def test_a_second_governed_root_is_skipped_when_the_path_is_not_under_it(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        repo = _repo(tmp_path)
+        handler._reference_repos = ReferenceReposConfig(roots=["vendor", "untracked/repos"])
+
+        assert handler.matches(_read(repo / "x.py")) is True
+
+
+class TestSubjectResolution:
+    def test_a_call_scoped_to_the_root_itself_names_no_repo(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """`rg pattern untracked/repos` attributes to no checkout, so it passes.
+
+        This test previously asserted the OPPOSITE — that the root became its
+        own subject — which pinned the defect rather than the behaviour: that
+        subject could never be cached, so the deny it produced was unclearable.
+        A search across the root is a real gap in coverage, but the answer to it
+        is to judge the repos beneath, never to invent one that does not exist.
+        """
+        _repo(tmp_path)
+
+        assert handler.handle(_bash("rg pattern untracked/repos")).decision == Decision.ALLOW
 
     def test_the_deepest_containing_repo_wins(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
@@ -763,3 +944,11 @@ class TestHandlerContract:
 
     def test_it_declares_an_acceptance_test(self, handler: ReferenceRepoFreshnessHandler) -> None:
         assert handler.get_acceptance_tests()
+
+    def test_it_declares_both_rules_distinctly(
+        self, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """Stale and NOT VERIFIED are different facts and get different IDs."""
+        ids = {rule.rule_id for rule in handler.get_rules()}
+
+        assert ids == {RuleID.REFERENCE_REPO_STALE, RuleID.REFERENCE_REPO_NOT_VERIFIED}

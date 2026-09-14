@@ -138,6 +138,20 @@ class TestUnusableCacheReadsAsNotVerified:
     def test_a_missing_cache_reads_as_not_verified(self, tmp_path: Path) -> None:
         assert cached_states(tmp_path, now=_NOW) is None
 
+    def test_undecodable_bytes_read_as_not_verified(self, tmp_path: Path) -> None:
+        """A byte that is not UTF-8 raises UnicodeDecodeError, not JSONDecodeError.
+
+        It is a ValueError, so the original `(OSError, json.JSONDecodeError)`
+        band missed it and let it escape `handle()` into the front controller —
+        which ALLOWS the operation. The gate failed OPEN on a corrupt cache,
+        which is the one direction this design must never fail.
+        """
+        path = cache_path(tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\xff\xfe not utf-8 at all")
+
+        assert cached_states(tmp_path) is None
+
     def test_malformed_json_reads_as_not_verified(self, tmp_path: Path) -> None:
         path = cache_path(tmp_path)
         path.parent.mkdir(parents=True, exist_ok=True)
