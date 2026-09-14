@@ -45,6 +45,12 @@ _ESCAPE_HATCH_PATTERN = re.compile(
 # scoping already used by destructive_git's force-push pattern and
 # gh_pr_comments' segment extraction -- so `git merge --squash x; git commit
 # -m "not a squash flag"` cannot leak a match across commands.
+#
+# A NEWLINE is one of those separators (Plan 00406). It was not, and this
+# comment's claim was false for the commonest spelling of all: `git merge
+# origin/main` on one line and `echo --squash is what we avoid` on the next was
+# denied as a squash merge. The `&&` spelling of the same pair was allowed,
+# which is what proved it a defect rather than a policy choice.
 _SEGMENT = rf"[^{SUBCOMMAND_SEPARATOR_CHARS}]*?"
 
 # git merge --squash, either flag position: `git merge --squash x` or

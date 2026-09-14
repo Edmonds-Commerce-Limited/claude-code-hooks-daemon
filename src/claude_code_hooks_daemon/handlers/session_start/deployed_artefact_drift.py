@@ -84,8 +84,14 @@ class DeployedArtefactDriftHandler(SessionStartHandlerBase):
             handler_id=HandlerID.DEPLOYED_ARTEFACT_DRIFT,
             priority=Priority.DEPLOYED_ARTEFACT_DRIFT,
             terminal=False,
-            tags=[HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
+            tags=[HandlerTag.ADVISORY, HandlerTag.PLANNING, HandlerTag.NON_TERMINAL],
         )
+        # Injected by the registry for PLANNING-tagged handlers: the plan
+        # directory (relative) when the workflow is enabled, else None. Without
+        # the tag this stayed None and the hardcoded default was used, so a
+        # project with a configured plan directory got SILENCE from a drift
+        # detector rather than a report (Plan 00407 N4).
+        self._track_plans_in_project: str | None = None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return not is_resume_session(hook_input)
@@ -164,10 +170,13 @@ class DeployedArtefactDriftHandler(SessionStartHandlerBase):
                 )
         return entries
 
-    @staticmethod
-    def _drifted_plan_tooling(project_root: Path) -> list[str]:
+    def _drifted_plan_tooling(self, project_root: Path) -> list[str]:
         entries: list[str] = []
-        plan_dir = project_root.joinpath(*_PLAN_DIR_PARTS)
+        # The configured directory when the registry injected one, else the
+        # historic default — so a project that has not configured anything, or
+        # has the plan workflow off, behaves exactly as before.
+        plan_dir_rel = self._track_plans_in_project or "/".join(_PLAN_DIR_PARTS)
+        plan_dir = project_root / plan_dir_rel
         pairs = (
             (MKPLAN_SCRIPT_NAME, mkplan_template_path()),
             (PLANLIB_SCRIPT_NAME, planlib_template_path()),
@@ -178,7 +187,7 @@ class DeployedArtefactDriftHandler(SessionStartHandlerBase):
                 continue
             if deployed.read_text() != template.read_text():
                 entries.append(
-                    f"{'/'.join(_PLAN_DIR_PARTS)}/{filename} — daemon-owned, rewritten "
+                    f"{plan_dir_rel}/{filename} — daemon-owned, rewritten "
                     f"on every deploy: `{daemon_cli_command('deploy-plan-workflow')}`"
                 )
         return entries

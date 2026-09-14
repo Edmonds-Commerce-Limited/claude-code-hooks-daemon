@@ -2134,15 +2134,25 @@ class Config(BaseModel):
         if not path.exists():
             raise FileNotFoundError(f"Configuration file not found: {path}")
 
-        with path.open() as f:
-            if path.suffix in (".yaml", ".yml"):
-                data = yaml.safe_load(f) or {}
-            elif path.suffix == ".json":
-                import json
+        try:
+            with path.open() as f:
+                if path.suffix in (".yaml", ".yml"):
+                    data = yaml.safe_load(f) or {}
+                elif path.suffix == ".json":
+                    import json
 
-                data = json.load(f)
-            else:
-                raise ValueError(f"Unsupported format: {path.suffix}")
+                    data = json.load(f)
+                else:
+                    raise ValueError(f"Unsupported format: {path.suffix}")
+        except yaml.YAMLError as exc:
+            # A syntax error is an UNREADABLE CONFIG, the same outcome as an
+            # unsupported suffix, so it leaves by the same door. `yaml.YAMLError`
+            # derives from `Exception` rather than `ValueError`, so callers that
+            # reasonably catch "the config could not be read" as `ValueError`
+            # were still hit by it — including a boundary documented as never
+            # raising (Plan 00407 N9). `json.JSONDecodeError` already IS a
+            # `ValueError`, so the two formats now agree.
+            raise ValueError(f"Invalid YAML in {path}: {exc}") from exc
 
         return cls.model_validate(data)
 

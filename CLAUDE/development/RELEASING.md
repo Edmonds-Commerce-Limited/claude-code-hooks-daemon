@@ -82,6 +82,25 @@ Rules for reading it:
 - **Delete the file** once Step 15 verification succeeds, so a later session
   cannot mistake a finished release for an in-flight one.
 
+**Step 1a runs BEFORE the state file, and that is not a contradiction of
+"first".** The state file is the first thing `/release` writes; the slate-clean
+gate is the first thing it *runs*, and it precedes the write. A release that
+never cleared the slate gate never started — nothing bumped, nothing moved, no
+agent spawned — so there is no authorisation to preserve across a compaction.
+
+Writing it first instead manufactures a deadlock, which is not hypothetical
+(Plan 00407 N1): Step 1a's exit `2` tells you to stop with
+`[awaiting-human] the release slate is not clean`, and `release_blocker` then
+DENIES that stop because a state file exists at `last_completed_step: 0`. Its
+only route out is deleting the file, which it correctly calls the ABORT action
+— so the gate's documented outcome, "a human decides and re-invokes with
+`accept-wip`", can only be reported as an abort, with the recorded
+authorisation destroyed on the way. Those two outcomes read differently to
+whoever finds the transcript, and only one of them is what happened.
+
+So: run `release-slate-check` first, and write the state file once it returns
+`0` — including the `0` that `accept-wip` produces.
+
 The scope question — "is the bundle complete?" — is the one thing an agent
 cannot answer from the repository, which is why `notes` records the human's
 answer rather than the agent's inference.

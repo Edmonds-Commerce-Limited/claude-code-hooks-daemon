@@ -1668,18 +1668,36 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
     if not lock_path.is_file():
         return None
 
-    fd = os.open(lock_path, os.O_RDWR)
+    # Every other OSError answers "I cannot tell", which for an ADVISORY means
+    # no warning. Propagating instead ended `hooks-daemon restart` with a
+    # traceback — a stronger refusal than the one the caller's docstring
+    # promises never to make, on the daemon's most-used recovery verb (Plan
+    # 00407 N10). The window is ordinary rather than exotic: `is_file()` and
+    # `os.open` are two calls, so a QA run that finishes between them unlinks
+    # the file; a lock owned by another user answers EACCES to the O_RDWR open;
+    # and NFS or overlayfs can refuse `flock` outright.
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        # Contention is the ANSWER here, not an error: a run holds the lock.
-        # Only this errno means held; anything else propagates rather than
-        # being misreported as a busy suite.
-        holder = lock_path.read_text(encoding="utf-8").strip() or "unknown"
-        return holder.removeprefix("pid=")
-    else:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        fd = os.open(lock_path, os.O_RDWR)
+    except OSError:
         return None
+
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            # Contention is the ANSWER here, not an error: a run holds the lock.
+            # Only this errno means held; reading the pid may still fail, and an
+            # unnamed holder is better than no warning at all.
+            try:
+                holder = lock_path.read_text(encoding="utf-8").strip() or "unknown"
+            except OSError:
+                return None
+            return holder.removeprefix("pid=")
+        except OSError:
+            return None
+        else:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return None
     finally:
         os.close(fd)
 

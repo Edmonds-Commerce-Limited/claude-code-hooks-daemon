@@ -38,6 +38,8 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import (
 _FORCE = "--" + "force"
 _AMEND = "--" + "amend"
 _RESET_HARD = "git reset " + "--hard"
+#: The operand that makes `git checkout` discard a working-tree change.
+_DISCARD = "-" + "-"
 
 #: The exact command from the field report, reduced to its shape.
 _FIELD_REPORT = (
@@ -134,9 +136,79 @@ class TestTheGuardStillGuards:
 
         Quoting the delimiter is what makes a body inert; an unquoted one can
         genuinely run what it contains, so it is not blanked.
+
+        The body is scanned like any other command text, which means LINE BY
+        LINE (Plan 00406). This test used to put `git push origin main` on the
+        command line and a bare `--force` in the body, and assert a match --
+        but bash feeds that `--force` to `git commit -F -` as the MESSAGE, so
+        the push it was attributed to never carried it. That was a cross-line
+        attribution, not a force push, and it is the exact class Plan 00406
+        removed.
+
+        What the guard is actually for is unchanged and is what is asserted
+        here: the body is NOT blanked, so a force push written inside it still
+        matches -- including the spelling that really does run, `$(...)`.
         """
-        command = f"git commit -F - <<EOF && git push origin main\n{_FORCE}\nEOF"
+        command = f"git commit -F - <<EOF\ngit push {_FORCE} origin main\nEOF"
         assert _matches(handler, command) is True
+
+    def test_a_substituting_force_push_inside_an_unquoted_body_is_blocked(
+        self, handler: DestructiveGitHandler
+    ) -> None:
+        """The spelling that genuinely executes from inside an unquoted body."""
+        command = f"git commit -F - <<EOF\n$(git push {_FORCE} origin main)\nEOF"
+        assert _matches(handler, command) is True
+
+
+class TestAFlagIsNotAMessage:
+    """`-m` means "message" only where the SUBCOMMAND takes one.
+
+    Message blanking was scoped to the BINARY, so for any git subcommand where
+    `-m` is not a message flag, the very next token was blanked as though it
+    were commit prose. Inserting two characters therefore talked the guard out
+    of blocking, and R-GIT-CHECKOUT-DISCARD exists precisely to prevent
+    unrecoverable loss. Reproduced end to end against the live hook by the
+    release review: the `-m` form ran, exited 0, and permanently discarded a
+    working-tree modification, while the plain form was denied (Plan 00407 N7).
+
+    The failure is not an evasion — `git checkout -m` is a real command a model
+    can emit — and it was a REGRESSION: the previous release blanked nothing
+    here and denied both spellings.
+    """
+
+    def test_an_inserted_flag_does_not_hide_a_discarding_checkout(
+        self, handler: DestructiveGitHandler
+    ) -> None:
+        assert _matches(handler, f"git checkout -m {_DISCARD} f.txt") is True
+
+    def test_the_plain_discarding_checkout_is_still_denied(
+        self, handler: DestructiveGitHandler
+    ) -> None:
+        """The control: the spelling that was never broken."""
+        assert _matches(handler, f"git checkout {_DISCARD} f.txt") is True
+
+    @pytest.mark.xfail(
+        reason=(
+            "Known BEHAVIOUR gap, Plan 00408: a QUOTED operand is not recognised, "
+            "and it is not this release's regression -- the plain quoted spelling "
+            "fails identically with no `-m` present, so blanking was never the "
+            "cause. Recorded as Plan 00407 N8 and graduated rather than fixed "
+            "inside a release: the pattern change is broader than the scoping fix "
+            "beside it. Flips to a plain pass when 00408 lands; fails loudly if "
+            "'fixed' by accident."
+        ),
+        strict=True,
+    )
+    def test_quoting_the_operand_does_not_hide_it_either(
+        self, handler: DestructiveGitHandler
+    ) -> None:
+        assert _matches(handler, f'git checkout -m "{_DISCARD}" f.txt') is True
+
+    def test_a_real_commit_message_is_still_treated_as_prose(
+        self, handler: DestructiveGitHandler
+    ) -> None:
+        """The property the blanking exists for must survive the fix."""
+        assert _matches(handler, f"git commit -m 'document {_AMEND}'") is False
 
 
 class TestBothVerbsReadTheSameCommand:

@@ -4,7 +4,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00407: niggles ledger twelve](00407-niggles-ledger-twelve/PLAN.md) - In Progress (the open ledger; ledger eleven is closed. N1: `RELEASING.md` and the release skill's Stage 0 each claim the FIRST action of `/release`, and obeying them in that order makes the slate gate's own `[awaiting-human]` stop unreachable — `release_blocker` denies it, and its route out is the ABORT)
+- [00407: niggles ledger twelve](00407-niggles-ledger-twelve/PLAN.md) - In Progress (the open ledger; ledger eleven is closed. Ten entries from using the release pipeline and from its own code-review gate — including N7, where inserting `-m` disabled R-GIT-CHECKOUT-DISCARD and permanently discarded a working-tree change, a regression caught before it shipped)
+
+- [00408: handler hygiene from the release review](00408-handler-hygiene-from-the-release-review/PLAN.md) - Not Started (the non-user-visible half of the v3.64.0 review: raw hook-field literals where `HookInputField` is the declared SSoT, `merge_qa_report` building the docs corpus on the hook budget while a sibling argues against exactly that, and four sub-bar items carried so they are not lost. Graduated from 00407 N6)
 
 - [00406: newline is a command boundary in handler patterns](00406-newline-is-a-command-boundary-in-handler-patterns/PLAN.md) - Not Started (four blocking handlers judge the NEXT line as part of the command they are matching, because their separator class omits `\n` — `git push origin main` ⏎ `grep -f x y` is denied as a force push, and `git branch -d` is denied by the rule that recommends it. Joining the same two lines with `&&` reverses every verdict. Graduated from 00405 N8)
 
@@ -246,22 +248,22 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 407 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 408 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 361 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 23 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 24 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 23 + 361 + 13 = **397 folders**, spanning
-  **394 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 24 + 361 + 13 = **398 folders**, spanning
+  **395 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  407 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  408 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a

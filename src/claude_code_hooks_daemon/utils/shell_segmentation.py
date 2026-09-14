@@ -31,6 +31,8 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
+from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
+
 # Bash quoting characters. Inside single quotes NOTHING is special except the
 # closing quote -- in particular a backslash is a literal backslash, which is
 # the rule a scanner that escapes everywhere gets wrong.
@@ -152,6 +154,25 @@ _MESSAGE_BODY_PLACEHOLDER = "<REDACTED>"
 #: as the redaction placeholder — a remediation the caller cannot run.
 _MESSAGE_TAKING_COMMANDS: tuple[str, ...] = ("git", "hg", "svn", "jj")
 
+#: Scoping to the BINARY is not enough, and the gap was a live bypass of
+#: R-GIT-CHECKOUT-DISCARD (Plan 00407 N7). `-m` means "message" only where the
+#: SUBCOMMAND takes one: for `git checkout` it selects merge-conflict style and
+#: takes NO value, so the next token -- the `--` that makes the checkout
+#: destructive -- was blanked as though it were commit prose, and the guard
+#: stopped matching. Inserting two characters was enough, and the loss is
+#: silent and permanent.
+#:
+#: An ALLOWLIST, because the safe error is withholding an exemption: an
+#: unlisted subcommand keeps its operands visible to every scanner, which at
+#: worst costs a false positive on a message nobody quoted.
+#:
+#: Deliberately absent, each because `-m` there is NOT prose: `checkout` and
+#: `branch` (rename / conflict style), `cherry-pick` and `revert` (mainline
+#: parent NUMBER), `rebase` (`--merge`, valueless).
+_MESSAGE_TAKING_SUBCOMMANDS: dict[str, frozenset[str]] = {
+    "git": frozenset({"commit", "tag", "merge", "notes", "stash"}),
+}
+
 #: Separators that end one command and start the next, for attributing a flag
 #: to the command word that owns it.
 _CHAIN_SEPARATORS: tuple[str, ...] = ("&&", "||", ";", "\n")
@@ -163,8 +184,8 @@ _PATH_SEPARATOR = "/"
 _SEGMENT_START = 0
 
 
-def _segment_binary(command: str, index: int) -> str:
-    """Basename of the command word that owns the flag at ``index``.
+def _segment_words(command: str, index: int) -> list[str]:
+    """Words of the command segment that owns the flag at ``index``.
 
     Bounded by chain separators so a `git commit` earlier in the line cannot
     lend its message-taking status to a later `python -m` in the same command.
@@ -174,10 +195,29 @@ def _segment_binary(command: str, index: int) -> str:
         found = command.rfind(separator, _SEGMENT_START, index)
         if found != -1:
             start = max(start, found + len(separator))
-    words = command[start:index].split()
+    return command[start:index].split()
+
+
+def _segment_binary(command: str, index: int) -> str:
+    """Basename of the command word that owns the flag at ``index``."""
+    words = _segment_words(command, index)
     if not words:
         return ""
     return words[0].rpartition(_PATH_SEPARATOR)[2]
+
+
+def _segment_subcommand(command: str, index: int) -> str:
+    """The SUBCOMMAND that owns the flag at ``index``, or ``""``.
+
+    The subcommand always precedes its flags, so the words before ``index`` are
+    enough. Global options are skipped by the same helper the regex grammar
+    uses, so ``git -C /path commit -m x`` still resolves to ``commit``.
+    """
+    words = _segment_words(command, index)
+    if not words:
+        return ""
+    position = git_subcommand_index(words, 0)
+    return words[position] if position is not None else ""
 
 
 def command_word(word: str) -> str:
@@ -263,7 +303,11 @@ def strip_message_bodies(command: str) -> str:
     """
 
     def _blank_if_inert(match: re.Match[str]) -> str:
-        if _segment_binary(command, match.start()) not in _MESSAGE_TAKING_COMMANDS:
+        binary = _segment_binary(command, match.start())
+        if binary not in _MESSAGE_TAKING_COMMANDS:
+            return match.group(0)
+        allowed = _MESSAGE_TAKING_SUBCOMMANDS.get(binary)
+        if allowed is not None and _segment_subcommand(command, match.start()) not in allowed:
             return match.group(0)
         if value_can_substitute(match.group("value")):
             return match.group(0)

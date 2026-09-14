@@ -162,6 +162,30 @@ class TestGitInvocation:
         assert re.search(GIT_INVOCATION + r"reset\b", "git show HEAD:notes/reset") is None
 
 
+class TestTheSeparatorSetIsLearnableFromATest:
+    r"""The boundary set is stated here so the next reader need not infer it."""
+
+    def test_the_separator_set_is_exactly_these_five(self) -> None:
+        """`;`, `&`, `|` AND the two newline characters (Plan 00406).
+
+        The newline was missing, so every consumer's segment ran past the end
+        of its own command and judged the next line. It is asserted rather than
+        described because the omission was invisible: each consumer looked
+        correct on its own, and only the `&&`-versus-newline control exposed it.
+        """
+        assert set(SUBCOMMAND_SEPARATOR_CHARS) == {";", "&", "|", "\n", "\r"}
+
+    def test_the_characters_are_real_not_escape_sequences(self) -> None:
+        r"""A backslash in here would be iterated as a separator in its own right.
+
+        The constant is interpolated into regex classes, where `\n` and a real
+        newline are equivalent — but it is ALSO iterated character by character
+        (the parametrised test above), and the escape spelling would hand that
+        one a `\` and an `n` as two bogus separators.
+        """
+        assert "\\" not in SUBCOMMAND_SEPARATOR_CHARS
+
+
 class TestGitSubcommandIndex:
     """Token-level equivalent of GIT_INVOCATION, for token-based handlers.
 

@@ -400,6 +400,41 @@ class TestActiveSecretTerms:
             for record in caplog.records
         )
 
+    def test_malformed_yaml_also_goes_inert_rather_than_raising(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The commonest unreadable config of all, and the first fix missed it.
+
+        Plan 00405 N9 widened the catch to `ValueError`, reasoning that pydantic's
+        `ValidationError` is one. `yaml.YAMLError` is NOT -- it derives straight
+        from `Exception` -- so a config with a syntax error still sailed through
+        a boundary documented as never raising. A schema mismatch needs a
+        version skew to produce; a stray tab or an unclosed quote needs a typo,
+        which makes this the MORE likely half and it was the half left open.
+        """
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text(
+            'version: "1.0"\nhandlers:\n  pre_tool_use:\n   bad: [unclosed\n'
+        )
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext._initialized", True
+            ),
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+                return_value=tmp_path,
+            ),
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.config_path",
+                return_value=tmp_path / ".claude" / "hooks-daemon.yaml",
+            ),
+        ):
+            with caplog.at_level(logging.WARNING, logger=sr.logger.name):
+                assert sr.get_active_secret_terms() == ()
+
+        assert any(record.levelno == logging.WARNING for record in caplog.records)
+
 
 @pytest.fixture(autouse=True)
 def _reset_module_caches() -> Generator[None, None, None]:

@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.issue_report.provenance import (
     GENERATOR_COMMAND,
     render_document,
 )
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 _UPSTREAM = "Edmonds-Commerce-Limited/claude-code-hooks-daemon"
 _CLIENT_REPO = "acme-corp/storefront"
@@ -52,6 +53,20 @@ def _handler(*, self_install: bool = False) -> IssueFilingGateHandler:
     handler = IssueFilingGateHandler()
     handler.self_install_reader = lambda: self_install
     return handler
+
+
+def _git_checkout_with_origin(tmp_path: Path, origin_url: str) -> Path:
+    """A real checkout with a real remote, because that is what `gh` reads.
+
+    Mocking the resolver would assert that the handler calls what the test
+    thinks it calls; a real `git init` asserts the property that matters -- the
+    slug this checkout would actually resolve to.
+    """
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    run_git(checkout, "init", "--quiet")
+    run_git(checkout, "remote", "add", "origin", origin_url)
+    return checkout
 
 
 def _bash(command: str, *, cwd: str | None = None) -> dict[str, Any]:
@@ -121,6 +136,44 @@ class TestWhatTheGateLeavesAlone:
     def test_a_create_with_no_repo_at_all_is_not_touched(self) -> None:
         """A bare create targets whatever repo the cwd is in — theirs."""
         assert not _handler().matches(_bash("gh issue create --title x --body y"))
+
+    def test_a_bare_create_from_a_client_checkout_is_not_touched(self, tmp_path: Path) -> None:
+        """Resolving the cwd must not start gating a client's own tracker."""
+        checkout = _git_checkout_with_origin(tmp_path, f"git@github.com:{_CLIENT_REPO}.git")
+
+        assert not _handler().matches(
+            _bash("gh issue create --title x --body y", cwd=str(checkout))
+        )
+
+
+class TestTheCwdIsAThirdWayToNameARepository:
+    """`gh` resolves the base repo from the cwd's remotes when no flag says.
+
+    That is `gh`'s DEFAULT, and the gate answered only `--repo` and `GH_REPO`.
+    It matters because every client install carries a clone of THIS repository
+    under `.claude/hooks-daemon/`: a bare `gh issue create` with the shell
+    sitting in that clone files a hand-written body against a PUBLIC tracker,
+    and the gate never engaged. That is an accident rather than an evasion,
+    which is precisely the class this handler exists to catch.
+    """
+
+    def test_a_bare_create_from_inside_the_vendored_clone_is_gated(self, tmp_path: Path) -> None:
+        clone = _git_checkout_with_origin(tmp_path, f"git@github.com:{_UPSTREAM}.git")
+
+        assert _handler().matches(_bash("gh issue create --title x --body y", cwd=str(clone)))
+
+    def test_an_https_remote_resolves_the_same_way(self, tmp_path: Path) -> None:
+        clone = _git_checkout_with_origin(tmp_path, f"https://github.com/{_UPSTREAM}.git")
+
+        assert _handler().matches(_bash("gh issue create --title x --body y", cwd=str(clone)))
+
+    def test_an_explicit_repo_flag_still_wins_over_the_cwd(self, tmp_path: Path) -> None:
+        """`gh`'s own precedence: the flag decides when it is present."""
+        clone = _git_checkout_with_origin(tmp_path, f"git@github.com:{_UPSTREAM}.git")
+
+        assert not _handler().matches(
+            _bash(f"gh issue create --repo {_CLIENT_REPO} --title x", cwd=str(clone))
+        )
 
     def test_merely_naming_us_in_the_title_is_not_targeting_us(self) -> None:
         """The false positive that would get this handler switched off."""

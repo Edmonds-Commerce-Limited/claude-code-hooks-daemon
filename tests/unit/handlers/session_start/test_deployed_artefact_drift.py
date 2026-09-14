@@ -48,8 +48,10 @@ def _session_start_input(transcript: str | None = None) -> dict[str, object]:
     return payload
 
 
-def _handle(root: Path) -> list[str]:
+def _handle(root: Path, *, plan_dir: str | None = None) -> list[str]:
     handler = DeployedArtefactDriftHandler()
+    if plan_dir is not None:
+        handler._track_plans_in_project = plan_dir
     with patch(_PATCH_TARGET, return_value=root):
         return list(handler.handle(_session_start_input()).context)
 
@@ -154,3 +156,45 @@ class TestMatching:
     def test_a_new_session_matches(self) -> None:
         handler = DeployedArtefactDriftHandler()
         assert handler.matches(_session_start_input()) is True
+
+
+class TestTheConfiguredPlanDirectoryIsHonoured:
+    """A drift detector that is silently blind is the failure it exists to end.
+
+    The plan directory is configurable and the installer honours it, but this
+    handler hardcoded `CLAUDE/Plan`. In a project that configured another one,
+    `deployed.is_file()` was False for every plan artefact, the loop continued,
+    and the handler reported NOTHING — no error, no advisory, just silence
+    (Plan 00407 N4). Its named sibling `plan_workflow_asset_checker` already
+    carried the PLANNING tag and read the injected value.
+    """
+
+    def test_a_drifted_mkplan_under_a_configured_plan_dir_is_reported(self, tmp_path: Path) -> None:
+        target = tmp_path / "docs" / "Plans" / MKPLAN_SCRIPT_NAME
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("#!/bin/bash\n# hand-edited\n")
+
+        report = "\n".join(_handle(tmp_path, plan_dir="docs/Plans"))
+
+        assert MKPLAN_SCRIPT_NAME in report
+        assert "deploy-plan-workflow" in report
+
+    def test_the_report_names_the_configured_directory_not_the_default(
+        self, tmp_path: Path
+    ) -> None:
+        """Naming `CLAUDE/Plan` would send the reader to a path they do not have."""
+        target = tmp_path / "docs" / "Plans" / MKPLAN_SCRIPT_NAME
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("#!/bin/bash\n# hand-edited\n")
+
+        report = "\n".join(_handle(tmp_path, plan_dir="docs/Plans"))
+
+        assert "docs/Plans" in report
+        assert "CLAUDE/Plan" not in report
+
+    def test_the_default_still_applies_when_nothing_is_injected(self, tmp_path: Path) -> None:
+        """Plan workflow off, or an older registry: behave exactly as before."""
+        target = _deploy_mkplan_verbatim(tmp_path)
+        target.write_text("#!/bin/bash\n# hand-edited\n")
+
+        assert MKPLAN_SCRIPT_NAME in "\n".join(_handle(tmp_path))

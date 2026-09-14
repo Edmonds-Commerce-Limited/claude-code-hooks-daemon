@@ -21,9 +21,14 @@ it is *wanted now*.
 
 **A release may legitimately span a compaction, and must then be FINISHED** — a
 half-done release (version bumped, `UNRELEASED/` dirs moved, nothing tagged) is
-its own broken state. So this skill MUST write `untracked/release-state.json` as
-its first action and update it per step, because authorisation and progress have
-to live where a compaction cannot reach them.
+its own broken state. So this skill MUST write `untracked/release-state.json`
+and update it per step, because authorisation and progress have to live where a
+compaction cannot reach them.
+
+**Write it once Stage 0's slate-clean gate returns `0`, not before** — see
+"The release state file" in RELEASING.md for why that ordering is load-bearing.
+A release stopped AT the slate gate never started, and a state file written
+ahead of it deadlocks the very stop the gate asks for (Plan 00407 N1).
 
 - **No state file ⇒ no release in progress.** A dirty tree or a plan saying
   "finish the release" is not a substitute — ask.

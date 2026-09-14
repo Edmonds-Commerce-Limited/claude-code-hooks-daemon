@@ -11,9 +11,16 @@ documented as never raising — every caller is a leak-vector site on a live pat
 installed schema does not recognise therefore escaped that boundary and failed
 the event being routed.
 
-The realistic way to hit it is a version skew: a legacy spelling the schema has
-since moved, or a key from a newer daemon than the one installed. The config
-was merely unreadable, and the cost was the tool call.
+Two ways to hit it, and the commoner one is the duller one. A **syntax error** —
+a stray tab, an unclosed quote — raises `yaml.YAMLError`, which derives from
+`Exception` rather than `ValueError` and so slipped past the same boundary. A
+**version skew** does it too: a legacy spelling the schema has since moved, or a
+key from a newer daemon than the one installed. Either way the config was merely
+unreadable, and the cost was the tool call.
+
+Malformed YAML is now reported as a configuration error by `Config.load` itself,
+so it leaves by the same door as an unsupported file extension, and the JSON
+path already behaved that way.
 
 An unusable config now makes redaction inert, which is what its contract always
 promised. Nothing changes for a config that validates.

@@ -31,7 +31,7 @@ rather than an edit.
 
 ## Tasks
 
-- [ ] ⬜ **N1**: two documents each claim the FIRST action of `/release`, and
+- [x] ✅ **N1**: two documents each claim the FIRST action of `/release`, and
   obeying them in the documented order makes the documented stop unreachable.
 
   **Found**: a human `/release` on a tree whose slate gate was not clean.
@@ -59,16 +59,167 @@ rather than an edit.
   written, because a release that never cleared the slate gate was never in
   flight, and writing the authorisation first is what manufactures the deadlock.
 
-  A candidate remedy, NOT yet ruled on: make `release_blocker` stand down when
-  `last_completed_step` is 0 — nothing has been changed at that point, so there
-  is no half-done release to protect. That is the state the guard exists to
-  prevent, and step 0 is definitionally not it.
+  **Fixed** as a precedence sentence, not new machinery. `RELEASING.md` ("The
+  release state file") now states that Step 1a runs BEFORE the state file is
+  written and why, and the skill — a thin shim — points at it rather than
+  restating the order it previously contradicted.
+
+  A second remedy is deliberately NOT taken, and is left for an owner ruling:
+  making `release_blocker` stand down at `last_completed_step: 0`. It would be
+  belt-and-braces, since nothing has changed at step 0 and that is definitionally
+  not the half-done release the guard protects. It is left alone because the
+  guard is a safety control, weakening one to fix a document is the wrong
+  direction, and the ordering fix removes the deadlock on its own.
+
+- [x] ✅ **N2**: `merge_to_main_approval` read a merge NAMED in a commit
+  message as a real merge.
+
+  **Found** by the release code-review gate, and reproduced against the real
+  function before being believed. `merge_target` blanked quoted LITERALS but
+  not a heredoc BODY, so `_GIT_MERGE_RE` matched prose inside one — including
+  `git commit -m "$(cat <<'EOF' … EOF)"`, this repository's own canonical
+  commit idiom. With the approval key on, any commit message describing a merge
+  was denied, naming a remediation about a command the author never ran.
+
+  This is the Plan 00377 N7 class that `destructive_git._scan_target` fixed in
+  the same release — applied to one handler and not to its sibling. The fix is
+  ordered, and the order is forced by a length property: strip the heredoc
+  bodies FIRST (that collapses the body, so offsets move), then blank literals
+  (which preserves length), and re-slice from the heredoc-stripped copy. Slicing
+  the raw command would use offsets the strip has already invalidated; slicing
+  the blanked copy would hand `shlex` a real branch name as a run of spaces.
+
+- [x] ✅ **N3**: `daemon_location_guard` read a `cd` named in PROSE as a
+  directory change.
+
+  **Found by the daemon denying a review agent** as it wrote up N2: the report's
+  prose quoted a `cd` into the daemon clone inside a `<<'EOF'` body, and the
+  handler matched text bash was never going to execute. The same command's
+  `destructive_git` check ALLOWED the identical heredoc, because it blanks inert
+  spans first — a clean side-by-side demonstration, in one command, of a fix
+  present in one handler and missing in its neighbour.
+
+  Both passes are needed and neither subsumes the other: `strip_inert_spans`
+  reaches heredoc and message bodies, while a bare `echo 'cd …'` is an ordinary
+  quoted literal that only `blank_shell_literal_spans` reaches. The second was
+  found by a failing test, not predicted.
+
+- [x] ✅ **N4**: `deployed_artefact_drift` hardcoded `CLAUDE/Plan`, so a project
+  with a configured plan directory got SILENCE from a drift detector.
+
+  The directory is configurable and the installer honours it, but the handler
+  carried no `PLANNING` tag, so the registry never injected the value. Every
+  plan artefact then missed `is_file()`, the loop continued, and nothing was
+  reported — no error, just quiet. That is exactly the "repairable but
+  invisible" failure the handler was written to end. Its named sibling
+  `plan_workflow_asset_checker` already did this correctly, which is what made
+  the omission legible.
+
+- [x] ✅ **N5**: `issue_filing_gate` missed `gh`'s DEFAULT way of naming a
+  repository, and the hole led to a PUBLIC tracker.
+
+  The gate resolved the target from `--repo`/`-R` or a `GH_REPO` assignment.
+  `gh` has a third route and it is the default: with neither present it reads
+  the base repository from the working directory's remotes. Every client install
+  carries a clone of this repository under `.claude/hooks-daemon/`, so a bare
+  `gh issue create` typed with the shell inside that clone filed a hand-written,
+  unverified body upstream while the gate stood by.
+
+  This is the guarantee Plan 00403 shipped — "nothing unchecked is filed" —
+  failing on the most natural route in, and the consequence is a client's
+  private material on a public tracker, which cannot be retracted. Resolution
+  failure deliberately answers "not ours" rather than "assume upstream": gating
+  an unresolvable cwd would deny a client's ordinary filing on their OWN
+  tracker, which the module docstring names as the false positive that gets this
+  handler switched off. The residual is now stated there rather than unnoticed.
+
+- [x] ✅ **N6**: two review findings graduated rather than fixed here —
+  see [Plan 00408](../00408-handler-hygiene-from-the-release-review/PLAN.md).
+
+  Neither is user-visible breakage, so neither belongs in a release being cut:
+  raw hook-field literals where `HookInputField` is declared the single source
+  of truth (plus two duplicate `_CWD_FIELD` constants), and `merge_qa_report`
+  building the full docs corpus on the hook budget while a sibling handler
+  argues against exactly that in the same release. The four sub-bar items the
+  reviewer listed are carried there too, so they are not lost.
+
+- [x] ✅ **N7**: inserting two characters disabled R-GIT-CHECKOUT-DISCARD — a
+  REGRESSION in this release, and the most serious finding of the session.
+
+  `strip_message_bodies` (new this release) scoped message blanking to the
+  BINARY, not the subcommand, and its value pattern had a bare-word fallback.
+  For `git checkout`, `-m` selects merge-conflict style and takes NO value — so
+  the next token, the `--` that makes the checkout destructive, was blanked as
+  though it were commit prose, and the guard stopped matching.
+
+  Reproduced twice: at the function level here, and end to end by the reviewer
+  through the live PreToolUse hook in a scratch repo, where the `-m` form ran,
+  exited 0 and permanently discarded a working-tree modification while the
+  plain form was denied. The previous release blanked nothing here and denied
+  both. **Not an evasion** — `git checkout -m` is a command a model can emit,
+  and the loss is silent and permanent.
+
+  Fixed by scoping to `(binary, subcommand)` with an ALLOWLIST, because the
+  safe error is withholding an exemption. `checkout` and `branch` (`-m`
+  renames), `cherry-pick` and `revert` (`-m` is a parent NUMBER) and `rebase`
+  (`-m` is valueless) are all deliberately absent, each for a stated reason.
+
+- [x] ✅ **N8**: a QUOTED destructive operand is not recognised — graduated to
+  [Plan 00408](../00408-handler-hygiene-from-the-release-review/PLAN.md).
+
+  Found while testing N7 and worth separating from it precisely because the
+  first reading was wrong: `git checkout -m "--" f.txt` survived the N7 fix,
+  which looked like the fix being incomplete. It is not — the plain
+  `git checkout "--" f.txt` fails identically with no `-m` present, so blanking
+  was never the cause and this pre-dates the release. Pinned by a strict xfail
+  naming 00408, so it fails loudly if it is ever fixed by accident.
+
+- [x] ✅ **N9**: the "never raises" boundary still raised on the commonest
+  unreadable config, and this entry corrects [Plan 00405](../Completed/00405-niggles-ledger-eleven/PLAN.md)'s
+  own N9 fix.
+
+  That fix widened the catch to `ValueError`, reasoning that pydantic's
+  `ValidationError` is one. `yaml.YAMLError` is NOT — it derives straight from
+  `Exception` — so a config with a syntax error still escaped a boundary the
+  router reaches while dispatching. The half left open was the MORE likely
+  half: a schema mismatch needs a version skew, a stray tab needs a typo.
+
+  Fixed at the source rather than at the catch site: `Config.load` now raises
+  `ValueError` for malformed YAML, matching `ConfigLoader.load`'s existing
+  contract and the JSON path, where `JSONDecodeError` already IS a `ValueError`.
+  Every caller that reasonably catches "the config could not be read" as
+  `ValueError` is now right, instead of only the one that was patched.
+
+- [x] ✅ **N10**: the QA-lock advisory could abort the restart it only meant to
+  warn about.
+
+  `_qa_run_lock_holder` opened the lock file outside any `OSError` handling and
+  nothing wraps the CLI's dispatch, so an unhandled exception ended
+  `hooks-daemon restart` with a traceback — a STRONGER refusal than the one its
+  caller's docstring promises never to make, on the most-used recovery verb.
+  The window is ordinary: `is_file()` then `os.open` is two calls, so a QA run
+  finishing in between unlinks the file. Unknown now degrades to "no warning",
+  the only answer an advisory can safely give when it cannot tell.
 
 ## Success Criteria
 
-- [ ] 🔄 Every entry above is in a terminal state: fixed, ruled NOT A DEFECT
-  with the evidence, or graduated to its own plan.
+- [x] ✅ Every entry above is in a terminal state: N1–N5, N7, N9 and N10 fixed;
+  N6 and N8 graduated to Plan 00408.
+
 - [ ] 🔄 Full QA passes and CI is green for every entry closed.
+
+- [x] ✅ Release-bound consequences are in `CLAUDE/UPGRADES/UNRELEASED/` before
+  the status flips, and only the ones a user can actually have seen.
+  `release-notes/48-…` covers N2–N5, including the `issue_filing_gate` hole as
+  a security fix; `46-…` was amended for N9, because the "never raises"
+  boundary predates v3.63.0 and the malformed-YAML half was left open by the
+  first fix.
+
+  **N7 and N10 deliberately get NO release note**, which was checked rather
+  than assumed: `strip_message_bodies` and `_qa_run_lock_holder` are both
+  absent from the v3.63.0 tree, so both defects were introduced and fixed
+  inside this unreleased range. A note would describe a regression no user ever
+  received. N1 is a process-document correction with nothing to do.
 
 ## Delivery & Milestones
 

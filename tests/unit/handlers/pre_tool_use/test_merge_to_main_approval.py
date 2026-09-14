@@ -206,3 +206,48 @@ class TestItDeclaresItselfDormantWhenTheKeyIsOff:
         handler = MergeToMainApprovalHandler()
         handler._merge_to_main_requires_human_approval = True
         assert handler.is_dormant() is False
+
+
+class TestAMergeDescribedInAMessageIsNotAMerge:
+    """A quoted heredoc body is DATA, so a merge named in one is prose.
+
+    The Plan 00377 N7 class, which `destructive_git._scan_target` fixed for
+    itself and not for this sibling: `blank_shell_literal_spans` blanks quoted
+    LITERALS but not a heredoc body, so `_GIT_MERGE_RE` matched prose sitting
+    inside one. With the approval key on, that denied any commit whose message
+    merely DESCRIBED a merge, naming a remediation the author was not running.
+
+    The second shape below is this repository's own canonical commit idiom, so
+    the false positive was not a corner case here -- it was the normal way to
+    write a commit message about a merge.
+    """
+
+    _BRANCH = "feature/x"
+
+    def test_a_quoted_heredoc_message_naming_a_merge_is_not_a_merge(self) -> None:
+        command = (
+            "git commit -F - <<'QUOTED'\n"
+            f"This commit explains why git merge {self._BRANCH} was avoided.\n"
+            "QUOTED"
+        )
+        assert merge_target(command) is None
+
+    def test_the_canonical_commit_idiom_is_not_a_merge(self) -> None:
+        command = (
+            "git commit -m \"$(cat <<'QUOTED'\n"
+            f"Describes git merge {self._BRANCH} in prose.\n"
+            'QUOTED\n)"'
+        )
+        assert merge_target(command) is None
+
+    def test_a_real_merge_is_still_named(self) -> None:
+        """The control: narrowing the scan must not stop it finding a merge."""
+        assert merge_target(f"git merge --no-ff {self._BRANCH}") == self._BRANCH
+
+    def test_a_real_merge_beside_a_heredoc_message_is_still_named(self) -> None:
+        """Blanking the body must not blank the command next to it."""
+        command = (
+            "git commit -F - <<'QUOTED'\nan ordinary message\nQUOTED\n"
+            f"git merge --no-ff {self._BRANCH}"
+        )
+        assert merge_target(command) == self._BRANCH

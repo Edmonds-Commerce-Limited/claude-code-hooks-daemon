@@ -260,3 +260,38 @@ class TestDaemonLocationGuardDisclosureLadder:
         result = handler.handle(hook_input)
 
         assert "path confusion" in result.reason
+
+
+class TestProseAboutTheDaemonDirectoryIsNotADirectoryChange:
+    """A quoted heredoc body is DATA, so a `cd` named in one never runs.
+
+    Found by using the daemon rather than by reading it: a review agent was
+    DENIED while writing a report, because its PROSE quoted a directory change
+    into the daemon clone inside a `<<'EOF'` body. `destructive_git` allowed
+    the identical heredoc in the same command — it blanks inert spans before
+    matching — which is a clean side-by-side demonstration that this handler
+    was missing the same step (Plan 00407 N3, the Plan 00377 N7 class).
+    """
+
+    def test_a_quoted_heredoc_body_naming_the_daemon_dir_is_not_matched(self) -> None:
+        handler = DaemonLocationGuardHandler()
+        command = (
+            "cat > notes.md <<'EOF'\n"
+            "Do not cd .claude/hooks-daemon — run commands from the project root.\n"
+            "EOF"
+        )
+
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is False
+
+    def test_a_single_quoted_mention_is_not_matched(self) -> None:
+        handler = DaemonLocationGuardHandler()
+        command = "echo 'cd .claude/hooks-daemon is what not to do'"
+
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is False
+
+    def test_a_real_directory_change_is_still_matched(self) -> None:
+        """The control: blanking prose must not blank the command beside it."""
+        handler = DaemonLocationGuardHandler()
+        command = "cat > notes.md <<'EOF'\nprose\nEOF\ncd .claude/hooks-daemon"
+
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True

@@ -26,8 +26,17 @@ Three boundaries decide whether this handler is usable or merely correct.
     to 3.64" against their own backlog names this repository and is none of this
     handler's business. Substring matching would deny it, and a gate that blocks
     a project's own issues gets switched off within the day. The target comes
-    from ``--repo``/``-R`` in the same shell segment, or from a ``GH_REPO``
-    assignment in the command.
+    from ``--repo``/``-R`` in the same shell segment, from a ``GH_REPO``
+    assignment in the command, or — when neither says — from the git remotes of
+    the working directory, which is what ``gh`` itself falls back to.
+
+    That third route is not an exotic one and was missing. Every client install
+    carries a clone of THIS repository under ``.claude/hooks-daemon/``, so a
+    bare ``gh issue create`` typed with the shell inside that clone filed
+    against a PUBLIC tracker with the gate standing by. The residual is
+    narrower and stated rather than unnoticed: if git cannot answer for that
+    directory, the answer is "not ours", because gating on an unresolvable cwd
+    would deny a client's ordinary filing on their own tracker.
 
 ``a comment is deliberately NOT covered``
     No generator produces a comment body, so requiring provenance on one would
@@ -66,6 +75,7 @@ from claude_code_hooks_daemon.issue_report.upstream import (
     UPSTREAM_REPO_SLUG,
 )
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
+from claude_code_hooks_daemon.utils.git_repo import GitRepo
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 logger = logging.getLogger(__name__)
@@ -219,29 +229,62 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         return text.strip("/").lower()
 
     @classmethod
-    def _targets_upstream(cls, segment: str, command: str) -> bool:
+    def _cwd_repo_slug(cls, cwd: str | None) -> str | None:
+        """The slug ``gh`` would resolve from the working directory, or None.
+
+        This is ``gh``'s DEFAULT answer, not an exotic one: with no ``--repo``
+        and no ``GH_REPO`` it reads the base repository from the current
+        directory's remotes. Leaving it out was a real hole rather than a
+        theoretical one, because every client install carries a clone of THIS
+        repository under ``.claude/hooks-daemon/`` — so a bare
+        ``gh issue create`` typed with the shell inside that clone filed a
+        hand-written body against a PUBLIC tracker while the gate stood by.
+
+        Resolution failure answers None rather than "assume upstream". The
+        alternative would gate a client's ordinary filing on their OWN tracker
+        whenever git could not answer, which is the false positive the module
+        docstring names as the one that gets this handler switched off.
+        """
+        if not cwd:
+            return None
+        try:
+            repo = GitRepo.resolve_for(Path(cwd))
+            if repo is None:
+                return None
+            url = repo.read_config("remote.origin.url")
+        except (OSError, ValueError) as exc:  # pragma: no cover - defensive
+            logger.debug("Could not resolve the repository for %s: %s", cwd, exc)
+            return None
+        return cls._repo_slug(url) if url else None
+
+    @classmethod
+    def _targets_upstream(cls, segment: str, command: str, cwd: str | None = None) -> bool:
         """Whether this ``gh issue create`` would file against THIS repository.
 
         The segment's own ``--repo`` decides when it has one. Only when it does
         not does the command-wide ``GH_REPO`` assignment answer, which mirrors
         ``gh``'s own precedence — and means a command that sets ``GH_REPO`` to
         this repo and then overrides it with ``--repo theirs`` is left alone.
+        The working directory answers last, for the same reason: it is what
+        ``gh`` itself falls back to when nothing else names a repository.
         """
         flag = _REPO_FLAG.search(segment)
         if flag is not None:
             return cls._repo_slug(cls._flag_value(flag)) == UPSTREAM_REPO_SLUG
         env = _GH_REPO_ENV.search(command)
-        return env is not None and cls._repo_slug(cls._flag_value(env)) == UPSTREAM_REPO_SLUG
+        if env is not None:
+            return cls._repo_slug(cls._flag_value(env)) == UPSTREAM_REPO_SLUG
+        return cls._cwd_repo_slug(cwd) == UPSTREAM_REPO_SLUG
 
     @classmethod
-    def _filing_segments(cls, command: str) -> list[str]:
+    def _filing_segments(cls, command: str, cwd: str | None = None) -> list[str]:
         """Every segment of ``command`` that would file an issue against us."""
         segments = []
         for raw in split_unquoted(command, _SEGMENT_SEPARATORS):
             segment = raw.strip()
             if not segment or _GH_ISSUE_CREATE.search(segment) is None:
                 continue
-            if cls._targets_upstream(segment, command):
+            if cls._targets_upstream(segment, command, cwd):
                 segments.append(segment)
         return segments
 
@@ -256,7 +299,7 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         command = get_bash_command(hook_input)
         if not command:
             return False
-        if not self._filing_segments(command):
+        if not self._filing_segments(command, hook_input.get("cwd")):
             return False
         return not self._is_self_install()
 
@@ -336,7 +379,7 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         """
         command = get_bash_command(hook_input) or ""
         problems: list[str] = []
-        for segment in self._filing_segments(command):
+        for segment in self._filing_segments(command, hook_input.get("cwd")):
             problems.extend(self._segment_problems(segment, hook_input))
 
         if not problems:

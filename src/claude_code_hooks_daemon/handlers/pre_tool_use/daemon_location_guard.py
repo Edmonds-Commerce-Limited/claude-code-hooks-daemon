@@ -10,10 +10,13 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
 )
+from claude_code_hooks_daemon.utils.quoted_spans import blank_shell_literal_spans
+from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
 
 _RULE = Rule(
     rule_id=RuleID.DAEMON_DIR_CD,
@@ -32,12 +35,21 @@ _RULE = Rule(
 # Match a `cd` whose TARGET is the .claude/hooks-daemon/ directory (or a path
 # inside it). The target is a single token that contains no whitespace or
 # command separators, so a `cd` into a SAFE directory cannot reach across a
-# `;`/`&&`/`|` to a later reference of the config FILE. The directory boundary
-# after `hooks-daemon` is a path separator, whitespace, command separator, quote
-# or end-of-string — never a `.`, so the config files `.claude/hooks-daemon.yaml`
-# and `.claude/hooks-daemon.yaml.example` do NOT match.
+# `;`/`&&`/`|`/newline to a later reference of the config FILE. The directory
+# boundary after `hooks-daemon` is a path separator, whitespace, command
+# separator, quote or end-of-string — never a `.`, so the config files
+# `.claude/hooks-daemon.yaml` and `.claude/hooks-daemon.yaml.example` do NOT
+# match.
+#
+# The gap after `cd` is horizontal-only. `\s` matches a NEWLINE, so `cd\s+` read
+# a bare `cd` on one line together with whatever began the next, and denied
+# `cd` ⏎ `.claude/hooks-daemon/bin/hooks-daemon status` — precisely the command
+# this handler's own deny message tells the reader to run instead (Plan 00406).
+# `[ \t]+` cannot lose a line continuation, because `matches()` reads through
+# `get_bash_command`, which has already joined `cd \<newline>.claude/...` back
+# into one line by the time this pattern runs.
 _CD_INTO_DAEMON_DIR = re.compile(
-    r"\bcd\s+[^\s;&|]*\.claude/hooks-daemon(?:/[^\s;&|]*)?(?=[\s;&|\"']|$)"
+    r"\bcd[ \t]+[^\s;&|]*\.claude/hooks-daemon(?:/[^\s;&|]*)?(?=[\s;&|\"']|$)"
 )
 
 
@@ -70,12 +82,30 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
         - cd to other directories
         - ls/grep/other operations on hooks-daemon directory
         """
-        if hook_input.get("tool_name") != "Bash":
+        # Read through `get_bash_command` rather than off `tool_input`: it
+        # returns None for a non-Bash tool AND normalises line continuations,
+        # which reading the raw payload skipped entirely. `cd \<newline>
+        # .claude/hooks-daemon` was therefore NOT matched at all — a hole, not
+        # a false positive — and the gap below could not be tightened until
+        # this was fixed, or tightening would have made that hole permanent
+        # (Plan 00406's ordering constraint).
+        command = get_bash_command(hook_input)
+        if not command:
             return False
 
-        command = hook_input.get("tool_input", {}).get("command", "")
-
-        return bool(_CD_INTO_DAEMON_DIR.search(command))
+        # Match only what the shell would EXECUTE. A quoted heredoc body and a
+        # single-quoted literal are DATA, so a `cd` NAMED in either is prose —
+        # and this denied a review agent writing a report that quoted one
+        # (Plan 00407 N3). `destructive_git` already blanked inert spans, and
+        # allowed the identical heredoc in the same command; this is the same
+        # step, not a new idea. Blanking need not preserve length here, because
+        # the result is a boolean search rather than an index into the original.
+        #
+        # BOTH passes are needed and neither subsumes the other: strip_inert_spans
+        # covers heredoc and message bodies, while a bare `echo 'cd ...'` is an
+        # ordinary quoted literal that only blank_shell_literal_spans reaches.
+        executable = blank_shell_literal_spans(strip_inert_spans(command))
+        return bool(_CD_INTO_DAEMON_DIR.search(executable))
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""

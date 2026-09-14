@@ -41,6 +41,7 @@ from claude_code_hooks_daemon.utils.git_repo import GitRepo, is_linked_worktree
 from claude_code_hooks_daemon.utils.git_sync import current_branch, default_branch
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
 from claude_code_hooks_daemon.utils.quoted_spans import blank_shell_literal_spans
+from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
 
 _CONFIG_KEY: Final[str] = "worktree.merge_to_main_requires_human_approval"
 _APPROVE_SUBCOMMAND: Final[str] = "approve-merge"
@@ -50,7 +51,11 @@ APPROVAL_SUBDIR: Final[str] = "merge-approvals"
 _STORE: Final[OneShotApprovalStore] = OneShotApprovalStore(APPROVAL_SUBDIR)
 
 # A command segment does not cross a shell sub-command separator, so
-# `git merge x && git push` names `x` and nothing from the push.
+# `git merge x && git push` names `x` and nothing from the push. The separator
+# set includes the newline (Plan 00406), so the two-line spelling of that pair
+# names `x` as well — this handler captures a merge TARGET rather than denying
+# on a flag, so the omission mis-named a branch here rather than inventing a
+# violation, but one boundary set serves all three consumers.
 _SEGMENT: Final[str] = rf"[^{SUBCOMMAND_SEPARATOR_CHARS}]*"
 _GIT_MERGE_RE: Final[re.Pattern[str]] = re.compile(
     rf"{GIT_INVOCATION}merge(?=\s|$)({_SEGMENT})",
@@ -140,24 +145,38 @@ def merge_target(command: str) -> str | None:
     refuse. Values of flags such as ``-m`` are skipped so a commit message
     can never be read as the branch.
 
-    Matching is scoped to what the shell will EXECUTE: quoted literals are
-    blanked first (``utils.quoted_spans.blank_shell_literal_spans``), the same
-    idiom ``plan_number_helper`` uses, so ``echo 'git merge x'`` -- which never
-    runs a merge -- is not read as one. Blanking preserves string length, so
-    the match's span still indexes the ORIGINAL command; the segment is
-    re-sliced from there rather than from the blanked copy, which would hand
-    a real branch name like ``'feature/x'`` to `shlex` as a run of spaces.
+    Matching is scoped to what the shell will EXECUTE, in two passes that must
+    run in this order:
+
+    1. ``strip_quoted_heredoc_bodies`` — a ``<<'EOF'`` body is handed to the
+       receiving command verbatim, so a merge NAMED in a commit message is
+       prose. Without this, the repository's own canonical commit idiom
+       (``git commit -m "$(cat <<'EOF' ... EOF)"``) was read as a real merge
+       and denied with a remediation about a command nobody ran. This is the
+       Plan 00377 N7 class that ``destructive_git._scan_target`` fixed for
+       itself; the sibling needed it too (Plan 00407 N2).
+    2. ``blank_shell_literal_spans`` — the same idiom ``plan_number_helper``
+       uses, so ``echo 'git merge x'`` is not read as a merge either.
+
+    The ORDER is forced by a length property. Blanking preserves length, so a
+    match span still indexes the string it was given; stripping a heredoc body
+    does NOT, because the body collapses to a placeholder. So the segment is
+    re-sliced from the HEREDOC-STRIPPED copy, which the blanked copy indexes
+    exactly — never from the blanked copy itself, which would hand a real
+    branch name like ``'feature/x'`` to `shlex` as a run of spaces, and never
+    from the raw command, whose offsets the strip has already moved.
     """
-    scannable = blank_shell_literal_spans(command)
+    executable = strip_quoted_heredoc_bodies(command)
+    scannable = blank_shell_literal_spans(executable)
     git = _GIT_MERGE_RE.search(scannable)
     if git is not None:
-        tokens = _segment_tokens(command[git.start(1) : git.end(1)])
+        tokens = _segment_tokens(executable[git.start(1) : git.end(1)])
         if any(token in _NON_MERGE_FLAGS for token in tokens):
             return None
         return _first_positional(tokens)
     gh = _GH_PR_MERGE_RE.search(scannable)
     if gh is not None:
-        segment = command[gh.start(1) : gh.end(1)]
+        segment = executable[gh.start(1) : gh.end(1)]
         return _first_positional(_segment_tokens(segment)) or _GH_CURRENT_PR
     return None
 

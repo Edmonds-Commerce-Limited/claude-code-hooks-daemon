@@ -41,9 +41,12 @@ _SUBCOMMAND_SEPARATOR_CHARS = SUBCOMMAND_SEPARATOR_CHARS
 _GIT_INVOCATION = GIT_INVOCATION
 
 # Force-push detection, scoped to the `git push` sub-command segment.
-# `[^;&|]*?` consumes only characters within the push segment (never a command
-# separator), so a non-push `--force` later in a compound command — e.g.
-# `git push origin main; git worktree remove <path> --force` — is NOT matched.
+# The negated class consumes only characters within the push segment (never a
+# command separator), so a non-push `--force` later in a compound command —
+# e.g. `git push origin main; git worktree remove <path> --force` — is NOT
+# matched. A NEWLINE is one of those separators (Plan 00406): the same pair
+# written on two lines was matched, so `git push origin main` followed by
+# `grep -f patterns.txt notes.txt` was denied on grep's `-f`.
 #
 # EVERY alternative below guards its leading position with `(?<!\S)`, so each
 # must START a whitespace-delimited token rather than merely appear inside one.
@@ -134,12 +137,20 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
     # moving a ref (no `-d`), and deleting a non-branch ref (e.g.
     # `refs/remotes/...`), stay untouched.
     #
-    # `[^;&|]*?` for the same reason as the push-force sibling above: a `.*`
-    # spans a separator, so `git update-ref refs/heads/backup HEAD; echo -d
+    # `[^;&|<newline>]*?` for the same reason as the push-force sibling above: a
+    # `.*` spans a separator, so `git update-ref refs/heads/backup HEAD; echo -d
     # refs/heads/backup` — a ref CREATE plus unrelated text — was denied under
-    # a rule neither statement matches.
+    # a rule neither statement matches. The separator set includes the newline
+    # (Plan 00406), because the same pair written on two LINES was denied too.
+    #
+    # The gap after `update-ref` is horizontal-only for a separate reason:
+    # `\s` matches a newline, so `\s+` would step over the end of this command
+    # even once the class stops it, and `git update-ref` ⏎ `-d refs/heads/x`
+    # would read as one call. A continuation cannot be lost this way — it is
+    # already normalised away before any pattern here runs.
     (
-        rf"{_GIT_INVOCATION}update-ref\s+[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?-d\s+refs/heads/\S+",
+        rf"{_GIT_INVOCATION}update-ref[ \t]+[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?"
+        rf"-d[ \t]+refs/heads/\S+",
         "git update-ref -d refs/heads/<name> force-deletes a branch ref with no "
         "merge check — the plumbing equivalent of git branch -D",
     ),
@@ -302,9 +313,12 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         The mechanism is worth naming, because it is not "two words in one
         string". The opener line was `git commit -F - <<'EOF' && git push
         origin main`, so the heredoc BODY follows `git push` in the command
-        string, and `_GIT_PUSH_FORCE_PATTERN`'s `[^;&|]*?` excludes those three
-        separators but NOT newlines — the scan ran straight down into the body.
-        A second route needs no heredoc at all: the single-line patterns use
+        string, and `_GIT_PUSH_FORCE_PATTERN`'s negated class excluded `;`, `&`
+        and `|` but NOT newlines — the scan ran straight down into the body.
+        That class now excludes the newline too (Plan 00406), which closes this
+        route independently; blanking is still required, because an inert span
+        can sit on the SAME line as the push. A second route needs no heredoc
+        at all: the single-line patterns use
         `.*`, which stays on one line but still matches inside a `-m` value, so
         `git commit -m 'document --amend'` was denied too.
 

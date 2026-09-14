@@ -40,7 +40,24 @@ _LINE_CONTINUATION_PATTERN: Final[re.Pattern[str]] = re.compile(r"\\\r?\n")
 # these belongs to a DIFFERENT sub-command, so a fragment that must stay inside
 # one segment forbids these characters rather than matching across them. This
 # is what stops `git status; reset --hard` reading as a destructive git call.
-SUBCOMMAND_SEPARATOR_CHARS = ";&|"
+#
+# A NEWLINE IS ONE OF THEM (Plan 00406). `;`, `&&` and a newline are three
+# spellings of "run this, then that", and omitting the newline let every
+# consumer's segment run past the end of its own command and convict the next
+# line: `git push origin main` ⏎ `grep -f patterns.txt notes.txt` was denied as
+# a force push, on grep's `-f`. The control that proves it a defect rather than
+# a preference is that joining those lines with `&&` reversed the verdict.
+#
+# REAL characters, not the two-character escapes `\n`/`\r`: this constant is
+# interpolated into regex classes AND iterated character by character by its
+# own test, and the escape spelling would hand that test a backslash and an `n`
+# as separate "separators". Inside a character class the literal is equivalent.
+#
+# The one newline this does NOT cover is a `\<newline>` line continuation,
+# which the shell REMOVES to join two lines into one command. That is handled
+# earlier, by `normalise_line_continuations` at the `get_bash_command`
+# boundary, so a pattern here never sees one (Plan 00405 N7).
+SUBCOMMAND_SEPARATOR_CHARS = ";&|\n\r"
 
 # One git global option: a token starting with `-`, optionally followed by a
 # separate value token which by definition does NOT start with `-` (that would
