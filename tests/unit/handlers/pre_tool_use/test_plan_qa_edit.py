@@ -268,7 +268,9 @@ class TestHandleJournal:
         the check's real contract instead of the time of day.
         """
         target = self._journal_file(tmp_path)
-        content = "# Journal\n\n## 09:00 · action · —\n\nfirst\n\n## 10:00 · finding · —\n\nsecond\n"
+        content = (
+            "# Journal\n\n## 09:00 · action · —\n\nfirst\n\n## 10:00 · finding · —\n\nsecond\n"
+        )
         today = date.today()
         with (
             patch.object(
