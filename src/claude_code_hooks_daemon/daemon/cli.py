@@ -104,6 +104,8 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     validate_settings_hooks,
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
+from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms
 from claude_code_hooks_daemon.utils.settings_repair import repair_settings_registrations
 
 from .init_config import generate_config
@@ -7259,7 +7261,13 @@ def cmd_bug_report(args: argparse.Namespace) -> int:
     sections.append(f"\n**Result:** {passed_count}/{total_count} checks passed\n")
 
     # --- Assemble report ---
-    report = "\n".join(sections)
+    # Scrubbed at the single assembly point rather than per section, and that
+    # placement is the design: this report is generated to be SHARED, on a
+    # tracker that is public and that no later edit retracts. A per-field
+    # approach leaks the first field somebody forgets, whereas `scrub_report`
+    # is safe to run over a whole document — it skips values too short to
+    # substitute without shredding the text.
+    report = _scrub_bug_report("\n".join(sections), project_path)
 
     # --- Write output ---
     output_target: str | None = getattr(args, "output", None)
@@ -7282,6 +7290,32 @@ def cmd_bug_report(args: argparse.Namespace) -> int:
     output_path.write_text(report)
     print(f"Bug report saved to: {output_path}")
     return 0
+
+
+def _bug_report_git_remote(project_path: Path) -> str | None:
+    """The origin URL, which names the client and often a private host."""
+    result = run_git(project_path, "remote", "get-url", "origin", timeout=Timeout.GIT_CONTEXT)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _scrub_bug_report(report: str, project_path: Path) -> str:
+    """Strip the client's identity from an assembled bug report.
+
+    Every identifier is resolved HERE rather than threaded through the report
+    builder, so a future section cannot be added that forgets to scrub itself —
+    the whole document passes through this one call on its way to disk or
+    stdout.
+    """
+    return scrub_report(
+        report,
+        project_root=project_path,
+        home=Path.home(),
+        hostname=os.environ.get("HOSTNAME") or socket.gethostname(),
+        git_remote=_bug_report_git_remote(project_path),
+        secret_terms=get_active_secret_terms(),
+    )
 
 
 def _bug_report_git_hash(project_path: Path) -> str:

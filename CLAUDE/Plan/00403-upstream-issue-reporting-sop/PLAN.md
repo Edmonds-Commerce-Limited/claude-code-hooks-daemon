@@ -111,6 +111,13 @@ finding in it — the owner's rule, made checkable.
 - [ ] ⬜ **Task 1.2**: Same for `scripts/debug_info.py`, and stop emitting
   `.claude/hooks-daemon.env` verbatim — report which keys are SET, never their
   values.
+- [ ] ⬜ **Task 1.5**: The captured log lines carry whole `hook_input` payloads
+  — `session_name`, prompt ids, cwd, cost and rate-limit figures — which
+  path-and-hostname scrubbing does not touch. Found by running the scrubbed
+  command against this repository and reading the result rather than trusting
+  the tests. A session NAME is free text a user wrote, so in a client project
+  it can carry anything. Reduce what is captured, rather than scrubbing harder
+  after the fact.
 - [x] ✅ **Task 1.3**: Fix the wrong GitHub org in
   `.claude/skills/hooks-daemon/report.md`, and add a QA check that every GitHub
   URL in tracked docs names this repository, so it cannot recur.

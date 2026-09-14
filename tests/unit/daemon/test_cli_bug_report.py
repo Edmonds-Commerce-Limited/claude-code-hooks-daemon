@@ -19,6 +19,7 @@ import pytest
 
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import cmd_bug_report
+from claude_code_hooks_daemon.utils.report_scrubbing import PROJECT_ROOT_PLACEHOLDER
 
 
 @pytest.fixture(autouse=True)
@@ -295,6 +296,80 @@ class TestBugReportMissingConfig:
 
         assert result == 0
         assert output_file.exists()
+
+
+class TestTheReportIsScrubbed:
+    """The report is assembled to be SHARED, so it must not carry the client.
+
+    `BUG_REPORTING.md` sends a reporter to a PUBLIC issue tracker, and a public
+    issue cannot be retracted by editing or deleting it. Before this, the report
+    carried the project's `hooks-daemon.yaml` verbatim, the hostname and 100 log
+    lines, and `utils/secret_redaction` — whose own threat model names a bug
+    report as the thing it protects — was called by no reporting path at all.
+    """
+
+    def test_the_project_root_is_not_written_into_the_report(self, tmp_path: Path) -> None:
+        """An absolute project path names the client and often the user."""
+        project = _make_project(tmp_path)
+        output_file = tmp_path / "report.md"
+
+        cmd_bug_report(_make_args(project, output=str(output_file)))
+
+        assert str(project) not in output_file.read_text()
+
+    def test_the_placeholder_is_present_so_paths_stay_readable(self, tmp_path: Path) -> None:
+        """Scrubbing must leave a legible report, not a hole where a path was."""
+        project = _make_project(tmp_path)
+        output_file = tmp_path / "report.md"
+
+        cmd_bug_report(_make_args(project, output=str(output_file)))
+
+        assert PROJECT_ROOT_PLACEHOLDER in output_file.read_text()
+
+    def test_the_hostname_is_not_written_into_the_report(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """In a corporate estate a hostname routinely names the client."""
+        monkeypatch.setenv("HOSTNAME", "acme-build-runner-07")
+        project = _make_project(tmp_path)
+        output_file = tmp_path / "report.md"
+
+        cmd_bug_report(_make_args(project, output=str(output_file)))
+
+        assert "acme-build-runner-07" not in output_file.read_text()
+
+    def test_a_declared_secret_term_is_redacted(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """The config is copied verbatim, so a term inside it reaches the report."""
+        project = _make_project(tmp_path)
+        (project / ".claude" / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\ndaemon:\n  log_level: INFO\n  note: Voldemort\n"
+        )
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.daemon.cli.get_active_secret_terms",
+            lambda: ("Voldemort",),
+        )
+        output_file = tmp_path / "report.md"
+
+        cmd_bug_report(_make_args(project, output=str(output_file)))
+
+        assert "Voldemort" not in output_file.read_text()
+
+    def test_stdout_is_scrubbed_too(self, tmp_path: Path, capsys: Any) -> None:
+        """`--output -` is the route most likely to be pasted straight into an issue."""
+        project = _make_project(tmp_path)
+
+        cmd_bug_report(_make_args(project, output="-"))
+
+        assert str(project) not in capsys.readouterr().out
+
+    def test_the_description_the_reporter_typed_survives(self, tmp_path: Path) -> None:
+        """Over-scrubbing has a cost too: a report nobody can read is no report."""
+        project = _make_project(tmp_path)
+        output_file = tmp_path / "report.md"
+
+        cmd_bug_report(_make_args(project, output=str(output_file), description="daemon hung"))
+
+        assert "daemon hung" in output_file.read_text()
 
 
 class TestBugReportWithDaemon:
