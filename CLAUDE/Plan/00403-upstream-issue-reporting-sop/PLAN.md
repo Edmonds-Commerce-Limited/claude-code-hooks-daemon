@@ -127,9 +127,15 @@ finding in it — the owner's rule, made checkable.
 
 ### Phase 2: The redacting generator
 
-- [ ] ⬜ **Task 2.1**: Assemble a report from controlled fields; scrub project
+- [ ] 🔄 **Task 2.1**: Assemble a report from controlled fields; scrub project
   root, `$HOME`, git remote, branch and hostname to placeholders while
-  preserving daemon-internal paths.
+  preserving daemon-internal paths. **Assembly landed**: `ReportFields` is the
+  entire input surface, so the hostname is never collected rather than scrubbed
+  out, and a test asserts each banned field name is absent from the class —
+  output can be scrubbed into looking clean, a field never collected cannot
+  come back. Scrubbing runs before the digest, so the provenance header vouches
+  for the bytes actually filed. **Outstanding**: the CLI verb that collects the
+  fields.
 - [x] ✅ **Task 2.2**: Require a minimal synthetic reproduction; refuse one
   referencing any path outside `untracked/scratch/`, with the "cannot reproduce
   synthetically" escape that carries no client data. Daemon-internal paths are
