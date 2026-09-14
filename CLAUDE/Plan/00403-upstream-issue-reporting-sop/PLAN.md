@@ -111,10 +111,10 @@ finding in it — the owner's rule, made checkable.
 - [ ] ⬜ **Task 1.2**: Same for `scripts/debug_info.py`, and stop emitting
   `.claude/hooks-daemon.env` verbatim — report which keys are SET, never their
   values.
-- [ ] ⬜ **Task 1.3**: Fix the wrong GitHub org in
+- [x] ✅ **Task 1.3**: Fix the wrong GitHub org in
   `.claude/skills/hooks-daemon/report.md`, and add a QA check that every GitHub
   URL in tracked docs names this repository, so it cannot recur.
-- [ ] ⬜ **Task 1.4**: Remove "paste the contents of the report file" from
+- [x] ✅ **Task 1.4**: Remove "paste the contents of the report file" from
   `BUG_REPORTING.md` — the instruction that turns a local diagnostic into a
   public disclosure.
 

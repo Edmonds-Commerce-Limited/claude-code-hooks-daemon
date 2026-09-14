@@ -184,10 +184,25 @@ bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" "$TARGET"
 
 ## Getting Help
 
-1. **Run debug script first**: `./scripts/debug_info.py untracked/scratch/report.md`
-2. **Create GitHub issue**: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
-3. **Paste debug report** into issue description
-4. **Add context**: What you were doing when the issue occurred
+> **The issue tracker is PUBLIC, and the debug report is not written for it.**
+> `debug_info.py` dumps `.claude/hooks-daemon.yaml` and `.claude/hooks-daemon.env`
+> **verbatim**, and an `.env` file is a conventional home for credentials.
+> Nothing redacts it for you. A public issue cannot be retracted by editing or
+> deleting it afterwards — assume anything posted is permanent.
+
+1. **Run the debug script**: `./scripts/debug_info.py untracked/scratch/report.md`
+   — this is a file for YOU to read, not a file to publish.
+2. **Redact it.** Remove anything belonging to your project: every value from
+   `hooks-daemon.env`, absolute paths carrying a username, your git remote,
+   branch names, internal service or client names. Keep the daemon's own paths
+   (`.claude/hooks-daemon/…`) — those are the part we need.
+3. **Minimise the reproduction.** Reduce it to the smallest case that still
+   shows the behaviour, using invented paths under `untracked/scratch/` rather
+   than a capture from your own tree. If it cannot be reproduced that way, say
+   so in the issue instead of pasting the original.
+4. **Create a GitHub issue**: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
+   — paste only the redacted, minimised extract, never the whole report file.
+5. **Add context**: what you were doing when the issue occurred.
 
 ## Contributing Bug Fixes
 
