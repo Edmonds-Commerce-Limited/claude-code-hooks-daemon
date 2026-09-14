@@ -227,8 +227,9 @@ rather than an edit.
   would have caught it — grep the claim's own wording before filing — costs one
   command.
 
-- [ ] ⬜ **N4**: `budget_exhaustion_detector` fires on SOURCE CODE surfaced in a
-  `ps` listing, and demands a loud user-facing banner for a budget nothing hit.
+- [x] ✅ **N4**: FIXED — `budget_exhaustion_detector` fired on SOURCE CODE
+  surfaced in a `ps` listing, demanding a loud user-facing banner for a budget
+  nothing hit.
 
   **Found**: running `ps -eo pid,etime,args` to check whether a QA run was still
   alive. Recorded late — it was reported in conversation when it happened and
@@ -265,6 +266,26 @@ rather than an edit.
   that cries wolf trains its reader to discount it — the same reasoning
   `journal-entry-future-dated` used to stay EDIT-stage-only rather than emit
   findings nobody can act on.
+
+  **FIXED**, with two details a RED run forced:
+
+  - **The window is the whole LINE, not the matched span.** A template usually
+    holds the placeholder just OUTSIDE the phrase that matched (`quota exceeded for {resource}` matches only `quota exceeded`), so the span-scoped version
+    passed the real-world case and left three parametrized cases red — it missed
+    exactly the shapes it existed to catch.
+  - **The placeholder regex is anchored on an IDENTIFIER immediately inside the
+    brace**, so a genuine signal delivered as JSON (`{"error": "quota exceeded"}`) is never mistaken for a template; that opens with a quote.
+
+  Scanning continues past a suppressed match rather than abandoning the pattern,
+  so a real signal elsewhere in the same text is still found.
+
+  **The cost is pinned by two guards that pass before AND after** — the same
+  message RENDERED still fires, and JSON braces still fire — so the suppression
+  cannot quietly eat true positives.
+
+  **Verified live, not only by unit test**: daemon restarted (pid 1355390) and
+  the exact payload re-emitted. Previously it produced `BUDGET EXHAUSTION DETECTED … Matched text: 'exceeded the {SOCKET_TIMEOUT_SECONDS:g}s budget'`;
+  now it produces nothing.
 
 ## Success Criteria
 
