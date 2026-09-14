@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00368: lsp is signal not noise](00368-lsp-is-signal-not-noise/PLAN.md) - Complete + the archiving commit (3,011 language-server errors down to zero with no suppression anywhere: the non-project trees are excluded, pyright is a blocking QA gate, and a session-start checker tells any project in five languages exactly how to silence its own noise)
+
 - [00367: deployed docs in sync with daemon workflow](00367-deployed-docs-in-sync-with-daemon-workflow/PLAN.md) - Complete + the archiving commit (a deployed core doc that told agents a human must approve a step no config key backs is now blocked by the `unenforced-approval-gate` docs-QA check, and both gates became real opt-in keys, default off)
 
 - [00366: supervisor own line follow up](00366-supervisor-own-line-follow-up/PLAN.md) - Complete + the archiving commit (an armed `/goal` pasted mid-turn was never submitted and sat in the input box for eight hours; the supervisor now remembers its own typed line, presses Enter for it at the next lull, holds the text families while it is pending, and the goal cap is a rolling hour rather than a process lifetime)

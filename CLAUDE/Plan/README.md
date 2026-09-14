@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00406: newline is a command boundary in handler patterns](00406-newline-is-a-command-boundary-in-handler-patterns/PLAN.md) - Not Started (four blocking handlers judge the NEXT line as part of the command they are matching, because their separator class omits `\n` — `git push origin main` ⏎ `grep -f x y` is denied as a force push, and `git branch -d` is denied by the rule that recommends it. Joining the same two lines with `&&` reverses every verdict. Graduated from 00405 N8)
 
-- [00405: niggles ledger eleven](00405-niggles-ledger-eleven/PLAN.md) - In Progress (the open ledger; ledger ten is closed. Nine entries, N9 open: chasing N6's newline-crossing regex outwards found N7 — a word split across two lines evaded EVERY blocking guard, because the shell JOINS a line continuation and the daemon replaced it with a space. N8 graduated to Plan 00406)
-
 - [00402: restart path leaves generated handler doc stale](00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md) - Not Started (a restart regenerates the `CLAUDE.md` block but never `.claude/HOOKS-DAEMON.md`, which sat a whole handler short for days and no test could see it. Regenerating on restart is the WRONG fix — that file's marker is the deployed-from version `upgrade.sh` reads. Graduated from 00400 N6; blocked on a ruling)
 
 - [00399: supervisor does not see tab completed slash commands](00399-supervisor-does-not-see-tab-completed-slash-commands/PLAN.md) - Not Started (Tab autocomplete expands `/comp` inside Claude Code and emits no keystrokes, so the raw-input tap never sees `/compact` and the supervisor fails to DEFER — risking a duplicate inject, never a missed compaction. Blocked on a ruling between three options)
@@ -135,6 +133,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00405: niggles ledger eleven](Completed/00405-niggles-ledger-eleven/PLAN.md) - Complete at `de143c9d`…`03610440` + the archiving commit (nine entries, all terminal. Chasing N6's newline-crossing regex outwards found N7: a word split across two lines evaded EVERY blocking guard, because the shell JOINS a continuation where the daemon substituted a space. N9 looked like a test-ordering quirk and was a "never raises" boundary that raised mid-route. N8 graduated to 00406)
+
 - [00403: upstream issue reporting sop](Completed/00403-upstream-issue-reporting-sop/PLAN.md) - Complete at `6787874f`…`47f315cd` + the archiving commit (one procedure for reporting a daemon defect to this PUBLIC repo: a generator that never COLLECTS the hostname, remote, env file, config or logs, a gate refusing any body it did not build, issue forms mirroring its fields, and `--web` kept open as the hole that keeps the gate honest)
 
 - [00404: niggles ledger ten](Completed/00404-niggles-ledger-ten/PLAN.md) - Complete at `bd8fd27f` + the archiving commit (one entry, fixed: an unguarded `chmod` one line outside `_bind_event_sockets`' per-socket guard meant a single unsecurable socket aborted daemon startup and cost ALL 31 event sockets — found by reading a CI failure rather than hitting a symptom. The NEXT niggle opens ledger eleven)
@@ -184,8 +184,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00374: the global `--project-root` is clobbered by a subparser default](Completed/00374-global-project-root-clobbered-by-subparser-default/PLAN.md) - Complete at `05d526be`…`692b32c5` + the archiving commit (`bin/hooks-daemon` refuses to run rather than let the CLI fall back to the caller's directory, but argparse's subparser default silently discarded the anchor it passed, and the anchoring suite asserted the argv rather than the behaviour)
 
 - [00373: drift reached main unseen — merge bypass and QA blind spot](Completed/00373-drift-reached-main-unseen-merge-bypass-and-qa-blind-spot/PLAN.md) - Complete at `7a722965`…`016611de` + the archiving commit (a merge resurrected an archived plan folder and four plan-QA findings survived a green QA run, green CI and a release-slate check; both sweeps are now QA tools where any finding fails, and `merge_qa_report` reports what a merge/pull/rebase actually introduced)
-
-- [00368: lsp is signal not noise](Completed/00368-lsp-is-signal-not-noise/PLAN.md) - Complete + the archiving commit (3,011 language-server errors down to zero with no suppression anywhere: the non-project trees are excluded, pyright is a blocking QA gate, and a session-start checker tells any project in five languages exactly how to silence its own noise)
 
 - [00372: worktree reap two defects](Completed/00372-worktree-reap-two-defects/PLAN.md) - Complete + the archiving commit (a worktree with no commits yet passed every safety predicate vacuously, so a live agent's work was offered for deletion; and the branch delete had never once worked, passing a fully-qualified ref that `git branch -d` rejects)
 
@@ -248,15 +246,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 406 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 360 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 361 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 23 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 22 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 23 + 360 + 13 = **396 folders**, spanning
+- **Folder-to-number reconciliation**: 22 + 361 + 13 = **396 folders**, spanning
   **393 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

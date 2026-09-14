@@ -19,7 +19,7 @@ newline reverses the verdict. Two spellings of one shell structure disagreeing
 is a fact about the implementation, never about the policy, which is what makes
 each of these a defect rather than a tuning preference.
 
-Graduated from [Plan 00405](../00405-niggles-ledger-eleven/PLAN.md) N8. Its N6
+Graduated from [Plan 00405](../Completed/00405-niggles-ledger-eleven/PLAN.md) N8. Its N6
 fixed the first instance found (`plan_number_helper`) and its N7 fixed the
 opposite-direction defect the survey turned up — a mid-token line continuation
 that evaded every guard. This plan is the remaining false positives.

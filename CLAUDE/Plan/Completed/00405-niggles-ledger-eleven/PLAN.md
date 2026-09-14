@@ -1,6 +1,6 @@
 # Plan 00405: niggles ledger eleven
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: Medium
@@ -12,7 +12,7 @@
 The open niggles ledger. Small defects get recorded here the turn they are
 found, so that noticing something and doing something about it are never the
 same decision. Ledger ten
-([Plan 00404](../Completed/00404-niggles-ledger-ten/PLAN.md)) is complete, so
+([Plan 00404](../00404-niggles-ledger-ten/PLAN.md)) is complete, so
 this one opens.
 
 An entry is either fixed in place, ruled NOT A DEFECT with the evidence that
@@ -37,7 +37,7 @@ rather than an edit.
   fold in.
 
   **Found**: running the wider suite while building
-  [Plan 00403](../Completed/00403-upstream-issue-reporting-sop/PLAN.md)'s Task 4.1. Both
+  [Plan 00403](../00403-upstream-issue-reporting-sop/PLAN.md)'s Task 4.1. Both
   faults were in a file committed earlier the same day, and the targeted test
   runs done at the time never touched
   `tests/integration/test_pending_release_notes_holding_area.py`.
@@ -212,7 +212,7 @@ rather than an edit.
   the next as one command, and denied a listing of ONE named plan.
 
   **Found**: listing the documents of
-  [Plan 00403](../Completed/00403-upstream-issue-reporting-sop/PLAN.md) while closing it
+  [Plan 00403](../00403-upstream-issue-reporting-sop/PLAN.md) while closing it
   out. The plan number is written in the path, so the command cannot be
   discovering one.
 
@@ -285,7 +285,7 @@ rather than an edit.
   implementation fact rather than a policy.
 
   **Graduated to
-  [Plan 00406](../00406-newline-is-a-command-boundary-in-handler-patterns/PLAN.md)**,
+  [Plan 00406](../../00406-newline-is-a-command-boundary-in-handler-patterns/PLAN.md)**,
   which carries the four sites, what each wrongly denies, the two cleared
   candidates and the ordering constraint. Graduated rather than fixed here
   because it is four blocking handlers, patterns whose loosening has evasion
@@ -332,10 +332,17 @@ rather than an edit.
 - [x] ✅ Every entry above is in a terminal state. N1, N2, N4, N5, N6, N7 and N9
   fixed; N3 ruled NOT A DEFECT with the mechanism that explains it; N8
   graduated to Plan 00406.
-- [ ] 🔄 Full QA passes and CI is green for every entry closed so far. Full QA
-  reached 30/30 at `9c332e83`, but N9 landed a SOURCE change after that run, so
-  this is deliberately back open: the run that closes it must postdate the
-  `secret_redaction` fix. Re-verification is the last thing owed here.
+- [x] ✅ Full QA passes and CI is green for every entry closed so far. Re-run
+  after N9's source change rather than inherited from before it: full QA 30/30
+  and CI `success` both at `03610440`. The earlier 30/30 at `9c332e83` was
+  deliberately NOT accepted — it predated the `secret_redaction` fix, so it
+  could not have covered it.
+- [x] ✅ Every release-bound consequence is in the holding area before this
+  plan closes. Three callouts in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`:
+  `44-…` (N6, a plan glob on the next line), `45-…` (N7, the security fix for a
+  word split across two lines) and `46-…` (N9, an unreadable config no longer
+  taking down the event). N1, N2, N4 and N5 are test-only or internal and carry
+  nothing a user upgrading would need told.
 
 ## Delivery & Milestones
 
