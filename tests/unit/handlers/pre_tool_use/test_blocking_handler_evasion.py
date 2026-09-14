@@ -101,6 +101,29 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             "git \\\n  commit -m x",
         ),
     ),
+    "IssueFilingGateHandler": (
+        "gh issue create --repo Edmonds-Commerce-Limited/claude-code-hooks-daemon --title x",
+        (
+            # `compile_command_name_pattern` covers all three at the command
+            # head; the repo ARGUMENT has its own respellings, and `gh` really
+            # does accept every one of these for --repo.
+            "/usr/bin/gh issue create "
+            "--repo Edmonds-Commerce-Limited/claude-code-hooks-daemon --title x",
+            "env gh issue create "
+            "--repo Edmonds-Commerce-Limited/claude-code-hooks-daemon --title x",
+            "gh \\\n  issue create "
+            "--repo Edmonds-Commerce-Limited/claude-code-hooks-daemon --title x",
+            "gh issue create -R Edmonds-Commerce-Limited/claude-code-hooks-daemon --title x",
+            "gh issue create --repo=Edmonds-Commerce-Limited/claude-code-hooks-daemon",
+            "gh issue create "
+            "--repo https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git",
+            "gh issue create "
+            "--repo git@github.com:Edmonds-Commerce-Limited/claude-code-hooks-daemon.git",
+            "GH_REPO=Edmonds-Commerce-Limited/claude-code-hooks-daemon gh issue create --title x",
+            "pytest tests/ && gh issue create "
+            "--repo Edmonds-Commerce-Limited/claude-code-hooks-daemon --title x",
+        ),
+    ),
     "GithubAutoCloseKeywordsHandler": (
         "git commit -m 'Fixes #123'",
         (
@@ -236,6 +259,19 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
 # ran. Nothing in the evasion table above would have noticed: every "must block"
 # case still passed. Both directions need a guard.
 _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
+    "IssueFilingGateHandler": (
+        # Every one of these is the SAME widening risk from the other side: a
+        # project filing on its own backlog, and a read of ours. The third is
+        # the one that would get the handler switched off -- it names this
+        # repository in prose while targeting somebody else's tracker.
+        "gh issue create --repo acme-corp/storefront --title x --body y",
+        "gh issue create --title x --body y",
+        "gh issue create --repo acme-corp/storefront "
+        '--title "upgrade Edmonds-Commerce-Limited/claude-code-hooks-daemon to 3.64"',
+        "gh issue list --repo Edmonds-Commerce-Limited/claude-code-hooks-daemon",
+        "gh issue view 12 --repo Edmonds-Commerce-Limited/claude-code-hooks-daemon --comments",
+        "gh issue comment 12 --repo Edmonds-Commerce-Limited/claude-code-hooks-daemon --body hi",
+    ),
     "DestructiveGitHandler": (
         "git status",
         f"git -C {_SAFE_PATH} log --oneline -n 5",

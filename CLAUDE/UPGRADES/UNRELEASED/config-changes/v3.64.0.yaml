@@ -336,6 +336,50 @@ config_changes:
         On by default; no action needed to adopt. This is where the network
         work happens, so disabling it while leaving the PreToolUse backstop on
         leaves every clone reading NOT VERIFIED once the cache expires.
+    - key: handlers.pre_tool_use.issue_filing_gate
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PreToolUse handler (Plan 00403), ships enabled at priority 14 --
+        the same band as `sensitive_content` and `artifact_publish_blocker`,
+        because all three guard content LEAVING the project. It denies
+        `gh issue create` against the hooks-daemon repository unless
+        `--body-file`/`-F` names a document `hooks-daemon issue-report`
+        produced and nobody has edited since. The asymmetry it exists for: this
+        project's tracker is PUBLIC and an issue cannot be retracted by editing
+        or deleting it, so a pasted config, log excerpt or absolute path costs
+        the CLIENT permanently, while an over-redacted report costs one round
+        trip asking for more detail. The generator it requires gathers no
+        hostname, no git remote, no environment file, no config dump and no
+        logs -- they are never collected rather than scrubbed out afterwards,
+        which is a guarantee an inspection pass cannot make. Three deliberate
+        non-targets keep it from reading as a ban on filing issues: your OWN
+        repository is untouched (the target is read from `--repo`/`-R`, never
+        from this repo's name appearing in the text, so an issue on your
+        backlog titled "upgrade the hooks daemon" passes); `gh issue comment`,
+        `list` and `view` are untouched against any repository, because no
+        generator produces a comment body and requiring provenance on a
+        follow-up would make the tracker unusable; and it stands down entirely
+        in a self-install checkout. Editing a generated report breaks the
+        digest in its provenance header and is refused -- that is the failure
+        it actually catches, a clean report edited to paste in "just the
+        relevant bit of the log" and then filed. The header is tamper EVIDENCE
+        rather than authentication, and the handler's own documentation says so
+        rather than implying more.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            issue_filing_gate:
+              enabled: true
+              priority: 14
+      migration_note: >-
+        On by default and inert unless you actually file an issue against the
+        hooks-daemon repository, so no action is needed to adopt. The remedy it
+        names is `hooks-daemon issue-report --fields <file.json>`, which writes
+        a filable body under `untracked/issue-reports/`. Disable with
+        handlers.pre_tool_use.issue_filing_gate.enabled: false -- but note that
+        the thing being disabled is the only check standing between a
+        hand-written body and a public tracker that cannot retract it.
   renamed: []
   removed:
     - key: handlers.pre_tool_use.daemon_restart_verifier

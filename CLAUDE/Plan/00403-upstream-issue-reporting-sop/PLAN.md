@@ -189,10 +189,28 @@ finding in it — the owner's rule, made checkable.
 
 ### Phase 4: The filing gate (client installs only)
 
-- [ ] ⬜ **Task 4.1**: PreToolUse handler denying `gh issue create` against this
-  repository unless `--body-file` names a generator-produced file with valid
-  provenance; stands down in self-install. New rule ID, all seven registration
-  gates.
+- [x] ✅ **Task 4.1**: `issue_filing_gate` (PreToolUse, priority 14, rule
+  `R-UPSTREAM-ISSUE-UNVERIFIED-BODY`). Priority 14 is the band
+  `sensitive_content`, `artifact_publish_blocker` and `project_containment`
+  already occupy, for the same reason: all of them guard content LEAVING the
+  project. Three boundaries decide whether it is usable rather than merely
+  correct, and each has a test that fails if it is traded away. It stands down
+  in self-install, because `issue-sdlc` files issues here hourly and a gate
+  that fired would break the delivery loop on its first tick — but an
+  UNRESOLVABLE install mode is answered as "client", so the failure direction
+  is a clear refusal rather than a silent disclosure. It engages on the
+  repository a command TARGETS, read from `--repo`/`-R` in the same shell
+  segment or a `GH_REPO` assignment, never on this repo's name appearing in the
+  text: a client filing "upgrade the hooks daemon" on their own backlog is the
+  false positive that would get the handler switched off. And `gh issue comment` is deliberately uncovered — no generator produces a comment body, so
+  requiring provenance on a follow-up would make the tracker unusable for the
+  reporter this plan exists to help, while `sensitive_content` already scans
+  one for secret terms. Respellings are covered through
+  `compile_command_name_pattern` rather than by literals, with both directions
+  in `test_blocking_handler_evasion.py`. Registered across all eight surfaces:
+  `HandlerID`, `Priority`, `RuleID`, the module, `.claude/hooks-daemon.yaml`,
+  `init_config.py`'s template, `hooks-daemon.yaml.example` (the one CI catches
+  and a local run does not) and `HANDLER_REFERENCE.md`.
 
 ### Phase 5: The issue form and the SOP
 

@@ -1590,6 +1590,58 @@ protects are never committed alongside the rule that blocks them.
 
 ---
 
+#### issue_filing_gate
+
+| Property       | Value               |
+| -------------- | ------------------- |
+| **Config key** | `issue_filing_gate` |
+| **Priority**   | 14                  |
+| **Type**       | Blocking            |
+| **Event**      | PreToolUse          |
+
+**Description:** Denies `gh issue create` against the hooks-daemon repository
+unless `--body-file`/`-F` names a document `hooks-daemon issue-report` produced
+and nobody has edited since. That tracker is public and an issue cannot be
+retracted, so a pasted config, log excerpt or absolute path costs the client
+permanently — while an over-redacted report costs one round trip.
+
+**What it does NOT touch**, because a gate that blocks ordinary work gets
+switched off:
+
+| Left alone                            | Why                                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------- |
+| Issues on your own repository         | Nothing to do with this daemon. The target comes from `--repo`/`-R`, never a mention. |
+| `gh issue comment`, `list` and `view` | No generator produces a comment body; `sensitive_content` scans one for secret terms. |
+| The daemon's own repository           | It stands down in self-install, so the project's own issue workflow is unaffected.    |
+
+**The remedy is one command.** `hooks-daemon issue-report --fields <file.json>`
+collects a controlled field set and gathers no hostname, no config dump, no
+environment file and no logs — they are never collected rather than scrubbed
+out afterwards. File the document it writes.
+
+Editing that document is refused: the digest in its provenance header stops
+matching. That is the failure this catches — a clean report edited to paste in
+"just the relevant bit of the log", then filed. Extra detail belongs in the
+reproduction field, where the checks still run over it. The header is tamper
+EVIDENCE, not authentication: it catches the accident, not an adversary.
+
+The gate proves the body is the one the generator built. It does not prove the
+prose you wrote inside it is safe to publish — read the report before filing.
+
+No options. The full SOP is in [BUG_REPORTING.md](../../BUG_REPORTING.md).
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    issue_filing_gate:
+      enabled: true
+      priority: 14
+```
+
+---
+
 #### secret_file_guard
 
 | Property       | Value               |
@@ -3909,6 +3961,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `project_containment`          | PreToolUse        | 14       | Writes whose target is named outside the repository root              |
 | `security_antipattern`         | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds)  |
 | `artifact_publish_blocker`     | PreToolUse        | 14       | Publishing an artefact (a claude.ai URL outside the project)          |
+| `issue_filing_gate`            | PreToolUse        | 14       | gh issue create against the daemon's tracker with a hand-written body |
 | `write_clobber_guard`          | PreToolUse        | 16       | Write to an existing file not read this session                       |
 | `worktree_file_copy`           | PreToolUse        | 15       | cp/mv/rsync between worktrees                                         |
 | `pipe_blocker`                 | PreToolUse        | 15       | Expensive commands piped to tail/head                                 |

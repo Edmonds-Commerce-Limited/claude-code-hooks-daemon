@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (60 handlers)
+### PreToolUse (61 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -15,6 +15,7 @@
 | 13 | error_hiding_blocker | BLOCKING | Block error-hiding patterns in code written via Write or Edit tools |
 | 14 | artifact_publish_blocker | TERMINAL | Deny artefact publishing; allow read-only enumeration |
 | 14 | flaggable_content_channel_guard | BLOCKING | Deny content-revealing git/grep commands over configured flaggable paths |
+| 14 | issue_filing_gate | BLOCKING | Deny an upstream issue whose body nothing checked |
 | 14 | project_containment | BLOCKING | Deny a write to a path named outside the repository root |
 | 14 | quarantine_artefact_read_guard | BLOCKING | Deny reading a quarantined DETAIL artefact from the main context |
 | 14 | secret_file_guard | BLOCKING | Deny any tool call that would put a protected file's contents into context |

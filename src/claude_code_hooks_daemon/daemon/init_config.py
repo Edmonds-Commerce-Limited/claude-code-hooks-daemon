@@ -155,6 +155,12 @@ class ConfigTemplate:
             # guard. Read-only `action: "list"` stays allowed. Only a human may
             # lift this -- the handler deliberately has no agent-side hatch.
             "    artifact_publish_blocker: {enabled: true, priority: 14}  # Block publishing artefacts outside the project\n"
+            # Plan 00403: the hooks-daemon tracker is PUBLIC and an issue cannot
+            # be retracted, so an upstream report's body must come from
+            # `hooks-daemon issue-report` rather than being typed by hand. Only
+            # `gh issue create` against THIS daemon's repo is judged -- a
+            # project's own issues, and every comment/list/view, are untouched.
+            "    issue_filing_gate: {enabled: true, priority: 14}  # Upstream issue bodies must come from the generator\n"
             # Plan 00272: protected files (vault passwords, *.secret*, SSH keys)
             # must never have their CONTENTS read into context by any route.
             # Presence/metadata stay available via `hooks-daemon secret-meta`.

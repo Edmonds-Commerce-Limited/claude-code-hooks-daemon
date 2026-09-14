@@ -86,6 +86,14 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "T1 denies a message carrying an auto-closing keyword reference"
     ),
     "GitStashHandler": "T1 denies git stash without the escape hatch",
+    "IssueFilingGateHandler": (
+        "T1 denies a `gh issue create` against the daemon's own public tracker "
+        "whose body no generator produced -- and the standing rules the fire-time "
+        "message cannot carry are the carve-outs that keep it from reading as a "
+        "ban on filing issues at all: a client's OWN repository is untouched, so "
+        "are comment/list/view against any repository, and the gate stands down "
+        "entirely in the daemon's own repo"
+    ),
     "LintOnEditHandler": "T1 denies a write whose lint fails, in nine languages",
     "ValidateEslintOnWriteHandler": (
         "T1 denies a .ts/.tsx write on ESLint errors, on timeout, and on any "

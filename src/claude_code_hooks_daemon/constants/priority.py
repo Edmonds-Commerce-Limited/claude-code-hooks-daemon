@@ -81,6 +81,13 @@ class Priority:
     # because for an out-of-root target those rules have nothing to say: the
     # path left the coordinate system they are defined in.
     PROJECT_CONTAINMENT = 14
+    # Plan 00403 Task 4.1: the same band, and the same premise as the five
+    # above -- content leaving the project, into a PUBLIC tracker where no
+    # history rewrite reaches it. Beside SENSITIVE_CONTENT rather than after
+    # it because the two judge disjoint things about the same command: that
+    # one scans a body for known terms, this one asks whether anything
+    # checked the body at all.
+    ISSUE_FILING_GATE = 14
 
     ROOT_RECURSION_GUARD = 16
     # Runs after the blocking safety handlers on purpose: a Read they DENY never

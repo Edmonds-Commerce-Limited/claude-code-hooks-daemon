@@ -701,6 +701,17 @@ class HandlerID:
         display_name="reference-repo-freshness",
     )
 
+    # Plan 00403 Phase 4: the one ENFORCED rule in the upstream issue-reporting
+    # SOP. Everything else in that plan is advice a reporter can route around by
+    # typing the issue body by hand; this gate is where the redaction guarantee
+    # stops being a suggestion. It stands down in self-install, where the
+    # project files its own issues.
+    ISSUE_FILING_GATE = HandlerIDMeta(
+        class_name="IssueFilingGateHandler",
+        config_key="issue_filing_gate",
+        display_name="issue-filing-gate",
+    )
+
     # ccy supervisor integrity checker (SessionStart handler) — Plan 00148:
     # warn when the ccy supervisor is armed but its files are missing, not
     # executable, or git-ignored (a brick risk for teammates)

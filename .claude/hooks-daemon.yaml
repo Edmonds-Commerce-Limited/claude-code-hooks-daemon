@@ -173,6 +173,16 @@ handlers:
         # as the in-session backstop.
         source_disable: true
 
+    # Plan 00403. Denies `gh issue create` against THIS project's tracker when
+    # the body was not produced by `hooks-daemon issue-report`. Enabled here
+    # deliberately even though it stands down in self-install: dogfooding a
+    # handler means shipping the same config a client gets, and the stand-down
+    # is the behaviour under test — `issue-sdlc` files issues here hourly and
+    # must stay untouched.
+    issue_filing_gate:
+      enabled: true
+      priority: 14
+
     sensitive_content:
       enabled: true
       priority: 14

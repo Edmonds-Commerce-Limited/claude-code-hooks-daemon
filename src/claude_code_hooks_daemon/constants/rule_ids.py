@@ -352,6 +352,16 @@ class RuleID:
     REFERENCE_REPO_NOT_VERIFIED: str = "R-REFERENCE-REPO-NOT-VERIFIED"
 
     # ------------------------------------------------------------------
+    # issue_filing_gate handler
+    # ------------------------------------------------------------------
+
+    #: A `gh issue create` against the daemon's own PUBLIC tracker carrying a
+    #: body no generator produced. One rule rather than several, because every
+    #: shape of it — inline text, a hand-written file, an edited report — is the
+    #: same fact: nothing checked what is about to become permanent.
+    UPSTREAM_ISSUE_UNVERIFIED_BODY: str = "R-UPSTREAM-ISSUE-UNVERIFIED-BODY"
+
+    # ------------------------------------------------------------------
     # lint_on_edit handler (post_tool_use)
     # ------------------------------------------------------------------
 

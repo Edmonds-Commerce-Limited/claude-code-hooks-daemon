@@ -73,6 +73,10 @@ handlers:
       enabled: true         # Read-only `action: "list"` is never blocked. No agent-side escape
       priority: 14          # hatch by design — only a human sets this to false.
 
+    issue_filing_gate:     # An upstream issue body must come from `hooks-daemon issue-report`
+      enabled: true         # Only `gh issue create` against the DAEMON's public tracker is judged.
+      priority: 14          # Your own repo, and comment/list/view anywhere, are never touched.
+
     sensitive_content:     # Blocks configured public patterns + a gitignored secret word list
       enabled: true         # Inert until configured: public_patterns defaults to [] and the
       priority: 14          # secret word list path defaults to a file that does not exist yet.

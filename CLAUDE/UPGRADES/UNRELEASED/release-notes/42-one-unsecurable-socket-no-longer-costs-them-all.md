@@ -1,7 +1,10 @@
 # Callout: one unsecurable socket no longer costs them all
 
-**Plan**: 00404 (N1)
-**Audience**: client projects with `transport.relay_enabled` or `nc_enabled`
+**Plan**: 00404
+**Audience**: client projects
+
+Filed as niggle N1 in that plan's ledger. It reaches a project only when the
+per-event transport is on — `transport.relay_enabled` or `nc_enabled`.
 
 When the per-event transport is on, the daemon binds one Unix socket per wired
 hook event — thirty-one of them — alongside the legacy socket. Binding each one
