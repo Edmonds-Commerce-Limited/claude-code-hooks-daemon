@@ -169,7 +169,10 @@ finding in it — the owner's rule, made checkable.
   verb and cannot be done as a pure function — there is no standalone
   enumeration to call, because a handler's options are resolved from config at
   registration time (`HandlerRegistry.register_all`). Do it with the verb, not
-  before it.
+  before it. **The verb now exists** (`cmd_issue_report`), so this is
+  unblocked: when `config_considered` is empty and `handler` is named, the
+  refusal should list that handler's actual options instead of telling the
+  reporter to go and find them.
 - [x] ✅ **Task 3.3**: Source cited — require a `file:line` in the daemon source
   and verify it resolves in the installed version. A citation that does not
   resolve means the reporter read a different version, a fork, or nothing, and
