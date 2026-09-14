@@ -695,6 +695,11 @@ class HandlerID:
         config_key="reference_repo_sweep",
         display_name="reference-repo-sweep",
     )
+    REFERENCE_REPO_FRESHNESS = HandlerIDMeta(
+        class_name="ReferenceRepoFreshnessHandler",
+        config_key="reference_repo_freshness",
+        display_name="reference-repo-freshness",
+    )
 
     # ccy supervisor integrity checker (SessionStart handler) — Plan 00148:
     # warn when the ccy supervisor is armed but its files are missing, not

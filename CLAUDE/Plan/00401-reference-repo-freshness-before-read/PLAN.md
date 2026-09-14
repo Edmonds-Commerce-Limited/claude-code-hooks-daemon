@@ -195,11 +195,12 @@ Each is a rule the implementation must not be able to violate:
 
 ### Phase 3: SessionStart sweep (does the network work)
 
-- [ ] ⬜ **Task 3.1**: `session_start/reference_repo_sweep.py` — refresh every
+- [x] ✅ **Task 3.1**: `session_start/reference_repo_sweep.py` — refresh every
   governed repo, auto-pull where safe, write the cache, report what it could not
   make fresh. Silent when everything is clean and current.
-- [ ] ⬜ **Task 3.2**: Bound the report so a project with many repos cannot flood
-  SessionStart. Follow `remote_docs_staleness.py:33,104-105`.
+- [x] ✅ **Task 3.2**: Bound the report so a project with many repos cannot flood
+  SessionStart (`_MAX_LISTED = 10`); the CLI stays unbounded, because a report
+  you ASKED for should show everything.
 
 ### Phase 4: PreToolUse enforcement (cache only)
 

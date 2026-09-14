@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (59 handlers)
+### PreToolUse (60 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -47,6 +47,7 @@
 | 37 | remote_docs_routing | BLOCKING | Route a fetch to the vendored copy; warn when that copy is stale |
 | 38 | lsp_enforcement | BLOCKING | Enforce LSP tool usage instead of Grep/Bash grep for symbol lookups |
 | 38 | remote_docs_commit_gate | BLOCKING | Deny a commit that would enter an unattributed vendored document |
+| 39 | reference_repo_freshness | BLOCKING | Gate a read of a governed reference repo on a cached freshness reading |
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
 | 42 | global_npm_advisor | NON-TERMINAL | Advise on global npm/yarn package installations |

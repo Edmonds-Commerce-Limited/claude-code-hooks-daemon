@@ -1964,6 +1964,47 @@ handlers:
 
 ---
 
+#### reference_repo_freshness
+
+| Property       | Value                      |
+| -------------- | -------------------------- |
+| **Config key** | `reference_repo_freshness` |
+| **Priority**   | 39                         |
+| **Type**       | Blocking                   |
+| **Event**      | PreToolUse                 |
+
+**Description:** Gates a `Read`, `Grep`, `Glob` or `Bash` call that reaches into a governed reference clone on whether that clone is actually up to date. The failure it prevents is silent: an agent reads a weeks-old checkout, reasons from it, and produces conclusions indistinguishable from correct ones.
+
+**It performs no network I/O.** Everything it knows comes from the cache written by the `reference_repo_sweep` SessionStart handler, which does the fetching. A fetch here could consume the whole 30s hook socket budget on a single repo.
+
+**Two carve-outs, both load-bearing:**
+
+| Carve-out                  | Why                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `git` is never intercepted | The remedy this handler PRINTS is a `git` command. A handler that blocks the command it just told you to run cannot be satisfied.                 |
+| Un-checkable never blocks  | No remote, no upstream or a detached HEAD is reported once by the sweep and never gates a read — a deliberately unreachable clone stays readable. |
+
+**`NOT VERIFIED` is not the same verdict as stale.** "Nobody has checked" and "this is out of date" call for different responses; collapsing them would either cry wolf about repos that are fine or give false comfort about repos nobody looked at. Run `hooks-daemon reference-repos` to refresh and clear it.
+
+**Configuration lives in the top-level `reference_repos:` block, not in this handler's options** — one block feeds the SessionStart sweep, this backstop and the `reference-repos` CLI, so the three cannot disagree. See `reference_repos` in the top-level configuration section for `roots`, `exclude`, `mode`, `auto_pull` and `cache_ttl_minutes`.
+
+**Config example:**
+
+```yaml
+reference_repos:
+  roots: ["untracked/repos"]
+  mode: block_once   # block_once | block | advise | off
+  auto_pull: true
+
+handlers:
+  pre_tool_use:
+    reference_repo_freshness:
+      enabled: true
+      priority: 39
+```
+
+---
+
 #### gh_issue_comments
 
 | Property       | Value               |
@@ -3876,6 +3917,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `comment_size`                 | PreToolUse        | 33       | Over-long comments growing past the size limit                        |
 | `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                 |
 | `lsp_enforcement`              | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                             |
+| `reference_repo_freshness`     | PreToolUse        | 39       | Reading a governed reference clone that is stale or unverified        |
 | `gh_issue_comments`            | PreToolUse        | 40       | gh issue view without --comments                                      |
 | `gh_pr_comments`               | PreToolUse        | 40       | gh pr view without --comments                                         |
 | `plan_time_estimates`          | PreToolUse        | 40       | Time estimates in plan docs                                           |

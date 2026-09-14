@@ -28,6 +28,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.config.models import ReferenceReposConfig
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
@@ -61,10 +62,13 @@ class ReferenceRepoSweepHandler(SessionStartHandlerBase):
                 HandlerTag.WORKFLOW,
             ],
         )
-        # Injected by the registry from the top-level ``reference_repos`` block
-        # (the same DI idiom as plan_workflow). None means the block was never
-        # resolved, which reads as OFF rather than as a crash at session start.
-        self._reference_repos: Any = None
+        # Overwritten by the registry with the project's resolved
+        # ``reference_repos`` block (the same DI idiom as plan_workflow).
+        # Seeded with the model's own defaults rather than None: ``Config``
+        # declares a default_factory, so production never hands over an absent
+        # value, and a None seed would mean `handle()` carried a branch that
+        # exists only to raise at session start if it were ever missed.
+        self._reference_repos: Any = ReferenceReposConfig()
         self.project_root_reader: Callable[[], Path] = self._default_project_root
         self.refresher: Callable[..., RefreshOutcome] = refresh_repo
 

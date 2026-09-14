@@ -87,13 +87,17 @@ class TestWhenItRuns:
 
         assert handler.matches(_STARTUP) is False
 
-    def test_it_does_nothing_when_config_was_never_injected(
-        self, handler: ReferenceRepoSweepHandler
-    ) -> None:
-        """Absent config means off, never a crash at session start."""
-        handler._reference_repos = None
+    def test_an_uninjected_handler_carries_the_documented_defaults(self) -> None:
+        """Not None, and deliberately so.
 
-        assert handler.matches(_STARTUP) is False
+        ``Config`` declares a ``default_factory`` for this block, so production
+        never hands the registry an absent value. Seeding the defaults keeps the
+        crash-at-session-start branch from existing at all.
+        """
+        fresh = ReferenceRepoSweepHandler()
+
+        assert fresh._reference_repos == ReferenceReposConfig()
+        assert fresh.matches(_STARTUP) is True
 
 
 class TestReporting:

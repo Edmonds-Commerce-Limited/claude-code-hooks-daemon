@@ -232,6 +232,12 @@ class Priority:
     # LSP enforcement (Priority: 38)
     LSP_ENFORCEMENT = 38
 
+    # Plan 00401 Task 4.1: gates a READ on whether the data being read is
+    # trustworthy, so it decides before the workflow handlers at 40 that judge
+    # how the work is being done. It stays well after SECRET_FILE_GUARD (14):
+    # a path that must never be read at all outranks one that is merely stale.
+    REFERENCE_REPO_FRESHNESS = 39
+
     # Workflow handlers (Priority: 35-55)
     GH_ISSUE_COMMENTS = 40
     GH_PR_COMMENTS = 40

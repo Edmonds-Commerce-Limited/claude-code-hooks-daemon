@@ -268,6 +268,14 @@ handlers:
         mode: block_once       # advisory | block_once | strict
         no_lsp_mode: block     # block | advisory | disable
 
+    reference_repo_freshness:  # Gates a READ of a stale reference clone (Plan 00401)
+      enabled: true            # Silent unless the project actually governs repos
+      priority: 39             # After lsp_enforcement, before the workflow 40s
+      # Cache-only — this handler never touches the network. Scope, enforcement
+      # posture and auto-pull live in the TOP-LEVEL `reference_repos:` block,
+      # not here: one block feeds the session sweep, this backstop and the
+      # `reference-repos` CLI, so the three cannot disagree with each other.
+
     # WORKFLOW HANDLERS (Priority 30-50) - Enable based on your workflow
     plan_number_helper:    # Provides correct next plan number
       enabled: false       # Enable when using CLAUDE/Plan/ structure

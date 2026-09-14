@@ -119,6 +119,13 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "hand-writing a plausible frontmatter block to satisfy the gate, and "
         "checks the vendored corpus before fetching a URL at all"
     ),
+    "ReferenceRepoFreshnessHandler": (
+        "T1 denies a read of a governed reference clone with no in-date freshness "
+        "reading, or one known to be behind/off its default branch -- and the "
+        "standing rules the fire-time message cannot carry are the two carve-outs: "
+        "git is never intercepted (so the printed remedy stays runnable) and an "
+        "un-checkable clone never blocks anything"
+    ),
     "RootRecursionGuardHandler": "T1 denies recursive scanners rooted at /",
     "SelfMatchingProcessProbeHandler": (
         "T1 denies a process probe that matches the calling shell's own argv"

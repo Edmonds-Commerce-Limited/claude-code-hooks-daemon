@@ -43,12 +43,19 @@ _NOT_VERIFIED_DETAIL: Final[str] = (
 )
 
 
-def _display_path(path: Path, project_root: Path | None) -> str:
+def display_path(path: Path, project_root: Path | None) -> str:
     """Show a governed repo the way a reader recognises it.
 
-    Project-relative when it lives inside the project, absolute otherwise — a
-    configured root may point anywhere, and a bare relative fragment for a path
-    outside the project would be actively misleading.
+    Project-relative when it lives inside the project, absolute otherwise. The
+    absolute case is not reachable through ``reference_repos.roots`` — that
+    validator rejects a root escaping the repository — but it IS reachable
+    through the CLI, which renders whatever readings it is handed, and through
+    a cache written before a root was narrowed.
+
+    Public because the PreToolUse gate names repos in its deny message too, and
+    a second copy of this rule is exactly the drift this module exists to
+    prevent: a repo called one thing when blocked and another thing when
+    reported reads as two separate problems.
     """
     if project_root is not None and path.is_relative_to(project_root):
         return str(path.relative_to(project_root))
@@ -57,7 +64,7 @@ def _display_path(path: Path, project_root: Path | None) -> str:
 
 def repo_line(state: RepoState, *, project_root: Path | None = None) -> str:
     """Render one repository's status as a single line."""
-    name = _display_path(state.path, project_root)
+    name = display_path(state.path, project_root)
 
     if not state.checkable:
         return f"{name} — {state.reason}"
