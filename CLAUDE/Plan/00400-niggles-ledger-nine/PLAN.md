@@ -210,6 +210,16 @@ rather than an edit.
   concurrent pushes and breaks from the third on — and says to cite a later
   green sha that contains the work.
 
+  **One interaction worth knowing, which does not change the ruling.** This
+  session pushes after every logical unit (a standing authorisation: "never hold
+  pushes behind long checks"), and that cadence is exactly what maximises
+  eviction — four shas were cancelled while pending here (`ec18062d`,
+  `a06bd799`, `dee7701e`, and one earlier). So on this repository "intermediate
+  commits lacking CI is ordinary" is not an edge case but the common case. HEAD
+  still always runs, so nothing is starved; the practical consequence is only
+  that a plan citing delivery evidence should expect to cite a later green sha
+  rather than the commit that introduced the work.
+
   **The pattern, recorded because this is its second appearance.** Plan 00393's
   journal named it: "I stated a result one step beyond what I had observed."
   Here I observed one sha with no run and claimed a live defect needing a
