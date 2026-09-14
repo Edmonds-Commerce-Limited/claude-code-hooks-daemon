@@ -507,6 +507,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - daemon_restart_verifier — restart the daemon before committing
 
+<!-- handler: reference-repo-freshness -->
+
+- reference_repo_freshness — a stale reference clone is caught before you read it
+
 <!-- handler: agent-isolation-advisor -->
 
 - agent_isolation_advisor — isolate concurrent agents
