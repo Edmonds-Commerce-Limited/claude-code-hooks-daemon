@@ -415,6 +415,35 @@ class TestDefaultBranch:
         assert git_sync.default_branch(plain) is None
 
 
+class TestRemotes:
+    """Public since Plan 00401: callers need to tell "no remote" from "no upstream".
+
+    Both are uncomparable in an ahead/behind sense, but they need opposite
+    remedies, so a caller that cannot distinguish them tells the reader to run
+    the wrong command.
+    """
+
+    def test_a_clone_reports_its_origin(self, tmp_path: Path) -> None:
+        _, clone = _make_remote_and_clone(tmp_path)
+        assert git_sync.remotes(clone) == ["origin"]
+
+    def test_a_repo_with_no_remote_reports_none(self, tmp_path: Path) -> None:
+        local = tmp_path / "local"
+        local.mkdir()
+        _run(local, "init", "-b", "main")
+        assert git_sync.remotes(local) == []
+
+    def test_a_non_repo_reports_none_rather_than_raising(self, tmp_path: Path) -> None:
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        assert git_sync.remotes(plain) == []
+
+    def test_several_remotes_are_all_reported(self, tmp_path: Path) -> None:
+        remote, clone = _make_remote_and_clone(tmp_path)
+        _run(clone, "remote", "add", "mirror", str(remote))
+        assert sorted(git_sync.remotes(clone)) == ["mirror", "origin"]
+
+
 class TestGoneBranches:
     def test_none_when_nothing_deleted(self, tmp_path: Path) -> None:
         _, clone = _make_remote_and_clone(tmp_path)

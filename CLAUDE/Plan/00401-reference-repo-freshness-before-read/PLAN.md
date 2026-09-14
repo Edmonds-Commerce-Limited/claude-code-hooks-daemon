@@ -117,9 +117,17 @@ Each is a rule the implementation must not be able to violate:
   the walk is depth-bounded so a root of `/` cannot become a filesystem sweep;
   a non-positive bound finds nothing rather than everything. 23 tests, 100%
   coverage of the module.
-- [ ] ⬜ **Task 1.2**: `model.py` + `inspect.py` — a `RepoState` built from
+- [x] ✅ **Task 1.2**: `model.py` + `inspection.py` — a `RepoState` built from
   `git_sync` with NO network: branch, default branch, upstream, ahead/behind,
   dirty, and a `checkable` classification carrying the reason it is not.
+  Named `inspection.py`, NOT `inspect.py` as drafted: that filename shadows a
+  standard-library module much of the ecosystem imports. `RepoState` carries no
+  enforcement policy — three surfaces consume it and only one blocks, so a
+  `should_block` here would bake one consumer's configurable mode into the value
+  the other two share. `git_sync._remotes` promoted to public `remotes()` so a
+  caller can tell "no remote" from "no upstream": both are uncomparable, but
+  their remedies differ (`git remote add` vs `git branch -u`). 69 tests, 100%
+  coverage; the load-bearing one asserts inspection performs no network I/O.
 - [ ] ⬜ **Task 1.3**: `refresh.py` — fetch, then `pull_ff_only` ONLY when clean
   and not ahead. Mirror `git_upstream_checker._auto_pull`'s refusal branches
   rather than re-deriving them.

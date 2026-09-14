@@ -395,8 +395,16 @@ def default_branch(cwd: Path) -> str | None:
     return None
 
 
-def _remotes(cwd: Path) -> list[str]:
-    """Return configured remote names (empty on failure / no remotes)."""
+def remotes(cwd: Path) -> list[str]:
+    """Return configured remote names (empty on failure / no remotes).
+
+    Public because "has this repo got a remote at all?" is a question callers
+    outside this module need in order to tell a repo nobody added a remote to
+    from one whose branch simply is not tracking. Those two look identical in
+    an ahead/behind comparison — both are uncomparable — but their remedies
+    differ (``git remote add`` versus ``git branch -u``), and a report that
+    cannot tell them apart gives the reader the wrong instruction.
+    """
     result = _run_git(cwd, "remote", timeout=Timeout.GIT_CONTEXT)
     if result is None or result.returncode != 0:
         return []
@@ -410,7 +418,7 @@ def _stale_remote_tracking_refs(cwd: Path) -> set[str]:
     that removes nothing. Fail-silent per remote (offline / auth → skipped).
     """
     stale: set[str] = set()
-    for remote in _remotes(cwd):
+    for remote in remotes(cwd):
         result = _run_git(
             cwd,
             "remote",

@@ -19,8 +19,13 @@ from claude_code_hooks_daemon.reference_repos.discovery import (
     DEFAULT_MAX_DEPTH,
     discover_reference_repos,
 )
+from claude_code_hooks_daemon.reference_repos.inspection import inspect_repo
+from claude_code_hooks_daemon.reference_repos.model import Checkability, RepoState
 
 __all__ = [
     "DEFAULT_MAX_DEPTH",
+    "Checkability",
+    "RepoState",
     "discover_reference_repos",
+    "inspect_repo",
 ]
