@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.reference_repos.inspection import inspect_repo
 from claude_code_hooks_daemon.reference_repos.model import Checkability
 from claude_code_hooks_daemon.utils import git_sync
@@ -31,7 +32,7 @@ def _run(cwd: Path, *args: str) -> str:
         capture_output=True,
         text=True,
         check=True,
-        timeout=30,
+        timeout=Timeout.GIT_CONTEXT,
     )
     return result.stdout.strip()
 
@@ -60,7 +61,7 @@ def _remote_and_clone(tmp_path: Path) -> tuple[Path, Path]:
         ["git", "init", "--bare", "-b", "main", str(origin)],
         capture_output=True,
         check=True,
-        timeout=30,
+        timeout=Timeout.GIT_CONTEXT,
     )
     _run(seed, "remote", "add", "origin", str(origin))
     _run(seed, "push", "-u", "origin", "main")
@@ -70,7 +71,7 @@ def _remote_and_clone(tmp_path: Path) -> tuple[Path, Path]:
         ["git", "clone", str(origin), str(clone)],
         capture_output=True,
         check=True,
-        timeout=30,
+        timeout=Timeout.GIT_CONTEXT,
     )
     _identity(clone)
     return origin, clone
@@ -84,7 +85,7 @@ def _advance_origin(tmp_path: Path, origin: Path) -> None:
             ["git", "clone", str(origin), str(pusher)],
             capture_output=True,
             check=True,
-            timeout=30,
+            timeout=Timeout.GIT_CONTEXT,
         )
         _identity(pusher)
     _commit(pusher, f"extra-{len(list(pusher.glob('extra-*')))}.md", "more\n")

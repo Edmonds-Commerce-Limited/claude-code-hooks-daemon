@@ -105,6 +105,7 @@ def report_lines(
     states: Iterable[RepoState] | None,
     *,
     project_root: Path | None = None,
+    max_listed: int | None = None,
 ) -> list[str]:
     """Render the whole report, for any surface.
 
@@ -112,6 +113,12 @@ def report_lines(
         states: The readings, or ``None`` meaning nothing is known. ``None`` and
             an empty iterable are different answers and render differently.
         project_root: Used to shorten paths that live inside the project.
+        max_listed: Cap on how many repos are listed individually, or ``None``
+            for all of them. SessionStart passes a cap because it is one
+            advisory among several and a long list pushes the others out of
+            view; the CLI leaves it unbounded, because a report you ASKED for
+            should show everything. The total is stated either way — a
+            truncated list that hid the real count would understate the problem.
 
     Returns:
         Lines to print. Empty when the project governs no repositories — a
@@ -132,9 +139,14 @@ def report_lines(
         f"{_ICON}  reference repos: {len(attention)} of {len(readings)} need attention "
         "BEFORE you rely on what they contain"
     ]
-    for state in attention:
+    listed = attention if max_listed is None else attention[:max_listed]
+    for state in listed:
         lines.append(f"  - {repo_line(state, project_root=project_root)}")
         command = remediation_command(state)
         if command is not None:
             lines.append(f"      fix: {command}")
+
+    withheld = len(attention) - len(listed)
+    if withheld > 0:
+        lines.append(f"  … and {withheld} more (run `hooks-daemon reference-repos` for all)")
     return lines

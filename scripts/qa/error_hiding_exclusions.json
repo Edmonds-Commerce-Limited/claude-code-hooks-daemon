@@ -1139,6 +1139,30 @@
       "function": "_resolve_installed_daemon_version",
       "rule": "return-none-on-error",
       "reason": "Plan 00395: the owner's standing ruling is fail-open everywhere -- no metadata, no venv, no project context, or an unparseable version string must never block a prompt, only ever mean 'nothing to compare against, say nothing'. The RuntimeError catch covers ProjectContext not yet initialised (mirrors model_downgrade_recorder.py::publish above); the ValueError catch covers install_stamp.parse_install_stamp rejecting a daemon_version that passed metadata.py's own (looser) schema regex but not the stamp parser's stricter ref/sha shape. Both are logged nowhere because both are ORDINARY states (missing metadata is the overwhelmingly common case: nothing has ever been upgraded), the same posture daemon/metadata.py::read_daemon_metadata documents for the exact same file two directories over."
+    },
+    {
+      "file": "reference_repos/cache.py",
+      "function": "_decode",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00401: None is this function's DOCUMENTED return value for 'this payload is not exactly right', not a swallowed failure -- a malformed entry is an ordinary state (a cache written by a newer schema, or a write torn by a crash), never an exceptional one. The caller acts on it decisively: one undecodable entry condemns the WHOLE file, so cached_states returns None and every downstream reader gets NOT VERIFIED. That is the strictly SAFE direction -- a corrupt cache makes the enforcing surface more conservative, never less -- whereas raising would let a single bad byte in an untracked cache file abort SessionStart for the whole project. Covered by test_one_bad_entry_condemns_the_whole_file."
+    },
+    {
+      "file": "reference_repos/cache.py",
+      "function": "write_cache",
+      "rule": "log-and-continue",
+      "reason": "Plan 00401: the cache is an OPTIMISATION -- it exists so the PreToolUse backstop never has to touch the network -- so a cache that cannot be written must degrade, not detonate. A full disk or an unwritable untracked/ would otherwise break SessionStart for every project at once. The failure conceals nothing: the next reader finds no in-date reading and emits the loud NOT_VERIFIED_HEADLINE advisory, so the user-visible consequence is louder than any log line would be, which is why the log sits at debug rather than the ERROR level used by the best-effort controller syncs above. Covered by test_an_unwritable_location_does_not_raise."
+    },
+    {
+      "file": "reference_repos/cache.py",
+      "function": "cached_states",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00401: None is the documented 'nothing here can be trusted' answer and is deliberately DISTINCT from {} ('the sweep ran and found no governed repos') -- the whole enforcement design turns on telling never-checked apart from checked-and-clean. A missing, expired, truncated or non-JSON cache all mean the same single thing to every caller, and all resolve to NOT VERIFIED, the most conservative verdict available. Raising instead would mean an unreadable untracked file could fail a Read the user asked for. Covered by test_malformed_json_reads_as_not_verified and test_a_truncated_write_reads_as_not_verified."
+    },
+    {
+      "file": "reference_repos/discovery.py",
+      "function": "_child_directories",
+      "rule": "silent-continue",
+      "reason": "Plan 00401: discovery is a best-effort WALK, and a freshness report that aborts on the first unreadable directory reports on nothing -- strictly worse than reporting on the rest. The per-entry catch is genuinely per-entry (an is_dir probe on an entry that vanished mid-walk, or a directory the daemon user cannot stat), so one bad entry costs one entry. Logging is not the escape here: log-and-continue is itself an audited rule, and a debug line per unreadable entry inside a recursive walk is noise that would bury the report this package exists to produce. The undiscovered-repo risk is bounded by the fact that a governed root is a directory the user configured in their own project. Covered by test_an_unreadable_subtree_does_not_abort_the_whole_sweep, which monkeypatches os.scandir because this container runs as root and chmod 0o000 denies it nothing."
     }
   ]
 }

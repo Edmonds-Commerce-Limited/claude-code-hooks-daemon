@@ -39,6 +39,7 @@ if TYPE_CHECKING:
         PlanWorkflowConfig,
         PluginsConfig,
         ProjectHandlersConfig,
+        ReferenceReposConfig,
         WorktreeConfig,
     )
     from claude_code_hooks_daemon.core.handler import Handler
@@ -193,6 +194,7 @@ class DaemonController:
         chain: "ChainConfig | None" = None,
         write_claude_md_in_linked_worktree: bool = False,
         worktree: "WorktreeConfig | None" = None,
+        reference_repos: "ReferenceReposConfig | None" = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -273,6 +275,7 @@ class DaemonController:
             project_layout=project_layout,
             project_registry=project_registry,
             worktree=worktree,
+            reference_repos=reference_repos,
         )
 
         logger.info("Registered %d built-in handlers", count)

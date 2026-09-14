@@ -2964,6 +2964,7 @@ def _build_initialised_controller(
         chain=config.daemon.chain,
         write_claude_md_in_linked_worktree=write_claude_md_in_linked_worktree,
         worktree=config.worktree,
+        reference_repos=config.reference_repos,
     )
     return controller
 

@@ -320,6 +320,13 @@ class Priority:
     # again. Deliberately last: re-establishing crons is session housekeeping,
     # and it must not push a finding about the code ahead of it off the top.
     PERSISTENT_CRON_ASSERTOR = 70
+    # Plan 00401 Task 3.1: reference-repo freshness sweep -- next free
+    # SessionStart priority after persistent_cron_assertor (70), so
+    # ADVISORY_MAX widens by one again. Last deliberately: this is the only
+    # SessionStart handler that fetches over the network for SEVERAL
+    # repositories, so running it after the cheap advisories means a slow or
+    # offline remote delays nothing else.
+    REFERENCE_REPO_SWEEP = 71
 
     # Advisory handlers (Priority: 55-65)
     CRITICAL_THINKING_ADVISORY = 55
@@ -381,7 +388,7 @@ class PriorityRange:
     # (Plan 00308), 68 for remote_docs_staleness (Plan 00326) and 69 for
     # lsp_noise_checker (Plan 00368). Documented in root CLAUDE.md's Priority
     # Ranges.
-    ADVISORY_MAX = 70
+    ADVISORY_MAX = 71
 
     LOGGING_MIN = 100
     LOGGING_MAX = 199

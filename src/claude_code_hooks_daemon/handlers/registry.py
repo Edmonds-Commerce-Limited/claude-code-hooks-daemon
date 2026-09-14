@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import (
         DocumentationConfig,
         PlanWorkflowConfig,
+        ReferenceReposConfig,
         WorktreeConfig,
     )
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
@@ -413,6 +414,7 @@ class HandlerRegistry:
         project_layout: "ProjectLayout | None" = None,
         project_registry: "ProjectRegistry | None" = None,
         worktree: "WorktreeConfig | None" = None,
+        reference_repos: "ReferenceReposConfig | None" = None,
     ) -> int:
         """Register all discovered handlers with the router.
 
@@ -434,6 +436,11 @@ class HandlerRegistry:
             worktree: Optional WorktreeConfig (Plan 00367) for git-tagged
                 handlers; its merge-to-main toggle is injected as
                 ``_merge_to_main_requires_human_approval``
+            reference_repos: Optional ReferenceReposConfig (Plan 00401),
+                injected as ``_reference_repos`` onto handlers that DECLARE
+                that attribute — attribute-selected rather than tag-selected,
+                because the two handlers that want it already carry the broad
+                ``git`` tag shared by handlers that do not
 
         Returns:
             Number of handlers registered
@@ -618,6 +625,19 @@ class HandlerRegistry:
                                 }
                                 for attr_key, attr_val in plan_attrs.items():
                                     setattr(instance, f"_{attr_key}", attr_val)
+
+                            # Inject the reference-repo policy (Plan 00401).
+                            # Selected by DECLARED ATTRIBUTE rather than by tag:
+                            # the sweep and the backstop are the only handlers
+                            # that want it, and they already carry the broad
+                            # "git" tag, so tag-matching would hand the block to
+                            # every git handler that has no use for it. A
+                            # handler opts in by declaring `_reference_repos`.
+                            reference_repos_attr_name = "_reference_repos"
+                            if reference_repos is not None and hasattr(
+                                instance, reference_repos_attr_name
+                            ):
+                                setattr(instance, reference_repos_attr_name, reference_repos)
 
                             # Inject the worktree merge-gate toggle for git-tagged
                             # handlers (Plan 00367 Phase 4) -- same DI idiom as

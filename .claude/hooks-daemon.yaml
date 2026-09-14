@@ -728,6 +728,13 @@ handlers:
         mode: warn         # warn | agent-pull | auto-pull
         auto_fetch: true   # run additive `git fetch --all --no-prune` before checking ahead/behind
 
+    reference_repo_sweep:  # Freshness of reference clones under untracked/repos (Plan 00401)
+      enabled: true        # New sessions only; silent when every governed repo is current
+      priority: 71         # Last: the only SessionStart handler that fetches for SEVERAL repos
+      # Scope, enforcement posture and auto-pull live in the TOP-LEVEL
+      # `reference_repos:` block, not here — one block feeds the sweep, the
+      # PreToolUse backstop and the CLI, so the three cannot disagree.
+
     suggest_status_line:  # Suggests daemon-based status line setup
       enabled: true      # Enable to suggest status line configuration
       priority: 55

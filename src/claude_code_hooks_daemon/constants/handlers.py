@@ -686,6 +686,16 @@ class HandlerID:
         display_name="git-upstream-checker",
     )
 
+    # Reference-repo freshness sweep (SessionStart handler) — Plan 00401: fetch
+    # every governed reference clone under the configured roots, fast-forward
+    # the ones that are provably safe, cache the readings for the PreToolUse
+    # backstop, and report what it could not make fresh.
+    REFERENCE_REPO_SWEEP = HandlerIDMeta(
+        class_name="ReferenceRepoSweepHandler",
+        config_key="reference_repo_sweep",
+        display_name="reference-repo-sweep",
+    )
+
     # ccy supervisor integrity checker (SessionStart handler) — Plan 00148:
     # warn when the ccy supervisor is armed but its files are missing, not
     # executable, or git-ignored (a brick risk for teammates)

@@ -216,6 +216,12 @@ _EARNS_GUIDANCE: dict[str, str] = {
     # -- Test 3, session-scoped: state the agent must hold all session ---
     "CcySupervisorIntegrityHandler": "T3 remediation spans a restart, not one call",
     "GitUpstreamCheckerHandler": "T3 the rewritten-upstream case must never be 'fixed' by pulling",
+    "ReferenceRepoSweepHandler": (
+        "T3 the reading is what the agent must hold all session: which reference "
+        "clones are trustworthy. The fire-time report names repos, but the rule it "
+        "teaches — a repo that CANNOT be checked never nags, so silence means "
+        "verified rather than unexamined — governs every later read of them"
+    ),
     "HookRegistrationCheckerHandler": "T3 self-repair changes settings.json under the agent",
     "DocsQaSweepHandler": "T3 drift findings are worked through across the session",
     "ToolDisableAdvisorHandler": "T3 the named settings change awaits a user decision later",

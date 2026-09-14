@@ -85,7 +85,7 @@
 | 34 | merge_qa_report | ADVISORY | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced |
 | 35 | daemon_sync_after_merge | ADVISORY | Advise a restart when a merge/pull/rebase changed daemon config or handlers |
 
-### SessionStart (24 handlers)
+### SessionStart (25 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -113,6 +113,7 @@
 | 68 | remote_docs_staleness | ADVISORY | Report vendored documents that are stale or no longer parse |
 | 69 | lsp_noise_checker | ADVISORY | Advise when a project's LSP config lets noise into the diagnostics stream |
 | 70 | persistent_cron_assertor | NON-TERMINAL | State the project's declared crons and instruct a CronList reconcile |
+| 71 | reference_repo_sweep | ADVISORY | Fetch, safely fast-forward and record every governed reference repo |
 
 ### PreCompact (2 handlers)
 

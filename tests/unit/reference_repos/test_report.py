@@ -192,6 +192,47 @@ class TestTheWholeReport:
         assert "alpha" in body
         assert "fix:" not in body
 
+    def test_the_listing_can_be_bounded_so_session_start_cannot_flood(self) -> None:
+        """SessionStart shows several advisories; one must not push the rest away.
+
+        The bound lives here rather than in the handler so the CLI can stay
+        unbounded — a report you asked for should show everything, a report that
+        interrupts you should not.
+        """
+        many = [
+            _state(path=Path(f"/workspace/untracked/repos/r{index}"), behind=1)
+            for index in range(25)
+        ]
+
+        lines = report_lines(many, project_root=_ROOT, max_listed=10)
+
+        listed = [line for line in lines if line.lstrip().startswith("- ")]
+        assert len(listed) == 10
+        assert any("15 more" in line for line in lines)
+
+    def test_an_unbounded_report_lists_every_repo(self) -> None:
+        many = [
+            _state(path=Path(f"/workspace/untracked/repos/r{index}"), behind=1)
+            for index in range(25)
+        ]
+
+        lines = report_lines(many, project_root=_ROOT)
+
+        listed = [line for line in lines if line.lstrip().startswith("- ")]
+        assert len(listed) == 25
+        assert not any("more" in line for line in lines)
+
+    def test_the_total_is_still_stated_when_the_listing_is_bounded(self) -> None:
+        """A truncated list that hides the true count understates the problem."""
+        many = [
+            _state(path=Path(f"/workspace/untracked/repos/r{index}"), behind=1)
+            for index in range(25)
+        ]
+
+        lines = report_lines(many, project_root=_ROOT, max_listed=3)
+
+        assert "25" in lines[0]
+
     def test_a_mixed_report_lists_only_what_needs_attention(self) -> None:
         """The uncheckable canary must not appear; that is what keeps it usable."""
         lines = report_lines(
