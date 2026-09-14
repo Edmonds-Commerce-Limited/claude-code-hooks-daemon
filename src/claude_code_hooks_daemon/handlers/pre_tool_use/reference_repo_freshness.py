@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.reference_repos.report import (
     unconfirmed_note,
 )
 from claude_code_hooks_daemon.reference_repos.sweep import governed_roots
+from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     command_word,
     split_unquoted,
@@ -440,7 +441,14 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
             deepest: Path | None = None
             for part in path.relative_to(root).parts:
                 candidate = candidate / part
-                if (candidate / _GIT_ENTRY).exists():
+                # `unreadable_means=False`: "I could not look" must not become
+                # "this is a governed clone". A path whose ancestor is not
+                # traversable cannot be READ either, so denying it would block a
+                # call that was going to fail anyway, with a `fix:` command
+                # incapable of clearing it — the same unclearable block that
+                # inventing a subject produced. The cache is consulted BEFORE
+                # this walk, so a repo that really was swept is still found.
+                if path_exists(candidate / _GIT_ENTRY, unreadable_means=False):
                     deepest = candidate
             if deepest is not None:
                 return deepest
@@ -610,17 +618,17 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
             TestType,
         )
 
-        # Both cases are driven as raw hook_input rather than as tool calls,
-        # because the verdict depends on the CACHE rather than on anything in
-        # the command. A real Read would assert whatever today's sweep happened
-        # to record, so it would pass or fail for reasons unrelated to the code.
-        # The probe path below is never a real clone, so it is never in the
-        # cache, which makes NOT VERIFIED the deterministic answer.
-        probe = "untracked/repos/__freshness_probe__"
+        # The governed root, and a path under it that is NOT a checkout. Both
+        # are the shapes that must stay allowed; the root is untracked, so in a
+        # clean checkout neither exists, and both are allowed for that reason
+        # too. That is the point — these assert a NON-verdict, which is exactly
+        # what a false positive here destroys.
+        root = "untracked/repos"
+        probe = f"{root}/__freshness_probe__"
         return [
             AcceptanceTest(
                 title="reference-repo freshness - reading an unverified governed clone",
-                command=f"Read {probe}/README.md",
+                command="Read a file inside a governed reference clone with no cached reading",
                 description=(
                     "A Read inside a governed reference repo with no in-date reading is "
                     "DENIED, and the message distinguishes NOT VERIFIED (nobody checked) "
@@ -634,21 +642,27 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
                     "and never blocks an un-checkable repo"
                 ),
                 test_type=TestType.BLOCKING,
-                hook_input={
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "Read",
-                    "tool_input": {"file_path": f"{probe}/README.md"},
-                    "session_id": "acceptance-freshness-deny",
-                },
+                harness_cannot_produce=(
+                    "The verdict needs a real git checkout under `reference_repos.roots`, and "
+                    "that root is untracked — a clean checkout and CI have none. Naming a path "
+                    "that merely LOOKS like one does not work, deliberately: the handler "
+                    "resolves a subject only when a directory carrying a `.git` contains the "
+                    "path, because inventing one denied `ls untracked/repos` with a remedy "
+                    "nothing could ever satisfy. Fixture commands are bounded to "
+                    "`untracked/scratch/`, so the harness cannot build a checkout under a "
+                    "governed root either. The deny path is covered end to end by "
+                    "`tests/unit/handlers/pre_tool_use/test_reference_repo_freshness.py` "
+                    "against a real cache on disk."
+                ),
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
             ),
             AcceptanceTest(
-                title="reference-repo freshness - git against the same repo is never blocked",
+                title="reference-repo freshness - git against a governed repo is never blocked",
                 command=f"git -C {probe} pull --ff-only",
                 description=(
                     "The near-miss that keeps the handler satisfiable: this command touches "
-                    "exactly the repo the deny message names, and is the very remedy that "
+                    "exactly the repo a deny message would name, and is the very remedy that "
                     "message prints. A handler that blocked it could never be satisfied."
                 ),
                 expected_decision=Decision.ALLOW,
@@ -662,7 +676,54 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
                     "hook_event_name": "PreToolUse",
                     "tool_name": "Bash",
                     "tool_input": {"command": f"git -C {probe} pull --ff-only"},
-                    "session_id": "acceptance-freshness-allow",
+                    "session_id": "acceptance-freshness-git",
+                },
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="reference-repo freshness - listing the governed root is never blocked",
+                command=f"ls {root}",
+                description=(
+                    "The regression this handler actually shipped: the root is under a "
+                    "governed root but is not a checkout, so nothing could ever cache a "
+                    "reading for it — and it was denied with a `fix:` command incapable of "
+                    "clearing the block. A freshness gate must judge CHECKOUTS, not "
+                    "everything that shares a prefix with one."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Read-only listing; touches nothing",
+                test_type=TestType.BLOCKING,
+                hook_input={
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "Bash",
+                    "tool_input": {"command": f"ls {root}"},
+                    "session_id": "acceptance-freshness-root",
+                },
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="reference-repo freshness - naming a repo is not reading it",
+                command=f"rm -rf {probe}",
+                description=(
+                    "A command that mentions a governed clone without reading a byte of it "
+                    "must pass. Answering `rm -rf <repo>` with 'pull it first' is advice "
+                    "about a different command than the one being run."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes=(
+                    "The path is a probe that never exists, and rm -rf of a missing path "
+                    "is a no-op"
+                ),
+                test_type=TestType.BLOCKING,
+                hook_input={
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "Bash",
+                    "tool_input": {"command": f"rm -rf {probe}"},
+                    "session_id": "acceptance-freshness-mention",
                 },
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,

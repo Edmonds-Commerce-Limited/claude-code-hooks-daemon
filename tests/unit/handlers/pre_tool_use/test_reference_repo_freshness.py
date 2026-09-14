@@ -493,6 +493,82 @@ class TestNotVerified:
         assert result.decision == Decision.DENY
 
 
+class TestAnUnreadableAncestor:
+    """A path the process cannot stat must not take PreToolUse down with it.
+
+    `_subject`'s disk fallback walks down from the governed root asking whether
+    each level carries a `.git`. A raw `Path.exists()` RAISES PermissionError
+    when an ancestor is not traversable, and it raises inside the hook — where
+    the caller is a tool call, not a test.
+    """
+
+    @staticmethod
+    def _unstattable(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """Make every stat under the governed root raise, as EACCES would.
+
+        Simulated rather than produced with ``chmod``: the suite runs as root
+        here, and root traverses a ``0o000`` directory regardless of its mode —
+        so a permissions fixture would pass while proving nothing. The defect
+        is that a RAW predicate propagates ``OSError``, and raising at the
+        predicate is exactly that condition.
+        """
+        locked = root / "untracked" / "repos" / "locked"
+        real = Path.exists
+
+        def _raise(self: Path) -> bool:
+            if self.is_relative_to(root / "untracked" / "repos"):
+                raise PermissionError(13, "Permission denied", str(self))
+            return real(self)
+
+        monkeypatch.setattr(Path, "exists", _raise)
+        return locked
+
+    def test_matching_degrades_instead_of_raising(
+        self,
+        tmp_path: Path,
+        handler: ReferenceRepoFreshnessHandler,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        locked = self._unstattable(tmp_path, monkeypatch)
+
+        assert handler.matches(_read(locked / "x.py")) is False
+
+    def test_an_unstattable_path_is_not_treated_as_a_checkout(
+        self,
+        tmp_path: Path,
+        handler: ReferenceRepoFreshnessHandler,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """'I could not look' must not become 'this is a governed clone'.
+
+        Saying yes would deny a read the agent could not perform anyway, with a
+        `fix:` command that cannot clear it — the same unclearable block the
+        invented-subject bug produced. The cache is consulted BEFORE the disk,
+        so a repo that really was swept is still found either way.
+        """
+        locked = self._unstattable(tmp_path, monkeypatch)
+
+        result = handler.handle(_read(locked / "x.py"))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_a_cached_repo_is_still_found_when_the_disk_cannot_be_read(
+        self,
+        tmp_path: Path,
+        handler: ReferenceRepoFreshnessHandler,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The cache answers first, so permissions cannot switch the gate off."""
+        locked = tmp_path / "untracked" / "repos" / "locked"
+        write_cache(tmp_path, [_state(locked, behind=2)])
+        self._unstattable(tmp_path, monkeypatch)
+
+        result = handler.handle(_read(locked / "x.py"))
+
+        assert result.decision == Decision.DENY
+
+
 class TestAnUnconfirmedReading:
     """The silent case: a sweep ran and confirmed nothing.
 
