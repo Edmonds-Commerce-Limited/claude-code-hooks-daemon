@@ -110,6 +110,18 @@ That is the failure this catches: a clean report edited to paste in "just the
 relevant bit of the log", then filed. Extra detail goes in `reproduction`,
 where the checks still run over it.
 
+**If the generator genuinely cannot run** — a defect that stops the CLI, a
+machine without the install — `--web` is allowed and is the fallback:
+
+```bash
+gh issue create --repo Edmonds-Commerce-Limited/claude-code-hooks-daemon --web
+```
+
+It files nothing; it opens GitHub's own issue form, which states the same rule
+and cannot be submitted without ticking two acknowledgements. Do not reach for
+it to skip steps 1–3 — the checks are then yours to do by hand, and they are
+the part that decides whether there is a defect at all.
+
 ## Related
 
 - `/hooks-daemon bug-report` — a LOCAL diagnostic for reading yourself. It is

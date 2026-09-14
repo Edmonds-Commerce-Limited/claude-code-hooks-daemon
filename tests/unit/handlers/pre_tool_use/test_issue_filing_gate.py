@@ -228,6 +228,39 @@ class TestABodyTheGeneratorProduced:
         assert result.decision == Decision.ALLOW
 
 
+class TestTheBrowserFallback:
+    """`--web` is ALLOWED, and that is a deliberate hole in the gate.
+
+    It opens GitHub's own issue form in a browser — the one place the redaction
+    rule is stated to a human, and one that cannot be submitted without ticking
+    the two acknowledgements. Nothing reaches the tracker until a person has
+    read those and clicked, so the human is in the loop by construction.
+
+    Denying it would leave someone who genuinely cannot run the generator — a
+    defect that stops the CLI, a machine without the install — with no route at
+    all except working around the gate. A gate whose only escape is evasion
+    teaches evasion.
+    """
+
+    def test_it_is_allowed(self) -> None:
+        result = _handler().handle(_bash(f"gh issue create --repo {_UPSTREAM} --web"))
+
+        assert result.decision == Decision.ALLOW
+
+    def test_it_is_allowed_alongside_a_title(self) -> None:
+        result = _handler().handle(
+            _bash(f'gh issue create --repo {_UPSTREAM} --web --title "sed_blocker denies"')
+        )
+
+        assert result.decision == Decision.ALLOW
+
+    def test_the_deny_message_names_it_so_the_fallback_is_discoverable(self) -> None:
+        """A refusal that hides the legitimate alternative gets worked around."""
+        result = _handler().handle(_bash(f"gh issue create --repo {_UPSTREAM} --title x"))
+
+        assert "--web" in str(result.reason)
+
+
 class TestABodyItDidNot:
     def test_an_inline_body_is_denied(self) -> None:
         result = _handler().handle(

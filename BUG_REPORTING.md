@@ -142,6 +142,14 @@ Use the **Daemon defect** issue form in the browser. It asks for the same
 fields and carries the same rule about private material — it just cannot refuse
 anything, so the checks in Step 1 are yours to do.
 
+```bash
+gh issue create --repo Edmonds-Commerce-Limited/claude-code-hooks-daemon --web
+```
+
+`--web` is explicitly allowed by the filing gate. It files nothing — it opens
+the form, which cannot be submitted without ticking two acknowledgements, so a
+person is in the loop by construction.
+
 That is the route for a machine without the install, a defect that stops the
 CLI itself, or anyone reporting from outside a project.
 

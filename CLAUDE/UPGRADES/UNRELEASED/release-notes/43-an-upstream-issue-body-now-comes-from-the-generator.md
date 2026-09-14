@@ -53,6 +53,10 @@ leaves alone:
   produces a comment body, and requiring provenance on a follow-up would make
   the tracker unusable for the reporter this exists to help.
 - The daemon's own repository, where the gate stands down entirely.
+- `--web`. It files nothing — it opens GitHub's own issue form, which states
+  the same rule and cannot be submitted without ticking two acknowledgements.
+  That is the fallback when the generator genuinely cannot run, and it is a
+  deliberate hole: a gate whose only escape is evasion teaches evasion.
 
 **Editing a generated report is refused**, because the provenance header
 carries a digest of the body. That is the failure this actually catches: a
