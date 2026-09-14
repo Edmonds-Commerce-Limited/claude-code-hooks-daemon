@@ -14,6 +14,15 @@ refuse valid reports or pass leaking ones.
 
 from __future__ import annotations
 
+from claude_code_hooks_daemon.issue_report.provenance import (
+    GENERATOR_COMMAND,
+    PROVENANCE_MARKER,
+    ProvenanceProblem,
+    body_digest,
+    render_document,
+    split_document,
+    verify_document,
+)
 from claude_code_hooks_daemon.issue_report.reproduction import (
     CANNOT_REPRODUCE_SENTINEL,
     SCRATCH_PREFIX,
@@ -23,7 +32,14 @@ from claude_code_hooks_daemon.issue_report.reproduction import (
 
 __all__ = [
     "CANNOT_REPRODUCE_SENTINEL",
+    "GENERATOR_COMMAND",
+    "PROVENANCE_MARKER",
     "SCRATCH_PREFIX",
+    "ProvenanceProblem",
     "ReproductionProblem",
+    "body_digest",
     "check_reproduction",
+    "render_document",
+    "split_document",
+    "verify_document",
 ]
