@@ -15,6 +15,12 @@ enforceable.
 
 from __future__ import annotations
 
+from claude_code_hooks_daemon.reference_repos.cache import (
+    DEFAULT_TTL_SECONDS,
+    cache_path,
+    cached_states,
+    write_cache,
+)
 from claude_code_hooks_daemon.reference_repos.discovery import (
     DEFAULT_MAX_DEPTH,
     discover_reference_repos,
@@ -25,10 +31,14 @@ from claude_code_hooks_daemon.reference_repos.refresh import RefreshOutcome, ref
 
 __all__ = [
     "DEFAULT_MAX_DEPTH",
+    "DEFAULT_TTL_SECONDS",
     "Checkability",
     "RefreshOutcome",
     "RepoState",
+    "cache_path",
+    "cached_states",
     "discover_reference_repos",
     "inspect_repo",
     "refresh_repo",
+    "write_cache",
 ]

@@ -150,9 +150,16 @@ Each is a rule the implementation must not be able to violate:
   serve one caller and not the other. Worth revisiting only if a third caller
   appears.
 
-- [ ] ⬜ **Task 1.4**: `cache.py` — JSON TTL cache under `daemon_untracked_dir()`,
-  following `session_start/contract_staleness.py`. Missing/expired reads as NOT
-  VERIFIED, never as fresh.
+- [x] ✅ **Task 1.4**: `cache.py` — JSON TTL cache under `daemon_untracked_dir()`.
+  Missing/expired reads as NOT VERIFIED, never as fresh — and so does every other
+  unusable shape: malformed JSON, a truncated write, an unknown `Checkability`, a
+  non-numeric count, a schema-version mismatch, or a timestamp in the FUTURE
+  (clock skew would otherwise make an entry immortal, since a naive `age > ttl`
+  never fires on a negative age). One bad entry condemns the whole file, because
+  returning the readable remainder would silently drop a repo, and a dropped repo
+  is indistinguishable from one that was never governed. `None` (nothing known)
+  and `{}` (swept, governs nothing) are deliberately different answers. 24 tests;
+  package coverage 100%.
 
 - [ ] ⬜ **Task 1.5**: `report.py` — one renderer used by every surface, so the
   three consumers cannot drift in what they say.
