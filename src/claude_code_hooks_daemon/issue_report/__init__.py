@@ -42,6 +42,11 @@ from claude_code_hooks_daemon.issue_report.reproduction import (
     ReproductionProblem,
     check_reproduction,
 )
+from claude_code_hooks_daemon.issue_report.subsystem import (
+    HandlerVerdict,
+    check_handler_name,
+    known_handler_keys,
+)
 
 __all__ = [
     "CANNOT_REPRODUCE_SENTINEL",
@@ -52,6 +57,7 @@ __all__ = [
     "CitationVerdict",
     "ConfigConsideration",
     "CurrencyVerdict",
+    "HandlerVerdict",
     "ProvenanceProblem",
     "ReportFields",
     "ReportProblem",
@@ -60,8 +66,10 @@ __all__ = [
     "assess_currency",
     "body_digest",
     "build_report",
+    "check_handler_name",
     "check_reproduction",
     "check_source_citation",
+    "known_handler_keys",
     "render_document",
     "split_document",
     "verify_document",

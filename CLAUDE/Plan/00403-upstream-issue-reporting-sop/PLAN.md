@@ -162,17 +162,21 @@ finding in it — the owner's rule, made checkable.
   with `--latest`; the lookup is an INPUT rather than a network call, because a
   report generator that needed a working remote would fail exactly when the
   daemon is misbehaving, which is when it gets run.
-- [ ] ⬜ **Task 3.2**: Configuration ruled out — surface the named handler's
-  options and require a stated reason per option. The "stated reason" half is
-  already enforced: `assemble_report` refuses a report with no
-  `config_considered`. The "surface the options" half is COUPLED to the CLI
-  verb and cannot be done as a pure function — there is no standalone
-  enumeration to call, because a handler's options are resolved from config at
-  registration time (`HandlerRegistry.register_all`). Do it with the verb, not
-  before it. **The verb now exists** (`cmd_issue_report`), so this is
-  unblocked: when `config_considered` is empty and `handler` is named, the
-  refusal should list that handler's actual options instead of telling the
-  reporter to go and find them.
+- [x] ✅ **Task 3.2**: Configuration ruled out — delivered as the stated-reason
+  gate plus a handler-NAME check, and NOT as an option list. The task as worded
+  rests on a premise that does not hold: a handler's options are not declared in
+  any schema, they are whatever the project's config supplies at registration
+  time, so there is nothing to enumerate and a generated list that LOOKED
+  authoritative would be worse than none, because a reporter would trust it. The
+  refusal therefore points at `hooks-daemon explain-handler <name>`, which is the
+  authoritative source, and says so. What does have teeth is the name: 127
+  handler config keys are machine-readable from `HandlerID`, so a report naming a
+  handler this daemon does not have is refused with the nearest real names —
+  that reporter has usually been debugging something other than what they think,
+  which is worth catching before it becomes a public issue rather than after. The
+  stated-reason half is unchanged and already enforced: `assemble_report` refuses
+  a report whose `config_considered` is empty, and refuses an entry that names an
+  option without saying why it is insufficient.
 - [x] ✅ **Task 3.3**: Source cited — require a `file:line` in the daemon source
   and verify it resolves in the installed version. A citation that does not
   resolve means the reporter read a different version, a fork, or nothing, and

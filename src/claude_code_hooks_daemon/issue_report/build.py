@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.issue_report.assemble import (
 )
 from claude_code_hooks_daemon.issue_report.citation import check_source_citation
 from claude_code_hooks_daemon.issue_report.currency import assess_currency
+from claude_code_hooks_daemon.issue_report.subsystem import check_handler_name
 
 _REQUIRED_TEXT_FIELDS: tuple[str, ...] = ("summary", "expected", "observed", "reproduction")
 
@@ -155,6 +156,10 @@ def build_report(
     parsed = _parse(data)
     problems: list[ReportProblem] = list(parsed.problems)
 
+    handler_verdict = check_handler_name(parsed.handler)
+    if not handler_verdict.resolved:
+        problems.append(ReportProblem(reason=handler_verdict.detail))
+
     subsystem = parsed.handler or parsed.values.get("summary", "")
     currency = assess_currency(
         installed=daemon_version,
@@ -186,7 +191,7 @@ def build_report(
         summary=parsed.values["summary"],
         expected=parsed.values["expected"],
         observed=_with_findings(
-            parsed.values["observed"], currency.detail, citation_detail
+            parsed.values["observed"], currency.detail, citation_detail, handler_verdict.detail
         ),
         reproduction=parsed.values["reproduction"],
         daemon_version=daemon_version,
@@ -211,7 +216,7 @@ def build_report(
     return assembled
 
 
-def _with_findings(observed: str, currency_detail: str, citation_detail: str) -> str:
+def _with_findings(observed: str, *details: str) -> str:
     """Append what the gates FOUND to the report body.
 
     A report that merely passed its checks looks identical to one that was
@@ -219,7 +224,7 @@ def _with_findings(observed: str, currency_detail: str, citation_detail: str) ->
     to a maintainer, and it is the same reason `assess_currency` returns a
     sentence rather than a bare boolean.
     """
-    findings = [detail for detail in (currency_detail, citation_detail) if detail]
+    findings = [detail for detail in details if detail]
     if not findings:
         return observed
     lines = "\n".join(f"- {detail}" for detail in findings)
