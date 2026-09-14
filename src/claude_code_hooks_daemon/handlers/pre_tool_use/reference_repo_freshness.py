@@ -29,15 +29,17 @@ unusable rather than merely wrong:
 """
 
 import logging
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import ReferenceReposConfig
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.reference_repos.cache import cached_states
 from claude_code_hooks_daemon.reference_repos.model import RepoState
 from claude_code_hooks_daemon.reference_repos.report import (
@@ -87,6 +89,51 @@ _MODE_BLOCK: Final[str] = "block"
 _MAX_TRACKED_SESSIONS: Final[int] = 64
 
 
+_STALE_RULE = Rule(
+    rule_id=RuleID.REFERENCE_REPO_STALE,
+    blocked="a read of a governed reference clone that is behind or off its default branch",
+    why=(
+        "reasoning from a stale clone produces conclusions indistinguishable from "
+        "correct ones -- no error, no failing test, just a wrong answer"
+    ),
+    fix="Run the `fix:` command printed beside the repo, then retry the read",
+    verbose=(
+        "Reference clones under `untracked/repos/` are fetched at session start and "
+        "fast-forwarded when that is provably safe. This one could not be brought "
+        "current, so what it contains is not what you think it is.\n\n"
+        "`git` is NEVER intercepted, so the printed remedy is always runnable, and a "
+        "repo that cannot be checked at all never blocks anything."
+    ),
+)
+
+_NOT_VERIFIED_RULE = Rule(
+    rule_id=RuleID.REFERENCE_REPO_NOT_VERIFIED,
+    blocked="a read of a governed reference clone with no in-date freshness reading",
+    why=(
+        "nobody has checked this clone, which is a different fact from it being "
+        "stale -- and treating the two the same either cries wolf or gives false comfort"
+    ),
+    fix="Run `hooks-daemon reference-repos` to fetch every governed repo and refresh",
+    verbose=(
+        "NOT VERIFIED means no sweep has run this session, or the cached reading "
+        "expired. The repo may be perfectly current -- the point is that nothing has "
+        "confirmed it.\n\n"
+        "`hooks-daemon reference-repos` fetches every governed repo, fast-forwards the "
+        "ones it safely can, and records the result."
+    ),
+)
+
+
+def _command_word(word: str) -> str:
+    """The bare command name, with any path or quoting stripped.
+
+    ``/usr/bin/git`` and ``git`` are the same program, and this handler's
+    exemption is the only thing keeping the remedy it prints runnable — so a
+    respelling must not cost the exemption and deny a legitimate fix.
+    """
+    return PurePosixPath(word.strip("\"'")).name
+
+
 def _is_git_only_chain(segments: list[list[str]]) -> bool:
     """True when the whole chain does nothing but navigate to a repo and run git.
 
@@ -99,11 +146,10 @@ def _is_git_only_chain(segments: list[list[str]]) -> bool:
     by a read still engages, so `cd <repo> && git pull && cat x` is judged, not
     excused by the git segment sitting in front of the read.
     """
-    if not any(words[0] == _EXEMPT_COMMAND for words in segments):
+    heads = [_command_word(words[0]) for words in segments]
+    if _EXEMPT_COMMAND not in heads:
         return False
-    return all(
-        words[0] in _NAVIGATION_COMMANDS or words[0] == _EXEMPT_COMMAND for words in segments
-    )
+    return all(head in _NAVIGATION_COMMANDS or head == _EXEMPT_COMMAND for head in heads)
 
 
 class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
@@ -122,6 +168,7 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         # `handle()` would have to re-check it on every Read in the session, and
         # a miss would raise inside PreToolUse rather than degrade.
         self._reference_repos: Any = ReferenceReposConfig()
+        self._formatter = RuleFormatter()
         self.project_root_reader = self._default_project_root
         # session_id -> the governed subjects already reported in that session.
         self._reported: dict[str, set[str]] = {}
@@ -179,7 +226,7 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
 
         found: list[Path] = []
         for words in segments:
-            if words[0] == _EXEMPT_COMMAND:
+            if _command_word(words[0]) == _EXEMPT_COMMAND:
                 continue
             found.extend(self._governed_words(words[1:], project_root))
         return found
@@ -294,24 +341,27 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
     ) -> str | None:
         """What is wrong with this repo, or ``None`` when nothing is.
 
-        A missing reading and a stale reading get DIFFERENT sentences on purpose:
-        "nobody checked" and "this is out of date" call for different responses,
-        and collapsing them would either cry wolf or give false comfort.
+        A missing reading and a stale reading get DIFFERENT sentences AND
+        different rule IDs on purpose: "nobody checked" and "this is out of
+        date" call for different responses, and collapsing them would either
+        cry wolf or give false comfort. Two rules means `explain-rule` can
+        answer each on its own terms.
         """
         if known is None or subject not in known:
-            return (
+            detail = (
                 f"{NOT_VERIFIED_HEADLINE}: no in-date reading exists for "
                 f"{display_path(subject, project_root)}, so what it contains may not be "
-                "what you think it is.\n\n"
-                "Refresh it with `hooks-daemon reference-repos`, which fetches every "
-                "governed repo and fast-forwards the ones it safely can."
+                "what you think it is."
             )
+            return f"{self._formatter.verbose(_NOT_VERIFIED_RULE)}\n\n{detail}"
 
         state = known[subject]
         if not state.needs_attention:
             return None
 
         lines = [
+            self._formatter.verbose(_STALE_RULE),
+            "",
             "a governed reference repo is NOT up to date, and reading it now would "
             "mean reasoning from stale source:",
             "",
@@ -351,6 +401,10 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         return GatingResult.deny(message)
 
     # ------------------------------------------------------------- self-report
+
+    def get_rules(self) -> list[Rule]:
+        """Two rules, because the two denials are genuinely different facts."""
+        return [_STALE_RULE, _NOT_VERIFIED_RULE]
 
     def get_claude_md(self) -> str | None:
         """Guidance for the generated ``<hooksdaemon>`` block."""

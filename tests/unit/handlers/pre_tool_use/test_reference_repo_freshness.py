@@ -217,6 +217,19 @@ class TestTheGitExemption:
 
         assert handler.matches(_bash(command)) is False
 
+    def test_an_absolute_path_to_git_is_still_git(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """Respelling the command must not cost the exemption.
+
+        This is the `git -C` lesson from test_blocking_handler_evasion pointed
+        the other way: for this handler a respelling does not BYPASS anything,
+        it strips the exemption and denies a legitimate remedy instead.
+        """
+        _repo(tmp_path)
+
+        assert handler.matches(_bash("/usr/bin/git -C untracked/repos/alpha pull")) is False
+
     def test_any_git_invocation_against_a_governed_repo_passes(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
     ) -> None:

@@ -339,6 +339,19 @@ class RuleID:
     LSP_SYMBOL_LOOKUP: str = "R-LSP-SYMBOL-LOOKUP"
 
     # ------------------------------------------------------------------
+    # reference_repo_freshness handler
+    # ------------------------------------------------------------------
+
+    #: A read of a governed reference clone known to be behind its upstream or
+    #: sitting off its default branch.
+    REFERENCE_REPO_STALE: str = "R-REFERENCE-REPO-STALE"
+
+    #: A read of a governed reference clone with no in-date freshness reading.
+    #: Deliberately its own rule: "nobody checked" and "this is out of date"
+    #: call for different responses, so they must not share an explanation.
+    REFERENCE_REPO_NOT_VERIFIED: str = "R-REFERENCE-REPO-NOT-VERIFIED"
+
+    # ------------------------------------------------------------------
     # lint_on_edit handler (post_tool_use)
     # ------------------------------------------------------------------
 

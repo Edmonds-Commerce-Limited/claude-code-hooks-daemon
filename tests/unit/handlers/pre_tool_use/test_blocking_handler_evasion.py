@@ -355,6 +355,18 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
 # assumption that let the git bypasses survive.
 _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "AbsolutePathHandler": "matches on the file_path parameter, not a command",
+    "ReferenceRepoFreshnessHandler": (
+        "matches on a governed reference-repo PATH appearing in a tool's path "
+        "field or anywhere in a Bash command's arguments, not on a command name - "
+        "respelling `cat` changes nothing, because the path is still there. The "
+        "one command-anchored part is the `git` EXEMPTION, and its evasion runs "
+        "the other way: a respelling STRIPS the exemption and denies a legitimate "
+        "remedy rather than bypassing the gate, so _command_word compares the "
+        "basename and `/usr/bin/git` stays exempt (covered by "
+        "test_an_absolute_path_to_git_is_still_git). A chain cannot be dressed up "
+        "as git-only either: _is_git_only_chain requires EVERY segment to be git "
+        "or navigation, so `cd <repo> && git pull && cat x` is still judged"
+    ),
     "ProjectContainmentHandler": (
         "matches on the write TARGET's location, not a command name - the Bash "
         "route reads get_bash_write_targets, which tokenises with shlex and "
