@@ -152,6 +152,7 @@ they are not routed. Run the verb directly (on a self-install the wrapper is
 .claude/hooks-daemon/bin/hooks-daemon init-project-handlers           # scaffold project-level handlers
 .claude/hooks-daemon/bin/hooks-daemon release-notes      # installed version's notes (--latest, --version, --list)
 .claude/hooks-daemon/bin/hooks-daemon plan-qa --sweep    # plan-tree drift (--lint <PLAN.md>, --check-staged)
+.claude/hooks-daemon/bin/hooks-daemon reference-repos     # freshness of reference clones (--json, --all)
 .claude/hooks-daemon/bin/hooks-daemon housekeeping --list # the housekeeping pass, step by step
 ```
 
