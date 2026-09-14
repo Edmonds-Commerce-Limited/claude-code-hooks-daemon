@@ -21,11 +21,14 @@ from claude_code_hooks_daemon.reference_repos.discovery import (
 )
 from claude_code_hooks_daemon.reference_repos.inspection import inspect_repo
 from claude_code_hooks_daemon.reference_repos.model import Checkability, RepoState
+from claude_code_hooks_daemon.reference_repos.refresh import RefreshOutcome, refresh_repo
 
 __all__ = [
     "DEFAULT_MAX_DEPTH",
     "Checkability",
+    "RefreshOutcome",
     "RepoState",
     "discover_reference_repos",
     "inspect_repo",
+    "refresh_repo",
 ]

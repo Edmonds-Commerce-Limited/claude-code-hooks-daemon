@@ -117,6 +117,7 @@ Each is a rule the implementation must not be able to violate:
   the walk is depth-bounded so a root of `/` cannot become a filesystem sweep;
   a non-positive bound finds nothing rather than everything. 23 tests, 100%
   coverage of the module.
+
 - [x] ✅ **Task 1.2**: `model.py` + `inspection.py` — a `RepoState` built from
   `git_sync` with NO network: branch, default branch, upstream, ahead/behind,
   dirty, and a `checkable` classification carrying the reason it is not.
@@ -128,12 +129,31 @@ Each is a rule the implementation must not be able to violate:
   caller can tell "no remote" from "no upstream": both are uncomparable, but
   their remedies differ (`git remote add` vs `git branch -u`). 69 tests, 100%
   coverage; the load-bearing one asserts inspection performs no network I/O.
-- [ ] ⬜ **Task 1.3**: `refresh.py` — fetch, then `pull_ff_only` ONLY when clean
-  and not ahead. Mirror `git_upstream_checker._auto_pull`'s refusal branches
-  rather than re-deriving them.
+
+- [x] ✅ **Task 1.3**: `refresh.py` — fetch, then `pull_ff_only` ONLY when clean
+  and not ahead. The task said MIRROR `git_upstream_checker._auto_pull`, but it
+  is a method welded to SessionStart's message formatting: it returns display
+  lines, not a decision, so it cannot be reused. The decision is instead owned
+  by `RepoState.safe_to_pull` and consumed here, so it exists once. What this
+  module adds is the granularity a REPORT needs — dirty / ahead / diverged are
+  one boolean to the decision but three different remedies to a reader, and
+  telling someone with diverged history to commit their changes is useless
+  advice. An un-checkable repo is not even fetched; a failed fetch or pull
+  degrades to a report, because an exception at SessionStart would cost the
+  session's whole startup context for something as ordinary as being offline.
+  11 tests; package coverage 100%.
+
+  **Known shallow duplication, recorded rather than left silent**: the two
+  boolean conditions (dirty, ahead) now appear both here via `safe_to_pull` and
+  inline in `_auto_pull`. Not unified because `_auto_pull` needs per-branch
+  message text that a single boolean cannot carry, so a shared predicate would
+  serve one caller and not the other. Worth revisiting only if a third caller
+  appears.
+
 - [ ] ⬜ **Task 1.4**: `cache.py` — JSON TTL cache under `daemon_untracked_dir()`,
   following `session_start/contract_staleness.py`. Missing/expired reads as NOT
   VERIFIED, never as fresh.
+
 - [ ] ⬜ **Task 1.5**: `report.py` — one renderer used by every surface, so the
   three consumers cannot drift in what they say.
 
