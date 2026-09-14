@@ -6,7 +6,7 @@
 **Priority**: Medium
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Direct
-**Graduated from**: [Plan 00400](../00400-niggles-ledger-nine/PLAN.md) N6
+**Graduated from**: [Plan 00400](../Completed/00400-niggles-ledger-nine/PLAN.md) N6
 
 ## Overview
 

@@ -1,6 +1,6 @@
 # Plan 00400: niggles ledger nine
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: Medium
@@ -11,7 +11,7 @@
 
 The open niggles ledger. Small defects get recorded here the turn they are
 found, so that noticing something and doing something about it are never the
-same decision. Ledger eight ([Plan 00397](../Completed/00397-niggles-ledger-eight/PLAN.md))
+same decision. Ledger eight ([Plan 00397](../00397-niggles-ledger-eight/PLAN.md))
 is complete, so this one opens.
 
 An entry is either fixed in place, ruled NOT A DEFECT with the evidence that
@@ -35,7 +35,7 @@ rather than an edit.
 - [x] ✅ **N1**: The QA suite writes into the LIVE supervisor runtime directory.
 
   **Found**: while reading `untracked/supervise/decision.log` as forensic
-  evidence for [Plan 00398](../Completed/00398-critical-compaction-blocked-by-the-idle-gate/PLAN.md).
+  evidence for [Plan 00398](../00398-critical-compaction-blocked-by-the-idle-gate/PLAN.md).
 
   **Evidence.** Test-authored lines interleave with live supervisor decisions in
   the live log:
@@ -177,7 +177,7 @@ rather than an edit.
 
   **CORRECTION — I presented this as needing an owner ruling between three
   options. It did not: the behaviour was ALREADY RULED.**
-  [Plan 00393](../Completed/00393-niggles-ledger-seven/PLAN.md) N2 observed the
+  [Plan 00393](../00393-niggles-ledger-seven/PLAN.md) N2 observed the
   identical eviction (`268cbc77` and `57d6b435` both cancelled while pending,
   `a64dca90` surviving three pushes), corrected the "every sha gets a result"
   claim in place, and judged it explicitly:
@@ -337,7 +337,7 @@ rather than an edit.
   detector is verified live and the message by test.
 
 - [x] ✅ **N6**: FIXED (documentation) / GRADUATED to
-  [Plan 00402](../00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md)
+  [Plan 00402](../../00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md)
   (behaviour) — a daemon restart regenerates the `<hooksdaemon>` block in
   `CLAUDE.md` but NEVER `.claude/HOOKS-DAEMON.md`. The restart's auto-commit is
   scoped `git commit --only CLAUDE.md`, and `DocsGenerator` — the sole writer of
@@ -385,18 +385,30 @@ rather than an edit.
   Inventing a test that greps the wording would pin prose, not behaviour, and
   would break on the next honest rewording. N6's BEHAVIOURAL half is not waived —
   it carries a RED-first test as Task 1.1 of Plan 00402, where the fix belongs.
-- [ ] Full QA passes and CI is green.
-- [ ] The plan is archived into the holding area (`Completed/`) with the README
+- [x] Full QA passes and CI is green — QA 29/29 on the restarted daemon (22,649
+  passed, 0 failed, coverage 95.3%, `smoke_test` 3/3); CI green on `6a8d01da`,
+  the last commit carrying code. The 18 acceptance errors that preceded this
+  were a stale daemon, not a defect — recorded in the journal.
+- [x] The plan is archived into the holding area (`Completed/`) with the README
   row and statistics updated in the same commit.
 
 ## Delivery & Milestones
 
 - Opened when N1 was found while investigating Plan 00398.
 
-- Four entries, and the shape of them is worth keeping: **not one was found by
-  hitting a symptom**. N1 came from reading a log as evidence, N2 and N3 from
-  checking CI rather than assuming it, N4 from a hook firing during an unrelated
-  command. The ledger's value here was in looking at what was already on screen.
+- Six entries. Four of them — N1, N2, N3, N4 — were found **without hitting a
+  symptom**: N1 from reading a log as evidence, N2 and N3 from checking CI rather
+  than assuming it, N4 from a hook firing during an unrelated command. The
+  ledger's value there was in looking at what was already on screen.
+
+- **N5 and N6 break that pattern, and the break is the more useful lesson.** Both
+  were found by hitting a symptom and then refusing the first explanation. N5
+  came from restarting the daemon mid-QA-run and erroring four tests. N6 came
+  from 18 acceptance tests erroring, which I diagnosed as my own tool calls
+  contending with the suite — a tidy story the run's own output flatly
+  contradicted with `STALE DAEMON`. Restarting cleared all 18. The defect was
+  real but one layer further down: the restart that fixed it refreshed only one
+  of two generated docs.
 
 - **Two entries were corrections to my own claims, not discoveries.** N3 was
   filed as a live defect needing an owner ruling between three options; it had
@@ -409,3 +421,8 @@ rather than an edit.
 - **N4 was reported in conversation and not written down** until several turns
   later. Recording it late is the exact failure this ledger exists to prevent,
   so it is named in the entry rather than quietly backfilled.
+
+- Delivered across `35da2e85`…`397cdde3` (CI evidence at `6a8d01da`, the last
+  commit carrying code) + the archiving commit. The next niggle opens ledger
+  ten; N6's behavioural half continues as
+  [Plan 00402](../../00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md).

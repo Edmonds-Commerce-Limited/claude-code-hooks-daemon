@@ -8,8 +8,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00401: reference repo freshness before read](00401-reference-repo-freshness-before-read/PLAN.md) - Not Started (agents read reference clones under `untracked/repos/` without pulling, so they reason from a weeks-old checkout and stale reasoning is indistinguishable from correct reasoning; one DRY checker on the repo-agnostic `git_sync`, enforced at PreToolUse from cache, refreshed and safely auto-pulled at SessionStart, reported by a CLI command)
 
-- [00400: niggles ledger nine](00400-niggles-ledger-nine/PLAN.md) - In Progress (the open niggles ledger; ledger eight is complete so this one opens. N1: the QA suite writes into the LIVE supervisor runtime dir — test lines interleave with real decisions in `untracked/supervise/decision.log`, and the daemon mints a `socket-stdin-test` sidecar live. Diagnostic contamination only: Plan 00166's own-session filter keeps it out of the decision path, verified at both call sites)
-
 - [00399: supervisor does not see tab completed slash commands](00399-supervisor-does-not-see-tab-completed-slash-commands/PLAN.md) - Not Started (Tab autocomplete expands `/comp` inside Claude Code and emits no keystrokes, so the raw-input tap never sees `/compact` and the supervisor fails to DEFER — risking a duplicate inject, never a missed compaction. Blocked on a ruling between three options)
 
 - [00396: detect a plan written without reading its domain docs](00396-detect-a-plan-written-without-reading-its-domain-docs/PLAN.md) - Not Started (a plan was filed about deployment by a session that had read none of the deployment docs; the signature is mechanical — a PLAN.md filled about domain X with zero reads of X's owning docs — and `write_clobber_guard` already tracks per-session reads. Advisory, inert until a project declares a topic map)
@@ -135,6 +133,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00400: niggles ledger nine](Completed/00400-niggles-ledger-nine/PLAN.md) - Complete at `35da2e85`…`397cdde3` (CI evidence at `6a8d01da`) + the archiving commit (six entries: N1–N4 found without hitting a symptom; N5 and N6 by refusing the first explanation — 18 acceptance errors read as tool contention were a STALE DAEMON, and the restart clearing them refreshes only one of two generated docs. N6's behaviour graduated to Plan 00402)
+
 - [00398: critical compaction blocked by the idle gate](Completed/00398-critical-compaction-blocked-by-the-idle-gate/PLAN.md) - Complete at `ec18062d` (CI evidence at `a7d0fb7b`) + the archiving commit (the input-box gate was UNBOUNDED, not over-sensitive: 20,755 ticks blocked by box-sitting against 281 by the 2s keystroke floor, the longest run ~10h ending at `[urgent]` still blocked; bounded on text STABILITY so a box unchanged for 120s is flushed and the session compacts)
 
 - [00397: niggles ledger eight](Completed/00397-niggles-ledger-eight/PLAN.md) - Complete at `92b9bdb4`…`ff26a6ee` + the archiving commit (three entries: N2 resolved as NOT A DEFECT — auto-compaction is healthy and tmux sits outside the container; N1 graduated to Plan 00399; N3 graduated to Plan 00398 — the `not idle` gate suppresses compaction at CRITICAL too)
@@ -193,8 +193,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00365: markdown_organization — a declared project at any depth](Completed/00365-markdown-organization-nested-vendor-and-existing-file-edits/PLAN.md) - Complete at `a8111e72` + the archiving commit (field report: an `Edit` of an existing `.md` two `vendor/` levels deep was denied with no escape hatch; a `projects:` root now wins at any depth, nested vendor trees strip through, a repo-root-anchored extra pattern matches, and an existing `.md` is never a location violation)
 
-- [00364: v3.63.0 release review follow-ups](Completed/00364-release-review-followups-v3630/PLAN.md) - Complete at `0560b5ff`…`b56c2621` + the archiving commit (every non-blocking Step 10 finding fixed: venv-lock misreport, slate check reading a git failure as clean, plan-QA gate spawning `git diff` per plan, bracket-range cost, lint temp dirs, dead pipe_blocker tests; a worktree's hooks reach its own daemon; project handler off priority 20; QA audits and runner work from a worktree)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -248,15 +246,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 402 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 356 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 357 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 23 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 22 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 23 + 356 + 13 = **392 folders**, spanning
+- **Folder-to-number reconciliation**: 22 + 357 + 13 = **392 folders**, spanning
   **389 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

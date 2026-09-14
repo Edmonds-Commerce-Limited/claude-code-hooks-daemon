@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00364: v3.63.0 release review follow-ups](00364-release-review-followups-v3630/PLAN.md) - Complete at `0560b5ff`…`b56c2621` + the archiving commit (every non-blocking Step 10 finding fixed: venv-lock misreport, slate check reading a git failure as clean, plan-QA gate spawning `git diff` per plan, bracket-range cost, lint temp dirs, dead pipe_blocker tests; a worktree's hooks reach its own daemon; project handler off priority 20; QA audits and runner work from a worktree)
+
 - [00363: self-matching process watcher blocker](00363-self-matching-process-watcher-blocker/PLAN.md) - Complete at `003f3036` and `8ae8ac61` + the archiving commit (a process probe whose literal pattern is in the calling shell's own argv, and a wait on `$!` after `setsid`, are denied; Rules A and C shipped in v3.63.0, Rule B holds a callout for the next release)
 
 - [00362: client upgrade report — fix all known defects](00362-client-upgrade-report-fix-all-known-defects/PLAN.md) - Complete + the archiving commit (the stability-release ledger: all eight client findings and every defect recorded in a live plan fixed or ruled out, v3.62.1's missing bootstrap assets repaired, full QA 26/26)
