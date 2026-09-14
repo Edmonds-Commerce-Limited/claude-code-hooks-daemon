@@ -394,6 +394,8 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 <!-- handler: remote-docs-commit-gate -->
 
+<!-- handler: reference-repo-freshness -->
+
 <!-- handler: require-gh-issue-comments -->
 
 <!-- handler: require-gh-pr-comments -->
@@ -469,6 +471,8 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 | R-REMOTE-DOCS-PROVENANCE           | a write into the remote-docs tree without valid provenance frontmatter                                                                               | A vendored document with no recorded source is indistinguishable from something we wrote ourselves, and cannot be refreshed, dated or trusted                                                     | Capture with `hooks-daemon remote-docs add <url>` instead of hand-authoring                                              |
 | R-REMOTE-DOCS-VENDORED-COPY        | a WebFetch of a URL this project already holds a fresh vendored copy of                                                                              | The local copy is faster, costs no network round trip, and is the corpus the remote-docs tree exists to build                                                                                     | Read the local path named in the message, or refresh it if you need newer content                                        |
 | R-REMOTE-DOCS-STAGED-PROVENANCE    | a commit staging a remote-docs file without valid provenance frontmatter                                                                             | An unattributed vendored document that reaches history needs a rewrite to remove, and cannot be refreshed, dated or trusted meanwhile                                                             | Capture with `hooks-daemon remote-docs add <url>` and re-stage                                                           |
+| R-REFERENCE-REPO-STALE             | a read of a governed reference clone that is behind or off its default branch                                                                        | reasoning from a stale clone produces conclusions indistinguishable from correct ones -- no error, no failing test, just a wrong answer                                                           | Run the `fix:` command printed beside the repo, then retry the read                                                      |
+| R-REFERENCE-REPO-NOT-VERIFIED      | a read of a governed reference clone with no in-date freshness reading                                                                               | nobody has checked this clone, which is a different fact from it being stale -- and treating the two the same either cries wolf or gives false comfort                                            | Run `hooks-daemon reference-repos` to fetch every governed repo and refresh                                              |
 | R-GH-ISSUE-VIEW-NO-COMMENTS        | `gh issue view` without `--comments`                                                                                                                 | Issue comments contain critical context, clarifications and updates not in the issue body                                                                                                         | Add --comments, or include comments in --json fields                                                                     |
 | R-GH-PR-VIEW-NO-COMMENTS           | `gh pr view` without `--comments`                                                                                                                    | PR comments contain review feedback and discussion context not in the PR body                                                                                                                     | Add --comments, or include comments in --json fields                                                                     |
 | R-STAGED-LINT-FAILURE              | a staged file fails the cheap syntax check at commit time                                                                                            | lint_on_edit only ever runs at Write/Edit time, so a git add of pre-existing content skips it entirely                                                                                            | Fix the failing file(s) above and re-stage before committing                                                             |
@@ -506,10 +510,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: daemon-restart-verifier -->
 
 - daemon_restart_verifier — restart the daemon before committing
-
-<!-- handler: reference-repo-freshness -->
-
-- reference_repo_freshness — a stale reference clone is caught before you read it
 
 <!-- handler: agent-isolation-advisor -->
 
