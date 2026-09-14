@@ -5,6 +5,13 @@ on what a valid report looks like — a gate that judged a report by a different
 rule from the one that built it would either refuse valid reports or pass
 leaking ones. So the re-export is a contract rather than a convenience, and it
 is worth a test that fails when someone quietly moves one.
+
+Named for the behaviour rather than for the file under test. The obvious name,
+`test___init__.py`, collides by BASENAME with another suite's file of the same
+name: neither directory is a package, so pytest derives the module name from the
+basename alone and refuses to collect the second one. That failure appears only
+in a whole-suite run — the file passes on its own — which is how it survived
+several targeted runs (Plan 00405 N5).
 """
 
 from __future__ import annotations

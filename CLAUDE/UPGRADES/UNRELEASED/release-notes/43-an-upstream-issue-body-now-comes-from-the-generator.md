@@ -69,3 +69,26 @@ catches the accident, which is the failure that actually happens.
 generator built. It does not prove the prose you wrote inside it is safe to
 publish — that judgement is still yours, and it is the one thing no check can
 make for you.
+
+**One last check covers the part "collect nothing sensitive" cannot reach.**
+The fields you TYPE are scanned against your project's own block-word list
+(`.claude/block-words.secret` by default, gitignored), and a match REFUSES the
+report. Refused rather than redacted, deliberately: you are still at the
+keyboard, the sentence is yours to rewrite, and a silent redaction would teach
+you nothing while leaving prose that reads as nonsense. The refusal names
+`entry N of M` and never the term, because that message is logged and kept in
+context. A project with no list gets silence.
+
+**Where the procedure lives now.** `BUG_REPORTING.md` is the whole thing —
+what to establish before filing, the generator, and the filing — and every
+other document that used to describe its own version now points at it. The
+`hooks-daemon` skill gained an `issue-report` entry that drives it end to end,
+and the tracker has issue forms mirroring the generator's fields for anyone
+filing from a browser.
+
+**Two instructions that were actively unsafe are gone.** The install and update
+guides told you to attach `debug_info.py`'s output "to any bug report", and the
+troubleshooting guide asked for your config file "with any sensitive values
+removed" — a check that asks you to recognise every one of them by eye, once.
+Both of those outputs are local diagnostics for the person who ran them, and
+both now say so.

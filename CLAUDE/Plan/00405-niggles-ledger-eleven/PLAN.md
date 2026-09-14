@@ -151,6 +151,38 @@ rather than an edit.
   heading carries the installed version, and say explicitly that no `--version`
   flag exists so the next person does not retry it.
 
+- [x] ✅ **N5**: A test file that passes alone and prevents the WHOLE suite from
+  collecting.
+
+  **Found**: the first `llm_qa.py all` run after Plan 00403's Phase 5. Every
+  targeted run of that same file had passed, including minutes earlier.
+
+  **Evidence.**
+
+  ```text
+  collected 23344 items / 1 error
+  ERROR collecting tests/unit/issue_report/test___init__.py
+  import file mismatch:
+  imported module 'test___init__' has this __file__ attribute:
+    /workspace/tests/unit/config_optimisation/test___init__.py
+  which is not the same as the test file we want to collect:
+    /workspace/tests/unit/issue_report/test___init__.py
+  ```
+
+  Neither test directory is a package, so pytest derives a module name from the
+  BASENAME alone and two files called `test___init__.py` are one module. The
+  second to be collected is refused.
+
+  **Why it is worse than it looks.** The failure is in COLLECTION, so the whole
+  run reports `0 passed, 0 failed, 1 errored` — a suite of 23,344 tests
+  produced no result at all, and a reader skimming for "failed: 0" sees
+  nothing wrong. The coverage figure is still printed, which makes it look
+  like a run happened.
+
+  **Fixed**: renamed to `test_package_exports.py`, which names the behaviour
+  rather than the file under test and is a better name anyway. The reason is in
+  the new file's docstring so nobody renames it back.
+
 ## Success Criteria
 
 - [ ] ⬜ Every entry above is in a terminal state: fixed, ruled not-a-defect,

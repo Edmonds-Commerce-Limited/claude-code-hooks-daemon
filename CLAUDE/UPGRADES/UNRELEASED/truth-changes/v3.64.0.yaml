@@ -25,6 +25,39 @@ truth_changes:
       its recommended and current value inline, plus a count of informational
       options. A recommendation's migration Note is read from the file before
       enabling. `--full` prints the whole advisory inline.
+  - topic: bug-reporting
+    id: upstream-issue-reporting
+    was: >
+      To report a hooks daemon bug, run the diagnostic generator
+      (`scripts/debug_info.py`, `hooks-daemon bug-report`, or the `report`
+      skill) and paste its output — or the relevant part of it, with sensitive
+      values removed by hand — into a GitHub issue on the daemon's tracker.
+    now: >
+      Those three are LOCAL diagnostics for the person who ran them and must
+      never be pasted into an issue: they reproduce the project's config file,
+      its environment and its logs on purpose, because the reader is you. To
+      report a defect upstream, run
+      `hooks-daemon issue-report --fields <file.json>`, which collects a
+      controlled field set and never gathers the hostname, git remote, `.env`,
+      config dump or logs at all, then file the document it writes with
+      `gh issue create --repo Edmonds-Commerce-Limited/claude-code-hooks-daemon
+      --body-file <report>`. The full procedure — including what to establish
+      before filing — is `BUG_REPORTING.md` at the daemon's root, and the
+      `hooks-daemon` skill drives it with args `issue-report`. A client
+      project's `gh issue create` against that tracker is DENIED unless the
+      body came from the generator (`R-UPSTREAM-ISSUE-UNVERIFIED-BODY`);
+      issues on your own repository are untouched.
+  - topic: daemon-cli
+    id: daemon-version-flag
+    was: >
+      `bin/hooks-daemon --version` prints the installed daemon version, and the
+      version also appears in `hooks-daemon status` output.
+    now: >
+      There is no `--version` flag — it exits non-zero with
+      `unrecognized arguments` — and `status` reports runtime state (PID,
+      socket, PID file, listener count) with no version in it. Run
+      `bin/hooks-daemon release-notes` with no flags: it prints the notes for
+      the installed version and its first heading names that version.
   - topic: hook-transport
     was: >
       Running `transport on`/`off` for the state the config already holds is a
