@@ -1,6 +1,6 @@
 # Plan 00398: critical compaction blocked by the idle gate
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-13
 **Owner**: joseph
 **Priority**: High
@@ -14,7 +14,7 @@ unattended. It can currently fail at exactly that, in the band where failing
 matters most: **a CRITICAL context does not compact while anything sits in the
 input box.**
 
-Graduated from [Plan 00397](../00397-niggles-ledger-eight/PLAN.md) N3, which
+Graduated from [Plan 00397](../Completed/00397-niggles-ledger-eight/PLAN.md) N3, which
 holds the full evidence. Graduated rather than fixed there because the fix is a
 design call with a real trade-off against the reason the gate exists, not a
 one-line correction.
@@ -57,6 +57,43 @@ same reasoning is documented at line 3908 for the resume path. So "just drop the
 `idle` check for critical" trades a guaranteed-safe behaviour for a
 context-safety win, and the cost lands on the human's unsent keystrokes.
 
+## PRIOR ART — Plan 00168 already classified this, and that must not be re-discovered
+
+`tests/unit/supervise/test_compaction_gap_repro.py` reproduces this exact
+report ("an agent reached COMPACT NOW but never got a /compact") and pins the
+behaviour as **H2 … BY DESIGN — never corrupt their input**, with a passing
+test `TestH2InputBoxGuardBlocksEvenCritical`. The same file proves the
+neighbouring theory false: critical DOES bypass `work_idle` while streaming.
+
+So this plan is not reporting an unknown defect. It is **revisiting a recorded
+design decision with the owner's authority**, because the symptom recurred and
+the owner has now ruled. Any implementation must update that test rather than
+work around it — it encodes the old decision deliberately.
+
+## CORRECTION — the diagnosability claim that graduated with this plan was wrong
+
+Plan 00397 N3 stated that `session busy (composing)` carries no band, so a tick
+blocked at 8% could not be told from one blocked at CRITICAL. **That is false.**
+Plan 00168 Phase 1 added `_noop_band_suffix` (line 4697) and the log reads:
+
+```text
+noop: session busy (composing) [red]
+```
+
+The measurement N3 called impossible is therefore available, and it is the real
+number this plan rests on:
+
+```text
+277  noop: session busy (composing) [red]
+  4  noop: session busy (composing) [urgent]      (critical folds into urgent)
+174  successful compact injections, for comparison
+```
+
+**Task 1.2 survives but narrows.** The general NOOP path already carries the
+band; it is specifically the INPUT-BOX DEFERRAL line that does not —
+`injection deferred: input box not empty (session busy (composing))`, line 4685,
+which omits the suffix the sibling path at 4697 adds.
+
 ## Goals
 
 - A session at CRITICAL context compacts, or the reason it did not is visible at
@@ -76,8 +113,19 @@ context-safety win, and the cost lands on the human's unsent keystrokes.
 
 ### Phase 1: Owner decision
 
-- [ ] ⬜ **Task 1.1**: RULING NEEDED on how a CRITICAL reading should behave when
-  the input box is not empty. Options, with the cost of each stated:
+- [x] ✅ **Task 1.1**: RULED by the owner — **option 3, with option 2 as the
+  follow-on**. Verbatim: "3 is a no brainer / 2 flushing the box via hitting
+  return is probably better than hitting escape".
+
+  Option 3 (bypass `idle` when the box holds only SUPERVISOR-authored text) is
+  adopted and is the buildable half: strictly safe, destroys nothing a human
+  typed, and fixes the case the supervisor itself causes.
+
+  **A concern was raised against the Enter-flush and is NOT resolved — see Task
+  1.3.** It must not be built on the strength of this ruling alone, because the
+  ruling was given before the objection existed.
+
+  The original options, kept for the record:
 
   1. **CRITICAL bypasses `idle`.** Compacts regardless. Simplest, matches the
      docstring's existing promise — and can discard or corrupt whatever the
@@ -92,11 +140,30 @@ context-safety win, and the cost lands on the human's unsent keystrokes.
      does not fix a human who wandered off mid-sentence at CRITICAL.
   4. **Report only.** Leave the gate, make the suppression loud.
 
-- [ ] ⬜ **Task 1.2**: Independent of the ruling — the `not idle` NOOP must carry
-  the tier and percentage. Today `session busy (composing)` is
-  indistinguishable between a tick blocked at 8% and one blocked at CRITICAL,
-  which is why Plan 00397 could measure the gate's frequency (20260 of 25834
-  decisions) but NOT how often it blocked a red reading.
+- [ ] ⬜ **Task 1.2**: NARROWED by the correction above. The general NOOP path
+  already carries the band. Give the INPUT-BOX DEFERRAL line (4685) the same
+  `_noop_band_suffix` its sibling at 4697 has, so the two log shapes agree and
+  neither can hide a suppressed CRITICAL.
+
+- [ ] ⬜ **Task 1.3**: RULING NEEDED — Enter-flush vs Esc-flush for option 2,
+  raised AFTER the owner ruled and therefore still open.
+
+  **The objection.** Enter does not clear the box, it SUBMITS. At CRITICAL that
+  means a fragment is sent to the model, a turn starts, context GROWS, and
+  `work_idle` goes False — so compaction is delayed by exactly the turn the
+  fragment bought. Enter makes the problem worse at the only moment it is
+  urgent. Esc clears, leaving the very next tick free to compact.
+
+  **Why the owner's instinct is still right.** Esc destroys what the human
+  typed, and nothing records it.
+
+  **Proposed resolution, not yet ruled**: capture the box contents into the
+  decision log (or a recoverable scratch file), THEN Esc. The text survives, no
+  turn is spent, and compaction happens on the next tick. This needs its own
+  decision because it adds a write of human-authored text to a log.
+
+  Note this is orthogonal to Task 1.1: option 3 covers the supervisor's OWN
+  text and needs no flush at all, so it ships without waiting on this.
 
 ## Success Criteria
 

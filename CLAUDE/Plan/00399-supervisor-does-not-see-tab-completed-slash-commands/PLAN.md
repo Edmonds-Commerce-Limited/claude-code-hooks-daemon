@@ -13,7 +13,7 @@ The supervisor recognises a human's typed `/compact` by matching the raw bytes
 it forwarded to the child. **Tab autocomplete produces none of those bytes**, so
 a `/compact` reached by typing `/comp` and pressing Tab is never recognised.
 
-Graduated from [Plan 00397](../00397-niggles-ledger-eight/PLAN.md) N1, which
+Graduated from [Plan 00397](../Completed/00397-niggles-ledger-eight/PLAN.md) N1, which
 holds the full evidence. Graduated because the obvious fix trades a false
 negative for a strictly worse false positive, which is a ruling rather than an
 edit.
