@@ -184,14 +184,39 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
             found.extend(self._governed_words(words[1:], project_root))
         return found
 
+    @staticmethod
+    def _path_like(word: str) -> str | None:
+        """The path a command word names, or ``None`` when it names none.
+
+        Two normalisations, both added after probing found the parser silently
+        blind to ordinary commands:
+
+        - ``segment.split()`` leaves quote characters ATTACHED, so the word from
+          ``cat 'untracked/repos/alpha/x.md'`` still carries its quotes and is
+          relative to no root at all. That is the plainest shape there is.
+        - A flag is skipped because a flag is not a path — but ``--file=<path>``
+          is both, and the VALUE after ``=`` is what gets read.
+
+        A false negative here is this handler's worst failure mode: it is
+        silent, and silence from a freshness gate reads as "that repo is fine".
+        """
+        if word.startswith("-"):
+            _, separator, value = word.partition("=")
+            if not separator:
+                return None
+            word = value
+        word = word.strip("\"'")
+        return word or None
+
     def _governed_words(self, words: list[str], project_root: Path) -> list[Path]:
         """Arguments of one command segment that name a governed location."""
         roots = self._roots(project_root)
         governed: list[Path] = []
         for word in words:
-            if word.startswith("-"):
+            path_like = self._path_like(word)
+            if path_like is None:
                 continue
-            candidate = self._absolute(word, project_root)
+            candidate = self._absolute(path_like, project_root)
             if any(self._within(candidate, root) for root in roots):
                 governed.append(candidate)
         return governed

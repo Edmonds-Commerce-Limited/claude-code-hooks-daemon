@@ -536,6 +536,50 @@ class TestCallsItMustNotJudge:
         assert handler.matches(_bash("cat untracked/repos/alpha/x.md && ")) is True
 
 
+class TestWordsThatStillNameAPath:
+    """Regression: three shapes slipped through entirely.
+
+    Found by probing the parser rather than by a failing test — every existing
+    case happened to use a bare unquoted path. `segment.split()` keeps quote
+    characters attached to the word, so `Path("'untracked/repos/alpha/x.md'")`
+    is not relative to any governed root, and the read was invisible.
+
+    A false negative here is the worst failure this handler has: it is silent,
+    and silence from this gate reads as "that repo is fine".
+    """
+
+    def test_a_single_quoted_path_is_seen(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """The plainest possible shape — and it was missed completely."""
+        _repo(tmp_path)
+
+        assert handler.matches(_bash("cat 'untracked/repos/alpha/x.md'")) is True
+
+    def test_a_double_quoted_path_is_seen(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        _repo(tmp_path)
+
+        assert handler.matches(_bash('cat "untracked/repos/alpha/some file.md"')) is True
+
+    def test_a_path_hidden_behind_a_flag_is_seen(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """`--file=<path>` reads the repo; skipping every `-` word missed it."""
+        _repo(tmp_path)
+
+        assert handler.matches(_bash("rg --file=untracked/repos/alpha/patterns.txt .")) is True
+
+    def test_a_bare_flag_is_still_not_a_path(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """The reason `-` words were skipped in the first place still holds."""
+        _repo(tmp_path)
+
+        assert handler.matches(_bash("ls -la --color=auto src/")) is False
+
+
 class TestTextIsNotACommand:
     """Regression: this handler blocked the commit that shipped its own docs.
 
