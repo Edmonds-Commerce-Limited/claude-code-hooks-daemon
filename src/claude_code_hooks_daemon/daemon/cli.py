@@ -5527,6 +5527,107 @@ def cmd_agents(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reference_repos(args: argparse.Namespace) -> int:
+    """Report freshness of every governed reference repo (Plan 00401 Task 5.1).
+
+    The third surface over the same checker the SessionStart sweep and the
+    PreToolUse gate use, and the one the other two POINT AT: both print "run
+    `hooks-daemon reference-repos`" as the way out of a NOT VERIFIED verdict.
+    So this command must REFRESH, not merely look — and must write the cache,
+    or following that advice would change nothing and the next read would
+    repeat the same instruction.
+
+    Unlike the SessionStart sweep it does not truncate: a report you asked for
+    should show everything. It also states how many repos could not be checked,
+    because silence about a repo in an answer to a direct question reads as
+    "that one is fine".
+
+    Args:
+        args: Parsed CLI arguments with ``json_output``, ``show_all`` and an
+            optional ``project_root``.
+
+    Returns:
+        0 when every checkable repo is current (or the feature is disabled, or
+        the project governs none), 1 when any is stale or off its default
+        branch, 2 when an explicit ``--project-root`` is not a directory.
+    """
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.reference_repos import refresh as refresh_module
+    from claude_code_hooks_daemon.reference_repos.cache import write_cache
+    from claude_code_hooks_daemon.reference_repos.discovery import discover_reference_repos
+    from claude_code_hooks_daemon.reference_repos.report import (
+        remediation_command,
+        repo_line,
+        report_lines,
+    )
+
+    resolved_root = resolve_tree_root(args)
+    if resolved_root is None:
+        return 2
+    project_root = resolved_root
+
+    config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+    settings = config.reference_repos
+    if not settings.enabled:
+        print("Reference repos: disabled in config (reference_repos.enabled) — nothing to check.")
+        return 0
+
+    repos = discover_reference_repos(
+        [project_root / relative for relative in settings.roots],
+        exclude_globs=settings.exclude,
+        project_root=project_root,
+    )
+    # Resolved through the module rather than imported by name so that a test
+    # replacing the ONLY network-touching function actually replaces it here.
+    states = [
+        refresh_module.refresh_repo(repo, allow_pull=settings.auto_pull).state
+        for repo in sorted(repos)
+    ]
+
+    # The command advertised as the cure for NOT VERIFIED has to record that it
+    # ran, or the cure does nothing.
+    write_cache(project_root, states)
+
+    if args.json_output:
+        print(
+            json.dumps(
+                {
+                    "checked": len(states),
+                    "needs_attention": sum(1 for state in states if state.needs_attention),
+                    "repos": [
+                        {
+                            "path": str(state.path),
+                            "checkability": str(state.checkability),
+                            "branch": state.branch,
+                            "default_branch": state.default_branch,
+                            "upstream": state.upstream,
+                            "behind": state.behind,
+                            "ahead": state.ahead,
+                            "dirty": state.dirty,
+                            "needs_attention": state.needs_attention,
+                            "remediation": remediation_command(state),
+                        }
+                        for state in states
+                    ],
+                },
+                indent=2,
+            )
+        )
+    else:
+        for line in report_lines(states, project_root=project_root) or [
+            "Reference repos: this project governs none "
+            f"(looked under: {', '.join(settings.roots)})."
+        ]:
+            print(line)
+
+        if args.show_all and states:
+            print("\nAll governed repositories:")
+            for state in states:
+                print(f"  - {repo_line(state, project_root=project_root)}")
+
+    return 1 if any(state.needs_attention for state in states) else 0
+
+
 def cmd_plan_qa(args: argparse.Namespace) -> int:
     """Run plan QA checks (Plan 00144): sweep, staged gate, or single-file lint.
 
@@ -7809,6 +7910,35 @@ def main() -> int:
     )
     _add_report_offload_arguments(parser_check_truth, default_subdir=_REPORT_OFFLOAD_TRUTH_SUBDIR)
     parser_check_truth.set_defaults(func=cmd_check_truth_changes)
+
+    # reference-repos command (Plan 00401) — freshness of governed clones
+    parser_reference_repos = subparsers.add_parser(
+        "reference-repos",
+        help=(
+            "Fetch every governed reference repo and report the ones that are stale "
+            "or off their default branch (exit 1 on findings)"
+        ),
+    )
+    parser_reference_repos.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Emit every reading as JSON, including repos that cannot be checked",
+    )
+    parser_reference_repos.add_argument(
+        "--all",
+        dest="show_all",
+        action="store_true",
+        help="Also list every governed repo, including the current and un-checkable ones",
+    )
+    parser_reference_repos.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_reference_repos.set_defaults(func=cmd_reference_repos)
 
     # plan-qa command (Plan 00144) — sweep / staged gate / single-file lint
     parser_plan_qa = subparsers.add_parser(

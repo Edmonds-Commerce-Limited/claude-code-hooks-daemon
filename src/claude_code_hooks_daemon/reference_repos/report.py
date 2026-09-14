@@ -139,8 +139,18 @@ def report_lines(
         return []
 
     attention = [state for state in readings if state.needs_attention]
+    checkable = [state for state in readings if state.checkable]
+    unchecked = len(readings) - len(checkable)
+
     if not attention:
-        return [f"{_ICON}  reference repos: all {len(readings)} up to date"]
+        # Counting an un-checkable repo as "up to date" would be a false
+        # all-clear: nobody knows whether it is current, and unknown is not the
+        # same answer as fine. It is stated as a bounded count rather than a
+        # list, so the canary cannot head the report forever.
+        if not checkable:
+            return [f"{_ICON}  reference repos: {len(readings)} governed, none checkable"]
+        suffix = f" ({unchecked} not checkable)" if unchecked else ""
+        return [f"{_ICON}  reference repos: all {len(checkable)} up to date{suffix}"]
 
     lines = [
         f"{_ICON}  reference repos: {len(attention)} of {len(readings)} need attention "
@@ -156,4 +166,8 @@ def report_lines(
     withheld = len(attention) - len(listed)
     if withheld > 0:
         lines.append(f"  … and {withheld} more (run `hooks-daemon reference-repos` for all)")
+    if unchecked:
+        lines.append(
+            f"  ({unchecked} not checkable — `hooks-daemon reference-repos --all` says why)"
+        )
     return lines

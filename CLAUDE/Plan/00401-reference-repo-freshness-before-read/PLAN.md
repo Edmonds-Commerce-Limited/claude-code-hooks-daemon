@@ -204,23 +204,25 @@ Each is a rule the implementation must not be able to violate:
 
 ### Phase 4: PreToolUse enforcement (cache only)
 
-- [ ] ⬜ **Task 4.1**: `pre_tool_use/reference_repo_freshness.py` matching
-  `Read`/`Grep`/`Glob` path fields and `Bash` command strings. No shared
-  "does this call touch path X" utility exists — model it on
-  `secret_file_guard.py:107-120`, with Bash paths via
-  `utils/shell_segmentation.py`.
-- [ ] ⬜ **Task 4.2**: Implement the four modes, `block_once` keyed per repo per
-  session (the `lsp_enforcement` precedent).
-- [ ] ⬜ **Task 4.3**: The exemption set — `git` invocations targeting a governed
-  repo (`-C <repo>`, or run from inside it) pass through. Covered by a test that
-  the exact remediation string the deny message prints is NOT blocked.
+- [x] ✅ **Task 4.1**: `pre_tool_use/reference_repo_freshness.py` matching
+  `Read`/`Grep`/`Glob` path fields and `Bash` command strings, the latter split
+  per segment via `utils/shell_segmentation.py`.
+- [x] ✅ **Task 4.2**: The four modes, `block_once` keyed per repo per session
+  (the `lsp_enforcement` precedent, including Plan 00277's session scoping so
+  one session cannot consume another's single warning). The session map is
+  capped, because the daemon outlives any one session.
+- [x] ✅ **Task 4.3**: The exemption set — every `git` segment passes through.
+  The test builds the command from `remediation_command()` rather than a
+  hand-written lookalike, so the exemption and the printed remedy cannot drift.
 
 ### Phase 5: CLI
 
-- [ ] ⬜ **Task 5.1**: `bin/hooks-daemon reference-repos [--json]` calling the
-  SAME checker. Follow the `plan-qa` registration shape
-  (`daemon/cli.py:7747-7782`); exit non-zero when any governed repo is stale or
-  off its default branch.
+- [x] ✅ **Task 5.1**: `bin/hooks-daemon reference-repos [--json] [--all]`
+  calling the SAME checker. Exits non-zero when any governed repo is stale or
+  off its default branch; an un-checkable repo alone never fails the command,
+  so the canary cannot make CI permanently red. It WRITES the cache, because
+  both other surfaces name it as the cure for `NOT VERIFIED` and a cure that
+  records nothing cures nothing.
 
 ### Phase 6: Documentation
 
