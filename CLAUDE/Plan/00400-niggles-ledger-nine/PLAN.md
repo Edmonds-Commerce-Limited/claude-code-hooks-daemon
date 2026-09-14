@@ -304,3 +304,20 @@ rather than an edit.
 ## Delivery & Milestones
 
 - Opened when N1 was found while investigating Plan 00398.
+
+- Four entries, and the shape of them is worth keeping: **not one was found by
+  hitting a symptom**. N1 came from reading a log as evidence, N2 and N3 from
+  checking CI rather than assuming it, N4 from a hook firing during an unrelated
+  command. The ledger's value here was in looking at what was already on screen.
+
+- **Two entries were corrections to my own claims, not discoveries.** N3 was
+  filed as a live defect needing an owner ruling between three options; it had
+  already been ruled in Plan 00393, and one grep of the claim's own wording would
+  have shown that. N1 was filed as "the QA suite writes into live state", which
+  was too broad — one half was a test correctly driving the live daemon. Both are
+  the same failure Plan 00393's journal named: stating a result one step beyond
+  what was observed.
+
+- **N4 was reported in conversation and not written down** until several turns
+  later. Recording it late is the exact failure this ledger exists to prevent,
+  so it is named in the entry rather than quietly backfilled.
