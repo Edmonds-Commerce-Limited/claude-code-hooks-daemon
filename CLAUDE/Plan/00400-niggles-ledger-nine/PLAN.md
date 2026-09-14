@@ -78,6 +78,41 @@ rather than an edit.
   `window_size: 0`). Needs a look at how the fixtures resolve the untracked dir
   before proposing either.
 
+- [x] ✅ **N2**: FIXED — a test whose result depended on the time of day, red on
+  `main` and not noticed.
+
+  **Found**: checking CI after pushing Plan 00398, which surfaced that the
+  PREVIOUS commit on `main` (`c1f2ee82`) had already failed CI — across all
+  three Python versions — and nobody had looked.
+
+  **The failure**: `test_plan_qa_edit.py::TestHandleJournal::test_pure_append_is_silent`
+  asserts a pure journal append produces no advisory. It appends an entry
+  stamped `## 10:00` to a day-file named for TODAY, and leaves the clock free:
+
+  ```text
+  E  assert not ["Plan QA drift report:\n- [advise] journal-entry-future-dated ..."]
+  ```
+
+  CI ran at **09:24 UTC**, so `10:00` had not arrived yet and
+  `journal-entry-future-dated` fired — correctly. My own full QA run passed the
+  same test because it ran nearer 10:00. **The handler is right; the test was
+  wrong**, and it fails any run starting more than 30 minutes (the check's
+  tolerance) before 10:00 — roughly the first 40% of each day.
+
+  **Why it survived**: the `_journal_file` helper already dodged one time-bomb
+  by generating TODAY's date rather than hardcoding one, and its comment says
+  so. Fixing the date dependence while leaving the TIME fixed swapped a bomb
+  that fires once for one that fires daily, on a schedule nobody was watching.
+
+  **Fix**: `journal_entry_future_dated._now` exists precisely so tests can pin
+  it ("isolated so tests can pin it") and no test did. An autouse fixture on
+  `TestHandleJournal` pins it to 23:59 today — late enough that every fixed
+  entry time is in the past, while keeping the day-file name valid for
+  `journal-dayfile-naming`, which accepts only today/yesterday. Added
+  `test_future_dated_entry_advises_regardless_of_run_time`, which pins 09:24
+  deliberately and asserts the finding DOES fire, so the behaviour CI caught by
+  accident is now asserted on purpose.
+
 ## Success Criteria
 
 - [ ] Every entry above reaches a terminal state (fixed / not-a-defect /

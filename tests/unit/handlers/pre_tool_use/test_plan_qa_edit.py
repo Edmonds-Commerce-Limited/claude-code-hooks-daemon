@@ -6,7 +6,7 @@ checked against the edit-stage plan QA catalogue on the WOULD-BE content
 violations in ``edit_mode: block``; advises otherwise.
 """
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_qa_edit import PlanQaEditHandler
+from claude_code_hooks_daemon.plan_qa.checks import journal_entry_future_dated
 
 _PLAN_DIR_REL = "CLAUDE/Plan"
 
@@ -167,6 +168,29 @@ class TestMatches:
 class TestHandleJournal:
     """Plan 00163: journal day-file edit linting through the handler."""
 
+    @pytest.fixture(autouse=True)
+    def _pin_clock_late_in_the_day(self):
+        """Pin `journal-entry-future-dated`'s clock to the END of today.
+
+        These tests use fixed entry times (`## 09:00`, `## 10:00`) in a day-file
+        named for TODAY, so whether an entry is "in the future" depends on what
+        time of day the suite runs. Unpinned, `test_pure_append_is_silent`
+        passed locally after 10:00 and failed in CI at 09:24 — the check firing
+        correctly on an entry that had not arrived yet.
+
+        Pinning to 23:59 today keeps the day-file name valid for
+        `journal-dayfile-naming` (which accepts only today/yesterday) while
+        putting every fixed entry time safely in the past. A test that WANTS the
+        future-dated finding pins its own earlier clock instead.
+        """
+        today = date.today()
+        with patch.object(
+            journal_entry_future_dated,
+            "_now",
+            return_value=datetime(today.year, today.month, today.day, 23, 59),
+        ):
+            yield
+
     def _journal_file(self, tmp_path: Path, name: str | None = None) -> Path:
         # Default to TODAY's date so the journal-dayfile-naming check (which
         # only accepts today/yesterday) never trips on a stale hardcoded date —
@@ -232,6 +256,31 @@ class TestHandleJournal:
             result = _handler().handle(_write_input(target, after))
         assert result.decision == Decision.ALLOW
         assert not result.context
+
+    def test_future_dated_entry_advises_regardless_of_run_time(self, tmp_path: Path) -> None:
+        """The clock-dependence that broke CI, pinned as deterministic behaviour.
+
+        Reproduces the CI failure directly: with the clock at 09:24 an entry
+        stamped 10:00 IS in the future, and the check is right to say so. The
+        defect was that `test_pure_append_is_silent` asserted silence while
+        leaving the clock free, so the same content passed after 10:00 and
+        failed before it. Here the clock is pinned deliberately, so this asserts
+        the check's real contract instead of the time of day.
+        """
+        target = self._journal_file(tmp_path)
+        content = "# Journal\n\n## 09:00 · action · —\n\nfirst\n\n## 10:00 · finding · —\n\nsecond\n"
+        today = date.today()
+        with (
+            patch.object(
+                journal_entry_future_dated,
+                "_now",
+                return_value=datetime(today.year, today.month, today.day, 9, 24),
+            ),
+            _patched_root(tmp_path),
+        ):
+            result = _handler().handle(_write_input(target, content))
+        assert result.decision == Decision.ALLOW
+        assert "journal-entry-future-dated" in " ".join(result.context)
 
     def test_history_rewrite_advises(self, tmp_path: Path) -> None:
         target = self._journal_file(tmp_path)
