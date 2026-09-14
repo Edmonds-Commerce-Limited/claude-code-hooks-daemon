@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00363: self-matching process watcher blocker](00363-self-matching-process-watcher-blocker/PLAN.md) - Complete at `003f3036` and `8ae8ac61` + the archiving commit (a process probe whose literal pattern is in the calling shell's own argv, and a wait on `$!` after `setsid`, are denied; Rules A and C shipped in v3.63.0, Rule B holds a callout for the next release)
+
 - [00362: client upgrade report — fix all known defects](00362-client-upgrade-report-fix-all-known-defects/PLAN.md) - Complete + the archiving commit (the stability-release ledger: all eight client findings and every defect recorded in a live plan fixed or ruled out, v3.62.1's missing bootstrap assets repaired, full QA 26/26)
 
 - [00361: supervisor worker crash loop visibility and backoff](00361-supervisor-worker-crash-loop-visibility-and-backoff/PLAN.md) - Complete at `da5b7258` + the archiving commit (a worker death is logged with its exit code and source fingerprint, a crash loop is held to a backoff and logged once, and the fallback transitions are logged; verified live)

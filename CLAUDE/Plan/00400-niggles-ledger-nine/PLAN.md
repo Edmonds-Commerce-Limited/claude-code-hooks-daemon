@@ -35,7 +35,7 @@ rather than an edit.
 - [x] ✅ **N1**: The QA suite writes into the LIVE supervisor runtime directory.
 
   **Found**: while reading `untracked/supervise/decision.log` as forensic
-  evidence for [Plan 00398](../00398-critical-compaction-blocked-by-the-idle-gate/PLAN.md).
+  evidence for [Plan 00398](../Completed/00398-critical-compaction-blocked-by-the-idle-gate/PLAN.md).
 
   **Evidence.** Test-authored lines interleave with live supervisor decisions in
   the live log:

@@ -1,6 +1,6 @@
 # Plan 00398: critical compaction blocked by the idle gate
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-13
 **Owner**: joseph
 **Priority**: High
@@ -294,13 +294,22 @@ the live dogfooding evidence, and the risks accepted rather than resolved.
 
 ## Success Criteria
 
-- [ ] The behaviour of a CRITICAL reading against a non-empty input box is
-  decided, implemented, and covered by a test that fails against today's code.
-- [ ] No decision-log line can hide a suppressed CRITICAL compaction: the
-  reason carries tier and percentage.
-- [ ] The `_evaluate_monitor` docstring states the `idle` gate's scope, so the
+- [x] The behaviour of a CRITICAL reading against a non-empty input box is
+  decided, implemented, and covered by a test that fails against today's code —
+  text-stability flush at 120s, `TestHumanInputLineStability` plus
+  `test_abandoned_input_flush.py`.
+- [x] No decision-log line can hide a suppressed CRITICAL compaction: the
+  reason carries tier and percentage —
+  `test_critical_deferral_carries_the_band_suffix`.
+- [x] The `_evaluate_monitor` docstring states the `idle` gate's scope, so the
   next reader is not told that critical compacts unconditionally.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green — 29/29 locally (22,640 tests, coverage
+  95.3%); CI green at `a7d0fb7b`, which carries this implementation. NOT
+  `ec18062d`, the commit that introduced it: that run was cancelled with zero
+  jobs by the concurrency gap recorded as Plan 00400 N3, so citing it would cite
+  a run that does not exist.
+- [x] The plan is archived into the holding area (`Completed/`) with the README
+  row and statistics updated in the same commit.
 
 ## Delivery & Milestones
 
