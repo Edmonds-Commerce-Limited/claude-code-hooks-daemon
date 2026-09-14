@@ -16,7 +16,9 @@ failure the daemon already has dedicated error text for. A future refactor that
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -241,22 +243,102 @@ class TestUncheckableClassifications:
         assert state.needs_attention is False
 
 
+#: git subcommands that contact a remote. Checked as a DENY-list over what was
+#: actually spawned, rather than by stubbing the two helpers that happen to use
+#: them today: a future probe added with a raw `_run_git(cwd, "ls-remote", ...)`
+#: would sail straight past a stub of `fetch_all`, which is precisely the shape
+#: of change this invariant exists to catch.
+_NETWORK_VERBS: Final[frozenset[str]] = frozenset(
+    {"fetch", "pull", "push", "clone", "ls-remote", "submodule"}
+)
+
+#: `git remote` alone lists local config; these subcommands talk to the remote.
+_NETWORK_REMOTE_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"update", "prune", "set-head"})
+
+#: More than one probe. A spy that recorded nothing — because the spawn point
+#: moved, or the inspection short-circuited — would satisfy "no network verbs"
+#: perfectly while checking nothing at all.
+_MINIMUM_LOCAL_PROBES: Final[int] = 2
+
+
+def _is_network(argv: tuple[str, ...]) -> bool:
+    if not argv:
+        return False
+    if argv[0] in _NETWORK_VERBS:
+        return True
+    return argv[0] == "remote" and len(argv) > 1 and argv[1] in _NETWORK_REMOTE_SUBCOMMANDS
+
+
 class TestTheInspectorDoesNoNetworkIO:
+    """The architectural invariant, enforced rather than documented.
+
+    PreToolUse reads this on the hook socket's 30s budget, and one fetch can
+    consume all of it. So the assertion is over every git command the inspection
+    ACTUALLY spawns, taken at the daemon's single spawn point — not over the two
+    named helpers a previous version stubbed, which proved only that
+    ``inspect_repo`` did not call those two functions BY NAME.
+    """
+
+    @staticmethod
+    def _spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+        """Record every git argv spawned through ``git_sync``, and pass it on."""
+        spawned: list[tuple[str, ...]] = []
+        real = git_sync.run_git
+
+        def _record(
+            cwd: Path,
+            *args: str,
+            timeout: float = Timeout.GIT_CONTEXT,
+            env: Mapping[str, str] | None = None,
+        ) -> subprocess.CompletedProcess[str]:
+            spawned.append(tuple(args))
+            return real(cwd, *args, timeout=timeout, env=env)
+
+        monkeypatch.setattr(git_sync, "run_git", _record)
+        return spawned
+
     def test_inspection_never_performs_network_io(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The architectural invariant, enforced rather than documented.
-
-        PreToolUse reads this on the hook socket's 30s budget, and one fetch can
-        consume all of it. Any future change that adds a fetch or a pull to the
-        inspection path fails here.
-        """
         _, clone = _remote_and_clone(tmp_path)
-
-        def _forbidden(*_args: object, **_kwargs: object) -> object:
-            raise AssertionError("inspection must not perform network I/O")
-
-        monkeypatch.setattr(git_sync, "fetch_all", _forbidden)
-        monkeypatch.setattr(git_sync, "pull_ff_only", _forbidden)
+        spawned = self._spy(monkeypatch)
 
         assert inspect_repo(clone).checkable is True
+        assert [argv for argv in spawned if _is_network(argv)] == []
+
+    def test_the_invariant_is_asserted_against_commands_that_really_ran(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Guards the test above from passing vacuously."""
+        _, clone = _remote_and_clone(tmp_path)
+        spawned = self._spy(monkeypatch)
+
+        inspect_repo(clone)
+
+        assert len(spawned) >= _MINIMUM_LOCAL_PROBES
+
+    def test_the_spy_sees_a_fetch_when_one_really_happens(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The mutation guard: prove the trap would spring.
+
+        Everything above asserts an ABSENCE, and an absence is exactly what a
+        spy watching the wrong spawn point also reports. So this drives a real
+        fetch through the same seam and asserts it is both recorded and
+        classified — if `_run_git` ever stops routing through `run_git`, this
+        fails while the invariant tests would go on quietly passing.
+        """
+        _, clone = _remote_and_clone(tmp_path)
+        spawned = self._spy(monkeypatch)
+
+        git_sync.fetch_all(clone)
+
+        assert [argv for argv in spawned if _is_network(argv)] != []
+
+    def test_the_detector_recognises_a_network_verb(self) -> None:
+        """The deny-list is only worth having if it would actually fire."""
+        assert _is_network(("fetch", "--all")) is True
+        assert _is_network(("remote", "prune", "origin")) is True
+        assert _is_network(("rev-list", "--count", "HEAD")) is False
+        assert _is_network(("remote",)) is False
+        assert _is_network(()) is False
