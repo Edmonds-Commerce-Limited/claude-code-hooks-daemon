@@ -113,6 +113,60 @@ rather than an edit.
   deliberately and asserts the finding DOES fire, so the behaviour CI caught by
   accident is now asserted on purpose.
 
+- [ ] ⬜ **N3**: `cancel-in-progress: false` does NOT give every sha on `main` a
+  CI result, and `qa.yml` asserts that it does.
+
+  **Found**: checking CI before archiving Plan 00398, whose implementation
+  commit turned out to have no CI evidence at all.
+
+  **The claim, in `.github/workflows/qa.yml`**:
+
+  ```yaml
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # ... With this false, a later push QUEUES behind the
+  # running job rather than killing it, so every sha on main gets a result.
+  ```
+
+  **The counter-example, observed live**:
+
+  ```text
+  09:56:49  e495227b  starts RUNNING
+  10:00:53  ec18062d  created -> PENDING
+  10:05:13  8867803e  created -> ec18062d CANCELLED, jobs: 0
+  ```
+
+  `gh run view 34830966652` reports `conclusion: cancelled`, `jobs: 0` — it
+  never started.
+
+  **Mechanism**: `cancel-in-progress: false` protects the run that is ALREADY
+  RUNNING. GitHub permits only ONE pending run per concurrency group, so a newer
+  arrival evicts the older pending one. A sha pushed while another run is in
+  progress, and superseded before it starts, gets no result whatsoever. The
+  guarantee holds for two concurrent pushes and fails from the third onward —
+  which is why it reads as correct and survived review.
+
+  **Why it matters, not merely tidy**: Plan 00359's release-slate gate requires
+  HEAD's EXACT sha to be CI-green, and plan completion criteria cite specific
+  commits. `ec18062d` is Plan 00398's implementation commit; citing it as
+  delivery evidence would cite a run that does not exist.
+
+  **Not ruled — the fix trades runner cost against evidence**:
+
+  1. **Per-sha concurrency group on the default branch**
+     (`group: qa-${{ github.ref }}-${{ github.sha }}`). Every sha gets its own
+     group, so nothing queues and nothing is evicted. Guarantees the property
+     the comment claims, at the cost of running CI for every sha in a rapid
+     series.
+  2. **Accept, and correct the comment.** A later green run covers the earlier
+     content, so `main` is still verified — just not per-sha. Cheapest, but the
+     release-slate gate and plan criteria keep wanting a specific sha.
+  3. **Keep the behaviour, make the gap visible** — have the release-slate check
+     report "this sha has no run" distinctly from "this sha failed", so the
+     absence is never read as a pass.
+
+  Whichever is chosen, the comment must stop asserting a guarantee the config
+  does not provide.
+
 ## Success Criteria
 
 - [ ] Every entry above reaches a terminal state (fixed / not-a-defect /
