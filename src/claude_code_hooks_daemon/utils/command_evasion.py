@@ -106,7 +106,7 @@ GIT_GLOBAL_OPTIONS_TAKING_SEPARATE_VALUE: Final[frozenset[str]] = frozenset(
 
 
 def normalise_line_continuations(command: str) -> str:
-    r"""Replace shell line continuations with a plain space.
+    r"""Remove shell line continuations, joining the lines as the shell does.
 
     A backslash immediately before a newline is not part of the command — the
     shell removes it and joins the lines. Every pattern in this daemon was
@@ -115,6 +115,23 @@ def normalise_line_continuations(command: str) -> str:
 
         git reset --hard HEAD        -> denied
         git \<newline> reset --hard  -> ALLOWED
+
+    REMOVED, not replaced with a space. The distinction is invisible between
+    tokens — where the author already wrote the separating space — and decisive
+    inside one, because there the continuation is glue rather than whitespace::
+
+        ec\<newline>ho joined   runs `echo`, printing "joined"
+        echo a\<newline>b       prints "ab"
+
+    Substituting a space SPLIT a token the shell JOINS, and that is the
+    fail-OPEN direction: ``git pu\<newline>sh --force`` is a real force push,
+    and every guard reading through ``get_bash_command`` was handed the
+    harmless ``git pu sh --force`` instead. The same trick reached
+    ``reset --hard`` and every other pattern built on this helper.
+
+    The converse is equally required: ``git\<newline>push --force`` is
+    ``gitpush`` to the shell and runs nothing, so joining must make it STOP
+    matching. Losing that match is the fix working, not a regression.
 
     That predates the global-option bypass and is independent of it: ``\s+``
     simply does not match a backslash. It is also the most innocent vector of
@@ -129,7 +146,7 @@ def normalise_line_continuations(command: str) -> str:
     also collapsed. That is the fail-CLOSED direction — it can only cause a
     guard to look at more text, never less.
     """
-    return _LINE_CONTINUATION_PATTERN.sub(" ", command)
+    return _LINE_CONTINUATION_PATTERN.sub("", command)
 
 
 def compile_command_name_pattern(name: str) -> re.Pattern[str]:

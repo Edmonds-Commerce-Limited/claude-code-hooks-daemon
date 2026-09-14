@@ -76,6 +76,54 @@ class TestNormaliseLineContinuations:
         assert re.search(GIT_INVOCATION + r"reset\b", normalised) is not None
 
 
+class TestAContinuationJoinsRatherThanSeparates:
+    r"""bash REMOVES a backslash-newline; it does not turn it into a space.
+
+    Confirmed against bash itself rather than from memory::
+
+        ec\<newline>ho joined   -> prints "joined"   (the token is `echo`)
+        echo a\<newline>b       -> prints "ab"
+
+    Substituting a space SPLITS a token the shell JOINS, which is the
+    fail-open direction: `git pu\<newline>sh --force` is a real force push,
+    and every guard reading through ``get_bash_command`` saw the harmless
+    `git pu sh --force` instead.
+
+    The surrounding class's framing -- "a shell line continuation is
+    whitespace" -- is where this came from, and it is only true between
+    tokens. Inside one it is the opposite of whitespace: it is glue. Every
+    existing case in that class writes a space BEFORE the backslash, so the
+    two behaviours were indistinguishable there and the wrong one was
+    chosen.
+    """
+
+    def test_a_mid_token_continuation_joins_the_halves(self) -> None:
+        assert normalise_line_continuations("git pu\\\nsh --force") == "git push --force"
+
+    def test_a_continuation_with_no_space_either_side_joins(self) -> None:
+        assert normalise_line_continuations("echo a\\\nb") == "echo ab"
+
+    def test_a_split_git_binary_name_joins(self) -> None:
+        assert normalise_line_continuations("gi\\\nt push --force") == "git push --force"
+
+    def test_whitespace_already_present_is_preserved_not_doubled(self) -> None:
+        """The between-tokens case every existing test covers, stated exactly.
+
+        Removal is correct here too because the author already wrote the
+        separating space before the backslash.
+        """
+        assert normalise_line_continuations("git \\\nreset --hard") == "git reset --hard"
+
+    def test_a_join_that_produces_no_real_command_is_left_unmatched(self) -> None:
+        r"""``git\<newline>push`` is ``gitpush`` to bash, and must not read as git.
+
+        The space substitution made this LOOK like a force push. Nothing runs
+        here, so denying it would be a false positive -- the fix has to lose
+        that match, not keep it.
+        """
+        assert normalise_line_continuations("git\\\npush --force") == "gitpush --force"
+
+
 # A path with no "git" substring anywhere: a path ending in ".git" lets a
 # `\bgit` anchor match inside the PATH and mask a broken fragment.
 _SAFE_PATH = "/srv/project"

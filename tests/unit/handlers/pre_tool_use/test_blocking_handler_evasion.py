@@ -18,6 +18,7 @@ The three vectors, all confirmed against the live daemon:
 * ``sudo`` own options     — ``sudo -H pip install``
 * path-qualified binaries  — ``/usr/bin/sed``, ``| /bin/bash``
 * line continuations       — ``git \<newline> reset --hard``
+                             and ``git re\<newline>set --hard``
 
 The last one is the most innocent and the oldest: it defeated the ORIGINAL bare
 patterns too, long before global options were considered, because ``\s+`` does
@@ -25,6 +26,14 @@ not match a backslash. Nobody writes it to evade anything — they write it
 because the command is long. It is fixed by normalising at the boundary
 (``get_bash_command``), not by widening patterns, so these cases also guard
 against a handler regressing to reading ``tool_input`` directly.
+
+Both POSITIONS matter, and only the first was covered for a long time. Between
+tokens the author has already written the separating space, so joining the
+lines and substituting a space are indistinguishable — and the normaliser
+substituted. Inside a token they are opposites: bash joins ``re``+``set`` into
+``reset`` and runs it, while a space yields ``git re set --hard``, which no
+pattern matches. That made every guard built on this helper evadable by
+splitting a word across two lines.
 
 Handlers must fail CLOSED. A false positive here is acceptable and already
 documented as intended; a silent bypass is not.
@@ -67,6 +76,15 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             # Line continuations: defeated the ORIGINAL bare pattern too.
             "git \\\n  reset --hard HEAD",
             f"git \\\n  -C {_SAFE_PATH} \\\n  reset --hard HEAD",
+            # MID-TOKEN continuations. Every case above puts the backslash
+            # between tokens, where the author already wrote the separating
+            # space -- so they could not tell joining from space-substitution,
+            # and the normaliser substituted. Inside a token the two differ:
+            # bash joins `re`+`set` into `reset` and runs it, while a space
+            # produced `git re set --hard`, which matched nothing.
+            "git re\\\nset --hard HEAD",
+            "gi\\\nt reset --hard HEAD",
+            "git reset --ha\\\nrd HEAD",
         ),
     ),
     "BashSafeModeHandler": (

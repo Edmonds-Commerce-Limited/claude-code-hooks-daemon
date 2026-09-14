@@ -235,6 +235,90 @@ rather than an edit.
   reads through `get_bash_command` in both `matches()` and `handle()`.
   Verified live by re-running the denied command after a daemon restart.
 
+- [x] ✅ **N7**: a word split across two lines evaded EVERY blocking handler.
+
+  **Found**: chasing N6's defect class outwards. `daemon_location_guard` reads
+  `tool_input` directly rather than through `get_bash_command`, so it gets no
+  line-continuation normalisation — and checking what that normalisation
+  actually does turned up something much worse than the false positive being
+  chased.
+
+  **Evidence, from bash itself rather than from memory:**
+
+  ```text
+  ec\<newline>ho joined   ->  prints "joined"   (the token is `echo`)
+  echo a\<newline>b       ->  prints "ab"
+  ```
+
+  The shell REMOVES a backslash-newline and joins the halves into one word.
+  `normalise_line_continuations` substituted a SPACE, which splits the word
+  instead. Against the real `DestructiveGitHandler`:
+
+  | command                           | before | bash runs           |
+  | --------------------------------- | ------ | ------------------- |
+  | `git push --force origin main`    | DENY   | a force push        |
+  | `git pu\<newline>sh --force …`    | ALLOW  | the same force push |
+  | `git push --fo\<newline>rce …`    | ALLOW  | the same force push |
+  | `gi\<newline>t push --force …`    | ALLOW  | the same force push |
+  | `git re\<newline>set --hard HEAD` | ALLOW  | a hard reset        |
+
+  Every guard reading a command through `get_bash_command` was evadable by
+  splitting any word across two lines — `destructive_git`, `sed_blocker`,
+  `pipe_blocker`, all of them.
+
+  **Why it survived so long, which is the part worth keeping.** The helper's
+  own docstring states the correct rule — "the shell removes it and joins the
+  lines" — directly above code that substituted a space. Both the summary line
+  and every existing test wrote the continuation BETWEEN tokens
+  (`git \<newline> reset`), where the author has already typed the separating
+  space and joining is indistinguishable from substituting. Inside a word they
+  are opposites: there the continuation is glue, not whitespace. The framing
+  "a line continuation is whitespace" is true in the tested position and false
+  in the untested one, and the tests were written from the framing.
+
+  **Fixed**: the continuation is removed rather than replaced. The converse is
+  now asserted too — `git\<newline>push` is `gitpush` to the shell, runs
+  nothing, and must STOP being reported as a force push, so losing that match
+  is the fix working. Mid-token spellings were added to
+  `test_blocking_handler_evasion.py`, whose header had named only the
+  between-token form.
+
+- [ ] 🔄 **N8**: the same newline blindness, in the other direction — four
+  handlers deny an unrelated command on the NEXT line.
+
+  **Found**: the survey that produced N7. Seven sites use a negated separator
+  class that omits `\n`, or a `\s+` in front of one, against a RAW multi-line
+  command. Four are defects; each has the same control — joining the two lines
+  with `&&` instead of a newline reverses the verdict, so it is an
+  implementation fact rather than a policy.
+
+  | site                         | evidence                                                                           |
+  | ---------------------------- | ---------------------------------------------------------------------------------- |
+  | `destructive_git` push-force | `git push origin main` ⏎ `grep -f patterns.txt notes.txt` → denied as a force push |
+  | `destructive_git` update-ref | `git update-ref refs/heads/backup HEAD` ⏎ `git branch -d refs/heads/old` → denied  |
+  | `ancestry_preserving_merge`  | `git merge origin/main` ⏎ `echo --squash is what we avoid` → denied                |
+  | `daemon_location_guard`      | bare `cd` ⏎ `.claude/hooks-daemon/bin/hooks-daemon status` → denied                |
+
+  The `-f` in the first row belongs to `grep`. The second denies `git branch -d`, which is the SAFE delete the daemon's own rules table tells you to use
+  instead of `-D`. The third denies prose that merely names the flag. The
+  fourth denies exactly what its own deny message tells you to do instead.
+
+  Each site carries a comment asserting the boundary holds and naming only
+  `;`, `&` and `|` — including one added by the earlier fix for this very
+  class. The comments are load-bearing: each is the reason the next reader does
+  not re-check.
+
+  Cleared, so the next person does not re-derive it:
+  `compile_command_name_pattern` also crosses newlines, but its contract
+  requires a caller-supplied single segment and a newline is itself a segment
+  separator; `merge_to_main_approval` is unaffected (verified, not assumed).
+
+  **Graduated** rather than fixed here: four blocking handlers, patterns whose
+  loosening has evasion consequences, and an ordering constraint —
+  `daemon_location_guard` must be routed through `get_bash_command` BEFORE its
+  gap is tightened, or the false positive becomes a hole. Dedupe scout checked
+  23 live plans: no existing plan covers it.
+
 ## Success Criteria
 
 - [ ] ⬜ Every entry above is in a terminal state: fixed, ruled not-a-defect,
