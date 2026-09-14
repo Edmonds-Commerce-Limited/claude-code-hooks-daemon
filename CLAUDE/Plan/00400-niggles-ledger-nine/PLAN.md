@@ -227,6 +227,45 @@ rather than an edit.
   would have caught it — grep the claim's own wording before filing — costs one
   command.
 
+- [ ] ⬜ **N4**: `budget_exhaustion_detector` fires on SOURCE CODE surfaced in a
+  `ps` listing, and demands a loud user-facing banner for a budget nothing hit.
+
+  **Found**: running `ps -eo pid,etime,args` to check whether a QA run was still
+  alive. Recorded late — it was reported in conversation when it happened and
+  not written down, which is the failure this ledger exists to prevent.
+
+  **Evidence**. The PostToolUse hook returned:
+
+  ```text
+  BUDGET EXHAUSTION DETECTED ... Matched text: 'exceeded the {SOCKET_TIMEOUT_SECONDS:g}s budget'
+  You MUST surface this to the user VERY CLEARLY ... Lead with a bold banner
+  ```
+
+  Nothing was exhausted. The match came from the `ps` argv of a pytest fixture's
+  hook-wrapper subprocess, whose Python SOURCE contains that f-string.
+
+  **The gap, stated against the handler's own design.** It already excludes
+  `Read`/`Grep`/`Glob`/`Edit`/`Write` because their response is "what a file
+  merely SAYS, not a live budget signal", and excludes Bash commands naming its
+  own ledger or module. Bash is otherwise NOT excluded, deliberately — a Bash
+  command can hit a real budget. But a process listing surfaces OTHER programs'
+  source code in argv, so source text reaches the matcher through a path the
+  file-content exclusions were built to close.
+
+  **Proposed discriminator, narrower than excluding `ps`**: the matched text
+  contained `{SOCKET_TIMEOUT_SECONDS:g}` — an UNEXPANDED format placeholder. A
+  real rendered budget message always has its placeholders substituted; only
+  source code still carries them. Suppressing a match whose span contains an
+  unexpanded `{...}` placeholder therefore costs no true positives, and unlike a
+  `ps`/`pgrep` command exclusion it also covers source surfaced by `cat`, a
+  heredoc echo, or a stack trace.
+
+  **Why it is worth fixing rather than tolerating**: the handler does not merely
+  advise, it instructs the agent to lead with a bold alarm banner. A detector
+  that cries wolf trains its reader to discount it — the same reasoning
+  `journal-entry-future-dated` used to stay EDIT-stage-only rather than emit
+  findings nobody can act on.
+
 ## Success Criteria
 
 - [ ] Every entry above reaches a terminal state (fixed / not-a-defect /
