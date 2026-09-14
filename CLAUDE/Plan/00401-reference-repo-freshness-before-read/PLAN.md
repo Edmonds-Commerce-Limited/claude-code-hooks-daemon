@@ -161,8 +161,17 @@ Each is a rule the implementation must not be able to violate:
   and `{}` (swept, governs nothing) are deliberately different answers. 24 tests;
   package coverage 100%.
 
-- [ ] ⬜ **Task 1.5**: `report.py` — one renderer used by every surface, so the
-  three consumers cannot drift in what they say.
+- [x] ✅ **Task 1.5**: `report.py` — one renderer used by every surface, so the
+  three consumers cannot drift in what they say. Only repos NEEDING ATTENTION
+  are listed: an all-clear is one line and a project governing nothing says
+  nothing, which is what keeps the uncheckable canary off the top of every
+  report. `NOT VERIFIED` is a distinct headline from `stale` — "nobody checked"
+  and "this is out of date" demand different responses, and collapsing them
+  would either cry wolf or give false comfort. `remediation_command` returns ONE
+  command (a reader given three runs none), `--ff-only` never a plain pull, with
+  wrong-branch outranking behind, and NOTHING at all for a dirty repo because
+  every mechanical remedy there moves a tree holding uncommitted work.
+  17 tests; package coverage 100%.
 
 ### Phase 2: Config
 

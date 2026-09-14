@@ -28,10 +28,17 @@ from claude_code_hooks_daemon.reference_repos.discovery import (
 from claude_code_hooks_daemon.reference_repos.inspection import inspect_repo
 from claude_code_hooks_daemon.reference_repos.model import Checkability, RepoState
 from claude_code_hooks_daemon.reference_repos.refresh import RefreshOutcome, refresh_repo
+from claude_code_hooks_daemon.reference_repos.report import (
+    NOT_VERIFIED_HEADLINE,
+    remediation_command,
+    repo_line,
+    report_lines,
+)
 
 __all__ = [
     "DEFAULT_MAX_DEPTH",
     "DEFAULT_TTL_SECONDS",
+    "NOT_VERIFIED_HEADLINE",
     "Checkability",
     "RefreshOutcome",
     "RepoState",
@@ -40,5 +47,8 @@ __all__ = [
     "discover_reference_repos",
     "inspect_repo",
     "refresh_repo",
+    "remediation_command",
+    "repo_line",
+    "report_lines",
     "write_cache",
 ]
