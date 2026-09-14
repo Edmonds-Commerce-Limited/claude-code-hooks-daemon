@@ -137,8 +137,9 @@ rather than an edit.
   deliberately and asserts the finding DOES fire, so the behaviour CI caught by
   accident is now asserted on purpose.
 
-- [ ] ⬜ **N3**: `cancel-in-progress: false` does NOT give every sha on `main` a
-  CI result, and `qa.yml` asserts that it does.
+- [x] ✅ **N3**: FIXED (comment) / NOT A DEFECT (behaviour) — `qa.yml` asserted a
+  per-sha guarantee the config does not provide, and kept asserting it after the
+  claim had already been corrected in the plan that introduced it.
 
   **Found**: checking CI before archiving Plan 00398, whose implementation
   commit turned out to have no CI evidence at all.
@@ -174,22 +175,47 @@ rather than an edit.
   commits. `ec18062d` is Plan 00398's implementation commit; citing it as
   delivery evidence would cite a run that does not exist.
 
-  **Not ruled — the fix trades runner cost against evidence**:
+  **CORRECTION — I presented this as needing an owner ruling between three
+  options. It did not: the behaviour was ALREADY RULED.**
+  [Plan 00393](../Completed/00393-niggles-ledger-seven/PLAN.md) N2 observed the
+  identical eviction (`268cbc77` and `57d6b435` both cancelled while pending,
+  `a64dca90` surviving three pushes), corrected the "every sha gets a result"
+  claim in place, and judged it explicitly:
 
-  1. **Per-sha concurrency group on the default branch**
-     (`group: qa-${{ github.ref }}-${{ github.sha }}`). Every sha gets its own
-     group, so nothing queues and nothing is evicted. Guarantees the property
-     the comment claims, at the cost of running CI for every sha in a rapid
-     series.
-  2. **Accept, and correct the comment.** A later green run covers the earlier
-     content, so `main` is still verified — just not per-sha. Cheapest, but the
-     release-slate gate and plan criteria keep wanting a specific sha.
-  3. **Keep the behaviour, make the gap visible** — have the release-slate check
-     report "this sha has no run" distinctly from "this sha failed", so the
-     absence is never read as a pass.
+  > The PRODUCT behaviour is fine — Plan 00359's gate needs HEAD's exact sha
+  > green, HEAD is always the newest pending run, and that one executes.
+  > Intermediate commits lacking CI is ordinary.
 
-  Whichever is chosen, the comment must stop asserting a guarantee the config
-  does not provide.
+  **Verified against this session's own runs rather than taken on trust** —
+  every cancellation was followed by the next sha running:
+
+  ```text
+  ec18062d  cancelled  ->  8867803e  ran
+  a06bd799  cancelled  ->  764d7c2f  ran
+                           a7d0fb7b  success
+  ```
+
+  HEAD always gets a run. The release-slate gate is therefore never starved, and
+  a plan that wants delivery evidence cites a later green sha containing the
+  work — which is exactly what Plan 00398 did.
+
+  **So the behaviour is NOT A DEFECT, and what actually survived was narrower**:
+  a documentation-SSoT failure. Plan 00393 corrected the claim in its PLAN.md but
+  never corrected `qa.yml`, so the artefact a reader actually sees kept asserting
+  the falsehood. The truth lived in a closed plan while the lie lived in the
+  config.
+
+  **FIXED**: the comment now states what the config does — `false` protects the
+  RUNNING run only, one pending run per group, the property holds for two
+  concurrent pushes and breaks from the third on — and says to cite a later
+  green sha that contains the work.
+
+  **The pattern, recorded because this is its second appearance.** Plan 00393's
+  journal named it: "I stated a result one step beyond what I had observed."
+  Here I observed one sha with no run and claimed a live defect needing a
+  ruling, without checking whether it had already been ruled. The check that
+  would have caught it — grep the claim's own wording before filing — costs one
+  command.
 
 ## Success Criteria
 

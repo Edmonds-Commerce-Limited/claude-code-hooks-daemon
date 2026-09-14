@@ -9,12 +9,20 @@ on:
 
 concurrency:
   group: qa-${{ github.ref }}
-  # Never cancel a run on the default branch. Plan 00359's release-slate gate
-  # requires HEAD's EXACT sha to be CI-green, and plan completion criteria cite
-  # a specific commit, so a cancelled run on main destroys the only evidence
+  # Never KILL a running run on the default branch. Plan 00359's release-slate
+  # gate requires HEAD's EXACT sha to be CI-green, and plan completion criteria
+  # cite a specific commit, so killing a run on main destroys the only evidence
   # either one can use. Superseded runs are still cancelled on a PR branch,
-  # where only the tip matters. With this false, a later push QUEUES behind the
-  # running job rather than killing it, so every sha on main gets a result.
+  # where only the tip matters.
+  #
+  # LIMIT, do not mis-read this as a per-sha guarantee (Plan 00400 N3): false
+  # protects the run that is ALREADY RUNNING, and nothing more. GitHub allows
+  # only ONE pending run per concurrency group, so while one run is in progress
+  # a third push cancels the second before it ever starts — it ends with zero
+  # jobs, which is a cancellation rather than a failure and so reads as noise.
+  # The property holds for two concurrent pushes and breaks from the third on.
+  # A sha pushed into a busy window and superseded before it starts therefore
+  # gets NO result at all; cite a later green sha that contains it instead.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
