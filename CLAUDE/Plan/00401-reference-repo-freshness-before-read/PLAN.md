@@ -261,3 +261,28 @@ Each is a rule the implementation must not be able to violate:
 - Filed from an owner report that agents reason from stale reference repos
   across projects. Dedupe scout checked 22 live plans: no overlap; 00178/00179
   are the portable prior art.
+- Delivered across `9e399219`…`7a43abf6`: the checker package and config
+  (Phases 1–2), the SessionStart sweep (`10520648`), the PreToolUse backstop
+  (`97764ef9`), the CLI (`84524579`) and the docs (`7e7df501`).
+- **Four defects, none of which a passing test suite would have surfaced.**
+  Each was found by using the finished thing rather than by adding more tests
+  of the kind already written, and each now has a regression test:
+  - `984e2c92` — a failed fetch read as an all-clear. Pointed the CLI at this
+    repo's real canary (unreachable origin, `git fetch` exits 128) and it
+    printed `all 1 up to date`. `refresh_repo` already knew; all three
+    consumers were dropping the outcome and keeping only `.state`.
+  - `7e7df501` — the handler DENIED the commit shipping its own documentation.
+    `_CHAIN_SEPARATORS` includes `\n`, so every line of a heredoc commit
+    message parsed as a command reading a governed repo.
+  - `f80e0657` — `git -C <repo> pull` was exempt but `cd <repo> && git pull`
+    was not, blocking the obvious form of the remedy the deny message prints.
+    Also the seventh registration gate, which CI caught and local runs did not:
+    the default config template lives in `init_config.py` and is tested from
+    `tests/daemon/`, not the `tests/unit/daemon/` subset being run.
+  - `7a43abf6` — the Bash parser was blind to `cat 'path'`, `cat "path"` and
+    `--file=path`. `split()` leaves quotes attached to the word, so the
+    plainest quoted read matched no governed root at all.
+- The last of those is the one worth remembering: a false POSITIVE is loud and
+  gets fixed, while a false NEGATIVE is silent — and silence from a freshness
+  gate reads as "that repo is fine", which is exactly the confident, wrong
+  conclusion this plan exists to prevent.
