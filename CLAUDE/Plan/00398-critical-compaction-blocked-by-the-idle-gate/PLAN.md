@@ -80,6 +80,64 @@ choice is therefore between options 1, 2 and 4, every one of which trades
 against the human's unsent text. That is precisely Plan 00168's H2, recorded as
 BY DESIGN, so revisiting it needs a fresh ruling made on accurate premises.
 
+## THE ACTUAL DEFECT — the box gate is UNBOUNDED, and that is the over-sensitivity
+
+The owner asked whether the gate is "over sensitive". It is, but not where the
+earlier revisions of this plan looked. The two blocking causes log differently
+and are wildly asymmetric:
+
+```text
+noop: session busy (composing)              281  <- keystroke inside the idle floor
+injection deferred: input box not empty   20755  <- text SITTING in the box
+```
+
+The idle floor is `_DEFAULT_IDLE_FLOOR_SECONDS = 2.0` — two seconds, cleared by
+the next 2s poll. It is not the problem and should not be touched.
+
+**The box gate has no bound at all.** 20593 of 20755 deferral ticks (99.2%) fall
+inside runs longer than two minutes, across only 32 runs:
+
+```text
+17975 ticks  09-03 20:26 -> 09-04 06:26     (~10 hours)
+  830 ticks  08-13 17:01 -> 08-13 17:28
+  448 ticks  08-13 16:45 -> 08-13 17:00
+```
+
+**The 10-hour run ends at URGENT, still blocked** — this is the reported symptom
+captured in the log:
+
+```text
+2026-09-04T06:26:49  noop: session busy (composing) [urgent]
+2026-09-04T06:26:55  noop: session busy (composing) [urgent]
+```
+
+**What is NOT established.** Whether the box was genuinely non-empty or the
+tracker was STUCK cannot be told from this window: no submission occurred inside
+it, and a submission is the only event that would have forced a clear. The run
+is overnight, so "the human left text in the box and went to bed" explains it at
+least as well. An earlier revision of this plan asserted a stuck tracker; that
+claim is withdrawn as unproven.
+
+**This reframes the fix and REMOVES most of the ruling.** The question is no
+longer "should CRITICAL override the human's unsent text" (options 1/2/4, all
+costly). It is "should a gate meant to cover the seconds a human is mid-sentence
+still hold after ten hours". Bounding it keeps the invariant the gate exists for
+— never type into a box someone is actively using — while ending the state where
+an absent human's abandoned fragment prevents compaction indefinitely.
+
+## LATENT, unproven, recorded so it is not lost
+
+`_LINE_CLEAR_BYTES` is `{CR, LF, Ctrl-U, Ctrl-C}` and `_LINE_BACKSPACE_BYTES` is
+`{0x08, 0x7F}`. **Ctrl-W (0x17) and Ctrl-K (0x0B) are in neither**, so they
+empty the REAL box while being APPENDED here as literal bytes, leaving the
+tracker permanently non-empty until an Enter arrives. The bracketed-paste latch
+(line 685) has the same shape: while `_in_paste` is True every byte is appended
+INCLUDING Enter, so a missed paste-end would make the buffer unclearable.
+
+Neither is evidenced in this log. Both are cheap to cover with a unit test and
+would produce exactly the unbounded runs measured above, so they are worth
+testing whether or not they turn out to be the cause.
+
 ## Why the gate exists — the trade-off any fix must pay
 
 The gate is not arbitrary. Injecting into a TUI that has half-typed human text
