@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00403: upstream issue reporting sop](00403-upstream-issue-reporting-sop/PLAN.md) - In Progress (a client project reporting a daemon defect to this PUBLIC repo has no procedure, and all three existing routes leak client config, env files and hostnames unredacted)
+
 - [00402: restart path leaves generated handler doc stale](00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md) - Not Started (a restart regenerates the `CLAUDE.md` block but never `.claude/HOOKS-DAEMON.md`, which sat a whole handler short for days and no test could see it. Regenerating on restart is the WRONG fix — that file's marker is the deployed-from version `upgrade.sh` reads. Graduated from 00400 N6; blocked on a ruling)
 
 - [00401: reference repo freshness before read](00401-reference-repo-freshness-before-read/PLAN.md) - In Progress (agents read reference clones under `untracked/repos/` without pulling, so they reason from a weeks-old checkout and stale reasoning is indistinguishable from correct reasoning; one DRY checker on the repo-agnostic `git_sync`, enforced at PreToolUse from cache, refreshed and safely auto-pulled at SessionStart, reported by a CLI command)
