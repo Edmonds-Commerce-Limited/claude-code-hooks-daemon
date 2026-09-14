@@ -1,0 +1,189 @@
+# Plan 00401: reference repo freshness before read
+
+**Status**: Not Started
+**Created**: 2026-09-14
+**Owner**: joseph
+**Priority**: High
+**Recommended Executor**: Opus
+**Execution Strategy**: Direct
+
+## Overview
+
+Reference repositories are cloned under `untracked/repos/` as a cross-project
+convention. Agents read them without pulling first, so they reason from a
+checkout that may be weeks behind the remote — and **stale reasoning is
+indistinguishable from correct reasoning** at the point it is produced. Nothing
+currently notices.
+
+This plan makes a governed reference repo fresh before it is read, and gives the
+project one DRY checker that reports every reference repo that is stale or off
+its default branch — exposed as a SessionStart sweep and a CLI command.
+
+Prior art is close and directly reusable: Plans 00178 and 00179 solved this for
+the project's OWN repo. `utils/git_sync.py` is already repo-agnostic (every
+function takes `cwd: Path`), so no new git plumbing is needed — only discovery,
+caching, enforcement and reporting.
+
+## Evidence gathered before designing
+
+Measured against the one repo currently under `untracked/repos/` here:
+
+```text
+current_branch : php8.4        default_branch : php8.4
+upstream_status: behind=0, ahead=1
+working_tree_clean: False
+origin: https://invalid.invalid/canary.git  -> Could not resolve host
+```
+
+Three facts that each constrain the design, and would each have produced a
+harmful implementation if assumed away:
+
+1. **The default branch is NOT `main`.** `git_sync.default_branch` resolves
+   `origin/HEAD` correctly (`php8.4`). Anything that hardcodes `main` reports a
+   false "not on default branch" for this repo.
+2. **A reference repo can be un-fetchable BY DESIGN.** The canary's `origin` is
+   deliberately replaced with an invalid URL (Plan 00291's rule: "with no
+   remote, a push cannot happen even by accident"). A system that blocks reads
+   of repos that are "not up to date" would lock this repo out permanently,
+   because it can never be brought up to date.
+3. **A reference repo can be dirty and ahead.** This one is `ahead 1` with
+   uncommitted changes. A blind `git pull` would conflict or destroy work.
+
+Measured cost, which decides the architecture below: `fetch_all` against the
+unreachable origin returns `False` in **0.02s** — fail-silent, no hang. But
+`Timeout.GIT_FETCH_SESSION` and `GIT_PULL_SESSION` are both **30s**, against a
+**30s hook socket budget**.
+
+## Owner rulings
+
+| Question    | Ruling                                                                             |
+| ----------- | ---------------------------------------------------------------------------------- |
+| Enforcement | **Block once per repo, per session** as the DEFAULT — and the mode is configurable |
+| Auto-pull   | **The daemon pulls when provably safe**; reports and never touches otherwise       |
+| Scope       | **Configurable roots, auto-discover** every git checkout beneath them              |
+
+## Architecture: PreToolUse performs NO network I/O
+
+Forced by the measurement above, not by preference. A fetch+pull inside
+PreToolUse can consume the entire 30s socket budget for ONE repo, and there can
+be several — reproducing the `socket_timeout` failure mode the daemon already
+has dedicated error text for.
+
+So the network work happens at **SessionStart**, which already owns that budget
+and already fetches for the project's own repo. By the time any read happens,
+governed repos have been fetched and safely pulled. The PreToolUse handler reads
+**cached state only** and is the backstop for a repo that goes stale mid-session
+or failed the safe-pull.
+
+A cache entry that is missing or past its TTL is treated as NOT VERIFIED, which
+still enforces — it must never silently read as fresh.
+
+## Safety invariants
+
+Each is a rule the implementation must not be able to violate:
+
+- **Un-checkable ⇒ never blocks.** No origin, unreachable, or no upstream is
+  reported once and then stays out of the way. This is what keeps the canary
+  usable.
+- **Dirty, ahead, or diverged ⇒ never pulled.** Report only. Reuses the refusal
+  logic already proven in `git_upstream_checker._auto_pull`.
+- **The remediation command is exempt.** A handler that blocks
+  `git -C untracked/repos/foo pull` makes its own instruction unreachable. The
+  git commands that inspect or update a governed repo must pass through.
+- **The daemon's own pull must not re-enter** the interception path.
+
+## Goals
+
+- A governed reference repo is fresh before an agent reads it, or the agent is
+  told it is not.
+- One checker, three surfaces (PreToolUse, SessionStart, CLI) that cannot drift.
+- The convention works unchanged in any project that adopts it, with zero config
+  for the default root.
+
+## Non-Goals
+
+- Managing what is cloned, or cloning anything. This plan governs freshness of
+  repos that already exist.
+- Pulling a repo that is dirty, ahead or diverged — reported, never resolved.
+- Governing the project's own repository; Plans 00178/00179 already do that.
+
+## Tasks
+
+### Phase 1: The DRY checker (`reference_repos/` package)
+
+- [ ] ⬜ **Task 1.1**: `discovery.py` — enumerate git checkouts under configured
+  roots, apply exclude globs. Reuse `utils/path_exclusion.py`.
+- [ ] ⬜ **Task 1.2**: `model.py` + `inspect.py` — a `RepoState` built from
+  `git_sync` with NO network: branch, default branch, upstream, ahead/behind,
+  dirty, and a `checkable` classification carrying the reason it is not.
+- [ ] ⬜ **Task 1.3**: `refresh.py` — fetch, then `pull_ff_only` ONLY when clean
+  and not ahead. Mirror `git_upstream_checker._auto_pull`'s refusal branches
+  rather than re-deriving them.
+- [ ] ⬜ **Task 1.4**: `cache.py` — JSON TTL cache under `daemon_untracked_dir()`,
+  following `session_start/contract_staleness.py`. Missing/expired reads as NOT
+  VERIFIED, never as fresh.
+- [ ] ⬜ **Task 1.5**: `report.py` — one renderer used by every surface, so the
+  three consumers cannot drift in what they say.
+
+### Phase 2: Config
+
+- [ ] ⬜ **Task 2.1**: Typed top-level `reference_repos` block following
+  `PlanWorkflowQaJournalConfig` (`config/models.py:487-558`): `enabled`,
+  `roots` (default `["untracked/repos"]`), `exclude`, `mode`
+  (`block_once` default, `block`, `advise`, `off`), `auto_pull`,
+  `cache_ttl_minutes`. `extra=forbid`, `Literal` for mode.
+
+### Phase 3: SessionStart sweep (does the network work)
+
+- [ ] ⬜ **Task 3.1**: `session_start/reference_repo_sweep.py` — refresh every
+  governed repo, auto-pull where safe, write the cache, report what it could not
+  make fresh. Silent when everything is clean and current.
+- [ ] ⬜ **Task 3.2**: Bound the report so a project with many repos cannot flood
+  SessionStart. Follow `remote_docs_staleness.py:33,104-105`.
+
+### Phase 4: PreToolUse enforcement (cache only)
+
+- [ ] ⬜ **Task 4.1**: `pre_tool_use/reference_repo_freshness.py` matching
+  `Read`/`Grep`/`Glob` path fields and `Bash` command strings. No shared
+  "does this call touch path X" utility exists — model it on
+  `secret_file_guard.py:107-120`, with Bash paths via
+  `utils/shell_segmentation.py`.
+- [ ] ⬜ **Task 4.2**: Implement the four modes, `block_once` keyed per repo per
+  session (the `lsp_enforcement` precedent).
+- [ ] ⬜ **Task 4.3**: The exemption set — `git` invocations targeting a governed
+  repo (`-C <repo>`, or run from inside it) pass through. Covered by a test that
+  the exact remediation string the deny message prints is NOT blocked.
+
+### Phase 5: CLI
+
+- [ ] ⬜ **Task 5.1**: `bin/hooks-daemon reference-repos [--json]` calling the
+  SAME checker. Follow the `plan-qa` registration shape
+  (`daemon/cli.py:7747-7782`); exit non-zero when any governed repo is stale or
+  off its default branch.
+
+### Phase 6: Documentation
+
+- [ ] ⬜ **Task 6.1**: Document the convention and the handler in the agent tree,
+  including the un-fetchable carve-out, so the canary rule and this system are
+  not read as contradicting each other.
+
+## Success Criteria
+
+- [ ] A stale governed repo cannot be read without the agent being told, in the
+  configured mode.
+- [ ] The canary (`untracked/repos/php-qa-ci`, invalid origin, dirty, ahead) is
+  reported and NEVER blocked and NEVER pulled — covered by a test built from its
+  real shape.
+- [ ] No PreToolUse code path performs network I/O — asserted by a test, not by
+  convention.
+- [ ] `default_branch` is resolved from `origin/HEAD`, so a repo whose default is
+  not `main` is not falsely reported.
+- [ ] The remediation command printed by a deny message is itself allowed.
+- [ ] One checker backs all three surfaces; a behaviour change needs one edit.
+- [ ] Full QA passes and CI is green.
+
+## Delivery & Milestones
+
+- Filed from an owner report that agents reason from stale reference repos
+  across projects. Dedupe scout checked 22 live plans: no overlap; 00178/00179
+  are the portable prior art.
