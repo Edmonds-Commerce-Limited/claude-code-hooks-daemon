@@ -95,6 +95,7 @@ from claude_code_hooks_daemon.docs_qa.comment_finder import DEFAULT_MIN_BLOCK_LI
 from claude_code_hooks_daemon.install.install_stamp import read_install_stamp
 from claude_code_hooks_daemon.install.release_notes import load_release_notes_between
 from claude_code_hooks_daemon.issue_report.build import build_report
+from claude_code_hooks_daemon.issue_report.upstream import filing_command
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.hook_registration import (
@@ -7404,6 +7405,12 @@ def cmd_issue_report(args: argparse.Namespace) -> int:
         release_notes=notes,
         latest_version=latest,
         home=Path.home(),
+        # The last backstop over the fields the reporter TYPED. Everything else
+        # this generator does is "never collect it"; free text is the one place
+        # that cannot reach, and a project's declared list is the only thing
+        # that knows which strings matter. Resolved here rather than inside
+        # assembly so assembly stays a pure function.
+        blocked_terms=get_active_secret_terms(),
     )
 
     if report.problems:
@@ -7430,8 +7437,10 @@ def cmd_issue_report(args: argparse.Namespace) -> int:
     print(f"Issue report written to: {output_path}")
     print(
         "\nRead it before filing. It carries no hostname, no config dump and no logs — "
-        "check the prose you wrote says nothing it should not, then file it with "
-        f"`gh issue create --body-file {output_path}`."
+        "check the prose you wrote says nothing it should not, then file it with:\n\n"
+        f"  {filing_command(str(output_path))}\n\n"
+        "`--repo` is not optional there: without it `gh` takes the target from the "
+        "working directory, which in a client project is the CLIENT'S own tracker."
     )
     return 0
 

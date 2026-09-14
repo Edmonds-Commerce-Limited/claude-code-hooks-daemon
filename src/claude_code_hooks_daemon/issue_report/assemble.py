@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.issue_report.block_words import first_blocked_term_problem
 from claude_code_hooks_daemon.issue_report.provenance import render_document
 from claude_code_hooks_daemon.issue_report.reproduction import check_reproduction
 from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
@@ -190,6 +191,7 @@ def assemble_report(
     *,
     project_root: Path | None = None,
     home: Path | None = None,
+    blocked_terms: tuple[str, ...] = (),
 ) -> AssembledReport:
     """Build a filable issue document, or explain why it cannot be built.
 
@@ -200,6 +202,10 @@ def assemble_report(
             the free-text fields. Optional so this stays a pure function that
             a test can drive without a filesystem.
         home: The user's home directory, whose name is usually their username.
+        blocked_terms: The project's gitignored block-word list. A match
+            REFUSES the report rather than redacting it — see
+            :mod:`...issue_report.block_words` for why those two answers are
+            not interchangeable here.
 
     Returns:
         An :class:`AssembledReport`. On success it carries the document with
@@ -207,6 +213,14 @@ def assemble_report(
         EMPTY document.
     """
     problems = _field_problems(fields)
+
+    # Collected alongside the field problems rather than after them, so a
+    # report with both faults reports both — and checked BEFORE anything is
+    # rendered, because the guarantee is that the document never exists.
+    blocked = first_blocked_term_problem(fields, blocked_terms)
+    if blocked is not None:
+        problems.append(ReportProblem(reason=blocked))
+
     if problems:
         return AssembledReport(problems=tuple(problems))
 

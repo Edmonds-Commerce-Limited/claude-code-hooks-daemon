@@ -1,0 +1,24 @@
+name: Something else
+description: A question, a documentation problem, or an idea — anything that is not a defect.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form asks for no structure, deliberately. It exists so that turning
+        blank issues off costs nobody a route in — a question that has to be
+        dressed up as a bug report is a question that does not get asked.
+
+        One rule still applies, and it is the same one: **this tracker is
+        public and an issue cannot be retracted.** Leave out config dumps,
+        logs, credentials, and any path or URL that identifies you or a client.
+
+        If the daemon is behaving differently from what its documentation says
+        it does, use the **Daemon defect** form instead — its fields are the
+        ones a maintainer needs, and filling them in is most of the diagnosis.
+
+  - type: textarea
+    id: body
+    attributes:
+      label: What is on your mind
+    validations:
+      required: true

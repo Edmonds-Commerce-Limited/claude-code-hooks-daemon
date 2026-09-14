@@ -89,6 +89,68 @@ rather than an edit.
 
   **Fixed** in `6787874f`: `391 + 13 = 404. ✅`.
 
+- [ ] 🔄 **N3**: `secret_file_guard` matches a dotted PYTHON MODULE PATH against
+  its protected-path globs, and did so inconsistently.
+
+  **Found**: writing a new module under `issue_report/` while building Plan
+  00403\. The module's own file was created without complaint; an `Edit` whose
+  content referenced it by dotted path was then denied.
+
+  **Evidence.** The deny named the token and the glob:
+
+  ```text
+  Matched protected glob: `*.secret*`
+  Matched on this token from your input:
+    `claude_code_hooks_daemon.issue_report.secret_terms`
+  ```
+
+  A dotted module path is not a filesystem path, and `*.secret*` matching it is
+  a coincidence of the separator. Erring toward blocking is the right default
+  for this handler, so the fnmatch is defensible on its own.
+
+  **What is NOT yet established, and is the part worth investigating.** The
+  same write that was denied also contains
+  `claude_code_hooks_daemon.utils.secret_redaction` — an existing module whose
+  dotted path matches `*.secret*` by exactly the same reasoning — and that
+  token was not named in the deny. Two tokens of the same shape, one reported
+  and one not, in one input. Either the guard stops at the first match (in
+  which case the message should say so, because "matched on this token" reads
+  as exhaustive), or the two are treated differently and the reason matters.
+
+  **Worked around, not fixed**: the new module is named `block_words.py`, after
+  the list's own filename, which is arguably the better name anyway. The
+  workaround is recorded in its docstring so nobody renames it back. The
+  inconsistency above is the open part of this entry.
+
+- [x] ✅ **N4**: Three documents told the reader to run a flag that does not
+  exist.
+
+  **Found**: writing the issue form's "daemon version" field for Plan 00403 and
+  running the command before documenting it.
+
+  **Evidence.** `bin/hooks-daemon --version` exits non-zero:
+
+  ```text
+  claude-hooks-daemon: error: unrecognized arguments: --version
+  ```
+
+  Three documents prescribed it — the two upgrade guides' **Verification**
+  sections (`v3.60-to-v3.61`, `v3.62.1-to-v3.63.0`), where it is step 1 of
+  confirming the upgrade worked. A verification step that errors out either
+  gets skipped or reads as a failed upgrade; neither is what those guides mean.
+
+  `TROUBLESHOOTING.md` §11 was wrong a second way: it said "the version number
+  is displayed in the status output", and `status` prints PID, socket, PID file
+  and listener count with no version anywhere.
+
+  **Why it went unnoticed.** Both claims are the kind nobody re-reads: one is
+  the step you skim past on a successful upgrade, and the other is in a section
+  people reach only when something else has already gone wrong.
+
+  **Fixed**: all three now name `bin/hooks-daemon release-notes`, whose first
+  heading carries the installed version, and say explicitly that no `--version`
+  flag exists so the next person does not retry it.
+
 ## Success Criteria
 
 - [ ] ⬜ Every entry above is in a terminal state: fixed, ruled not-a-defect,

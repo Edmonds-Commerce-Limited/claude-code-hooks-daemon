@@ -38,8 +38,10 @@ that owns the depth for every fact. The audience split (agent tree vs human
 | [UPGRADES/](UPGRADES/README.md)                                        | Version upgrade guides, truth-changes and config-changes manifests                  |
 | [development/](development/CLAUDE.md)                                  | Daemon-repo contributor docs (QA patterns, releasing, lessons, client-mode testing) |
 
-Troubleshooting and bug reporting live at the repo root:
-[../BUG_REPORTING.md](../BUG_REPORTING.md).
+Reporting a daemon defect upstream lives at the repo root:
+[../BUG_REPORTING.md](../BUG_REPORTING.md) — the whole procedure, including
+what to establish before filing and the one rule about private material.
+Troubleshooting is [../docs/guides/TROUBLESHOOTING.md](../docs/guides/TROUBLESHOOTING.md).
 
 ## What NOT to Put Here
 

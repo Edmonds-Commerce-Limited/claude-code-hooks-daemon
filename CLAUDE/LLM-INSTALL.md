@@ -562,7 +562,11 @@ handlers:
 
 ## Troubleshooting Common Issues
 
-**For comprehensive troubleshooting, see [BUG_REPORTING.md](../BUG_REPORTING.md)**
+**For comprehensive troubleshooting, see
+[docs/guides/TROUBLESHOOTING.md](../docs/guides/TROUBLESHOOTING.md). To report a
+daemon defect upstream, follow [BUG_REPORTING.md](../BUG_REPORTING.md) — it is
+the whole procedure; an agent drives it with the `hooks-daemon` skill, args
+`issue-report`.**
 
 ### Quick Diagnostics
 
@@ -571,7 +575,8 @@ handlers:
 <!-- ssot-anchor: debug-report-snippet -->
 
 ```bash
-# Generate the full diagnostic report (attach it to any bug report)
+# A LOCAL diagnostic, for you to read. Never attach it to an issue: it
+# reproduces this project's config, and the tracker is public and permanent.
 .claude/hooks-daemon/scripts/debug_info.py untracked/scratch/debug_report.md
 ```
 
@@ -604,7 +609,7 @@ grep -A 1 "destructive_git:" .claude/hooks-daemon.yaml
 
 1. **Restart Claude session** (required for settings.json changes)
 2. Run debug script to see what's wrong
-3. Check [BUG_REPORTING.md](../BUG_REPORTING.md)
+3. Work through [docs/guides/TROUBLESHOOTING.md](../docs/guides/TROUBLESHOOTING.md) §3
 
 **Layer 2 installer not found (legacy fallback):**
 If you see "Layer 2 installer not found" during install, you are installing an older version that predates the modular architecture. The legacy fallback (uv sync + install.py) will handle the installation. This is expected for tags before the two-layer architecture was introduced.

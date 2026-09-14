@@ -1,0 +1,182 @@
+name: Daemon defect
+description: The hooks daemon behaves differently from what its documentation says it does.
+title: "[defect] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Before anything else: this tracker is PUBLIC
+
+        An issue here cannot be retracted. Editing it leaves the original in the
+        edit history, and deleting it does not reach the copies GitHub has
+        already served, notified and indexed. So the cost of pasting something
+        private is permanent and it is **yours**, while the cost of leaving
+        something out is one comment asking for it.
+
+        **Never paste into this form:**
+
+        - your `hooks-daemon.yaml` or `hooks-daemon.env` in full
+        - daemon logs, hook payloads or transcript excerpts
+        - absolute paths containing a username, hostname or client name
+        - a git remote URL, an internal host, or any credential
+
+        Where you need a path, write `<project>/src/thing.py`. Where you need a
+        config value, name the option and give the value only if it is not
+        specific to you.
+
+        ## If you have the daemon installed, let it do this for you
+
+        ```bash
+        bin/hooks-daemon issue-report --fields <file.json>
+        ```
+
+        It collects exactly the fields below and **never collects** your
+        hostname, git remote, environment file, config dump or logs — they are
+        not scrubbed out afterwards, they are never gathered. It also refuses
+        to build a report that skips the checks this form asks you to do by
+        hand, and it writes a body you file with
+        `gh issue create --body-file <report>`.
+
+        This form is for when you cannot run that — a browser, a machine
+        without the install, a defect that stops the CLI itself.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happens, in one or two sentences
+      description: The behaviour, not your theory about the cause.
+      placeholder: "`sed_blocker` denies `grep foo file | wc -l`, which contains no sed at all."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead, and what says so
+      description: >-
+        Name the documentation, deny message or `explain-rule` output you are
+        reading it from. A defect is a gap between behaviour and a stated
+        promise; without the promise this is a feature request, which is a
+        different form and a different conversation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: What actually happened
+      description: >-
+        The exact behaviour. If a message was printed, quote the part that
+        matters — not a whole log.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce it from a clean checkout
+      description: >-
+        Numbered steps someone else can run. Keep every path inside a scratch
+        directory and invent the file names — a reproduction that needs your
+        project is one nobody can run. If you genuinely cannot reproduce it,
+        say `CANNOT REPRODUCE` here and describe what you saw instead; that is
+        a useful report, just a weaker one.
+      placeholder: |
+        1. echo 'x' > untracked/scratch/probe.txt
+        2. Run: grep x untracked/scratch/probe.txt | wc -l
+        3. Observe: denied with R-SED-...
+    validations:
+      required: true
+
+  - type: input
+    id: handler
+    attributes:
+      label: Which handler, if it is one
+      description: >-
+        The config key, e.g. `sed_blocker`. Leave this empty if the defect is in
+        the CLI, the installer, the config loader or the supervisor — not every
+        defect belongs to a handler.
+      placeholder: sed_blocker
+    validations:
+      required: false
+
+  - type: textarea
+    id: config_considered
+    attributes:
+      label: Which configuration you ruled out, and why it was not the answer
+      description: >-
+        Name the option(s) you checked and say why each is insufficient.
+        `hooks-daemon explain-handler <name>` prints what a handler honours.
+        This field exists because most reports that turn out not to be defects
+        die here — and finding that out yourself costs you one command, while
+        finding it out through triage costs you days.
+      placeholder: >-
+        `sed_blocker.extra_whitelist` — it whitelists a PIPE PRODUCER, and the
+        command being denied has sed in no pipe stage at all, so there is
+        nothing to list.
+    validations:
+      required: true
+
+  - type: input
+    id: source_citation
+    attributes:
+      label: The line of daemon source you read
+      description: >-
+        `src/claude_code_hooks_daemon/<path>.py:<line>`. Reading the source is
+        what separates a defect from a misunderstanding, and a `file:line` is
+        the part of that a report can carry. It is a lower bound, not a proof —
+        it shows you looked, not that you were right, and that is still worth
+        far more than nothing.
+      placeholder: src/claude_code_hooks_daemon/handlers/pre_tool_use/sed_blocker.py:212
+    validations:
+      required: true
+
+  - type: input
+    id: daemon_version
+    attributes:
+      label: Daemon version
+      description: >-
+        `bin/hooks-daemon release-notes` — its first heading names the version
+        you have installed. If you are not on the latest release, say so: a
+        report from an older version is welcome, but check the notes between
+        yours and the latest first, because the fix may already be out.
+      placeholder: 3.64.0
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: OS, architecture and Python version
+      description: >-
+        e.g. `Linux x86_64, Python 3.12.4`. Not the hostname — the daemon's own
+        generator deliberately omits it, and so should you.
+      placeholder: Linux x86_64, Python 3.12.4
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_mode
+    attributes:
+      label: Install mode
+      options:
+        - normal (installed under .claude/hooks-daemon/)
+        - self-install (this repository IS the daemon)
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: disclosure
+    attributes:
+      label: Before you file
+      options:
+        - label: >-
+            I have re-read what I typed above and it contains no config dump, no
+            logs, no credentials, and no path or URL that identifies me or a
+            client.
+          required: true
+        - label: >-
+            I have checked this is not the handler doing what its configuration
+            asks, and said above which options I ruled out.
+          required: true

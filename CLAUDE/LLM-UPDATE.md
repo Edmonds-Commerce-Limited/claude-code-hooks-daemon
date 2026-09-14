@@ -1172,16 +1172,19 @@ If you encounter update issues:
 <!-- ssot-quote: CLAUDE/LLM-INSTALL.md#debug-report-snippet -->
 
 ```bash
-# Generate the full diagnostic report (attach it to any bug report)
+# A LOCAL diagnostic, for you to read. Never attach it to an issue: it
+# reproduces this project's config, and the tracker is public and permanent.
 .claude/hooks-daemon/scripts/debug_info.py untracked/scratch/debug_report.md
 ```
 
 <!-- /ssot-quote -->
 
-**Report the issue**:
-
-- GitHub: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
-- Include: current version, target version, error output, daemon logs
+**Report the issue**: follow
+[BUG_REPORTING.md](../BUG_REPORTING.md), or use the `hooks-daemon` skill with
+args `issue-report`, which drives the same procedure. It establishes there is a
+defect, then builds
+a filable body carrying your version, platform and install mode — and no
+config, no logs and no paths from your tree.
 
 ---
 

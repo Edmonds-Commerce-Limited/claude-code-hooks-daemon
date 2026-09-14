@@ -129,6 +129,7 @@ def build_report(
     release_notes: Mapping[str, str],
     latest_version: str | None = None,
     home: Path | None = None,
+    blocked_terms: tuple[str, ...] = (),
 ) -> AssembledReport:
     """Verify, then assemble — or refuse with every reason at once.
 
@@ -148,6 +149,8 @@ def build_report(
             release is known to this install", which is the ordinary case and
             is treated as current.
         home: The user's home directory, scrubbed out of the free text.
+        blocked_terms: The project's gitignored block-word list. A match
+            refuses the report, naming only the entry's index.
 
     Returns:
         An :class:`AssembledReport`. On refusal the document is EMPTY — a file
@@ -208,7 +211,9 @@ def build_report(
     # reporter with a blank summary and a dead citation fixes the citation,
     # resubmits, and only then learns about the summary — one refusal per round
     # trip, which is the thing this module exists to avoid.
-    assembled = assemble_report(fields, project_root=project_root, home=home)
+    assembled = assemble_report(
+        fields, project_root=project_root, home=home, blocked_terms=blocked_terms
+    )
     problems.extend(assembled.problems)
 
     if problems:

@@ -22,11 +22,12 @@ case you are in before treating an instruction to add a test here as wrong.
   `.claude/project-handlers/`); run them with
   `.claude/hooks-daemon/bin/hooks-daemon test-project-handlers --verbose`.
   See [Project-Level Handlers Guide](../CLAUDE/PROJECT_HANDLERS.md).
-- **Found a bug** — do NOT fix it here. Write a report to
-  `untracked/scratch/` and ask your human to submit it upstream, following
-  the [Bug Reporting Guide](../BUG_REPORTING.md). That directory is inside the
-  working tree, so the report survives a container restart, and it is
-  gitignored, so it never reaches review. `project_containment` denies an
-  ordinary redirect outside the repository, but it does not cover a path
-  passed to a script as a plain argument — treat it as a backstop, not a
-  guarantee.
+- **Found a bug** — do NOT fix it here. Use the `hooks-daemon` skill with args
+  `issue-report`, or read the [Bug Reporting Guide](../BUG_REPORTING.md): it
+  establishes there is
+  a defect before anything is filed, then generates a body that carries no
+  config, logs or paths from your tree. Working notes go under
+  `untracked/scratch/` — inside the working tree, so they survive a container
+  restart, and gitignored, so they never reach review. `project_containment`
+  denies an ordinary redirect outside the repository, but not a path passed to
+  a script as a plain argument — a backstop, not a guarantee.

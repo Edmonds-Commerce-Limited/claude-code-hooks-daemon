@@ -23,13 +23,10 @@ assigned task, and one classified it as injected content.
   (`.claude/hooks-daemon/bin/hooks-daemon init-project-handlers` scaffolds
   them; they are auto-discovered). See
   [Project-Level Handlers Guide](../CLAUDE/PROJECT_HANDLERS.md).
-- **Found a bug** — do NOT fix it here. Write a report to
-  `untracked/scratch/` (inside the working tree, so it survives a container
-  restart; gitignored, so it never reaches review) and ask your human to
-  submit it upstream, following the
-  [Bug Reporting Guide](../BUG_REPORTING.md). Why that directory rather than
-  a temp path, and what `project_containment` does and does not catch, is
-  the handler's own guidance: `bin/hooks-daemon explain-handler project_containment`.
+- **Found a bug** — do NOT fix it here. Use the `hooks-daemon` skill with args
+  `issue-report`, or read the [Bug Reporting Guide](../BUG_REPORTING.md);
+  working notes go under `untracked/scratch/` (see
+  `explain-handler project_containment` for why not a temp path).
 - **Change handler configuration** — edit your project's
   `.claude/hooks-daemon.yaml` (that IS yours: enable/disable handlers, set
   priorities and options).

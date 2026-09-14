@@ -61,15 +61,14 @@ from claude_code_hooks_daemon.issue_report.provenance import (
     GENERATOR_COMMAND,
     verify_document,
 )
+from claude_code_hooks_daemon.issue_report.upstream import (
+    UPSTREAM_REPO_DISPLAY,
+    UPSTREAM_REPO_SLUG,
+)
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 logger = logging.getLogger(__name__)
-
-#: This project's tracker, in the form ``gh --repo`` takes. Kept as a slug
-#: rather than a URL because every other spelling normalises to it, and the
-#: comparison has to hold for all of them.
-UPSTREAM_REPO_SLUG: Final[str] = "edmonds-commerce-limited/claude-code-hooks-daemon"
 
 #: Shell operators separating one command from the next. Each segment is judged
 #: alone so a ``--repo`` belonging to a neighbouring command cannot decide this
@@ -135,7 +134,8 @@ _RULE = Rule(
         "environment file and no logs. Those are not scrubbed out afterwards; they are "
         "never collected, which is a guarantee an inspection pass cannot make.\n\n"
         "It then writes a document carrying a provenance header, and this gate accepts "
-        f"that file:\n\n    gh issue create --repo {UPSTREAM_REPO_SLUG} --body-file <report>\n\n"
+        f"that file:\n\n    gh issue create --repo {UPSTREAM_REPO_DISPLAY} "
+        "--body-file <report>\n\n"
         "**Read the report before filing it.** The gate proves the body is the one the "
         "generator built, not that the prose you wrote inside it is safe to publish.\n\n"
         "Editing the generated file breaks its digest and is refused, deliberately: a "
@@ -363,7 +363,7 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="issue filing gate - a hand-written body for our own tracker",
                 command=(
-                    f"gh issue create --repo {UPSTREAM_REPO_SLUG} --title x --body 'it broke'"
+                    f"gh issue create --repo {UPSTREAM_REPO_DISPLAY} --title x --body 'it broke'"
                 ),
                 description=(
                     "A `gh issue create` against the hooks-daemon tracker whose body no "

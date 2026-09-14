@@ -117,6 +117,23 @@ If the venv is corrupted (e.g., after a Python upgrade):
 
 This runs `uv sync` to rebuild the virtual environment.
 
+### Symptom: status says NOT RUNNING, but hooks are clearly working
+
+This is normal, not a fault. The daemon starts on the first hook call and shuts
+itself down after an idle period (default 10 minutes), so a status check made
+some time after your last tool call finds nothing running — and the next tool
+call starts it again.
+
+To see it running, check immediately after a hook fires:
+
+```bash
+echo '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' | bash .claude/hooks/pre-tool-use && \
+.claude/hooks-daemon/bin/hooks-daemon status
+```
+
+If the restart delay is what bothers you rather than the status line, raise
+`daemon.idle_timeout_seconds` — see Performance Issues below.
+
 ---
 
 ## 3. Hooks Not Firing
@@ -674,14 +691,17 @@ If you believe the block is incorrect, see [Handler Blocking Too Much](#5-handle
 ### Check your daemon version
 
 ```bash
-.claude/hooks-daemon/bin/hooks-daemon status
+.claude/hooks-daemon/bin/hooks-daemon release-notes
 ```
 
-The version number is displayed in the status output.
+With no flags this prints the notes for the version you have installed, and its
+first heading names that version. There is no `--version` flag, and `status`
+reports the daemon's runtime state rather than its version.
 
 ### Gather debug information
 
-Before reporting an issue, collect this information:
+For your own diagnosis. **This output is not what you file** — see Reporting
+issues below:
 
 ```bash
 # Daemon status
@@ -705,13 +725,21 @@ uname -a
 
 ### Reporting issues
 
-File issues on the GitHub repository with:
+Follow [BUG_REPORTING.md](../../BUG_REPORTING.md) — the whole procedure. An
+agent drives it with the `hooks-daemon` skill, args `issue-report`.
 
-1. **Description** of the problem
-2. **Steps to reproduce** the issue
-3. **Expected behaviour** vs actual behaviour
-4. **Debug information** from the commands above
-5. **Configuration** (your `.claude/hooks-daemon.yaml`, with any sensitive values removed)
+**Do not paste the output gathered above into an issue.** That tracker is
+public and an issue cannot be retracted: editing leaves the original in the
+edit history, and deleting does not reach what GitHub already served, emailed
+and indexed. `config` and `logs` reproduce your project's configuration and
+whatever your session was handling, and "with sensitive values removed" asks
+you to recognise every one of them by eye, once, under no time pressure — which
+is the check that fails.
+
+The generator asks for a controlled field set instead and gathers no hostname,
+git remote, `.env`, config dump or logs at all. In a client project,
+`gh issue create` against the daemon's repository is denied unless the body
+came from it.
 
 ### CLI command reference
 

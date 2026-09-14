@@ -1,0 +1,33 @@
+# Issue routing for a PUBLIC tracker (Plan 00403).
+#
+# `blank_issues_enabled: false` is the load-bearing line, and it is not about
+# tidiness. This repository's issues cannot be retracted by editing or deleting
+# them, and the forms are the ONLY place a web reporter meets the rule about
+# what never to paste. A blank-issue escape hatch would nullify that for
+# exactly the people the forms exist for -- someone filing from a browser, who
+# has no `hooks-daemon issue-report` to run the checks for them.
+#
+# Turning it off costs nothing only because nothing becomes unfileable: the
+# "Something else" form takes free text and asks for no structure at all.
+blank_issues_enabled: false
+
+contact_links:
+  - name: How to report a daemon defect (read this first)
+    url: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/main/BUG_REPORTING.md
+    about: >-
+      The procedure, including what to check before filing and the one rule
+      about private material. If you have the daemon installed, `hooks-daemon
+      issue-report` runs most of this for you and writes a filable body.
+
+  - name: Handler reference — is this configurable rather than broken?
+    url: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/main/docs/guides/HANDLER_REFERENCE.md
+    about: >-
+      Every handler's options and defaults. Most reported "bugs" are a handler
+      doing exactly what its configuration asks; `hooks-daemon explain-handler
+      <name>` answers the same question from your own install.
+
+  - name: Troubleshooting guide
+    url: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/main/docs/guides/TROUBLESHOOTING.md
+    about: >-
+      The daemon will not start, hooks are not firing, a restart did not take
+      effect — the known failures and what clears them.

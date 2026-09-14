@@ -21,6 +21,10 @@ from claude_code_hooks_daemon.issue_report.assemble import (
     ReportProblem,
     assemble_report,
 )
+from claude_code_hooks_daemon.issue_report.block_words import (
+    describe_blocked_term,
+    first_blocked_term_problem,
+)
 from claude_code_hooks_daemon.issue_report.build import build_report
 from claude_code_hooks_daemon.issue_report.citation import (
     CitationVerdict,
@@ -47,12 +51,19 @@ from claude_code_hooks_daemon.issue_report.subsystem import (
     check_handler_name,
     known_handler_keys,
 )
+from claude_code_hooks_daemon.issue_report.upstream import (
+    UPSTREAM_REPO_DISPLAY,
+    UPSTREAM_REPO_SLUG,
+    filing_command,
+)
 
 __all__ = [
     "CANNOT_REPRODUCE_SENTINEL",
     "GENERATOR_COMMAND",
     "PROVENANCE_MARKER",
     "SCRATCH_PREFIX",
+    "UPSTREAM_REPO_DISPLAY",
+    "UPSTREAM_REPO_SLUG",
     "AssembledReport",
     "CitationVerdict",
     "ConfigConsideration",
@@ -69,6 +80,9 @@ __all__ = [
     "check_handler_name",
     "check_reproduction",
     "check_source_citation",
+    "describe_blocked_term",
+    "filing_command",
+    "first_blocked_term_problem",
     "known_handler_keys",
     "render_document",
     "split_document",

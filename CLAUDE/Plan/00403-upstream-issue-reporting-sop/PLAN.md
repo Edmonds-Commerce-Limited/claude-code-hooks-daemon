@@ -31,17 +31,10 @@ the bleeding.
 
 ## The three leaking surfaces (verified, not assumed)
 
-| Surface                                                                           | Emits                                                                                                      | Redaction | Where the docs send it                                                             |
-| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | --------- | ---------------------------------------------------------------------------------- |
-| `scripts/debug_info.py` — what `BUG_REPORTING.md` actually prescribes             | `.claude/hooks-daemon.yaml` verbatim (`:352-357`) and **`.claude/hooks-daemon.env` verbatim** (`:361-368`) | none      | "Paste the contents of the report file" into a GitHub issue                        |
-| `bin/hooks-daemon bug-report` — the real CLI verb, which the guide never mentions | config verbatim (`cli.py:7167-7172`), `HOSTNAME`/`VIRTUAL_ENV` (`cli.py:7060-7068`), 100 log lines         | none      | —                                                                                  |
-| `/hooks-daemon report` skill                                                      | LLM narrative + **session transcript** excerpts (`report.md:53-59`, which warns they are unredacted)       | none      | **the wrong GitHub org** — `anthropics/claude-code-hooks-daemon` (`report.md:204`) |
-
-An `.env` file is a conventional home for credentials. Nothing stops a client
-putting a token in `hooks-daemon.env`, and the guide gives no warning before
-telling them to paste the result into a public issue. The wrong-org link is not
-merely a broken URL: it points a client's diagnostics at a repository this
-project does not control.
+Measured per surface in [LEAK-INVENTORY.md](LEAK-INVENTORY.md): what each one
+emits, whether anything redacts it, and where the documentation sends it. All
+three leaked, none redacted, and one pointed a client's diagnostics at a GitHub
+org this project does not control.
 
 ## Goals
 
@@ -73,34 +66,11 @@ project does not control.
 
 ## Design decisions
 
-**Redaction is by construction, not by inspection.** A denylist of "things that
-look sensitive" is the shape that fails — the same mistake as judging a path by
-its text rather than by what it is, which produced three shipped false
-positives in Plan 00401. So the report is assembled from fields the generator
-controls, and the single place client content can enter is a reproduction that
-must be minimal and synthetic.
-
-**The minimal synthetic reproduction is the load-bearing rule.** A repro
-authored against invented paths under `untracked/scratch/` cannot leak, removes
-most of the surface in one move, and independently produces a better issue. A
-bug that genuinely cannot be reproduced synthetically is still reportable — the
-report says so explicitly and carries no client data instead.
-
-**Daemon paths are ours; client paths are not.** Scrubbing keeps
-`.claude/hooks-daemon/…` and `src/claude_code_hooks_daemon/…` intact, because
-those ARE the substance, while rewriting the project root, `$HOME`, the git
-remote, the branch name and the hostname to placeholders.
-
-**Unverifiable claims become checkable artefacts.** The generator cannot know
-whether the reporter really read the source. It CAN require the report to name
-which config options were considered and why each is insufficient, and which
-`file:line` was read. That is the move `MUST_EXCEED_COMMENT_SIZE_BECAUSE` and
-the remote-docs provenance frontmatter already make here.
-
-**The older-version rule is mechanical.** Installed versus latest; when older,
-diff the release notes between them for the named subsystem. If it changed,
-refuse and say upgrade first. If it did not, allow the report and record that
-finding in it — the owner's rule, made checkable.
+Five, each with what it defends against, in
+[DECISIONS.md](DECISIONS.md): redaction by construction rather than by
+inspection; the minimal synthetic reproduction as the load-bearing rule; daemon
+paths kept while client paths go; unverifiable claims turned into checkable
+artefacts; and the older-version rule made mechanical.
 
 ## Tasks
 
@@ -214,15 +184,38 @@ finding in it — the owner's rule, made checkable.
 
 ### Phase 5: The issue form and the SOP
 
-- [ ] ⬜ **Task 5.1**: `.github/ISSUE_TEMPLATE/` defect form mirroring the
-  generator's fields, plus a `config.yml` pointing at the SOP.
-- [ ] ⬜ **Task 5.2**: Rewrite `BUG_REPORTING.md` as the SOP's single home, and
-  reconcile it with the CLI verb it currently does not mention.
-- [ ] ⬜ **Task 5.3**: A skill entry point that drives the procedure.
-- [ ] ⬜ **Task 5.4**: Point the scattered client-facing instructions
-  (`src/CLAUDE.md`, `tests/CLAUDE.md`, `CLAUDE/LLM-INSTALL.md`,
-  `CLAUDE/LLM-UPDATE.md`, `README.md`, `docs/guides/TROUBLESHOOTING.md`) at the
-  one SOP instead of each describing its own.
+- [x] ✅ **Task 5.1**: `1-defect.yml` mirrors the generator's fields,
+  `2-other.yml` takes free text, and `config.yml` turns blank issues OFF. That
+  switch is the load-bearing one: the forms are the only place the redaction
+  rule reaches someone filing from a browser, and a blank-issue route past them
+  would nullify it for exactly that population. It costs nobody a way in only
+  because `2-other.yml` asks for no structure at all — a question that has to
+  be dressed up as a bug report is a question nobody asks. The field set is
+  asserted against `ReportFields` rather than a list written in the test, with
+  every non-asked field carrying its reason, so a field added to the generator
+  and forgotten in the form fails. Nothing else would notice: no other test
+  reads `.github/`, and `rg` skips it.
+- [x] ✅ **Task 5.2**: `BUG_REPORTING.md` rewritten as the SOP: the asymmetry
+  first, then establish-it-is-a-defect, generate, read, file. Its
+  troubleshooting half MOVED to `TROUBLESHOOTING.md` rather than being deleted
+  — the one entry that guide lacked ("status says NOT RUNNING but hooks work")
+  was added there in the same commit. The filing snippet is no longer restated:
+  the generator prints the exact command with the real timestamped filename, so
+  duplicating it here would be both redundant and untypable.
+- [x] ✅ **Task 5.3**: `issue-report.md` in the bundled `hooks-daemon` skill,
+  routed in `SKILL.md` and deployed via `deploy_skills`. It is `cat`-ed rather
+  than forwarded to the CLI verb of the same name: that verb takes a `--fields`
+  JSON file which is the OUTPUT of the first two steps, so forwarding would run
+  the procedure backwards. Its cross-tree pointers are spelled out rather than
+  linked, because the file is COPIED into every install and no single relative
+  link is correct from both here and a client's `.claude/skills/`.
+- [x] ✅ **Task 5.4**: Every site repointed, and one of them was actively
+  wrong rather than merely scattered. `LLM-INSTALL.md`'s `debug-report-snippet`
+  said "attach it to any bug report" — the instruction Phase 1 diagnosed,
+  still live, and quoted verbatim into `LLM-UPDATE.md` by an `ssot-quote`, so
+  it shipped twice. `TROUBLESHOOTING.md` asked for the config file "with any
+  sensitive values removed", which is the check that fails. Both now say what
+  those outputs are: local diagnostics for the person who ran them.
 
 ## Success Criteria
 
@@ -234,12 +227,21 @@ finding in it — the owner's rule, made checkable.
   config file is still reproduced in full, scrubbed — deliberate, because
   ruling configuration out is the first thing the SOP asks for, and narrowing
   it to controlled fields is Task 2.1's remaining half.
-- [ ] ⬜ A generated report containing a planted secret term is refused, and
-  the refusal names only an index, never the term.
-- [ ] ⬜ The filing gate denies a hand-written `gh issue create` against this
+- [x] ✅ A generated report containing a planted declared term is refused, and
+  the refusal names only an index, never the term. Refused rather than
+  REDACTED, which is the opposite of what `scrub_report` does and deliberately
+  so: the reporter is still at the keyboard, the sentence is theirs to rewrite,
+  and a silent redaction teaches them nothing while leaving prose that reads as
+  nonsense. Verified live against a real `build_report` call — one problem, an
+  empty document, and neither the problems nor the document carrying the term.
+- [x] ✅ The filing gate denies a hand-written `gh issue create` against this
   repo from a client install, and allows one whose body the generator produced.
-- [ ] ⬜ The gate stands down in this repository: `issue-sdlc` files and edits
-  issues with no change in behaviour.
+  Verified live against a REAL generated document rather than a fixture: as
+  printed → allow, inline body → deny, after an edit → deny, restored → allow.
+- [x] ✅ The gate stands down in this repository: it resolves self-install from
+  `ProjectContext` and never engages here, so `issue-sdlc` is untouched. The
+  live check above had to force `self_install_reader` to False to see any
+  verdict at all, which is that stand-down demonstrating itself.
 - [x] ✅ Every GitHub URL in tracked documentation names this repository —
   enforced by the `github_urls` QA gate, which walks the tree itself rather
   than using `rg`, because `rg` skips hidden directories and that is exactly
@@ -253,3 +255,22 @@ finding in it — the owner's rule, made checkable.
   checked 22 live plans: no overlap. Six completed plans supply building blocks
   (00072 bug-report CLI, 00201 secret-word redaction, 00371/00386/00389 version
   currency, 00330 skill-surface coherence); the verification gate is new.
+- **Three defects found by USING the finished thing, none of which a passing
+  test suite would have surfaced.** Each has a regression test now:
+  - The generator printed `gh issue create --body-file <report>` with no
+    `--repo`. In a self-install that is correct and invisible; in a CLIENT
+    project — the only place the generator matters — `gh` takes the target from
+    the working directory, so the printed remedy files a hooks-daemon defect on
+    the CLIENT'S OWN tracker, and the filing gate never engages because it
+    judges the repository a command targets. Both halves fail in the same
+    direction, and only where nobody runs it by hand. `issue_report/upstream.py`
+    now holds the slug and builds the command, so the printed remedy and the
+    gate's comparison cannot drift.
+  - `assemble_report` called `scrub_report` without the term list, so the free
+    text a reporter TYPES was the one surface with no backstop — and it is the
+    only surface the "collect nothing sensitive" design cannot reach.
+  - `bin/hooks-daemon --version` does not exist, and three documents made it a
+    verification step. Recorded as Plan 00405 N4.
+- The pattern across all three: the generator is correct in the environment it
+  is developed in and wrong in the one it ships to. Running it was the only
+  thing that showed that, because every test runs in the developing one.

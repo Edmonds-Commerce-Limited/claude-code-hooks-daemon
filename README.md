@@ -468,7 +468,7 @@ New team members get the same hooks automatically on first use. If your root `.g
 - [Debugging Hooks](CLAUDE/DEBUGGING_HOOKS.md) — Event introspection tool
 - [QA Pipeline](CLAUDE/development/QA.md) — Quality assurance automation
 - [Upgrade Guides](CLAUDE/UPGRADES/) — Version migration guides
-- [Bug Reporting](BUG_REPORTING.md) — Debug info generation
+- [Bug Reporting](BUG_REPORTING.md) — The procedure for filing a daemon defect
 
 ---
 
@@ -482,9 +482,14 @@ New team members get the same hooks automatically on first use. If your root `.g
 
 ## Troubleshooting
 
-For comprehensive troubleshooting and bug reporting, see [BUG_REPORTING.md](BUG_REPORTING.md).
+For comprehensive troubleshooting, see
+[docs/guides/TROUBLESHOOTING.md](docs/guides/TROUBLESHOOTING.md). To report a
+daemon defect, follow [BUG_REPORTING.md](BUG_REPORTING.md) — the whole
+procedure; an agent drives it with the `hooks-daemon` skill, args
+`issue-report`.
 
-**Generate a debug report:**
+**Generate a debug report** — a LOCAL diagnostic for you to read, never
+something to paste into an issue:
 
 ```bash
 # From the daemon project
