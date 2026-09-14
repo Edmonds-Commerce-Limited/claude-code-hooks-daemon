@@ -340,12 +340,14 @@ rather than an edit.
 
 - [x] Every entry above reaches a terminal state (fixed / not-a-defect /
   graduated) with its evidence recorded — N1 fixed (sidecar half ruled not a
-  defect), N2 fixed, N3 comment fixed and behaviour ruled not a defect, N4 fixed.
+  defect), N2 fixed, N3 comment fixed and behaviour ruled not a defect, N4 fixed,
+  N5 fixed.
 - [x] Any fix with a behavioural surface is covered by a test that fails against
-  today's code — N1, N2 and N4 each shipped a RED-first test. **N3 is the stated
-  exception and is not ticked silently**: its fix is a comment correction, which
-  has no behaviour to assert. Inventing a test that greps the comment's wording
-  would pin prose, not behaviour, and would break on the next honest rewording.
+  today's code — N1, N2, N4 and N5 each shipped a RED-first test. **N3 is the
+  stated exception and is not ticked silently**: its fix is a comment correction,
+  which has no behaviour to assert. Inventing a test that greps the comment's
+  wording would pin prose, not behaviour, and would break on the next honest
+  rewording.
 - [ ] Full QA passes and CI is green.
 - [ ] The plan is archived into the holding area (`Completed/`) with the README
   row and statistics updated in the same commit.
