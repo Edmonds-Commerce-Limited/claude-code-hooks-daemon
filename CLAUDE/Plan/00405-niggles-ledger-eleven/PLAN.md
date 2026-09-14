@@ -323,10 +323,14 @@ rather than an edit.
 
 ## Success Criteria
 
-- [x] ✅ Every entry above is in a terminal state: N1, N2, N4, N5, N6 and N7
+- [ ] 🔄 Every entry above is in a terminal state. N1, N2, N4, N5, N6 and N7
   fixed; N3 ruled NOT A DEFECT with the mechanism that explains it; N8
-  graduated to Plan 00406.
-- [ ] ⬜ Full QA passes and CI is green.
+  graduated to Plan 00406. **N9 is open** — a test that passes in its file and
+  fails in isolation, which needs the fixture ordering read.
+- [x] ✅ Full QA passes and CI is green for every entry closed so far. Full QA
+  30/30 at `786f4dc5`; CI green on `e40f91a4` and `38c97c45`. The archival
+  commit that followed changes plan documents only, and `plan_qa`, `docs_qa`,
+  `repo_hygiene` and the plan-index navigability tests all pass over it.
 
 ## Delivery & Milestones
 
@@ -340,10 +344,8 @@ rather than an edit.
   The false positive was the visible symptom and the hole was the expensive
   defect, and nothing about N6 suggested the second existed — only surveying
   for the shape did.
-- **Two habits did the work, and neither is cleverness.** Running the real
-  thing rather than reasoning about it: bash itself settled what a line
-  continuation does, against a docstring and an implementation that disagreed
-  with each other. And pairing every claim with a control: the `&&` spelling of
-  each N8 command, which turns "this block feels wrong" into a fact no
-  judgement call can absorb.
-- Full QA 30/30 at `786f4dc5`, over the tree carrying every entry above.
+- **Two habits did the work, and neither is cleverness**: running the real
+  thing rather than reasoning about it (bash settled what a line continuation
+  does, against a docstring and an implementation that disagreed), and pairing
+  every claim with a control (the `&&` spelling of each N8 command, which turns
+  "this block feels wrong" into a fact no judgement call absorbs).

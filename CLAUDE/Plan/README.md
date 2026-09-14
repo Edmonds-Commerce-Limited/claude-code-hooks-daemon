@@ -6,7 +6,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00406: newline is a command boundary in handler patterns](00406-newline-is-a-command-boundary-in-handler-patterns/PLAN.md) - Not Started (four blocking handlers judge the NEXT line as part of the command they are matching, because their separator class omits `\n` — `git push origin main` ⏎ `grep -f x y` is denied as a force push, and `git branch -d` is denied by the rule that recommends it. Joining the same two lines with `&&` reverses every verdict. Graduated from 00405 N8)
 
-- [00405: niggles ledger eleven](00405-niggles-ledger-eleven/PLAN.md) - In Progress (the open ledger; ledger ten is closed. Seven entries: N6 found a regex crossing a newline, and chasing its shape outwards found N7 — a word split across two lines evaded EVERY blocking guard, because the shell joins a line continuation and the daemon replaced it with a space. N8 graduated to Plan 00406)
+- [00405: niggles ledger eleven](00405-niggles-ledger-eleven/PLAN.md) - In Progress (the open ledger; ledger ten is closed. Nine entries, N9 open: chasing N6's newline-crossing regex outwards found N7 — a word split across two lines evaded EVERY blocking guard, because the shell JOINS a line continuation and the daemon replaced it with a space. N8 graduated to Plan 00406)
 
 - [00402: restart path leaves generated handler doc stale](00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md) - Not Started (a restart regenerates the `CLAUDE.md` block but never `.claude/HOOKS-DAEMON.md`, which sat a whole handler short for days and no test could see it. Regenerating on restart is the WRONG fix — that file's marker is the deployed-from version `upgrade.sh` reads. Graduated from 00400 N6; blocked on a ruling)
 
