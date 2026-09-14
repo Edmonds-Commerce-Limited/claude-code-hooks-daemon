@@ -138,8 +138,12 @@ finding in it — the owner's rule, made checkable.
   is what identifies. Running the checker over realistic prose rather than the
   fixtures found a Windows drive path passing clean through a rule built
   entirely around `/`.
-- [ ] ⬜ **Task 2.3**: Emit a provenance header (the remote-docs pattern) the
-  filing gate can verify.
+- [x] ✅ **Task 2.3**: Emit a provenance header (the remote-docs pattern) the
+  filing gate can verify. It is tamper EVIDENCE, not authentication — nothing
+  in-process can stop an agent that computes a digest itself, and the module
+  says so rather than implying otherwise. What it catches is the failure that
+  actually happens: a clean report generated, then edited to paste in a log
+  excerpt, and filed.
 
 ### Phase 3: The verification gates
 

@@ -14,6 +14,13 @@ refuse valid reports or pass leaking ones.
 
 from __future__ import annotations
 
+from claude_code_hooks_daemon.issue_report.assemble import (
+    AssembledReport,
+    ConfigConsideration,
+    ReportFields,
+    ReportProblem,
+    assemble_report,
+)
 from claude_code_hooks_daemon.issue_report.provenance import (
     GENERATOR_COMMAND,
     PROVENANCE_MARKER,
@@ -35,8 +42,13 @@ __all__ = [
     "GENERATOR_COMMAND",
     "PROVENANCE_MARKER",
     "SCRATCH_PREFIX",
+    "AssembledReport",
+    "ConfigConsideration",
     "ProvenanceProblem",
+    "ReportFields",
+    "ReportProblem",
     "ReproductionProblem",
+    "assemble_report",
     "body_digest",
     "check_reproduction",
     "render_document",
