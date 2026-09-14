@@ -71,11 +71,31 @@ class RepoState:
     behind: int
     ahead: int
     dirty: bool
+    #: True when the last fetch ATTEMPT failed, so ``behind``/``ahead`` were
+    #: computed from whatever refs were already on disk. Defaults False because
+    #: ``inspect_repo`` never attempts a fetch; only ``refresh_repo`` can know.
+    fetch_failed: bool = False
 
     @property
     def checkable(self) -> bool:
         """True when freshness can be judged at all."""
         return self.checkability is Checkability.CHECKABLE
+
+    @property
+    def verified(self) -> bool:
+        """True when this reading was actually confirmed against the remote.
+
+        Distinct from :attr:`checkable`, and the distinction is one a real
+        canary exposed: a repo can have a remote and an upstream (so it IS
+        checkable) while that remote is unreachable, leaving ``behind`` computed
+        from stale refs. Counting such a repo as "up to date" is a confident
+        all-clear about a repo nobody checked.
+
+        Deliberately NOT folded into :attr:`needs_attention`: an unreachable
+        remote is usually permanent, and a complaint nobody can action, repeated
+        every session, is one a reader learns to skim.
+        """
+        return self.checkable and not self.fetch_failed
 
     @property
     def reason(self) -> str:
@@ -128,7 +148,10 @@ class RepoState:
         not unsafe — there is simply nothing to do, and pulling anyway would be
         work with no result.
         """
-        if not self.checkable:
+        if not self.verified:
+            # A failed fetch brought nothing down, so there is nothing newly
+            # available to fast-forward ONTO -- pulling would either no-op or
+            # fail again against the same unreachable remote.
             return False
         if self.dirty or self.is_ahead:
             return False

@@ -58,6 +58,7 @@ def _state(
     behind: int = 0,
     branch: str = "main",
     checkability: Checkability = Checkability.CHECKABLE,
+    fetch_failed: bool = False,
 ) -> RepoState:
     return RepoState(
         path=path,
@@ -68,6 +69,7 @@ def _state(
         behind=behind,
         ahead=0,
         dirty=False,
+        fetch_failed=fetch_failed,
     )
 
 
@@ -186,13 +188,13 @@ class TestReportContent:
 
         assert "pull --ff-only" in capsys.readouterr().out
 
-    def test_uncheckable_repos_are_counted_not_hidden(
+    def test_unverified_repos_are_counted_not_hidden(
         self, tmp_path: Path, stub_refresh, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Silence about a repo in a report you ASKED for reads as 'it is fine'.
 
-        The sweep can stay quiet about an un-checkable clone because it speaks
-        unprompted; a command answering a direct question cannot.
+        The all-clear must count only what was actually confirmed: one good repo
+        plus the canary is "all 1 up to date", never "all 2".
         """
         root = _project(tmp_path)
         good = _repo(root, "alpha")
@@ -204,7 +206,28 @@ class TestReportContent:
 
         cmd_reference_repos(_args(root))
 
-        assert "not checkable" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "all 1 up to date" in out
+        assert "1 could not be checked" in out
+
+    def test_a_repo_whose_fetch_failed_is_not_counted_as_up_to_date(
+        self, tmp_path: Path, stub_refresh, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The real canary's shape: checkable, but its remote is unreachable.
+
+        Its local refs say "not behind", so before this was fixed the command
+        printed a confident `all 1 up to date` about a repo whose fetch had
+        failed with exit 128.
+        """
+        root = _project(tmp_path)
+        repo = _repo(root, "php-qa-ci")
+        stub_refresh(**{"php-qa-ci": _state(repo, fetch_failed=True)})
+
+        assert cmd_reference_repos(_args(root)) == 0
+
+        out = capsys.readouterr().out
+        assert "none verifiable" in out
+        assert "up to date" not in out
 
     def test_show_all_lists_every_governed_repo(
         self, tmp_path: Path, stub_refresh, capsys: pytest.CaptureFixture[str]

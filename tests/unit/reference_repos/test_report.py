@@ -37,6 +37,7 @@ def _state(
     behind: int = 0,
     ahead: int = 0,
     dirty: bool = False,
+    fetch_failed: bool = False,
 ) -> RepoState:
     return RepoState(
         path=path,
@@ -47,6 +48,7 @@ def _state(
         behind=behind,
         ahead=ahead,
         dirty=dirty,
+        fetch_failed=fetch_failed,
     )
 
 
@@ -83,6 +85,17 @@ class TestASingleRepoLine:
         line = repo_line(_state(), project_root=_ROOT)
 
         assert "up to date" in line.lower()
+
+    def test_a_failed_fetch_qualifies_everything_after_it(self) -> None:
+        """Stated first, because the counts beside it came from stale refs.
+
+        Without this the line reads "up to date" for a repo whose remote could
+        not be reached at all — which is what this repo's own canary produced.
+        """
+        line = repo_line(_state(fetch_failed=True), project_root=_ROOT)
+
+        assert "last fetch failed" in line
+        assert "up to date" not in line
 
     def test_a_missing_upstream_name_falls_back_rather_than_printing_none(self) -> None:
         """Reachable from a cache: the schema permits a null upstream.

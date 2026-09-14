@@ -20,7 +20,7 @@ someone with diverged history to commit their changes is useless advice.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final
 
@@ -99,7 +99,12 @@ def refresh_repo(path: Path, *, allow_pull: bool = True) -> RefreshOutcome:
     state = inspect_repo(path)
 
     if not fetched:
-        return RefreshOutcome(state=state, fetched=False, pulled=False, detail=_FETCH_FAILED)
+        # Recorded ON THE STATE, not just in `detail`: the state is what gets
+        # cached and handed to all three surfaces, and a caller keeping only
+        # `.state` (all three do) would otherwise report refs from a failed
+        # fetch as a confirmed all-clear.
+        unverified = replace(state, fetch_failed=True)
+        return RefreshOutcome(state=unverified, fetched=False, pulled=False, detail=_FETCH_FAILED)
 
     if not allow_pull:
         return RefreshOutcome(state=state, fetched=True, pulled=False, detail=_PULL_DISABLED)

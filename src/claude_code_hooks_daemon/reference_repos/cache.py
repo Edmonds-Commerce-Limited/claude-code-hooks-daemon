@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 #: Bumped whenever the on-disk shape changes. A reader that meets a different
 #: version discards rather than interprets — a cache misread as a newer shape
 #: would report confident nonsense, which is worse than reporting nothing.
-CACHE_VERSION: Final[int] = 1
+CACHE_VERSION: Final[int] = 2
 
 #: How long a reading stays trustworthy. Long enough that a normal session does
 #: not re-sweep constantly, short enough that a long session cannot enforce all
@@ -58,6 +58,10 @@ _REQUIRED_FIELDS: Final[tuple[str, ...]] = (
     "behind",
     "ahead",
     "dirty",
+    # Required, not defaulted, for exactly the reason above: False is the
+    # innocent reading, so a v1 cache silently defaulted here would claim every
+    # repo's refs had been confirmed against its remote.
+    "fetch_failed",
 )
 
 
@@ -76,6 +80,7 @@ def _encode(state: RepoState) -> dict[str, Any]:
         "behind": state.behind,
         "ahead": state.ahead,
         "dirty": state.dirty,
+        "fetch_failed": state.fetch_failed,
     }
 
 
@@ -100,6 +105,7 @@ def _decode(raw: object) -> RepoState | None:
             behind=int(raw["behind"]),
             ahead=int(raw["ahead"]),
             dirty=bool(raw["dirty"]),
+            fetch_failed=bool(raw["fetch_failed"]),
         )
     except (TypeError, ValueError):
         return None

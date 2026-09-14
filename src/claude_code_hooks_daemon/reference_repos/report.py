@@ -70,6 +70,13 @@ def repo_line(state: RepoState, *, project_root: Path | None = None) -> str:
         return f"{name} — {state.reason}"
 
     problems: list[str] = []
+    if state.fetch_failed:
+        # Stated FIRST, because it qualifies everything after it: the counts
+        # below were computed from refs already on disk, not from the remote.
+        problems.append(
+            "last fetch failed (offline, or the remote is unreachable), so this reading "
+            "is from the refs already on disk"
+        )
     if state.is_behind:
         upstream = state.upstream or "its upstream"
         problems.append(f"{state.behind} commit(s) behind {upstream}")
@@ -139,18 +146,20 @@ def report_lines(
         return []
 
     attention = [state for state in readings if state.needs_attention]
-    checkable = [state for state in readings if state.checkable]
-    unchecked = len(readings) - len(checkable)
+    verified = [state for state in readings if state.verified]
+    unverified = len(readings) - len(verified)
 
     if not attention:
-        # Counting an un-checkable repo as "up to date" would be a false
-        # all-clear: nobody knows whether it is current, and unknown is not the
-        # same answer as fine. It is stated as a bounded count rather than a
-        # list, so the canary cannot head the report forever.
-        if not checkable:
-            return [f"{_ICON}  reference repos: {len(readings)} governed, none checkable"]
-        suffix = f" ({unchecked} not checkable)" if unchecked else ""
-        return [f"{_ICON}  reference repos: all {len(checkable)} up to date{suffix}"]
+        # Counting an UNVERIFIED repo as "up to date" would be a false
+        # all-clear: nobody confirmed it, and unknown is not the same answer as
+        # fine. Two different repos land here — one with no remote to check
+        # against, and one whose remote could not be reached — and both are
+        # stated as a bounded count rather than a list, so a permanently
+        # unreachable clone cannot head the report forever.
+        if not verified:
+            return [f"{_ICON}  reference repos: {len(readings)} governed, none verifiable"]
+        suffix = f" ({unverified} could not be checked against their remotes)" if unverified else ""
+        return [f"{_ICON}  reference repos: all {len(verified)} up to date{suffix}"]
 
     lines = [
         f"{_ICON}  reference repos: {len(attention)} of {len(readings)} need attention "
@@ -166,8 +175,9 @@ def report_lines(
     withheld = len(attention) - len(listed)
     if withheld > 0:
         lines.append(f"  … and {withheld} more (run `hooks-daemon reference-repos` for all)")
-    if unchecked:
+    if unverified:
         lines.append(
-            f"  ({unchecked} not checkable — `hooks-daemon reference-repos --all` says why)"
+            f"  ({unverified} could not be checked against their remotes — "
+            "`hooks-daemon reference-repos --all` says why)"
         )
     return lines

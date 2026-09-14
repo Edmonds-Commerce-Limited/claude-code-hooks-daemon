@@ -43,6 +43,7 @@ def _state(
     ahead: int = 0,
     dirty: bool = False,
     path: Path = _REPO,
+    fetch_failed: bool = False,
 ) -> RepoState:
     """A checkable, clean, up-to-date repo on its default branch."""
     return RepoState(
@@ -54,7 +55,46 @@ def _state(
         behind=behind,
         ahead=ahead,
         dirty=dirty,
+        fetch_failed=fetch_failed,
     )
+
+
+class TestAFailedFetchIsNotAnAllClear:
+    """A reading taken from refs a failed fetch left behind is not verified.
+
+    Found by running the CLI against this repo's own canary, whose origin is
+    `https://invalid.invalid/canary.git`. The fetch fails with exit 128, the
+    local refs say "not behind", and the report said `all 1 up to date` — a
+    confident all-clear about a repo nobody had actually checked.
+    """
+
+    def test_a_repo_whose_fetch_failed_is_not_verified(self) -> None:
+        assert _state(fetch_failed=True).verified is False
+
+    def test_a_repo_whose_fetch_succeeded_is_verified(self) -> None:
+        assert _state().verified is True
+
+    def test_an_uncheckable_repo_is_never_verified(self) -> None:
+        """Nothing was fetched FROM, so nothing was confirmed."""
+        assert _state(checkability=Checkability.NO_REMOTE).verified is False
+
+    def test_a_failed_fetch_does_not_demand_attention(self) -> None:
+        """The canary trap, and the reason this is not routed through attention.
+
+        This repo's origin is unreachable BY DESIGN and always will be. If a
+        failed fetch demanded attention, every session would open with a
+        complaint nobody can action, and the reports that matter would be
+        skimmed past — exactly what un-checkable is kept out of the way for.
+        """
+        assert _state(fetch_failed=True).needs_attention is False
+
+    def test_a_stale_repo_still_demands_attention_when_its_fetch_failed(self) -> None:
+        """Being unverifiable does not excuse a repo that is demonstrably behind."""
+        assert _state(behind=4, fetch_failed=True).needs_attention is True
+
+    def test_a_failed_fetch_is_never_safe_to_pull(self) -> None:
+        """There is nothing newly fetched to fast-forward ONTO."""
+        assert _state(behind=2, fetch_failed=True).safe_to_pull is False
 
 
 class TestCheckability:
