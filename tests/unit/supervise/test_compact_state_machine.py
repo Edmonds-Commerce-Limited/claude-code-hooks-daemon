@@ -287,6 +287,79 @@ class TestMonitor:
         assert result.decision is Decision.NOOP
 
 
+class TestAbandonedInputBoxFlush:
+    """Plan 00398 Phase 3: an abandoned (unchanged past the stability
+    threshold) box submits the pending text via the existing resubmit/Enter
+    machinery, then compacts, instead of deferring forever like a genuinely
+    busy box does.
+    """
+
+    def test_abandoned_box_fires_resubmit_not_plain_noop(self) -> None:
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(_reading(), idle=False, now=1000.0, input_line_abandoned=True)
+        assert result.decision is Decision.WOULD_RESUBMIT
+        assert result.abandoned_box_flush is True
+
+    def test_non_abandoned_busy_box_is_unaffected(self) -> None:
+        # Regression: a merely-busy (not abandoned) box keeps deferring exactly
+        # as before -- this is Plan 00168's H2, still BY DESIGN below threshold.
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(_reading(), idle=False, now=1000.0, input_line_abandoned=False)
+        assert result.decision is Decision.NOOP
+        assert result.reason == _mod._REASON_BUSY_COMPOSING
+        assert result.abandoned_box_flush is False
+
+    def test_flush_fires_exactly_once_per_abandoned_episode(self) -> None:
+        # Task 3.3: a box the Enter did not clear must get exactly one
+        # attempt, never a resubmit loop -- the known failure shape in this
+        # area (/compact stall -> [esc] flush).
+        sm = CompactStateMachine(CompactPolicy())
+        first = sm.evaluate(_reading(), idle=False, now=1000.0, input_line_abandoned=True)
+        assert first.decision is Decision.WOULD_RESUBMIT
+        # Box STILL reads abandoned+non-empty (the Enter never landed) on the
+        # next tick: must NOT fire a second resubmit.
+        second = sm.evaluate(_reading(), idle=False, now=1002.0, input_line_abandoned=True)
+        assert second.decision is Decision.NOOP
+        assert second.reason == _mod._REASON_BUSY_COMPOSING
+        assert second.abandoned_box_flush is False
+
+    def test_flush_latch_resets_for_a_later_episode(self) -> None:
+        sm = CompactStateMachine(CompactPolicy())
+        first = sm.evaluate(_reading(), idle=False, now=1000.0, input_line_abandoned=True)
+        assert first.decision is Decision.WOULD_RESUBMIT
+        # The box cleared (flush worked): a normal, non-abandoned tick.
+        cleared = sm.evaluate(_reading(), idle=True, now=1002.0, input_line_abandoned=False)
+        assert cleared.decision is Decision.WOULD_COMPACT
+        # A brand new abandoned episode, much later, fires its OWN flush.
+        sm2 = CompactStateMachine(CompactPolicy(cooldown_seconds=0))
+        sm2.evaluate(_reading(), idle=False, now=1000.0, input_line_abandoned=True)
+        sm2.evaluate(
+            _reading(), idle=False, now=1002.0, input_line_abandoned=False
+        )  # not abandoned
+        later = sm2.evaluate(_reading(), idle=False, now=2000.0, input_line_abandoned=True)
+        assert later.decision is Decision.WOULD_RESUBMIT
+
+    def test_box_reading_empty_after_flush_compacts_normally(self) -> None:
+        # Once the box reads empty (idle=True), the ordinary path takes over --
+        # no special-casing needed to reach WOULD_COMPACT.
+        sm = CompactStateMachine(CompactPolicy())
+        flushed = sm.evaluate(_reading(), idle=False, now=1000.0, input_line_abandoned=True)
+        assert flushed.decision is Decision.WOULD_RESUBMIT
+        compacted = sm.evaluate(_reading(), idle=True, now=1002.0, input_line_abandoned=False)
+        assert compacted.decision is Decision.WOULD_COMPACT
+
+    def test_abandoned_but_not_red_stays_plain_noop(self) -> None:
+        # The flush only ever fires for a red-or-worse reading -- confirmed by
+        # construction (the check sits after the not-red early return), pinned
+        # here so a future refactor cannot move it ahead of that guard.
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(
+            _reading(red=False, tier="green"), idle=False, now=1000.0, input_line_abandoned=True
+        )
+        assert result.decision is Decision.NOOP
+        assert result.abandoned_box_flush is False
+
+
 class TestForegroundAmbiguityGate:
     """Plan 00160: a red reading defers compaction while the foreground thread is
     ambiguous (a recent Agent-View thread switch), so /compact never targets the

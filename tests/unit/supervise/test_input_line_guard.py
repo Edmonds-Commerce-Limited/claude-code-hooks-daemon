@@ -41,6 +41,8 @@ _CTRL_U = b"\x15"
 _CTRL_C = b"\x03"
 _DEL = b"\x7f"
 _BACKSPACE = b"\x08"
+_CTRL_W = b"\x17"
+_CTRL_K = b"\x0b"
 
 
 class TestHumanInputLine:
@@ -97,6 +99,154 @@ class TestHumanInputLine:
     def test_backspace_on_empty_line_is_noop(self) -> None:
         line = HumanInputLine()
         line.feed(_DEL + _BACKSPACE)
+        assert line.is_empty is True
+
+
+class TestHumanInputLineStability:
+    """Plan 00398 Phase 2: content-stability tracking, not mere non-emptiness.
+
+    The owner's ruling ("if the text is the same after X seconds ... regard it
+    as captured by accident") requires telling a human mid-sentence apart from
+    one who has walked away. A naive "non-empty for threshold_seconds" timer
+    gets the continuous-typing case wrong -- these tests pin that it does not.
+    """
+
+    _THRESHOLD = 120.0
+
+    def test_empty_box_is_never_abandoned(self) -> None:
+        line = HumanInputLine()
+        assert line.is_abandoned(now=10_000.0, threshold_seconds=self._THRESHOLD) is False
+
+    def test_unchanged_content_past_threshold_is_abandoned(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"forgot to hit enter", now=1000.0)
+        assert (
+            line.is_abandoned(now=1000.0 + self._THRESHOLD, threshold_seconds=self._THRESHOLD)
+            is True
+        )
+
+    def test_unchanged_content_just_under_threshold_is_not_abandoned(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"still composing", now=1000.0)
+        assert (
+            line.is_abandoned(now=1000.0 + self._THRESHOLD - 1.0, threshold_seconds=self._THRESHOLD)
+            is False
+        )
+
+    def test_continuous_typing_never_reads_abandoned(self) -> None:
+        # The case a naive "non-empty for threshold_seconds" timer gets wrong:
+        # the box has been non-empty for well over the threshold, but every
+        # keystroke refreshes the "last changed" clock, so it must never trip.
+        line = HumanInputLine()
+        now = 1000.0
+        line.feed(b"f", now=now)
+        for _ in range(200):
+            now += 1.0
+            line.feed(b"x", now=now)
+        assert now - 1000.0 > self._THRESHOLD  # sanity: the box IS old by now
+        assert line.is_abandoned(now=now, threshold_seconds=self._THRESHOLD) is False
+
+    def test_submitting_then_typing_again_restarts_the_clock(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"old message" + _ENTER, now=1000.0)
+        later = 1000.0 + self._THRESHOLD + 10.0
+        line.feed(b"new", now=later)
+        assert line.is_abandoned(now=later, threshold_seconds=self._THRESHOLD) is False
+
+    def test_feed_without_explicit_now_does_not_raise(self) -> None:
+        # The real (host/worker) callers do not always pass `now` -- defaults
+        # to the real clock so every existing call site keeps working.
+        line = HumanInputLine()
+        line.feed(b"typed without an explicit clock")
+        assert line.is_empty is False
+
+
+class TestHumanInputLineForceClear:
+    """Plan 00398 Phase 3: the flush path must be able to reset the model.
+
+    The supervisor's own injected Enter (used to flush an abandoned box) is
+    written straight to the PTY master and never passes through `feed`, so the
+    model needs an explicit way to be told "this content is gone now" -- same
+    reason every other supervisor injection never marks the box non-empty.
+    """
+
+    def test_clear_empties_the_box(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"leftover text", now=1000.0)
+        line.clear()
+        assert line.is_empty is True
+
+    def test_clear_resets_the_stability_clock(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"leftover text", now=1000.0)
+        line.clear()
+        line.feed(b"x", now=1000.5)
+        assert line.is_abandoned(now=1000.5 + 1.0, threshold_seconds=1.0) is True
+        # But immediately after clear+refeed, it is fresh, not stale from before.
+        assert line.is_abandoned(now=1000.6, threshold_seconds=1.0) is False
+
+
+class TestHumanInputLineClearByteGaps:
+    """Plan 00398 Phase 4: latent clear-byte gaps recorded (unproven) in the
+    plan, confirmed here as real defects and fixed on their own merits.
+
+    Ctrl-W and Ctrl-K empty the REAL box (fully or partially) but were in
+    neither `_LINE_CLEAR_BYTES` nor `_LINE_BACKSPACE_BYTES`, so they fell to
+    the `else` branch and were APPENDED as literal bytes -- the tracked model
+    grows non-whitespace content the real box does not have, and can never
+    read empty again without an Enter/Ctrl-U/Ctrl-C. An unterminated
+    bracketed-paste start has the same shape: every byte after it, INCLUDING
+    Enter, is swallowed as paste payload forever.
+    """
+
+    def test_ctrl_w_deletes_the_trailing_word_down_to_empty(self) -> None:
+        # A single word, fully word-deleted, must read empty again -- today it
+        # does not (the byte is appended, not interpreted).
+        line = HumanInputLine()
+        line.feed(b"oops" + _CTRL_W)
+        assert line.is_empty is True
+
+    def test_ctrl_w_deletes_only_the_trailing_word(self) -> None:
+        # Real shells word-delete just the last word, not the whole line --
+        # modelling it as a full clear would be WRONG in the other direction.
+        line = HumanInputLine()
+        line.feed(b"two words" + _CTRL_W)
+        assert line.is_empty is False
+
+    def test_repeated_ctrl_w_clears_a_multi_word_line(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"two words" + _CTRL_W + _CTRL_W)
+        assert line.is_empty is True
+
+    def test_ctrl_w_on_an_empty_line_is_a_harmless_noop(self) -> None:
+        line = HumanInputLine()
+        line.feed(_CTRL_W)
+        assert line.is_empty is True
+
+    def test_ctrl_k_on_an_empty_line_does_not_wedge_it_non_empty(self) -> None:
+        # The core permanent-non-empty bug: today the raw 0x0B byte is
+        # appended as "content" even though nothing was typed.
+        line = HumanInputLine()
+        line.feed(_CTRL_K)
+        assert line.is_empty is True
+
+    def test_ctrl_k_does_not_delete_existing_content(self) -> None:
+        # No cursor-position tracking exists in this model, so Ctrl-K is
+        # modelled as a no-op under the same "cursor at end" assumption
+        # backspace already makes -- it must never SILENTLY drop content that
+        # is still genuinely in the (real) box.
+        line = HumanInputLine()
+        line.feed(b"still typing")
+        line.feed(_CTRL_K)
+        assert line.is_empty is False
+
+    def test_unterminated_bracketed_paste_does_not_swallow_a_later_enter(self) -> None:
+        # A missing/dropped paste-end marker must not make every later
+        # keystroke -- including the human's own Enter -- unable to ever
+        # clear the box again.
+        line = HumanInputLine()
+        line.feed(b"\x1b[200~" + b"x" * 70_000)  # no ESC[201~ -- latch never ends
+        line.feed(_ENTER)
         assert line.is_empty is True
 
 
@@ -195,10 +345,11 @@ class TestHumanCompactDetection:
         assert line.is_empty is False
 
     def test_unrecognised_control_bytes_count_as_content(self) -> None:
-        # Ctrl-W (word kill) removes only PART of the line; modelling it as a
-        # clear would falsely report empty. It must count as content instead.
+        # A genuinely unrecognised control byte (not one of the specific
+        # editing keys this class models) must count as content -- modelling
+        # it as a no-op/clear would falsely report empty.
         line = HumanInputLine()
-        line.feed(b"two words\x17")
+        line.feed(b"two words\x01")  # Ctrl-A: not modelled, so conservative
         assert line.is_empty is False
 
     def test_utf8_multibyte_input_counts_as_content(self) -> None:

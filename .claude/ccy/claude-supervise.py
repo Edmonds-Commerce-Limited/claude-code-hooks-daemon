@@ -468,6 +468,21 @@ _SLASH_OBSERVED_MAX_LINES = 8
 _LINE_BACKSPACE_BYTES = frozenset({0x08, 0x7F})
 # Bytes that never make the box "non-empty" on their own: space and tab.
 _LINE_WHITESPACE_BYTES = frozenset({0x20, 0x09})
+# Plan 00398 Phase 4: Ctrl-W (unix-word-rubout, 0x17) deletes the trailing
+# WORD in a real shell -- neither a full clear nor plain content, so it needs
+# its own handling rather than falling into `_LINE_CLEAR_BYTES` (wrong: it
+# does not clear the whole line) or the unrecognised-byte fallthrough (wrong:
+# appending the raw byte left the tracked box permanently non-empty, since
+# nothing ever removes it again short of Enter/Ctrl-U/Ctrl-C).
+_LINE_WORD_DELETE_BYTES = frozenset({0x17})
+# Ctrl-K (kill-to-end-of-line, 0x0B) deletes everything AFTER the cursor in a
+# real shell. This model tracks no cursor position (it assumes "typing at the
+# end", the same assumption `_LINE_BACKSPACE_BYTES` already makes) -- under
+# that assumption there is nothing after the cursor to kill, so it is modelled
+# as a harmless no-op: consumed, but neither appended (which wedged the box
+# non-empty forever) nor treated as a clear (which could silently drop content
+# still genuinely in the real box).
+_LINE_KILL_TO_END_BYTES = frozenset({0x0B})
 # A submitted line whose (whitespace-stripped) text starts with this is a human
 # `/compact` — the supervisor detects it to avoid stacking its own /compact on
 # top (Claude Code aborts the duplicate). Covers `/compact` and `/compact <args>`.
@@ -613,6 +628,11 @@ _CSI_ARROW_UP = 0x41  # 'A'
 _CSI_ARROW_DOWN = 0x42  # 'B'
 _PASTE_START_PARAMS = (0x32, 0x30, 0x30)  # "200"
 _PASTE_END_PARAMS = (0x32, 0x30, 0x31)  # "201"
+# Plan 00398 Phase 4: bound on how many bytes `_in_paste` trusts without
+# seeing the end marker. Generous -- far past any real paste -- so it only
+# ever trips on a genuinely dropped/malformed ESC[201~, not a large legitimate
+# paste.
+_PASTE_LATCH_MAX_BYTES = 65536
 
 
 class HumanInputLine:
@@ -638,6 +658,18 @@ class HumanInputLine:
         self._state: int = _ST_GROUND
         self._csi_params: list[int] = []
         self._in_paste: bool = False
+        # Plan 00398 Phase 4: bytes consumed as paste payload since the
+        # current `_in_paste` spell started -- bounds the latch (see
+        # `_PASTE_LATCH_MAX_BYTES`). Meaningless while `_in_paste` is False.
+        self._paste_bytes: int = 0
+        # Plan 00398 Phase 2: wall-clock timestamp the buffer's CONTENT last
+        # changed (set/cleared/refreshed by every content-mutating `feed`, never
+        # by mere elapsed time) -- the stability guard's whole basis. `None`
+        # until the first change. Wall-clock to match every other timer in this
+        # file (cooldowns, escape intervals), and because it must be meaningful
+        # to BOTH the long-lived host instance and a short-lived worker instance
+        # fed only `now_wall` over JSON.
+        self._last_changed_at: float | None = None
         # Edge flag: set when a submitted line was a human `/compact`, cleared by
         # take_compact_submitted() so the supervisor acts on it exactly once.
         self._compact_submitted: bool = False
@@ -657,10 +689,19 @@ class HumanInputLine:
         # supervisor itself typed -- so the own-line follow-up stands down.
         self._enter_pressed: bool = False
 
-    def feed(self, data: bytes) -> None:
-        """Advance the line model with a chunk of forwarded human stdin bytes."""
+    def feed(self, data: bytes, *, now: float | None = None) -> None:
+        """Advance the line model with a chunk of forwarded human stdin bytes.
+
+        ``now`` (Plan 00398 Phase 2) stamps a CONTENT change for the stability
+        guard -- wall-clock, so it lines up with every other timer in this
+        file. Defaults to the real clock; tests pass a fixed value so
+        stability can be asserted deterministically.
+        """
+        before = bytes(self._buffer)
         for byte in data:
             self._consume(byte)
+        if bytes(self._buffer) != before:
+            self._last_changed_at = time.time() if now is None else now
 
     def _consume(self, byte: int) -> None:
         state = self._state
@@ -686,8 +727,24 @@ class HumanInputLine:
             # Inside bracketed paste every non-ESC byte is literal paste
             # payload -- real box content, including embedded CR/LF.
             self._buffer.append(byte)
+            self._paste_bytes += 1
+            if self._paste_bytes > _PASTE_LATCH_MAX_BYTES:
+                # Plan 00398 Phase 4: bound the latch. No real bracketed-paste
+                # burst is this large, so a dropped/missing ESC[201~ end
+                # marker must not swallow every later keystroke -- including
+                # the human's own Enter -- forever. Falls back to ground,
+                # consistent with this parser's policy for other malformed
+                # sequences (an aborted CSI does the same).
+                self._in_paste = False
             return
-        if byte in _LINE_CLEAR_BYTES:
+        if byte in _LINE_WORD_DELETE_BYTES:
+            self._word_delete()
+        elif byte in _LINE_KILL_TO_END_BYTES:
+            # No cursor tracking -- see `_LINE_KILL_TO_END_BYTES`. Consumed as
+            # a no-op: neither appended (which wedged the box permanently
+            # non-empty) nor a clear (which could drop real content).
+            pass
+        elif byte in _LINE_CLEAR_BYTES:
             # Only Enter SUBMITS the line; Ctrl-U/Ctrl-C discard it. A submitted
             # `/compact` sets the edge flag so the supervisor can defer to it.
             if byte in _LINE_SUBMIT_BYTES:
@@ -707,6 +764,19 @@ class HumanInputLine:
                 self._buffer.pop()
         else:
             self._buffer.append(byte)
+
+    def _word_delete(self) -> None:
+        """Delete the trailing WORD (Ctrl-W / unix-word-rubout), not the whole line.
+
+        Pops trailing whitespace, then the non-whitespace run behind it --
+        mirroring real shells (`readline`'s unix-word-rubout), and consistent
+        with `_LINE_BACKSPACE_BYTES` in operating purely on the tail of the
+        buffer (no cursor-position tracking exists in this model).
+        """
+        while self._buffer and self._buffer[-1] in _LINE_WHITESPACE_BYTES:
+            self._buffer.pop()
+        while self._buffer and self._buffer[-1] not in _LINE_WHITESPACE_BYTES:
+            self._buffer.pop()
 
     def _consume_esc(self, byte: int) -> None:
         if byte == _CSI_INTRODUCER:
@@ -734,8 +804,10 @@ class HumanInputLine:
         params = tuple(self._csi_params)
         if final == _CSI_FINAL_TILDE and params == _PASTE_START_PARAMS:
             self._in_paste = True
+            self._paste_bytes = 0
         elif final == _CSI_FINAL_TILDE and params == _PASTE_END_PARAMS:
             self._in_paste = False
+            self._paste_bytes = 0
         elif not params and final in (_CSI_ARROW_UP, _CSI_ARROW_DOWN):
             # Up/Down recall history into an empty box -- conservatively content.
             self._buffer.append(final)
@@ -802,6 +874,36 @@ class HumanInputLine:
         """True when the box holds no non-whitespace human input."""
         return all(byte in _LINE_WHITESPACE_BYTES for byte in self._buffer)
 
+    def is_abandoned(self, *, now: float, threshold_seconds: float) -> bool:
+        """True when the box holds content UNCHANGED for >= ``threshold_seconds``.
+
+        Plan 00398 Phase 2: deliberately NOT "non-empty for threshold_seconds".
+        The clock restarts on every content-mutating `feed` (including one that
+        clears the box), so a human typing continuously is never judged
+        abandoned no matter how long the box has been non-empty -- only a box
+        that has stopped changing is. Always False while empty: there is
+        nothing to abandon.
+        """
+        if self.is_empty or self._last_changed_at is None:
+            return False
+        return (now - self._last_changed_at) >= threshold_seconds
+
+    def clear(self) -> None:
+        """Reset the tracked box to empty, as if a real submit had cleared it.
+
+        Plan 00398 Phase 3: the abandoned-box flush presses Enter directly on
+        the PTY master (the same path every other supervisor injection uses),
+        which never passes through `feed` -- so without an explicit reset the
+        model would keep showing the just-submitted text forever and judge it
+        abandoned again on every later tick. Called ONLY by that flush path,
+        immediately after deciding to fire it.
+        """
+        self._buffer.clear()
+        self._state = _ST_GROUND
+        self._csi_params = []
+        self._in_paste = False
+        self._last_changed_at = None
+
 
 @dataclass
 class InputActivity:
@@ -811,11 +913,16 @@ class InputActivity:
     last_input_monotonic: float | None = None
     line: HumanInputLine = field(default_factory=HumanInputLine)
 
-    def record(self, data: bytes) -> None:
-        """Record a chunk of stdin data that was forwarded to the child."""
+    def record(self, data: bytes, *, now: float | None = None) -> None:
+        """Record a chunk of stdin data that was forwarded to the child.
+
+        ``now`` (Plan 00398 Phase 2) is the wall-clock stamp forwarded to
+        `HumanInputLine.feed` for its stability clock; defaults to the real
+        clock, same as `feed` itself.
+        """
         self.bytes_seen += len(data)
         self.last_input_monotonic = os.times().elapsed
-        self.line.feed(data)
+        self.line.feed(data, now=now)
 
     def take_compact_submitted(self) -> bool:
         """Return True once if the human submitted a `/compact` since last checked."""
@@ -1589,6 +1696,14 @@ class Evaluation:
 
     decision: Decision
     reason: str
+    # Plan 00398 Phase 3: True ONLY for the abandoned-input-box flush (a
+    # WOULD_RESUBMIT fired because the box has been unchanged past the
+    # stability threshold, not the AWAIT-flush loop's or the own-line
+    # follow-up's WOULD_RESUBMIT). Tells the caller to reset the tracked
+    # `HumanInputLine` model, which the flush's own injected Enter -- written
+    # straight to the PTY master like every other supervisor keystroke --
+    # never touches.
+    abandoned_box_flush: bool = False
 
 
 @dataclass(frozen=True)
@@ -1640,6 +1755,15 @@ class TickFacts:
     # never be consumed on a LATER tick and injected out of turn. 0 on the
     # in-process path (no worker, no correlation needed).
     tick_id: int = 0
+    # Plan 00398 Phase 2: True when the tracked input box holds content that
+    # has sat UNCHANGED for >= the stability threshold (never "non-empty for
+    # threshold_seconds" -- see `HumanInputLine.is_abandoned`). Computed by the
+    # host from its own long-lived `HumanInputLine`, which never loses history
+    # to a worker restart; the worker does NOT re-derive or AND this the way it
+    # does `input_line_empty` (unlike command recognition, a worker restart
+    # resetting this specific clock would silently re-open the very unbounded
+    # gate this plan exists to close). False on legacy hosts.
+    input_line_abandoned: bool = False
 
 
 @dataclass(frozen=True)
@@ -1719,6 +1843,13 @@ class TickOutcome:
     # flush happened this tick. `_apply_decision` writes it as an ADDITIONAL
     # decision.log line, never a substitute for the primary one.
     audit_flush_log: str | None = None
+    # Plan 00398 Phase 3: True ONLY when this tick decided the abandoned-box
+    # flush (`Evaluation.abandoned_box_flush`), so the HOST resets its tracked
+    # `HumanInputLine` (and the WORKER its own) once the Enter is injected --
+    # that injection never passes through `feed`, so without this the model
+    # would show the just-flushed text as non-empty forever. False for every
+    # other decision and for legacy replies without the field.
+    abandoned_box_flushed: bool = False
 
 
 def _coerce_float(value: object) -> float:
@@ -2918,6 +3049,12 @@ class CompactStateMachine:
         self._injections = 0
         self._last_action_ts: float | None = None
         self._compaction_handled = False
+        # Plan 00398 Phase 3: one-shot per-episode latch -- True once the
+        # abandoned-box flush has fired for the box's CURRENT abandoned spell,
+        # so a box the flush's Enter failed to clear gets exactly one attempt,
+        # never a resubmit loop. Reset (in `_evaluate_monitor`) the moment the
+        # box stops reading abandoned, whatever the reason.
+        self._abandoned_box_handled = False
         # ESC-flush bookkeeping for the current AWAIT_COMPACTING episode: how many
         # [esc] we have already injected to flush the queued /compact. Capped at
         # policy.max_escapes, then we give up and return to MONITOR (Plan 00164).
@@ -3880,6 +4017,7 @@ class CompactStateMachine:
         human_compact_submitted: bool = False,
         work_idle: bool = True,
         foreground_ambiguous: bool = False,
+        input_line_abandoned: bool = False,
     ) -> Evaluation:
         """Advance the machine one step and return what it WOULD do.
 
@@ -3898,6 +4036,22 @@ class CompactStateMachine:
         ``work_idle`` (Plan 00152) is True when the child has produced no output
         recently (the turn has settled). It only gates the LOWER red band: an
         elevated-band or critical reading compacts regardless of ``work_idle``.
+
+        ``idle`` is a SEPARATE, unconditional gate checked ahead of the
+        ``work_idle``/band split above and applies to EVERY band including
+        critical (Plan 00398): it is False on a human keystroke or a non-empty
+        input box, and a compaction never fires while it is False, however
+        urgent the reading. Do not read the ``work_idle`` sentence above as
+        "critical always compacts" -- it describes only the band split that
+        follows ``idle``, not a bypass of ``idle`` itself.
+
+        ``input_line_abandoned`` (Plan 00398 Phase 3) is True when the box
+        ``idle`` is False for has held UNCHANGED content past the stability
+        threshold -- a human mid-sentence, not one who has walked away. While
+        it holds, a red-or-worse reading fires ONE flush (submit the pending
+        text via the existing resubmit/Enter path, `Decision.WOULD_RESUBMIT`)
+        instead of deferring forever, then compacts normally once the box
+        reads empty again.
         """
         compacting = reading is not None and reading.compacting
         if compacting:
@@ -3957,6 +4111,7 @@ class CompactStateMachine:
             work_idle=work_idle,
             now=now,
             foreground_ambiguous=foreground_ambiguous,
+            input_line_abandoned=input_line_abandoned,
         )
 
     def _evaluate_monitor(
@@ -3967,7 +4122,14 @@ class CompactStateMachine:
         work_idle: bool,
         now: float,
         foreground_ambiguous: bool = False,
+        input_line_abandoned: bool = False,
     ) -> Evaluation:
+        # Plan 00398 Phase 3: the flush latch is scoped to the box's CURRENT
+        # abandoned spell, consumed here every tick regardless of what follows
+        # below -- a stale/non-red/ambiguous tick must not leave a stale latch
+        # armed for a LATER, unrelated episode.
+        if not input_line_abandoned:
+            self._abandoned_box_handled = False
         if reading is None:
             return Evaluation(Decision.NOOP, "no sidecar reading")
         if reading.stale:
@@ -3980,6 +4142,28 @@ class CompactStateMachine:
         if foreground_ambiguous:
             return Evaluation(Decision.NOOP, _REASON_FOREGROUND_AMBIGUOUS)
         if not idle:
+            if input_line_abandoned and not self._abandoned_box_handled:
+                # Owner ruling (Plan 00398): text unchanged for the stability
+                # threshold is "captured text by accident" -- submit it via the
+                # SAME resubmit/Enter machinery the AWAIT-flush loop already
+                # uses (no new keystroke path), then let the ordinary idle+red
+                # check above compact on a later tick once the box reads empty.
+                # One-shot: `_abandoned_box_handled` is not cleared again until
+                # the box stops reading abandoned, so a box the Enter fails to
+                # clear gets exactly one attempt, never a resubmit loop.
+                # Deliberately does NOT touch `_last_action_ts`: doing so would
+                # arm the (up to 300s) compact cooldown against this flush and
+                # delay the very compaction it exists to unblock -- CRITICAL
+                # bypasses cooldown, but a non-critical urgent reading (the
+                # production incident's actual band) would not.
+                self._abandoned_box_handled = True
+                return Evaluation(
+                    Decision.WOULD_RESUBMIT,
+                    f"input box unchanged for >= "
+                    f"{_DEFAULT_INPUT_LINE_ABANDON_SECONDS:.0f}s -> submitting the "
+                    "pending text before compacting",
+                    abandoned_box_flush=True,
+                )
             return Evaluation(Decision.NOOP, _REASON_BUSY_COMPOSING)
         # Plan 00152 graduated bands: critical is always urgent. In the LOWER red
         # band (red but not urgent) stay PATIENT -- defer until the child output
@@ -4184,6 +4368,16 @@ _DRY_RUN_RESUBMIT_BODY = (
     "would press [enter] to submit a /compact left unsubmitted in the input box "
     "(dry-run — no real Enter sent)"
 )
+# Plan 00398 Phase 3: the SAME keystroke (Decision.WOULD_RESUBMIT, a raw Enter)
+# also flushes a box abandoned by the HUMAN, which is a different situation
+# from the AWAIT-flush use above (no /compact was ever queued) -- distinct
+# dry-run wording only, so the visible marker does not mislead about a stuck
+# /compact that was never there. The armed payload is identical either way
+# (`_RESUBMIT_PAYLOAD`): only the human-visible dry-run text differs.
+_DRY_RUN_ABANDONED_FLUSH_BODY = (
+    "would press [enter] to submit text left unchanged in the input box, then "
+    "compact (dry-run — no real Enter sent)"
+)
 # The supervisor's OWN typed line is followed up. A submitted injection is
 # remembered as box content until there is evidence it went: a human Enter, or
 # the session going busy after a follow-up Enter. Until then, at each lull
@@ -4382,10 +4576,20 @@ _DEFAULT_IDLE_FLOOR_SECONDS = 2.0
 # the tick only ran on a clear `select` timeout (a genuine lull). Between-turn
 # lulls easily exceed this; an actively streaming turn never does.
 _DEFAULT_WORK_SETTLE_SECONDS = 3.0
+# Plan 00398 Phase 2: how long the input box's CONTENT must sit UNCHANGED
+# before it is judged abandoned rather than mid-composition. Far above the
+# idle floor above (2s, "between keystrokes") -- this is "the human walked
+# away", not "between keystrokes", so it must not be confused with or tuned
+# alongside it. Owner ruling, verbatim: "120 to give it plenty of safety".
+_DEFAULT_INPUT_LINE_ABANDON_SECONDS = 120.0
 
 
 def _resolve_payload(
-    decision: Decision, *, dry_run: bool, now_wall: float | None = None
+    decision: Decision,
+    *,
+    dry_run: bool,
+    now_wall: float | None = None,
+    abandoned_box_flush: bool = False,
 ) -> str | None:
     """Return the keystroke payload for a decision, or None for NOOP.
 
@@ -4397,6 +4601,12 @@ def _resolve_payload(
     ``_format_bot_prefix(now_wall)``) so the human can see WHEN the supervisor
     acted when scrolling back. The raw ESC (armed) is exempt -- it is an
     interrupt key, not a human-readable line.
+
+    ``abandoned_box_flush`` (Plan 00398 Phase 3) selects the dry-run wording
+    for a ``WOULD_RESUBMIT`` fired to flush a box abandoned by the HUMAN,
+    rather than the AWAIT-flush loop's stuck-``/compact`` case -- the armed
+    payload is identical either way (a bare Enter); only the visible marker
+    text would otherwise mislead about a ``/compact`` that was never queued.
     """
     prefix = _format_bot_prefix(now_wall)
     if decision is Decision.WOULD_COMPACT:
@@ -4410,7 +4620,10 @@ def _resolve_payload(
     if decision is Decision.WOULD_ESCAPE:
         return f"{prefix} {_DRY_RUN_ESCAPE_BODY}" if dry_run else _ESC_PAYLOAD
     if decision is Decision.WOULD_RESUBMIT:
-        return f"{prefix} {_DRY_RUN_RESUBMIT_BODY}" if dry_run else _RESUBMIT_PAYLOAD
+        if not dry_run:
+            return _RESUBMIT_PAYLOAD
+        body = _DRY_RUN_ABANDONED_FLUSH_BODY if abandoned_box_flush else _DRY_RUN_RESUBMIT_BODY
+        return f"{prefix} {body}"
     return None
 
 
@@ -4607,7 +4820,12 @@ def decide_once(
     # Empty-input-box guard: the machine only ever decides to inject when its
     # `idle` input is True, so AND-ing the box state into `idle` guards every
     # injection path without new machine states -- the busy branches already
-    # defer-and-retry correctly (no latch, no cooldown, signal kept).
+    # defer-and-retry correctly (no latch, no cooldown, signal kept). Plan
+    # 00398: this guard is no longer UNBOUNDED -- while `can_inject` is False,
+    # `_evaluate_monitor` separately checks `facts.input_line_abandoned` (the
+    # box content unchanged past the stability threshold) and, for a
+    # red-or-worse reading, flushes it via the existing resubmit/Enter
+    # machinery instead of deferring forever.
     can_inject = facts.idle and facts.input_line_empty
     # Plan 00164 Phase 4 fix: adopt the host's authoritative machine state before
     # deciding so the worker never runs on divergent state. None on the in-process
@@ -4639,8 +4857,14 @@ def decide_once(
         human_compact_submitted=facts.human_compact_submitted,
         work_idle=facts.work_idle,
         foreground_ambiguous=foreground_ambiguous,
+        input_line_abandoned=facts.input_line_abandoned,
     )
-    payload = _resolve_payload(evaluation.decision, dry_run=dry_run, now_wall=facts.now_wall)
+    payload = _resolve_payload(
+        evaluation.decision,
+        dry_run=dry_run,
+        now_wall=facts.now_wall,
+        abandoned_box_flush=evaluation.abandoned_box_flush,
+    )
     # Additional confirming Enters for a /model injection (set by the manual
     # switch branch and the auto-restore branch below); every other decision
     # leaves this at 0, which is a no-op in _perform_injection.
@@ -4682,7 +4906,7 @@ def decide_once(
         and not facts.input_line_empty
         and evaluation.reason in _INJECTION_GATED_REASONS
     ):
-        deferred_log = f"{_DEFERRED_LOG_PREFIX} ({evaluation.reason})"
+        deferred_log = f"{_DEFERRED_LOG_PREFIX} ({evaluation.reason}){_noop_band_suffix(reading)}"
     # Plan 00168 Phase 1: for every OTHER NOOP tick (not the input-box deferral
     # above, which already logs), emit a deduped NOOP-reason diagnostic naming
     # the gate + observed band. This makes a red-but-not-compacting session
@@ -5382,6 +5606,7 @@ def decide_once(
         audit_flush_log=(
             audit_flush_log_line if decision_value != Decision.WOULD_AUDIT.value else None
         ),
+        abandoned_box_flushed=evaluation.abandoned_box_flush,
     )
 
 
@@ -5545,6 +5770,8 @@ def _poll_once(
     goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS,
     model_confirm_enters: int = _DEFAULT_MODEL_CONFIRM_ENTERS,
     effort_confirm_enters: int = _DEFAULT_EFFORT_CONFIRM_ENTERS,
+    input_line_abandoned: bool = False,
+    on_input_line_flushed: Callable[[], None] | None = None,
 ) -> Evaluation:
     """One in-process supervisor tick: decide (``decide_once``) then inject.
 
@@ -5553,6 +5780,12 @@ def _poll_once(
     the decision to ``decide_once`` and the injection to ``_apply_decision``.
     ``own_sessions`` (Plan 00166) is passed straight through to ``decide_once``
     (``None`` = no own-session filter; the production loop resolves and passes it).
+
+    ``on_input_line_flushed`` (Plan 00398 Phase 3) is called, if given, exactly
+    when this tick's outcome is the abandoned-box flush -- the caller's chance
+    to reset whatever tracked ``HumanInputLine`` it owns, which this function
+    has no reference to (``input_line_empty``/``input_line_abandoned`` arrive
+    as plain booleans, same as every other fact here).
     """
     facts = TickFacts(
         now_wall=now_wall,
@@ -5561,6 +5794,7 @@ def _poll_once(
         human_compact_submitted=human_compact_submitted,
         work_idle=work_idle,
         human_effort_command=human_effort_command,
+        input_line_abandoned=input_line_abandoned,
     )
     outcome = decide_once(
         machine,
@@ -5579,6 +5813,8 @@ def _poll_once(
     )
     injected = _apply_decision(outcome, master_writer=master_writer, log=log)
     _apply_post_injection_bookkeeping(machine, outcome, injected=injected, now_wall=now_wall)
+    if outcome.abandoned_box_flushed and on_input_line_flushed is not None:
+        on_input_line_flushed()
     return Evaluation(decision=Decision(outcome.decision_value), reason=outcome.reason)
 
 
@@ -5607,6 +5843,7 @@ def _facts_to_json(facts: TickFacts) -> str:
             "human_raw_input": facts.human_raw_input,
             "machine_state": facts.machine_state,
             "tick_id": facts.tick_id,
+            "input_line_abandoned": facts.input_line_abandoned,
         }
     )
 
@@ -5624,6 +5861,7 @@ def _facts_from_json(line: str) -> TickFacts:
         human_raw_input=str(data.get("human_raw_input", "")),
         machine_state=data.get("machine_state"),
         tick_id=int(data.get("tick_id", 0)),
+        input_line_abandoned=bool(data.get("input_line_abandoned", False)),
     )
 
 
@@ -5647,6 +5885,7 @@ def _outcome_to_json(outcome: TickOutcome) -> str:
             "is_anchor_injection": outcome.is_anchor_injection,
             "is_anchor_escape": outcome.is_anchor_escape,
             "audit_flush_log": outcome.audit_flush_log,
+            "abandoned_box_flushed": outcome.abandoned_box_flushed,
         }
     )
 
@@ -5671,6 +5910,7 @@ def _outcome_from_json(line: str) -> TickOutcome:
         is_anchor_injection=bool(data.get("is_anchor_injection", False)),
         is_anchor_escape=bool(data.get("is_anchor_escape", False)),
         audit_flush_log=data.get("audit_flush_log"),
+        abandoned_box_flushed=bool(data.get("abandoned_box_flushed", False)),
     )
 
 
@@ -5711,6 +5951,17 @@ def run_worker(
     no host-side change and no session restart. Reset (buffer cleared) on
     every restart -- the same risk profile ``machine``'s in-flight state
     already carries across a restart.
+
+    ``input_line_abandoned`` (Plan 00398 Phase 2) is deliberately NOT
+    re-derived/ANDed here the way ``input_line_empty`` is: it is a duration
+    measured against a clock, not a parse of the current bytes, and this
+    recognizer's own clock resets to "fresh" on every worker restart with no
+    replay of prior history (``raw_tap`` only ships bytes forwarded SINCE the
+    restart). ANDing would silently re-open the unbounded gate Plan 00398
+    exists to close for up to the whole stability threshold after every
+    restart -- worse, indefinitely if no further human byte ever arrives to
+    seed a fresh reading. The host's own long-lived model never has that gap,
+    so its verdict is taken as-is.
     """
     machine = CompactStateMachine(policy)
     line_recognizer = HumanInputLine()
@@ -5781,6 +6032,12 @@ def run_worker(
             # the whole purpose is to contain ANY unexpected decision failure.
             append_worker_error("decide_once failed:\n" + traceback.format_exc())
             outcome = _worker_error_noop()
+        if outcome.abandoned_box_flushed:
+            # Plan 00398 Phase 3: mirror the host's own reset (below) on THIS
+            # process's recognizer -- the flush's Enter never passes through
+            # `feed`, so without this `line_recognizer.is_empty` would keep
+            # ANDing the box back to non-empty on every later tick, forever.
+            line_recognizer.clear()
         # Plan 00182: echo the request's correlation id so the host can match
         # this reply to the tick that produced it and drop any stale reply left
         # buffered by an earlier timed-out tick.
@@ -6229,6 +6486,7 @@ def supervise(
     poll_seconds: float = _DEFAULT_POLL_SECONDS,
     idle_floor_seconds: float = _DEFAULT_IDLE_FLOOR_SECONDS,
     work_settle_seconds: float = _DEFAULT_WORK_SETTLE_SECONDS,
+    input_line_abandon_seconds: float = _DEFAULT_INPUT_LINE_ABANDON_SECONDS,
     decider: Callable[[TickFacts], TickOutcome | None] | None = None,
 ) -> int:
     """Run `argv` under a PTY, forwarding I/O and polling the context sidecar.
@@ -6260,6 +6518,10 @@ def supervise(
         work_settle_seconds: Minimum quiet time on the CHILD output before the
             lower red band is allowed to compact (Plan 00152). The elevated and
             critical bands ignore it and compact promptly.
+        input_line_abandon_seconds: How long the input box's content must sit
+            UNCHANGED before a red-or-worse reading submits it (via the
+            existing resubmit/Enter path) and compacts, rather than deferring
+            forever (Plan 00398). Not the same axis as `idle_floor_seconds`.
 
     Returns:
         The child's exit code (or 128+signal if it died from a signal).
@@ -6373,6 +6635,11 @@ def supervise(
         # failure (decider returns None) fall back to the identical in-process
         # path so a tick is never dropped. The host always performs the injection.
         now_wall = time.time()
+        # Plan 00398 Phase 2: computed from the host's own long-lived model,
+        # which never loses history to a worker restart (see `TickFacts`).
+        input_line_abandoned = activity.line.is_abandoned(
+            now=now_wall, threshold_seconds=input_line_abandon_seconds
+        )
         outcome = None
         if decider is not None:
             outcome = decider(
@@ -6387,6 +6654,7 @@ def supervise(
                     # Ship the host's authoritative machine state so the worker
                     # decides on it -- never on divergent worker-local state.
                     machine_state=machine.export_state(),
+                    input_line_abandoned=input_line_abandoned,
                 )
             )
             transition = fallback_transitions.note(worker_answered=outcome is not None)
@@ -6415,6 +6683,11 @@ def supervise(
             _apply_post_injection_bookkeeping(
                 machine, outcome, injected=injected, now_wall=now_wall
             )
+            # Plan 00398 Phase 3: the flush's own Enter never passes through
+            # `feed` (same as every other supervisor injection), so without
+            # this the model would show the just-flushed text forever.
+            if outcome.abandoned_box_flushed:
+                activity.line.clear()
         else:
             _poll_once(
                 machine,
@@ -6434,6 +6707,8 @@ def supervise(
                 foreground_margin_seconds=policy.foreground_margin_seconds,
                 own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
                 goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
+                input_line_abandoned=input_line_abandoned,
+                on_input_line_flushed=activity.line.clear,
             )
         # Plan 00297: loud, rate-limited owner-facing alert once the anchor
         # has exceeded its attempt/time bound -- purely a notification, the

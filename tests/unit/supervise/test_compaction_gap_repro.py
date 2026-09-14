@@ -65,6 +65,7 @@ def _poll(
     now_wall: float,
     idle: bool = True,
     input_line_empty: bool = True,
+    input_line_abandoned: bool = False,
     work_idle: bool = True,
     own_sessions: object = None,
     machine: object = None,
@@ -79,6 +80,7 @@ def _poll(
         log=log,
         freshness_seconds=30.0,
         input_line_empty=input_line_empty,
+        input_line_abandoned=input_line_abandoned,
         work_idle=work_idle,
         own_sessions=own_sessions,
     )
@@ -101,7 +103,18 @@ class TestH1BackgroundThreadStaleSidecar:
 
 
 class TestH2InputBoxGuardBlocksEvenCritical:
-    """A non-empty input box defers even a critical compaction (by design), logged."""
+    """A non-empty input box defers even a critical compaction (by design), logged.
+
+    Plan 00168 pinned this BY DESIGN: never type into a box a human is
+    actively using. Plan 00398 REVISITED that decision on the owner's
+    authority (the box gate turned out to be UNBOUNDED, holding for up to 10
+    real hours in the field) and bounded it on TEXT STABILITY rather than
+    lifting it outright: below `_mod._DEFAULT_INPUT_LINE_ABANDON_SECONDS`
+    (120s) unchanged, the deferral below is still exactly BY DESIGN and
+    unchanged; past it, the box is judged abandoned and gets flushed then
+    compacted (`TestAbandonedInputBoxFlush` in test_compact_state_machine.py,
+    and the end-to-end coverage in test_abandoned_input_flush.py).
+    """
 
     def test_critical_with_nonempty_input_box_defers_and_is_logged(self, tmp_path: Path) -> None:
         sc = tmp_path / "sc"
@@ -112,6 +125,30 @@ class TestH2InputBoxGuardBlocksEvenCritical:
         assert ev.reason == _mod._REASON_BUSY_COMPOSING
         contents = log_path.read_text(encoding="utf-8")
         assert _mod._DEFERRED_LOG_PREFIX in contents
+
+    def test_critical_deferral_carries_the_band_suffix(self, tmp_path: Path) -> None:
+        # Plan 00398 Task 1.2: the input-box DEFERRAL line omitted the
+        # `_noop_band_suffix` its sibling NOOP-reason line already carries, so a
+        # suppressed CRITICAL compaction could hide inside the deferral stream
+        # (indistinguishable from a merely-red one). Both shapes must agree.
+        sc = tmp_path / "sc"
+        _write_sidecar(sc, ts=1000.0)  # critical=True by default
+        log_path = tmp_path / "decision.log"
+        _poll(sc, DecisionLog(log_path), now_wall=1000.0, input_line_empty=False)
+        contents = log_path.read_text(encoding="utf-8")
+        assert f"{_mod._DEFERRED_LOG_PREFIX} ({_mod._REASON_BUSY_COMPOSING}) [critical]" in contents
+
+    def test_critical_with_abandoned_box_is_no_longer_blocked_forever(self, tmp_path: Path) -> None:
+        # CONTRAST (Plan 00398): the SAME critical + non-empty box that the
+        # first test above still defers, once it is ALSO reported abandoned
+        # (unchanged past the stability threshold), no longer sits in the
+        # deferral loop -- it fires the existing resubmit/Enter machinery
+        # instead of a plain NOOP, so the box cannot hold a critical
+        # compaction hostage indefinitely the way the field incident showed.
+        sc = tmp_path / "sc"
+        _write_sidecar(sc, ts=1000.0)  # critical=True by default
+        ev = _poll(sc, None, now_wall=1000.0, input_line_empty=False, input_line_abandoned=True)
+        assert ev.decision is Decision.WOULD_RESUBMIT
 
     def test_critical_while_streaming_still_compacts(self, tmp_path: Path) -> None:
         # CONTRAST: critical bypasses the work_idle patience gate, so a streaming

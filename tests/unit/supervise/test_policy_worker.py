@@ -78,6 +78,59 @@ def test_facts_from_json_defaults_missing_raw_input_to_empty_string() -> None:
     assert _mod._facts_from_json(line).human_raw_input == ""
 
 
+def test_facts_json_roundtrip_carries_input_line_abandoned() -> None:
+    facts = _mod.TickFacts(
+        now_wall=1.5,
+        idle=False,
+        input_line_empty=False,
+        human_compact_submitted=False,
+        work_idle=True,
+        input_line_abandoned=True,
+    )
+    assert _mod._facts_from_json(_mod._facts_to_json(facts)) == facts
+
+
+def test_facts_from_json_defaults_missing_input_line_abandoned_to_false() -> None:
+    # Backward-compat: an older host's JSON without the new key must decode.
+    line = json.dumps(
+        {
+            "now_wall": 1.0,
+            "idle": True,
+            "input_line_empty": True,
+            "human_compact_submitted": False,
+            "work_idle": True,
+        }
+    )
+    assert _mod._facts_from_json(line).input_line_abandoned is False
+
+
+def test_outcome_json_roundtrip_carries_abandoned_box_flushed() -> None:
+    outcome = _mod.TickOutcome(
+        decision_value="WOULD_RESUBMIT",
+        reason="input box unchanged -> submitting before compacting",
+        payload="\r",
+        submit=False,
+        consume_signal_path=None,
+        deferred_log=None,
+        abandoned_box_flushed=True,
+    )
+    assert _mod._outcome_from_json(_mod._outcome_to_json(outcome)) == outcome
+
+
+def test_outcome_from_json_defaults_missing_abandoned_box_flushed_to_false() -> None:
+    line = json.dumps(
+        {
+            "decision_value": "NOOP",
+            "reason": "reason",
+            "payload": None,
+            "submit": True,
+            "consume_signal_path": None,
+            "deferred_log": None,
+        }
+    )
+    assert _mod._outcome_from_json(line).abandoned_box_flushed is False
+
+
 def test_outcome_json_roundtrip_noop() -> None:
     outcome = _mod.TickOutcome(
         decision_value="NOOP",
