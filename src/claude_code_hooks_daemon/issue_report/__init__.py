@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.issue_report.assemble import (
     ReportProblem,
     assemble_report,
 )
+from claude_code_hooks_daemon.issue_report.build import build_report
 from claude_code_hooks_daemon.issue_report.citation import (
     CitationVerdict,
     check_source_citation,
@@ -58,6 +59,7 @@ __all__ = [
     "assemble_report",
     "assess_currency",
     "body_digest",
+    "build_report",
     "check_reproduction",
     "check_source_citation",
     "render_document",
