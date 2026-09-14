@@ -378,13 +378,47 @@ def _stringify_tool_response(tool_response: Any) -> str:
         return str(tool_response)
 
 
+# A format placeholder that was never substituted: `{name}`, `{name:spec}`,
+# `{name!r}`, or shell `${NAME}`. A RENDERED runtime message always has its
+# placeholders filled in, so one still sitting in the text proves the span is
+# SOURCE CODE rather than a delivered signal (Plan 00400 N4 — a `ps` listing
+# surfaced a hook wrapper's own f-string and the detector demanded a bold
+# user-facing banner for a budget nothing had hit).
+#
+# Deliberately anchored on an IDENTIFIER immediately inside the brace, so a real
+# signal delivered as JSON (`{"error": "quota exceeded"}`) is never mistaken for
+# a placeholder — that opens with a quote, not an identifier.
+_UNRENDERED_PLACEHOLDER_RE: Final[re.Pattern[str]] = re.compile(
+    r"\$?\{[A-Za-z_][A-Za-z0-9_.]*(?:\[[^\]]*\])?(?:![rsa])?(?::[^{}]*)?\}"
+)
+
+
 def _find_matched_fragment(text: str, extra_patterns: list[re.Pattern[str]]) -> str | None:
-    """Return the first matched fragment's own text, or None if no pattern hits."""
+    """Return the first matched fragment's own text, or None if no pattern hits.
+
+    A match on a LINE that still carries an unexpanded format placeholder is
+    source code, not a delivered message, so it is skipped and scanning
+    continues — a genuine signal elsewhere in the same text is still found.
+
+    The window is the whole line, not the matched span: a template often holds
+    the placeholder just OUTSIDE the phrase that matched (`quota exceeded for
+    {resource}` matches only `quota exceeded`), so a span-scoped test misses
+    exactly the shapes it exists to catch. Judging TEXT rather than the command
+    also covers source surfaced by `cat`, a heredoc echo, or a stack trace.
+    """
     for pattern in (*_BUILTIN_PATTERNS, *extra_patterns):
-        match = pattern.search(text)
-        if match:
+        for match in pattern.finditer(text):
+            if _UNRENDERED_PLACEHOLDER_RE.search(_line_around(text, match.start(), match.end())):
+                continue
             return match.group(0)
     return None
+
+
+def _line_around(text: str, start: int, end: int) -> str:
+    """The full line(s) spanning ``text[start:end]``, used as the placeholder window."""
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    return text[line_start:] if line_end == -1 else text[line_start:line_end]
 
 
 def _advisory(tool_name: str, matched_fragment: str) -> str:

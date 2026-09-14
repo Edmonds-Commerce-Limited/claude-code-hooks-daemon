@@ -109,6 +109,67 @@ class TestGenericBudgetShapes:
 # ─── Precision: excluded tools ───────────────────────────────────────────────
 
 
+class TestUnrenderedTemplateIsNotASignal:
+    """Plan 00400 N4: SOURCE CODE carrying a budget phrase is not a budget hit.
+
+    Observed live: `ps -eo pid,etime,args` listed a pytest fixture's
+    hook-wrapper subprocess, and that wrapper's Python SOURCE contains the
+    f-string below. The detector fired and demanded a bold user-facing banner
+    for a budget nothing had hit.
+
+    The discriminator is the fragment's own text rather than the command: a
+    RENDERED runtime message always has its placeholders substituted, so an
+    unexpanded `{...}` placeholder proves the text is source. That also covers
+    source surfaced by `cat`, a heredoc echo or a stack trace — none of which a
+    `ps`-command exclusion would catch.
+    """
+
+    _PS_ARGV_SOURCE = (
+        "1142781 04:51 python3 -c import sys\n"
+        "        context_lines = [\n"
+        "            f'HOOKS DAEMON: A hook handler exceeded the "
+        "{SOCKET_TIMEOUT_SECONDS:g}s budget',\n"
+        "        ]\n"
+    )
+
+    def test_ps_listing_of_source_does_not_fire(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        hook_input = _tool_input("Bash", {"stdout": self._PS_ARGV_SOURCE, "stderr": ""})
+        assert handler.matches(hook_input) is False
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "quota exceeded for {resource}",
+            "the {name!r} budget has been used up",
+            "budget exhausted after ${LIMIT} calls",
+        ],
+    )
+    def test_other_unexpanded_placeholder_shapes_do_not_fire(
+        self, handler: BudgetExhaustionDetectorHandler, content: str
+    ) -> None:
+        hook_input = _tool_input("Bash", {"stdout": content, "stderr": ""})
+        assert handler.matches(hook_input) is False
+
+    def test_the_same_message_RENDERED_still_fires(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """The load-bearing half: suppressing source must cost no true positive."""
+        rendered = "HOOKS DAEMON: A hook handler exceeded the 30s budget"
+        hook_input = _tool_input("Bash", {"stdout": rendered, "stderr": ""})
+        assert handler.matches(hook_input) is True
+
+    def test_json_braces_are_not_mistaken_for_a_placeholder(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """A real signal delivered as JSON must not be suppressed by the guard."""
+        hook_input = _tool_input(
+            "Bash", {"stdout": '{"error": "quota exceeded for this resource"}', "stderr": ""}
+        )
+        assert handler.matches(hook_input) is True
+
+
 class TestExcludedToolsByDefault:
     @pytest.mark.parametrize(
         "tool_name", ["Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Task", "Agent"]
