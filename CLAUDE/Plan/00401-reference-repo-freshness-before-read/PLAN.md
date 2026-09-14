@@ -1,6 +1,6 @@
 # Plan 00401: reference repo freshness before read
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: High
@@ -111,8 +111,12 @@ Each is a rule the implementation must not be able to violate:
 
 ### Phase 1: The DRY checker (`reference_repos/` package)
 
-- [ ] ⬜ **Task 1.1**: `discovery.py` — enumerate git checkouts under configured
-  roots, apply exclude globs. Reuse `utils/path_exclusion.py`.
+- [x] ✅ **Task 1.1**: `discovery.py` — enumerate git checkouts under configured
+  roots, apply exclude globs. Reuse `utils/path_exclusion.py`. A checkout is a
+  `.git` of EITHER kind (a worktree's is a file), is never descended into, and
+  the walk is depth-bounded so a root of `/` cannot become a filesystem sweep;
+  a non-positive bound finds nothing rather than everything. 23 tests, 100%
+  coverage of the module.
 - [ ] ⬜ **Task 1.2**: `model.py` + `inspect.py` — a `RepoState` built from
   `git_sync` with NO network: branch, default branch, upstream, ahead/behind,
   dirty, and a `checkable` classification carrying the reason it is not.
