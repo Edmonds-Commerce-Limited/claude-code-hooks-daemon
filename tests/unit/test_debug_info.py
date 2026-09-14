@@ -162,3 +162,140 @@ def test_daemon_status_and_installed_handlers_sections_run_without_an_error_line
     assert "Errno" not in report, "no section may report a failed command launch"
     assert "Permission denied" not in report
     assert "Discovered" in report, "the handlers section must list what it found"
+
+
+class TestTheEnvFileIsNeverDumped:
+    """This script's output is written to be pasted into a PUBLIC issue.
+
+    It dumped `.claude/hooks-daemon.env` VERBATIM, and `BUG_REPORTING.md` then
+    said to paste the result into a GitHub issue. An `.env` file is a
+    conventional home for credentials; nothing stops a client putting a token
+    in this one, and a public issue cannot be retracted afterwards.
+
+    Which keys are SET is the diagnostic fact — a value never is.
+    """
+
+    @staticmethod
+    def _summary(module, tmp_path: Path, body: str) -> str:
+        """Drive the env section DIRECTLY, not through `generate()`.
+
+        `generate()` reaches the Configuration Files section only after
+        `.claude/init.sh` detection succeeds AND a real venv python is found.
+        A fixture with neither returns before that section ever runs, so
+        asserting "the secret is absent" against it passes while testing
+        nothing at all — which is what the first version of these tests did.
+        """
+        env_file = tmp_path / "hooks-daemon.env"
+        env_file.write_text(body)
+        gen = module.DebugInfoGenerator(output_file=str(tmp_path / "out.md"), project_root=tmp_path)
+        gen._emit_env_summary(env_file)
+        return "\n".join(gen.output_lines)
+
+    def test_the_section_runs_at_all(self, debug_info_module, tmp_path: Path) -> None:
+        """The guard against every other test here passing vacuously."""
+        summary = self._summary(debug_info_module, tmp_path, "MODE=strict\n")
+
+        assert "hooks-daemon.env" in summary
+
+    def test_a_value_never_reaches_the_report(self, debug_info_module, tmp_path: Path) -> None:
+        summary = self._summary(
+            debug_info_module, tmp_path, "HOOKS_DAEMON_TOKEN=sk-live-abcdef123456\n"
+        )
+
+        assert "sk-live-abcdef123456" not in summary
+
+    def test_the_key_name_is_still_reported(self, debug_info_module, tmp_path: Path) -> None:
+        """Which settings are present is the actual diagnostic signal."""
+        summary = self._summary(
+            debug_info_module,
+            tmp_path,
+            "HOOKS_DAEMON_TOKEN=sk-live-abcdef123456\nHOOKS_DAEMON_MODE=strict\n",
+        )
+
+        assert "HOOKS_DAEMON_TOKEN" in summary
+        assert "HOOKS_DAEMON_MODE" in summary
+
+    def test_a_comment_line_is_not_reported_as_a_key(
+        self, debug_info_module, tmp_path: Path
+    ) -> None:
+        """A comment can say anything, including why a credential is there."""
+        summary = self._summary(
+            debug_info_module,
+            tmp_path,
+            "# issued by the acme-payments platform team\nMODE=strict\n",
+        )
+
+        assert "acme-payments" not in summary
+
+    def test_a_blank_env_file_says_so_rather_than_nothing(
+        self, debug_info_module, tmp_path: Path
+    ) -> None:
+        """'Present but empty' and 'absent' are different diagnostic facts."""
+        summary = self._summary(debug_info_module, tmp_path, "\n\n")
+
+        assert "no settings" in summary
+
+    def test_an_unreadable_env_file_is_reported_not_skipped(
+        self, debug_info_module, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A file that exists but cannot be read is itself a diagnostic fact.
+
+        A permission problem under `.claude/` is a plausible cause of the very
+        misbehaviour being reported, so the report says so where the reader
+        will see it. Silently omitting the section would make an unreadable
+        file indistinguishable from an absent one.
+
+        The failure is injected rather than produced with `chmod`: this suite
+        runs as root, which traverses a `0o000` file regardless of its mode, so
+        a permission fixture would pass against code that never handled it.
+        """
+        env_file = tmp_path / "hooks-daemon.env"
+        env_file.write_text("MODE=strict\n")
+
+        def _refuse(_self: Path, *_args: object, **_kwargs: object) -> str:
+            raise OSError(13, "Permission denied")
+
+        monkeypatch.setattr(Path, "read_text", _refuse)
+
+        gen = debug_info_module.DebugInfoGenerator(
+            output_file=str(tmp_path / "out.md"), project_root=tmp_path
+        )
+        gen._emit_env_summary(env_file)
+        summary = "\n".join(gen.output_lines)
+
+        assert "hooks-daemon.env" in summary, "the section must still be emitted"
+        assert "could not be read" in summary
+        assert "Permission denied" in summary, "the reason is the diagnostic content"
+
+    def test_an_absent_env_file_emits_nothing(self, debug_info_module, tmp_path: Path) -> None:
+        gen = debug_info_module.DebugInfoGenerator(
+            output_file=str(tmp_path / "out.md"), project_root=tmp_path
+        )
+
+        gen._emit_env_summary(tmp_path / "does-not-exist.env")
+
+        assert gen.output_lines == []
+
+
+class TestTheOutputIsScrubbed:
+    def test_the_project_root_is_not_written_to_the_file(
+        self, debug_info_module, tmp_path: Path
+    ) -> None:
+        project = _make_client_project(tmp_path)
+        out = tmp_path / "out.md"
+        gen = debug_info_module.DebugInfoGenerator(output_file=str(out), project_root=project)
+        gen.generate()
+        gen.flush_output()
+
+        assert str(project) not in out.read_text()
+
+    def test_the_closing_message_does_not_say_to_paste_the_file(self) -> None:
+        """The script must not undo the guidance the docs now carry.
+
+        `BUG_REPORTING.md` no longer says to paste the report into an issue;
+        this script printing 'you can now copy/paste this file into GitHub
+        issues' would restore exactly that instruction at the moment of use.
+        """
+        source = DEBUG_INFO_PATH.read_text(encoding="utf-8")
+
+        assert "copy/paste this file into GitHub issues" not in source

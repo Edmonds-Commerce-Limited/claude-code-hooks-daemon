@@ -11,10 +11,13 @@ Usage:
 If output_file not specified, writes to stdout.
 """
 
+import os
+import socket
 import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from types import ModuleType
 
 
 class DebugInfoGenerator:
@@ -30,6 +33,7 @@ class DebugInfoGenerator:
         """
         self.output_file = output_file
         self.output_lines: list[str] = []
+        self._flushed = False
 
         # Plan 00122 BUG 4: detect the CLIENT project root, not the daemon's own
         # clone. Previously this was Path(__file__).parent.parent which, in a
@@ -57,9 +61,166 @@ class DebugInfoGenerator:
         """Add line to output buffer."""
         self.output_lines.append(line)
 
+    def _emit_env_summary(self, env_file: Path) -> None:
+        """Report which env settings are SET, never what they are set to.
+
+        This file used to be copied into the report verbatim, under a guide
+        whose next instruction was to paste the report into a GitHub issue. An
+        ``.env`` file is a conventional home for credentials, the tracker is
+        public, and a public issue cannot be retracted afterwards.
+
+        Which keys are present is the diagnostic fact that actually helps —
+        a value never is. A comment line is dropped entirely rather than listed,
+        because a comment is free text and can say anything, including why a
+        credential is there.
+        """
+        if not env_file.exists():
+            return
+
+        self.output(f"### {env_file}")
+        try:
+            raw = env_file.read_text()
+        except OSError as exc:
+            # The report IS the log here. A file that exists but cannot be read
+            # is itself a diagnostic fact — a permission problem on
+            # `.claude/` is a plausible cause of the daemon misbehaving — so it
+            # is recorded where whoever reads the report will see it.
+            self.output(f"(could not be read: {exc})")
+        else:
+            keys = [
+                line.split("=", 1)[0].strip()
+                for line in raw.splitlines()
+                if "=" in line and not line.lstrip().startswith("#")
+            ]
+            if keys:
+                self.output("Keys set (values withheld — this report may be shared):")
+                self.output("```")
+                for key in keys:
+                    self.output(f"{key}=<set>")
+                self.output("```")
+            else:
+                # "Present but empty" and "absent" are different diagnostic
+                # facts; the early return above already covers the second.
+                self.output("(present, no settings)")
+        self.output()
+
+    def _scrub(self, text: str) -> str:
+        """Replace the client's identifiers with placeholders.
+
+        The daemon package is imported HERE rather than at module scope, and
+        the failure is announced rather than swallowed. This script's whole
+        value is running when the daemon is broken, so it must not refuse to
+        produce a report just because the package will not import — but a
+        report that silently skipped redaction would look exactly like one that
+        did not need it, which is the worse outcome of the two.
+        """
+        scrubber = self._load_daemon_util("report_scrubbing")
+        if scrubber is None:
+            return (
+                "> **NOT REDACTED.** `utils/report_scrubbing.py` could not be "
+                "loaded, so absolute paths, hostname and secret terms are still "
+                "present below. Redact this by hand before sharing it.\n\n"
+                f"{text}"
+            )
+
+        # The secret word list is a SEPARATE, best-effort layer: resolving it
+        # reads project config. Path and hostname scrubbing must not be lost
+        # just because that fails — surviving a broken daemon is the whole
+        # reason this script exists.
+        terms = self._secret_terms()
+
+        scrubbed = str(
+            scrubber.scrub_report(
+                text,
+                project_root=self.project_root,
+                home=Path.home(),
+                hostname=os.environ.get("HOSTNAME") or socket.gethostname(),
+                secret_terms=terms or (),
+            )
+        )
+        if terms is None:
+            scrubbed = (
+                "> **Secret word list not applied.** Paths and hostname are "
+                "redacted below, but this project's declared secret terms could "
+                "not be loaded on this interpreter. Check for them by hand "
+                "before sharing.\n\n"
+            ) + scrubbed
+        return scrubbed
+
+    def _secret_terms(self) -> tuple[str, ...] | None:
+        """The project's declared secret terms, or ``None`` if unobtainable.
+
+        Resolving them reads project config through `ProjectContext`, which
+        needs the daemon's dependencies — so this fails on a bare interpreter
+        even though the redaction module itself does not. Returning ``None``
+        rather than raising is the point: failing to load a word list must
+        degrade the report to a warned, partially-scrubbed one, never abort it.
+        A missing report helps nobody diagnose anything.
+        """
+        secrets = self._load_daemon_util("secret_redaction")
+        if secrets is None:
+            return None
+        try:
+            return tuple(secrets.get_active_secret_terms())
+        except (ImportError, OSError, ValueError) as exc:
+            print(f"warning: secret word list unavailable: {exc}", file=sys.stderr)
+            return None
+
+    @staticmethod
+    def _load_daemon_util(name: str) -> ModuleType | None:
+        """Load one daemon util BY PATH, without importing the package.
+
+        `claude_code_hooks_daemon/__init__.py` pulls in the front controller and
+        therefore pydantic, so `import claude_code_hooks_daemon.utils.x` fails on
+        a bare interpreter — which is the ordinary way this script is run, and
+        the run during which a report most needs redacting. Both modules loaded
+        here are pure stdlib at import time, so loading the FILE sidesteps the
+        dependency without duplicating the logic into this script.
+
+        The package sits beside this script in both layouts: `<repo>/src/` when
+        self-installed, `<project>/.claude/hooks-daemon/src/` in a client.
+        """
+        import importlib.util
+
+        path = (
+            Path(__file__).resolve().parent.parent
+            / "src"
+            / "claude_code_hooks_daemon"
+            / "utils"
+            / f"{name}.py"
+        )
+        if not path.is_file():
+            print(f"warning: {path} not found; not redacting with it", file=sys.stderr)
+            return None
+
+        spec = importlib.util.spec_from_file_location(f"_debug_info_{name}", path)
+        if spec is None or spec.loader is None:
+            print(f"warning: {path} could not be prepared for import", file=sys.stderr)
+            return None
+
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except ImportError as exc:
+            # Reported, never swallowed: the caller turns a None into a banner
+            # on the report itself, so an unredacted report can never look like
+            # a redacted one.
+            print(f"warning: could not load {name}: {exc}", file=sys.stderr)
+            return None
+        return module
+
     def flush_output(self) -> None:
-        """Write buffered output to file or stdout."""
-        text = "\n".join(self.output_lines)
+        """Write buffered output to file or stdout, scrubbed either way.
+
+        Idempotent. `generate()` flushes and returns on each of its early-exit
+        paths, and `main()` flushes again afterwards — so the degraded report,
+        the one produced when something is already wrong, was written twice and
+        announced twice.
+        """
+        if self._flushed:
+            return
+        self._flushed = True
+        text = self._scrub("\n".join(self.output_lines))
         if self.output_file:
             with open(self.output_file, "w") as f:
                 f.write(text)
@@ -359,13 +520,7 @@ class DebugInfoGenerator:
             self.output(f"{self.RED}Configuration file not found: {config_file}{self.RESET}")
         self.output()
 
-        env_file = self.project_root / ".claude" / "hooks-daemon.env"
-        if env_file.exists():
-            self.output(f"### {env_file}")
-            self.output("```bash")
-            self.output(env_file.read_text())
-            self.output("```")
-            self.output()
+        self._emit_env_summary(self.project_root / ".claude" / "hooks-daemon.env")
 
         # Hook Tests
         self.output(f"{self.BOLD}## Hook Test{self.RESET}")
@@ -492,7 +647,13 @@ def main() -> None:
     generator.flush_output()
 
     if output_file:
-        print("You can now copy/paste this file into GitHub issues.")
+        print(
+            "This report is for YOU to read. Absolute paths, hostname and any\n"
+            "declared secret terms have been replaced with placeholders, but\n"
+            "nothing else has: config values, log lines and command output are\n"
+            "as captured. Before sharing it, see BUG_REPORTING.md — the tracker\n"
+            "is PUBLIC and an issue cannot be retracted once posted."
+        )
 
 
 if __name__ == "__main__":

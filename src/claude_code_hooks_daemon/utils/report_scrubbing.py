@@ -34,8 +34,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final
 
-from claude_code_hooks_daemon.utils.secret_redaction import redact_text
-
 PROJECT_ROOT_PLACEHOLDER: Final[str] = "<project-root>"
 HOME_PLACEHOLDER: Final[str] = "<home>"
 HOSTNAME_PLACEHOLDER: Final[str] = "<hostname>"
@@ -96,8 +94,17 @@ def scrub_report(
     scrubbed = _replace(scrubbed, git_remote, REMOTE_PLACEHOLDER)
     scrubbed = _replace(scrubbed, hostname, HOSTNAME_PLACEHOLDER)
 
+    # Imported lazily, and that is deliberate rather than incidental: with no
+    # module-level package import, this file can be loaded BY PATH with no
+    # package resolution at all. `scripts/debug_info.py` needs exactly that —
+    # it must produce a scrubbed report on a bare interpreter, when the daemon's
+    # dependencies are missing or broken, which is precisely when someone is
+    # generating a bug report.
+    #
     # Not guarded by length: the secret word list is a deliberate declaration,
     # and `redact_text` owns the matching rules (slug and separator variants).
     if secret_terms:
+        from claude_code_hooks_daemon.utils.secret_redaction import redact_text
+
         scrubbed = redact_text(scrubbed, secret_terms)
     return scrubbed

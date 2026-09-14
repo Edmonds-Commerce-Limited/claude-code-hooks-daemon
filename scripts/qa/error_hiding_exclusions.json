@@ -719,6 +719,18 @@
       "reason": "Plan 00200 Task 5.4: ValueError from Path.relative_to() only fires when a hook_file isn't under project_root -- an expected input-filtering case (a hook file from a different tree), not a failure. The inline comment already documents why ('File not under project_root, skip'); no information is lost, the file is simply excluded from the relative_paths list being built."
     },
     {
+      "file": "scripts/debug_info.py",
+      "function": "_load_daemon_util",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00403 Task 1.2: this script's entire value is producing a diagnostic report WHILE the daemon is broken, which is exactly when its dependencies fail to import. It loads utils/report_scrubbing.py and utils/secret_redaction.py BY PATH precisely so it does not need the package (importing claude_code_hooks_daemon pulls in the front controller and therefore pydantic), and an ImportError from exec_module means only that this interpreter cannot provide that one module. Raising would abort the report, and a missing report helps nobody diagnose anything. Nothing is concealed: every None path prints a named warning to stderr first, and the sole caller (_scrub) turns a None into a 'NOT REDACTED' banner at the top of the report itself -- so an unredacted report can never be mistaken for a redacted one, which is the specific harm the rule exists to prevent."
+    },
+    {
+      "file": "scripts/debug_info.py",
+      "function": "_secret_terms",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00403 Task 1.2: the same degrade-never-abort contract as _load_daemon_util above, one layer up. Resolving the project's declared secret terms reaches ProjectContext and therefore the daemon's dependencies, so it can fail on a bare interpreter even when report_scrubbing itself loaded fine. Path and hostname scrubbing must not be lost because the word list could not be read -- surviving a broken daemon is why this script exists. The failure is printed to stderr and the caller emits a 'Secret word list not applied' banner into the report, so the reporter is told which layer did not run rather than being left to assume it did."
+    },
+    {
       "file": "scripts/qa/audit_error_hiding.py",
       "function": "audit_heredoc_python",
       "rule": "silent-continue",
