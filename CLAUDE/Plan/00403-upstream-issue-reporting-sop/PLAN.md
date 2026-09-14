@@ -106,12 +106,12 @@ finding in it — the owner's rule, made checkable.
 
 ### Phase 1: Stop the bleeding
 
-- [ ] ⬜ **Task 1.1**: Route `cmd_bug_report` through `secret_redaction`, and
+- [x] ✅ **Task 1.1**: Route `cmd_bug_report` through `secret_redaction`, and
   scrub the config dump, env-var capture and log lines before they reach disk.
-- [ ] ⬜ **Task 1.2**: Same for `scripts/debug_info.py`, and stop emitting
+- [x] ✅ **Task 1.2**: Same for `scripts/debug_info.py`, and stop emitting
   `.claude/hooks-daemon.env` verbatim — report which keys are SET, never their
   values.
-- [ ] ⬜ **Task 1.5**: The captured log lines carry whole `hook_input` payloads
+- [x] ✅ **Task 1.5**: The captured log lines carry whole `hook_input` payloads
   — `session_name`, prompt ids, cwd, cost and rate-limit figures — which
   path-and-hostname scrubbing does not touch. Found by running the scrubbed
   command against this repository and reading the result rather than trusting
