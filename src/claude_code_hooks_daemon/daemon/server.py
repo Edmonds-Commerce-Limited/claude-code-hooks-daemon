@@ -423,6 +423,32 @@ def get_memory_logs(
     return _memory_log_handler.get_logs(count, elide_arguments=elide_arguments)
 
 
+async def _discard_unsecured_socket(server: asyncio.Server, path: Path) -> None:
+    """Stop serving a per-event socket whose permissions could not be set.
+
+    `asyncio` does not unlink a Unix socket file when its server closes, so
+    closing alone would leave the path on disk carrying umask-derived
+    permissions with nothing listening — the shape most likely to be mistaken
+    for a working socket.
+
+    The unlink is best-effort for the same reason the caller is: losing one
+    event to the legacy socket is a far smaller failure than aborting the
+    daemon's startup, and the commonest cause here is that a concurrently
+    starting daemon already removed the events dir — which `missing_ok` treats
+    as success because it IS the outcome we wanted.
+
+    Args:
+        server: The bound server to stop.
+        path: The socket file to remove.
+    """
+    server.close()
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as e:
+        logger.error("Failed to unlink unsecured per-event socket %s: %s", path, e)
+    await server.wait_closed()
+
+
 def get_log_count() -> int:
     """Get number of log records in memory buffer.
 
@@ -947,7 +973,28 @@ class HooksDaemon:
                     e,
                 )
                 continue
-            event_socket_path.chmod(0o660)
+            # Securing the socket is the second half of binding it, so it
+            # shares the first half's best-effort contract: one event drops to
+            # the legacy socket, the other thirty keep theirs. An unguarded
+            # chmod here would throw out of this loop and out of start(),
+            # costing ALL the per-event sockets over one file — and the window
+            # is real rather than theoretical, because this method rmtree's the
+            # events dir at entry, so a second daemon starting concurrently for
+            # the same project can delete the socket in between.
+            #
+            # Skipped rather than served: without the chmod the socket carries
+            # umask-derived permissions instead of 0o660.
+            try:
+                event_socket_path.chmod(0o660)
+            except OSError as e:
+                logger.error(
+                    "Failed to secure per-event socket %s (%s): %s — skipping it",
+                    event_socket_path,
+                    meta.wire_key.value,
+                    e,
+                )
+                await _discard_unsecured_socket(event_server, event_socket_path)
+                continue
             bound[meta.wire_key.value] = event_server
 
         self._event_servers = bound

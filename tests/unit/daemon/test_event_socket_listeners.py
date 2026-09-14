@@ -403,6 +403,60 @@ class TestSocketHygiene:
         await server_task
 
     @pytest.mark.anyio
+    async def test_a_chmod_failure_skips_one_socket_rather_than_aborting_startup(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        """Binding a socket is two filesystem steps, and both must degrade alike.
+
+        `start_unix_server` is wrapped in a per-socket `except OSError:
+        continue`; the `chmod` that secures the socket it just created was
+        not. So a failure on step 1 skipped one event and a failure on step 2
+        — the same kind of operation, on the same path, one line later — threw
+        out of `_bind_event_sockets`, out of `start()`, and took the whole
+        daemon down with it.
+
+        The window is real rather than theoretical: this method begins by
+        `shutil.rmtree`-ing the events dir, so a second daemon starting
+        concurrently for the same project deletes the socket between the bind
+        and the chmod. CI caught it as a `FileNotFoundError` on
+        `subagent-start.sock` that failed one Python version and passed two.
+
+        Skipping is the right degradation and serving is not: a socket whose
+        chmod did not land has umask-derived permissions rather than the 0o660
+        the daemon intends, and the legacy socket already covers every event.
+        """
+        from claude_code_hooks_daemon.daemon.server import get_memory_logs
+
+        events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
+        real_chmod = Path.chmod
+        refused: list[Path] = []
+
+        def _flaky_chmod(self: Path, mode: int, **kwargs: Any) -> None:
+            if self.parent == events_dir and not refused:
+                refused.append(self)
+                raise FileNotFoundError(2, "No such file or directory", str(self))
+            real_chmod(self, mode, **kwargs)
+
+        config = _make_config(isolated_untracked_dir, relay_enabled=True)
+        daemon = HooksDaemon(config=config, controller=front_controller)
+
+        with patch.object(Path, "chmod", _flaky_chmod):
+            server_task = asyncio.create_task(daemon.start())
+            await asyncio.sleep(0.1)
+
+        assert refused, "the fixture must actually have interfered with a chmod"
+        assert (
+            len(daemon._event_servers) == len(wired_event_metas()) - 1
+        ), "exactly the one unsecurable socket is skipped; the rest still bind"
+        assert not refused[0].exists(), "an unsecured socket file must not be left behind"
+
+        logs = "\n".join(get_memory_logs())
+        assert refused[0].name in logs, "the skip must say which event lost its socket"
+
+        await daemon.shutdown()
+        await server_task
+
+    @pytest.mark.anyio
     async def test_shutdown_rmtree_failure_is_logged_not_swallowed(
         self, isolated_untracked_dir: Path, front_controller: FrontController
     ) -> None:

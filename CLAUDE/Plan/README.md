@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00404: niggles ledger ten](00404-niggles-ledger-ten/PLAN.md) - In Progress (the open niggles ledger; ledger nine is complete. N1 fixed: an unguarded `chmod` one line outside `_bind_event_sockets`' per-socket guard meant a single unsecurable socket aborted daemon startup and cost ALL 31 event sockets, not one — found by reading a CI failure that passed on two of three Python versions)
+
 - [00403: upstream issue reporting sop](00403-upstream-issue-reporting-sop/PLAN.md) - In Progress (a client project reporting a daemon defect to this PUBLIC repo has no procedure, and all three existing routes leak client config, env files and hostnames unredacted)
 
 - [00402: restart path leaves generated handler doc stale](00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md) - Not Started (a restart regenerates the `CLAUDE.md` block but never `.claude/HOOKS-DAEMON.md`, which sat a whole handler short for days and no test could see it. Regenerating on restart is the WRONG fix — that file's marker is the deployed-from version `upgrade.sh` reads. Graduated from 00400 N6; blocked on a ruling)
@@ -250,7 +252,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Completed**: 357 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 23 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 24 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

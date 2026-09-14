@@ -719,6 +719,12 @@
       "reason": "Plan 00200 Task 5.4: ValueError from Path.relative_to() only fires when a hook_file isn't under project_root -- an expected input-filtering case (a hook file from a different tree), not a failure. The inline comment already documents why ('File not under project_root, skip'); no information is lost, the file is simply excluded from the relative_paths list being built."
     },
     {
+      "file": "daemon/server.py",
+      "function": "_discard_unsecured_socket",
+      "rule": "log-and-continue",
+      "reason": "Plan 00403 niggle N1: cleanup for a per-event socket the caller has ALREADY decided to abandon, because its chmod to 0o660 failed and it must not be served with umask-derived permissions. Raising here would defeat the entire purpose of the function -- it exists so that one unsecurable socket costs one event (which falls back to the legacy socket, as every other per-socket failure in _bind_event_sockets does) instead of aborting daemon startup, which is exactly the defect it was written to fix. The commonest cause is a concurrently starting daemon having already rmtree'd the events dir, and `missing_ok=True` treats that as success because it IS the outcome wanted; the residual OSError band is a directory permission problem, logged at ERROR so nothing is concealed. Covered by test_a_chmod_failure_skips_one_socket_rather_than_aborting_startup."
+    },
+    {
       "file": "scripts/debug_info.py",
       "function": "_load_daemon_util",
       "rule": "return-none-on-error",
