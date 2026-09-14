@@ -80,6 +80,19 @@ def _fresh_cache(root: Path, name: str = "alpha") -> None:
     write_cache(root, [_state(root / "untracked" / "repos" / name)])
 
 
+def _reason(result: Any) -> str:
+    """The deny text, asserted present rather than assumed.
+
+    `HookResult.reason` is `str | None`, so a bare `"x" in result.reason` is a
+    type error on every assertion below. Asserting here rather than coercing
+    keeps the failure honest: a DENY that carries no reason is itself a defect,
+    and this reports it as one instead of comparing against the string "None".
+    """
+    reason = result.reason
+    assert reason is not None, "a denial must carry a reason"
+    return str(reason)
+
+
 def _read(path: Path, session: str = _SESSION) -> dict[str, Any]:
     return {
         "hook_event_name": "PreToolUse",
@@ -308,7 +321,7 @@ class TestVerdicts:
         result = handler.handle(_read(repo / "x.py"))
 
         assert result.decision == Decision.DENY
-        assert "4" in result.reason
+        assert "4" in _reason(result)
 
     def test_the_deny_names_the_command_that_fixes_it(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
@@ -318,7 +331,7 @@ class TestVerdicts:
 
         result = handler.handle(_read(repo / "x.py"))
 
-        assert "pull --ff-only" in result.reason
+        assert "pull --ff-only" in _reason(result)
 
     def test_a_repo_on_the_wrong_branch_is_denied(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
@@ -456,7 +469,7 @@ class TestNotVerified:
 
         result = handler.handle(_read(repo / "x.py"))
 
-        assert NOT_VERIFIED_HEADLINE in result.reason
+        assert NOT_VERIFIED_HEADLINE in _reason(result)
 
     def test_not_verified_also_honours_block_once(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
@@ -478,7 +491,7 @@ class TestNotVerified:
         result = handler.handle(_read(repo / "x.py"))
 
         assert result.decision == Decision.DENY
-        assert NOT_VERIFIED_HEADLINE in result.reason
+        assert NOT_VERIFIED_HEADLINE in _reason(result)
 
     def test_a_repo_absent_from_a_valid_cache_reads_as_not_verified(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
@@ -662,7 +675,7 @@ class TestAnUnconfirmedReading:
         result = handler.handle(_read(repo / "x.py"))
 
         assert result.decision == Decision.DENY
-        assert UNCONFIRMED_HEADLINE not in result.reason
+        assert UNCONFIRMED_HEADLINE not in _reason(result)
 
     def test_the_note_does_not_spend_the_repos_one_block(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
@@ -905,7 +918,7 @@ class TestOnlyRealCheckoutsAreGoverned:
         result = handler.handle(_read(fresh / "x.py"))
 
         assert result.decision == Decision.DENY
-        assert NOT_VERIFIED_HEADLINE in result.reason
+        assert NOT_VERIFIED_HEADLINE in _reason(result)
 
 
 class TestCommandsThatCannotRead:
@@ -1044,7 +1057,7 @@ class TestSubjectResolution:
         result = handler.handle(_read(inner / "x.py"))
 
         assert result.decision == Decision.DENY
-        assert "7" in result.reason
+        assert "7" in _reason(result)
 
 
 class TestDirtyRepoWording:
@@ -1062,8 +1075,8 @@ class TestDirtyRepoWording:
         result = handler.handle(_read(repo / "x.py"))
 
         assert result.decision == Decision.DENY
-        assert "uncommitted local changes" in result.reason
-        assert "fix:" not in result.reason
+        assert "uncommitted local changes" in _reason(result)
+        assert "fix:" not in _reason(result)
 
 
 class TestStateIsBounded:
@@ -1097,8 +1110,8 @@ class TestPathDisplay:
 
         result = handler.handle(_read(repo / "x.py"))
 
-        assert "untracked/repos/alpha" in result.reason
-        assert str(tmp_path) not in result.reason
+        assert "untracked/repos/alpha" in _reason(result)
+        assert str(tmp_path) not in _reason(result)
 
     def test_a_root_outside_the_repository_cannot_be_configured(self) -> None:
         """Why the handler never has to render an absolute path.
