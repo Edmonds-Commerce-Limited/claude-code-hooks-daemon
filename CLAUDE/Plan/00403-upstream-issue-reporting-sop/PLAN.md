@@ -153,9 +153,15 @@ finding in it — the owner's rule, made checkable.
 
 ### Phase 3: The verification gates
 
-- [ ] ⬜ **Task 3.1**: Version currency — resolve installed versus latest; when
+- [ ] 🔄 **Task 3.1**: Version currency — resolve installed versus latest; when
   older, scan the release notes between them for the named subsystem and refuse
-  if it changed.
+  if it changed. **Decision landed** as a pure function over notes the caller
+  supplies; `install.release_notes.load_release_notes_between` already provides
+  them. Two asymmetries are deliberate: being AHEAD of the newest tag is fine
+  (a contributor on the default branch is not behind), and being unable to
+  check is a refusal rather than a pass — an unchecked install and a
+  checked-and-clean one must never render the same. **Outstanding**: wiring it
+  to the real installed/latest resolution.
 - [ ] ⬜ **Task 3.2**: Configuration ruled out — surface the named handler's
   options and require a stated reason per option.
 - [ ] ⬜ **Task 3.3**: Source cited — require a `file:line` in the daemon source
