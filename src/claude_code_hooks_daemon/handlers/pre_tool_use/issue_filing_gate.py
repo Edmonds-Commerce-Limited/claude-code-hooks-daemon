@@ -247,14 +247,18 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         """
         if not cwd:
             return None
+        # "Could not resolve" is carried in a variable and returned once below,
+        # rather than returned from the handler body: an early return from an
+        # except block reads as success to a reader AND is rejected by the
+        # error-hiding audit, which matches the shape rather than the intent.
+        url: str | None = None
         try:
             repo = GitRepo.resolve_for(Path(cwd))
-            if repo is None:
-                return None
-            url = repo.read_config("remote.origin.url")
+            if repo is not None:
+                url = repo.read_config("remote.origin.url")
         except (OSError, ValueError) as exc:  # pragma: no cover - defensive
             logger.debug("Could not resolve the repository for %s: %s", cwd, exc)
-            return None
+            url = None
         return cls._repo_slug(url) if url else None
 
     @classmethod

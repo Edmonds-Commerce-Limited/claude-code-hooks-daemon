@@ -283,15 +283,43 @@ class TestProseAboutTheDaemonDirectoryIsNotADirectoryChange:
 
         assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is False
 
-    def test_a_single_quoted_mention_is_not_matched(self) -> None:
-        handler = DaemonLocationGuardHandler()
-        command = "echo 'cd .claude/hooks-daemon is what not to do'"
-
-        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is False
-
     def test_a_real_directory_change_is_still_matched(self) -> None:
         """The control: blanking prose must not blank the command beside it."""
         handler = DaemonLocationGuardHandler()
         command = "cat > notes.md <<'EOF'\nprose\nEOF\ncd .claude/hooks-daemon"
+
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
+
+
+class TestAQuotedStringCanItselfBeACommand:
+    """Blanking every quoted literal is unsound for an EXISTENCE decision.
+
+    Plan 00407 N12, correcting this handler's own N3 fix. That fix blanked all
+    quoted literals so `echo 'cd ...'` would not read as a directory change. But
+    `bash -c "<cmd>"` puts a REAL command inside a quoted literal — the shell
+    executes the argument — so the same pass that spared the prose also spared
+    the command, and `R-DAEMON-DIR-CD` could be walked past by quoting.
+
+    The distinction the fix missed: blanking literals is right when asking
+    "what is this command's TARGET?" (how `destructive_git._scan_target` uses
+    it) and wrong when asking "is there a command here AT ALL?".
+
+    A heredoc body is genuinely inert, so `strip_inert_spans` stays — it is
+    what fixes the defect N3 was actually reported for. The narrower
+    `echo 'cd ...'` false positive returns with it, deliberately: it is the
+    same false positive `destructive_git` carries, and over-denying a harmless
+    `echo` is the safe error where under-denying a real `bash -c` is not.
+    """
+
+    def test_a_real_directory_change_inside_bash_dash_c_is_matched(self) -> None:
+        handler = DaemonLocationGuardHandler()
+        command = 'bash -c "cd .claude/hooks-daemon && bin/hooks-daemon status"'
+
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
+
+    def test_a_real_directory_change_inside_sh_dash_c_is_matched(self) -> None:
+        """Single quotes hide it from the same pass, so both spellings are pinned."""
+        handler = DaemonLocationGuardHandler()
+        command = "sh -c 'cd .claude/hooks-daemon'"
 
         assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True

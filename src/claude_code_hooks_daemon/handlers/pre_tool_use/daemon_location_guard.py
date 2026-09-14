@@ -15,7 +15,6 @@ from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
 )
-from claude_code_hooks_daemon.utils.quoted_spans import blank_shell_literal_spans
 from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
 
 _RULE = Rule(
@@ -93,18 +92,25 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
         if not command:
             return False
 
-        # Match only what the shell would EXECUTE. A quoted heredoc body and a
-        # single-quoted literal are DATA, so a `cd` NAMED in either is prose —
-        # and this denied a review agent writing a report that quoted one
-        # (Plan 00407 N3). `destructive_git` already blanked inert spans, and
-        # allowed the identical heredoc in the same command; this is the same
-        # step, not a new idea. Blanking need not preserve length here, because
-        # the result is a boolean search rather than an index into the original.
+        # Match only what the shell would EXECUTE. A quoted heredoc body is
+        # DATA, so a `cd` NAMED in one is prose — and this denied a review agent
+        # writing a report that quoted one (Plan 00407 N3). `destructive_git`
+        # already stripped inert spans, and allowed the identical heredoc in the
+        # same command; this is the same step, not a new idea.
         #
-        # BOTH passes are needed and neither subsumes the other: strip_inert_spans
-        # covers heredoc and message bodies, while a bare `echo 'cd ...'` is an
-        # ordinary quoted literal that only blank_shell_literal_spans reaches.
-        executable = blank_shell_literal_spans(strip_inert_spans(command))
+        # Blanking EVERY quoted literal as well is deliberately NOT done, and
+        # that is a correction rather than an omission (Plan 00407 N12). A
+        # quoted literal can itself BE a command: the shell executes the
+        # argument of `bash -c "cd .claude/hooks-daemon && ..."`, so a pass that
+        # blanks it hides a real directory change and this rule could be walked
+        # past by quoting. Blanking literals answers "what is this command's
+        # TARGET?" — it cannot answer "is there a command here at all?".
+        #
+        # The cost is that `echo 'cd .claude/hooks-daemon'` matches. That is the
+        # same false positive `destructive_git` carries, and it is the safe
+        # error: over-denying a harmless `echo` costs a rephrase, under-denying
+        # a real `bash -c` costs the rule.
+        executable = strip_inert_spans(command)
         return bool(_CD_INTO_DAEMON_DIR.search(executable))
 
     def get_rules(self) -> list[Rule]:

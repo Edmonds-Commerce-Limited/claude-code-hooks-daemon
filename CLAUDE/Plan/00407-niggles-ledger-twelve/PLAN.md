@@ -236,10 +236,58 @@ rather than an edit.
   [Plan 00408](../00408-handler-hygiene-from-the-release-review/PLAN.md) rather
   than absorbed into a release being cut.
 
+- [x] ✅ **N12**: my own N2 and N3 fixes opened an evasion hole in the two
+  guards they were meant to correct — found by the release QA gate, and the
+  most serious entry after N7.
+
+  Both fixes added `blank_shell_literal_spans` so a command NAMED in an
+  `echo` would not be read as a real one. But **a quoted literal can itself BE
+  a command**: the shell executes the argument of `bash -c "…"`. The same pass
+  that blanked the prose blanked the command, so `R-DAEMON-DIR-CD` and the
+  merge-approval gate could both be walked past simply by quoting.
+
+  Reproduced before believing it, in both handlers:
+  `bash -c "cd .claude/hooks-daemon && bin/hooks-daemon status"` → allowed;
+  `sh -c 'git merge feature/x'` → not a merge. The unquoted spellings were
+  denied throughout, which is what made the hole invisible to every test that
+  asked whether the guard still worked.
+
+  **The distinction the fixes missed.** Blanking literals answers "what is
+  this command's TARGET?" — which is how `destructive_git._scan_target` uses
+  it, correctly. It cannot answer "is there a command here at all?", because
+  the text being blanked may be the command. Using a target-extraction pass as
+  an existence filter is the defect, and it is worth naming because
+  `plan_number_helper` uses the same idiom the same way (recorded below).
+
+  Fixed by dropping the literal-blanking from both existence decisions and
+  keeping `strip_inert_spans`, which is what the reported defects actually
+  needed: a heredoc body and a `-m` message body really are inert.
+  `merge_target` moved from `strip_quoted_heredoc_bodies` to
+  `strip_inert_spans` in the process, which fixes a plain
+  `git commit -m "git merge x is next"` that the removed pass had been masking.
+  A second bug fell out of the same reproduction: the branch name was reported
+  as `feature/x"`, because the match lands inside the enclosing literal and the
+  slice carries its closing quote — an approval recorded for `feature/x` would
+  never have been found.
+
+  **The cost is accepted and stated**: `echo 'cd …'` and `echo 'git merge x'`
+  match again. That is the same false positive `destructive_git` has always
+  carried, and it is the safe direction — over-denying a harmless `echo` costs
+  a rephrase, under-denying a real `bash -c` costs the rule. Telling the two
+  apart needs an allowlist of commands that do not execute their argument,
+  which is new machinery rather than a correction, and this release is being
+  cut — graduated to
+  [Plan 00408](../00408-handler-hygiene-from-the-release-review/PLAN.md).
+
+  Release note `48-…` was amended rather than left: it told users a `cd` inside
+  a single-quoted string was no longer matched, which this correction makes
+  false. No NEW note is owed — N2 and N3 are both unreleased, so the hole was
+  introduced and closed inside this range.
+
 ## Success Criteria
 
-- [x] ✅ Every entry above is in a terminal state: N1–N5, N7, N9 and N10 fixed;
-  N11 fixed with its structural half graduated; N6 and N8 graduated to
+- [x] ✅ Every entry above is in a terminal state: N1–N5, N7, N9, N10 and N12
+  fixed; N11 fixed with its structural half graduated; N6 and N8 graduated to
   Plan 00408.
 
 - [ ] 🔄 Full QA passes and CI is green for every entry closed.

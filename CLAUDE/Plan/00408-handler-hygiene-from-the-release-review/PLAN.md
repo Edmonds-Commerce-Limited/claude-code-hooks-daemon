@@ -89,6 +89,38 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   class outright. Either remedy closes this — prefer whichever leaves fewer
   hand-maintained numbers behind.
 
+### Phase 3c: An allowlist of commands that do not run their argument
+
+- [ ] ⬜ **Task 3.3**: `echo 'git merge x'` and `echo 'cd .claude/hooks-daemon'`
+  are matched as real commands by `merge_to_main_approval` and
+  `daemon_location_guard`. Graduated from
+  [Plan 00407](../00407-niggles-ledger-twelve/PLAN.md) N12.
+
+  This is the accepted cost of closing that entry's hole, not an oversight.
+  `echo 'X'` and `bash -c 'X'` are structurally identical — a command with a
+  quoted argument — so nothing in the text separates them. Only knowing that
+  `echo` does not EXECUTE its argument does, which means an allowlist of inert
+  commands (`echo`, `printf`, `:`, `true`), applied per segment head.
+
+  Build it as an ALLOWLIST, per N7's rule: the safe error is withholding an
+  exemption, because a missing entry costs a false positive while a wrong entry
+  costs a guard. It belongs in `utils.shell_segmentation` beside
+  `strip_inert_spans`, so all three guards get it at once rather than one
+  growing a private copy — that divergence is what produced N2, N3 and N12 in
+  the first place.
+
+- [ ] ⬜ **Task 3.4**: `plan_number_helper` uses literal-blanking as an
+  existence filter, the same shape N12 corrected in its two siblings —
+  `blank_shell_literal_spans(strip_quoted_heredoc_bodies(command))` decides
+  whether a `mkdir` of a plan folder is present, so `bash -c "mkdir …"` is
+  missed.
+
+  Carried here rather than fixed in the release because the consequence is a
+  plan-number collision rather than a safety breach, and because it pre-dates
+  this cycle — it is the idiom N2's comment cited as precedent, which is
+  precisely how the mistake propagated. Verify the behaviour before changing
+  it; the fix is the same one-line removal if it reproduces.
+
 ### Phase 4: The sub-bar items, carried so they are not lost
 
 - [ ] ⬜ **Task 3.1**: Four items the reviewer put below the filing bar, each

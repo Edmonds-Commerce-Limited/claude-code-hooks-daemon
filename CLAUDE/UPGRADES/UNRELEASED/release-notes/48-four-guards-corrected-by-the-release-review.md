@@ -7,7 +7,7 @@ The code-review gate for this release found four defects that reach users. All
 four are fixed here.
 
 **A merge described in a commit message is no longer a merge.**
-`merge_to_main_approval` blanked quoted literals but not a heredoc BODY, so a
+`merge_to_main_approval` did not exclude a heredoc or message BODY, so a
 `git merge` named in prose inside one was read as a real merge. With
 `worktree.merge_to_main_requires_human_approval` on, any commit whose message
 described a merge was denied, naming a remediation about a command nobody ran —
@@ -15,10 +15,20 @@ and the shape that triggered it includes the `git commit -m "$(cat <<'EOF' … E
 it was unavoidable.
 
 **A `cd` described in prose is no longer a directory change.** The same class,
-in `daemon_location_guard`: text inside a quoted heredoc or a single-quoted
-string is data, and naming the daemon directory there is not entering it. This
-was found by the daemon denying an agent that was writing a report ABOUT the
-first defect.
+in `daemon_location_guard`: the body of a quoted heredoc is handed to the
+receiving command verbatim, so naming the daemon directory there is not
+entering it. This was found by the daemon denying an agent that was writing a
+report ABOUT the first defect.
+
+**Both fixes stop at the heredoc, and deliberately so.** An earlier draft of
+them also blanked every quoted string, which would have spared
+`echo 'cd …'` too. It was removed before release because a quoted string can
+itself BE a command: the shell executes the argument of
+`bash -c "cd .claude/hooks-daemon"`, so blanking it hid a real directory
+change — and a real `git merge` — from the very guard meant to catch it. Both
+handlers therefore still match a command named inside an ordinary quoted
+argument, which is what `destructive_git` has always done. Writing prose about
+either rule is best done with a quoted heredoc, or with the `Write` tool.
 
 **A drift detector no longer goes silently blind.** `deployed_artefact_drift`
 hardcoded `CLAUDE/Plan`. A project with a different configured plan directory

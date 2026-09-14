@@ -40,8 +40,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, is_linked_worktree
 from claude_code_hooks_daemon.utils.git_sync import current_branch, default_branch
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
-from claude_code_hooks_daemon.utils.quoted_spans import blank_shell_literal_spans
-from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
+from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
 
 _CONFIG_KEY: Final[str] = "worktree.merge_to_main_requires_human_approval"
 _APPROVE_SUBCOMMAND: Final[str] = "approve-merge"
@@ -119,7 +118,13 @@ def _segment_tokens(segment: str) -> list[str]:
     try:
         return shlex.split(segment)
     except ValueError:
-        return segment.split()
+        # Unbalanced quoting, which is ORDINARY here rather than malformed
+        # input: a merge inside `bash -c "git merge x"` is matched within the
+        # enclosing literal, so the slice carries that literal's closing quote
+        # and no opener. `shlex` refuses it, and the fallback split would then
+        # report the branch as `x"` — close enough to look right and wrong
+        # enough to miss a recorded approval for `x` (Plan 00407 N12).
+        return [token.strip("\"'") for token in segment.split()]
 
 
 def _first_positional(tokens: list[str]) -> str | None:
@@ -145,36 +150,42 @@ def merge_target(command: str) -> str | None:
     refuse. Values of flags such as ``-m`` are skipped so a commit message
     can never be read as the branch.
 
-    Matching is scoped to what the shell will EXECUTE, in two passes that must
-    run in this order:
+    Matching is scoped to what the shell will EXECUTE by a single pass,
+    ``strip_inert_spans``: it removes both a ``<<'EOF'`` body, which is handed
+    to the receiving command verbatim, and a ``-m`` message body. A merge
+    NAMED in either is prose. Without it, the repository's own canonical commit
+    idiom (``git commit -m "$(cat <<'EOF' ... EOF)"``) was read as a real merge
+    and denied with a remediation about a command nobody ran. This is the Plan
+    00377 N7 class that ``destructive_git._scan_target`` fixed for itself; the
+    sibling needed it too (Plan 00407 N2).
 
-    1. ``strip_quoted_heredoc_bodies`` — a ``<<'EOF'`` body is handed to the
-       receiving command verbatim, so a merge NAMED in a commit message is
-       prose. Without this, the repository's own canonical commit idiom
-       (``git commit -m "$(cat <<'EOF' ... EOF)"``) was read as a real merge
-       and denied with a remediation about a command nobody ran. This is the
-       Plan 00377 N7 class that ``destructive_git._scan_target`` fixed for
-       itself; the sibling needed it too (Plan 00407 N2).
-    2. ``blank_shell_literal_spans`` — the same idiom ``plan_number_helper``
-       uses, so ``echo 'git merge x'`` is not read as a merge either.
+    A second pass blanking every quoted literal was tried and REMOVED, which is
+    a correction worth stating so it is not re-added (Plan 00407 N12). It was
+    there so ``echo 'git merge x'`` would not read as a merge — but a quoted
+    literal can itself BE a command, because the shell executes the argument of
+    ``bash -c "git merge x"``. Blanking it therefore hid a real merge from an
+    approval gate, and the gate could be walked past by quoting. Blanking
+    literals answers "what is this command's TARGET?"; it cannot answer "is
+    there a command here at all?".
 
-    The ORDER is forced by a length property. Blanking preserves length, so a
-    match span still indexes the string it was given; stripping a heredoc body
-    does NOT, because the body collapses to a placeholder. So the segment is
-    re-sliced from the HEREDOC-STRIPPED copy, which the blanked copy indexes
-    exactly — never from the blanked copy itself, which would hand a real
-    branch name like ``'feature/x'`` to `shlex` as a run of spaces, and never
-    from the raw command, whose offsets the strip has already moved.
+    What that costs is ``echo 'git merge x'`` reading as a merge — the same
+    false positive ``destructive_git`` carries, and the safe direction for a
+    gate. Telling it apart from ``bash -c`` needs an allowlist of commands that
+    do not execute their argument, which is new machinery rather than a
+    correction (Plan 00408).
+
+    Because one copy is both matched and re-sliced, offsets need no
+    reconciliation — the earlier two-pass form had to re-slice from the
+    heredoc-stripped copy rather than the blanked one, and that hazard is gone.
     """
-    executable = strip_quoted_heredoc_bodies(command)
-    scannable = blank_shell_literal_spans(executable)
-    git = _GIT_MERGE_RE.search(scannable)
+    executable = strip_inert_spans(command)
+    git = _GIT_MERGE_RE.search(executable)
     if git is not None:
         tokens = _segment_tokens(executable[git.start(1) : git.end(1)])
         if any(token in _NON_MERGE_FLAGS for token in tokens):
             return None
         return _first_positional(tokens)
-    gh = _GH_PR_MERGE_RE.search(scannable)
+    gh = _GH_PR_MERGE_RE.search(executable)
     if gh is not None:
         segment = executable[gh.start(1) : gh.end(1)]
         return _first_positional(_segment_tokens(segment)) or _GH_CURRENT_PR

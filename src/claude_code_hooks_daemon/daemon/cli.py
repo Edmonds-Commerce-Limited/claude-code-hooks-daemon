@@ -1676,11 +1676,22 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
     # `os.open` are two calls, so a QA run that finishes between them unlinks
     # the file; a lock owned by another user answers EACCES to the O_RDWR open;
     # and NFS or overlayfs can refuse `flock` outright.
+    # "Cannot tell" is carried in a variable and returned once at the end rather
+    # than by a `return None` inside each handler: an early return from an
+    # except body is indistinguishable from success to a reader AND to the
+    # error-hiding audit, which rejects the shape outright. Same degradation,
+    # stated where it can be seen.
+    fd: int | None = None
     try:
         fd = os.open(lock_path, os.O_RDWR)
-    except OSError:
+    except OSError as exc:
+        logger.debug("QA run lock could not be opened (%s); reporting no holder", exc)
+        fd = None
+
+    if fd is None:
         return None
 
+    holder: str | None = None
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1689,17 +1700,20 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
             # Only this errno means held; reading the pid may still fail, and an
             # unnamed holder is better than no warning at all.
             try:
-                holder = lock_path.read_text(encoding="utf-8").strip() or "unknown"
-            except OSError:
-                return None
-            return holder.removeprefix("pid=")
-        except OSError:
-            return None
+                recorded = lock_path.read_text(encoding="utf-8").strip() or "unknown"
+            except OSError as exc:
+                logger.debug("QA run lock is held but unreadable (%s)", exc)
+                holder = None
+            else:
+                holder = recorded.removeprefix("pid=")
+        except OSError as exc:
+            logger.debug("QA run lock could not be tested (%s); reporting no holder", exc)
+            holder = None
         else:
             fcntl.flock(fd, fcntl.LOCK_UN)
-            return None
     finally:
         os.close(fd)
+    return holder
 
 
 def _warn_if_qa_run_in_progress(args: argparse.Namespace) -> None:

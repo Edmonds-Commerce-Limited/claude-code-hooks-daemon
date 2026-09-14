@@ -86,7 +86,6 @@ class TestMergeTarget:
             "git status",
             "git merge-base main feature",
             "git mergetool",
-            "echo 'git merge x'",
         ],
     )
     def test_ignores_non_merges(self, command: str) -> None:
@@ -251,3 +250,50 @@ class TestAMergeDescribedInAMessageIsNotAMerge:
             f"git merge --no-ff {self._BRANCH}"
         )
         assert merge_target(command) == self._BRANCH
+
+
+class TestAQuotedStringCanItselfBeAMerge:
+    """A quoted literal can BE the command, so blanking every one hides merges.
+
+    Plan 00407 N12, correcting this function's own N2 fix. That fix added a
+    literal-blanking pass so `echo 'git merge x'` would not read as a merge —
+    but the shell EXECUTES the argument of `bash -c "git merge x"`, so the same
+    pass hid a real merge and the approval gate could be walked past by quoting.
+
+    Stripping heredoc and message bodies is what N2 was actually reported for
+    (the canonical `git commit -m "$(cat <<'EOF' ... EOF)"` idiom), and it
+    alone does that job — the cases above still pass without the blanking.
+    """
+
+    _BRANCH = "feature/x"
+
+    def test_a_real_merge_inside_bash_dash_c_is_named(self) -> None:
+        assert merge_target(f'bash -c "git merge {self._BRANCH}"') == self._BRANCH
+
+    def test_a_real_merge_inside_sh_dash_c_is_named(self) -> None:
+        """Single quotes hide it from the same pass, so both spellings are pinned."""
+        assert merge_target(f"sh -c 'git merge {self._BRANCH}'") == self._BRANCH
+
+    def test_the_branch_is_named_without_the_enclosing_quote(self) -> None:
+        """A branch reported as `x"` is worse than no branch at all.
+
+        The match lands INSIDE the enclosing literal, so the slice carries that
+        literal's closing quote and no opener; `shlex` refuses the unbalanced
+        result and the fallback split kept the quote. An approval recorded for
+        `feature/x` would then never be found, and the deny reason would name a
+        branch nobody typed.
+        """
+        assert merge_target(f'bash -c "git merge {self._BRANCH}"') == self._BRANCH
+
+    def test_an_echo_naming_a_merge_is_matched_and_that_is_the_accepted_cost(
+        self,
+    ) -> None:
+        """Deliberate: `echo` and `bash -c` are structurally identical here.
+
+        Both are a command with a quoted argument; only knowing that `echo`
+        does not EXECUTE its argument separates them, which needs an allowlist
+        of inert commands (Plan 00408). Until then the gate over-denies a
+        harmless `echo` rather than under-denying a real `bash -c`, matching
+        what `destructive_git` has always done.
+        """
+        assert merge_target(f"echo 'git merge {self._BRANCH}'") == self._BRANCH
