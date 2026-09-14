@@ -21,6 +21,7 @@ import pytest
 
 from claude_code_hooks_daemon.config.models import ReferenceReposConfig
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.session_start.reference_repo_sweep import (
     ReferenceRepoSweepHandler,
 )
@@ -258,6 +259,16 @@ class TestConfiguredScope:
         cached = cached_states(tmp_path)
         assert cached is not None
         assert {path.name for path in cached} == {"alpha"}
+
+
+class TestTheDefaultProjectRootReader:
+    def test_it_resolves_from_the_project_context(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The injected reader is a test seam; the real one must work too."""
+        monkeypatch.setattr(ProjectContext, "project_root", classmethod(lambda cls: tmp_path))
+
+        assert ReferenceRepoSweepHandler().project_root_reader() == tmp_path
 
 
 class TestHandlerContract:

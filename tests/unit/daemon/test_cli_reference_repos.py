@@ -77,13 +77,13 @@ def _state(
 def stub_refresh(monkeypatch: pytest.MonkeyPatch):
     """Replace the only module that touches the network."""
 
-    def _install(**by_name: RepoState) -> list[bool]:
+    def _install(*, detail: str = "ok", **by_name: RepoState) -> list[bool]:
         seen: list[bool] = []
 
         def _refresh(path: Path, *, allow_pull: bool = True) -> RefreshOutcome:
             seen.append(allow_pull)
             state = by_name.get(path.name, _state(path))
-            return RefreshOutcome(state=state, fetched=True, pulled=False, detail="ok")
+            return RefreshOutcome(state=state, fetched=True, pulled=False, detail=detail)
 
         monkeypatch.setattr(
             "claude_code_hooks_daemon.reference_repos.refresh.refresh_repo", _refresh
@@ -248,6 +248,27 @@ class TestReportContent:
         assert "php-qa-ci" in out
         assert "no remote configured" in out
 
+    def test_show_all_states_why_each_repo_was_not_fast_forwarded(
+        self, tmp_path: Path, stub_refresh, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The refusal detail had no consumer at all, and it is the actionable half.
+
+        "Dirty", "ahead" and "diverged" are one boolean to `safe_to_pull` but
+        three different remedies to a reader — and telling someone with diverged
+        history to commit their changes is advice to nowhere. The renderer wrote
+        that distinction and nothing ever printed it.
+        """
+        root = _project(tmp_path)
+        repo = _repo(root)
+        stub_refresh(
+            alpha=_state(repo, behind=2),
+            detail="not pulled: history has diverged, so a fast-forward is impossible",
+        )
+
+        cmd_reference_repos(_args(root, show_all=True))
+
+        assert "history has diverged" in capsys.readouterr().out
+
     def test_the_report_is_not_truncated(
         self, tmp_path: Path, stub_refresh, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -313,6 +334,27 @@ class TestJsonOutput:
         entry = json.loads(capsys.readouterr().out)["repos"][0]
         assert entry["fetch_failed"] is True
         assert entry["verified"] is False
+
+    def test_json_carries_what_the_refresh_actually_did(
+        self, tmp_path: Path, stub_refresh, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`fetched`, `pulled` and `detail` are facts no state can reconstruct.
+
+        A repo that is current because the daemon just fast-forwarded it looks
+        identical, in `RepoState` alone, to one that was already current. Only
+        the outcome distinguishes them, and a machine consumer auditing whether
+        the daemon touched anything needs exactly that distinction.
+        """
+        root = _project(tmp_path)
+        repo = _repo(root)
+        stub_refresh(alpha=_state(repo), detail="already up to date with its upstream")
+
+        cmd_reference_repos(_args(root, json_output=True))
+
+        entry = json.loads(capsys.readouterr().out)["repos"][0]
+        assert entry["fetched"] is True
+        assert entry["pulled"] is False
+        assert entry["detail"] == "already up to date with its upstream"
 
     def test_json_lists_every_repo_including_uncheckable_ones(
         self, tmp_path: Path, stub_refresh, capsys: pytest.CaptureFixture[str]

@@ -33,10 +33,9 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
-from claude_code_hooks_daemon.reference_repos.cache import write_cache
-from claude_code_hooks_daemon.reference_repos.discovery import discover_reference_repos
-from claude_code_hooks_daemon.reference_repos.refresh import RefreshOutcome, refresh_repo
+from claude_code_hooks_daemon.reference_repos.refresh import RefreshOutcome
 from claude_code_hooks_daemon.reference_repos.report import report_lines
+from claude_code_hooks_daemon.reference_repos.sweep import sweep_reference_repos
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -70,7 +69,9 @@ class ReferenceRepoSweepHandler(SessionStartHandlerBase):
         # exists only to raise at session start if it were ever missed.
         self._reference_repos: Any = ReferenceReposConfig()
         self.project_root_reader: Callable[[], Path] = self._default_project_root
-        self.refresher: Callable[..., RefreshOutcome] = refresh_repo
+        # None means "the real one, resolved at call time" — see
+        # :mod:`reference_repos.sweep`. A seam, not a default to bind here.
+        self.refresher: Callable[..., RefreshOutcome] | None = None
 
     @staticmethod
     def _default_project_root() -> Path:
@@ -96,18 +97,14 @@ class ReferenceRepoSweepHandler(SessionStartHandlerBase):
         config = self._reference_repos
         root = self.project_root_reader()
 
-        repos = discover_reference_repos(
-            [root / relative for relative in config.roots],
-            exclude_globs=config.exclude,
-            project_root=root,
-        )
-
-        states = [self.refresher(repo, allow_pull=config.auto_pull).state for repo in sorted(repos)]
-
-        # Written unconditionally -- see the module docstring. An empty sweep
-        # records "checked, governs nothing", which the reader must be able to
-        # tell apart from "never checked".
-        write_cache(root, states)
+        # Discovery, refresh and the unconditional cache write all live in
+        # `reference_repos.sweep`, shared with the `reference-repos` CLI. Two
+        # copies of that walk is how the two surfaces came to disagree about
+        # what had been checked.
+        states = [
+            outcome.state
+            for outcome in sweep_reference_repos(root, config, refresher=self.refresher)
+        ]
 
         # Silent when nothing needs attention. The renderer's one-line all-clear
         # is right for the CLI -- you asked, so it answers -- but SessionStart is

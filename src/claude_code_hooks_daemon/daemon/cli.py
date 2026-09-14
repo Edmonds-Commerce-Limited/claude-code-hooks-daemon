@@ -5552,14 +5552,12 @@ def cmd_reference_repos(args: argparse.Namespace) -> int:
         branch, 2 when an explicit ``--project-root`` is not a directory.
     """
     from claude_code_hooks_daemon.config.models import Config
-    from claude_code_hooks_daemon.reference_repos import refresh as refresh_module
-    from claude_code_hooks_daemon.reference_repos.cache import write_cache
-    from claude_code_hooks_daemon.reference_repos.discovery import discover_reference_repos
     from claude_code_hooks_daemon.reference_repos.report import (
         remediation_command,
         repo_line,
         report_lines,
     )
+    from claude_code_hooks_daemon.reference_repos.sweep import sweep_reference_repos
 
     resolved_root = resolve_tree_root(args)
     if resolved_root is None:
@@ -5572,21 +5570,12 @@ def cmd_reference_repos(args: argparse.Namespace) -> int:
         print("Reference repos: disabled in config (reference_repos.enabled) — nothing to check.")
         return 0
 
-    repos = discover_reference_repos(
-        [project_root / relative for relative in settings.roots],
-        exclude_globs=settings.exclude,
-        project_root=project_root,
-    )
-    # Resolved through the module rather than imported by name so that a test
-    # replacing the ONLY network-touching function actually replaces it here.
-    states = [
-        refresh_module.refresh_repo(repo, allow_pull=settings.auto_pull).state
-        for repo in sorted(repos)
-    ]
-
-    # The command advertised as the cure for NOT VERIFIED has to record that it
-    # ran, or the cure does nothing.
-    write_cache(project_root, states)
+    # Discovery, refresh and the cache write are the SessionStart sweep's
+    # pipeline, shared rather than reproduced: the command advertised as the
+    # cure for NOT VERIFIED has to record that it ran, and a second copy of that
+    # rule is a second place for it to be forgotten.
+    outcomes = sweep_reference_repos(project_root, settings)
+    states = [outcome.state for outcome in outcomes]
 
     if args.json_output:
         print(
@@ -5596,24 +5585,31 @@ def cmd_reference_repos(args: argparse.Namespace) -> int:
                     "needs_attention": sum(1 for state in states if state.needs_attention),
                     "repos": [
                         {
-                            "path": str(state.path),
-                            "checkability": str(state.checkability),
-                            "branch": state.branch,
-                            "default_branch": state.default_branch,
-                            "upstream": state.upstream,
-                            "behind": state.behind,
-                            "ahead": state.ahead,
-                            "dirty": state.dirty,
+                            "path": str(outcome.state.path),
+                            "checkability": str(outcome.state.checkability),
+                            "branch": outcome.state.branch,
+                            "default_branch": outcome.state.default_branch,
+                            "upstream": outcome.state.upstream,
+                            "behind": outcome.state.behind,
+                            "ahead": outcome.state.ahead,
+                            "dirty": outcome.state.dirty,
                             # Without these two a repo whose fetch FAILED reads
                             # as `behind: 0, needs_attention: false` and exits
                             # 0 -- the false all-clear, restored on the one
                             # surface CI actually parses.
-                            "fetch_failed": state.fetch_failed,
-                            "verified": state.verified,
-                            "needs_attention": state.needs_attention,
-                            "remediation": remediation_command(state),
+                            "fetch_failed": outcome.state.fetch_failed,
+                            "verified": outcome.state.verified,
+                            "needs_attention": outcome.state.needs_attention,
+                            "remediation": remediation_command(outcome.state),
+                            # What the refresh DID, which no state can
+                            # reconstruct: a repo the daemon just fast-forwarded
+                            # and one that was already current are the same
+                            # reading afterwards.
+                            "fetched": outcome.fetched,
+                            "pulled": outcome.pulled,
+                            "detail": outcome.detail,
                         }
-                        for state in states
+                        for outcome in outcomes
                     ],
                 },
                 indent=2,
@@ -5626,10 +5622,15 @@ def cmd_reference_repos(args: argparse.Namespace) -> int:
         ]:
             print(line)
 
-        if args.show_all and states:
+        if args.show_all and outcomes:
             print("\nAll governed repositories:")
-            for state in states:
-                print(f"  - {repo_line(state, project_root=project_root)}")
+            for outcome in outcomes:
+                print(f"  - {repo_line(outcome.state, project_root=project_root)}")
+                # The refusal detail, which nothing else prints. "Dirty",
+                # "ahead" and "diverged" are one boolean to `safe_to_pull` but
+                # three different remedies to a reader, and telling someone with
+                # diverged history to commit their changes is advice to nowhere.
+                print(f"      {outcome.detail}")
 
     return 1 if any(state.needs_attention for state in states) else 0
 

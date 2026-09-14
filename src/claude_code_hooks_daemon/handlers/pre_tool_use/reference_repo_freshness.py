@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.reference_repos.report import (
     repo_line,
     unconfirmed_note,
 )
+from claude_code_hooks_daemon.reference_repos.sweep import governed_roots
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     command_word,
     split_unquoted,
@@ -250,7 +251,7 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
     # ---------------------------------------------------------------- matching
 
     def _roots(self, project_root: Path) -> list[Path]:
-        return [project_root / relative for relative in self._reference_repos.roots]
+        return governed_roots(project_root, self._reference_repos.roots)
 
     def _touched_paths(self, hook_input: dict[str, Any], project_root: Path) -> list[Path]:
         """Every governed location this call would read.
