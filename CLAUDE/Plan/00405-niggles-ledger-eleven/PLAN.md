@@ -194,6 +194,47 @@ rather than an edit.
   rather than the file under test and is a better name anyway. The reason is in
   the new file's docstring so nobody renames it back.
 
+- [x] ✅ **N6**: `plan_number_helper` read an `echo` on one line and a glob on
+  the next as one command, and denied a listing of ONE named plan.
+
+  **Found**: listing the documents of
+  [Plan 00403](../00403-upstream-issue-reporting-sop/PLAN.md) while closing it
+  out. The plan number is written in the path, so the command cannot be
+  discovering one.
+
+  **Evidence.** Three lines, denied as `R-PLAN-NUMBER-DISCOVERY`:
+
+  ```text
+  ls CLAUDE/Plan/00403-upstream-issue-reporting-sop/
+  echo "--- wc ---"
+  wc -l CLAUDE/Plan/00403-upstream-issue-reporting-sop/*.md
+  ```
+
+  Neither the `ls` nor the `wc` matches any rule alone. The `echo` rule is
+  `echo\s+[^;&|\n\r]*<plan dir>/[^\s;&|\n\r]*[\*\[?]`, and it matched by
+  starting at the `echo`, crossing the newline, and borrowing the `*` from the
+  `wc` on the next line.
+
+  **Why the newline exclusion did not save it.** `_COMMAND_SEPARATORS` lists
+  `\n` for exactly this reason, and the comment above the rule says a previous
+  fix added it because "an `echo` on one line reach[ed] forward and borrow[ed] a
+  glob character from an unrelated command on the next line". That fix was
+  defeated one character earlier: `\s` matches a newline too, so `echo\s+` had
+  already stepped into the next line before the negated class started. The `;`
+  spelling of the same structure was correctly allowed throughout — two
+  spellings, opposite verdicts, which is what makes it a bug and not a policy.
+
+  **A second, latent gap found while fixing it.** The handler read the command
+  off `tool_input` directly instead of through `get_bash_command`, so it never
+  saw the line-continuation normalisation done at the daemon's single entry
+  point. `echo \<newline>CLAUDE/Plan/0*` is ONE command that really does expand
+  the glob, and it matched only by the same accident that caused the false
+  positive — so the naive fix would have turned a false positive into a hole.
+
+  **Fixed**: the gap after a command name is now `[ \t]+`, and the handler
+  reads through `get_bash_command` in both `matches()` and `handle()`.
+  Verified live by re-running the denied command after a daemon restart.
+
 ## Success Criteria
 
 - [ ] ⬜ Every entry above is in a terminal state: fixed, ruled not-a-defect,

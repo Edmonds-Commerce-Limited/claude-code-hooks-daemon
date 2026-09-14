@@ -164,6 +164,89 @@ class TestGenuineDiscoveryIsStillBlocked:
         assert handler.matches(_bash(command)) is True
 
 
+class TestTheEchoRuleStopsAtTheEndOfItsOwnCommand:
+    """`echo\\s+` matched a newline, so the rule reached into the NEXT command.
+
+    Hit live on 2026-09-14 while listing ONE named plan's documents. The command
+    was three lines: an `ls`, an `echo` of a separator, and a `wc -l` over
+    `CLAUDE/Plan/00403-…/*.md`. Nothing in it can discover a plan number — the
+    number is already written in the path — yet it was denied as a discovery
+    scan.
+
+    `_COMMAND_SEPARATORS` lists `\\n` precisely so the `echo` rule cannot run
+    past its own command, and the comment above the rule says so. The exclusion
+    was defeated one character earlier: the `\\s+` between `echo` and its
+    arguments matches a newline itself, so the pattern had already crossed into
+    the next line before the negated class started. The `;` form was correctly
+    left alone throughout, which is what makes this a bug rather than a policy
+    — two spellings of the same shell structure got opposite verdicts.
+    """
+
+    def test_an_echo_does_not_reach_across_a_newline_into_the_next_command(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """The live reproduction, verbatim."""
+        command = (
+            "ls CLAUDE/Plan/00403-upstream-issue-reporting-sop/\n"
+            'echo "--- wc ---"\n'
+            "wc -l CLAUDE/Plan/00403-upstream-issue-reporting-sop/*.md"
+        )
+
+        assert handler.matches(_bash(command)) is False
+
+    def test_the_newline_and_the_semicolon_forms_agree(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """Same shell structure, two spellings; the verdict must not depend on which.
+
+        The `;` spelling was always correct. Pinning them together means a
+        future change cannot fix one and leave the other behind.
+        """
+        tail = "wc -l CLAUDE/Plan/00403-upstream-issue-reporting-sop/*.md"
+
+        newline_form = handler.matches(_bash(f'echo "--- wc ---"\n{tail}'))
+        semicolon_form = handler.matches(_bash(f'echo "--- wc ---"; {tail}'))
+
+        assert newline_form == semicolon_form is False
+
+    def test_a_glob_over_one_named_plans_files_is_not_discovery(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """Teeth for the reproduction: the tail alone must be allowed too.
+
+        If this ever denied on its own, the test above would be passing for a
+        reason that has nothing to do with the `echo` rule.
+        """
+        command = "wc -l CLAUDE/Plan/00403-upstream-issue-reporting-sop/*.md"
+
+        assert handler.matches(_bash(command)) is False
+
+    def test_a_genuine_echo_glob_on_the_plan_dir_still_matches(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """The rule keeps its purpose: an `echo` that really does expand the glob."""
+        assert handler.matches(_bash("echo CLAUDE/Plan/0*")) is True
+        assert handler.matches(_bash("echo CLAUDE/Plan/[0-9]*")) is True
+
+    def test_a_tab_between_echo_and_its_glob_still_matches(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """Horizontal whitespace is still whitespace — only the newline is a separator."""
+        assert handler.matches(_bash("echo\tCLAUDE/Plan/0*")) is True
+
+    def test_a_line_continuation_still_matches(self, handler: PlanNumberHelperHandler) -> None:
+        """`\\<newline>` JOINS two lines into one command, and must not become an escape.
+
+        This is the case that stops the fix from being a bare `[ \\t]+`: a
+        backslash-newline is the one newline that is not a separator. The
+        handler read the raw command string, so it never saw the normalisation
+        `get_bash_command` performs at the daemon's entry point.
+        """
+        command = "echo \\\nCLAUDE/Plan/0*"
+
+        assert handler.matches(_bash(command)) is True
+
+
 class TestHandlerSelfDescriptionMatchesBehaviour:
     """The module docstring claimed the opposite of what the handler does."""
 

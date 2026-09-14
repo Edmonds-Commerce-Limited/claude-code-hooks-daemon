@@ -29,13 +29,13 @@ from claude_code_hooks_daemon.constants import (
     HandlerTag,
     HookInputField,
     Priority,
-    ToolName,
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     PLAN_NUMBER_WIDTH,
     next_plan_number_for_target,
@@ -51,6 +51,15 @@ from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_hered
 # separator just as much as `;`, `&` and `|` are, and must be listed explicitly:
 # a negated class matches "\n" unless told otherwise.
 _COMMAND_SEPARATORS: Final[str] = r";&|\n\r"
+
+# The whitespace between a command NAME and its arguments, which is horizontal
+# only. `\s` was used here and it matches a newline, so `echo\s+` stepped over
+# the end of its own command before the negated class above could exclude
+# anything -- an `echo` on one line borrowed a glob from the next line's
+# unrelated command and denied it as plan-number discovery. A line continuation
+# is not a counter-example: `\<newline>` is normalised away by
+# `get_bash_command` before any pattern here sees it.
+_ARGUMENT_GAP: Final[str] = r"[ \t]+"
 
 # A `-name` pattern carrying this many consecutive literal digits is naming ONE
 # specific plan (e.g. `00036-*`), not sweeping for whichever plans happen to
@@ -327,11 +336,12 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         if not self._track_plans_in_project:
             return False
 
-        # Only match Bash tool
-        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
-            return False
-
-        command = hook_input.get(HookInputField.TOOL_INPUT, {}).get("command", "")
+        # Read through `get_bash_command` rather than off `tool_input` directly:
+        # it returns None for a non-Bash tool AND normalises line continuations
+        # at the daemon's single entry point. Reading the raw string meant
+        # `echo \<newline>CLAUDE/Plan/0*` -- ONE command that really does expand
+        # the glob -- reached every rule here in a shape none of them matched.
+        command = get_bash_command(hook_input)
         if not command:
             return False
 
@@ -424,10 +434,13 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         # The referenced path segment MUST contain a real glob metacharacter (*, [, ?) — a bare
         # digit is NOT enough, otherwise `echo CLAUDE/Plan/00135-feature/PLAN.md` (a reference to
         # a specific numbered folder) would falsely match as a discovery glob.
+        # The gap after the command name is `_ARGUMENT_GAP`, not `\s+`: `\s`
+        # matches a newline, which would step past the end of this command
+        # before the negated class below excluded anything.
         glob_patterns = [
-            rf"echo\s+[^{_COMMAND_SEPARATORS}]*{re.escape(plan_dir)}"
+            rf"echo{_ARGUMENT_GAP}[^{_COMMAND_SEPARATORS}]*{re.escape(plan_dir)}"
             rf"/[^\s{_COMMAND_SEPARATORS}]*[\*\[?]",  # echo with glob chars
-            rf"printf\s+[^{_COMMAND_SEPARATORS}]*{re.escape(plan_dir)}"
+            rf"printf{_ARGUMENT_GAP}[^{_COMMAND_SEPARATORS}]*{re.escape(plan_dir)}"
             rf"/[^\s{_COMMAND_SEPARATORS}]*[\*\[?]",  # printf with glob chars
         ]
 
@@ -482,7 +495,9 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         # A hand-rolled creation needs the scaffolder, not a number: handing back
         # "the next number is N" would answer a question that was not asked and
         # leave the caller on the very path that loses the allocation.
-        command = hook_input.get(HookInputField.TOOL_INPUT, {}).get("command", "")
+        # Same reader as `matches()` on purpose: a `handle()` that judged a
+        # different string from the one that matched could disagree with it.
+        command = get_bash_command(hook_input) or ""
         hand_rolled_folder = self._new_plan_folder_in_mkdir(command)
         if hand_rolled_folder is not None:
             return self._deny_hand_rolled_creation(hand_rolled_folder, hook_input)
