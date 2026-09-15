@@ -100,6 +100,24 @@ class Priority:
     # recursive scan is reported as the scan first, which is the larger hazard.
     SELF_MATCHING_PROCESS_PROBE = 17
 
+    # Plan 00416 Task 1.1: deliberately BELOW (numerically less than)
+    # AUTO_CONTINUE_STOP/SUBAGENT_REPORT_SIZE_BLOCKER (15; this project
+    # overrides AUTO_CONTINUE_STOP to 10). Both are terminal and match nearly
+    # every ordinary stop, so a handler registered AFTER either is shadowed on
+    # every stop that lacks a `STOPPING BECAUSE:` line -- the common case, not
+    # the exception -- which `tests/integration/test_stop_chain_terminal_shadowing.py`
+    # denies outright rather than accepting as "still reachable eventually".
+    # 7, not 8: the `release_blocker` project handler already occupies 8 on
+    # this event (named in that test's own docstring), and a shared priority
+    # produces a logged collision plus an undefined tie order. Both new
+    # handlers here are also `terminal=False` -- unlike release_blocker and
+    # auto_continue_stop, whose own DENY is meant to short-circuit everything
+    # after it, cron_stop_enforcer's DENY must not shadow THEM in turn; running
+    # first and non-terminal lets its DENY still win the response
+    # (most-restrictive-wins) while every handler behind it still runs too.
+    CRON_STOP_ENFORCER = 7
+    CRON_SUBAGENT_STOP_ENFORCER = 7
+
     TDD_ENFORCEMENT = 15
     DANGEROUS_PERMISSIONS = 15
     AUTO_CONTINUE_STOP = 15

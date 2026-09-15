@@ -645,9 +645,17 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - auto_approve_reads — gated on bypassPermissions mode
 
+<!-- handler: cron-stop-enforcer -->
+
+- cron_stop_enforcer — declared crons are verified, not just asked for
+
 <!-- handler: subagent-report-size-blocker -->
 
 - subagent_report_size_blocker — write large reports to a file
+
+<!-- handler: cron-subagent-stop-enforcer -->
+
+- cron_subagent_stop_enforcer — SubagentStop twin of `cron_stop_enforcer`
 
 <!-- handler: worktree-create -->
 

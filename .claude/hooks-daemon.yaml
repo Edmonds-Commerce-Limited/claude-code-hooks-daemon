@@ -864,6 +864,10 @@ handlers:
       options:
         threshold_chars: 4000
 
+    cron_subagent_stop_enforcer:  # SubagentStop twin of cron_stop_enforcer below (Plan 00416)
+      enabled: true  # Silent unless persistent_crons.enabled and at least one job is declared
+      priority: 7    # Below subagent_report_size_blocker's 15, non-terminal -- see test_stop_chain_terminal_shadowing.py
+
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:
     git_context_injector:  # Injects git context into user prompts
@@ -933,11 +937,18 @@ handlers:
   notification: {}
 
   # auto_continue_stop is terminal at priority 10 and matches nearly every Stop,
-  # so ANY handler added above it is unreachable on an ordinary stop (Plan 00237
-  # removed three that sat there silently). Message-auditing belongs on the
-  # nitpick pseudo-event, which fires per-turn. See
+  # so ANY handler added ABOVE (numerically greater than) it is unreachable on
+  # an ordinary stop (Plan 00237 removed three that sat there silently).
+  # Message-auditing belongs on the nitpick pseudo-event, which fires per-turn.
+  # cron_stop_enforcer sits BELOW it (priority 7) deliberately, so it is not
+  # shadowed, and is itself non-terminal so its own near-universal match
+  # cannot shadow auto_continue_stop in turn. See
   # tests/integration/test_stop_chain_terminal_shadowing.py.
   stop:
+    cron_stop_enforcer:  # Blocks a stop while a declared persistent_crons job is verified missing (Plan 00416)
+      enabled: true  # Silent unless persistent_crons.enabled and at least one job is declared
+      priority: 7
+
     auto_continue_stop:  # Auto-continues after stop events based on criteria
       enabled: true
       priority: 10

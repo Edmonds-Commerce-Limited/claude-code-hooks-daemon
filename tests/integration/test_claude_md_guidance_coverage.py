@@ -179,6 +179,17 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "AutoContinueStopHandler": "T1 denies a stop with no declared reason",
     "AutoApproveReadsHandler": "T1 decides a permission request outright",
     "SubagentReportSizeBlockerHandler": "T1 denies an oversized SubagentStop return",
+    "CronStopEnforcerHandler": (
+        "T1 denies a stop while a declared persistent_crons job is verified "
+        "missing, and the guidance carries what the deny reason alone cannot: "
+        "an ABSENT session_crons field always ALLOWs (no information, never "
+        "read as 'no crons exist'), where a PRESENT-but-empty one is a real "
+        "report and does block"
+    ),
+    "CronSubagentStopEnforcerHandler": (
+        "T1 SubagentStop twin of cron_stop_enforcer; same absent-vs-empty "
+        "session_crons distinction the deny reason alone cannot carry"
+    ),
     "DispatchDeclarationHandler": (
         "T1 strict mode denies an undeclared Task dispatch; the fire-time "
         "additionalContext alone would not teach the standing filename "

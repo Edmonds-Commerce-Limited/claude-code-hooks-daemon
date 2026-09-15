@@ -78,6 +78,11 @@ class HookInputField:
     AGENT_TYPE = "agent_type"
     AGENT_TRANSCRIPT_PATH = "agent_transcript_path"
 
+    # Stop/SubagentStop fields. CONDITIONAL, not merely optional -- an absent
+    # SESSION_CRONS means "no information", never "no crons exist" (Plan
+    # 00416; contracts/claude-code-hooks/Stop.json).
+    SESSION_CRONS = "session_crons"
+
     # Notification fields
     NOTIFICATION_TYPE = "notification_type"
     NOTIFICATION_DATA = "notification_data"
