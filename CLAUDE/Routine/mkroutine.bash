@@ -283,7 +283,13 @@ cat > "$routine_file" <<ROUTINE
 **Status**: Active
 **Created**: $created
 **Owner**: $owner
-**Trigger**: <!-- schedule: <cadence> | session_start -->
+**Trigger**: <!-- schedule | session_start -->
+**Period**: <!-- e.g. 30 days. Only for a schedule trigger. -->
+**Grace**: <!-- e.g. 7 days. Omit to take a fifth of the period. -->
+
+<!-- Leave the placeholders above until you have DECIDED. They parse as
+     "not declared", which is honest and which the QA sweep reports; filling
+     in a plausible cadence nobody chose would be silently wrong instead. -->
 
 ## Purpose
 

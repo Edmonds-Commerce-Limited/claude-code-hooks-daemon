@@ -195,6 +195,23 @@ class TestScaffolding:
         assert "00001" in body
         assert "security review" in body
 
+    def test_scaffolded_header_parses_as_undeclared(self, routine_repo: Path) -> None:
+        """A fresh routine declares nothing, and says so to the parser.
+
+        The scaffolder leaves placeholders rather than a plausible cadence,
+        so the model reads the trigger as UNKNOWN and the QA sweep can report
+        "this routine has not been configured". Writing a default cadence into
+        the skeleton would instead hand every new routine a schedule nobody
+        chose — wrong, and silently so.
+        """
+        from claude_code_hooks_daemon.routines.model import Trigger, parse_routine
+
+        _run(routine_repo, "security-review")
+
+        doc = parse_routine(routine_repo / "CLAUDE" / "Routine" / "00001-security-review")
+        assert doc.trigger is Trigger.UNKNOWN
+        assert doc.period_days is None
+
     def test_creates_an_empty_runs_directory(self, routine_repo: Path) -> None:
         """``RUNS/`` exists from the start.
 

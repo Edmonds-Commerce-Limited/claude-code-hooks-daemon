@@ -34,6 +34,30 @@ is deliberate: "this routine has never run" and "nobody created the runs
 directory" are different facts, and only the first is interesting. With the
 directory always present, an empty one always means never ran.
 
+## What ROUTINE.md declares
+
+```
+**Status**: Active | Retired
+**Trigger**: schedule | session_start
+**Period**: 30 days        # schedule only
+**Grace**: 7 days          # optional
+```
+
+`Trigger` is a closed set rather than free text. A cadence written in prose has
+to be interpreted, and a misread cadence produces an overdue date that is wrong
+without being detectably wrong.
+
+**A period on its own is not enough.** A monthly routine with no grace is
+overdue on day 31, every month, for ever — a nag that arrives reliably and is
+ignored just as reliably, which is how a recurring obligation stops being one.
+An omitted `Grace` therefore takes a fifth of the period (minimum one day)
+rather than zero, since zero is exactly the value that causes that. A `Grace`
+declared as `0 days` is honoured: only an omission takes the default.
+
+A scaffolded routine leaves these as placeholders, which read as **not
+declared**. That is deliberate too — writing a plausible cadence into the
+skeleton would hand every new routine a schedule nobody chose.
+
 ## Creating a routine
 
 ```
