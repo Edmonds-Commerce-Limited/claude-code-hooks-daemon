@@ -309,10 +309,17 @@ vulnerability and carry a CI rule. Also **variant analysis** (CodeQL, 400+
 CVEs) — the same sweep, but performed after the fix and as research rather than
 as a permanent gate.
 
-**Do not cite as precedent** (checked and found wanting): the widely-repeated
-claim that Django requires a test with every security fix appears to be
-folklore with no written policy behind it, and an annual Kubernetes/CNCF audit
-cadence could not be verified — observed intervals are roughly triennial.
+**Do not cite as precedent — and do not cite these rebuttals as settled
+either.** The researcher looked for, and did not find, a written Django policy
+requiring a test with every security fix, and could not confirm an annual
+Kubernetes/CNCF audit cadence (observed intervals look roughly triennial).
+
+Both are ABSENCE-of-evidence results produced by one agent's search, not
+independently reproduced here. That distinction is the point: a failed search
+is weaker than a disproof, and these two are exactly the kind of claim a later
+plan would reach for as supporting precedent. Treat them as "unsupported until
+someone checks", which is enough reason not to build on them and not enough to
+assert the opposite.
 
 ## D16. Squash-merge bans are load-bearing for this design — NOTED
 
