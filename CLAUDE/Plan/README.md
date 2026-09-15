@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00409: interpreter heredoc defeats the guards](00409-interpreter-heredoc-defeats-the-guards/PLAN.md) - Not Started (v3.64.0 REGRESSION, measured by running the shipped v3.63.0 module side by side: `bash <<'EOF'` executes its body, but `strip_quoted_heredoc_bodies` blanks it, so five destructive-git spellings v3.63.0 denied are now allowed. Keyed on the heredoc's quoting where it should key on its receiver; `curl_pipe_shell` already has the allowlist the other seven consumers lack)
+
 - [00408: handler hygiene from the release review](00408-handler-hygiene-from-the-release-review/PLAN.md) - Not Started (the non-user-visible half of the v3.64.0 review: raw hook-field literals where `HookInputField` is the declared SSoT, `merge_qa_report` building the docs corpus on the hook budget while a sibling argues against exactly that, and four sub-bar items carried so they are not lost. Graduated from 00407 N6)
 
 - [00402: restart path leaves generated handler doc stale](00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md) - Not Started (a restart regenerates the `CLAUDE.md` block but never `.claude/HOOKS-DAEMON.md`, which sat a whole handler short for days and no test could see it. Regenerating on restart is the WRONG fix — that file's marker is the deployed-from version `upgrade.sh` reads. Graduated from 00400 N6; blocked on a ruling)
@@ -244,27 +246,27 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 408 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 409 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 363 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 22 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 23 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 22 + 363 + 13 = **398 folders**, spanning
-  **395 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 23 + 363 + 13 = **399 folders**, spanning
+  **396 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  408 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  409 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  395 + 13 = 408. ✅
+  396 + 13 = 409. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
