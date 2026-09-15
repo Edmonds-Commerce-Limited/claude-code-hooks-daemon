@@ -641,6 +641,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - session_actions_directive — the must-do list is delivered as a turn
 
+<!-- handler: routine-qa-sweep -->
+
+- routine_qa_sweep — recurring work that has stopped recurring
+
 <!-- handler: idle-housekeeping-advisory -->
 
 - idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
