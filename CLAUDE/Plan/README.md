@@ -4,9 +4,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00415: config is invisible to the freshness guard](00415-config-is-invisible-to-the-freshness-guard/PLAN.md) - Not Started (the source fingerprint hashes `.py` only, exactly as documented, but its consumers gate a LIVE DISPATCH on it — so editing config without restarting yields FRESH while every dispatch is graded against the old config. Graduated from 00413 N17; deferred in 00371's non-goals and again by 00395)
+
 - [00414: absent protected path is silent](00414-absent-protected-path-is-silent/PLAN.md) - Not Started (a configured protected path that does NOT exist produces no advisory, so "your word list is fine" and "that guard has been inert since you cloned" are reported identically — by silence. Graduated from 00413 N3, which was filed with the wrong fix)
 
-- [00413: niggles ledger thirteen](00413-niggles-ledger-thirteen/PLAN.md) - In Progress, the OPEN ledger (three entries, all opened by a new collaborator's fresh clone — the one environment this project structurally cannot dogfood, since every maintainer checkout has already been installed into)
+- [00413: niggles ledger thirteen](00413-niggles-ledger-thirteen/PLAN.md) - In Progress, the OPEN ledger (seventeen entries; the first five opened by a new collaborator's fresh clone — the one environment this project structurally cannot dogfood, since every maintainer checkout has already been installed into. All terminal bar N6/N15, whose enforcement is designed and owner-gated)
 
 - [00412: jobs, recurring work and security review](00412-jobs-recurring-work-and-security-review/PLAN.md) - Not Started (a second work concept beside Plans: a JOB is recurring work that never completes, journalled per RUN, driven by the persistent-cron system. First job is a security review — full monthly sweep plus a per-release delta — with self-improving security docs and a defence-before-fix rule. In design; research first, then owner review before implementation)
 
@@ -256,11 +258,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 414 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 415 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 363 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 28 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 29 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
