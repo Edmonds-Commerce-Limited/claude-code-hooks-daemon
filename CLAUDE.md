@@ -601,10 +601,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - git_upstream_checker — additive fetch + pull/cleanup advice on session start
 
-<!-- handler: hook-registration-checker -->
-
-- hook_registration_checker — hooks configuration policy
-
 <!-- handler: model-fallback-detector -->
 
 - model_fallback_detector — silent model substitution is surfaced
@@ -621,10 +617,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - plan_workflow_asset_checker — plan tooling provisioning alert
 
-<!-- handler: project-handler-load-checker -->
-
-- project_handler_load_checker — project protection degraded alert
-
 <!-- handler: reference-repo-sweep -->
 
 - reference_repo_sweep — reference clones are made fresh before you read them
@@ -636,6 +628,14 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: tool-disable-advisor -->
 
 - tool_disable_advisor — declared never-want tools are checked at session start
+
+<!-- handler: project-handler-load-checker -->
+
+- project_handler_load_checker — project protection degraded alert
+
+<!-- handler: hook-registration-checker -->
+
+- hook_registration_checker — hooks configuration policy
 
 <!-- handler: idle-housekeeping-advisory -->
 
