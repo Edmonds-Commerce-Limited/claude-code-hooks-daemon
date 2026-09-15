@@ -104,6 +104,8 @@ def collect_handler_rules(handler_classes: Iterable[type[Handler]]) -> list[Hand
 
 def discover_handler_rules(
     package_path: str = "claude_code_hooks_daemon.handlers",
+    *,
+    include_project_handlers: bool = False,
 ) -> list[HandlerRules]:
     """Discover every handler under ``package_path`` and collect its rules.
 
@@ -114,6 +116,15 @@ def discover_handler_rules(
 
     Args:
         package_path: Python package path to scan (override only for tests).
+        include_project_handlers: Also collect THIS project's own handlers.
+            Off by default so the block-report fingerprint index keeps
+            building from the library package alone, which is what it wants:
+            it maps a rule ID to a library handler's config key.
+
+            ``explain-handler``/``explain-rule`` pass ``True``, because the
+            generated CLAUDE.md lists project handlers and tells the reader to
+            look them up with exactly that command — without this, the first
+            handler in that list answers "unknown handler" (Plan 00413 N16).
 
     Returns:
         One ``HandlerRules`` per handler that instantiated and inspected
@@ -122,12 +133,47 @@ def discover_handler_rules(
     registry = HandlerRegistry()
     registry.discover(package_path)
 
-    handler_classes = (
+    handler_classes = [
         handler_class
         for handler_class in (registry.get_handler_class(name) for name in registry.list_handlers())
         if handler_class is not None
-    )
+    ]
+    if include_project_handlers:
+        handler_classes.extend(_project_handler_classes())
     return collect_handler_rules(handler_classes)
+
+
+def _project_handler_classes() -> list[type[Handler]]:
+    """This project's own handler classes, or nothing if it declares none.
+
+    Project handlers are OPTIONAL and their absence is a normal state, so
+    every failure here degrades to "no project handlers" rather than taking
+    down a lookup that would otherwise have answered about the library ones.
+    """
+    from pathlib import Path
+
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
+    from claude_code_hooks_daemon.utils.repo_relative_path import expand_repo_root_token
+
+    try:
+        project_root = ProjectContext.project_root()
+        config = Config.find_and_load(project_root)
+        if not config.project_handlers.enabled:
+            return []
+        handlers_path = Path(expand_repo_root_token(config.project_handlers.path, project_root))
+        if not handlers_path.is_absolute():
+            handlers_path = project_root / handlers_path
+        if not handlers_path.exists():
+            return []
+        return [
+            type(handler)
+            for _event_type, handler in ProjectHandlerLoader.discover_handlers(handlers_path)
+        ]
+    except Exception:
+        logger.exception("Could not load project handlers for rule lookup")
+        return []
 
 
 def find_rule(handlers: list[HandlerRules], rule_id: str) -> tuple[HandlerRules, Rule] | None:

@@ -255,6 +255,22 @@ because N10 made the first handler whose declared tests vary by option.
 
 Latent for every future option-switched handler, and silent until one exists.
 
+### N16 — CLAUDE.md's own discovery route fails on the FIRST handler it lists
+
+CLAUDE.md says of its advisory list: *"Full text: `bin/hooks-daemon explain-handler <name>`"*. The first entry is `daemon_restart_verifier`, and
+that command answers `ERROR: unknown handler`, with a "did you mean" list that
+does not contain it — so the handler that just fired on your last commit reads
+as nonexistent.
+
+Systematic: all four PROJECT handlers fail, because `discover_handler_rules()`
+scans only the library package while the CLAUDE.md generator lists them via
+`_load_project_handlers`. The generated document and the command it recommends
+disagree about what exists.
+
+Scoped by checking rather than assuming: these handlers declare NO rules, so
+`explain-rule --list` omitting them is CORRECT and the fingerprint index has no
+rule IDs to miss. Only `explain-handler` is wrong. Detail in the JOURNAL.
+
 ### N15 — the daemon CAN see the session's crons, and two plans were built on it not being able to
 
 N6 rests on "`CronList` is session memory the daemon cannot read", so declared-
@@ -329,8 +345,7 @@ repository was clean across 3,514 tracked files.
 
 That artefact is what `llm_qa.py` publishes for an agent to READ, so the false
 verdict is consumed as fact. It was: I read it in-session and reported the repo
-had a violation before checking. The tests also read the same shared path back,
-so they depended on a file the whole suite writes.
+had a violation before checking.
 
 Found by dogfooding, not by the suite — every check passed while the artefact
 said otherwise, because nothing compares a scoped verdict against its scope.
@@ -375,6 +390,13 @@ said otherwise, because nothing compares a scoped verdict against its scope.
   prompt never matches) and absent-is-not-empty. N12's slot earning its keep
   within the hour. 00412's D7/D9 corrected in the same pass, since they rest on
   the same false premise.
+
+- [x] ✅ **Task 1.19**: N16 — `discover_handler_rules(include_project_handlers= True)`, wired into both `explain-handler` and `explain-rule`. RED first. All
+  four project handlers now resolve; library lookups unchanged. Opt-in rather
+  than default, because the block-report fingerprint index wants the library
+  package alone — it maps a rule ID to a library handler's config key.
+  Project-handler loading degrades to "none" on any failure, so a lookup that
+  would have answered about library handlers still does.
 
 - [x] ✅ **Task 1.9**: N7 — `bin/hooks-daemon find-plan <number|name|words>`,
   named in the deny message beside the number and in the injected guidance.

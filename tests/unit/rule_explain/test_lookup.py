@@ -230,3 +230,56 @@ class TestDiscoverHandlerRulesIntegration:
     def test_returns_a_handler_rules_instance(self) -> None:
         collected = discover_handler_rules()
         assert all(isinstance(entry, HandlerRules) for entry in collected)
+
+
+class TestProjectHandlersAreDiscoverable:
+    """`explain-handler <name>` must answer for a PROJECT handler too.
+
+    CLAUDE.md's advisory list is generated via `_load_project_handlers`, so it
+    LISTS this project's own handlers, and it tells the reader "Full text:
+    `bin/hooks-daemon explain-handler <name>`". Scanning only the library
+    package makes that promise false for the first entry in the list — the
+    handler that just fired on the reader's previous command answers "unknown
+    handler" (Plan 00413 N16).
+
+    The opt-in default keeps every existing caller unchanged: the block-report
+    fingerprint index builds from the library package deliberately.
+    """
+
+    def test_library_only_by_default(self) -> None:
+        collected = discover_handler_rules()
+
+        assert find_handler(collected, "daemon_restart_verifier") is None
+
+    @staticmethod
+    def _as_the_cli_does() -> list[HandlerRules]:
+        """Both explain commands initialise ProjectContext before enumerating.
+
+        Project handlers are resolved from the project's own config, so
+        enumerating them without that context finds nothing — which is the
+        correct degraded answer, not a crash.
+        """
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+        if not ProjectContext.is_initialized():
+            ProjectContext.initialize(
+                Path(__file__).resolve().parents[3] / ".claude" / "hooks-daemon.yaml"
+            )
+        return discover_handler_rules(include_project_handlers=True)
+
+    def test_project_handlers_included_when_requested(self) -> None:
+        collected = self._as_the_cli_does()
+
+        handler = find_handler(collected, "daemon_restart_verifier")
+        assert handler is not None, "the first handler CLAUDE.md lists is still unknown"
+        assert handler.claude_md, "explain-handler exists to print this"
+
+    def test_library_handlers_survive_the_merge(self) -> None:
+        """The addition must not displace what already worked."""
+        collected = self._as_the_cli_does()
+
+        handler = find_handler(collected, "destructive_git")
+        assert handler is not None
+        assert "R-GIT-RESET-HARD" in {rule.rule_id for rule in handler.rules}

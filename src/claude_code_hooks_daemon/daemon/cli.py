@@ -6826,7 +6826,7 @@ def cmd_explain_rule(args: argparse.Namespace) -> int:
     )
 
     _init_project_context_for_explain(args)
-    handlers = discover_handler_rules()
+    handlers = discover_handler_rules(include_project_handlers=True)
 
     if getattr(args, "list_rules", False):
         for handler in handlers:
@@ -6889,7 +6889,7 @@ def cmd_explain_handler(args: argparse.Namespace) -> int:
     )
 
     _init_project_context_for_explain(args)
-    handlers = discover_handler_rules()
+    handlers = discover_handler_rules(include_project_handlers=True)
 
     if getattr(args, "list_handlers", False):
         for handler_entry in handlers:
