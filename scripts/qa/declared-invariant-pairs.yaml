@@ -12,13 +12,25 @@
 #
 # Fields:
 #   id         stable identifier, quoted in the deny message
-#   relation   disjoint  — the two member sets must not overlap
+#   relation   disjoint — the two member sets must not overlap
+#              superset — every member of the RIGHT side must appear on the LEFT
 #   reason     one sentence: why the two readings cannot both be right
-#   left/right file (repo-relative), symbol (module-level name), extract
+#   left/right file (repo-relative), symbol (module-level name), extract,
+#              and optionally `only` (see below)
 #   allow      reviewed exceptions, by member name (optional)
+#
+# `only` restricts a side to named members, and it is load-bearing rather than
+# a convenience. Two alternations can EACH be missing members of the other, so
+# an unrestricted relation reports a violation in both directions and neither
+# report is the defect. Declare which members participate.
 #
 # Extractors:
 #   dict_keys          string keys of a module-level dict literal
+#   str_tuple          string members of a module-level tuple/list literal
+#   regex_alternation  members of every `(a|b|c)` group in a pattern literal,
+#                      read through a `re.compile(...)` call; a top-level
+#                      alternative that is punctuation (`>`, `of=`) is not a
+#                      named member and is excluded
 #   regex_head_names   the `^name\b` command name of each literal pattern in a
 #                      module-level tuple/list; a non-literal entry (an
 #                      f-string built from a shared grammar) is SKIPPED rather
@@ -41,3 +53,23 @@
     file: src/claude_code_hooks_daemon/utils/process_probe.py
     symbol: _WRAPPERS
     extract: dict_keys
+
+- id: worktree-relocation-verbs-vs-write-indicators
+  relation: superset
+  reason: >
+    a verb that relocates a file defeats worktree isolation whichever verb it
+    is, so the worktree guard must cover every relocation verb this repository
+    already recognises elsewhere.
+  left:
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/worktree_file_copy.py
+    symbol: _RELOCATION_VERBS
+    extract: str_tuple
+  right:
+    file: src/claude_code_hooks_daemon/core/utils.py
+    symbol: _WRITE_INDICATOR_RE
+    extract: regex_alternation
+    # `tee` writes NEW content rather than relocating an existing file, so it
+    # is not a member of this relation. Without `only`, the comparison would
+    # also drag in a verb the left side has no business carrying, and the row
+    # would report a defect that is not one.
+    only: [cp, mv, install, dd]

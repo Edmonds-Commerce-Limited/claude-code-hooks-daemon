@@ -201,6 +201,108 @@ class TestTheDisjointRelation:
         assert violations[0].members == ("sudo",)
 
 
+_SUPERSET_ROW = """
+- id: demo-superset
+  relation: superset
+  reason: the guard must cover every verb the sibling already recognises.
+  left:
+    file: a.py
+    symbol: VERBS
+    extract: str_tuple
+  right:
+    file: b.py
+    symbol: INDICATORS
+    extract: regex_alternation
+    only: [cp, mv, install, dd]
+"""
+
+
+class TestTheSupersetRelation:
+    def _row(self, checker: ModuleType, tmp_path: Path, body: str = _SUPERSET_ROW) -> object:
+        return checker.load_registry(_registry(tmp_path, body))[0]
+
+    def test_a_member_missing_from_the_left_is_reported(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _module(tmp_path, "a.py", 'VERBS = ("cp", "mv", "rsync")\n')
+        _module(
+            tmp_path, "b.py", 'INDICATORS = re.compile(r">|of=|\\b(?:tee|cp|mv|install|dd)\\b")\n'
+        )
+        violations = checker.check_row(tmp_path, self._row(checker, tmp_path))
+        assert violations[0].members == ("dd", "install")
+
+    def test_full_coverage_is_silent(self, checker: ModuleType, tmp_path: Path) -> None:
+        _module(tmp_path, "a.py", 'VERBS = ("cp", "mv", "rsync", "install", "dd")\n')
+        _module(
+            tmp_path, "b.py", 'INDICATORS = re.compile(r">|of=|\\b(?:tee|cp|mv|install|dd)\\b")\n'
+        )
+        assert checker.check_row(tmp_path, self._row(checker, tmp_path)) == []
+
+    def test_an_extra_member_on_the_left_is_not_a_violation(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """`rsync` is on the left only, and superset is directional."""
+        _module(tmp_path, "a.py", 'VERBS = ("cp", "mv", "rsync", "install", "dd")\n')
+        _module(tmp_path, "b.py", 'INDICATORS = re.compile(r"\\b(?:cp|mv|install|dd)\\b")\n')
+        assert checker.check_row(tmp_path, self._row(checker, tmp_path)) == []
+
+    def test_only_excludes_a_member_that_does_not_participate(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """`tee` writes new content rather than relocating, so it is excluded.
+
+        Without `only` this row would demand the left side carry `tee`, which
+        would be reporting a defect that is not one — the failure mode that
+        gets a check switched off rather than satisfied.
+        """
+        _module(tmp_path, "a.py", 'VERBS = ("cp", "mv", "install", "dd")\n')
+        _module(tmp_path, "b.py", 'INDICATORS = re.compile(r"\\b(?:tee|cp|mv|install|dd)\\b")\n')
+        assert checker.check_row(tmp_path, self._row(checker, tmp_path)) == []
+
+    def test_the_message_says_missing_rather_than_shared(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _module(tmp_path, "a.py", 'VERBS = ("cp", "mv")\n')
+        _module(tmp_path, "b.py", 'INDICATORS = re.compile(r"\\b(?:cp|mv|install)\\b")\n')
+        payload = checker.check_row(tmp_path, self._row(checker, tmp_path))[0].to_dict()
+        assert "missing from it" in payload["message"]
+        assert "disjoint" not in payload["message"]
+
+
+class TestTheNewExtractors:
+    def test_str_tuple_reads_string_members(self, checker: ModuleType, tmp_path: Path) -> None:
+        _module(tmp_path, "a.py", 'VERBS = ("cp", "mv", "rsync")\n')
+        side = checker.Side(file="a.py", symbol="VERBS", extract="str_tuple")
+        assert checker.extract_members(tmp_path, side) == frozenset({"cp", "mv", "rsync"})
+
+    def test_regex_alternation_reads_through_re_compile(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _module(tmp_path, "b.py", 'P = re.compile(r"\\b(?:tee|cp|mv)\\b")\n')
+        side = checker.Side(file="b.py", symbol="P", extract="regex_alternation")
+        assert checker.extract_members(tmp_path, side) == frozenset({"tee", "cp", "mv"})
+
+    def test_regex_alternation_excludes_ungrouped_punctuation(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """`>` and `of=` are operators, not named members.
+
+        Folding them in would put punctuation into a set that gets compared
+        against command names, and the resulting violation would name `>` as a
+        missing verb.
+        """
+        _module(tmp_path, "b.py", 'P = re.compile(r">|of=|\\b(?:cp|mv)\\b")\n')
+        side = checker.Side(file="b.py", symbol="P", extract="regex_alternation")
+        assert checker.extract_members(tmp_path, side) == frozenset({"cp", "mv"})
+
+    def test_regex_alternation_reads_a_bare_pattern_literal(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _module(tmp_path, "b.py", 'P = r"(cp|mv)"\n')
+        side = checker.Side(file="b.py", symbol="P", extract="regex_alternation")
+        assert checker.extract_members(tmp_path, side) == frozenset({"cp", "mv"})
+
+
 class TestTheViolation:
     def test_it_carries_the_rows_reason_so_the_message_explains_itself(
         self, checker: ModuleType, tmp_path: Path

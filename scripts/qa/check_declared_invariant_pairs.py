@@ -68,10 +68,18 @@ _RULE: Final[str] = "declared-invariant-pairs"
 
 #: Relations a row may declare. A typo must be rejected at load rather than
 #: silently skipped, or the row reads as one that passes.
-_RELATIONS: Final[frozenset[str]] = frozenset({"disjoint"})
+#:
+#: ``disjoint`` -- the two member sets must not overlap.
+#: ``superset``  -- every member of the RIGHT side must appear on the LEFT.
+_RELATIONS: Final[frozenset[str]] = frozenset({"disjoint", "superset"})
 
 #: Ways of reading a member set out of a module-level symbol.
-_EXTRACTORS: Final[frozenset[str]] = frozenset({"dict_keys", "regex_head_names"})
+_EXTRACTORS: Final[frozenset[str]] = frozenset(
+    {"dict_keys", "regex_head_names", "str_tuple", "regex_alternation"}
+)
+
+#: A `(?:a|b|c)` or `(a|b|c)` group inside a pattern literal.
+_ALTERNATION_GROUP_RE: Final[re.Pattern[str]] = re.compile(r"\((?:\?:)?([^()]*\|[^()]*)\)")
 
 #: `^name\b` at the head of a whitelist pattern. Anything else in the pattern
 #: is grammar rather than a command name, so only this shape yields a member.
@@ -108,11 +116,20 @@ class RegistryRotError(Exception):
 
 @dataclass(frozen=True)
 class Side:
-    """One half of a declared pair."""
+    """One half of a declared pair.
+
+    ``only`` restricts the comparison to named members, and it is not a
+    convenience. Two verb alternations can each be missing members of the
+    other -- one lists `rsync`, the other `tee` -- so an unrestricted set
+    relation reports a violation in BOTH directions and neither report is the
+    defect. A row therefore declares WHICH MEMBERS participate, not just two
+    symbol names.
+    """
 
     file: str
     symbol: str
     extract: str
+    only: frozenset[str] = field(default_factory=frozenset)
 
     @property
     def label(self) -> str:
@@ -145,16 +162,17 @@ class Violation:
 
     def to_dict(self) -> dict[str, object]:
         named = ", ".join(f"`{m}`" for m in self.members)
+        if self.relation == "disjoint":
+            complaint = f"must be disjoint, but both carry {named}"
+        else:
+            complaint = f"must cover {self.right}, but {named} is missing from it"
         return {
             "rule": self.rule,
             "row": self.row_id,
             "left": self.left,
             "right": self.right,
             "members": list(self.members),
-            "message": (
-                f"{self.left} and {self.right} must be {self.relation}, but both "
-                f"carry {named} — {self.reason}"
-            ),
+            "message": f"{self.left} {complaint} — {self.reason}",
         }
 
 
@@ -170,7 +188,15 @@ def _side(raw: object, row_id: str) -> Side:
             f"row `{row_id}`: unknown extractor `{extract}` "
             f"(known: {', '.join(sorted(_EXTRACTORS))})"
         )
-    return Side(file=str(raw["file"]), symbol=str(raw["symbol"]), extract=extract)
+    only = raw.get("only") or []
+    if not isinstance(only, list):
+        raise ValueError(f"row `{row_id}`: `only` must be a list")
+    return Side(
+        file=str(raw["file"]),
+        symbol=str(raw["symbol"]),
+        extract=extract,
+        only=frozenset(str(o) for o in only),
+    )
 
 
 def load_registry(path: Path) -> list[Row]:
@@ -253,6 +279,36 @@ def _regex_head_names(value: ast.expr, side: Side) -> frozenset[str]:
     return frozenset(names)
 
 
+def _str_tuple(value: ast.expr, side: Side) -> frozenset[str]:
+    """String members of a module-level tuple or list literal."""
+    if not isinstance(value, ast.Tuple | ast.List):
+        raise RegistryRotError(f"{side.label} is not a tuple or list literal")
+    return frozenset(
+        e.value for e in value.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)
+    )
+
+
+def _regex_alternation(value: ast.expr, side: Side) -> frozenset[str]:
+    """Members of every ``(a|b|c)`` group inside a pattern literal.
+
+    Reads through a ``re.compile(...)`` call to its first argument, because
+    that is how this repository spells a module-level pattern constant.
+
+    Only grouped alternations count. A top-level alternative such as ``>`` or
+    ``of=`` in the same pattern is an operator rather than a named member, and
+    folding it in would put punctuation into a set that is compared against
+    command names.
+    """
+    if isinstance(value, ast.Call) and value.args:
+        value = value.args[0]
+    if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+        raise RegistryRotError(f"{side.label} is not a pattern literal")
+    members: set[str] = set()
+    for group in _ALTERNATION_GROUP_RE.findall(value.value):
+        members.update(part for part in group.split("|") if part)
+    return frozenset(members)
+
+
 def extract_members(repo_root: Path, side: Side) -> frozenset[str]:
     """The member set ``side`` declares.
 
@@ -267,22 +323,39 @@ def extract_members(repo_root: Path, side: Side) -> frozenset[str]:
     if value is None:
         raise RegistryRotError(f"{side.symbol} is not assigned at module level in {side.file}")
 
-    if side.extract == "dict_keys":
-        members = _dict_keys(value, side)
-    else:
-        members = _regex_head_names(value, side)
+    extractors = {
+        "dict_keys": _dict_keys,
+        "regex_head_names": _regex_head_names,
+        "str_tuple": _str_tuple,
+        "regex_alternation": _regex_alternation,
+    }
+    members = extractors[side.extract](value, side)
     if not members:
         raise RegistryRotError(f"{side.label} yielded no members")
+    if side.only:
+        # Restricting AFTER the emptiness check on purpose: an `only` naming a
+        # member that has since been renamed away should surface as a violation
+        # to look at, not as a silently empty comparison.
+        members &= side.only
     return members
 
 
 def check_row(repo_root: Path, row: Row) -> list[Violation]:
-    """Every way ``row``'s declared relation fails to hold."""
+    """Every way ``row``'s declared relation fails to hold.
+
+    ``members`` on the returned violation is always "the members that make the
+    relation false", so the deny message reads the same whichever relation the
+    row declared.
+    """
     left = extract_members(repo_root, row.left)
     right = extract_members(repo_root, row.right)
 
-    overlap = sorted((left & right) - row.allow)
-    if not overlap:
+    if row.relation == "disjoint":
+        offending = (left & right) - row.allow
+    else:
+        offending = (right - left) - row.allow
+
+    if not offending:
         return []
     return [
         Violation(
@@ -291,7 +364,7 @@ def check_row(repo_root: Path, row: Row) -> list[Violation]:
             reason=row.reason,
             left=row.left.label,
             right=row.right.label,
-            members=tuple(overlap),
+            members=tuple(sorted(offending)),
         )
     ]
 
@@ -334,8 +407,9 @@ def main() -> int:
     if violations:
         print(f"Found {len(violations)} declared invariant pair(s) that do not hold:")
         for violation in violations:
+            label = "shared" if violation.relation == "disjoint" else "missing from left"
             print(f"  [{violation.row_id}] {violation.left}  vs  {violation.right}")
-            print(f"      shared: {', '.join(violation.members)}")
+            print(f"      {label}: {', '.join(violation.members)}")
         print(f"\n{_REMEDIATION}")
     else:
         print("Every declared invariant pair holds")

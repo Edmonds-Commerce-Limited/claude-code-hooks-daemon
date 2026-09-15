@@ -21,6 +21,19 @@ _WORKTREE_PREFIXES = (ProjectPath.WORKTREES_DIR, ProjectPath.CLAUDE_WORKTREES_DI
 # independently hardcoded literal that could drift from it.
 _WORKTREE_RE = "(?:" + "|".join(re.escape(prefix) for prefix in _WORKTREE_PREFIXES) + ")"
 
+# The verbs that RELOCATE a file. Named rather than inlined so the
+# `declared-invariant-pairs` Detector can read them and hold this list against
+# `core.utils._WRITE_INDICATOR_RE`, the other place this repository enumerates
+# the same idea. An alternation inlined at its only call site has no sibling to
+# be checked against, and drifts from one silently.
+#
+# The declared relation is a SUPERSET, not equality: `rsync` matters to this
+# handler and is not a plain write indicator, so it is absent from the sibling
+# by design.
+_RELOCATION_VERBS: tuple[str, ...] = ("cp", "mv", "rsync")
+
+_RELOCATION_VERB_RE = re.compile(r"\b(" + "|".join(_RELOCATION_VERBS) + r")\b", re.IGNORECASE)
+
 
 class WorktreeFileCopyHandler(PreToolUseHandlerBase):
     """Prevent copying files between worktrees and main repo."""
@@ -101,7 +114,7 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
             return False
 
         # Check for forbidden operations
-        if not re.search(r"\b(cp|mv|rsync)\b", command, re.IGNORECASE):
+        if not _RELOCATION_VERB_RE.search(command):
             return False
 
         # Check patterns — the "main repo code dirs" alternation is built
