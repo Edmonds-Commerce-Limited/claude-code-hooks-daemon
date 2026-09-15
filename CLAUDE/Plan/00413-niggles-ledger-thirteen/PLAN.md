@@ -89,20 +89,8 @@ collaborator gets a working daemon with one guard permanently inert and nothing
 anywhere saying so. Surfacing the absence is a handler behaviour change, so it
 wants its own plan rather than a ledger quick-fix.
 
-`.claude/block-words.secret.example` is not tracked, so a fresh clone receives
-no template for the `sensitive_content` word list. The daemon's documented
-behaviour when the file is missing is to stand that source down **silently**,
-which is correct as a runtime policy and unhelpful as an onboarding one: a new
-collaborator gets a working daemon with one guard permanently inert and no
-signal that it exists.
-
-The counterexample is next to it — `.claude/hooks-daemon.yaml.example` IS
-tracked, and is how the config is discoverable. An `.example` file carries no
-secrets by definition; that is what makes it an example.
-
-Scope check before fixing: confirm the ignore rule is not deliberately
-prefix-matching the real file, in which case the fix is to anchor the rule
-rather than to force-add the template.
+Graduated to Plan
+[00414](../00414-absent-protected-path-is-silent/PLAN.md) (Task 1.7).
 
 ### N4 — the remedy the guard prints names an interpreter that is not installed
 
@@ -371,8 +359,14 @@ is wrong is that the TESTS consult the real file instead of a controlled one.
 The fix is to make them hermetic — inject the path or the file's content — not
 to weaken the resolver or delete the assertions.
 
-Belongs to Plan 00411, which is otherwise complete; needs confirming whether
-its author intended these to be environment-dependent.
+**DETERMINED from the record — not deliberate, and no owner decision needed.**
+Plan 00411's Task 1.1 mandates fixtures for exactly these two `/etc/hosts`
+shapes, the mechanism exists (`hosts_path` parameter, `ENV_ETC_HOSTS_PATH`),
+and the sibling ladder tests already use it. The 13 failures omit it and reach
+the real file. The assertion is wrong too: refusing a hostile env value does
+not mean NOTHING resolves — the ladder correctly continues to the `/etc/hosts`
+rung, which is silent on Fedora and speaks in this container. Full reasoning in
+the JOURNAL (13:05 entry).
 
 ## Tasks
 
@@ -440,10 +434,11 @@ its author intended these to be environment-dependent.
   `CronCreate` job firing into a live interactive session. `mode: unattended`
   added RED-first and enabled here; live-verified through the real hook.
 
-- [ ] ⬜ **Task 1.14**: N11 — make the host-identity tests hermetic: inject the
-  `/etc/hosts` path or its content rather than reading real machine state.
-  Confirm with Plan 00411's author first, in case environment-dependence was
-  deliberate. Do NOT weaken the resolver or drop the assertions.
+- [ ] ⬜ **Task 1.14**: N11 — UNBLOCKED, no owner confirmation needed: Plan
+  00411's Task 1.1 mandates fixtures, so the dependence is accidental. Pass the
+  existing `_FEDORA_STYLE_HOSTS` fixture via the `hosts_path` parameter the
+  sibling tests already use, so the lower rung is silent and `None` is the
+  correct expectation. Do NOT weaken the resolver or drop the assertions.
 
 ## Success Criteria
 
