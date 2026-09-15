@@ -1,0 +1,43 @@
+# Declared invariant pairs — the Defence for `asymmetric-sibling-protection`.
+#
+# Each row names TWO sites that this repository has already reasoned about, and
+# the relation that must hold between them. A human who has read both sides
+# writes the row; the Detector asserts it mechanically on every QA run.
+#
+# The class has no syntactic signature. Nothing about either site is wrong on
+# its own — it is wrong only RELATIVE to its sibling — so a rule that reads one
+# site can never find a member. That is why the pairs are declared, and it is
+# also the blind spot: a divergence with no row here is invisible. Adding a row
+# is the whole of how this Defence grows.
+#
+# Fields:
+#   id         stable identifier, quoted in the deny message
+#   relation   disjoint  — the two member sets must not overlap
+#   reason     one sentence: why the two readings cannot both be right
+#   left/right file (repo-relative), symbol (module-level name), extract
+#   allow      reviewed exceptions, by member name (optional)
+#
+# Extractors:
+#   dict_keys          string keys of a module-level dict literal
+#   regex_head_names   the `^name\b` command name of each literal pattern in a
+#                      module-level tuple/list; a non-literal entry (an
+#                      f-string built from a shared grammar) is SKIPPED rather
+#                      than guessed at
+#
+# Source: CLAUDE/Plan/00412-jobs-recurring-work-and-security-review/
+#         DESIGN-declared-invariant-pairs.md
+
+- id: pipe-whitelist-vs-command-wrappers
+  relation: disjoint
+  reason: >
+    a name cannot be both a cheap filter whose own output is safe to truncate
+    and a wrapper that runs someone else's command, because piping the wrapper
+    truncates the WRAPPED command's output.
+  left:
+    file: src/claude_code_hooks_daemon/strategies/pipe_blocker/common.py
+    symbol: UNIVERSAL_WHITELIST_PATTERNS
+    extract: regex_head_names
+  right:
+    file: src/claude_code_hooks_daemon/utils/process_probe.py
+    symbol: _WRAPPERS
+    extract: dict_keys

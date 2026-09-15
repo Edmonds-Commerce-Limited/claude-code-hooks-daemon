@@ -366,6 +366,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="authored_path_stat.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "declared_invariant_pairs": ToolConfig(
+        command=_python("check_declared_invariant_pairs.py", "--json"),
+        json_file="declared_invariant_pairs.json",
+        jq_hint="jq '.violations[] | {row, left, right, members, message}'",
+    ),
     "semgrep": ToolConfig(
         command=_bash("run_semgrep_check.sh"),
         json_file="semgrep.json",
@@ -598,6 +603,11 @@ def _summarize_authored_path_stat(data: QaReport) -> str:
     return f"{total} violations"
 
 
+def _summarize_declared_invariant_pairs(data: QaReport) -> str:
+    total = data.get("summary", {}).get("total_violations", 0)
+    return f"{total} violations"
+
+
 def _summarize_repo_hygiene(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
@@ -698,6 +708,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "python_var_guidance": _summarize_python_var_guidance,
     "eacces_safe": _summarize_eacces_safe,
     "authored_path_stat": _summarize_authored_path_stat,
+    "declared_invariant_pairs": _summarize_declared_invariant_pairs,
     "smoke_test": _summarize_smoke_test,
     "repo_hygiene": _summarize_repo_hygiene,
     "doc_truth": _summarize_doc_truth,
