@@ -1,0 +1,100 @@
+# Routine 00001: security review full
+
+**Status**: Active
+**Created**: 2026-09-15
+**Owner**: dev
+**Trigger**: schedule
+**Period**: 90 days
+**Grace**: 14 days
+
+## Purpose
+
+This repository's whole product is guards: handlers that deny a dangerous
+command, refuse a dangerous write, or refuse to reveal protected material. A
+defect in one of them does not look like a defect. It looks like a command
+being allowed, which is what the overwhelming majority of commands are.
+
+That is the obligation this routine discharges: nothing in the normal working
+of the project ever reports "this guard stopped covering the thing it was
+written for". A test suite proves the guards still do what their tests say;
+it cannot notice that the set of things worth guarding has moved.
+
+If this routine stops running, nothing breaks, nothing goes red, and the
+protection decays silently. The decay is the failure mode — not any single
+finding.
+
+## Scope
+
+A **full** sweep: every check in
+[CHECKS.md](CHECKS.md), over the whole tree, with no reliance on what changed.
+
+Its counterpart is [Routine 00002](../00002-security-review-delta/ROUTINE.md),
+a narrower per-release sweep over changed code and changed rules. The two are
+not duplicates and neither replaces the other:
+
+- a **delta** run is fast, runs often, and is **structurally blind** to every
+  finding whose cause is not in the diff — an unchanged dependency that
+  acquired a CVE, an exemption list that only became too broad on its ninth
+  entry, a bypass created by two files that both stayed still;
+- this **full** run is the compensating control for exactly that blindness.
+
+Because they cover different check sets, they keep **separate ledgers**. That
+is deliberate, and it is the load-bearing reason they are two routines rather
+than two modes of one: a shared ledger would let a delta run reset this
+routine's overdue clock, and a project that releases often would defer its
+full sweep for ever while every record read as healthy.
+
+## Procedure
+
+1. Establish the interval. `from` is the `to` ref of this routine's last
+   recorded run (any outcome — a skipped run covered nothing, so the next run
+   inherits its ground, D5); `to` is the current release tag, or `HEAD` if
+   there is no tag since. A first run's `from` is the repository's root commit.
+
+2. Open the run: `bin/hooks-daemon run-routine 00001-security-review-full`.
+   This writes a `started` row. A run that dies from here on is derivable as
+   `failed` — started and did not finish — which is a different fact from
+   never having started.
+
+3. Dispatch the specialist reviewer (Task 3.3) once per check in
+   [CHECKS.md](CHECKS.md), giving it the interval and that check alone. One
+   check per dispatch: a reviewer asked for "anything security-relevant"
+   returns the findings that are easy to phrase.
+
+4. Record every confirmed finding in the living security documentation
+   (Task 3.2), under its category, naming its Defence.
+
+5. Fix under **Defence Before Fix**: the Defence lands before the fix, every
+   time, and each Defence is a Detector in `scripts/qa/` wired into
+   `run_all.sh`. A regression test proves one instance was fixed; a Detector
+   finds the whole class and keeps finding it.
+
+6. Close the run:
+   `bin/hooks-daemon run-routine 00001-security-review-full --finish --outcome clean|findings --from <ref> --to <ref>`.
+
+7. If the run cannot proceed, close it as `skipped` **with its reason**. A
+   skipped run is a real, recorded state; an abandoned one is indistinguishable
+   from a crash.
+
+## What a run records
+
+Every run appends rows to `RUNS/<year>.md`, covering:
+
+- the interval it covered, `from -> to` (a commit or tag at each end) —
+  never a mutable "last run" pointer, so a gap between runs stays detectable;
+- the outcome, including `clean`, which is recorded as distinctly as a run
+  that found something and is NOT the same as never having run;
+- for any check it did not perform, which one and why. A full run that skipped
+  a check is a delta run wearing the wrong label, and recording it as a full
+  run would retire the compensating control without anyone deciding to.
+
+## Non-Goals
+
+- **Not a vulnerability scanner.** Tooling that runs on every commit belongs
+  in `scripts/qa/`, not here. This routine exists for the judgements a tool
+  cannot make.
+- **Not a release gate.** Releases stay human-gated and this routine never
+  blocks one; a finding produces a Defence and a fix, on their own schedule.
+- **Not a place to record findings.** Findings live in the living security
+  documentation, by category. `RUNS/` records that a run happened and what it
+  covered.

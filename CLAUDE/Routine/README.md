@@ -16,9 +16,18 @@ Design rationale, decisions and the research behind them:
 
 ## Active Routines
 
-<!-- One row per active routine. None yet: the generic system is still being
-     built (Plan 00412 Phase 2) and the first routine — a security review —
-     arrives in Phase 3. -->
+| Routine                                                               | Trigger           | Covers                                                           |
+| --------------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------- |
+| [00001 security review full](00001-security-review-full/ROUTINE.md)   | schedule, 90 days | Every check in [CHECKS.md](00001-security-review-full/CHECKS.md) |
+| [00002 security review delta](00002-security-review-delta/ROUTINE.md) | release           | The delta-able checks only, over one release's diff              |
+
+The two are a pair, not a duplicate. The delta sweep is structurally blind to
+any finding whose cause is not in the diff — a dependency that acquired a CVE
+without changing, an exemption list that only became too broad on its ninth
+entry — and the full sweep is the compensating control for exactly that. They
+keep **separate ledgers** so that a delta run cannot reset the full sweep's
+overdue clock; sharing one would let a project that releases often defer its
+full sweep for ever while every record read as healthy.
 
 ## Directory shape
 
@@ -29,10 +38,19 @@ NNNNN-name/
     <year>.md     append-only ledger, one row per run
 ```
 
-`RUNS/` exists from the moment a routine is scaffolded, and is left empty. That
-is deliberate: "this routine has never run" and "nobody created the runs
-directory" are different facts, and only the first is interesting. With the
-directory always present, an empty one always means never ran.
+`RUNS/` is created empty when a routine is scaffolded — and git does not track
+an empty directory, so on a fresh clone it is simply absent until the first run
+writes to it.
+
+That is fine, and it is worth saying why rather than propping the directory up
+with a placeholder file. "This routine has never run" and "nobody created the
+runs directory" are different facts, but only the first is interesting, so the
+reader collapses them on purpose: a missing `RUNS/` and an empty one both yield
+no events, and the writer creates the directory on its first append. Nothing
+anywhere has to decide which of the two it is looking at.
+
+Discovery does not depend on it either — a routine is a numbered folder holding
+a `ROUTINE.md`, so a clone finds every routine whether or not any has run.
 
 ## What ROUTINE.md declares
 
@@ -83,10 +101,11 @@ The script prints the new folder path on stdout and everything human-facing on
 stderr, so `dir=$(CLAUDE/Routine/mkroutine.bash "name")` works. You still add
 the index row above yourself.
 
-It is not deployed to client projects. The Routine concept has no run CLI, no
-QA checks and no overdue assertion yet (Plan 00412 Tasks 2.3–2.5), and shipping
-a scaffolder for half a feature would put it in other people's repositories
-before there is anything to scaffold it for.
+It is not deployed to client projects. The machinery is all here — a run CLI
+(`hooks-daemon run-routine`), the drift checks (`hooks-daemon routine-qa`) and
+the session-start dead-man's switch — but this repository is the only one so
+far with routines to run, and a scaffolder deployed before anyone has a use for
+it becomes a file people delete rather than a tool they reach for.
 
 ## Two things a run record must hold
 

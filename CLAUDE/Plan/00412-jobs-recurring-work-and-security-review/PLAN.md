@@ -255,12 +255,17 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
 
 ### Phase 3: The first routine — security review
 
-- [ ] ⬜ **Task 3.1**: The routine definition: a full sweep on a calendar cadence,
+- [x] ✅ **Task 3.1**: The routine definition: a full sweep on a calendar cadence,
   a narrower per-release sweep over changed code and changed rules, and an
   explicit list of which checks are delta-able and which are full-only. A
   delta run MUST record which checks it did not run — a delta scan is
   structurally blind to a class of finding, which is what makes the periodic
   full sweep a compensating control rather than belt-and-braces.
+  Delivered as **two** routines, 00001 full (schedule) and 00002 delta
+  (release), sharing one check inventory: they cover different check sets, so
+  they need different coverage timelines, and a shared ledger would let a delta
+  run reset the full sweep's overdue clock. `Trigger: release` added as a
+  first-class value, deliberately with no clock of its own.
 
 - [ ] ⬜ **Task 3.2**: Living security documentation that grows by category as
   findings arrive, with each category naming its Defence.
