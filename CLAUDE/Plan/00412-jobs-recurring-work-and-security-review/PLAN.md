@@ -147,8 +147,35 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   Independent of D18/D22, which decide WHERE run records live. The composition
   is the same arithmetic whether they are tracked or per-checkout.
 
-- [ ] ⬜ **Task 2.2**: The document tree and its scaffolding script, mirroring
-  `mkplan.bash`'s atomic git-counter numbering rather than a folder scan.
+- [x] ✅ **Task 2.2**: The document tree (`CLAUDE/Routine/` with its index) and
+  `mkroutine.bash`, RED first, with 15 tests driving the real script in a real
+  temporary git repository — the behaviour under test is shell semantics and
+  git-config state, neither of which a Python-level assertion could observe.
+
+  **The two counters are separate keys, and a test pins it.** Both trees live
+  in one repository and both counters live in one git config, so a copy-paste
+  that left `latestPlanNumber` in place would work perfectly while silently
+  consuming plan numbers — unrecoverable once a plan is filed against one.
+  That is the guard that matters most here, so it is asserted directly rather
+  than implied by the happy path.
+
+  **The duplication with `mkplan.bash` is deliberate, not laziness.** That
+  script documents self-containment as a design property: the installer
+  deploys it standalone into client projects, so factoring the numbering into
+  a sourced library would break what makes it deployable. The cost — a fix
+  applied to one and not the other — is paid in the test file, which pins the
+  properties both must agree on: counter-over-scan, the drift guard, the
+  archived-routine high-water mark, and the lock that makes two concurrent
+  runners take distinct numbers.
+
+  `RUNS/` is created empty rather than on first use, so an empty directory
+  always means never ran — D6's distinction made structural instead of
+  remembered.
+
+  **Not deployed to client projects**, and that is a scope decision rather
+  than an oversight: Tasks 2.3–2.5 still owe the run CLI, the QA checks and
+  the overdue assertion, so shipping the scaffolder now would put half a
+  feature in other people's repositories.
 
 - [ ] ⬜ **Task 2.3**: `hooks-daemon run-routine <id>`: resolve the definition,
   open a run record, hand the agent the procedure, and record the outcome. The

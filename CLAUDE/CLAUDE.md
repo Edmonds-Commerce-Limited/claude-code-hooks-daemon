@@ -35,6 +35,7 @@ that owns the depth for every fact. The audience split (agent tree vs human
 | [CodeLifecycle/](CodeLifecycle/README.md)                              | Mandatory lifecycles: features, bugs, general changes                               |
 | [Performance/](Performance/README.md)                                  | Performance baselines and measurements                                              |
 | [Plan/](Plan/README.md)                                                | Numbered development plans (see [Plan/CLAUDE.md](Plan/CLAUDE.md) for lifecycle)     |
+| [Routine/](Routine/README.md)                                          | Recurring work that never completes — a Plan finishes, a Routine recurs             |
 | [UPGRADES/](UPGRADES/README.md)                                        | Version upgrade guides, truth-changes and config-changes manifests                  |
 | [development/](development/CLAUDE.md)                                  | Daemon-repo contributor docs (QA patterns, releasing, lessons, client-mode testing) |
 
