@@ -637,6 +637,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - hook_registration_checker — hooks configuration policy
 
+<!-- handler: session-actions-directive -->
+
+- session_actions_directive — the must-do list is delivered as a turn
+
 <!-- handler: idle-housekeeping-advisory -->
 
 - idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
