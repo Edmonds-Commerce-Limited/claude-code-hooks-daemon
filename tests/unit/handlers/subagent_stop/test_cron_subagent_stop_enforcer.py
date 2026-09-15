@@ -159,10 +159,7 @@ class TestHandlerWiring:
     def test_it_is_registered_below_subagent_report_size_blocker(self) -> None:
         """Runs first (lower priority number) so it is never shadowed --
         see test_stop_chain_terminal_shadowing.py."""
-        assert (
-            CronSubagentStopEnforcerHandler().priority
-            < Priority.SUBAGENT_REPORT_SIZE_BLOCKER
-        )
+        assert CronSubagentStopEnforcerHandler().priority < Priority.SUBAGENT_REPORT_SIZE_BLOCKER
 
     def test_it_is_non_terminal(self) -> None:
         """Deliberately non-terminal -- see the Stop twin's test for the
