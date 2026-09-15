@@ -119,10 +119,33 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
 
 ### Phase 2: The generic system
 
-- [ ] ⬜ **Task 2.1**: Failing tests first: the interval algebra. Composing
-  two runs' intervals must expose a gap, an overlap and full coverage, and a
-  run whose recorded `from` does not meet the previous run's `to` must be
-  detectable without consulting anything mutable.
+- [x] ✅ **Task 2.1**: The interval algebra, RED first, in
+  `src/claude_code_hooks_daemon/routines/intervals.py` with 16 tests. Gap,
+  overlap and full coverage each compose to their own answer, and a fourth —
+  `UNRELATED` — exists because a rebase or a diverged branch leaves refs where
+  neither precedes the other, and reporting that as `MEETS` would be the
+  pointer bug wearing an interval's clothes.
+
+  **Detection needs no oracle; classification does.** Whether two runs are
+  discontinuous is string inequality, which is all the dead-man's switch needs
+  and is what "without consulting anything mutable" comes to. Telling a gap
+  from an overlap needs to know which ref came first, so git ancestry arrives
+  as an injected `Ancestry` protocol: the arithmetic stays pure, the
+  subprocess stays at the edge, and the healthy case — every consecutive pair
+  in a well-run Routine — short-circuits on equality and never pays for a
+  lookup.
+
+  D5's "missed runs widen, never replay" is pinned as a test rather than left
+  as prose: a skipped run leaves no hole, because the next run's `from` is
+  still the last completed run's `to`.
+
+  D6 is pinned by its absence: `discontinuities([])` is empty, because a
+  Routine that never ran has no runs to compose. Conflating "never ran" with
+  "continuous" would let an unrun Routine report as covered — so the overdue
+  assertion stays Task 2.5's job, outside this algebra.
+
+  Independent of D18/D22, which decide WHERE run records live. The composition
+  is the same arithmetic whether they are tracked or per-checkout.
 
 - [ ] ⬜ **Task 2.2**: The document tree and its scaffolding script, mirroring
   `mkplan.bash`'s atomic git-counter numbering rather than a folder scan.
