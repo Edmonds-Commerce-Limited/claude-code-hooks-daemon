@@ -420,11 +420,13 @@ also documented as conditionally absent. Full reasoning in the JOURNAL (13:20).
   `CronCreate` job firing into a live interactive session. `mode: unattended`
   added RED-first and enabled here; live-verified through the real hook.
 
-- [ ] ⬜ **Task 1.14**: N11 — UNBLOCKED, no owner confirmation needed: Plan
-  00411's Task 1.1 mandates fixtures, so the dependence is accidental. Pass the
-  existing `_FEDORA_STYLE_HOSTS` fixture via the `hosts_path` parameter the
-  sibling tests already use, so the lower rung is silent and `None` is the
-  correct expectation. Do NOT weaken the resolver or drop the assertions.
+- [x] ✅ **Task 1.14**: N11 — 13 machine-dependent tests pinned to the
+  `_FEDORA_STYLE_HOSTS` fixture via `hosts_path`; resolver untouched, no
+  assertion dropped. The pass also closed the hole that let the bug exist: every
+  test in that class asserts an ABSENCE, which a resolver returning `None`
+  unconditionally would satisfy too, so a guard now feeds the env rung a hostile
+  value while a LOWER rung holds a real answer — refusal and resolution are
+  finally distinguishable. 48 pass.
 
 - [ ] ⬜ **Task 1.15**: N12 — give the vendored contract a slot for a
   CONDITIONAL input field, so "may arrive, under this condition" is

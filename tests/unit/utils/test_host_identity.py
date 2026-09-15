@@ -56,6 +56,21 @@ def _force_runtime(monkeypatch: pytest.MonkeyPatch, runtime: str | None) -> None
     monkeypatch.setattr(host_identity, "detect_container_runtime", lambda: runtime)
 
 
+def _silent_hosts(tmp_path: Path) -> Path:
+    """An ``/etc/hosts`` the last rung finds nothing in.
+
+    A test asserting that some HIGHER rung refuses a value has to pin this one
+    too, or it is really asserting something about the machine it runs on: on a
+    Fedora-style host the read is silent and the test passes, while on a
+    Debian-style one the ladder continues past the refusal and resolves a real
+    name. Refusing a hostile value never meant NOTHING resolves — only that the
+    refused rung contributes nothing.
+    """
+    hosts = tmp_path / "hosts"
+    hosts.write_text(_FEDORA_STYLE_HOSTS)
+    return hosts
+
+
 class TestTheEnvironmentVariableIsTheOnlyAuthoritativeRouteInAContainer:
     """Rung 1 — an explicit hand-off from outside the namespace."""
 
@@ -257,15 +272,17 @@ class TestAResolvedNameIsNeverAllowedToBeAnythingButAHostName:
         ],
     )
     def test_a_hostile_env_value_yields_no_segment(
-        self, monkeypatch: pytest.MonkeyPatch, label: str, hostile: str
+        self, monkeypatch: pytest.MonkeyPatch, label: str, hostile: str, tmp_path: Path
     ) -> None:
         monkeypatch.setenv(_ENV_VAR, hostile)
         _force_runtime(monkeypatch, "podman")
 
-        assert resolve_host_name() is None, f"{label} was not refused"
+        assert resolve_host_name(hosts_path=_silent_hosts(tmp_path)) is None, (
+            f"{label} was not refused"
+        )
 
     def test_an_absurdly_long_value_is_refused_rather_than_truncated(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """A truncated unknown is still an unknown, shown with more confidence.
 
@@ -275,7 +292,29 @@ class TestAResolvedNameIsNeverAllowedToBeAnythingButAHostName:
         monkeypatch.setenv(_ENV_VAR, "a" * 500)
         _force_runtime(monkeypatch, "podman")
 
-        assert resolve_host_name() is None
+        assert resolve_host_name(hosts_path=_silent_hosts(tmp_path)) is None
+
+    def test_a_refused_rung_does_not_stop_the_ladder(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Refusing a value is not the same as resolving nothing.
+
+        Without this, every test above could pass against a resolver that
+        returned ``None`` unconditionally — they assert an absence, and an
+        absence is what a broken ladder produces too. Here the env rung is fed a
+        hostile value and a LOWER rung has a real answer: the hostile text must
+        not appear, and the real name must.
+        """
+        monkeypatch.setenv(_ENV_VAR, "host\033[31m")
+        _force_runtime(monkeypatch, "podman")
+        hosts = tmp_path / "hosts"
+        hosts.write_text(_DEBIAN_STYLE_HOSTS)
+
+        resolved = resolve_host_name(hosts_path=hosts)
+
+        assert resolved == HostName(
+            name="build-box.example.invalid", source=HostNameSource.ETC_HOSTS_HINT
+        )
 
     def test_a_value_at_the_length_limit_is_still_accepted(
         self, monkeypatch: pytest.MonkeyPatch
