@@ -331,7 +331,7 @@ def _validate_installation(project_root: Path) -> Path:
             print(
                 f"ERROR: hooks-daemon not installed at: {project_root}\n"
                 f"Expected directory: {hooks_daemon_dir}\n"
-                f"Hint: Run 'python install.py' or set 'self_install_mode: true' in config",
+                f"Hint: Run 'python3 install.py' or set 'self_install_mode: true' in config",
                 file=sys.stderr,
             )
             sys.exit(1)

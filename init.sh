@@ -35,6 +35,16 @@ _HOOKS_DAEMON_VERSION_MISMATCH=false
 _HOOKS_DAEMON_CLONE_VERSION=""
 _HOOKS_DAEMON_TRACKED_VERSION=""
 
+# Set by the repo-detection guard below: this checkout IS the hooks-daemon
+# repository and self-install has not been set up in it. Distinct from
+# NOT_INSTALLED because the remedy is the opposite of the standard one — a
+# restart cannot help, and the reader must run the installer with a flag the
+# standard message never mentions. A fresh clone of this repository is the one
+# environment the project cannot dogfood, since every maintainer checkout has
+# already been installed into, so this branch is written for a reader who has
+# no context at all.
+_HOOKS_DAEMON_REPO_UNCONFIGURED=false
+
 #
 # emit_hook_error() - Output a valid hook error response to stdout
 #
@@ -44,7 +54,13 @@ _HOOKS_DAEMON_TRACKED_VERSION=""
 # DRY: Uses Python utility to generate error responses - single source of truth.
 #
 # Args:
-#   $1 - Event name (e.g., "PreToolUse", "Stop")
+#   $1 - Event name (e.g., "PreToolUse", "Stop"), or EMPTY when the caller
+#        genuinely cannot know it. Claude Code validates `hookEventName`
+#        against a closed enum, and a value outside it invalidates the WHOLE
+#        document rather than just that field — so a placeholder word there
+#        does not degrade the response, it destroys it. Pass empty instead and
+#        the universal `systemMessage` field carries the text with no event
+#        name at all.
 #   $2 - Error type (e.g., "daemon_startup_failed")
 #   $3 - Error details
 #
@@ -53,7 +69,7 @@ _HOOKS_DAEMON_TRACKED_VERSION=""
 #   Also logs to stderr for debugging
 #
 emit_hook_error() {
-    local event_name="${1:-Unknown}"
+    local event_name="${1:-}"
     local error_type="${2:-unknown_error}"
     local error_details="${3:-No details available}"
 
@@ -83,6 +99,30 @@ emit_hook_error() {
             "3. Use the hooks-daemon skill to install (Skill tool: skill=hooks-daemon, args=install)" \
             "" \
             "DO NOT continue working without the daemon.")
+    elif [[ "$_HOOKS_DAEMON_REPO_UNCONFIGURED" == "true" ]]; then
+        # THE HOOKS-DAEMON REPO ITSELF, never installed into.
+        #
+        # Checked ahead of NOT_INSTALLED because both are true here and only
+        # this one is actionable: the standard message says "restart", and a
+        # restart cannot create a venv that was never built. Same reasoning as
+        # the VERSION_MISMATCH branch below — when the usual advice cannot
+        # succeed, saying so outright beats offering a better option, because
+        # a reader who follows advice that cannot work concludes the
+        # repository is broken rather than unconfigured.
+        context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+            "HOOKS DAEMON: this checkout is the hooks-daemon repository, not yet set up" \
+            "" \
+            "You have cloned the daemon's own source. Its runtime pieces — the" \
+            "virtualenv, the dependencies and .claude/hooks-daemon.env — are" \
+            "gitignored per-checkout artefacts, so a clone never carries them." \
+            "Checkout: $_hooks_daemon_checkout" \
+            "" \
+            "ALL safety handlers, code quality checks, and workflow enforcement are INACTIVE." \
+            "" \
+            "A RESTART CANNOT FIX THIS — there is nothing built to restart yet." \
+            "" \
+            "TO FIX — build this checkout's runtime, from the repository root:" \
+            "  python3 install.py --self-install")
     elif [[ "$_HOOKS_DAEMON_NOT_INSTALLED" == "true" ]]; then
         # NOT INSTALLED: Guide to install guide — project was cloned but daemon never set up
         #
@@ -168,7 +208,17 @@ emit_hook_error() {
     # Stop/SubagentStop: top-level decision only (deny to show error)
     # Other events: hookSpecificOutput with context (fail-open allow)
     if command -v jq &>/dev/null; then
-        if [[ "$_HOOKS_DAEMON_CI_ENFORCED" == "true" ]]; then
+        if [[ -z "$event_name" ]]; then
+            # The guards that run while init.sh is being SOURCED reach here:
+            # they fire before the forwarder that sourced us reaches its own
+            # body, so the event in flight is genuinely unknown. Every branch
+            # below keys on the event name, so none can be chosen honestly —
+            # and `hookSpecificOutput` has nowhere to put "I do not know".
+            # `systemMessage` is one of the five universal output fields
+            # defined on EVERY event, so it needs no event name and cannot
+            # name the wrong one. Fails open, like the branches below.
+            jq -n --arg msg "$context_msg" '{"systemMessage": $msg}'
+        elif [[ "$_HOOKS_DAEMON_CI_ENFORCED" == "true" ]]; then
             # CI enforced: hard deny/block for ALL event types to prevent work
             local ci_reason="Hooks daemon REQUIRED (ci_enabled: true) but not installed"
             if [[ "$event_name" == "PreToolUse" ]]; then
@@ -220,7 +270,13 @@ import sys
 event_name, context_msg, ci_enforced, not_installed, checkout = sys.argv[1:6]
 stop_events = ("Stop", "SubagentStop")
 
-if ci_enforced == "true":
+if not event_name:
+    # No event name: see the jq branch above. systemMessage is universal, so it
+    # is the only field that can carry this without naming an event. No
+    # backticks in this block -- the outer shell quotes it, and shellcheck
+    # reads a backtick inside single quotes as a dead command substitution.
+    resp = {"systemMessage": context_msg}
+elif ci_enforced == "true":
     if event_name == "PreToolUse":
         resp = {"decision": "deny", "reason": context_msg}
     elif event_name in stop_events:
@@ -262,7 +318,7 @@ done
 
 if [[ "$PROJECT_PATH" == "/" ]]; then
     # Output valid JSON error to stdout - event name unknown at this point
-    emit_hook_error "Unknown" "init_path_error" "Could not find .claude directory in path hierarchy. Hooks daemon cannot initialize."
+    emit_hook_error "" "init_path_error" "Could not find .claude directory in path hierarchy. Hooks daemon cannot initialize."
     exit 0  # Exit 0 so Claude Code processes the JSON response
 fi
 
@@ -282,7 +338,7 @@ HOOKS_DAEMON_ROOT_DIR="${HOOKS_DAEMON_ROOT_DIR:-$PROJECT_PATH/.claude/hooks-daem
 # .claude/hooks-daemon/.claude/hooks-daemon structure
 #
 if [[ -d "$PROJECT_PATH/.claude/hooks-daemon/.claude/hooks-daemon" ]]; then
-    emit_hook_error "Unknown" "nested_installation" \
+    emit_hook_error "" "nested_installation" \
         "NESTED INSTALLATION DETECTED! Found: $PROJECT_PATH/.claude/hooks-daemon/.claude/hooks-daemon. Remove $PROJECT_PATH/.claude/hooks-daemon and reinstall."
     exit 0
 fi
@@ -320,8 +376,9 @@ if [[ -d "$PROJECT_PATH/.git" ]]; then
         # For now, just trust the HOOKS_DAEMON_ROOT_DIR override
 
         if [[ "$has_self_install" != "true" ]] && [[ ! -f "$PROJECT_PATH/.claude/hooks-daemon.env" ]]; then
-            emit_hook_error "Unknown" "hooks_daemon_repo_detected" \
-                "This is the hooks-daemon repository. To install for development, run: python install.py --self-install"
+            _HOOKS_DAEMON_REPO_UNCONFIGURED=true
+            emit_hook_error "" "hooks_daemon_repo_detected" \
+                "This is the hooks-daemon repository. To install for development, run: python3 install.py --self-install"
             exit 0
         fi
     fi
