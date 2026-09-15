@@ -794,6 +794,24 @@ class HandlerID:
         config_key="persistent_cron_assertor",
         display_name="persistent-cron-assertor",
     )
+    # Cron Stop enforcer (Stop handler) -- Plan 00416 Task 1.1: the teeth
+    # PERSISTENT_CRON_ASSERTOR cannot have. session_crons reaches Stop (unlike
+    # SessionStart), so this VERIFIES declared persistent_crons jobs against
+    # actual session state and blocks the stop, naming the exact CronCreate
+    # to run, when one was never created.
+    CRON_STOP_ENFORCER = HandlerIDMeta(
+        class_name="CronStopEnforcerHandler",
+        config_key="cron_stop_enforcer",
+        display_name="cron-stop-enforcer",
+    )
+    # SubagentStop sibling of CRON_STOP_ENFORCER (Plan 00416 Task 1.1):
+    # session_crons is also conditional here, and a subagent-only session can
+    # reach SubagentStop without ever firing the main-thread Stop event.
+    CRON_SUBAGENT_STOP_ENFORCER = HandlerIDMeta(
+        class_name="CronSubagentStopEnforcerHandler",
+        config_key="cron_subagent_stop_enforcer",
+        display_name="cron-subagent-stop-enforcer",
+    )
     # Monorepo detector (SessionStart handler) -- Plan 00296 Task 3.4: manifests
     # below the repo root with none at it is the signature of an unconfigured
     # monorepo. Advises only -- never resolves a boundary itself.

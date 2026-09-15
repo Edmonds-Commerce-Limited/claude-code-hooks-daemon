@@ -251,6 +251,19 @@ class Priority:
     PLAN_TIME_ESTIMATES = 40
     GLOBAL_NPM_ADVISOR = 40
 
+    # Plan 00416 Task 1.1: workflow-band, deliberately ABOVE (numerically
+    # greater than) the Stop/SubagentStop safety-band terminal handlers --
+    # AUTO_CONTINUE_STOP (15, this project overrides it to 10) and
+    # SUBAGENT_REPORT_SIZE_BLOCKER (15). That is safe rather than a shadowing
+    # hazard: Plan 00242 made an ALLOW never end the chain, so whichever of
+    # those denies only ends the SAME dispatch that was already ending the
+    # session for its own reason; the moment either one genuinely ALLOWs (the
+    # session is actually about to stop), dispatch continues into these two
+    # regardless of ordering, which is exactly the turn cron enforcement must
+    # not miss. See CLAUDE/Plan/00416-.../DESIGN-cron-enforcement.md.
+    CRON_STOP_ENFORCER = 40
+    CRON_SUBAGENT_STOP_ENFORCER = 40
+
     # Plan 00268 Task 3.2: sits between the workflow-40s entries and the plan
     # QA pair at 44 -- a sibling gate on the same `git commit` trigger, not an
     # extension of either.
