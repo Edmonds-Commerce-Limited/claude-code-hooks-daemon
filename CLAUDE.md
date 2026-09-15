@@ -532,13 +532,21 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
 
-<!-- handler: model-downgrade-recorder -->
-
-- model_downgrade_recorder — the automatic model downgrade is written down
-
 <!-- handler: background-process-tracker -->
 
 - background_process_tracker — backgrounded processes are tracked
+
+<!-- handler: budget-exhaustion-detector -->
+
+- budget_exhaustion_detector — hidden agent budgets are surfaced
+
+<!-- handler: command-hints -->
+
+- command_hints — advisory reminders after specific commands
+
+<!-- handler: daemon-sync-after-merge -->
+
+- daemon_sync_after_merge — a pull can leave the daemon stale
 
 <!-- handler: git-hooks-executable-fixer -->
 
@@ -548,14 +556,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - goal_injection — plan-start goal signal for the ccy supervisor
 
-<!-- handler: command-hints -->
-
-- command_hints — advisory reminders after specific commands
-
-<!-- handler: recovery-cron-advisor -->
-
-- recovery_cron_advisor — failsafe recovery cron lifecycle advisory
-
 <!-- handler: markdown-table-formatter -->
 
 - markdown_table_formatter — markdown tables are auto-aligned
@@ -564,17 +564,25 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - merge_qa_report — post-hoc plan/docs QA report after a merge
 
-<!-- handler: daemon-sync-after-merge -->
+<!-- handler: model-downgrade-recorder -->
 
-- daemon_sync_after_merge — a pull can leave the daemon stale
+- model_downgrade_recorder — the automatic model downgrade is written down
 
-<!-- handler: budget-exhaustion-detector -->
+<!-- handler: recovery-cron-advisor -->
 
-- budget_exhaustion_detector — hidden agent budgets are surfaced
+- recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
 <!-- handler: ccy-supervisor-integrity -->
 
 - ccy_supervisor_integrity — keep the ccy supervisor properly set up
+
+<!-- handler: deployed-artefact-drift -->
+
+- deployed_artefact_drift — a deployed file has moved away from its template
+
+<!-- handler: docs-qa-sweep -->
+
+- docs_qa_sweep — documentation drift report at session start
 
 <!-- handler: git-upstream-checker -->
 
@@ -584,53 +592,45 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - hook_registration_checker — hooks configuration policy
 
-<!-- handler: project-handler-load-checker -->
-
-- project_handler_load_checker — project protection degraded alert
-
-<!-- handler: secret-file-hygiene-checker -->
-
-- secret_file_hygiene_checker -- on-disk hygiene for protected paths
-
-<!-- handler: plan-qa-sweep -->
-
-- plan_qa_sweep — plan-tree drift report at session start
-
 <!-- handler: model-fallback-detector -->
 
 - model_fallback_detector — silent model substitution is surfaced
-
-<!-- handler: tool-disable-advisor -->
-
-- tool_disable_advisor — declared never-want tools are checked at session start
-
-<!-- handler: docs-qa-sweep -->
-
-- docs_qa_sweep — documentation drift report at session start
-
-<!-- handler: plan-workflow-asset-checker -->
-
-- plan_workflow_asset_checker — plan tooling provisioning alert
-
-<!-- handler: reference-repo-sweep -->
-
-- reference_repo_sweep — reference clones are made fresh before you read them
-
-<!-- handler: deployed-artefact-drift -->
-
-- deployed_artefact_drift — a deployed file has moved away from its template
 
 <!-- handler: persistent-cron-assertor -->
 
 - persistent_cron_assertor — declared crons are re-established each session
 
-<!-- handler: standing-authorisations -->
+<!-- handler: plan-qa-sweep -->
 
-- standing_authorisations — a project can record a standing request
+- plan_qa_sweep — plan-tree drift report at session start
+
+<!-- handler: plan-workflow-asset-checker -->
+
+- plan_workflow_asset_checker — plan tooling provisioning alert
+
+<!-- handler: project-handler-load-checker -->
+
+- project_handler_load_checker — project protection degraded alert
+
+<!-- handler: reference-repo-sweep -->
+
+- reference_repo_sweep — reference clones are made fresh before you read them
+
+<!-- handler: secret-file-hygiene-checker -->
+
+- secret_file_hygiene_checker -- on-disk hygiene for protected paths
+
+<!-- handler: tool-disable-advisor -->
+
+- tool_disable_advisor — declared never-want tools are checked at session start
 
 <!-- handler: idle-housekeeping-advisory -->
 
 - idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
+
+<!-- handler: standing-authorisations -->
+
+- standing_authorisations — a project can record a standing request
 
 <!-- handler: auto-approve-reads -->
 
