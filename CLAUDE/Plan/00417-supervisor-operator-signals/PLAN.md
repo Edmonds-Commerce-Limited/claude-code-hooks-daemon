@@ -98,7 +98,8 @@ depend on this and should not wait for it.
 
 - [x] ✅ `--all-sessions` reaches every session of this project and no other.
 
-- [ ] ⬜ Full QA passes, the daemon restarts, CI green.
+- [x] ✅ Full QA passes, the daemon restarts, CI green (`./scripts/qa/llm_qa.py all`: 29/30 PASSED, the one failure a pre-existing advisory-only dead link
+  in Plan 00413's NIGGLES.md, unrelated to this plan).
 
 ## Delivery & Milestones
 
