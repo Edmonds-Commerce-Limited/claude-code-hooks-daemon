@@ -113,6 +113,23 @@ def contained_authored_path(
 def authored_path_exists(base: Path, target: str) -> bool:
     """Whether ``target``, written relative to ``base``, names something on disk.
 
+    **This normalises; it does NOT contain, and that has bitten twice.** The
+    answer is about wherever the normalised path lands, including outside the
+    repository — ``target`` may be absolute, and pathlib discards ``base`` for
+    an absolute right operand, so no ``..`` is even needed to leave.
+
+    For a value an AUTHOR wrote, a bare existence answer is therefore an
+    ORACLE: a caller that reports its result tells the reader whether a named
+    host path is there. Both members of Plan 00412's authored-path category
+    had this shape — a markdown link target and a PLAN.md span — and BOTH
+    passed the ``authored-path-stat`` Detector green, because reaching a
+    sanctioned helper is the whole of what a chokepoint rule can check.
+
+    Use this only where the value is daemon-chosen or already bounded. Where it
+    is authored, use :func:`contained_authored_path` (whose ``within`` argument
+    lets the containment boundary differ from the join base) and treat an
+    escape as "not found" rather than probing it.
+
     Args:
         base: The directory ``target`` is written relative to — the containing
             document's folder, or the repository root.
