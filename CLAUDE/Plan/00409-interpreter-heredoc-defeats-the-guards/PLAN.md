@@ -166,10 +166,17 @@ bypass"). Of the eight consumers that blank heredoc bodies, only
   it had been living in a gitignored report, and a session can end at any
   point.
 
-- Six fix passes, every hole found by probing and none by reading — including
-  three found after a fix was committed, QA-green and pushed. The first three
-  were wrong about the UNIT of judgement (receiver, then pipeline, then command
-  position); the last two were ordinary shell punctuation defeating the parser
-  (`&` inside `2>&1`, in both directions). Two further passes found nothing and
-  are recorded anyway, because "probed and clean" is a different fact from "did
-  not probe". The blow-by-blow is in `JOURNAL/`.
+- Nine passes, every hole found by probing and none by reading — including
+  three found after a fix was committed, QA-green and pushed.
+
+  Five of them changed code. The first three were wrong about the UNIT of
+  judgement (receiver, then pipeline, then command position); two more were
+  ordinary shell punctuation defeating the parser (`&` inside `2>&1`, in both
+  directions), and the second of those was a FALSE POSITIVE rather than a hole
+  — a shape no hole-hunting probe would ever have surfaced, because it failed
+  in the safe direction.
+
+  Three found nothing and are recorded anyway, because "probed and clean" is a
+  different fact from "did not probe". One changed nothing deliberately,
+  leaving a safe imprecision alone rather than tightening it for tidiness. The
+  blow-by-blow is in `JOURNAL/`.
