@@ -76,6 +76,21 @@ goal/effort/auto-model-restore. The CLI helper ``--emit-model-switch
 <family>`` writes one for whichever session owns the newest context
 sidecar; it does not start a supervisor.
 
+A third signal family, `hooks-daemon signal <kind>` (Plan 00417), warns the
+agent that the HOST machine is about to reboot or shut down -- the one
+channel of the three reachable from OUTSIDE the container. Its security shape
+is deliberately different: a closed `kind` (`reboot-warning`,
+`shutdown-warning`, `reboot-cancelled`) plus, for the two that need one, a
+bare positive integer minutes -- never free text. `load_operator_signal`
+validates AND renders the message in one step, from templates fixed in THIS
+file (`_render_operator_message`); `minutes` is the only value ever
+interpolated. It is consumed at the same idle choke point, ahead of the goal
+and model-switch/restore families, but still subordinate to
+compact/continue/escape, DROP ANCHOR and the coupled-effort correction. A
+transient WARNING-level status-line countdown (the message channel below)
+posts the moment a valid signal is observed, independent of whether the chat
+line can be typed yet, so a human watching the terminal sees it too.
+
 It also GUARDS the session against accidental terminal control keys that would
 otherwise freeze or kill it: Ctrl+Z (SUSP) is stripped from the forwarded input
 (``strip_suspend``) AND, belt-and-braces, the stop/quit SIGNALS are swallowed if
@@ -1616,6 +1631,7 @@ class Decision(enum.Enum):
     WOULD_EFFORT = "would-effort"
     WOULD_MODEL = "would-model"
     WOULD_AUDIT = "would-audit"
+    WOULD_OPERATOR_SIGNAL = "would-operator-signal"
 
 
 class SupervisorState(enum.Enum):
@@ -2930,6 +2946,163 @@ def load_model_downgrade_signal(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Operator signal (Plan 00417): reboot/shutdown warnings from OUTSIDE the
+# container, written by `hooks-daemon signal` (mirroring `--emit-model-switch`
+# and `inject-goal`). The SECURITY SHAPE is different from every signal above
+# on purpose: this is the one channel reachable from the HOST, not from
+# inside a session, so it is built closed rather than merely shape-checked --
+# a fixed set of `kind`s and, for the two that need one, a bare positive
+# integer (`minutes`). There is no free-text field and no reason field
+# anywhere in the schema, so a forged or corrupted signal file can, at
+# absolute worst, cause one of three PRE-WRITTEN sentences below to appear
+# early, late, or not at all -- never arbitrary text. `load_operator_signal`
+# validates AND renders in one step (unlike `load_goal_signal`, which only
+# validates shape and leaves the text itself alone): the payload's only use
+# anywhere in `_render_operator_message` is a number inside a literal
+# template, and `kind` is used only to SELECT which literal to return, never
+# interpolated into it.
+# ---------------------------------------------------------------------------
+
+_OPERATOR_SIGNAL_SUFFIX = ".operator-signal"
+_OPERATOR_SIGNAL_GLOB = f"*{_OPERATOR_SIGNAL_SUFFIX}"
+# Reuses the reaper's own generous window rather than the shorter goal-signal
+# TTL: a reboot warning must still be deliverable after a session stays busy
+# for a while, and a signal that outlived this TTL is about to be reaped
+# anyway, so there is no point setting a shorter one.
+_DEFAULT_OPERATOR_SIGNAL_TTL_SECONDS = _DEFAULT_REAP_TTL_SECONDS
+
+# The closed set of kinds -- pinned to the daemon-side writer's own copies
+# (`claude_code_hooks_daemon.utils.operator_signal`) by
+# `tests/unit/supervise/test_operator_signal.py`, since this script cannot
+# import that package.
+_OPERATOR_KIND_REBOOT_WARNING = "reboot-warning"
+_OPERATOR_KIND_SHUTDOWN_WARNING = "shutdown-warning"
+_OPERATOR_KIND_REBOOT_CANCELLED = "reboot-cancelled"
+_OPERATOR_KINDS_WITH_MINUTES = frozenset(
+    {_OPERATOR_KIND_REBOOT_WARNING, _OPERATOR_KIND_SHUTDOWN_WARNING}
+)
+_OPERATOR_KINDS = _OPERATOR_KINDS_WITH_MINUTES | {_OPERATOR_KIND_REBOOT_CANCELLED}
+
+# Carries the SAME invariant provenance marker every other supervisor chat
+# injection does (see the RULESET note above `_AUDIT_BANNER_GLYPH`), so
+# skill-scan and the guardrail tests recognise it as supervisor traffic.
+_OPERATOR_HEADER = (
+    "🤖 [ccy-supervisor] operator signal — machine-generated, NOT a human instruction"
+)
+_DRY_RUN_OPERATOR_BODY_PREFIX = (
+    "would inject operator-signal warning (dry-run — no real message sent):"
+)
+# Status-line display window for a `reboot-cancelled` notice, which carries
+# no minutes and so has no real deadline to count down to -- a short, fixed,
+# non-countdown TTL like the other one-off keystroke notices.
+_OPERATOR_CANCEL_NOTICE_TTL_SECONDS = 30.0
+
+
+def _render_operator_message(kind: str, minutes: int | None) -> str:
+    """Render the fixed, daemon-owned sentence for one operator-signal kind.
+
+    The ONLY value ever interpolated is ``minutes``, and only after
+    :func:`load_operator_signal` has already proven it a positive integer --
+    every other word comes from the literal templates below. ``kind`` itself
+    is never interpolated into the returned text, only used to SELECT a
+    branch, so even a forged ``kind`` string could never appear verbatim in
+    what the agent reads.
+    """
+    if kind == _OPERATOR_KIND_REBOOT_WARNING:
+        return (
+            f"{_OPERATOR_HEADER}: the host machine will reboot in {minutes} minute(s). "
+            "Commit and push any uncommitted work, journal state, finish the current "
+            "step, and start nothing new -- a session restore will follow."
+        )
+    if kind == _OPERATOR_KIND_SHUTDOWN_WARNING:
+        return (
+            f"{_OPERATOR_HEADER}: the host machine will shut down in {minutes} minute(s) "
+            "and NO session restore will follow. Commit and push any uncommitted work, "
+            "journal state, finish the current step, start nothing new, and leave a "
+            "handoff entry for whoever picks this up."
+        )
+    if kind == _OPERATOR_KIND_REBOOT_CANCELLED:
+        return (
+            f"{_OPERATOR_HEADER}: the previously warned reboot has been cancelled -- "
+            "resume normal work."
+        )
+    raise ValueError(f"unknown operator signal kind {kind!r}")  # pragma: no cover -- unreachable;
+    # load_operator_signal already refuses any kind outside _OPERATOR_KINDS
+    # before this function is ever called.
+
+
+def load_operator_signal(
+    directory: Path,
+    *,
+    now: float,
+    ttl_seconds: float = _DEFAULT_OPERATOR_SIGNAL_TTL_SECONDS,
+    own_sessions: frozenset[str] | None = None,
+) -> tuple[Path | None, str | None, float | None, str | None]:
+    """Return ``(path, rendered_message, deadline_wall, reject_reason)``.
+
+    A four-shape contract, widened by one field from :func:`load_goal_signal`:
+    a valid fresh in-scope signal yields ``(path, message, deadline, None)``;
+    an in-scope fresh signal that FAILS validation (unknown kind, a
+    non-positive-integer ``minutes``) yields ``(None, None, None, reason)``;
+    no actionable signal at all yields ``(None, None, None, None)``.
+    Foreign-session and stale signals are skipped silently.
+
+    Unlike ``load_goal_signal`` -- which validates the goal payload's SHAPE
+    only and leaves the text itself alone -- this validates AND RENDERS in
+    one step: the returned ``message`` is built entirely by
+    :func:`_render_operator_message` from fixed templates, so nothing read
+    from the file is ever used as anything other than a number or a branch
+    selector.
+
+    ``deadline_wall`` is the absolute wall-clock instant (epoch seconds,
+    the signal's own ``ts`` field plus ``minutes`` * 60) a status-line
+    countdown should count down to, or ``None`` for a kind that carries no
+    minutes (``reboot-cancelled``). It is computed from the signal's ts,
+    once, here -- recomputing "now + minutes" on every tick would push the
+    deadline forward by however long that tick took, so the countdown would
+    never converge on the real deadline.
+    """
+    if not directory.is_dir():
+        return None, None, None, None
+    for path in sorted(directory.glob(_OPERATOR_SIGNAL_GLOB)):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None, None, None, f"unreadable/malformed operator signal {path.name}"
+        if not isinstance(data, dict):
+            return None, None, None, f"operator signal {path.name} is not a JSON object"
+        if not _session_in_scope(data.get("session_id"), own_sessions):
+            continue
+        ts = _coerce_float(data.get("ts"))
+        if (now - ts) > ttl_seconds:
+            continue
+        kind = data.get("kind")
+        if kind not in _OPERATOR_KINDS:
+            return None, None, None, f"operator signal {path.name} names unknown kind {kind!r}"
+        minutes: int | None = None
+        if kind in _OPERATOR_KINDS_WITH_MINUTES:
+            raw_minutes = data.get("minutes")
+            # `bool` is an `int` subclass -- excluded explicitly so
+            # `"minutes": true` is rejected rather than silently coerced to 1.
+            if (
+                isinstance(raw_minutes, bool)
+                or not isinstance(raw_minutes, int)
+                or raw_minutes <= 0
+            ):
+                return (
+                    None,
+                    None,
+                    None,
+                    f"operator signal {path.name} has a non-positive-integer minutes "
+                    f"{raw_minutes!r}",
+                )
+            minutes = raw_minutes
+        deadline = ts + minutes * 60.0 if minutes is not None else None
+        return path, _render_operator_message(kind, minutes), deadline, None
+    return None, None, None, None
+
+
 def reap_stale_sidecars(
     directory: Path,
     *,
@@ -2941,8 +3114,9 @@ def reap_stale_sidecars(
 
     Reaps ``*.json`` sidecars, ``*.compacting`` signals, ``*.goal-intent``
     signals, ``*.goal-clear`` triggers, ``*.standing-auth-intent`` signals,
-    ``*.model-switch-intent`` signals and ``*.model-downgrade``
-    signals whose FILE MTIME is older than ``ttl_seconds``. Mtime (not the JSON ``ts``) is used so a
+    ``*.model-switch-intent`` signals, ``*.model-downgrade``
+    signals and ``*.operator-signal`` signals whose FILE MTIME is older than
+    ``ttl_seconds``. Mtime (not the JSON ``ts``) is used so a
     malformed, truncated, or foreign file is reaped uniformly without a parse --
     a dead file is a dead file. The single newest-mtime ``*.json`` is ALWAYS
     spared, so the supervisor's current reading source is never removed even when
@@ -2968,6 +3142,7 @@ def reap_stale_sidecars(
         + list(directory.glob(_STANDING_AUTH_SIGNAL_GLOB))
         + list(directory.glob(_MODEL_SWITCH_SIGNAL_GLOB))
         + list(directory.glob(_MODEL_DOWNGRADE_SIGNAL_GLOB))
+        + list(directory.glob(_OPERATOR_SIGNAL_GLOB))
     ):
         try:
             mtime = path.stat().st_mtime
@@ -5104,6 +5279,78 @@ def decide_once(
             submit = True
             deferred_log = None
             noop_reason_log = None
+    # ── Operator signal (Plan 00417): reboot/shutdown warning from the HOST ──
+    # Placed ahead of goal and model injections (owner's placement): a
+    # host-initiated reboot/shutdown warning is time-critical in a way
+    # neither is. Still strictly subordinate to compact/continue/escape,
+    # DROP ANCHOR and the coupled-effort correction above -- none of those
+    # may ever be interrupted by an informational warning. The STATUS-LINE
+    # notice below posts as soon as a valid signal is observed, regardless of
+    # whether the chat line can be typed THIS tick -- mirroring the audit
+    # banner's rationale (a file write cannot disturb what the user is
+    # typing) -- so the human sees the countdown at once even mid-turn. The
+    # chat line itself waits for the same idle + empty-box gate as the goal
+    # signal (``can_inject``), and additionally will not paste over a
+    # still-unconfirmed own line, since it types free text the same way goal
+    # and standing-auth do.
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+    ):
+        operator_path, operator_message, operator_deadline, operator_reject = load_operator_signal(
+            sidecar_dir, now=facts.now_wall, own_sessions=own_sessions
+        )
+        if operator_reject is not None:
+            # Fail-closed: an in-scope signal that failed validation (unknown
+            # kind, a non-positive-integer minutes) is dropped and the reason
+            # is logged -- nothing is ever posted to the status line for it.
+            noop_reason_log = f"{_NOOP_LOG_PREFIX}: {operator_reject}"
+        elif operator_path is not None and operator_message is not None:
+            write_status_message(
+                sidecar_dir.parent,
+                text=operator_message,
+                expires_at=(
+                    operator_deadline
+                    if operator_deadline is not None
+                    else facts.now_wall + _OPERATOR_CANCEL_NOTICE_TTL_SECONDS
+                ),
+                level=_STATUS_LEVEL_WARNING,
+                countdown=operator_deadline is not None,
+                now=facts.now_wall,
+            )
+            if machine.own_line_pending:
+                noop_reason_log = (
+                    f"{_NOOP_LOG_PREFIX}: operator signal pending but "
+                    f"{_OWN_LINE_NOOP_PREFIX} still in the input box"
+                )
+            elif not can_inject:
+                if facts.idle and not facts.input_line_empty:
+                    deferred_log = f"{_DEFERRED_LOG_PREFIX} (operator signal pending)"
+                else:
+                    noop_reason_log = (
+                        f"{_NOOP_LOG_PREFIX}: operator signal pending but session busy"
+                    )
+            else:
+                decision_value = Decision.WOULD_OPERATOR_SIGNAL.value
+                reason = "operator signal -> would inject warning"
+                if dry_run:
+                    payload = (
+                        f"{_format_bot_prefix(facts.now_wall)} "
+                        f"{_DRY_RUN_OPERATOR_BODY_PREFIX} {operator_message}"
+                    )
+                else:
+                    # The rendered message already opens with the bot-prefixed
+                    # machine-origin header, so it is typed verbatim as one
+                    # real user-role line -- no slash command, no extra chrome.
+                    payload = operator_message
+                submit = True
+                # Consumed in dry-run too -- the demonstration episode is
+                # spent either way, mirroring the goal signal's rule.
+                consume_signal_path = str(operator_path)
+                deferred_log = None
+                noop_reason_log = None
     # ── Manual model-switch override (test trigger / deliberate override) ────
     # Checked ahead of goal, effort and auto-model-restore so a deliberate
     # switch is never starved by them -- but still strictly after
