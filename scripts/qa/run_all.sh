@@ -334,6 +334,16 @@ else
 fi
 echo ""
 
+echo "25. Running Authored-Path-Stat Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_authored_path_stat.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Authored-path-stat check FAILED"
+else
+    echo "✅ Authored-path-stat check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -372,6 +382,7 @@ results = {
     "Project Handlers": "untracked/qa/project_handlers.json",
     "Hook Contract": "untracked/qa/hook_contract.json",
     "Input Contract": "untracked/qa/input_contract.json",
+    "Authored Path Stat": "untracked/qa/authored_path_stat.json",
 }
 
 all_passed = True
