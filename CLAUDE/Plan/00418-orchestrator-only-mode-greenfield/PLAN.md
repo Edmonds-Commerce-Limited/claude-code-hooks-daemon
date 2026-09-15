@@ -106,7 +106,10 @@ does. The simulated run exists to answer this from data rather than taste.
   would have denied and allows every call. No blocking code path exists yet, so
   none can be reached by mistake.
 
-- [ ] ⬜ **Task 1.4**: Enable it in this repository and gather a real record.
+- [x] ✅ **Task 1.4**: Enable it in this repository and gather a real record.
+  Live since the merge-day daemon restart; no config entry was needed, since
+  project handlers auto-load. 153 would-be denials recorded in the first
+  session alone (`bin/hooks-daemon verdicts`, handler `orchestrator-simulate`).
 
 ### Phase 2: Decide from the record
 
