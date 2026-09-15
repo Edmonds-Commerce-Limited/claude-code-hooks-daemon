@@ -290,12 +290,14 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   unanswerable, and is closed as `findings` over
   `74b0989c -> 5d59f7ff` with 77 findings recorded in `subagent-reports/`.
 
-  **The fix half is not.** One class has completed DBF end to end —
-  `authored-path-resolution`: Detector committed red over 7 instances
-  (`20f5fe82`), fix after (`344ebf16`), `run_all.sh` check 25, register
-  category with five blind spots stated. The remaining ~6 classes are recorded
-  and unfixed. Several remedies are owner-gated because they change the gate
-  surface in every installing project.
+  **The fix half is partly done.** `authored-path-resolution` has completed DBF
+  **twice** — red over 7 then fixed (`20f5fe82`, `344ebf16`), then widened red
+  over 30 after its coverage was measured rather than assumed, and fixed
+  (`e040e89b`, `73c90244`, `65161ce5`). Gate green. The second pass found a
+  live content-oracle read in `quote_drift`. Reasoning in JOURNAL/.
+
+  The remaining ~6 classes are recorded and unfixed. Several remedies are
+  owner-gated because they change the gate surface in every installing project.
 
   Next unit is a consolidated worklist: 77 findings across 15 reports collapse
   to roughly seven classes, and building Defences per REPORT would produce
