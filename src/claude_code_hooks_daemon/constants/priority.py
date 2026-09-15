@@ -100,6 +100,24 @@ class Priority:
     # recursive scan is reported as the scan first, which is the larger hazard.
     SELF_MATCHING_PROCESS_PROBE = 17
 
+    # Plan 00416 Task 1.1: deliberately BELOW (numerically less than)
+    # AUTO_CONTINUE_STOP/SUBAGENT_REPORT_SIZE_BLOCKER (15; this project
+    # overrides AUTO_CONTINUE_STOP to 10). Both are terminal and match nearly
+    # every ordinary stop, so a handler registered AFTER either is shadowed on
+    # every stop that lacks a `STOPPING BECAUSE:` line -- the common case, not
+    # the exception -- which `tests/integration/test_stop_chain_terminal_shadowing.py`
+    # denies outright rather than accepting as "still reachable eventually".
+    # 7, not 8: the `release_blocker` project handler already occupies 8 on
+    # this event (named in that test's own docstring), and a shared priority
+    # produces a logged collision plus an undefined tie order. Both new
+    # handlers here are also `terminal=False` -- unlike release_blocker and
+    # auto_continue_stop, whose own DENY is meant to short-circuit everything
+    # after it, cron_stop_enforcer's DENY must not shadow THEM in turn; running
+    # first and non-terminal lets its DENY still win the response
+    # (most-restrictive-wins) while every handler behind it still runs too.
+    CRON_STOP_ENFORCER = 7
+    CRON_SUBAGENT_STOP_ENFORCER = 7
+
     TDD_ENFORCEMENT = 15
     DANGEROUS_PERMISSIONS = 15
     AUTO_CONTINUE_STOP = 15
@@ -250,19 +268,6 @@ class Priority:
     GH_PR_COMMENTS = 40
     PLAN_TIME_ESTIMATES = 40
     GLOBAL_NPM_ADVISOR = 40
-
-    # Plan 00416 Task 1.1: workflow-band, deliberately ABOVE (numerically
-    # greater than) the Stop/SubagentStop safety-band terminal handlers --
-    # AUTO_CONTINUE_STOP (15, this project overrides it to 10) and
-    # SUBAGENT_REPORT_SIZE_BLOCKER (15). That is safe rather than a shadowing
-    # hazard: Plan 00242 made an ALLOW never end the chain, so whichever of
-    # those denies only ends the SAME dispatch that was already ending the
-    # session for its own reason; the moment either one genuinely ALLOWs (the
-    # session is actually about to stop), dispatch continues into these two
-    # regardless of ordering, which is exactly the turn cron enforcement must
-    # not miss. See CLAUDE/Plan/00416-.../DESIGN-cron-enforcement.md.
-    CRON_STOP_ENFORCER = 40
-    CRON_SUBAGENT_STOP_ENFORCER = 40
 
     # Plan 00268 Task 3.2: sits between the workflow-40s entries and the plan
     # QA pair at 44 -- a sibling gate on the same `git commit` trigger, not an

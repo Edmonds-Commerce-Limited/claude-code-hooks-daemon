@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.config.models import (
     PersistentCronConfig,
     PersistentCronsConfig,
 )
+from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.subagent_stop.cron_subagent_stop_enforcer import (
     CronSubagentStopEnforcerHandler,
@@ -33,9 +34,7 @@ class _RootedCronSubagentStopEnforcerHandler(CronSubagentStopEnforcerHandler):
         self._workspace_root = root
 
 
-def _handler(
-    monkeypatch: pytest.MonkeyPatch, config: Config
-) -> CronSubagentStopEnforcerHandler:
+def _handler(monkeypatch: pytest.MonkeyPatch, config: Config) -> CronSubagentStopEnforcerHandler:
     handler = CronSubagentStopEnforcerHandler()
     monkeypatch.setattr(handler, "_load_config", lambda: config)
     return handler
@@ -157,5 +156,15 @@ class TestHandlerWiring:
     def test_it_is_enabled_by_default(self) -> None:
         assert CronSubagentStopEnforcerHandler().get_default_enabled() is True
 
-    def test_it_is_terminal(self) -> None:
-        assert CronSubagentStopEnforcerHandler().terminal is True
+    def test_it_is_registered_below_subagent_report_size_blocker(self) -> None:
+        """Runs first (lower priority number) so it is never shadowed --
+        see test_stop_chain_terminal_shadowing.py."""
+        assert (
+            CronSubagentStopEnforcerHandler().priority
+            < Priority.SUBAGENT_REPORT_SIZE_BLOCKER
+        )
+
+    def test_it_is_non_terminal(self) -> None:
+        """Deliberately non-terminal -- see the Stop twin's test for the
+        full reasoning (a DENY still wins via most-restrictive-wins)."""
+        assert CronSubagentStopEnforcerHandler().terminal is False

@@ -680,12 +680,26 @@ handlers:
       enabled: true
       priority: 10
 
+  # cron_stop_enforcer sits BELOW auto_continue_stop's priority 10 deliberately
+  # (see priority: 7), so it is not shadowed -- a handler placed above it would
+  # never run on the common stop that lacks a `STOPPING BECAUSE:` line. It is
+  # also non-terminal, so its own near-universal match cannot shadow
+  # auto_continue_stop in turn. See
+  # tests/integration/test_stop_chain_terminal_shadowing.py.
   stop:
+    cron_stop_enforcer:  # Blocks a stop while a declared persistent_crons job is verified missing (Plan 00416)
+      enabled: true       # Silent unless persistent_crons.enabled AND a job is declared
+      priority: 7
+
     auto_continue_stop:  # Auto-continues after stop events based on criteria
       enabled: true
       priority: 10
 
   subagent_stop:
+    cron_subagent_stop_enforcer:  # SubagentStop twin of cron_stop_enforcer above (Plan 00416)
+      enabled: true                 # Silent unless persistent_crons.enabled AND a job is declared
+      priority: 7
+
     subagent_report_size_blocker:  # Blocks an oversized subagent final message
       enabled: true                 # On by default (Plan 00307 Task 4.3); set false to opt out
       priority: 15

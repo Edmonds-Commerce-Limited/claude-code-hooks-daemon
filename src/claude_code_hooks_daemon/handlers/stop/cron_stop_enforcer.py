@@ -8,18 +8,20 @@ VERIFIED at session start. It IS delivered to ``Stop``
 possible: compare declared jobs against the session's actual crons and block
 the stop, naming the exact ``CronCreate`` to run, when one was never created.
 
-**Ordering note, because it looks like a hazard and is not one.** This
-handler's ``Priority.CRON_STOP_ENFORCER`` (40) sits numerically AFTER the
-Stop-chain's safety-band terminal handlers (``auto_continue_stop`` at 15,
-overridden to 10 in this project's own config). Plan 00242 made an ALLOW
-never end the dispatch chain, so that ordering is safe rather than a
-shadowing bug: whichever of those handlers DENIES only ends the SAME dispatch
-that was already refusing to end the session for its own reason, and the
-moment either one genuinely ALLOWs -- the session is actually about to stop --
-dispatch continues into this handler regardless of registration order. See
-``tests/integration/test_stop_chain_terminal_shadowing.py`` before changing
-this reasoning, and the plan's ``DESIGN-cron-enforcement.md`` for the full
-argument.
+**Ordering note, both halves.** This handler's ``Priority.CRON_STOP_ENFORCER``
+(7) sits deliberately BELOW ``auto_continue_stop`` (15; overridden to 10 in
+this project's own config), which is terminal and matches nearly every
+ordinary stop. A handler registered AFTER it is shadowed on every stop that
+lacks a ``STOPPING BECAUSE:`` line -- the common case, not the exception --
+and ``tests/integration/test_stop_chain_terminal_shadowing.py`` denies that
+placement outright rather than accepting "still reachable once the stop is
+eventually allowed". Running first solves half the problem; the other half is
+that THIS handler also matches nearly every ordinary stop (whenever a job is
+declared) and must not become a NEW shadow for whatever runs after it. That is
+why it is ``terminal=False``: a DENY still wins the final response
+(most-restrictive-wins), but dispatch always continues, so auto_continue_stop
+and every other Stop handler still run on the same turn. Read that test before
+changing either this priority or the terminal flag.
 
 Mirrors ``persistent_cron_assertor``'s config-loading shape (inert on an
 unloadable config, gated by the SAME ``persistent_crons.enabled`` switch) so
@@ -53,16 +55,26 @@ class CronStopEnforcerHandler(StopHandlerBase):
     """Block a Stop while a declared persistent cron was never created."""
 
     def __init__(self) -> None:
-        """Initialise as a terminal blocking handler."""
+        """Initialise as a non-terminal blocking handler.
+
+        ``terminal=False`` is deliberate, not an oversight: this handler runs
+        FIRST (priority 7, below every other Stop handler in this project) so
+        it can never be shadowed, but that same early, near-universal match
+        would make it shadow everything AFTER it if it were terminal. Staying
+        non-terminal keeps a DENY in the final response via
+        most-restrictive-wins while letting auto_continue_stop and every
+        other Stop handler still run on the same turn. See the module
+        docstring's "Ordering note".
+        """
         super().__init__(
             handler_id=HandlerID.CRON_STOP_ENFORCER,
             priority=Priority.CRON_STOP_ENFORCER,
-            terminal=True,
+            terminal=False,
             tags=[
                 HandlerTag.WORKFLOW,
                 HandlerTag.SAFETY,
                 HandlerTag.BLOCKING,
-                HandlerTag.TERMINAL,
+                HandlerTag.NON_TERMINAL,
             ],
         )
 
@@ -199,6 +211,12 @@ class CronStopEnforcerHandler(StopHandlerBase):
             "information was delivered, never that no crons exist — only a "
             "PRESENT list (even an empty one) is treated as a real report of "
             "session state.\n\n"
+            "**This handler runs FIRST and is deliberately non-terminal.** "
+            "Priority 7 puts it ahead of every other Stop handler in this "
+            "project, so it is never shadowed; `terminal=False` means its own "
+            "DENY never shadows anything else either — every other Stop "
+            "handler (including `auto_continue_stop`) still runs on the same "
+            "turn, and the DENY still wins the final response.\n\n"
             "**Fix**: run `CronCreate` (recurring: true) for every job named in "
             "the block message, using the schedule and prompt given verbatim, "
             "then stop again."

@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.config.models import (
     PersistentCronConfig,
     PersistentCronsConfig,
 )
+from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.stop.cron_stop_enforcer import (
     CronStopEnforcerHandler,
@@ -197,7 +198,16 @@ class TestHandlerWiring:
     def test_it_is_enabled_by_default(self) -> None:
         assert CronStopEnforcerHandler().get_default_enabled() is True
 
-    def test_it_is_terminal(self) -> None:
-        """A DENY here must end the chain -- nothing downstream can un-block a
-        session with a declared cron genuinely missing."""
-        assert CronStopEnforcerHandler().terminal is True
+    def test_it_is_registered_below_auto_continue_stop(self) -> None:
+        """Runs first (lower priority number) so it is never shadowed by
+        auto_continue_stop, which is terminal and matches nearly every
+        ordinary stop -- see test_stop_chain_terminal_shadowing.py."""
+        assert CronStopEnforcerHandler().priority < Priority.AUTO_CONTINUE_STOP
+
+    def test_it_is_non_terminal(self) -> None:
+        """Deliberately non-terminal: this handler also matches nearly every
+        ordinary stop (whenever a job is declared), so being terminal would
+        make IT shadow auto_continue_stop and everything else registered
+        after it. A DENY still wins the final response via
+        most-restrictive-wins; dispatch simply always continues."""
+        assert CronStopEnforcerHandler().terminal is False

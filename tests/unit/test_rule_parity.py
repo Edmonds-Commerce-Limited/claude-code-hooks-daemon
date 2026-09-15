@@ -341,6 +341,15 @@ _DENY_WITHOUT_RULES_ALLOWLIST: dict[str, str] = {
         "Plan 00307: a single DENY branch (message over threshold) with no "
         "other concept to distinguish — not a disclosure-ladder table."
     ),
+    "CronStopEnforcerHandler": (
+        "Plan 00416: a single DENY branch (a declared persistent_crons job "
+        "verified missing from session_crons) with no other concept to "
+        "distinguish — not a disclosure-ladder table."
+    ),
+    "CronSubagentStopEnforcerHandler": (
+        "Plan 00416: SubagentStop twin of cron_stop_enforcer, same single "
+        "DENY branch and same reasoning."
+    ),
 }
 
 

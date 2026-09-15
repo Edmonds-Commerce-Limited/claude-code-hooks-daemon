@@ -173,8 +173,5 @@ def render_missing_crons_reason(missing: list[PersistentCronConfig]) -> str:
         lines.append("    prompt:")
         lines.extend(f"      {line}" for line in job.prompt.splitlines() or [""])
     lines.append("")
-    lines.append(
-        "Once CronCreate has been called for every job above, stopping is safe "
-        "again."
-    )
+    lines.append("Once CronCreate has been called for every job above, stopping is safe again.")
     return "\n".join(lines)

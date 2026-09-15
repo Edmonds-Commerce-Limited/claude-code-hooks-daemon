@@ -7,12 +7,15 @@ Stop event ever firing -- so cron enforcement needs this twin rather than
 relying on ``cron_stop_enforcer`` alone. The comparison logic is identical and
 lives once in ``utils.cron_enforcement``; only the event wiring differs.
 
-**Ordering note** -- same reasoning as the Stop twin, against this event's own
-safety-band terminal handler: ``Priority.CRON_SUBAGENT_STOP_ENFORCER`` (40)
-sits after ``subagent_report_size_blocker`` (15). Plan 00242's "an ALLOW never
-ends the chain" invariant makes that safe: this handler still runs whenever
-the SubagentStop is actually about to succeed. See ``cron_stop_enforcer``'s
-module docstring for the full argument.
+**Ordering note** -- same reasoning as the Stop twin, both halves: ``Priority.
+CRON_SUBAGENT_STOP_ENFORCER`` (7) sits deliberately BELOW
+``subagent_report_size_blocker`` (15), which is terminal and matches nearly
+every SubagentStop, so this handler runs first and is never shadowed. It is
+also ``terminal=False``, so its own near-universal match cannot shadow
+``subagent_report_size_blocker`` (or anything else) in turn -- a DENY still
+wins the final response via most-restrictive-wins, but dispatch always
+continues. See ``cron_stop_enforcer``'s module docstring for the full
+argument and the test that enforces this ordering.
 """
 
 from __future__ import annotations
@@ -42,16 +45,21 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
     """Block a SubagentStop while a declared persistent cron is missing."""
 
     def __init__(self) -> None:
-        """Initialise as a terminal blocking handler."""
+        """Initialise as a non-terminal blocking handler.
+
+        See ``CronStopEnforcerHandler.__init__`` -- same reasoning: running
+        first (priority 7) avoids being shadowed, and staying non-terminal
+        avoids shadowing everything registered after it in turn.
+        """
         super().__init__(
             handler_id=HandlerID.CRON_SUBAGENT_STOP_ENFORCER,
             priority=Priority.CRON_SUBAGENT_STOP_ENFORCER,
-            terminal=True,
+            terminal=False,
             tags=[
                 HandlerTag.WORKFLOW,
                 HandlerTag.SAFETY,
                 HandlerTag.BLOCKING,
-                HandlerTag.TERMINAL,
+                HandlerTag.NON_TERMINAL,
             ],
         )
 
@@ -165,8 +173,9 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
             "## cron_subagent_stop_enforcer — SubagentStop twin of "
             "`cron_stop_enforcer`\n\n"
             "Same verification, same matching rules, same absent-vs-empty "
-            "`session_crons` semantics as `cron_stop_enforcer` — see its "
-            "guidance above. This twin exists because a subagent-only session "
-            "can reach `SubagentStop` without the main-thread `Stop` event ever "
+            "`session_crons` semantics, same priority-7/non-terminal "
+            "ordering reasoning as `cron_stop_enforcer` — see its guidance "
+            "above. This twin exists because a subagent-only session can "
+            "reach `SubagentStop` without the main-thread `Stop` event ever "
             "firing."
         )
