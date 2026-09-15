@@ -122,7 +122,11 @@ guessing.
   the strength of a passing test, because the whole point of the other two
   criteria was that the live behaviour surprised the tests once already.
 
-- [ ] ⬜ Full QA passes, the daemon is restarted, and CI is green.
+- [ ] ⬜ Full QA passes, the daemon is restarted, and CI is green. QA is
+  30/30 with 23,528 tests passed, 0 failed and 95.40% coverage; the daemon was
+  restarted and the segment verified through the real hook in three states
+  (resolved, refused-hostile, absent). CI on `d1ed6e88` is still running, so
+  this stays unticked until it reports.
 
 ## Delivery & Milestones
 

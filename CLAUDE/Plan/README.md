@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00412: jobs, recurring work and security review](00412-jobs-recurring-work-and-security-review/PLAN.md) - Not Started (a second work concept beside Plans: a JOB is recurring work that never completes, journalled per RUN, driven by the persistent-cron system. First job is a security review — full monthly sweep plus a per-release delta — with self-improving security docs and a defence-before-fix rule. In design; research first, then owner review before implementation)
+
 - [00411: host hostname in status line](00411-host-hostname-in-status-line/PLAN.md) - Not Started (an optional segment naming the machine the session is really on; a container's own hostname is the container ID, and probing proved the host's name is unreadable from inside one — the `/etc/hosts` loopback read is host-distro-dependent, so an explicit export is the mechanism and the read is only a hint)
 
 - [00410: gitignore swallows deployed assets](00410-gitignore-swallows-deployed-assets/PLAN.md) - Not Started (an unanchored `hooks-daemon/` ignore pattern matches at every depth, so it hides the deployed `.claude/skills/hooks-daemon/` tree as well as the intended clone; this repo is already anchored, but nothing DETECTS the mistake, and an ignored file cannot drift visibly. Owner-reported from a client project)
@@ -250,11 +252,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 411 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 412 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 363 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 25 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 26 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
