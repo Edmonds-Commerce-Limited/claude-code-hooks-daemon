@@ -15,7 +15,7 @@
     "retry": {}
   },
   "discarded_fields": [],
-  "notes": "retry: true tells the model it may retry the denied tool call. No blocking.",
+  "notes": "retry: true tells the model it may retry the denied tool call; Claude Code does not reverse the denial. No blocking: exit code and stderr are ignored because the denial already occurred. Claude Code IGNORES retry: true for no-verdict denials -- the classifier's response didn't parse, or a safety check separate from auto mode refused the classifier's own request; for those, Claude Code already tells the model in the rejection message whether to retry later or move on.",
   "input_example": {
     "session_id": "abc123",
     "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
@@ -28,6 +28,6 @@
       "description": "Clean build directory"
     },
     "tool_use_id": "toolu_01ABC123...",
-    "reason": "Blocked by classifier"
+    "reason": "[Irreversible Local Destruction]"
   }
 }

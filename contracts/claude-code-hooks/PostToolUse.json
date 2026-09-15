@@ -41,7 +41,7 @@
     },
     "tool_response": {
       "filePath": "/path/to/file.txt",
-      "success": true
+      "type": "create"
     },
     "tool_use_id": "toolu_01ABC123...",
     "duration_ms": 12

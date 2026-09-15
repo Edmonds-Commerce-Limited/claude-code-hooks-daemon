@@ -31,6 +31,7 @@
     "prompt_id": "00000000-0000-0000-0000-000000000000",
     "transcript_path": "/home/user/.claude/projects/.../transcript.jsonl",
     "cwd": "/home/user/my-project",
+    "scratchpad_dir": "/tmp/claude-1000/-home-user-my-project/abc123/scratchpad",
     "permission_mode": "default",
     "effort": {
       "level": "high"

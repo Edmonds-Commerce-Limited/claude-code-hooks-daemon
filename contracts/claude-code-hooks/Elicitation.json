@@ -25,12 +25,11 @@
     "systemMessage",
     "continue"
   ],
-  "notes": "Exit 2 denies the elicitation; stderr not shown anywhere.",
+  "notes": "Exit 2 denies the elicitation; stderr not shown anywhere. permission_mode is NOT delivered to this event -- neither upstream example carries it, and the common-fields table makes the per-event example authoritative ('Not all events receive this field. Check the JSON example in each hook event section'). Upstream documents TWO input shapes: the form-mode example recorded here, and a url-mode example identical except that it carries 'url' (e.g. https://auth.example.com/login) in place of requested_schema. The docs also list an optional elicitation_id for this event, but no Elicitation example carries it -- it appears only in the ElicitationResult example -- so it is deliberately absent here rather than invented.",
   "input_example": {
     "session_id": "abc123",
     "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
     "cwd": "/Users/...",
-    "permission_mode": "default",
     "hook_event_name": "Elicitation",
     "mcp_server_name": "my-mcp-server",
     "message": "Please provide your credentials",

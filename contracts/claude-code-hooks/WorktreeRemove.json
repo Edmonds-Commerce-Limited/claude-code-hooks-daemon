@@ -1,7 +1,7 @@
 {
   "event": "WorktreeRemove",
-  "block_mechanism": null,
-  "can_block": false,
+  "block_mechanism": "nonzero-exit",
+  "can_block": true,
   "ask_capable": false,
   "top_level_output_fields": [
     "continue",
@@ -16,7 +16,7 @@
     "systemMessage",
     "continue"
   ],
-  "notes": "No decision control; JSON output fields discarded.",
+  "notes": "Blocks via EXIT CODE only, and conditionally: any non-zero exit makes the removal fail IF the directory at worktree_path still exists afterward -- a non-zero exit that nonetheless removed the directory is not a failure. Not exit-2-specific, unlike the exit-2-or-continue-false events. No JSON decision control: Claude Code discards this hook's JSON output fields such as systemMessage and continue, so a refusal encoded in JSON is dropped and only the process exit code is read. On failure the worktree stays on disk and the hook's command and stderr go to the debug log; for a background-session delete the session stays too.",
   "input_example": {
     "session_id": "abc123",
     "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",

@@ -94,3 +94,18 @@ the docs enumerate values), `discarded_fields` (fields the docs say Claude
 Code discards for this event), `notes`, and a VERBATIM `input_example` lifted
 from the docs. `hookEventName` is implied for every event with
 `hook_specific_output_fields` and is not listed per file.
+
+### The one exception to VERBATIM: session UUIDs
+
+Upstream examples use real-looking session UUIDs as `transcript_path`
+placeholders. This project's `sensitive_content` handler blocks writing one —
+its `session-uuid` pattern — so every vendored `input_example` substitutes an
+all-same-digit placeholder (all zeros; all-`a`/all-`b` where two UUIDs must
+stay distinguishable, as in `MessageDisplay.json`). `UserPromptExpansion.json`
+matches upstream exactly only because upstream truncates that UUID to eight
+characters, which the pattern does not match.
+
+**This divergence is REQUIRED and is not drift.** Do not "restore" the
+upstream UUIDs: the write is denied, mid-refresh, and the correct value was
+the placeholder all along. An auditor quoting one verbatim into a report hits
+the same block — write it as `<upstream-session-uuid>` instead.

@@ -98,6 +98,11 @@ MECH_PERMISSION_DECISION: Final[str] = "permission-decision"
 MECH_DECISION_BEHAVIOUR: Final[str] = "decision-behavior"
 MECH_ACTION: Final[str] = "hook-specific-action"
 MECH_PATH_RETURN: Final[str] = "path-return"
+#: WorktreeRemove only: ANY non-zero exit fails the removal, and only if the
+#: directory still exists afterward. JSON output is discarded for that event,
+#: so a refusal cannot be expressed on the wire and this token is deliberately
+#: absent from ``_REFUSAL_EXPRESSIBLE_MECHANISMS`` below.
+MECH_NONZERO_EXIT: Final[str] = "nonzero-exit"
 
 #: Mechanisms a ``HookResult`` DENY can express on the wire. An event whose
 #: only documented block route is a returned path or an elicitation action is

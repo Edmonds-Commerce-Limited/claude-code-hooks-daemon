@@ -486,7 +486,7 @@ class EventID:
         config_key="worktree_remove",
         bash_key="worktree-remove",
         json_key="WorktreeRemove",
-        can_block=False,
+        can_block=True,
         category="worktree",
     )
 
