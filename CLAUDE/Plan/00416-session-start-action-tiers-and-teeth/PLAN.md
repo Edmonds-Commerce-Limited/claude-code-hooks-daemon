@@ -137,6 +137,16 @@ enforcement and therefore neither can be gamed into teeth.
   point in the lifecycle can see a session's crons, so there may be no such
   signal to find. Owner-gated between the two.
 
+  **Recommendation: the first.** Not a close call, because the analysis above
+  has effectively already made it — option two is conditional on finding a
+  signal the same paragraph says probably does not exist, so choosing it is
+  choosing to search rather than to decide. Option one costs nothing the Stop
+  block does not already cover, and it keeps the tier honest: a tier
+  computed from a check that cannot see its subject is not a weaker signal,
+  it is a false one. Leaving the decision open is itself a choice with a
+  cost — the assertor stays unclassified while every other handler has a
+  tier, which is the inconsistency this plan set out to remove.
+
 - [x] ✅ **Task 2.2**: Classify the remaining handlers. Both named candidates
   now carry real verifiers, RED first: `project_handler_load_checker` (guards
   the project declared are OFF) and `hook_registration_checker` (events never

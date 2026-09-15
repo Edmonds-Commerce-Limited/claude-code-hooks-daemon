@@ -93,6 +93,21 @@ without opening it:
   "repoint at archival time" is not available. Still owner-gated, because it
   changes what `--sweep` blocks on across every project.
 
+  **The gating premise has a possible dissolution worth deciding on
+  explicitly**, by analogy with N7. That niggle was also recorded as
+  owner-gated "because it changes the gate surface in every installing
+  project", and that stopped being true once the remedy was scoped to a
+  PROJECT-level handler — the reasoning was sound, it just described a
+  different artefact from the one actually needed.
+
+  The same move is not available here, since a project handler cannot
+  override the library's plan-QA link resolution. The equivalent is a
+  DEFAULT-OFF config flag: no installing project's `--sweep` behaviour
+  changes until it opts in, so the premise that gates this task no longer
+  holds. That is a suggestion for the owner to accept or reject, not a
+  decision taken — it trades one real cost (a config surface that must be
+  documented and can drift out of step with the default) for another.
+
 - [x] ✅ **Task 1.6**: N4 fixed, RED first, in
   `tests/unit/utils/test_cron_enforcement_whitespace.py`. Clean RED was 5
   failed / 3 passed — the three that passed are the guards asserting a
