@@ -90,19 +90,19 @@ does. The simulated run exists to answer this from data rather than taste.
 
 ### Phase 1: Simulate
 
-- [ ] ⬜ **Task 1.1**: Confirm the premise against the live contract before
+- [x] ✅ **Task 1.1**: Confirm the premise against the live contract before
   writing anything: `agent_id` is present on a subagent `PreToolUse` and absent
   on a main-thread one. If that does not hold, STOP — the plan has no basis.
   Capture with `scripts/debug_hooks.sh` rather than trusting the documentation,
   since trusting a document about this exact field is what cost the first
   attempt.
 
-- [ ] ⬜ **Task 1.2**: RED first — a main-thread `PreToolUse` (no `agent_id`)
+- [x] ✅ **Task 1.2**: RED first — a main-thread `PreToolUse` (no `agent_id`)
   for a non-coordination tool is flagged; the same call carrying an `agent_id`
   is NOT. The second test is the one that matters: it is the exact failure that
   killed the original handler.
 
-- [ ] ⬜ **Task 1.3**: The project handler, simulate-only. It records what it
+- [x] ✅ **Task 1.3**: The project handler, simulate-only. It records what it
   would have denied and allows every call. No blocking code path exists yet, so
   none can be reached by mistake.
 
@@ -118,7 +118,9 @@ does. The simulated run exists to answer this from data rather than taste.
 
 ## Success Criteria
 
-- [ ] ⬜ A subagent's tool call is provably unaffected, by test.
+- [x] ✅ A subagent's tool call is provably unaffected, by test. This is the
+  exact failure that killed the original attempt, so it is the test the slice
+  was built around rather than one added afterwards.
 
 - [ ] ⬜ A simulated run over real sessions in this repository produces a record
   of would-be denials, and that record is what the boundary decision cites.

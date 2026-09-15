@@ -96,7 +96,7 @@ enforcement and therefore neither can be gamed into teeth.
 
 ### Phase 1: The two independent halves (parallel)
 
-- [ ] 🔄 **Task 1.1**: Stop-time cron enforcement, per
+- [x] ✅ **Task 1.1**: Stop-time cron enforcement, per
   [DESIGN-cron-enforcement.md](DESIGN-cron-enforcement.md). Compare declared
   `persistent_crons` against the `session_crons` the `Stop` payload carries;
   block the stop on a mismatch, naming the exact `CronCreate`. Three contract
@@ -105,7 +105,7 @@ enforcement and therefore neither can be gamed into teeth.
   `… [+N chars]` marker, so exact equality never matches this project's own
   long prompt; and an ABSENT list must never be read as "no crons exist".
 
-- [ ] 🔄 **Task 1.2**: The tier mechanism — an optional verifier on a
+- [x] ✅ **Task 1.2**: The tier mechanism — an optional verifier on a
   SessionStart handler, `ACTION_REQUIRED` computed as "verifier exists and is
   failing", tier rendered into the emitted block, and a
   `bin/hooks-daemon session-actions` verb that prints just the required items so
