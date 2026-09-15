@@ -21,10 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Measured rather than inferred: the shipped v3.63.0 module was recovered from
   the tag and executed beside the installed one, and it denied all five.
 
-  The exemption is now granted by PIPELINE, from an allowlist of commands that
-  consume their input as data (`cat`, `tee`, `git`, `jq`, `grep`, …). An
-  unrecognised receiver — an interpreter, `ssh host`, or any name not on the
-  list — has its body scanned like any other command. The direction is
+  The exemption is now granted only when NOTHING on the line can execute the
+  body, decided from an allowlist of commands that consume their input as data
+  (`cat`, `tee`, `git`, `jq`, `grep`, …) — three questions, because each was
+  separately a real hole. An unrecognised receiver — an interpreter,
+  `ssh host`, or any name not on the list, including one no list could hold
+  such as `$SHELL` or a shell function — has its body scanned like any other
+  command. The direction is
   deliberate and is the one `curl_pipe_shell` already used: withholding the
   exemption costs a false positive, granting one wrongly costs the guard.
 
