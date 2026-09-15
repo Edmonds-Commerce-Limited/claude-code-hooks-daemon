@@ -158,6 +158,50 @@ blocked calls and a re-read of the file.
 making it sound. (1) looks most correct — the criterion is a precondition of
 closing, so reading it as a completion claim is the actual category error.
 
+### N4 — `cron_stop_enforcer` wedged this session on the day it merged
+
+The handler blocked every Stop reporting the `issue-sdlc` job missing, while
+`CronList` showed that job present at the declared schedule. Diagnosed from a
+real `Stop` payload captured with `payload_capture`, not from inference:
+
+- `schedule` arrived byte-identical: `23 * * * *`.
+- the DECLARED prompt is 576 characters, paragraphs separated by one `\n`.
+- the DELIVERED prompt is 580 characters — the same words, with blank lines
+  inserted between most paragraphs.
+
+Nothing truncated it (580 is far below the 1000-char cap), so the cap
+normalisation the module was built around could not help. The prompt is
+re-rendered somewhere between the advisory an agent READS and the `CronCreate`
+that agent makes, and `cron_is_asserted` compared the two byte for byte.
+
+**This is severe, not untidy, and it compounds.** The match can never succeed,
+so the block is permanent; and an agent obeying the block's own instruction
+creates a SECOND cron from the same re-rendered text, which also never
+matches, and which then costs an hourly model turn of its own. Following the
+guidance makes it strictly worse. Any client project that declares a cron
+would have hit this on first use.
+
+**The evidence that fixed it also settled how to fix it.** The same capture
+showed the three live crons disagreeing with EACH OTHER — the failsafe job
+kept single newlines, the other two did not. Delivered whitespace is not a
+stable property of the wire, so it cannot be part of an identity test.
+Matching now normalises layout away (strip each line, drop blank lines) and
+compares the WORDS; `schedule` stays an exact comparison, because that is a
+five-field expression where any difference is a real one.
+
+**The lesson worth keeping.** The module's docstring names three contract
+constraints, each carefully established, and the code honours all three — the
+defect is in a fourth nobody thought to ask about. Every constraint was about
+what the WIRE does to a field. None was about what the round trip through a
+rendered advisory and an agent's own retyping does to it, and that round trip
+is the only way this field is ever populated. Reasoning about a delivery
+mechanism is not the same as reasoning about a delivery PATH.
+
+**It also argues the guard was too sharp for its first outing.** A handler
+whose failure mode is "no stop is ever possible again" should not have shipped
+straight to blocking. A warn-first period — the shape Plan 00418 was
+deliberately given — would have surfaced this at zero cost.
+
 ## Tasks
 
 - [x] ✅ **Task 1.1**: N1 — RED first, both defects tested separately, in
@@ -199,6 +243,17 @@ closing, so reading it as a completion claim is the actual category error.
   journal link cannot be repointed without violating append-only, so
   "repoint at archival time" is not available. Still owner-gated, because it
   changes what `--sweep` blocks on across every project.
+
+- [x] ✅ **Task 1.6**: N4 fixed, RED first, in
+  `tests/unit/utils/test_cron_enforcement_whitespace.py`. Clean RED was 5
+  failed / 3 passed — the three that passed are the guards asserting a
+  genuinely different prompt, a dropped paragraph and a different schedule
+  still do NOT match, which had to pass before AND after, or the fix would
+  have traded a false positive for a check that never fires.
+
+  Verified against the captured payload rather than only against fixtures:
+  replaying the real `Stop` through `find_missing_crons` now reports nothing
+  missing. Daemon restarted with the fix live.
 
 - [ ] ⬜ **Task 1.5**: N3 — choose between the three candidate remedies and
   build it. Owner-gated: (1) and (2) both relax a gate that currently blocks,

@@ -47,6 +47,28 @@ PROMPT_DELIVERY_CAP: Final[int] = 1000
 _TRUNCATION_MARKER_RE: Final[re.Pattern[str]] = re.compile(r"(?:\.\.\.|…)\s*\[\+\d+\s*chars\]\s*$")
 
 
+def _normalise_whitespace(prompt: str) -> str:
+    """The prompt's WORDS, with every whitespace-only difference removed.
+
+    The delivered prompt is not the declared prompt's bytes. It is that text
+    after a round trip through a rendered advisory and an agent's
+    ``CronCreate`` call, and that round trip re-flows it: a real ``Stop``
+    capture showed this project's own ``issue-sdlc`` prompt arriving 4
+    characters longer than declared, with blank lines inserted between
+    paragraphs. Nothing had truncated it.
+
+    That is not a transport quirk to special-case. The same capture showed the
+    three live crons disagreeing with each other — one kept single newlines,
+    two did not — so delivered whitespace is simply not a stable property and
+    cannot be part of an identity test.
+
+    So each line is stripped and blank lines are dropped. The WORDS all
+    survive, which is what actually distinguishes one declared job from
+    another; only the layout is discarded.
+    """
+    return "\n".join(line.strip() for line in prompt.splitlines() if line.strip())
+
+
 @dataclass(frozen=True)
 class SessionCron:
     """One entry from the Stop/SubagentStop ``session_crons`` field.
@@ -93,14 +115,41 @@ def parse_session_crons(hook_input: dict[str, Any]) -> list[SessionCron] | None:
     return crons
 
 
-def _normalised_prompt_prefix(prompt: str) -> str:
-    """The declared prompt, truncated to the same cap the wire delivers."""
-    return prompt[:PROMPT_DELIVERY_CAP]
-
-
 def _strip_truncation_marker(prompt: str) -> str:
     """The delivered prompt with any trailing truncation marker removed."""
     return _TRUNCATION_MARKER_RE.sub("", prompt)
+
+
+def _was_truncated(delivered: str, without_marker: str) -> bool:
+    """Whether the wire cut this prompt short.
+
+    The marker is the reliable signal. The length test behind it is a
+    fallback for a delivery that caps without annotating -- the contract
+    documents the marker but a byte-for-byte guarantee is not something to
+    rely on for a check whose failure mode is blocking every stop.
+    """
+    return without_marker != delivered or len(without_marker) >= PROMPT_DELIVERY_CAP
+
+
+def _prompts_match(declared: str, delivered: str) -> bool:
+    """Whether two prompts are the same job, ignoring layout and truncation.
+
+    Prefix matching is used ONLY when the delivered prompt was actually cut
+    short. That restriction is what keeps the check honest: a genuinely
+    shorter prompt is a different job, and accepting every prefix would make
+    a one-line cron match a ten-line declaration.
+
+    Truncation is applied before normalisation on purpose. The wire cuts the
+    RE-RENDERED text, so the cap falls at a different point than it would in
+    the declared text, and comparing normalised prefixes is the only form
+    that survives both transformations at once.
+    """
+    without_marker = _strip_truncation_marker(delivered)
+    delivered_norm = _normalise_whitespace(without_marker)
+    declared_norm = _normalise_whitespace(declared)
+    if _was_truncated(delivered, without_marker):
+        return declared_norm.startswith(delivered_norm)
+    return declared_norm == delivered_norm
 
 
 def cron_is_asserted(declared: PersistentCronConfig, session_crons: list[SessionCron]) -> bool:
@@ -112,15 +161,20 @@ def cron_is_asserted(declared: PersistentCronConfig, session_crons: list[Session
             the conditional-absence case with ``parse_session_crons`` first).
 
     Returns:
-        True if some entry shares ``declared``'s schedule and its prompt
-        matches once both sides are normalised to ``PROMPT_DELIVERY_CAP``
-        (constraint 2) -- never by ``id``, which the contract does not
+        True if some entry shares ``declared``'s schedule and its prompt is
+        the same job once truncation (constraint 2) and layout are both
+        normalised away -- never by ``id``, which the contract does not
         guarantee round-trips (constraint 3).
+
+        ``schedule`` IS compared exactly, and that asymmetry is deliberate:
+        the captured payload showed it arriving byte-identical to the
+        declaration, and it is a five-field expression where any difference
+        is a real difference. Only the prompt makes the round trip through a
+        rendering that re-flows it.
     """
-    declared_prefix = _normalised_prompt_prefix(declared.prompt)
     return any(
         actual.schedule == declared.schedule
-        and _strip_truncation_marker(actual.prompt) == declared_prefix
+        and _prompts_match(declared.prompt, actual.prompt)
         for actual in session_crons
     )
 

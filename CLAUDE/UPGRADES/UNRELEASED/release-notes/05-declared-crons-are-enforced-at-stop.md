@@ -19,9 +19,18 @@ for anything missing.
 **An absent `session_crons` field means "no information", never "no crons
 exist", and can never block.** The field is conditional in the hook contract,
 so treating absence as emptiness would block every session on a Claude Code
-build that does not send it. Matching is on schedule plus prompt, normalised to
-the 1000-character cap the wire truncates to, and never on `id` — nothing
-guarantees a session's own `CronCreate` echoes a declared id back.
+build that does not send it.
+
+Matching is on schedule plus prompt, never on `id` — nothing guarantees a
+session's own `CronCreate` echoes a declared id back. The prompt comparison
+ignores layout, and that is load-bearing rather than lenient: a declared prompt
+reaches `CronCreate` only by being rendered into an advisory and retyped by an
+agent, and that round trip re-flows it. Measured on a real payload, this
+project's own declaration arrived four characters longer with blank lines
+inserted between paragraphs, and the three crons in one session disagreed with
+each other about it. Comparison is therefore on the words, with blank lines and
+line-trailing spaces normalised away; truncation at the 1000-character wire cap
+is handled on top of that.
 
 Both handlers are silent unless `persistent_crons` is enabled with at least one
 declared job, so a project that declares no crons sees no change at all.
