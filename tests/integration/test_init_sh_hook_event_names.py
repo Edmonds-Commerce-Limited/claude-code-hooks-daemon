@@ -187,12 +187,45 @@ class TestTheRemedyIsOneThatCanActuallySucceed:
     reason.
     """
 
-    def test_it_names_the_installer_not_a_restart(self, tmp_path: Path) -> None:
+    def test_it_names_the_bootstrap_script(self, tmp_path: Path) -> None:
         message = json.loads(_source(_throwaway_repo(tmp_path)).stdout)["systemMessage"]
 
-        assert "install.py --self-install" in message, (
+        assert "scripts/bootstrap-self-install.sh" in message, (
             "the fresh-clone message no longer names the command that fixes "
             f"it. Message was:\n{message}"
+        )
+
+    def test_the_named_script_exists_and_is_executable(self) -> None:
+        """A remedy naming a script that is not there is worse than none.
+
+        Pinned because the message is a string: renaming or moving the script
+        cannot break it, so nothing else would notice.
+        """
+        script = _REPO_ROOT / "scripts" / "bootstrap-self-install.sh"
+
+        assert script.is_file(), f"{script} does not exist, but init.sh tells readers to run it."
+        assert script.stat().st_mode & 0o111, f"{script} is not executable."
+
+    def test_it_warns_off_the_client_installer_rather_than_recommending_it(
+        self, tmp_path: Path
+    ) -> None:
+        """`install.py --self-install` is DESTRUCTIVE in this repository.
+
+        `create_daemon_config` and `create_settings_json` do not skip an
+        existing file — they rename it to `.bak` and write a default template
+        over it, and `--force` only decides whether the backup is taken. On a CI
+        runner this replaced the repository's own 1188-line hooks-daemon.yaml
+        with a template invalid against the current schema, after which the
+        daemon refused to start. The message used to RECOMMEND it.
+        """
+        message = json.loads(_source(_throwaway_repo(tmp_path)).stdout)["systemMessage"]
+
+        if "install.py" not in message:
+            return
+        assert "Do NOT run install.py" in message, (
+            "the message mentions install.py without warning that it "
+            "overwrites this repository's tracked config. Either drop the "
+            f"mention or keep the warning. Message was:\n{message}"
         )
 
     def test_it_says_outright_that_a_restart_cannot_help(self, tmp_path: Path) -> None:

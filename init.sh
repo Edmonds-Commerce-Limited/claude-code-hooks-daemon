@@ -109,7 +109,7 @@ emit_hook_error() {
         # succeed, saying so outright beats offering a better option, because
         # a reader who follows advice that cannot work concludes the
         # repository is broken rather than unconfigured.
-        context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+        context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
             "HOOKS DAEMON: this checkout is the hooks-daemon repository, not yet set up" \
             "" \
             "You have cloned the daemon's own source. Its runtime pieces — the" \
@@ -122,7 +122,12 @@ emit_hook_error() {
             "A RESTART CANNOT FIX THIS — there is nothing built to restart yet." \
             "" \
             "TO FIX — build this checkout's runtime, from the repository root:" \
-            "  python3 install.py --self-install")
+            "  scripts/bootstrap-self-install.sh" \
+            "" \
+            "Do NOT run install.py --self-install here. install.py is the CLIENT" \
+            "installer: it OVERWRITES this repository's own tracked" \
+            ".claude/hooks-daemon.yaml and .claude/settings.json with default" \
+            "templates (--force only decides whether a .bak is kept first).")
     elif [[ "$_HOOKS_DAEMON_NOT_INSTALLED" == "true" ]]; then
         # NOT INSTALLED: Guide to install guide — project was cloned but daemon never set up
         #
@@ -378,7 +383,7 @@ if [[ -d "$PROJECT_PATH/.git" ]]; then
         if [[ "$has_self_install" != "true" ]] && [[ ! -f "$PROJECT_PATH/.claude/hooks-daemon.env" ]]; then
             _HOOKS_DAEMON_REPO_UNCONFIGURED=true
             emit_hook_error "" "hooks_daemon_repo_detected" \
-                "This is the hooks-daemon repository. To install for development, run: python3 install.py --self-install"
+                "This is the hooks-daemon repository. To set it up for development, run: scripts/bootstrap-self-install.sh"
             exit 0
         fi
     fi
