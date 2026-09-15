@@ -53,7 +53,7 @@ a missing list produces no advisory at all — a new collaborator gets a working
 daemon with one guard permanently inert and nothing saying so.
 
 Graduated to Plan
-[00414](../00414-absent-protected-path-is-silent/PLAN.md) (Task 1.7).
+[00414](../../00414-absent-protected-path-is-silent/PLAN.md) (Task 1.7).
 
 ### N4 — the remedy the guard prints names an interpreter that is not installed
 

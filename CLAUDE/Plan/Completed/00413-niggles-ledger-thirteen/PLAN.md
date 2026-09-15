@@ -48,10 +48,10 @@ fixing earlier entries, and that sequence is part of the record.
 | --- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
 | N1  | `hookEventName: "Unknown"` fails a closed enum, so the whole response is discarded         | ✅ Fixed                                                                             |
 | N2  | the self-install guard is RIGHT to ignore tracked config; its comment was not              | ✅ Not a defect                                                                      |
-| N3  | a missing secret word list leaves a guard inert and says nothing                           | ⬜ Graduated to [00414](../00414-absent-protected-path-is-silent/PLAN.md)            |
+| N3  | a missing secret word list leaves a guard inert and says nothing                           | ⬜ Graduated to [00414](../../00414-absent-protected-path-is-silent/PLAN.md)            |
 | N4  | the printed remedy names an interpreter that is not installed                              | ✅ Fixed                                                                             |
 | N5  | that remedy also DESTROYS this repository's tracked config                                 | ✅ Fixed                                                                             |
-| N6  | the persistent-cron mechanism rests on output agents skim                                  | ⬜ Graduated to [00416](../00416-session-start-action-tiers-and-teeth/PLAN.md)       |
+| N6  | the persistent-cron mechanism rests on output agents skim                                  | ⬜ Graduated to [00416](../../00416-session-start-action-tiers-and-teeth/PLAN.md)       |
 | N7  | no sanctioned way to FIND a plan, so the guard denies the only obvious one                 | ✅ Fixed                                                                             |
 | N8  | a newly recorded licence never reaches already-vendored files                              | ✅ Fixed (Task 1.11 — drift is reported)                                             |
 | N9  | the provenance deny message invites the corruption it should prevent                       | ✅ Fixed                                                                             |
@@ -62,7 +62,7 @@ fixing earlier entries, and that sequence is part of the record.
 | N14 | the acceptance playbook describes the DEFAULT handler, not the configured one              | ✅ Fixed                                                                             |
 | N15 | the daemon CAN see the session's crons; two plans were built on it not being able to       | ✅ Fixed                                                                             |
 | N16 | CLAUDE.md's own discovery route fails on the FIRST handler it lists                        | ✅ Fixed                                                                             |
-| N17 | the freshness guard certifies a live dispatch it cannot vouch for                          | ⬜ Graduated to [00415](../00415-config-is-invisible-to-the-freshness-guard/PLAN.md) |
+| N17 | the freshness guard certifies a live dispatch it cannot vouch for                          | ⬜ Graduated to [00415](../../00415-config-is-invisible-to-the-freshness-guard/PLAN.md) |
 
 ## Tasks
 
@@ -85,10 +85,10 @@ fixing earlier entries, and that sequence is part of the record.
   GitHub, ran the real forwarder, followed the printed instruction verbatim.
 
 - [x] ✅ **Task 1.7**: N3 graduated to Plan
-  [00414](../00414-absent-protected-path-is-silent/PLAN.md).
+  [00414](../../00414-absent-protected-path-is-silent/PLAN.md).
 
 - [x] ✅ **Task 1.21**: N6/N15 graduated to Plan
-  [00416](../00416-session-start-action-tiers-and-teeth/PLAN.md), carrying
+  [00416](../../00416-session-start-action-tiers-and-teeth/PLAN.md), carrying
   `DESIGN-cron-enforcement.md` with them.
 
 - [x] ✅ **Task 1.8**: N6 — designed, and the design changed when N15 showed the
@@ -186,7 +186,7 @@ fixing earlier entries, and that sequence is part of the record.
   2,025 acceptance + daemon tests pass.
 
 - [x] ✅ **Task 1.20**: N17 graduated to Plan
-  [00415](../00415-config-is-invisible-to-the-freshness-guard/PLAN.md). It needs
+  [00415](../../00415-config-is-invisible-to-the-freshness-guard/PLAN.md). It needs
   design, not a patch: what to hash (file bytes versus resolved model) and
   whether to extend the existing fingerprint or report a second one are genuine
   forks, and the wrong pick yields a guard that either flaps or leaves existing
@@ -216,7 +216,7 @@ fixing earlier entries, and that sequence is part of the record.
   held for an owner ruling; once that ruling arrived the work had outgrown a
   ledger — it is feature work with three build phases, not a niggle.
   `DESIGN-cron-enforcement.md` moved to
-  [00416](../00416-session-start-action-tiers-and-teeth/PLAN.md) with it. The
+  [00416](../../00416-session-start-action-tiers-and-teeth/PLAN.md) with it. The
   `when_env:` key and the `issue-sdlc` branch-ref claim stay owner-gated, and
   are recorded in that plan's Non-Goals so gating one no longer blocks the
   other.
