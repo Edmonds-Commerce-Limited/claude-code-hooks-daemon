@@ -138,6 +138,32 @@ does. The simulated run exists to answer this from data rather than taste.
   calls need no interpretation at all. Building the classifier did not
   foreclose that — the second option is exactly as available as it was.
 
+  **Second sample, classifier live.** 1,385 would-be denials in one long
+  session: Bash 896, Write 250, Edit 205, everything else 34, `Read` zero
+  again. Of the 412 Bash calls recorded after the classifier landed (the 485
+  before it are pre-classifier history, verified by a clean timestamp cutover
+  at 19:52 with no overlap):
+
+  | Measure                        | Value              |
+  | ------------------------------ | ------------------ |
+  | Distinct command heads         | 171                |
+  | Compound (multi-command) calls | 325 (79%)          |
+  | Most common single head        | 9.5%               |
+  | Heads needed to cover 50%      | 21 of 171          |
+  | Heads seen exactly once        | 106 (62% of heads) |
+
+  **This settles a sub-question, and it is not the owner's to decide because
+  it is arithmetic: the line cannot be drawn on Bash by command head.** Four
+  fifths of calls run several commands at once, the heads are a long tail with
+  no dominant member, and 62% occur once. Worse for the premise, compounds
+  straddle the boundary WITHIN a single call — `set+git add+git commit+…` is
+  coordination and mutation in the same invocation, so no per-call verdict can
+  be right about both halves.
+
+  `Write`/`Edit` remain 455 calls needing no interpretation at all. The
+  boundary decision is still the owner's; what has changed is that one of the
+  two options is now known to be unbuildable as stated.
+
 - [ ] ⬜ **Task 2.2**: Owner decision on promoting to blocking, and separately
   on promoting to the shipped library. Either may be "no".
 
@@ -147,8 +173,10 @@ does. The simulated run exists to answer this from data rather than taste.
   exact failure that killed the original attempt, so it is the test the slice
   was built around rather than one added afterwards.
 
-- [ ] ⬜ A simulated run over real sessions in this repository produces a record
+- [x] ✅ A simulated run over real sessions in this repository produces a record
   of would-be denials, and that record is what the boundary decision cites.
+  Two samples now: 437 in the first session, 1,385 in a second with the
+  classifier live. The record has already ruled one option out on arithmetic.
 
 - [ ] ⬜ Nothing is blocked by this plan. Blocking is a later, separate decision.
 
