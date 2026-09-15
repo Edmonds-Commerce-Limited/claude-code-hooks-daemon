@@ -27,9 +27,29 @@ else
     exit 2
 fi
 
-# Find daemon socket in project's untracked directory
-# Supports both suffixed (container) and unsuffixed (desktop) paths
-SOCKET_PATH=$(find "$PROJECT_ROOT/.claude/hooks-daemon/untracked/" -name "daemon*.sock" 2>/dev/null | head -n1)
+# Find the daemon socket. TWO layouts exist and both are supported:
+#   self-install   — the daemon IS the project:  <root>/untracked/
+#   client install — vendored subtree:           <root>/.claude/hooks-daemon/untracked/
+# Suffixed (container) and unsuffixed (desktop) socket names are matched by the
+# same glob in either layout.
+#
+# Plan 00419 N1: each directory is tested before it is searched, and nothing is
+# piped. `find` on a missing directory exits non-zero, and under
+# `set -euo pipefail` a failing command substitution killed this script outright
+# — before it could reach the CLAUDE_HOOKS_SOCKET_PATH fallback below, making
+# that documented escape hatch unreachable on exactly the layout that needed it.
+# `mapfile` from a process substitution also avoids the SIGPIPE a `| head -n1`
+# can raise in the producer once the reader closes early.
+SOCKET_PATH=""
+for socket_dir in "$PROJECT_ROOT/untracked" "$PROJECT_ROOT/.claude/hooks-daemon/untracked"; do
+    if [[ -d "$socket_dir" ]]; then
+        mapfile -t found_sockets < <(find "$socket_dir" -name "daemon*.sock")
+        if [[ ${#found_sockets[@]} -gt 0 ]]; then
+            SOCKET_PATH="${found_sockets[0]}"
+            break
+        fi
+    fi
+done
 
 if [[ -z "$SOCKET_PATH" ]]; then
     # Fallback: check for env var override
@@ -37,7 +57,7 @@ if [[ -z "$SOCKET_PATH" ]]; then
 fi
 
 if [[ -z "$SOCKET_PATH" ]]; then
-    echo "ERROR: No daemon socket found in $PROJECT_ROOT/.claude/hooks-daemon/untracked/"
+    echo "ERROR: No daemon socket found in $PROJECT_ROOT/untracked/ or $PROJECT_ROOT/.claude/hooks-daemon/untracked/"
     echo "Is the daemon running? Use the hooks-daemon skill to check health (Skill tool: skill=hooks-daemon, args=health)"
     exit 1
 fi

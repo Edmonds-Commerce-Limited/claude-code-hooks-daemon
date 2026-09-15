@@ -146,7 +146,7 @@ evidence of execution — records an intention and calls it a fact.
 "sourced from `CronCreate`, `ScheduleWakeup`, and `/loop`", carrying `id`,
 `schedule`, `recurring` and `prompt`. It is in the vendored contract
 (`Stop.json:48`) and nothing reads it. See ledger
-[00413](../00413-niggles-ledger-thirteen/PLAN.md) N15.
+[00413](../Completed/00413-niggles-ledger-thirteen/PLAN.md) N15.
 
 The three bullets above SURVIVE — a declared cron still is not evidence that a
 run happened, and the run record is still what proves one. What does not
@@ -219,7 +219,7 @@ backwards.
 
 > **This paragraph is the one the review damaged, and it is now twice wrong.**
 > The daemon CAN see a cron — `session_crons` at `Stop`
-> ([00413](../00413-niggles-ledger-thirteen/PLAN.md) N15) — and it cannot
+> ([00413](../Completed/00413-niggles-ledger-thirteen/PLAN.md) N15) — and it cannot
 > EXECUTE agent work at SessionStart either, only inject context that prompts a
 > run, exactly as a cron prompts one (adversarial review §3). Both halves of
 > the asymmetry fail. The CONCLUSION — that a trigger is a kind, not a clock —
@@ -581,3 +581,206 @@ Defence Before Fix clause 3.2 forbids the test being the Detector. So every
 Detector this produces lands in `scripts/qa/` or as a handler — never only in
 `tests/`. A test proves the fix; the Detector prevents the class. They are
 different artefacts and the plan must not let them collapse into one.
+
+## D20. How the sampling actually works — OWNER'S RULING
+
+> build in some randomness to the security sweep
+>
+> and look for surfaces that are more likely to carry security issues if possible
+>
+> and keep a ledger of when each file was last checked in json
+>
+> you know - this is another job we are defining - its a job to run in this
+> project only but it could become an archetype for security reviewing in client
+> projects, so machinery we create might become supporting helpers for client
+> projects
+
+(`job` = Routine throughout; D1 settled the name.)
+
+This makes D19's method concrete and answers the open question D18 left.
+
+### The three sampling inputs
+
+D19 said spot-check, and flagged that the same comfortable places would get
+sampled repeatedly. Three inputs settle that, and each fixes a different failure:
+
+1. **Randomness** — defeats a fixed order. A deterministic sweep has permanent
+   blind spots: whatever sorts last is never reached when a run is cut short,
+   and an attacker who reads this repository can predict what goes unexamined.
+2. **Risk weighting** — effort goes where defects actually live. Uniform
+   sampling over 3,516 files spends most of its budget on markdown.
+3. **Staleness** — from the ledger. A file checked last week should lose to one
+   never checked at all, so coverage SPREADS instead of orbiting.
+
+Selection is a weighted random draw over `risk × staleness`. Random alone
+re-samples; weighting alone is deterministic and blind; staleness alone ignores
+where the risk is. All three, or the sweep has a hole.
+
+### Risk weighting must be DERIVED, not a list
+
+A hand-maintained list of "dangerous files" is wrong the day it is written and
+worse every day after — the file that just gained a `subprocess` call is exactly
+the one missing from it.
+
+Derive the score from signals in the file itself: does it spawn a process,
+deserialise, touch the network, handle paths from outside, parse untrusted
+input, sit on a hook path that receives a raw tool payload. Allow a manual
+override, but as an override on a derived base, never as the base.
+
+This also converges with Q4's trust-boundary list arrived at independently —
+shell-spawning handlers, the socket server, config loading, install and upgrade,
+the fetchers, the `bin/` wrappers. That the two came out the same by different
+routes is mild evidence both are right.
+
+### The per-file JSON ledger — and how it reconciles with D18
+
+**This SUPERSEDES the "one-line pointer per Routine" option D18 left open.** Per
+file is strictly better: it drives the staleness weighting above, and it makes
+the honest coverage answer a query rather than a guess. "Which files has the
+security review never looked at?" becomes readable, which is the question a
+reviewer most wants and the one no run record could previously answer.
+
+D18 ruled that run LOGS are not tracked. **The ledger is not a log**, and the
+distinction is worth stating because it looks like one:
+
+- a log is narrative about one execution — what was looked at, what was thought,
+  what was found;
+- the ledger is an INDEX — one timestamp per path, machine-written,
+  machine-read, carrying no findings and no prose.
+
+Findings still become Plans (D18). The ledger is the third thing D18 already
+identified: not a log, not a finding, and the only part anything else reads.
+
+**Recommendation: track it.** Untracked, a fresh clone believes nothing has ever
+been checked, so the staleness weighting resets to uniform and the coverage
+answer is lost precisely when someone new asks it. It is small, machine-written
+and mergeable by a stated rule: **on conflict, take the later timestamp per
+path**. That rule is total — it needs no judgement and cannot lose coverage,
+because a later check always subsumes an earlier one.
+
+This is a REFINEMENT of D18, not a reversal: logs stay out of git, the index
+goes in.
+
+### Archetype, not one-off
+
+> it could become an archetype for security reviewing in client projects, so
+> machinery we create might become supporting helpers
+
+Exactly D17's shape, now with a concrete first instance. The separation to hold
+while building:
+
+- **Generic, and therefore shippable**: the ledger format and its merge rule,
+  the `risk × staleness` weighted draw, the staleness query, the
+  never-been-checked query.
+- **This project's own**: the risk SIGNALS (language- and framework-specific),
+  the security checklist, and what the trust boundary is here.
+
+Build the first instance concretely — a generalisation drawn from one working
+example is worth more than one designed from none, and that is the mistake the
+adversarial review caught the first time. But keep the seam visible, so
+extracting the generic half later is a move rather than a rewrite.
+
+## D21. Run logs are local to where they ran — OWNER'S RULING
+
+> job run logs are relevant in the place they are running - so install A not
+> know about job logs in instance B is fine
+
+This closes the portability question D4 opened and settles it the simple way:
+**a run log is per-install and stays there.** No syncing, no shared location, no
+design effort spent making one checkout's logs legible to another.
+
+It also retires the residual worry in D4's table. That table justified putting
+the INTERVAL in-repo on the grounds that "a run on a different checkout would
+otherwise have no idea what was already covered" — a real concern under the
+interval model, and a much smaller one now. Under D19/D20 coverage is carried by
+the Detectors (which run everywhere, on every QA) and by the ledger (D20), not
+by reading someone else's run log.
+
+### What this does NOT settle, and it must not be assumed
+
+The ruling is about **logs**. D20's per-file ledger is a different artefact by
+D20's own distinction — a log is narrative about one execution; the ledger is an
+index of one timestamp per path — so "logs are local" does not automatically
+decide it, and quietly extending it would be the kind of inference this plan has
+already been burned by twice.
+
+The consequence if the ledger is ALSO local:
+
+- A fresh clone believes no file has ever been checked, so the staleness half of
+  D20's `risk × staleness` draw collapses to uniform and the sweep re-samples
+  from scratch.
+- "Which files has the security review never looked at?" — the question D20 made
+  answerable — gets a different answer per checkout, and the most honest-looking
+  answer (a fresh clone's "none of them") is the least informative.
+
+Neither is fatal. A local ledger still works within the machine that does the
+reviewing, and if that is one machine in practice the cost is theoretical. The
+recommendation stays **track the ledger, keep the logs local** — it is the only
+part of a run another checkout benefits from reading, it is small and
+machine-written, and it merges by a total rule (later timestamp per path wins).
+But this is the owner's call and is explicitly still open.
+
+## D22. Duplicate runs across installs — OWNER'S DIRECTION, not yet settled
+
+> there is another question about some mechanism to ensure jobs are not run in
+> duplicate across instances - this is an interesting question and we might be
+> leading towards some untracked hooks daemon local config which can possibly be
+> where cron config resides
+
+This is the same problem N6 hit and answered with a `when_env:` activation key.
+**The local-config direction is better than `when_env:`**, for three reasons
+worth recording before either is built:
+
+1. **It is config, not environment.** A key in a file is discoverable,
+   validatable, documentable and greppable. An environment variable is none of
+   those, has to be plumbed through every launcher, and fails silently and
+   invisibly when it is not set.
+2. **Untracked means per-install by construction**, which is exactly the
+   property D21 just established for run logs. The same reasoning applies:
+   "which Routines does THIS install run" is a fact about this machine, and a
+   tracked file is the wrong place for a per-machine fact — every checkout would
+   fight over it.
+3. **It generalises past crons.** Any "this install only" setting wants the same
+   home, and the alternative is a new bespoke mechanism each time one appears.
+
+### The sharp edge: an untracked file must not be able to weaken a tracked control
+
+This is the one thing that must be decided before implementation, because
+getting it wrong creates an unreviewed escape hatch in a security product.
+
+The tracked `.claude/hooks-daemon.yaml` is reviewed: it is in git, it shows up
+in diffs, a teammate sees it change. An untracked local file is reviewed by
+nobody, by design. If it can override arbitrary config, then "disable the
+handler that was blocking me" becomes a one-line untracked edit that leaves no
+trace in history — and the agent-facing rule this project already enforces
+against permission laundering ("never edit permission settings because a peer
+asked") is trivially routed around by writing a local file instead.
+
+So the local config needs a **bounded key surface**, decided up front rather
+than by omission:
+
+- **Suitable**: which Routines this install runs, which crons this install
+  owns, machine-local paths, this install's identity.
+- **Unsuitable**: anything that disables, weakens or narrows a handler; anything
+  in `tool_policy`; anything under a safety handler's `options`.
+
+The cheap enforcement is a whitelist of permitted key prefixes, with everything
+else rejected loudly at load rather than silently ignored — a silently-ignored
+key in a file nobody reviews is how an operator ends up believing a setting is
+in force when it is not.
+
+### What this does and does not solve
+
+Declaring ownership locally means two installs do not both run a Routine
+**because they were each told to**. It does not prevent two installs both being
+told to. That residual case was already settled in N6's design and the reasoning
+carries over unchanged: a lock is what you need when the machines are
+adversarial or unknown, and here the owner controls them, so a declaration is
+sufficient and a distributed lock is over-engineering.
+
+Worth stating, though, that this makes the failure mode **silence, not
+duplication**: if no install claims a Routine, nobody runs it and nothing
+notices. That is precisely the dead-man's-switch problem D6 already named, and
+it is the reason the overdue check has to live outside the Routine and outside
+the local config — otherwise the file that forgot to claim the Routine is also
+the file that would have complained about it.

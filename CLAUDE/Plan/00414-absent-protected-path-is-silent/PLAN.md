@@ -21,7 +21,7 @@ missing list is to stand the source down quietly, which is correct at runtime �
 a missing file must not break a session — and unhelpful exactly once, on the
 first run, to the one person who does not yet know the file is expected.
 
-This was found as N3 of ledger [00413](../00413-niggles-ledger-thirteen/PLAN.md)
+This was found as N3 of ledger [00413](../Completed/00413-niggles-ledger-thirteen/PLAN.md)
 when a new collaborator cloned the repository. `.claude/block-words.secret` and
 its `.example` are both gitignored — deliberately, and `.gitignore:215-220`
 gives the reason: the rule ships before any such file exists so that a broad
@@ -99,6 +99,6 @@ These need settling before implementation, and they are genuinely open:
 
 ## Delivery & Milestones
 
-- Graduated from ledger [00413](../00413-niggles-ledger-thirteen/PLAN.md) N3,
+- Graduated from ledger [00413](../Completed/00413-niggles-ledger-thirteen/PLAN.md) N3,
   which was filed with the wrong fix (track the `.example`) and re-scoped once
   `.gitignore`'s own comment showed the exclusion was deliberate.
