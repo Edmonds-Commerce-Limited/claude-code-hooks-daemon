@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00419: niggles ledger fourteen](00419-niggles-ledger-fourteen/PLAN.md) - In Progress, the OPEN ledger (N1: `debug_hooks.sh` could not work in the repository that dogfoods it — it searched only the client-install layout, and died under `set -e` before reaching its own documented fallback. Three documents route agents there instead of guessing at payload shapes)
+
 - [00418: orchestrator only mode greenfield](00418-orchestrator-only-mode-greenfield/PLAN.md) - In Progress (restrict the MAIN THREAD to coordination tools; built once and deleted because hooks could not tell which agent fired an event, and `agent_id` now can. Greenfield by ruling, project-level handler, warn/simulate before ever blocking. From issue #14)
 
 - [00417: supervisor operator signals](00417-supervisor-operator-signals/PLAN.md) - In Progress (a closed channel letting a host warn every session that the machine reboots in N minutes, so work is committed and journalled first. Fixed kinds, integer payload, no free text anywhere — the wording is daemon-owned, because a channel from outside the container is a prompt-injection surface by default. From issue #39)
@@ -262,11 +264,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 418 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 419 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 364 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 31 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 32 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
