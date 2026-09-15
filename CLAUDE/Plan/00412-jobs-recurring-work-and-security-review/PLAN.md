@@ -54,14 +54,14 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
 - **A run that found nothing is recorded as distinctly as one that found
   something**, and both are distinct from never having run. Absence of a
   record is not observable from the records themselves, so something outside
-  the job must assert "a run is overdue".
+  the routine must assert "a run is overdue".
 
 - **Two-level logging, split by portability rather than verbosity.** The
   in-repo record carries the outcome and the interval; raw output goes to
   `untracked/`, which survives restarts but is per-checkout and invisible to
   CI, another machine or a fresh clone.
 
-- A `hooks-daemon run-job <id>` CLI the cron system can invoke, with the
+- A `hooks-daemon run-routine <id>` CLI the cron system can invoke, with the
   honest contract that the cron PROMPTS a run and the record PROVES one.
 
 - **A trigger is a KIND, not always a clock.** `session_start` is a
@@ -70,7 +70,7 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   the STRONGEST delivery guarantee, since the daemon executes SessionStart
   itself while a Claude Code cron it cannot even see.
 
-- The first job conforms to Defence Before Fix: every confirmed defect
+- The first routine conforms to Defence Before Fix: every confirmed defect
   produces a blocking Detector before the fix lands.
 
 ## Non-Goals
@@ -82,7 +82,7 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
 
 - **Over-fitting to security.** Security review is the first CONSUMER, not the
   shape. Anything in the core that only makes sense for a security sweep
-  belongs in that job's own definition instead.
+  belongs in that routine's own definition instead.
 
 - **Replaying missed runs.** A missed run widens the NEXT run's interval
   rather than queueing catch-up executions — systemd's `Persistent=` semantics
@@ -98,10 +98,16 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
 
 ### Phase 1: Decide the shape
 
-- [ ] ⬜ **Task 1.1**: Settle the open decisions in
+- [x] ✅ **Task 1.1**: Settle the open decisions in
   [DESIGN.md](DESIGN.md) with the owner — principally the NAME (the research
   argues "Job" collides locally and recommends "Routine"), the directory, and
   whether the run record is one file per run or an append-only ledger.
+  All four settled; see "Owner decisions" in DESIGN.md. **Routine**, in
+  `CLAUDE/Routine/NNNNN-name/`, with runs in `RUNS/`; the run record is a
+  **yearly append-only ledger**; Defence Before Fix conformance is **declared
+  with a known-gap record** under toolchain clause 9.2; the first security run
+  covers the **whole repository**. This plan's folder keeps its original name —
+  plan folder names are historical and renaming one breaks every inbound link.
 
 - [x] ✅ **Task 1.2**: Capture the one Defence Before Fix document the
   remote-docs corpus is missing (`TOOLING-SPEC`), and correct the
@@ -121,7 +127,7 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
 - [ ] ⬜ **Task 2.2**: The document tree and its scaffolding script, mirroring
   `mkplan.bash`'s atomic git-counter numbering rather than a folder scan.
 
-- [ ] ⬜ **Task 2.3**: `hooks-daemon run-job <id>`: resolve the definition,
+- [ ] ⬜ **Task 2.3**: `hooks-daemon run-routine <id>`: resolve the definition,
   open a run record, hand the agent the procedure, and record the outcome. The
   existing `daemon/housekeeping.py` step-registry and
   `config_optimisation/state.py`'s `record_run` are the closest existing
@@ -135,9 +141,9 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   that never happened leaves no record, so a session-start surface must notice
   the absence.
 
-### Phase 3: The first job — security review
+### Phase 3: The first routine — security review
 
-- [ ] ⬜ **Task 3.1**: The job definition: a full sweep on a calendar cadence,
+- [ ] ⬜ **Task 3.1**: The routine definition: a full sweep on a calendar cadence,
   a narrower per-release sweep over changed code and changed rules, and an
   explicit list of which checks are delta-able and which are full-only. A
   delta run MUST record which checks it did not run — a delta scan is
@@ -155,13 +161,13 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
 
 ## Success Criteria
 
-- [ ] ⬜ A second run of any job can state, from the records alone, exactly
+- [ ] ⬜ A second run of any routine can state, from the records alone, exactly
   what interval it must cover, with no mutable pointer consulted.
 
 - [ ] ⬜ A deliberately skipped run is detectable: the QA sweep reports the
   gap rather than the records reading as continuous.
 
-- [ ] ⬜ The security job has run once for real, its findings are recorded,
+- [ ] ⬜ The security routine has run once for real, its findings are recorded,
   and every confirmed defect has a BLOCKING Detector that was proved to fire
   before its fix landed.
 

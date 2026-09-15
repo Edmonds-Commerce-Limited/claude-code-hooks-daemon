@@ -4,7 +4,11 @@ Written from four research reports in `subagent-reports/`. Each section states
 the decision, the reasoning, and — where it is genuinely the owner's call —
 what is being asked. Nothing here is implemented; the plan is in review.
 
-## D1. The name — OWNER DECISION REQUIRED
+## D1. The name — DECIDED: Routine
+
+**The owner chose Routine**, accepting the research recommendation over their
+own original proposal. The reasoning that follows is kept because it is the
+answer to "why not Job?", which will be asked again.
 
 The owner proposed **Job**. The research argues for **Routine**, and the
 argument is not an abstract preference, so it is put here rather than quietly
@@ -329,17 +333,75 @@ unrelated to this plan, but they are what keeps a stored baseline ref
 break job coverage retroactively and non-obviously — every stored `from` that
 pointed into a squashed branch becomes unresolvable at once.
 
-## Open questions for the owner
+## Owner decisions — all four settled
 
-1. **D1 — the name.** Job (yours) or Routine (research recommendation)?
-   Everything else can proceed either way.
-2. **Run record shape**: one file per run, or an append-only yearly ledger with
-   one row per run? The ledger is cheaper to scan for gaps; separate files are
-   easier to write concurrently and to reference from a plan.
-3. **Is Defence Before Fix yours?** If so, "engage with it" means conform this
-   project to our own published standard, which raises the bar from "borrow
-   the good idea" to "meet the clauses" — including the test-is-not-a-Detector
-   rule above.
-4. **Scope of the first security run**: whole repository, or start with the
-   handler surface and widen? The full sweep over ~1,700 files is a large
-   first run.
+These were the four open questions. None is open now; Phase 2 is unblocked.
+
+### Q1 — the name: **Routine**
+
+`CLAUDE/Routine/NNNNN-name/` beside `CLAUDE/Plan/NNNNN-name/`, with the
+contrast *a Plan finishes, a Routine recurs*. The per-execution record is a
+**Run**, in `RUNS/`, which was never in dispute. See D1.
+
+### Q2 — run record shape: **a yearly append-only ledger**
+
+One file per year, one row per run — not one file per run.
+
+Three reasons, in the order they carry weight. The main query this design
+exists to serve is "does the coverage compose without a gap?" (D2), and that is
+a scan over consecutive runs, which a single ordered file answers directly.
+D4 already concluded that run files should rotate by year rather than by day.
+And D14 wants the append-only journal subsystem SHARED rather than forked; a
+ledger is the shape that subsystem already implements.
+
+The cost accepted: concurrent writers contend on one file, and a run cannot be
+referenced by its own path from a plan. Both are real and neither outweighs gap
+detection being a read of one file. If concurrency ever bites, the lock that
+`mkplan.bash` already uses for the counter is the precedent.
+
+### Q3 — Defence Before Fix: **declare conformance with a known-gap record**
+
+Confirmed as the owner's own published standard, so the bar is meeting the
+clauses rather than borrowing the idea. But conformance is declared HONESTLY
+rather than claimed: toolchain specification clause 9.2 states that the
+declaration is the claim and the known-gap record, **not a condition of
+conformance** — so a declaration naming what we do not yet meet is conforming
+behaviour, and the gaps become tracked work instead of a blocker.
+
+The toolchain specification is now vendored (Task 1.2) at
+`remote-docs/defence-before-fix.github.io/raw/TOOLING-SPEC.md`, so the clauses
+are readable offline and this is measurable rather than asserted.
+
+Where this project already conforms by convergent design, per D15 and the
+clause numbers now checkable: `qa_suppression` against 4.3 (forbid every
+suppression route that bypasses the project record), `explain-rule` against 4.2
+(resolve every printed identifier offline, from the installed copy), `handlers`
+against 5.1 (list active defences without triggering them), and the generated
+`<hooksdaemon>` CLAUDE.md block, which IS clause 7.2.
+
+The two gaps to record rather than close here:
+
+1. **Clause 6.2 — exceptions carry no loaded justification.** `exclude_paths`
+   entries are Exceptions with no reason the toolchain reads. Several DO carry
+   a YAML comment explaining themselves, and that is explicitly not enough:
+   clause 6.1 requires "a path the Toolchain loads. Not a documentation
+   convention", precisely so the written decision and the enforced decision
+   cannot drift. A comment is also invisible to clause 6.3's enumeration, and
+   nothing can reject a generic one.
+2. **Clause 3.3 of the method — no red-commit discipline.** The rule is not
+   proved to fire in a commit of its own.
+
+Closing gap 1 is its own plan, not a Phase of this one: it changes the config
+schema, needs a genericness check with its own false-positive surface, and
+touches every existing exclusion.
+
+### Q4 — first security run: **the whole repository**
+
+Roughly 1,700 files, accepted as a one-off.
+
+The design's own escalation triggers (D12) name "first run" as forcing a full
+run, so a narrow first run would contradict the rule being built in the same
+plan. D3 is the sharper reason: a run recording "clean" without recording
+"clean under this scope" is the expensive kind of wrong, because it is cited
+later as coverage. The first run is the baseline every subsequent interval
+composes against, so it is the one run whose scope must not need an asterisk.
