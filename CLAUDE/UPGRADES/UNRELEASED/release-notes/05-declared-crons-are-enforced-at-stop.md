@@ -1,7 +1,7 @@
 # Callout: a declared persistent cron is now enforced, not just announced
 
 **Plan**: 00416
-**Audience**: operators, client projects
+**Audience**: everyone
 
 Claude Code crons do not survive a session, so a project that needs recurring
 work declares it under `persistent_crons` and the SessionStart advisory asks
