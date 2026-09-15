@@ -138,7 +138,18 @@ def _collect_all_blocking_tests() -> list[dict[str, Any]]:
     registry = HandlerRegistry()
     registry.discover()
     project_handlers = list(_project_handler_instances().values())
-    generator = PlaybookGenerator(config={}, registry=registry, project_handlers=project_handlers)
+    # The REAL config, not `{}`. A handler whose declared tests vary by option
+    # -- `ask_user_question_blocker` in `mode: unattended` denies the justified
+    # question every other mode allows -- would otherwise be DECLARED in its
+    # default mode and DRIVEN in the configured one by `_handler_instances()`
+    # below, which injects config. That mismatch is guaranteed, and it reads as
+    # the handler misbehaving rather than as the two sides disagreeing about
+    # which handler they are describing (Plan 00413 N14).
+    generator = PlaybookGenerator(
+        config=_build_handler_config_mapping(_real_config()),
+        registry=registry,
+        project_handlers=project_handlers,
+    )
     tests = generator.generate_json(include_disabled=True)
     return [t for t in tests if t.get("test_type") == "blocking" and t.get("source") != "cli"]
 

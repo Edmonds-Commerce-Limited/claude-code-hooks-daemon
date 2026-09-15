@@ -48,7 +48,6 @@ from claude_code_hooks_daemon.utils import secret_redaction as sr
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TREE_CHECKER = _REPO_ROOT / "scripts" / "qa" / "check_sensitive_content.py"
 _HISTORY_CHECKER = _REPO_ROOT / "scripts" / "qa" / "check_git_history.py"
-_TREE_JSON = _REPO_ROOT / "untracked" / "qa" / "sensitive_content.json"
 _HISTORY_JSON = _REPO_ROOT / "untracked" / "qa" / "git_history.json"
 
 _TERM = "zzqx-nonsense-term"
@@ -117,6 +116,17 @@ def _git(repo: Path, *args: str, **env: str) -> None:
     )
 
 
+def _scoped_tree_json(scan_path: Path) -> Path:
+    """Where a ``--path`` tree scan writes its verdict.
+
+    Beside what was scanned, never into ``untracked/qa/`` — that artefact
+    answers "is this REPOSITORY clean", and a scoped scan did not establish
+    it (Plan 00413 N13). Reading the repo artefact here would also make these
+    tests depend on a file the whole QA suite writes.
+    """
+    return scan_path / "sensitive_content.json"
+
+
 def _run(checker: Path, output: Path, *args: str) -> dict[str, Any]:
     subprocess.run(  # nosec B603 - trusted first-party checker script
         [sys.executable, str(checker), "--json", *args],
@@ -181,7 +191,14 @@ class TestBatchGuardCoversEverySurface:
         _write_config(config)
         (tmp_path / "clean.md").write_text(f"has {_TERM}\n")
 
-        data = _run(_TREE_CHECKER, _TREE_JSON, "--path", str(tmp_path), "--config", str(config))
+        data = _run(
+            _TREE_CHECKER,
+            _scoped_tree_json(tmp_path),
+            "--path",
+            str(tmp_path),
+            "--config",
+            str(config),
+        )
 
         assert data["summary"]["passed"] is False
 
@@ -191,7 +208,14 @@ class TestBatchGuardCoversEverySurface:
         _write_config(config)
         (tmp_path / f"{_TERM}-notes.md").write_text("wholly innocent body\n")
 
-        data = _run(_TREE_CHECKER, _TREE_JSON, "--path", str(tmp_path), "--config", str(config))
+        data = _run(
+            _TREE_CHECKER,
+            _scoped_tree_json(tmp_path),
+            "--path",
+            str(tmp_path),
+            "--config",
+            str(config),
+        )
 
         assert data["summary"]["passed"] is False
 
