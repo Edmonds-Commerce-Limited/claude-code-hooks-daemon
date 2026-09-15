@@ -118,10 +118,21 @@ bypass"). Of the eight consumers that blank heredoc bodies, only
 - [x] ✅ Running the shipped v3.63.0 `destructive_git` and the fixed one over
   the same table yields no row where v3.63.0 denies and the fix allows, except
   the `cat` row that release note 29 deliberately changed. One flip remains and
-  it is that row (`untracked/scratch/probe_v3630_regression.py`).
+  it is that row.
+
+  The comparison itself cannot be a test — it needs `git show` of a tag — so
+  the reproducible PROCEDURE is recorded in this plan's `JOURNAL/` rather than
+  the throwaway script, which lives under gitignored `untracked/scratch/` and
+  will not survive. Citing that path as evidence would repeat the mistake this
+  plan is about. What IS pinned as a test is the table it produced: the
+  receiver cases in `tests/unit/utils/test_shell_segmentation.py` and the
+  five-spellings-by-five-receivers matrix in `test_destructive_git_prose.py`.
+
 - [ ] ⬜ Full QA passes, the daemon is restarted, and CI is green.
+
 - [x] ✅ The human is told, in plain terms, that v3.64.0 carries this defect and
   that RELEASING.md's rollback table prescribes a patch release for it.
+
 - [ ] ⬜ **BLOCKED ON HUMAN — a published version carries the fix.** RELEASING.md's
   rollback table prescribes "After push: Create immediate patch release (NEVER
   force-push tags)". Only a human `/release` can start one, so this criterion
