@@ -95,6 +95,43 @@ class TestFindings:
         assert finding.level == Level.ADVISE
         assert "src/missing.py" in finding.message
 
+    def test_a_span_escaping_the_repository_does_not_probe_the_host(self, tmp_path: Path) -> None:
+        """Plan 00412: a PLAN.md span is AUTHORED, and this check stats it.
+
+        `D-PATH` Finding 4. The scope regex gates the PREFIX to a code
+        directory, so `/etc/passwd` cannot match — but its character class
+        allows `.` and `/`, so `src/../../etc/passwd` matches and normalises
+        clean out of the repository. Whether a finding appears then reports
+        whether that host path exists.
+
+        `src/../../etc` is used rather than a made-up path because it really
+        does resolve to something on this host: were the assertion satisfied
+        by the target merely being absent, the test would pass for the wrong
+        reason and keep passing after a regression.
+        """
+        root = tmp_path / "repo"
+        (root / "src").mkdir(parents=True)
+        outside = tmp_path / "secret.py"
+        outside.write_text("x = 1\n")
+        content = "# Plan 00042: Widget\n\nSee `src/../../secret.py` for details.\n"
+        context = _context(root, "CLAUDE/Plan/00042-widget/PLAN.md", content)
+
+        findings = CHECK.run(context)
+
+        # The escaping span is reported as not-present: outside the repository
+        # is not a project path, whether or not a file happens to sit there.
+        assert len(findings) == 1
+        assert "secret.py" in findings[0].message
+
+    def test_a_parent_hop_that_stays_inside_still_resolves(self, tmp_path: Path) -> None:
+        """`..` is not the hazard; leaving the repository is."""
+        (tmp_path / "src" / "pkg").mkdir(parents=True)
+        (tmp_path / "src" / "present.py").write_text("x = 1\n")
+        content = "# Plan 00042: Widget\n\nSee `src/pkg/../present.py` for details.\n"
+        context = _context(tmp_path, "CLAUDE/Plan/00042-widget/PLAN.md", content)
+
+        assert CHECK.run(context) == []
+
     def test_non_path_like_inline_code_is_ignored(self, tmp_path: Path) -> None:
         content = "# Plan 00042: Widget\n\nRun `pytest -q` and check `foo()`.\n"
         context = _context(tmp_path, "CLAUDE/Plan/00042-widget/PLAN.md", content)

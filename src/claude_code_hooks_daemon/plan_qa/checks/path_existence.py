@@ -27,7 +27,7 @@ from claude_code_hooks_daemon.plan_qa.types import (
     Finding,
     Level,
 )
-from claude_code_hooks_daemon.utils.authored_paths import authored_path_exists
+from claude_code_hooks_daemon.utils.authored_paths import contained_authored_path
 
 CHECK_ID: Final[str] = "path-existence"
 
@@ -64,7 +64,17 @@ def _rule(context: CheckContext, target: DocumentTarget) -> list[Finding]:
                 continue
             if span in missing:
                 continue
-            if not authored_path_exists(context.project_root, span):
+            # CONTAINED, not merely normalised. The span comes out of a PLAN.md,
+            # so it is authored; `_project_path_pattern` gates only the PREFIX,
+            # and its character class allows `.` and `/`, so
+            # `src/../../etc/passwd` matches and normalises clean out of the
+            # repository. A plain existence answer over that is an ORACLE --
+            # whether this finding appears reports whether the host path is
+            # there. Outside the repository is not a project path, so the
+            # escaping span joins `missing`: the check's own question is
+            # "does this exist IN THIS PROJECT", and the answer is no.
+            resolved = contained_authored_path(context.project_root, span)
+            if resolved is None or not resolved.exists():
                 missing.append(span)
 
     if not missing:
