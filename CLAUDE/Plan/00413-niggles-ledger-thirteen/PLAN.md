@@ -350,6 +350,55 @@ replaced in the real content), or drop the frontmatter diagnosis for `Edit`
 entirely and refuse hand-editing plainly. The second is simpler and loses
 nothing — no hand `Edit` of a vendored file is ever wanted.
 
+### N10 — the question gate's escape hatch is correct interactively and catastrophic unattended
+
+Raised by the owner, watching a legitimate `AskUserQuestion` go through in this
+session: *"if this was in fully headless mode, which it will be most of the
+time, [that] would have been a full stop on all progress."*
+
+`ask_user_question_blocker` is prefix-positive. A question prefixed
+`ASKING BECAUSE:` is ALLOWED, on the stated rationale that "the user is watching
+and will interrupt if the assumption is wrong". That rationale is the whole
+design, and it is **conditional on a user being there**.
+
+Unattended — a cron tick, CI, `claude -p`, a hook-driven run — nobody is
+watching. The justification the prefix carries is then irrelevant: a perfectly
+justified question is as fatal as a tautological one, because both wait for an
+answer that is never coming. The gate is calibrated for the case where asking is
+merely expensive, and the case where asking is terminal has no representation in
+it at all.
+
+Note the inversion this produces. The BETTER an agent behaves — declining to
+guess, declaring honestly why it cannot decide, using the sanctioned escape
+hatch exactly as documented — the more likely it is to hang an unattended run.
+The handler currently rewards the behaviour that breaks headless mode.
+
+**The daemon cannot detect the mode, and this was checked rather than assumed.**
+No vendored event in `contracts/claude-code-hooks/` carries a headless,
+non-interactive or `--print` signal; `PreToolUse` gets `session_id`,
+`transcript_path`, `cwd`, `permission_mode` and `scratchpad_dir`, none of which
+distinguishes an attended session from an unattended one. So a third mode cannot
+infer its own applicability from the payload — it has to be DECLARED (config or
+environment) by whatever launches the unattended run, or detected outside the
+hook contract entirely.
+
+The shape of the fix, once the mode is known: a mode in which `AskUserQuestion`
+is denied unconditionally, prefix or not, with a reason that tells the agent to
+pick the best option, state the assumption in output text, and continue. A deny
+is strictly better than a hang — the agent keeps working and the transcript
+records what it assumed, which is exactly the audit trail the attended case gets
+from the user's silence.
+
+Two things to establish before building it, because either could make a new
+handler mode the wrong answer:
+
+1. whether Claude Code already offers a question timeout, or a supported
+   disable (`disallowedTools`, a permission deny rule) that returns a
+   recoverable tool error rather than stalling — if so this is configuration,
+   not a handler change;
+2. whether a denied `AskUserQuestion` reliably leaves the model working, rather
+   than stopping anyway, which is the failure this entry exists to prevent.
+
 ## Tasks
 
 - [x] ✅ **Task 1.1**: N1 — detector first, RED on both tracked paths, then the
@@ -397,6 +446,13 @@ nothing — no hand `Edit` of a vendored file is ever wanted.
   leaves valid frontmatter untouched. Prefer refusing hand-edits plainly over
   reconstructing the resulting file, unless the reconstruction is needed
   elsewhere.
+
+- [ ] ⬜ **Task 1.13**: N10 — establish the two facts first (does Claude Code
+  offer a question timeout or a supported disable; does a denied
+  `AskUserQuestion` leave the model working). Then, only if a handler change is
+  still the right lever, add the unattended mode: deny unconditionally, with a
+  reason that tells the agent to assume and continue. The mode must be
+  DECLARED, not inferred — no hook payload carries the signal.
 
 ## Success Criteria
 
