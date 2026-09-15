@@ -102,7 +102,12 @@ visible — and the honest place to say so is beside the invariant, not in a
 backlog.
 
 The second category also shows the obligation is not sufficient on its own. Its
-Defence is wired in and failing correctly, and it covers **one declared pair out
+Defence is wired in and failing correctly, and it covers **two declared pairs out
 of thirteen known instances** — so "has a Defence" and "the class is watched"
 are different facts, and only the category page's own blind-spot section carries
 the second one.
+
+That category records a third instance its own Defence does not catch, found
+while the Defence was being built. Keeping it listed is deliberate: a register
+that only recorded what its Detectors cover would describe the detectors, not
+the defects.

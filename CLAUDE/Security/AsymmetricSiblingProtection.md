@@ -73,6 +73,49 @@ cannot run another command, and remains whitelisted.
 - Defence: `79421f21`, committed deliberately red over 1 declared row.
 - Fix: `85b5adc4`.
 
+**The worktree relocation verbs** —
+`handlers/pre_tool_use/worktree_file_copy.py`, `_RELOCATION_VERBS`, against
+`core/utils.py`'s `_WRITE_INDICATOR_RE`.
+
+What it allowed: `install` and `dd` relocate a file and were not matched, so
+the same move out of a worktree was denied when spelled `cp` and allowed when
+spelled `install`. Verified by probing the handler rather than reading the
+regex — three verbs denied, two allowed.
+
+The sibling had carried both all along. The worktree verbs were an alternation
+inlined at their only call site, which is the shape that has no sibling to be
+checked against and drifts from one silently.
+
+- Defence: `602c5fa3`, committed deliberately red.
+- Fix: `55f374e8`.
+
+**Judging prose as a command** — the same handler, found by hitting it: the
+commit message for `602c5fa3` was DENIED, because it described this handler and
+so contained a worktree path beside a relocation verb. A **call-path** instance
+rather than a constant one.
+
+What it cost: the deny renders "WHY THIS IS CATASTROPHIC" and five bullets about
+destroying branch isolation, so someone writing a sentence was told they nearly
+destroyed their work. A guard that cries wolf on prose is a guard people switch
+off, which is how a false positive becomes a security problem.
+
+`utils/shell_segmentation.strip_inert_spans` is this repository's existing
+answer to "what command is actually being run", and `destructive_git`,
+`pipe_blocker`, `merge_to_main_approval` and `daemon_location_guard` all reach
+it. This handler judged the raw string. The helper existed; the site did not
+reach it.
+
+The boundary was kept rather than widened: `bash <<'EOF'` still has its body
+judged, because the receiver RUNS those bytes whatever the outer shell quoted.
+
+- Fix: `c23b1b8c`, whose own message carries the previously-denied shape and is
+  therefore the regression proof.
+
+This instance has **no registry row**, and that is the honest entry in this
+section: a call-path pair is a rule kind the Detector does not yet implement, so
+nothing would catch a recurrence. It is recorded as an instance because it
+happened, not because it is covered.
+
 Twelve further table rows are recorded in
 [the consolidated worklist](../Plan/00412-jobs-recurring-work-and-security-review/subagent-reports/260915-consolidated-defence-worklist.md),
 with the registry's design notes in
@@ -87,8 +130,12 @@ fail-closed on an oversized body file, and F-HYG-3's new deny in
 - **Only declared pairs.** This is the defining limitation and it is
   structural, not an oversight. A divergence with no row in
   `scripts/qa/declared-invariant-pairs.yaml` is invisible, and the registry
-  currently holds one row against thirteen known instances. **Read a green run
+  currently holds two rows against thirteen known instances. **Read a green run
   as "every declared pair holds", never as "the class is clear."**
+
+  The third instance above proves the point from inside: it is a real member of
+  this category, found while building the Defence, and the Defence does not
+  cover it.
 
   The generative half — proposing candidate pairs by finding a constant or
   helper consumed by one of two handlers that judge the same command — was
@@ -107,9 +154,14 @@ fail-closed on an oversized body file, and F-HYG-3's new deny in
   the cheap error for this rule is missing a member, because crying wolf once
   costs the whole check.
 
-- **One relation so far.** Only `disjoint` is implemented. `superset`, `equal`
-  and `same-normalisation` are designed and not built, so a row needing them
-  cannot be added yet.
+- **Constant pairs only.** `disjoint` and `superset` are implemented; `equal`
+  and `same-normalisation` are designed and not built.
+
+  The bigger gap is the rule KIND. Every row so far compares two member sets.
+  The **call-path** kind — "a named helper reached from site A is also reached
+  from site B" — is designed and unbuilt, and it is the kind several known
+  instances need, including `_escape_for_double_quotes`, `path_is_protected`,
+  `content_guard` and the `strip_inert_spans` instance recorded above.
 
 - **A row must name which MEMBERS participate.** This was bought the hard way.
   The first row drafted asserted a superset between two relocation-verb
