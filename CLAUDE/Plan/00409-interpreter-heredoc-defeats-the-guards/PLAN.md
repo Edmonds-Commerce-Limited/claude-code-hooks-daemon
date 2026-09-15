@@ -138,7 +138,16 @@ bypass"). Of the eight consumers that blank heredoc bodies, only
   receiver cases in `tests/unit/utils/test_shell_segmentation.py` and the
   five-spellings-by-five-receivers matrix in `test_destructive_git_prose.py`.
 
-- [ ] ⬜ Full QA passes, the daemon is restarted, and CI is green.
+- [x] ✅ Full QA passes, the daemon is restarted, and CI is green. Local QA was
+  30/30 gates with 23,447 tests and 95.40% coverage; the daemon was restarted
+  and the fix verified end-to-end through the live hook in both directions; CI
+  run `34916494383` on `9de54099` completed `success` across all five jobs
+  (Shell, Daemon load, and QA on Python 3.11/3.12/3.13).
+
+  Every earlier run on this work reported `cancelled`, which is not a failure:
+  CI is in a per-branch concurrency group, so each push cancelled the run still
+  in flight for its predecessor. Satisfying this criterion needed the tree held
+  still, not a fix.
 
 - [x] ✅ The human is told, in plain terms, that v3.64.0 carries this defect and
   that RELEASING.md's rollback table prescribes a patch release for it.
