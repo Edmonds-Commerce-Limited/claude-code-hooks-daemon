@@ -255,6 +255,22 @@ because N10 made the first handler whose declared tests vary by option.
 
 Latent for every future option-switched handler, and silent until one exists.
 
+### N17 — the freshness guard certifies a live dispatch it cannot vouch for
+
+**Status**: ⬜ Open — found and evidenced today; no fix attempted
+
+`compute_source_fingerprint` hashes `.py` ONLY and says so. Its CONSUMERS ask a
+different question: the acceptance harness and `smoke_test` gate LIVE DISPATCH
+on it. But config is bound at `initialise()`/`register_all()` — which is why a
+restart is required after editing `.claude/hooks-daemon.yaml` — and nothing
+hashes that file. Edit config, skip the restart, and the guard reports FRESH
+while every dispatch is graded against the OLD config.
+
+Not hypothetical: N14 is the evidence — `mode: unattended` changed three live
+probe outcomes. The fix is to mix the resolved config into the identity
+fingerprint so "stale" covers both inputs the daemon bound at startup. Detail
+in the JOURNAL.
+
 ### N16 — CLAUDE.md's own discovery route fails on the FIRST handler it lists
 
 CLAUDE.md says of its advisory list: *"Full text: `bin/hooks-daemon explain-handler <name>`"*. The first entry is `daemon_restart_verifier`, and
