@@ -283,7 +283,7 @@ cat > "$routine_file" <<ROUTINE
 **Status**: Active
 **Created**: $created
 **Owner**: $owner
-**Trigger**: <!-- schedule | session_start -->
+**Trigger**: <!-- schedule | session_start | release -->
 **Period**: <!-- e.g. 30 days. Only for a schedule trigger. -->
 **Grace**: <!-- e.g. 7 days. Omit to take a fifth of the period. -->
 

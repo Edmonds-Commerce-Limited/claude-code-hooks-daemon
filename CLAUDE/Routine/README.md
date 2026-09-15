@@ -38,7 +38,7 @@ directory always present, an empty one always means never ran.
 
 ```
 **Status**: Active | Retired
-**Trigger**: schedule | session_start
+**Trigger**: schedule | session_start | release
 **Period**: 30 days        # schedule only
 **Grace**: 7 days          # optional
 ```
@@ -46,6 +46,14 @@ directory always present, an empty one always means never ran.
 `Trigger` is a closed set rather than free text. A cadence written in prose has
 to be interpreted, and a misread cadence produces an overdue date that is wrong
 without being detectably wrong.
+
+**A `release` trigger carries no clock, deliberately.** A routine prompted by
+a release is expected to sit beside a scheduled full sweep of the same ground,
+and that full sweep is its backstop: a delta run that never happened simply
+widens the next full run's interval, which is the compensating control rather
+than a second thing to nag about. Declaring a `Period` on one is therefore
+ignored for overdue purposes — reporting it late against a calendar nobody
+keeps would be a nag that trains its reader to skim.
 
 **A period on its own is not enough.** A monthly routine with no grace is
 overdue on day 31, every month, for ever — a nag that arrives reliably and is

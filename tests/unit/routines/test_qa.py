@@ -270,6 +270,25 @@ class TestNotConfigured:
 
         assert "routine-not-configured" not in _ids(tmp_path)
 
+    def test_a_release_trigger_is_declared_not_unknown(self, tmp_path: Path) -> None:
+        """Plan 00412 Task 3.1: a per-release sweep is a declared trigger.
+
+        Left out of the closed set it parses as UNKNOWN, and the routine drops
+        out of every other check here while still looking configured to a
+        reader — so the value has to exist before the routine can.
+        """
+        folder = _routine(tmp_path, trigger="release", period="", grace=None)
+        _completed_run(folder, "2026-001", datetime(2026, 9, 14, tzinfo=UTC), "a", "b")
+
+        assert "routine-not-configured" not in _ids(tmp_path)
+
+    def test_a_release_routine_is_never_overdue_by_the_clock(self, tmp_path: Path) -> None:
+        """Its backstop is the full sweep beside it, not a calendar (D5)."""
+        folder = _routine(tmp_path, trigger="release", period="30 days", grace="1 days")
+        _completed_run(folder, "2026-001", datetime(2025, 1, 1, tzinfo=UTC), "a", "b")
+
+        assert "routine-overdue" not in _ids(tmp_path)
+
 
 class TestSweepShape:
     """The sweep itself."""

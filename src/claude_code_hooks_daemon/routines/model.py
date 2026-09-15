@@ -61,6 +61,12 @@ class Trigger(StrEnum):
     #: At session start (D9) — the trigger the daemon actually executes,
     #: rather than one it can only hope fired.
     SESSION_START = "session_start"
+    #: On a release (D12 anchors runs to tags, so a release is a natural
+    #: boundary). Deliberately carries NO clock: a release-triggered routine
+    #: exists beside a scheduled full sweep, and that full sweep is its
+    #: backstop — a missed delta run widens the next full run's interval (D5).
+    #: Giving it a due date as well would nag about a cadence nobody keeps.
+    RELEASE = "release"
     UNKNOWN = "unknown"
 
 

@@ -81,6 +81,24 @@ class TestParsing:
         assert doc.trigger is Trigger.SESSION_START
         assert doc.period_days is None
 
+    def test_reads_a_release_trigger(self, tmp_path: Path) -> None:
+        """A sweep prompted by a release, not by a clock (Plan 00412 Task 3.1).
+
+        Without a value of its own it parses as UNKNOWN, which removes the
+        routine from every other check — the exact silent switch-off that
+        `routine-not-configured` exists to make loud.
+        """
+        doc = parse_routine(
+            _write(
+                tmp_path,
+                "# Routine 00002: security review delta\n\n"
+                "**Status**: Active\n**Trigger**: release\n\n## Procedure\n\n1. Go.\n",
+            )
+        )
+
+        assert doc.trigger is Trigger.RELEASE
+        assert doc.period_days is None
+
     def test_reads_a_retired_routine(self, tmp_path: Path) -> None:
         """Retired is a real state, and the reason overdue must consult status."""
         doc = parse_routine(
@@ -159,6 +177,25 @@ class TestDueAfter:
             )
         )
 
+        assert doc.due_after_days is None
+
+    def test_a_release_routine_has_no_clock_even_with_a_period(self, tmp_path: Path) -> None:
+        """A declared period must not quietly become a due date here.
+
+        A release-triggered routine's backstop is the FULL sweep it sits
+        beside, not a calendar: a missed delta run widens the next full run's
+        interval (D5), and that is the compensating control. Reading a period
+        as a due date would report it overdue on a clock nobody is keeping.
+        """
+        doc = parse_routine(
+            _write(
+                tmp_path,
+                "# Routine 00002: r\n\n**Status**: Active\n"
+                "**Trigger**: release\n**Period**: 30 days\n\n## Procedure\n\n1. Go.\n",
+            )
+        )
+
+        assert doc.period_days == 30
         assert doc.due_after_days is None
 
 

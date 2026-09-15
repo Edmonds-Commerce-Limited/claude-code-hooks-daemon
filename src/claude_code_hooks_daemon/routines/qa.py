@@ -144,7 +144,7 @@ def _not_configured(doc: RoutineDoc) -> list[RoutineFinding]:
             ),
             remediation=(
                 "Fill in the ROUTINE.md header: Status is Active or Retired, "
-                "Trigger is schedule or session_start."
+                "Trigger is schedule, session_start or release."
             ),
         )
     ]
