@@ -145,7 +145,7 @@ enforcement and therefore neither can be gamed into teeth.
 ## Delivery & Milestones
 
 - Carries N6 and N15 forward from ledger
-  [00413](../00413-niggles-ledger-thirteen/PLAN.md), whose design document moved
+  [00413](../Completed/00413-niggles-ledger-thirteen/PLAN.md), whose design document moved
   here with them. The ledger was the wrong home once this became feature work.
 
 - Issues #22/#23 (delivery) are closed and fixed. #32 stays OPEN as the tracking

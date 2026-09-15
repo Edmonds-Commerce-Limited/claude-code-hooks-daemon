@@ -28,7 +28,7 @@ dispatch is graded against the config the daemon bound before the edit. The
 failure is the expensive kind — no error, no crash, just a confidently wrong
 verdict that a caller consumes as fact.
 
-Not hypothetical. Ledger [00413](../00413-niggles-ledger-thirteen/PLAN.md) N14
+Not hypothetical. Ledger [00413](../Completed/00413-niggles-ledger-thirteen/PLAN.md) N14
 is the evidence: enabling `mode: unattended` on `ask_user_question_blocker`
 changed the outcome of three live acceptance probes. Had that edit been made
 without a restart, the harness would have certified the run as trustworthy and
@@ -135,7 +135,7 @@ These need settling before implementation, and they are genuinely open:
 
 ## Delivery & Milestones
 
-- Graduated from ledger [00413](../00413-niggles-ledger-thirteen/PLAN.md) N17,
+- Graduated from ledger [00413](../Completed/00413-niggles-ledger-thirteen/PLAN.md) N17,
   which was recorded with evidence but deliberately left unfixed: the remedy
   changes a safety mechanism every acceptance test gates on, and that ledger had
   already rewritten enough of that surface in one pass.
