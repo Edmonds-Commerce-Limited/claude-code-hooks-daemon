@@ -150,57 +150,19 @@ Full design input, evidence and the three distinct duplication problems:
 
 ### N7 — there is no sanctioned way to FIND a plan, so the number guard denies the only obvious one
 
-**Status**: ⬜ Open — needs a finder; the guard itself is correct and must stay strict
+**Status**: ✅ Resolved by Task 1.9 — `bin/hooks-daemon find-plan`
 
-Asked to locate a recently-created plan about Jobs, the obvious first move is
-`ls -d CLAUDE/Plan/*job*`. `plan_number_helper` denies it: the `ls_patterns`
-entry `ls\s+.*<plan_dir>/\*` matches any glob under the plan directory,
-whatever the glob contains.
+Filed as a false positive and it is not one: the guard's stated reason holds
+exactly as written, and a glob under the plan directory really does skip the
+363 plans in `Completed/`. What was missing is an AFFORDANCE — the deny
+message's only remedy was the next plan NUMBER, an answer to a question the
+caller did not ask. Fixed additively, detector untouched.
 
-**This was filed as a false positive and it is not one.** The guard's stated
-reason — folder scans miss plans archived in `Completed/` — applies exactly as
-written: `CLAUDE/Plan/*job*` searches the 27 active plans and skips the 363 in
-`Completed/`, so it would have answered confidently and wrongly had the plan
-been archived. The deny prevented an unreliable answer, which is its job.
+**N7b — the detector had no git-message exemption, which IS a false positive.**
+Resolved by Task 1.10: a `git commit` message describing a scan cannot perform
+one, so committing the entry above was denied by the handler it documents.
 
-What is missing is an AFFORDANCE, not a loosening. The deny message's entire
-remedy is *"Next plan number is 00415"* — an answer to a question the caller
-did not ask. A name search has no sanctioned route at all: `git ls-files`
-happens to work and is not mentioned anywhere, and
-`hooks-daemon-plan-dedupe-scout` is an agent dispatch, which is the right
-weight before filing a plan and the wrong weight for "where is the Jobs plan".
-
-So the guard blocks the unreliable route, stays silent about the reliable one,
-and offers a number instead. An agent that hits this either routes around it
-with an unblocked-but-equally-partial glob, or burns an agent dispatch.
-
-The fix is additive: a finder that searches the whole tree — active,
-`Completed/`, and any other subdirectory — and returns paths, named in the deny
-message beside the number. Nothing about the detector should be narrowed:
-deny-by-default is what makes a scan-derived number untrustworthy by
-construction, and a finder that covers `Completed/` is strictly better than the
-glob it replaces rather than a concession to it.
-
-Worth checking while there: whether the same silence applies to the other
-discovery shapes the handler blocks (`find`, `echo` glob expansion), and
-whether `README.md`'s index is already a searchable substrate the finder should
-read rather than walking the filesystem again.
-
-**N7b — and the detector has no git-message exemption, which IS a false
-positive.** Committing the entry above was denied, because the commit message
-quotes the offending command in its own prose. A `git commit -m`/`-F` message
-cannot scan anything; it is a description of a scan, which is exactly what a
-ledger entry about a scan must contain.
-
-`sed_blocker` already solves this and is the precedent to copy: its exemption 2
-spares a `git commit` message mentioning sed, with no command separator between
-the two. `plan_number_helper` has no equivalent, so the handler blocks writing
-down the defect it just raised — and the workaround (`git commit -F <file>`,
-since the file's CONTENT is never scanned) is discoverable only by hitting the
-wall first.
-
-This half is a straight detector fix rather than a new affordance, and it is
-cheap: the same exemption shape, applied to the same position in the command.
+Full reasoning for both in the JOURNAL (13:25 entry).
 
 ### N8 — a newly recorded licence never reaches the files already vendored under that domain
 
@@ -368,6 +330,30 @@ not mean NOTHING resolves — the ladder correctly continues to the `/etc/hosts`
 rung, which is silent on Fedora and speaks in this container. Full reasoning in
 the JOURNAL (13:05 entry).
 
+### N12 — the vendored contract cannot express a CONDITIONAL input field, and the gap produced a wrong answer
+
+Found by getting it wrong. Asked whether `PreToolUse` carries agent identity —
+the fact deciding whether GitHub issue #14 is buildable — I checked
+`PreToolUse.json`'s `input_example` and grepped every contract file, got "no"
+from both, and reported it. The raw v2.1.272 docs say YES: `agent_id` is
+delivered to `PreToolUse` inside a subagent call, explicitly "to distinguish
+subagent hook calls from main-thread calls".
+
+The contract could not have shown it. `agent_id`/`agent_type` sit in their own
+table — "When running with `--agent` or inside a subagent, two additional
+fields are included" — so they are CONDITIONAL, and a `PreToolUse` example
+depicting a main-thread call omits them correctly.
+
+The trap is the project's own reading convention, recorded in
+`Elicitation.json`: the per-event example is authoritative for whether a field
+is delivered. That is right for an UNCONDITIONAL field and produces a
+confident FALSE NEGATIVE for a conditional one. The contract has
+`input_example` and nothing else, so "may arrive, under this condition" has no
+slot to live in.
+
+Fix the SLOT, not these two fields: `permission_mode` and `scratchpad_dir` are
+also documented as conditionally absent. Full reasoning in the JOURNAL (13:20).
+
 ## Tasks
 
 - [x] ✅ **Task 1.1**: N1 — detector first, RED on both tracked paths, then the
@@ -439,6 +425,13 @@ the JOURNAL (13:05 entry).
   existing `_FEDORA_STYLE_HOSTS` fixture via the `hosts_path` parameter the
   sibling tests already use, so the lower rung is silent and `None` is the
   correct expectation. Do NOT weaken the resolver or drop the assertions.
+
+- [ ] ⬜ **Task 1.15**: N12 — give the vendored contract a slot for a
+  CONDITIONAL input field, so "may arrive, under this condition" is
+  expressible and the per-event-example reading convention stops producing
+  false negatives. Cover `permission_mode` and `scratchpad_dir` too, not just
+  `agent_id`/`agent_type`. Update `HOOK-CONTRACT-REFRESH.md` so the next
+  refresh populates it.
 
 ## Success Criteria
 
