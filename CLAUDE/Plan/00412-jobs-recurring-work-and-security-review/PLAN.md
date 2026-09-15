@@ -174,30 +174,9 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   grew inside it had to be extracted; this one starts outside.
 
   Proven live as well as in tests: a routine was started, refused a finish with
-  no interval, finished `clean`, and the ledger holds both rows.
-
-  **One row per EVENT, not per run**, and the shape is forced rather than
-  chosen. D10's `failed` means "started and did not finish", and nothing can
-  WRITE that row — whatever would have written it died with the run. So
-  `failed` is DERIVED from a start with no terminal event, which needs two
-  rows; row-per-run also cannot be append-only, since finishing would edit a
-  row already on disk.
-
-  Both validity guards sit in the constructor: a terminal outcome with no
-  interval silently breaks gap detection, and a `skipped` with no reason is the
-  unexplained absence that state exists to replace. `skipped` is exempt from
-  the interval rule because it genuinely covered nothing.
-
-  The on-disk form is a markdown table, since this is a tree humans read — so
-  the parser treats cell padding as presentation, because this project's own
-  `markdown_table_formatter` re-aligns a ledger anyone opens.
-
-  **It exposed a gap in D10's vocabulary**: there is no IN-PROGRESS state, so a
-  run happening right now derives to `failed`. That is literally true, and
-  genuinely indistinguishable in the record — which is why the state is derived
-  — but the listing renders it `unfinished` rather than accusing a healthy run
-  of dying. Separating them for real needs D11's "period plus grace", so it was
-  recorded for 2.4 rather than settled inside a display label.
+  no interval, finished `clean`, and the ledger holds both rows. The ledger is
+  one row per EVENT, not per run — a shape forced by D10 rather than chosen.
+  Reasoning in [DESIGN-routine-tree.md](DESIGN-routine-tree.md).
 
 - [x] ✅ **Task 2.4**: QA checks for the new tree, in `routines/qa.py` with a
   `hooks-daemon routine-qa` verb, plus the two things they had to be able to
@@ -206,28 +185,10 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   tests, and the model's red was a genuine 2-failed/14-passed rather than a
   bare import error.
 
-  **Five checks, not the four listed above.** `routine-not-configured` was
-  added because every other check consults `Status` and `Trigger`, so an
-  unrecognised value silently removes a routine from all of them. A check a
-  typo can switch off is worse than no check, because it still looks like one.
-
-  **Grace is not optional and its default is not zero** (D11): an omitted
-  `Grace` takes a fifth of the period, floor one day, while a declared `0` is
-  honoured — only an omission takes a default. The fifth is a CHOSEN value,
-  which is why it is overridable.
-
-  **Only a run that FINISHED counts as coverage**, or a start would reset the
-  overdue clock and the obligation would read as met because somebody began.
-
-  `OVERLAP` is not reported (wasteful, never dangerous, and it would bury the
-  finding that matters), and retired routines are skipped by overdue and
-  never-run — reporting one for ever trains its reader to skim the section.
-
-  **A defect in 2.3's own ledger surfaced here and was fixed first**: a
-  hand-edited row that could not become a `RunEvent` made `read_events` RAISE,
-  so a sweep over a corrupted ledger would have reported nothing at all.
-  Reading now skips and logs, and `malformed_rows()` reports — shipped as a
-  pair, since skipping alone trades a crash for a silent omission.
+  Five checks, not the four originally listed; grace defaults to a fifth of the
+  period rather than zero; only a FINISHED run counts as coverage. Building
+  these surfaced and fixed a defect in 2.3's own ledger. All of it in
+  [DESIGN-routine-tree.md](DESIGN-routine-tree.md).
 
 - [x] ✅ **Task 2.5**: The overdue assertion — the dead-man's switch, as the
   `routine_qa_sweep` SessionStart handler (priority 72, opt-in, 12 tests).
@@ -298,6 +259,10 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
 
   The remaining ~6 classes are recorded and unfixed. Several remedies are
   owner-gated because they change the gate surface in every installing project.
+  The highest-value one is written up as a decision request with four costed
+  options and a recommendation:
+  [DECISION-degraded-mode-guard-surface.md](DECISION-degraded-mode-guard-surface.md).
+  Owner-gated means the decision is owed, not that the analysis is.
 
   Next unit is a consolidated worklist: 77 findings across 15 reports collapse
   to roughly seven classes, and building Defences per REPORT would produce
