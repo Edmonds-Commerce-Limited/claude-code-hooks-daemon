@@ -24,6 +24,19 @@ than guessed, shape every function here:
    ``id``. The daemon's declaration carries a stable id, but nothing in the
    contract guarantees a session's own ``CronCreate`` call echoed that id
    back into ``session_crons``.
+4. The delivered ``prompt`` is LAYOUT-UNSTABLE, and this one is not from the
+   contract -- it was measured after the first three shipped and the handler
+   still blocked every stop (ledger 00419 N4). A declared prompt reaches
+   ``CronCreate`` only by being rendered into a SessionStart advisory and
+   retyped by an agent, and that round trip re-flows it: this project's own
+   576-character declaration arrived as 580 characters with blank lines
+   inserted, untruncated. Matching therefore compares the WORDS.
+
+The fourth is the one worth remembering when extending this module. The first
+three each describe what the WIRE does to a field; none describes what the
+round trip through a rendered advisory does to it, and that round trip is the
+only way ``session_crons`` is ever populated. A delivery MECHANISM and a
+delivery PATH are different things to reason about.
 """
 
 from __future__ import annotations
@@ -173,8 +186,7 @@ def cron_is_asserted(declared: PersistentCronConfig, session_crons: list[Session
         rendering that re-flows it.
     """
     return any(
-        actual.schedule == declared.schedule
-        and _prompts_match(declared.prompt, actual.prompt)
+        actual.schedule == declared.schedule and _prompts_match(declared.prompt, actual.prompt)
         for actual in session_crons
     )
 

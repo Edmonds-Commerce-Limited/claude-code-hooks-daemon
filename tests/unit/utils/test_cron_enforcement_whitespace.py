@@ -74,9 +74,7 @@ class TestARerenderedPromptStillMatches:
     """The defect itself: same words, different blank lines, must match."""
 
     def test_blank_lines_between_paragraphs_do_not_break_the_match(self) -> None:
-        delivered = [
-            SessionCron(id="c0000000", schedule="23 * * * *", prompt=_DELIVERED_PROMPT)
-        ]
+        delivered = [SessionCron(id="c0000000", schedule="23 * * * *", prompt=_DELIVERED_PROMPT)]
 
         assert cron_is_asserted(_JOB, delivered), (
             "the delivered prompt is the declared one re-rendered with blank "
@@ -84,9 +82,7 @@ class TestARerenderedPromptStillMatches:
         )
 
     def test_the_job_is_not_reported_missing(self) -> None:
-        delivered = [
-            SessionCron(id="c0000000", schedule="23 * * * *", prompt=_DELIVERED_PROMPT)
-        ]
+        delivered = [SessionCron(id="c0000000", schedule="23 * * * *", prompt=_DELIVERED_PROMPT)]
 
         assert find_missing_crons([_JOB], delivered) == []
 
@@ -127,14 +123,12 @@ class TestNormalisingDoesNotMakeEverythingMatch:
         truncated = "\n\n".join(_DECLARED_PROMPT.splitlines()[:2])
         delivered = [SessionCron(id="c0000000", schedule="23 * * * *", prompt=truncated)]
 
-        assert not cron_is_asserted(_JOB, delivered), (
-            "dropping a paragraph changes the words, not the whitespace"
-        )
+        assert not cron_is_asserted(
+            _JOB, delivered
+        ), "dropping a paragraph changes the words, not the whitespace"
 
     def test_a_different_schedule_still_does_not_match(self) -> None:
-        delivered = [
-            SessionCron(id="c0000000", schedule="47 * * * *", prompt=_DELIVERED_PROMPT)
-        ]
+        delivered = [SessionCron(id="c0000000", schedule="47 * * * *", prompt=_DELIVERED_PROMPT)]
 
         assert not cron_is_asserted(_JOB, delivered)
 
@@ -147,9 +141,7 @@ class TestTruncationStillWorksAlongsideNormalisation:
         job = PersistentCronConfig(id="long", schedule="5 * * * *", prompt=declared)
         rerendered = declared.replace("\n", "\n\n")
         delivered_text = rerendered[:PROMPT_DELIVERY_CAP] + "... [+400 chars]"
-        delivered = [
-            SessionCron(id="c0000000", schedule="5 * * * *", prompt=delivered_text)
-        ]
+        delivered = [SessionCron(id="c0000000", schedule="5 * * * *", prompt=delivered_text)]
 
         assert cron_is_asserted(job, delivered), (
             "a long prompt is both re-rendered AND truncated; the two "
