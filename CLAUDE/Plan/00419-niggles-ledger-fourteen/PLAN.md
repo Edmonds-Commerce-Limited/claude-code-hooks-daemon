@@ -202,6 +202,46 @@ whose failure mode is "no stop is ever possible again" should not have shipped
 straight to blocking. A warn-first period — the shape Plan 00418 was
 deliberately given — would have surfaced this at zero cost.
 
+### N5 — the supervisor's goal check reads `background_tasks` as live when they are finished
+
+The ccy supervisor's stop-condition evaluation refused three consecutive
+legitimate stops, each time citing "7 background_tasks with status 'running'"
+and concluding work was in flight.
+
+Nothing was in flight. Established four independent ways, none agreeing with
+the field:
+
+- `bin/hooks-daemon harvest-background`: `NO RUNAWAYS DETECTED` (twice, minutes
+  apart).
+- `ps`: zero `sleep`/`pytest`/`llm_qa` workers; **10 processes total** in the
+  container, which is the daemon, its listeners and the probing shell.
+- `ListAgents`: all 7 teammates `idle`, not running.
+- The session's own notification history: all seven Bash background tasks had
+  already delivered terminal notifications (five completed, two exit-144 from
+  kills I issued deliberately).
+
+So the field reports a task as `running` after it has finished. The count
+matches the number of background tasks STARTED this session, which is the shape
+of a list that is appended to and never reconciled on completion.
+
+**Why this matters beyond the annoyance.** It is N4's shape exactly: a guard
+whose false positive makes stopping impossible. The supervisor's condition
+cannot be satisfied while it believes work is live, and no action available to
+the agent can clear a flag that is keyed on a completed task. Three turns were
+spent re-verifying the same facts against a field that cannot change — and an
+unattended session would loop on it indefinitely, paying a full model turn each
+time.
+
+**Not diagnosed further.** Unlike N4 there is no capture here; the field arrives
+in the supervisor's own arguments and its provenance has not been traced.
+Deliberately recorded rather than guessed at: the next step is to find where
+`background_tasks` is assembled and whether anything ever marks an entry
+terminal.
+
+Worth pairing with N4 when either is picked up. Two guards shipped in quick
+succession, both able to block a stop forever on a false positive, is a pattern
+about how blocking guards get introduced here rather than two coincidences.
+
 ## Tasks
 
 - [x] ✅ **Task 1.1**: N1 — RED first, both defects tested separately, in
