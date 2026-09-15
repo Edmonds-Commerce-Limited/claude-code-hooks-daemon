@@ -213,6 +213,30 @@ command destructive. Repairing N1 alone — the obvious first move, and the one 
 made — delivered destructive advice to a reader who previously could not read
 it.
 
+### N6 — the whole persistent-cron mechanism rests on output agents skim
+
+**Status**: ⬜ Open — owner has ruled on the direction; mechanism not yet chosen
+
+`persistent_cron_assertor` cannot create a Claude Code cron; no API exists. It
+PRINTS "run CronList, then CronCreate" and relies on the agent to act — and the
+owner's field observation is that agents skim SessionStart output. When they do,
+the declared cron never exists and nothing reports it, because `CronList` is
+session memory the daemon cannot read.
+
+Two compounding facts: `PersistentCronConfig` has no per-machine gating, so
+every checkout declares the same job and two machines both fire it at `:23`; and
+`issue-sdlc`'s only claim is the `agent-working` label, applied AFTER selection,
+so two ticks on the same minute take the same issue.
+
+The owner's rulings — *"the system MUST have teeth or its pointless"* and
+*"where the agent ignores hooks, we defer to the supervisor to handle it"* —
+name the ccy supervisor as the enforcement tier, and a one-line test on the
+other machine showed a turn-level directive succeeds where the same words as
+injected context did not.
+
+Full design input, evidence and the three distinct duplication problems:
+[DESIGN-cron-enforcement.md](DESIGN-cron-enforcement.md).
+
 ## Tasks
 
 - [x] ✅ **Task 1.1**: N1 — detector first, RED on both tracked paths, then the
@@ -233,8 +257,13 @@ it.
 - [x] ✅ **Task 1.6**: Prove it the only way that counts — cloned fresh from
   GitHub, ran the real forwarder, followed the printed instruction verbatim.
 
-- [ ] ⬜ **Task 1.7**: File the N3 visibility plan: a protected path that is
-  ABSENT is currently indistinguishable from one that is fine.
+- [x] ✅ **Task 1.7**: N3 graduated to Plan
+  [00414](../00414-absent-protected-path-is-silent/PLAN.md).
+
+- [ ] ⬜ **Task 1.8**: N6 — design the enforcement tier the owner named: what
+  the supervisor CHECKS about declared crons, and what it DOES when the check
+  fails. Then settle duplication (env-var activation vs a GitHub-side lock) and
+  the `agent-working` claim race as the separate problem it is.
 
 ## Success Criteria
 
