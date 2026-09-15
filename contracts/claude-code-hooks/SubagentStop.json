@@ -20,7 +20,9 @@
   },
   "discarded_fields": [],
   "conditional_input_fields": {
-    "effort": "In the example, but present only when the current model supports the effort parameter."
+    "effort": "In the example, but present only when the current model supports the effort parameter.",
+    "session_crons": "In the example, but conditional in practice -- an ABSENT list is not the same fact as an EMPTY one (the example carries an empty one). Same shape and same 1000-character prompt cap as Stop.",
+    "background_tasks": "In the example, but conditional in practice -- treat an absent list as 'unknown', never as 'no tasks running'."
   },
   "notes": "Same decision control as Stop; reason required when decision is 'block'. agent_id and agent_type are UNCONDITIONAL here -- this event only ever fires for a subagent -- so they sit in the input_example and need no conditional slot.",
   "input_example": {

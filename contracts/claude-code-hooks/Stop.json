@@ -22,7 +22,9 @@
   "conditional_input_fields": {
     "agent_id": "Present ONLY when the hook fires inside a subagent call. A main-thread Stop carries no agent identity, which is what makes its ABSENCE the usable signal.",
     "agent_type": "Present when the session uses --agent or the hook fires inside a subagent. Note a session-wide --agent makes this present on a MAIN-THREAD stop too, so agent_type alone does not mean 'in a subagent' -- agent_id does.",
-    "effort": "In the example, but present only when the current model supports the effort parameter."
+    "effort": "In the example, but present only when the current model supports the effort parameter.",
+    "session_crons": "In the example, but conditional in practice -- an ABSENT list is not the same fact as an EMPTY one. One entry per session-scoped wakeup sourced from CronCreate, ScheduleWakeup and /loop, each with id, schedule, recurring and prompt. Note `prompt` is CAPPED at 1000 characters with an in-string '... [+N chars]' marker, so exact-equality matching against a declared prompt longer than that never succeeds.",
+    "background_tasks": "In the example, but conditional in practice -- treat an absent list as 'unknown', never as 'no tasks running'. `description` and `command` are capped at 1000 characters with the same marker."
   },
   "notes": "reason is REQUIRED when decision is 'block'. hookSpecificOutput.additionalContext is non-error feedback that continues the conversation.",
   "input_example": {

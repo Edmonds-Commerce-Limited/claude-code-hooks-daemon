@@ -126,13 +126,11 @@ delivered destructive advice to a reader who previously could not read it.
 
 ### N6 — the whole persistent-cron mechanism rests on output agents skim
 
-**Status**: ⬜ Open — owner has ruled on the direction; mechanism not yet chosen
+**Status**: ⬜ Designed — mechanism settled; implementation needs the owner's go
 
 `persistent_cron_assertor` cannot create a Claude Code cron; no API exists. It
 PRINTS "run CronList, then CronCreate" and relies on the agent to act — and the
-owner's field observation is that agents skim SessionStart output. When they do,
-the declared cron never exists and nothing reports it, because `CronList` is
-session memory the daemon cannot read.
+owner's field observation is that agents skim SessionStart output.
 
 Two compounding facts: `PersistentCronConfig` has no per-machine gating, so
 every checkout declares the same job and two machines both fire it at `:23`; and
@@ -141,11 +139,11 @@ so two ticks on the same minute take the same issue.
 
 The owner's rulings — *"the system MUST have teeth or its pointless"* and
 *"where the agent ignores hooks, we defer to the supervisor to handle it"* —
-name the ccy supervisor as the enforcement tier, and a one-line test on the
-other machine showed a turn-level directive succeeds where the same words as
-injected context did not.
+named the supervisor as the enforcement tier. **N15 then found the daemon can
+verify this itself** (`session_crons` at `Stop`), so the supervisor is demoted
+to backstop and the teeth become a Stop block.
 
-Full design input, evidence and the three distinct duplication problems:
+Design, evidence and the three distinct duplication problems:
 [DESIGN-cron-enforcement.md](DESIGN-cron-enforcement.md).
 
 ### N7 — there is no sanctioned way to FIND a plan, so the number guard denies the only obvious one
@@ -176,28 +174,17 @@ frontmatter. But it is consumed only on the CAPTURE path, so recording it has no
 effect on anything already vendored from that domain — which, for a domain
 anybody has actually used, is every file they care about.
 
-Neither obvious remedy works:
-
-- Hand-editing the frontmatter is DENIED by `remote_docs_provenance`, correctly:
-  this tree is captured, not authored.
-- `remote-docs refresh --path <file>` reports `unchanged` and rewrites nothing.
-  Refresh compares the SOURCE HASH; the licence is a local judgement rather than
-  source content, so a content-identical refresh has no reason to re-stamp it.
-  This is defensible behaviour on its own terms, which is what makes the gap
-  easy to miss.
-
-What does work is re-running `remote-docs add` on the original URL, because
-capture re-derives frontmatter from config. That is undocumented, reads as
-destructive (it overwrites a vendored file), and is discoverable only by
-exhausting the two documented routes first.
+Neither obvious remedy works: hand-editing frontmatter is DENIED (correctly —
+captured, not authored), and `refresh` reports `unchanged` because it compares
+the SOURCE HASH, while a licence is a local judgement. What works is re-running
+`remote-docs add` on the original URL, which is undocumented and reads as
+destructive. Full reasoning in the JOURNAL.
 
 The fix is a back-fill: either a `refresh --relicence` flag, or a plain check
 that reports any vendored file whose `licence` disagrees with the
 `known_sources` entry for its domain. The second is cheaper and fits the
 project's report-the-drift habit, but it does not close the loop on its own.
-
-Scale check before anyone over-builds this: it bites once per domain, at the
-moment a licence is first recorded. Reporting the drift may well be enough.
+It bites once per domain, so reporting the drift may well be enough.
 
 ### N9 — the provenance deny message misdiagnoses an Edit fragment as a whole file
 
@@ -208,20 +195,15 @@ with: `no YAML frontmatter found; a remote document must open with a --- delimit
 
 The verdict is right and must stand. The reason is wrong: the handler validated
 the edit's `new_string` — a one-line fragment — as though it were the whole
-file. Every single-line edit to every vendored file produces this message,
-including edits that would leave the frontmatter untouched and intact.
+file.
 
-**It misleads in a specific and harmful direction.** An agent reading the stated
-reason literally would satisfy it the way it asks — by pasting a `---`
-frontmatter block into the middle of the document, corrupting the file, having
-been invited to do so by the deny message. The guard would then pass the
-resulting write, because the fragment now does open with `---`.
+**It misleads in a harmful direction.** An agent reading the reason literally
+would satisfy it as asked, by pasting a `---` block into the middle of the
+document — corrupting the file, invited to do so by the deny message, and the
+guard would then PASS that write.
 
-The honest reason is already in the rest of the message: this tree is captured,
-not hand-edited. Either judge the file the edit WOULD produce (`old_string`
-replaced in the real content), or drop the frontmatter diagnosis for `Edit`
-entirely and refuse hand-editing plainly. The second is simpler and loses
-nothing — no hand `Edit` of a vendored file is ever wanted.
+Drop the frontmatter diagnosis for `Edit` and refuse hand-editing plainly: no
+hand `Edit` of a vendored file is ever wanted, so nothing is lost.
 
 ### N10 — the question gate's escape hatch is correct interactively and catastrophic unattended
 
@@ -235,38 +217,27 @@ and will interrupt if the assumption is wrong". That rationale is the whole
 design, and it is **conditional on a user being there**.
 
 Unattended — a cron tick, CI, `claude -p`, a hook-driven run — nobody is
-watching. The justification the prefix carries is then irrelevant: a perfectly
-justified question is as fatal as a tautological one, because both wait for an
-answer that is never coming. The gate is calibrated for the case where asking is
-merely expensive, and the case where asking is terminal has no representation in
-it at all.
+watching, so a perfectly justified question is as fatal as a tautological one:
+both wait for an answer that is never coming. The gate is calibrated for asking
+being merely expensive, and the case where asking is TERMINAL has no
+representation in it.
 
-Note the inversion this produces. The BETTER an agent behaves — declining to
-guess, declaring honestly why it cannot decide, using the sanctioned escape
-hatch exactly as documented — the more likely it is to hang an unattended run.
-The handler currently rewards the behaviour that breaks headless mode.
+Note the inversion. The BETTER an agent behaves — declining to guess, declaring
+why, using the sanctioned escape hatch exactly as documented — the more likely
+it is to hang an unattended run.
 
 **The daemon cannot detect the mode, and this was checked rather than assumed.**
-No vendored event in `contracts/claude-code-hooks/` carries a headless,
-non-interactive or `--print` signal; `PreToolUse` gets `session_id`,
-`transcript_path`, `cwd`, `permission_mode` and `scratchpad_dir`, none of which
-distinguishes an attended session from an unattended one. So a third mode cannot
-infer its own applicability from the payload — it has to be DECLARED (config or
-environment) by whatever launches the unattended run, or detected outside the
-hook contract entirely.
+No vendored event carries a headless, non-interactive or `--print` signal, so
+the mode has to be DECLARED rather than inferred from the payload.
 
 **RESOLVED.** Both facts were established, and neither made a handler change
 the wrong lever:
 
-- Claude Code 2.1.272 DOES offer mechanisms — the installed CLI confirms
-  `--permission-prompts none` ("anything that would prompt is denied
-  automatically") and `--permission-mode dontAsk` — and a denied tool leaves
-  the model working rather than stalling. But `--permission-prompts` defaults
-  to `host`, not `none`, so an unattended run with no flags is NOT covered.
-- Decisively for this repository, those are LAUNCHER flags and this project's
-  crons are `CronCreate` session-memory jobs firing into an already-running
-  interactive session. That session has a TTY and its flags were fixed at
-  launch, so the 3am question is drawn to a terminal nobody is reading. No
+- Claude Code 2.1.272 DOES offer mechanisms (`--permission-prompts none`,
+  `--permission-mode dontAsk`), but `--permission-prompts` defaults to `host`,
+  so an unattended run with no flags is NOT covered.
+- Decisively: those are LAUNCHER flags, and this project's crons fire into an
+  already-running interactive session whose flags were fixed at launch. No
   launcher flag reaches that case.
 
 A `mode: unattended` was added and enabled here, RED first on the test that
@@ -291,6 +262,25 @@ which reads as a defect in the handler, not a stale declaration. Found only
 because N10 made the first handler whose declared tests vary by option.
 
 Latent for every future option-switched handler, and silent until one exists.
+
+### N15 — the daemon CAN see the session's crons, and two plans were built on it not being able to
+
+N6 rests on "`CronList` is session memory the daemon cannot read", so declared-
+and-running is indistinguishable from declared-and-absent. Plan 00412's D7
+rests on the same claim. Both are false.
+
+`Stop` and `SubagentStop` receive **`session_crons`** — one entry per wakeup
+"sourced from `CronCreate`, `ScheduleWakeup`, and `/loop`", with `id`,
+`schedule`, `recurring` and `prompt`. It is in the vendored contract already
+(`Stop.json:48`) and **no handler reads it.**
+
+So enforcement needs no supervisor, no ack verb and no cooperation: compare
+declared against actual at `Stop` and block the stop. The correction is
+recorded in [DESIGN-cron-enforcement.md](DESIGN-cron-enforcement.md).
+
+Same failure as N12, one layer up — a capability ruled out by inference rather
+than checked, and the documentation said yes both times. The 2026-08-26 review
+of Plan 00273 had already named this exact hazard about this exact field.
 
 ### N11 — host-identity tests read the real machine's `/etc/hosts`, so they pass or fail by machine
 
@@ -376,10 +366,15 @@ said otherwise, because nothing compares a scoped verdict against its scope.
 - [x] ✅ **Task 1.7**: N3 graduated to Plan
   [00414](../00414-absent-protected-path-is-silent/PLAN.md).
 
-- [ ] ⬜ **Task 1.8**: N6 — design the enforcement tier the owner named: what
-  the supervisor CHECKS about declared crons, and what it DOES when the check
-  fails. Then settle duplication (env-var activation vs a GitHub-side lock) and
-  the `agent-working` claim race as the separate problem it is.
+- [x] ✅ **Task 1.8**: N6 — designed, and the design changed when N15 showed the
+  premise was false: verification is a `Stop`-time comparison of `session_crons`
+  against `persistent_crons`, the teeth are a Stop block, and the supervisor
+  drops to backstop rather than being the mechanism. Duplication settled as
+  `when_env:` activation (a lock arbitrates between machines nobody controls;
+  here the owner controls them). The claim race settled as an atomic
+  branch-ref push — git's `push` of a new ref is the compare-and-swap a label
+  can never be. **Implementation is NOT started**: it adds a config key and
+  changes the public issue loop, so it needs the owner's go.
 
 - [x] ✅ **Task 1.9**: N7 — `bin/hooks-daemon find-plan <number|name|words>`,
   named in the deny message beside the number and in the injected guidance.
