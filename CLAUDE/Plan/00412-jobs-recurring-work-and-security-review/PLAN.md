@@ -274,8 +274,13 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   live in `RUNS/` and git. It opens with a real category rather than an empty
   table, because the first defect arrived while the register was being written.
 
-- [ ] ⬜ **Task 3.3**: A specialist security-review sub-agent, and the run
+- [x] ✅ **Task 3.3**: A specialist security-review sub-agent, and the run
   procedure that dispatches it.
+  `.claude/agents/security-reviewer.md` — read-only, one CHECK per dispatch,
+  and every finding carries the class, why the tests miss it and a Detector
+  hypothesis, because the net is the deliverable and the fix is not. Distinct
+  from `hooks-daemon-opus-security`, which is a quarantine EXECUTOR for a
+  different problem. Both routines' step 3 dispatch it.
 
 - [ ] ⬜ **Task 3.4**: Run it once, end to end, and fix what it finds under
   Defence Before Fix — the Defence before the fix, every time. Each Defence is

@@ -56,13 +56,21 @@ full sweep for ever while every record read as healthy.
    `failed` — started and did not finish — which is a different fact from
    never having started.
 
-3. Dispatch the specialist reviewer (Task 3.3) once per check in
+3. Dispatch the `security-reviewer` agent once per check in
    [CHECKS.md](CHECKS.md), giving it the interval and that check alone. One
    check per dispatch: a reviewer asked for "anything security-relevant"
-   returns the findings that are easy to phrase.
+   returns the findings that are easy to phrase, and a clean result from such a
+   brief cannot be told apart from a thorough one.
 
-4. Record every confirmed finding in the living security documentation
-   (Task 3.2), under its category, naming its Defence.
+   Each dispatch must state the check id, the interval `from -> to`, and where
+   to write its report. The agent reports; it never fixes. If it says a check
+   was **not answerable**, that is not a clean result — record it as a check
+   this run did not perform, exactly as a delta run records its full-only set.
+
+4. Record every confirmed finding in the [security register](../../Security/README.md),
+   under its category, naming its Defence. A category with no Defence yet is
+   written only once the Defence exists — the register must not claim coverage
+   it does not have.
 
 5. Fix under **Defence Before Fix**: the Defence lands before the fix, every
    time, and each Defence is a Detector in `scripts/qa/` wired into

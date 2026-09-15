@@ -42,11 +42,11 @@ reliably is ignored just as reliably.
 
 2. Open the run: `bin/hooks-daemon run-routine 00002-security-review-delta`.
 
-3. Produce the diff for the interval and dispatch the specialist reviewer
-   (Task 3.3) once per delta-able check, giving it the diff and that check
-   alone.
+3. Produce the diff for the interval and dispatch the `security-reviewer` agent
+   once per delta-able check, giving it the diff and that check alone. A
+   dispatch that names two checks, or none, is one the agent is told to refuse.
 
-4. Record confirmed findings in the living security documentation (Task 3.2),
+4. Record confirmed findings in the [security register](../../Security/README.md),
    and fix under **Defence Before Fix** — the Defence, as a Detector in
    `scripts/qa/`, lands before the fix.
 
