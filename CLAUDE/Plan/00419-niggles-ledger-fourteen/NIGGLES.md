@@ -244,3 +244,60 @@ false positive. But N4 was a genuine defect in a shipped comparison, and this
 is a reporting mismatch plus a missing convention, so they want different
 fixes.
 
+
+### N6 — declaring `layout.source_dirs` silently disables the TDD file exclusions
+
+**Found**: creating a new package for Plan 00412 Task 2.1. Writing
+`src/claude_code_hooks_daemon/routines/__init__.py` was DENIED by
+`tdd_enforcement`, demanding a `test___init__.py`.
+
+The first signal that the rule rather than the write was wrong: this
+repository has 49 `__init__.py` files and 7 files named `test___init__.py`. A
+rule that almost every existing instance violates is mis-specified.
+
+**Proven, not inferred** (the N5 lesson): driving the real handler directly,
+with only the layout changed between the two calls.
+
+| project layout                | `matches()` for `…/routines/__init__.py` |
+| ----------------------------- | ---------------------------------------- |
+| zero-config                   | `False` — correctly exempt               |
+| `layout.source_dirs: ["src"]` | `True` — wrongly gated                   |
+
+**Cause.** `TddEnforcementHandler.matches` resolves in this order:
+
+```python
+if layout.is_test_path(file_path):        return False
+if strategy.is_test_file(file_path):      return False
+if layout.is_source_path(file_path):      return True     # ← short-circuits
+return strategy.is_production_source(file_path)
+```
+
+`PythonTddStrategy.is_production_source` does exclude `__init__.py`, exactly
+as the `TddStrategy` protocol docstring instructs ("Should also exclude
+language-specific init files"). But the declared-layout branch returns True
+first, so that exclusion is unreachable for any project that declares its
+layout.
+
+**The confusion is between two different questions.** The declared layout
+answers *is this file in a source DIRECTORY?*; the gate needs *is this a
+production source FILE?*. Consulting the declared layout first is right — a
+project stating where its source lives outranks per-language inference — but
+letting it answer alone throws away everything the language knows about
+individual files.
+
+**Not repo-specific.** Any client that declares `layout.source_dirs` loses
+the exemption, and the more carefully a project describes itself, the more of
+the language strategy it silently switches off. `layout:` reads as additive
+configuration, so nothing warns that it subtracts.
+
+**Fixed** with a RED-first reproduction. `TddStrategy` gains
+`is_excluded_source_file(file_path)` — a file-level veto, independent of
+location — consulted before either location rule. Python returns True for
+`__init__.py` and its `is_production_source` now delegates to it rather than
+re-testing, so the two cannot drift; the other ten languages have no such
+file and return False.
+
+Two guards had to pass before AND after, or the fix would have traded a false
+positive for a gate that never fires: a real module under a declared
+`source_dirs` is still gated, and an `__init__.py` under zero-config is still
+exempt.

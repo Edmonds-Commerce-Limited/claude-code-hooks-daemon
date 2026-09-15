@@ -32,6 +32,9 @@ def test_complete_implementation_satisfies_protocol() -> None:
         def is_production_source(self, file_path: str) -> bool:
             return "/src/" in file_path
 
+        def is_excluded_source_file(self, file_path: str) -> bool:
+            return False
+
         def should_skip(self, file_path: str) -> bool:
             return "/vendor/" in file_path
 

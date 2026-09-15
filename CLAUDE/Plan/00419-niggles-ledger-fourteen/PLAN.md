@@ -43,6 +43,9 @@ without opening it:
 - **N5** — the supervisor's goal check counts idle teammates as running work,
   so a session that correctly harvests its parallel work cannot satisfy its own
   stop condition. Remedy owner-gated.
+- **N6** — declaring `layout.source_dirs` silently switched off every TDD
+  language strategy's file-level exclusions, so a project that describes itself
+  carefully lost Python's `__init__.py` exemption. Fixed, RED first.
 
 ## Tasks
 
@@ -101,6 +104,24 @@ without opening it:
   build it. Owner-gated: (1) and (2) both relax a gate that currently blocks,
   and relaxing a correct gate to fix a sequencing problem is the kind of change
   that should be asked for rather than assumed.
+
+- [x] ✅ **Task 1.8**: N6 fixed, RED first, in
+  `tests/unit/handlers/test_tdd_enforcement.py`. Clean RED was 1 failed / 4
+  passed — and the four that passed are the guards that had to hold before AND
+  after: a real module under a declared `source_dirs` is still gated, and an
+  `__init__.py` under zero-config is still exempt. Without both, the fix could
+  have traded a false positive for a gate that never fires.
+
+  `TddStrategy` gains `is_excluded_source_file` — a file-level veto,
+  independent of location — consulted ahead of both location rules. Python's
+  `is_production_source` now delegates to it rather than re-testing
+  `__init__.py`, so the two cannot drift apart; the other ten languages have no
+  such file and return False.
+
+  Proven before it was written up, and before it was fixed: the real handler
+  was driven directly with only the layout changed between two calls, which is
+  what separated "the gate is too strict" from "declaring a layout disables an
+  exclusion".
 
 - [ ] ⬜ **Task 1.7**: N5 — decide between teaching the goal check that `idle`
   is not `running` (the fix) and documenting teammate reaping as the

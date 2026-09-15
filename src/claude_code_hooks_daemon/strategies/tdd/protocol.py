@@ -39,7 +39,29 @@ class TddStrategy(Protocol):
         """Check if a file is in a production source directory.
 
         Each language has its own conventions for source directories.
-        Should also exclude language-specific init files (e.g., Python's __init__.py).
+        Should also exclude language-specific init files (e.g., Python's __init__.py)
+        — delegate that half to :meth:`is_excluded_source_file` rather than
+        re-testing it here, so the two cannot disagree.
+        """
+        ...
+
+    def is_excluded_source_file(self, file_path: str) -> bool:
+        """Whether this language NEVER treats ``file_path`` as production source.
+
+        A file-level veto, independent of LOCATION: Python's ``__init__.py``
+        is a package marker wherever it sits. This is deliberately separate
+        from :meth:`is_production_source`, which answers the directory
+        question as well — the handler needs the two apart (Plan 00419 N6).
+
+        A project that DECLARES ``layout.source_dirs`` has the handler consult
+        the declared layout FIRST, because a project stating where its source
+        lives outranks per-language inference. But that answers "is this file
+        in a source DIRECTORY?", and if it is allowed to stand alone it
+        silently switches off every exclusion bundled inside
+        ``is_production_source``. Declaring your layout must not cost you
+        Python's ``__init__.py`` exemption.
+
+        Most languages have no such file and return False.
         """
         ...
 

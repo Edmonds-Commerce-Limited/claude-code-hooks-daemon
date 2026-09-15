@@ -216,6 +216,74 @@ class TestTddEnforcementHandler:
         }
         assert handler.matches(hook_input) is True
 
+    def test_a_declared_source_dir_does_not_re_gate_an_excluded_init_file(self, handler):
+        """A declared layout answers WHERE, never WHICH FILES (00419 N6).
+
+        `layout.is_source_path()` is consulted before
+        `strategy.is_production_source()`, and it answers "is this file in a
+        source DIRECTORY?" — a different question from "is this a production
+        source FILE?". So declaring `source_dirs` silently switched off every
+        language strategy's own file-level exclusion, and Python's
+        `__init__.py` exemption became unreachable for any project that
+        declares its layout.
+
+        Found by trying to create a new package in THIS repository, which
+        declares `source_dirs: ["src"]`: the gate demanded a
+        `test___init__.py`. The repo has 49 `__init__.py` files and none has
+        one, so the rule every existing instance violates was the rule that
+        was wrong.
+        """
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=("src",),
+            test_dirs=("tests",),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/src/pkg/routines/__init__.py"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_a_declared_source_dir_still_gates_a_real_module(self, handler):
+        """The guard: the fix must not switch the declared layout off.
+
+        This must pass BOTH before and after — an exclusion that also let
+        real modules through would trade a false positive for a gate that
+        never fires, which is worse than the defect.
+        """
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=("backend",),
+            test_dirs=("tests",),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/backend/my_module.py"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_an_init_file_is_exempt_in_zero_config_too(self, handler):
+        """The half that always worked, pinned so the fix cannot regress it."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/src/pkg/routines/__init__.py"},
+        }
+        assert handler.matches(hook_input) is False
+
     def test_matches_honours_declared_test_dir_from_facade(self, handler):
         """A file under a declared layout.test_dirs entry is never itself
         gated as a production source (Plan 00288 Task 4.4)."""

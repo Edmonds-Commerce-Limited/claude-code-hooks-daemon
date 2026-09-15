@@ -49,11 +49,14 @@ class PythonTddStrategy:
         return filename.startswith("test_") and filename.endswith(".py")
 
     def is_production_source(self, file_path: str) -> bool:
-        # Exclude __init__.py files
-        if file_path.endswith(_INIT_FILENAME):
+        if self.is_excluded_source_file(file_path):
             return False
 
         return matches_directory(file_path, _SOURCE_DIRECTORIES)
+
+    def is_excluded_source_file(self, file_path: str) -> bool:
+        """`__init__.py` is a package marker wherever it sits, not a module."""
+        return file_path.endswith(_INIT_FILENAME)
 
     def should_skip(self, file_path: str, content: str = "") -> bool:
         return matches_directory(file_path, _SKIP_DIRECTORIES)

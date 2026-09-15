@@ -366,6 +366,17 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         if strategy.should_skip(file_path, content):
             return False
 
+        # A file-level veto, checked BEFORE either location rule below
+        # (Plan 00419 N6). The declared layout answers "is this file in a
+        # source DIRECTORY?"; this answers "is this a production source FILE
+        # at all?". They are different questions, and while the declared
+        # layout was allowed to answer alone it silently switched off every
+        # exclusion bundled inside `strategy.is_production_source` — so a
+        # project that declared `layout.source_dirs` lost Python's
+        # `__init__.py` exemption and was told to write a `test___init__.py`.
+        if strategy.is_excluded_source_file(file_path):
+            return False
+
         # Declared layout dirs (Plan 00288 Task 4.4/C6) are consulted FIRST:
         # a project stating "this dir is a test dir" or "this dir is source"
         # is a FACT that outranks per-language inference, the same priority

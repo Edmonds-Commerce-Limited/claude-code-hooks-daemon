@@ -66,6 +66,10 @@ class PhpTddStrategy:
     def is_production_source(self, file_path: str) -> bool:
         return matches_directory(file_path, _SOURCE_DIRECTORIES)
 
+    def is_excluded_source_file(self, file_path: str) -> bool:
+        """No PHP file is excluded from production source by name alone."""
+        return False
+
     def should_skip(self, file_path: str, content: str = "") -> bool:
         if matches_directory(file_path, _SKIP_DIRECTORIES):
             return True
