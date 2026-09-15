@@ -4,7 +4,6 @@ The full write-up for each entry in ledger fourteen. `PLAN.md` carries the
 status and the tasks; the reasoning, evidence and candidate remedies live
 here, because they are findings rather than plan state.
 
-
 ### N1 — `debug_hooks.sh` cannot work in the repository that dogfoods it
 
 Found by a sub-agent following Plan 00418 Task 1.1, which names
@@ -244,7 +243,6 @@ false positive. But N4 was a genuine defect in a shipped comparison, and this
 is a reporting mismatch plus a missing convention, so they want different
 fixes.
 
-
 ### N6 — declaring `layout.source_dirs` silently disables the TDD file exclusions
 
 **Found**: creating a new package for Plan 00412 Task 2.1. Writing
@@ -345,5 +343,23 @@ hours after reading the prose.
 3. Nothing, and rely on the QA run catching it. This is the current state, and
    the cost is that it catches it AFTER the commit is pushed.
 
-Remedy owner-gated: (1) adds a handler and a rule id, which changes the gate
-surface in every project that installs the daemon.
+**RESOLVED by (1), as a PROJECT-level handler.**
+`.claude/project-handlers/pre_tool_use/ruff_format_blocker.py`, 20 tests.
+
+The "owner-gated" note above was reasoning about a LIBRARY handler, and that
+reasoning was sound — another project may legitimately use Ruff as its
+formatter, so this must never ship to one. But the owner has already ruled on
+this exact shape (Plan 00418): dogfood as a project handler first. A project
+handler changes no installing project's gate surface, so the gate that made
+this owner-gated does not apply to it. Promotion to the library would be a
+separate decision, and the answer there is probably no.
+
+`ruff check` and `ruff check --fix` are untouched — Ruff IS the linter here,
+and the deny message says so, because the wrong lesson to take from the block
+is "Ruff is banned". `ruff format --check` IS blocked: it writes nothing, but
+it answers confidently about a tree Black owns, so passing it is a false
+reassurance. Blocking only the writing form would have left the misleading
+half of the trap in place.
+
+Verified live after a daemon restart, both directions: `ruff format --check src` denied with the Black/`run_autofix.sh` guidance, `python -m ruff check`
+still runs.
