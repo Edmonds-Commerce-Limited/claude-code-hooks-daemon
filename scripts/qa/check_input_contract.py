@@ -10,10 +10,19 @@ the plan's Technical Decision 1 SUPERSET rule against each event's vendored
 
 ``unknown-input-field``         the daemon reads a top-level hook_input field
                                 that appears in NO vendored input example for
-                                that event — the rename signal. Absence (the
-                                example carrying fields the daemon never
-                                reads) is NEVER flagged: examples are not
-                                schemas and several fields are conditional.
+                                that event, AND is not declared in that event's
+                                ``conditional_input_fields`` — the rename
+                                signal. Absence (the example carrying fields
+                                the daemon never reads) is NEVER flagged:
+                                examples are not schemas.
+
+An ``input_example`` depicts ONE call, so a field that arrives only under some
+condition is simply missing from it — and reading that absence as "never
+delivered" is a confident false negative (Plan 00413 N12: ``agent_id`` IS
+delivered to ``PreToolUse`` inside a subagent call, and no example can ever
+show it). ``conditional_input_fields`` maps such a field to the CONDITION
+under which it arrives; a name with no condition is rejected, and the
+declaration is per-event, never global.
 ``stale-allowlist-entry``       an INPUT-ALLOWLIST.yaml entry whose finding no
                                 longer exists.
 ``malformed-allowlist-entry``   an allowlist entry missing its reason or link.
@@ -87,6 +96,14 @@ _GET_METHOD: Final[str] = "get"
 _INPUT_EXAMPLE_KEY: Final[str] = "input_example"
 _EVENT_KEY: Final[str] = "event"
 
+#: Fields an event MAY receive that no ``input_example`` can show, mapped to
+#: the condition under which they arrive. An example depicts one call, so a
+#: conditionally-present field is absent from it — and reading that absence as
+#: "never delivered" is a confident false negative (Plan 00413 N12). The slot
+#: also carries the reverse case: a field the example DOES show that can be
+#: absent at runtime, so a handler must not assume it.
+_CONDITIONAL_INPUT_FIELDS_KEY: Final[str] = "conditional_input_fields"
+
 #: Handler packages excluded from the scan by construction: StatusLine is a
 #: separate Claude Code feature with its own contract; ``nitpick`` is a daemon
 #: pseudo-event; ``utils`` under handlers/ is a shared surface (scanned as
@@ -114,6 +131,7 @@ class InputReport(Report):
 
     read_surface: dict[str, set[str]] = field(default_factory=dict)
     skipped_events: list[str] = field(default_factory=list)
+    conditional_fields: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 def load_field_constants(src_dir: Path) -> dict[str, str]:
@@ -232,26 +250,93 @@ def collect_read_surface(root: Path) -> dict[str, set[str]]:
     return surface
 
 
-def load_input_examples(contracts_dir: Path) -> dict[str, set[str]]:
-    """Top-level keys of every vendored per-event ``input_example``.
+def _read_conditional_fields(path: Path, data: dict[str, object]) -> dict[str, str]:
+    """The event's ``conditional_input_fields`` map, validated.
+
+    A name with no condition is rejected rather than accepted leniently: "may
+    arrive" without "when" is not a contract, and leaves the next reader
+    guessing — which is the exact failure the slot exists to remove.
+    """
+    raw = data.get(_CONDITIONAL_INPUT_FIELDS_KEY)
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"contract file {path.name} has a non-object "
+            f"'{_CONDITIONAL_INPUT_FIELDS_KEY}' — it maps a field name to the "
+            f"condition under which that field arrives"
+        )
+    conditions: dict[str, str] = {}
+    for name, condition in raw.items():
+        if not isinstance(condition, str) or not condition.strip():
+            raise ValueError(
+                f"contract file {path.name} declares conditional input field "
+                f"'{name}' with no condition — state WHEN the field arrives"
+            )
+        conditions[name] = condition
+    return conditions
+
+
+def _load_contracts(contracts_dir: Path) -> dict[str, tuple[set[str], dict[str, str]]]:
+    """Per-event ``(example keys, conditional field conditions)``.
 
     Raises:
         FileNotFoundError: when the vendored contract directory is absent —
             FAIL FAST, an input check with no examples verifies nothing.
-        ValueError: when a contract file has no ``event`` key — a malformed
-            vendored file must fail loudly, naming the file.
+        ValueError: when a contract file has no ``event`` key, or declares a
+            malformed conditional-field slot — a malformed vendored file must
+            fail loudly, naming the file.
     """
     if not contracts_dir.is_dir():
         raise FileNotFoundError(f"vendored contract directory missing: {contracts_dir}")
-    examples: dict[str, set[str]] = {}
+    contracts: dict[str, tuple[set[str], dict[str, str]]] = {}
     for path in sorted(contracts_dir.glob("*.json")):
         if path.name == _META_FILENAME:
             continue
         data = json.loads(path.read_text(encoding="utf-8"))
         if _EVENT_KEY not in data:
             raise ValueError(f"contract file {path.name} has no '{_EVENT_KEY}' key")
-        examples[data[_EVENT_KEY]] = set(data.get(_INPUT_EXAMPLE_KEY) or {})
-    return examples
+        contracts[data[_EVENT_KEY]] = (
+            set(data.get(_INPUT_EXAMPLE_KEY) or {}),
+            _read_conditional_fields(path, data),
+        )
+    return contracts
+
+
+def load_input_examples(contracts_dir: Path) -> dict[str, set[str]]:
+    """Every field an event is DOCUMENTED to deliver, per event.
+
+    The union of the vendored ``input_example``'s top-level keys and any
+    ``conditional_input_fields`` the event declares. The union is deliberately
+    per-event rather than global: upstream says outright that not all events
+    receive ``permission_mode``, so a field declared conditional on one event
+    must not quietly become known on every other.
+
+    An event whose example is empty stays empty here even if it declares
+    conditional fields — an event with no example has no substrate and is
+    skipped by :func:`check_read_surface`, and inventing one from the
+    conditional slot alone would start checking it against a fragment.
+    """
+    return _known_fields(_load_contracts(contracts_dir))
+
+
+def _known_fields(
+    contracts: dict[str, tuple[set[str], dict[str, str]]],
+) -> dict[str, set[str]]:
+    """Example keys plus declared conditional fields, per event."""
+    return {
+        event: (example | set(conditions) if example else example)
+        for event, (example, conditions) in contracts.items()
+    }
+
+
+def load_conditional_input_fields(contracts_dir: Path) -> dict[str, dict[str, str]]:
+    """Per-event conditional field -> condition, for events that declare any."""
+    return {
+        event: conditions
+        for event, (_example, conditions) in _load_contracts(contracts_dir).items()
+        if conditions
+    }
 
 
 def check_read_surface(
@@ -303,7 +388,8 @@ def skipped_event_names(
 def scan(root: Path) -> InputReport:
     """Run the input-contract check against the tree at ``root``."""
     contracts_dir = root.joinpath(*_CONTRACTS_DIR_PARTS)
-    examples = load_input_examples(contracts_dir)
+    contracts = _load_contracts(contracts_dir)
+    examples = _known_fields(contracts)
     read_surface = collect_read_surface(root)
     findings = check_read_surface(read_surface, examples)
     remaining, allowlisted, problems = apply_allowlist(
@@ -314,6 +400,9 @@ def scan(root: Path) -> InputReport:
         allowlisted=allowlisted,
         read_surface=read_surface,
         skipped_events=skipped_event_names(read_surface, examples),
+        conditional_fields={
+            event: conditions for event, (_example, conditions) in contracts.items() if conditions
+        },
     )
 
 
@@ -323,6 +412,16 @@ def _render_inventory(report: InputReport) -> str:
         lines.append(f"  {event}: {', '.join(sorted(reads))}")
     for event in report.skipped_events:
         lines.append(f"  {event}: SKIPPED — no vendored input example (no substrate to check)")
+    if report.conditional_fields:
+        lines.append("")
+        lines.append(
+            "Conditional input fields (declared in the vendored contract; an "
+            "input_example shows ONE call, so its silence about these proves nothing):"
+        )
+        for event, conditions in sorted(report.conditional_fields.items()):
+            lines.append(f"  {event}:")
+            for name, condition in sorted(conditions.items()):
+                lines.append(f"    {name}: {condition}")
     return "\n".join(lines)
 
 

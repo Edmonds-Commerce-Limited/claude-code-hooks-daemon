@@ -109,9 +109,7 @@ class TestGate:
 
         assert "remote-docs add" in reason
 
-    def test_an_edit_in_the_tree_is_denied(
-        self, handler: RemoteDocsProvenanceHandler
-    ) -> None:
+    def test_an_edit_in_the_tree_is_denied(self, handler: RemoteDocsProvenanceHandler) -> None:
         """Hand-editing a captured file is refused, whatever the fragment says."""
         hook_input = {
             "tool_name": "Edit",

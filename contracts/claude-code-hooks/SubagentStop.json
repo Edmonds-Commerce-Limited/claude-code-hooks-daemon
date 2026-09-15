@@ -19,7 +19,10 @@
     "additionalContext": {}
   },
   "discarded_fields": [],
-  "notes": "Same decision control as Stop; reason required when decision is 'block'.",
+  "conditional_input_fields": {
+    "effort": "In the example, but present only when the current model supports the effort parameter."
+  },
+  "notes": "Same decision control as Stop; reason required when decision is 'block'. agent_id and agent_type are UNCONDITIONAL here -- this event only ever fires for a subagent -- so they sit in the input_example and need no conditional slot.",
   "input_example": {
     "session_id": "abc123",
     "transcript_path": "~/.claude/projects/.../abc123.jsonl",

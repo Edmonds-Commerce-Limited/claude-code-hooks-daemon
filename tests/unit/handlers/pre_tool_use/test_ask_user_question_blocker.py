@@ -346,7 +346,9 @@ class TestAskUserQuestionBlockerHandler:
             {
                 "tool_name": "AskUserQuestion",
                 "tool_input": {
-                    "questions": [{"question": f"{REQUIRED_PREFIX} A and B are equally valid. Which?"}]
+                    "questions": [
+                        {"question": f"{REQUIRED_PREFIX} A and B are equally valid. Which?"}
+                    ]
                 },
             }
         )

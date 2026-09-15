@@ -298,6 +298,142 @@ class TestScan:
             cic.scan(tmp_path)
 
 
+# ── conditional input fields ──────────────────────────────────────
+
+
+class TestConditionalInputFields:
+    """A field that MAY arrive, under a stated condition (Plan 00413 N12).
+
+    ``input_example`` depicts ONE call, so a field that is conditionally
+    present is simply missing from it — and the project's reading convention
+    (recorded in Elicitation.json: the per-event example is authoritative)
+    then turns that absence into a confident "never delivered". That is right
+    for an unconditional field and a FALSE NEGATIVE for a conditional one:
+    ``agent_id`` is documented as arriving at PreToolUse inside a subagent
+    call, and no PreToolUse example can ever show it, because every example
+    depicts a main-thread call where it is absent by definition.
+
+    So the condition needs somewhere to live that is not prose in ``notes``.
+    """
+
+    def _contract(self, conditional: object) -> dict[str, object]:
+        return {
+            "event": "PreToolUse",
+            "input_example": {"session_id": "abc", "tool_name": "Bash"},
+            "conditional_input_fields": conditional,
+        }
+
+    def test_a_conditional_field_counts_as_known(self, tmp_path: Path) -> None:
+        contracts = tmp_path / "contracts" / "claude-code-hooks"
+        contracts.mkdir(parents=True)
+        (contracts / "PreToolUse.json").write_text(
+            json.dumps(self._contract({"agent_id": "only inside a subagent call"}))
+        )
+
+        known = cic.load_input_examples(contracts)
+
+        assert "agent_id" in known["PreToolUse"]
+
+    def test_a_read_of_a_conditional_field_is_not_flagged(self) -> None:
+        examples = {"PreToolUse": {"session_id", "tool_name", "agent_id"}}
+
+        assert cic.check_read_surface({"PreToolUse": {"agent_id"}}, examples) == []
+
+    def test_conditionality_is_per_event_not_global(self, tmp_path: Path) -> None:
+        """Declaring it on one event must not quietly excuse every other.
+
+        ``permission_mode`` is the case that makes this load-bearing: upstream
+        says outright that not all events receive it, and Elicitation is one
+        that does not. If the slot were global, a read of it on Elicitation
+        would stop being reported.
+        """
+        contracts = tmp_path / "contracts" / "claude-code-hooks"
+        contracts.mkdir(parents=True)
+        (contracts / "PreToolUse.json").write_text(
+            json.dumps(self._contract({"agent_id": "only inside a subagent call"}))
+        )
+        (contracts / "Elicitation.json").write_text(
+            json.dumps({"event": "Elicitation", "input_example": {"session_id": "abc"}})
+        )
+
+        known = cic.load_input_examples(contracts)
+
+        assert "agent_id" not in known["Elicitation"]
+
+    def test_an_empty_example_stays_empty_despite_conditional_fields(
+        self, tmp_path: Path
+    ) -> None:
+        """An event with no example has no substrate, and the slot is not one.
+
+        ``check_read_surface`` skips such an event deliberately. Synthesising a
+        known-set from the conditional slot alone would start checking its
+        reads against a fragment — every ordinary field would then read as
+        unknown, which is worse than not checking it at all.
+        """
+        contracts = tmp_path / "contracts" / "claude-code-hooks"
+        contracts.mkdir(parents=True)
+        (contracts / "Setup.json").write_text(
+            json.dumps(
+                {
+                    "event": "Setup",
+                    "input_example": {},
+                    "conditional_input_fields": {"agent_id": "inside a subagent call"},
+                }
+            )
+        )
+
+        known = cic.load_input_examples(contracts)
+
+        assert known["Setup"] == set()
+        assert cic.check_read_surface({"Setup": {"anything"}}, known) == []
+
+    def test_a_field_named_with_no_condition_is_rejected(self, tmp_path: Path) -> None:
+        """A bare name restores the ambiguity the slot exists to remove.
+
+        "may arrive" without "when" is not a contract — the next reader is back
+        to guessing, which is precisely the failure being fixed.
+        """
+        contracts = tmp_path / "contracts" / "claude-code-hooks"
+        contracts.mkdir(parents=True)
+        (contracts / "PreToolUse.json").write_text(json.dumps(self._contract({"agent_id": "  "})))
+
+        with pytest.raises(ValueError, match="agent_id"):
+            cic.load_input_examples(contracts)
+
+    def test_a_non_mapping_slot_is_rejected(self, tmp_path: Path) -> None:
+        contracts = tmp_path / "contracts" / "claude-code-hooks"
+        contracts.mkdir(parents=True)
+        (contracts / "PreToolUse.json").write_text(json.dumps(self._contract(["agent_id"])))
+
+        with pytest.raises(ValueError, match="PreToolUse.json"):
+            cic.load_input_examples(contracts)
+
+    def test_the_real_contract_records_agent_id_for_the_tool_events(self) -> None:
+        """The finding that started N12, pinned against the vendored tree.
+
+        Getting this wrong cost a wrong answer twice on GitHub issue #14, which
+        had been parked since 2026-02-23 on the belief that PreToolUse carries
+        no agent identity.
+        """
+        contracts = _SCRIPTS_QA_DIR.parent.parent / "contracts" / "claude-code-hooks"
+
+        known = cic.load_input_examples(contracts)
+
+        for event in ("PreToolUse", "PostToolUse"):
+            assert "agent_id" in known[event], f"{event} lost its agent_id declaration"
+            assert "agent_type" in known[event]
+
+    def test_the_real_contract_states_a_condition_for_every_declared_field(self) -> None:
+        contracts = _SCRIPTS_QA_DIR.parent.parent / "contracts" / "claude-code-hooks"
+
+        conditions = cic.load_conditional_input_fields(contracts)
+
+        assert conditions, "no event declares a conditional input field"
+        for event, fields in conditions.items():
+            for name, condition in fields.items():
+                assert condition.strip(), f"{event}.{name} has no condition"
+
+
 # ── the real tree ─────────────────────────────────────────────────
 
 

@@ -422,18 +422,17 @@ also documented as conditionally absent. Full reasoning in the JOURNAL (13:20).
 
 - [x] ✅ **Task 1.14**: N11 — 13 machine-dependent tests pinned to the
   `_FEDORA_STYLE_HOSTS` fixture via `hosts_path`; resolver untouched, no
-  assertion dropped. The pass also closed the hole that let the bug exist: every
-  test in that class asserts an ABSENCE, which a resolver returning `None`
-  unconditionally would satisfy too, so a guard now feeds the env rung a hostile
-  value while a LOWER rung holds a real answer — refusal and resolution are
-  finally distinguishable. 48 pass.
+  assertion dropped. A new guard makes "refused" distinguishable from "broken",
+  which the class could not do before. 48 pass. Detail in JOURNAL.
 
-- [ ] ⬜ **Task 1.15**: N12 — give the vendored contract a slot for a
-  CONDITIONAL input field, so "may arrive, under this condition" is
-  expressible and the per-event-example reading convention stops producing
-  false negatives. Cover `permission_mode` and `scratchpad_dir` too, not just
-  `agent_id`/`agent_type`. Update `HOOK-CONTRACT-REFRESH.md` so the next
-  refresh populates it.
+- [x] ✅ **Task 1.15**: N12 — `conditional_input_fields` added to the contract
+  shape (name → the CONDITION under which the field arrives), consumed by
+  `check_input_contract.py`, surfaced in `--inventory`, and mandated by
+  `HOOK-CONTRACT-REFRESH.md` at every refresh. A name with no condition is
+  REJECTED; the slot is per-event, never global. `permission_mode` deliberately
+  got NO entry, contrary to this task's original wording — upstream resolves it
+  via each event's example, so the existing convention already answers it.
+  Detail and the `Stop`/`SubagentStop` boundary in JOURNAL.
 
 ## Success Criteria
 

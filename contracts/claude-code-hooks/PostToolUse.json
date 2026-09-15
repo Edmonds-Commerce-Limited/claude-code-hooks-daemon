@@ -24,6 +24,11 @@
     "updatedMCPToolOutput": {}
   },
   "discarded_fields": [],
+  "conditional_input_fields": {
+    "agent_id": "Present ONLY when the hook fires inside a subagent call, and documented upstream as the way to distinguish subagent hook calls from main-thread calls. No input_example here can ever show it: every example depicts a main-thread call, where it is absent by definition. Upstream names PreToolUse and PostToolUse explicitly as the tool events that fire inside a subagent.",
+    "agent_type": "Present when the session uses --agent or the hook fires inside a subagent. For subagents the subagent's type takes precedence over the session's --agent value. Absent from the example for the same reason as agent_id.",
+    "effort": "In the example, but present only when the current model supports the effort parameter."
+  },
   "notes": "decision: 'block' adds reason next to the tool result.",
   "input_example": {
     "session_id": "abc123",

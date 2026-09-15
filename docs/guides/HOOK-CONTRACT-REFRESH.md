@@ -98,6 +98,11 @@ Everything after this point is judgement, and stays manual by design.
    that case. Without this step the input half rots exactly as the output
    half did.
 
+   Re-derive each event's `conditional_input_fields` in the same pass — see
+   [`conditional_input_fields`](#conditional_input_fields-what-the-example-cannot-say).
+   A newly conditional field is invisible to the diff above, because the
+   example that would have shown it never did.
+
 ## Contract JSON shape
 
 Each `<Event>.json` records: `block_mechanism` (named token or null),
@@ -105,9 +110,60 @@ Each `<Event>.json` records: `block_mechanism` (named token or null),
 fields plus any documented top-level decision fields),
 `top_level_decision_enum`, `hook_specific_output_fields` (with `enum` where
 the docs enumerate values), `discarded_fields` (fields the docs say Claude
-Code discards for this event), `notes`, and a VERBATIM `input_example` lifted
-from the docs. `hookEventName` is implied for every event with
-`hook_specific_output_fields` and is not listed per file.
+Code discards for this event), optional `conditional_input_fields` (below),
+`notes`, and a VERBATIM `input_example` lifted from the docs. `hookEventName`
+is implied for every event with `hook_specific_output_fields` and is not
+listed per file.
+
+### `conditional_input_fields`: what the example CANNOT say
+
+An `input_example` depicts ONE call. A field that arrives only under some
+condition is therefore simply missing from it, and reading that absence as
+"never delivered" is a confident false negative — the example is correct and
+the inference is not.
+
+That is not hypothetical. `agent_id` is documented as arriving at `PreToolUse`
+inside a subagent call, explicitly "to distinguish subagent hook calls from
+main-thread calls", yet no `PreToolUse` example can ever show it, because
+every example depicts a main-thread call where it is absent by definition.
+Reading the example as authoritative produced the wrong answer, twice, and
+left GitHub issue #14 parked for months on a capability the product already
+had.
+
+So map the field to the CONDITION under which it arrives:
+
+```json
+"conditional_input_fields": {
+  "agent_id": "Present ONLY when the hook fires inside a subagent call. ..."
+}
+```
+
+Two kinds of entry belong here, and the condition text should make clear
+which: a field ABSENT from the example that may arrive (`agent_id`,
+`agent_type`), and a field PRESENT in it that may be absent at runtime
+(`prompt_id`, `scratchpad_dir`, `effort`). Both mislead a reader who treats
+the example as a schema.
+
+Rules the checker enforces (`scripts/qa/check_input_contract.py`):
+
+- A name with no condition is REJECTED. "May arrive" without "when" is not a
+  contract and leaves the next reader guessing, which is the whole failure.
+- The declaration is PER-EVENT, never global. Upstream says outright that not
+  all events receive `permission_mode`, so a field declared conditional on one
+  event must not become known on every other.
+- Declared fields count as known, so a legitimate read of one is not reported
+  as `unknown-input-field` and does not need an `INPUT-ALLOWLIST.yaml` entry.
+  An allowlist entry records a KNOWN GAP; a documented conditional field is
+  not a gap, and filing it as one would misrecord it.
+
+**`permission_mode` deliberately gets no entry.** Upstream resolves it by
+telling you to check each event's JSON example — so the per-event example IS
+the contract for that field, and slotting it would add noise where the
+existing convention already gives the right answer.
+
+When refreshing, walk the two common-input-field tables (the second is headed
+"When running with `--agent` or inside a subagent") and re-derive every
+condition. A condition that has changed upstream is drift like any other.
 
 ### The one exception to VERBATIM: session UUIDs
 

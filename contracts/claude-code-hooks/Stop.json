@@ -19,6 +19,11 @@
     "additionalContext": {}
   },
   "discarded_fields": [],
+  "conditional_input_fields": {
+    "agent_id": "Present ONLY when the hook fires inside a subagent call. A main-thread Stop carries no agent identity, which is what makes its ABSENCE the usable signal.",
+    "agent_type": "Present when the session uses --agent or the hook fires inside a subagent. Note a session-wide --agent makes this present on a MAIN-THREAD stop too, so agent_type alone does not mean 'in a subagent' -- agent_id does.",
+    "effort": "In the example, but present only when the current model supports the effort parameter."
+  },
   "notes": "reason is REQUIRED when decision is 'block'. hookSpecificOutput.additionalContext is non-error feedback that continues the conversation.",
   "input_example": {
     "session_id": "abc123",
