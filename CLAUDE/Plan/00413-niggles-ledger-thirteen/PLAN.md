@@ -37,7 +37,7 @@ every checkout the maintainers work in has already been installed into.
 
 ### N1 — `hookEventName: "Unknown"` is not a valid event name, so the whole hook response is discarded
 
-**Status**: ⬜ Open
+**Status**: ✅ Fixed at `48a9ff74`
 
 `init.sh`'s `emit_hook_error()` takes an event name as `$1` and embeds it
 verbatim in `{"hookSpecificOutput": {"hookEventName": $event, ...}}`. Three
@@ -73,7 +73,23 @@ wrapper reaches its body, lack it.
 
 ### N2 — the self-install guard ignores the tracked config that answers it
 
-**Status**: ⬜ Open
+**Status**: ✅ Resolved as NOT A DEFECT at `a39ec0d5` — the guard is right, its
+comment was misleading
+
+**The original entry below was wrong, and proving N4 is what showed it.** The
+guard reads two untracked signals and deliberately does not read the tracked
+`self_install_mode: true`. That is correct: the config declares INTENT, while
+the env file and `HOOKS_DAEMON_ROOT_DIR` are evidence the runtime was actually
+BUILT. A fresh clone has the intent and none of the runtime.
+
+Had the guard believed the config, it would have waved the clone through to the
+`NOT_INSTALLED` branch — whose advice is to run the client installer, which
+overwrites this repository's own tracked config (see N5). So the "defect" I
+filed would have made the outcome strictly worse.
+
+What was genuinely wrong was the comment, which read as an unfinished TODO
+(*"requires Python, done later — for now, just trust the override"*) and invited
+exactly the change I was about to make. Replaced with the rationale.
 
 `init.sh:309-327` refuses to initialise when the checkout's git remote says
 this is the hooks-daemon repository, unless self-install is established. It
@@ -106,7 +122,21 @@ nobody reads it.
 
 ### N3 — a fresh clone has no template for the secret word list
 
-**Status**: ⬜ Open
+**Status**: ⬜ Open — but NOT as filed; the ignore rule is deliberate and the
+fix is elsewhere
+
+`.gitignore:220` ignores `*.secret.example` on purpose, with its reason stated:
+the rule ships *"BEFORE any such file is created so a broad `git add` can never
+catch one"*. That is defence in depth against someone copying a real list to an
+`.example` name, and tracking the template would weaken it. My proposed fix was
+wrong.
+
+The gap underneath it is still real, and it is about VISIBILITY rather than the
+template. `secret_file_hygiene_checker` reports only on protected paths *that
+exist on disk*, so a missing list produces no advisory at all — a new
+collaborator gets a working daemon with one guard permanently inert and nothing
+anywhere saying so. Surfacing the absence is a handler behaviour change, so it
+wants its own plan rather than a ledger quick-fix.
 
 `.claude/block-words.secret.example` is not tracked, so a fresh clone receives
 no template for the `sensitive_content` word list. The daemon's documented
@@ -125,7 +155,8 @@ rather than to force-add the template.
 
 ### N4 — the remedy the guard prints names an interpreter that is not installed
 
-**Status**: ⬜ Open
+**Status**: ✅ Fixed at `48a9ff74` (and superseded by N5 — the whole command was
+wrong, not just the interpreter)
 
 The `hooks_daemon_repo_detected` message ends with:
 
@@ -145,31 +176,78 @@ here, N1 stops them ever seeing the sentence, and if N1 is fixed so they finally
 read it, N4 is what they hit next. Worth sweeping for the same `python `
 spelling elsewhere in user-facing output rather than fixing just this line.
 
+### N5 — the advertised remedy DESTROYS this repository's tracked config
+
+**Status**: ✅ Fixed at `a39ec0d5`
+
+Found by trying N4's advice instead of trusting it. `.github/workflows/qa.yml`
+already documented what `install.py --self-install` does to an existing
+checkout, in a comment that exists because a CI runner proved it:
+
+> `create_daemon_config` and `create_settings_json` do NOT skip an existing file
+> — they RENAME it to `.bak` and write a default template over it. The `force`
+> flag only controls whether that backup is taken, so BOTH paths overwrite. On
+> the runner it replaced this repo's 1188-line hooks-daemon.yaml, and the daemon
+> then refused to start because the template it wrote is invalid against the
+> current schema.
+
+So the one instruction a fresh cloner was given would have cost them the
+repository's config and left them with a daemon that will not start — and N1
+plus N4 had both been "fixed" in a way that made that instruction MORE
+prominent and MORE likely to be followed.
+
+`install.py` is the CLIENT installer. Its job is to create files a client
+project does not have yet, and every one of them is already tracked here.
+Nothing in a clone of this repository needs installing; only the two gitignored
+per-checkout runtime artefacts need building.
+
+Fixed by packaging the procedure qa.yml proves on every run as
+`scripts/bootstrap-self-install.sh`, and having the message name that and warn
+explicitly against `install.py`.
+
+**The broader lesson, worth more than the fix**: four entries that each looked
+independent were one sequential failure, and fixing any prefix of them without
+the last would have made things worse, not better. N2 routes the reader to the
+guard; N1 discards the guard's explanation; N4 garbles the command; N5 makes the
+command destructive. Repairing N1 alone — the obvious first move, and the one I
+made — delivered destructive advice to a reader who previously could not read
+it.
+
 ## Tasks
 
-- [ ] ⬜ **Task 1.1**: N1 — detector first: a test that asserts every
-  `emit_hook_error` call site supplies an event name Claude Code accepts, and
-  that fails on the three current ones. Then thread the real event name through.
+- [x] ✅ **Task 1.1**: N1 — detector first, RED on both tracked paths, then the
+  fix: no event name at all, carried by the universal `systemMessage` field.
 
-- [ ] ⬜ **Task 1.2**: N2 — teach the guard to read the tracked
-  `self_install_mode` declaration without spawning Python.
+- [x] ✅ **Task 1.2**: N2 — resolved as not-a-defect; the misleading TODO-shaped
+  comment that invited the wrong change was replaced with the rationale.
 
-- [ ] ⬜ **Task 1.3**: N3 — establish whether the `.example` exclusion is
-  deliberate, then track the template or anchor the ignore rule.
+- [x] ✅ **Task 1.3**: N3 — established: the exclusion IS deliberate and
+  documented. Re-scoped to visibility, which needs its own plan.
 
-- [ ] ⬜ **Task 1.4**: N4 — sweep user-facing output for bare `python `
-  invocations and correct them to `python3`.
+- [x] ✅ **Task 1.4**: N4 — corrected in `init.sh` and `daemon/cli.py`; the swept
+  repository had no other bare `python install.py`.
 
-- [ ] ⬜ **Task 1.5**: Prove the composite fix the only way that counts —
-  a genuinely fresh clone, with an agent started in it.
+- [x] ✅ **Task 1.5**: N5 — `scripts/bootstrap-self-install.sh`, and a message
+  that warns against the destructive command rather than recommending it.
+
+- [x] ✅ **Task 1.6**: Prove it the only way that counts — cloned fresh from
+  GitHub, ran the real forwarder, followed the printed instruction verbatim.
+
+- [ ] ⬜ **Task 1.7**: File the N3 visibility plan: a protected path that is
+  ABSENT is currently indistinguishable from one that is fine.
 
 ## Success Criteria
 
-- [ ] ⬜ No `emit_hook_error` path can emit an event name Claude Code rejects,
-  and a test fails if one is reintroduced.
+- [x] ✅ No `emit_hook_error` path can emit an event name Claude Code rejects,
+  and a test fails if one is reintroduced — 15 tests, including a sweep of all
+  32 forwarders and two vacuity guards so a dead regex cannot pass silently.
 
-- [ ] ⬜ A fresh clone of this repository starts a session in which the daemon
+- [x] ✅ A fresh clone of this repository starts a session in which the daemon
   either runs, or explains in readable prose exactly why it does not.
+
+- [x] ✅ The printed remedy is one a reader can follow without losing anything:
+  run from a bare clone it reaches 31/31 listeners and leaves the tracked tree
+  clean, with no `.bak` files.
 
 - [ ] ⬜ Every entry above is terminal.
 

@@ -377,8 +377,15 @@ if [[ -d "$PROJECT_PATH/.git" ]]; then
             has_self_install=true
         fi
 
-        # Check config file for self_install_mode (requires Python, done later)
-        # For now, just trust the HOOKS_DAEMON_ROOT_DIR override
+        # Deliberately NOT read: .claude/hooks-daemon.yaml's self_install_mode.
+        # It is tracked and says `true` in this repository, so reading it would
+        # satisfy this guard on every fresh clone — and that is exactly wrong.
+        # The config declares INTENT; the two signals above are evidence the
+        # runtime was actually BUILT. A clone has the intent and none of the
+        # runtime, so believing the config would wave it through to the
+        # "not installed" branch, whose advice is to run the CLIENT installer —
+        # which overwrites this repository's own tracked config. Refusing here,
+        # with the bootstrap instruction, is the useful answer.
 
         if [[ "$has_self_install" != "true" ]] && [[ ! -f "$PROJECT_PATH/.claude/hooks-daemon.env" ]]; then
             _HOOKS_DAEMON_REPO_UNCONFIGURED=true
