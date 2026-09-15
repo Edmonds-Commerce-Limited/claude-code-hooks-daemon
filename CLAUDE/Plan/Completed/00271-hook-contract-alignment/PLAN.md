@@ -2,6 +2,9 @@
 
 **Status**: Complete
 **Created**: 2026-08-26
+**GitHub Issue**: #22, #23 (retro-fitted — Task 2.7 fixed both, and neither was
+linked when the plan closed, so the reports stayed open for months after the fix
+shipped)
 **Owner**: joseph
 **Priority**: High
 **Recommended Executor**: Opus
