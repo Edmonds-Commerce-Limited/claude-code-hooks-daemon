@@ -114,16 +114,29 @@ does. The simulated run exists to answer this from data rather than taste.
 ### Phase 2: Decide from the record
 
 - [ ] 🔄 **Task 2.1**: Review what it would have denied, and settle the
-  coordination-tool boundary from that evidence. **Review done, boundary not
-  settled — and the record is why.** 437 would-be denials in one session:
-  Bash 277, Write 122, Edit 33, Artifact 4, CronList 1, ToolSearch 1, and
-  `Read` zero. Reads are already exempt, so the boundary is not too tight in
-  the way first suspected. But Bash is 63% of the total and spans both sides of
-  the line — `git status` and a QA run are coordination, and both are Bash —
-  while the verdict record carries `tool` without the command. The evidence
-  cannot separate them. Owner input needed: record enough to classify Bash, or
-  draw the boundary on `Write`/`Edit` alone, where 155 calls need no
-  interpretation at all.
+  coordination-tool boundary from that evidence. **Review done; the record now
+  CAN classify Bash, and the boundary itself remains the owner's call.**
+
+  437 would-be denials in the first session: Bash 277, Write 122, Edit 33,
+  Artifact 4, CronList 1, ToolSearch 1, and `Read` zero. Reads are already
+  exempt, so the boundary is not too tight in the way first suspected. But Bash
+  was 63% of the total and spans both sides of the line — `git status` and a QA
+  run are both Bash — while `verdicts.jsonl` carried `tool` without the
+  command, so the two were the same record.
+
+  That half was a BUILD, not a decision, and it is done: the handler now sets
+  `HookResult.rule` to the command HEADS (`git status`, `git commit`,
+  `pytest`), reusing the field that already exists for a handler-set
+  sub-classification. No new log, no new file, and nothing recorded that was
+  not already recorded. Heads only is both the privacy floor — a label is
+  written to a log, so it must never carry arguments, paths or tokens — and
+  the right granularity, since the rest of the command line cannot inform the
+  decision. RED first, 11 tests.
+
+  What is still owed is the judgement the evidence now serves: where the line
+  falls for Bash, or whether to draw it on `Write`/`Edit` alone, where 155
+  calls need no interpretation at all. Building the classifier did not
+  foreclose that — the second option is exactly as available as it was.
 
 - [ ] ⬜ **Task 2.2**: Owner decision on promoting to blocking, and separately
   on promoting to the shipped library. Either may be "no".

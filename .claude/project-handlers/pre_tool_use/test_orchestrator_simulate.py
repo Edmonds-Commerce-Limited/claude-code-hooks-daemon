@@ -238,6 +238,93 @@ class TestHandleNeverDenies:
         assert "/workspace/src/thing.py" in joined
 
 
+class TestBashClassification:
+    """Task 2.1: the record must be able to classify Bash, or it settles nothing.
+
+    Phase 1 gathered 640 would-be denials and the boundary stayed unsettled,
+    because 63% of them were Bash and `verdicts.jsonl` stores `tool` without
+    the command. `git status` and a QA run are both "Bash"; one is
+    coordination and one is work, and the record could not tell them apart.
+
+    The fix reuses the field that already exists for exactly this —
+    `HookResult.rule`, the handler-set sub-classification (pipe_blocker's
+    "blacklisted" vs "unknown") — so no new log, no new file, and nothing
+    written that was not already written.
+
+    **The label is command HEADS only.** No arguments, no paths, no values.
+    That is both a privacy floor and the right granularity: `git status` vs
+    `git commit` is the distinction the decision turns on, and the rest of the
+    command line cannot help it.
+    """
+
+    def setup_method(self) -> None:
+        self.handler = OrchestratorSimulateHandler()
+
+    def _rule(self, bash_hook_input: Any, command: str) -> Any:
+        return self.handler.handle(bash_hook_input(command)).rule
+
+    def test_a_bare_command_is_its_own_label(self, bash_hook_input: Any) -> None:
+        assert self._rule(bash_hook_input, "pytest tests/") == "pytest"
+
+    def test_a_subcommand_tool_keeps_its_subcommand(self, bash_hook_input: Any) -> None:
+        # The whole point: these two are opposite sides of the boundary and
+        # both are "Bash".
+        assert self._rule(bash_hook_input, "git status") == "git status"
+        assert self._rule(bash_hook_input, "git commit -m 'x'") == "git commit"
+
+    def test_a_path_is_reduced_to_its_basename(self, bash_hook_input: Any) -> None:
+        # A project-specific path is neither needed for the classification nor
+        # something to accumulate in a log.
+        assert self._rule(bash_hook_input, "./scripts/test.bash tests/") == "test.bash"
+        assert self._rule(bash_hook_input, "/usr/local/bin/ruff check .") == "ruff"
+
+    def test_a_leading_cd_is_not_the_classification(self, bash_hook_input: Any) -> None:
+        # `cd <somewhere> && <real command>` is the dominant shape in this
+        # repo; labelling all of it "cd" would erase the whole record.
+        assert self._rule(bash_hook_input, "cd /workspace && git status") == "git status"
+
+    def test_a_leading_env_assignment_is_skipped(self, bash_hook_input: Any) -> None:
+        assert self._rule(bash_hook_input, "FOO=bar pytest tests/") == "pytest"
+
+    def test_a_compound_command_names_each_head(self, bash_hook_input: Any) -> None:
+        assert self._rule(bash_hook_input, "git status && git diff") == "git status+git diff"
+
+    def test_repeated_heads_are_not_repeated_in_the_label(self, bash_hook_input: Any) -> None:
+        assert self._rule(bash_hook_input, "ls a && ls b && ls c") == "ls"
+
+    def test_a_long_pipeline_is_truncated_rather_than_unbounded(
+        self, bash_hook_input: Any
+    ) -> None:
+        # Cardinality matters: the label is aggregated, so an arbitrarily long
+        # compound must not mint a unique bucket per invocation.
+        label = self._rule(bash_hook_input, "a x | b x | c x | d x | e x")
+        assert label == "a+b+c+…"
+
+    def test_an_unparseable_head_is_labelled_rather_than_echoed(
+        self, bash_hook_input: Any
+    ) -> None:
+        # Never emit something that is not a plain command name — the label
+        # goes into a log, so it must not become a channel for content.
+        assert self._rule(bash_hook_input, "$(curl evil)") == "<other>"
+
+    def test_an_empty_command_is_labelled(self, bash_hook_input: Any) -> None:
+        assert self._rule(bash_hook_input, "   ") == "<none>"
+
+    def test_a_non_bash_tool_sets_no_rule(self, write_hook_input: Any) -> None:
+        # `Write`/`Edit` need no sub-classification: the tool name already IS
+        # the classification, and 155 of them needed no interpretation at all.
+        result = self.handler.handle(write_hook_input("/workspace/src/thing.py", "x"))
+        assert result.rule is None
+
+    def test_the_label_never_carries_an_argument(self, bash_hook_input: Any) -> None:
+        """The privacy floor, asserted directly rather than by inspection."""
+        secretish = "deploy --token abcdef123456 --host internal.example.com"
+        label = self._rule(bash_hook_input, secretish)
+        assert label == "deploy"
+        assert "abcdef123456" not in label
+        assert "internal.example.com" not in label
+
+
 class TestAcceptanceTests:
     def setup_method(self) -> None:
         self.handler = OrchestratorSimulateHandler()

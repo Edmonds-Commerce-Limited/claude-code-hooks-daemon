@@ -35,7 +35,8 @@ read-only" prefix list would throw away exactly the data Phase 2 needs to
 answer that question from evidence instead of taste.
 """
 
-from typing import Any
+import re
+from typing import Any, Final
 
 from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult, TestType
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
@@ -65,6 +66,84 @@ _COORDINATION_TOOLS: frozenset[str] = frozenset(
         "SendMessage",
     }
 )
+
+
+# ── Bash classification (Plan 00418 Task 2.1) ──────────────────────────────
+# Phase 1 gathered 640 would-be denials and the boundary stayed unsettled:
+# 63% were Bash, and `verdicts.jsonl` stores `tool` without the command, so
+# `git status` and a QA run are the same record. This labels the call with its
+# command HEADS and nothing else, carried on `HookResult.rule` — the field
+# that already exists for a handler-set sub-classification (pipe_blocker's
+# "blacklisted" vs "unknown"), so no new log and no new file.
+#
+# Heads only, deliberately. It is the privacy floor (a label is written to a
+# log, so it must never become a channel for arguments, paths, tokens or
+# hostnames) AND the right granularity: `git status` versus `git commit` is
+# the distinction the boundary decision turns on, and the rest of the command
+# line cannot inform it.
+
+# Segment separators. A deliberately naive split: this produces a LABEL, not a
+# parse, and anything it mishandles falls through to `_OTHER` rather than
+# being echoed.
+_SEGMENT_SPLIT: Final[re.Pattern[str]] = re.compile(r"&&|\|\||[;|]")
+# A plain command name — anything else is not emitted at all.
+_PLAIN_NAME: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9._-]+$")
+# A bare subcommand word (`status`, `commit`, `pr`), never a flag or a value.
+_BARE_WORD: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_-]*$")
+# `NAME=value` prefixes, which precede the real command head.
+_ENV_ASSIGNMENT: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# Tools whose FIRST ARGUMENT carries the meaning. `git` alone says nothing
+# about which side of the boundary a call sits on; `git status` says it all.
+_SUBCOMMAND_TOOLS: Final[frozenset[str]] = frozenset(
+    {"git", "gh", "npm", "npx", "uv", "pip", "pip3", "docker", "podman", "cargo", "go", "apt"}
+)
+# `cd <somewhere> && <the real command>` is the dominant shape in this repo;
+# labelling the whole thing "cd" would erase the record it exists to build.
+_TRANSPARENT_HEADS: Final[frozenset[str]] = frozenset({"cd", "pushd", "popd"})
+_LABEL_SEPARATOR: Final[str] = "+"
+_MAX_LABELS: Final[int] = 3
+_TRUNCATION_MARKER: Final[str] = "…"
+_OTHER: Final[str] = "<other>"
+_NONE: Final[str] = "<none>"
+
+
+def _segment_label(segment: str) -> str | None:
+    """The command head(s) of one segment, or None when there is nothing to say."""
+    tokens = segment.split()
+    while tokens and _ENV_ASSIGNMENT.match(tokens[0]):
+        tokens.pop(0)
+    if not tokens:
+        return None
+
+    head = tokens[0].rsplit("/", 1)[-1]
+    if head in _TRANSPARENT_HEADS:
+        return None
+    if not _PLAIN_NAME.match(head):
+        # Substitutions, quoting, redirects — not a name, so say so rather
+        # than emit the text.
+        return _OTHER
+    if head in _SUBCOMMAND_TOOLS and len(tokens) > 1 and _BARE_WORD.match(tokens[1]):
+        return f"{head} {tokens[1]}"
+    return head
+
+
+def classify_bash_command(command: str) -> str:
+    """A low-cardinality label naming what a Bash call RUNS, never its arguments.
+
+    Deduped in first-seen order and capped at :data:`_MAX_LABELS`, because the
+    label is aggregated: an uncapped compound command would mint a unique
+    bucket per invocation and the tally would count nothing.
+    """
+    labels: list[str] = []
+    for segment in _SEGMENT_SPLIT.split(command):
+        label = _segment_label(segment)
+        if label is not None and label not in labels:
+            labels.append(label)
+    if not labels:
+        return _NONE
+    if len(labels) > _MAX_LABELS:
+        return _LABEL_SEPARATOR.join([*labels[:_MAX_LABELS], _TRUNCATION_MARKER])
+    return _LABEL_SEPARATOR.join(labels)
 
 
 def _call_detail(hook_input: dict[str, Any]) -> str:
@@ -112,9 +191,18 @@ class OrchestratorSimulateHandler(PreToolUseHandlerBase):
         return tool_name not in _COORDINATION_TOOLS
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Always ALLOW. Records what would have been denied, as context only."""
+        """Always ALLOW. Records what would have been denied, as context only.
+
+        `rule` carries the Bash classification (Task 2.1) so `verdicts.jsonl`
+        records WHICH command, not just "Bash" — 63% of Phase 1's record was
+        Bash and could not be classified from it. Set for Bash only:
+        `Write`/`Edit` need no sub-classification, because the tool name
+        already is one.
+        """
+        command = get_bash_command(hook_input)
         return GatingResult(
             decision=Decision.ALLOW,
+            rule=classify_bash_command(command) if command is not None else None,
             context=[
                 "SIMULATED orchestrator-only mode (Plan 00418, Phase 1 — "
                 "record only, never blocks): main thread would have been "

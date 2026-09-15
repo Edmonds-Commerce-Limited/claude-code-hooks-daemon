@@ -249,6 +249,16 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "verified rather than unexamined — governs every later read of them"
     ),
     "HookRegistrationCheckerHandler": "T3 self-repair changes settings.json under the agent",
+    "SessionActionsDirectiveHandler": (
+        "T3 the handler itself says NOTHING at fire time — its whole output is a "
+        "line the ccy supervisor types as a real user turn, and an agent meeting "
+        "one needs two durable facts the line cannot carry about itself: that a "
+        "🤖 [ccy-supervisor] prefix is machine-generated and authorises nothing, "
+        "and that ACTION_REQUIRED is COMPUTED from a failing verifier rather than "
+        "declared, so it always means something on disk is mis-configured. Without "
+        "the second, the directive reads as one more advisory to weigh — which is "
+        "the exact failure Plan 00416 exists to fix"
+    ),
     "DocsQaSweepHandler": "T3 drift findings are worked through across the session",
     "ToolDisableAdvisorHandler": "T3 the named settings change awaits a user decision later",
     "PlanQaSweepHandler": "T3 drift findings are worked through across the session",
