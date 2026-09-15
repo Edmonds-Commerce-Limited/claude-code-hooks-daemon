@@ -12,8 +12,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00414: absent protected path is silent](00414-absent-protected-path-is-silent/PLAN.md) - Not Started (a configured protected path that does NOT exist produces no advisory, so "your word list is fine" and "that guard has been inert since you cloned" are reported identically — by silence. Graduated from 00413 N3, which was filed with the wrong fix)
 
-- [00413: niggles ledger thirteen](00413-niggles-ledger-thirteen/PLAN.md) - In Progress, the OPEN ledger (seventeen entries; the first five opened by a new collaborator's fresh clone — the one environment this project structurally cannot dogfood, since every maintainer checkout has already been installed into. All terminal bar N6/N15, whose enforcement is designed and owner-gated)
-
 - [00412: jobs, recurring work and security review](00412-jobs-recurring-work-and-security-review/PLAN.md) - Not Started (a second work concept beside Plans: a JOB is recurring work that never completes, journalled per RUN, driven by the persistent-cron system. First job is a security review — full monthly sweep plus a per-release delta — with self-improving security docs and a defence-before-fix rule. In design; research first, then owner review before implementation)
 
 - [00411: host hostname in status line](00411-host-hostname-in-status-line/PLAN.md) - Not Started (an optional segment naming the machine the session is really on; a container's own hostname is the container ID, and probing proved the host's name is unreadable from inside one — the `/etc/hosts` loopback read is host-distro-dependent, so an explicit export is the mechanism and the read is only a hint)
@@ -151,6 +149,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00413: niggles ledger thirteen](Completed/00413-niggles-ledger-thirteen/PLAN.md) - Complete at `1861a5ec`…`c2e52bb5` + the archiving commit (seventeen entries, all terminal; opened by a new collaborator's fresh clone, the one environment this project structurally cannot dogfood. N3→00414, N17→00415, N6/N15→00416)
+
 - [00407: niggles ledger twelve](Completed/00407-niggles-ledger-twelve/PLAN.md) - Complete at `1eefc55b`…`a391132e` + the archiving commit (twelve entries, all terminal; N7 was a release REGRESSION disabling R-GIT-CHECKOUT-DISCARD, and N12 corrected this plan's own N2/N3 fixes, which blanked quoted literals and let `bash -c` walk past two guards)
 
 - [00406: newline is a command boundary in handler patterns](Completed/00406-newline-is-a-command-boundary-in-handler-patterns/PLAN.md) - Complete at `f9b78828` + the archiving commit (four blocking handlers judged the NEXT line as part of the command they matched; the `&&` control turned a hunch into an implementation fact)
@@ -209,7 +209,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00372: worktree reap two defects](Completed/00372-worktree-reap-two-defects/PLAN.md) - Complete + the archiving commit (a worktree with no commits yet passed every safety predicate vacuously, so a live agent's work was offered for deletion; and the branch delete had never once worked, passing a fully-qualified ref that `git branch -d` rejects)
 
-- [00371: qa acceptance probes detect a stale daemon](Completed/00371-qa-acceptance-probes-detect-a-stale-daemon/PLAN.md) - Complete + the archiving commit (the acceptance harness graded whatever code the running daemon loaded at startup, so it could pass a broken tree; a startup source fingerprint now makes every live-dispatch test fail by name on a stale daemon)
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
@@ -264,9 +263,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 417 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 363 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 364 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 31 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 30 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

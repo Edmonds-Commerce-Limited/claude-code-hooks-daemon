@@ -1,6 +1,6 @@
 # Plan 00413: niggles ledger thirteen
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-15
 **Owner**: joseph
 **Priority**: Medium
@@ -51,7 +51,7 @@ fixing earlier entries, and that sequence is part of the record.
 | N3  | a missing secret word list leaves a guard inert and says nothing                           | ⬜ Graduated to [00414](../00414-absent-protected-path-is-silent/PLAN.md)            |
 | N4  | the printed remedy names an interpreter that is not installed                              | ✅ Fixed                                                                             |
 | N5  | that remedy also DESTROYS this repository's tracked config                                 | ✅ Fixed                                                                             |
-| N6  | the persistent-cron mechanism rests on output agents skim                                  | ⬜ Designed; implementation owner-gated                                              |
+| N6  | the persistent-cron mechanism rests on output agents skim                                  | ⬜ Graduated to [00416](../00416-session-start-action-tiers-and-teeth/PLAN.md)       |
 | N7  | no sanctioned way to FIND a plan, so the guard denies the only obvious one                 | ✅ Fixed                                                                             |
 | N8  | a newly recorded licence never reaches already-vendored files                              | ✅ Fixed (Task 1.11 — drift is reported)                                             |
 | N9  | the provenance deny message invites the corruption it should prevent                       | ✅ Fixed                                                                             |
@@ -86,6 +86,10 @@ fixing earlier entries, and that sequence is part of the record.
 
 - [x] ✅ **Task 1.7**: N3 graduated to Plan
   [00414](../00414-absent-protected-path-is-silent/PLAN.md).
+
+- [x] ✅ **Task 1.21**: N6/N15 graduated to Plan
+  [00416](../00416-session-start-action-tiers-and-teeth/PLAN.md), carrying
+  `DESIGN-cron-enforcement.md` with them.
 
 - [x] ✅ **Task 1.8**: N6 — designed, and the design changed when N15 showed the
   premise was false: verification is a `Stop`-time comparison of `session_crons`
@@ -204,14 +208,27 @@ fixing earlier entries, and that sequence is part of the record.
   clean, with no `.bak` files.
 
 - [x] ✅ Every entry above is terminal in the sense this plan's Goals define —
-  seventeen niggles, twenty tasks, each fixed with a RED-first test, determined
-  from the record, or graduated to its own numbered plan (N3 → 00414,
-  N17 → 00415).
+  seventeen niggles, twenty-one tasks, each fixed with a RED-first test,
+  determined from the record, or graduated to its own numbered plan
+  (N3 → 00414, N17 → 00415, N6/N15 → 00416).
 
-- [ ] ⬜ **Owner-gated, and the only thing left**: N6/N15's enforcement is
-  DESIGNED, not built. It adds a `when_env:` config key and changes the public
-  `issue-sdlc` claim from a label to a branch-ref push, so it is not a change
-  to make unasked. Everything else in this ledger is complete.
+- [x] ✅ N6/N15 graduated rather than stalling here. It was the last open entry,
+  held for an owner ruling; once that ruling arrived the work had outgrown a
+  ledger — it is feature work with three build phases, not a niggle.
+  `DESIGN-cron-enforcement.md` moved to
+  [00416](../00416-session-start-action-tiers-and-teeth/PLAN.md) with it. The
+  `when_env:` key and the `issue-sdlc` branch-ref claim stay owner-gated, and
+  are recorded in that plan's Non-Goals so gating one no longer blocks the
+  other.
+
+- [x] ✅ Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/01-find-plan-and-explain-handler.md` and
+  `02-unattended-mode-and-scoped-scans.md`, plus
+  `UNRELEASED/config-changes/v3.65.0.yaml` for the one new config key
+  (`ask_user_question_blocker.options.mode`). The holding area was EMPTY when
+  this plan closed, so none of it had been staged; the version in that filename
+  is a target for the release agent to confirm, not a release decision taken
+  here.
 
 ## Delivery & Milestones
 

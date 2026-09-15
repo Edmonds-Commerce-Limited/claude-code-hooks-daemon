@@ -1,0 +1,36 @@
+# Drafted by Plan 00413. The VERSION in the filename and the `version:` key are
+# a target, not a decision — releases are human-gated in this project, and the
+# release agent confirms or renames this file. Only the content is asserted here.
+version: "3.65.0"
+date: "UNRELEASED"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.ask_user_question_blocker.options.mode
+      description: >-
+        Declares whether a human is watching this session. Claude Code's own
+        "nobody is watching" mechanisms are launcher flags, so they cannot reach
+        a cron job firing into a live interactive session — a session that is
+        only SOMETIMES unattended previously had no way to say so. Set to
+        `unattended` and a question that would otherwise wait forever for an
+        answer is refused, with the agent told to choose the option it would
+        have recommended and continue.
+      example_yaml: |
+        ask_user_question_blocker:
+          enabled: true
+          options:
+            mode: unattended
+      migration_note: >-
+        Leave unset for an ordinary interactive session; the default behaviour
+        is unchanged. Set `unattended` for a session driven by crons, a
+        supervisor, or any other automation where no human will answer.
+      recommended: false
+      dormant: true
+
+  renamed: []
+
+  removed: []
+
+  changed: []
