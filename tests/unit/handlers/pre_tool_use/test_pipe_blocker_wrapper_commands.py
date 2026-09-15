@@ -59,9 +59,7 @@ class TestTheCheapUseSurvives:
             "printenv PATH | tail -n 2",
         ],
     )
-    def test_printenv_is_still_whitelisted(
-        self, handler: PipeBlockerHandler, command: str
-    ) -> None:
+    def test_printenv_is_still_whitelisted(self, handler: PipeBlockerHandler, command: str) -> None:
         """`printenv` is the non-wrapper spelling and does the same job.
 
         It cannot run another command at all, so it carries none of the hazard
