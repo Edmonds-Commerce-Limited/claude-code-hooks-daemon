@@ -301,3 +301,49 @@ Two guards had to pass before AND after, or the fix would have traded a false
 positive for a gate that never fires: a real module under a declared
 `source_dirs` is still gated, and an `__init__.py` under zero-config is still
 exempt.
+
+### N7 — the formatter of record is documented and unguarded, in a repository whose thesis is that this fails
+
+**Found**: by doing it. Mid-way through Plan 00412 Phase 3 I ran
+`python -m ruff format src/claude_code_hooks_daemon tests/unit` to tidy the
+files I had just edited. Ruff is this project's LINTER; **Black is its
+formatter**, and `scripts/qa/run_format_check.sh` runs Black auto-fixing.
+
+`CLAUDE/QA.md:48` says so plainly — "**Format** (Black) / **Linter** (Ruff) —
+both auto-fix via `./scripts/qa/run_autofix.sh`". So this is not a
+documentation gap. I had read that file in this session and reached for the
+wrong tool anyway.
+
+**What it cost.** Commit `344ebf16` was meant to carry an eight-file fix. It
+carried **163 files**, the other 155 being Ruff restyling every file it
+touched. The next QA run reformatted 82 of them back to Black's style, which is
+how it surfaced. An earlier commit, `5d70237f`, was the same thing in
+miniature; at the time I recorded it as "the QA run's own formatter correcting
+a file I had committed unformatted", which was wrong — the file was formatted,
+just by the wrong formatter.
+
+**Why it is a niggle and not merely my mistake.** Both formatters are installed
+and both are a natural reach; `ruff format` succeeds, reports confidently, and
+leaves a tree that passes `ruff format --check`. Nothing objects until a later
+QA run rewrites the files, by which point the churn is already in pushed
+history and mixed into an unrelated commit — so the review cost lands on
+whoever reads that diff, not on whoever caused it.
+
+This repository's whole argument is that a rule stated in prose and enforced by
+nothing gets broken. Here is that argument, tested on its own author, a few
+hours after reading the prose.
+
+**Candidate remedies**, cheapest first:
+
+1. A Bash guard denying `ruff format` (and `ruff --fix` where it restyles),
+   naming `./scripts/qa/run_autofix.sh` in the deny message. Mirrors
+   `enforce_llm_qa`, which already redirects `run_all.sh` to the LLM wrapper
+   for exactly this kind of "right family, wrong entry point" error.
+2. Configure `[tool.ruff.format]` to match Black, so the two agree and the
+   trap stops existing. Weaker: it makes the wrong tool harmless rather than
+   unavailable, and leaves two sources of truth for one decision.
+3. Nothing, and rely on the QA run catching it. This is the current state, and
+   the cost is that it catches it AFTER the commit is pushed.
+
+Remedy owner-gated: (1) adds a handler and a rule id, which changes the gate
+surface in every project that installs the daemon.

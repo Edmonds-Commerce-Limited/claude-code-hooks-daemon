@@ -46,6 +46,10 @@ without opening it:
 - **N6** — declaring `layout.source_dirs` silently switched off every TDD
   language strategy's file-level exclusions, so a project that describes itself
   carefully lost Python's `__init__.py` exemption. Fixed, RED first.
+- **N7** — Black is the formatter of record, Ruff the linter, and nothing stops
+  an agent running `ruff format`: an eight-file fix commit went in carrying 163.
+  Documented in `CLAUDE/QA.md` and broken anyway, by the author, hours after
+  reading it. Remedy owner-gated.
 
 ## Tasks
 
