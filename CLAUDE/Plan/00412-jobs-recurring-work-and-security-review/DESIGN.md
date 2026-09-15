@@ -134,8 +134,9 @@ jobs expire after seven days, and the daemon cannot enumerate them. Therefore:
 
 - A cron **prompts** a run. It is not evidence of one.
 - A run record **proves** a run, including a run that found nothing.
-- `hooks-daemon run-job <id>` is the entry point a cron prompt names, so the
-  schedule lives in `persistent_crons` and the procedure lives in the job.
+- `hooks-daemon run-routine <id>` is the entry point a cron prompt names, so
+  the schedule lives in `persistent_crons` and the procedure lives in the
+  routine.
 
 Stated plainly because the tempting design — treating a declared cron as
 evidence of execution — records an intention and calls it a fact.
@@ -202,11 +203,11 @@ backwards.
 monthly job does not need a monthly cron at all: a `session_start` trigger that
 consults the interval and stays silent unless a run is overdue gives the same
 cadence with none of the delivery risk. The clock becomes an optimisation for
-jobs that must fire without a human present, not the foundation.
+routines that must fire without a human present, not the foundation.
 
-Consequence for D7: the cron entry point remains useful, but `run-job` should
-be invokable from a session-start surface too, and a job's declaration names
-its trigger kind rather than assuming a schedule.
+Consequence for D7: the cron entry point remains useful, but `run-routine`
+should be invokable from a session-start surface too, and a routine's
+declaration names its trigger kind rather than assuming a schedule.
 
 ## D10. Run states, and why "clean" must never mean "absent" — DECIDED
 
@@ -260,15 +261,15 @@ to versions; dates drift and mean nothing to a reader six months later.
 Found by auditing what makes Plans work. Both would be silent.
 
 **The staleness checks invert.** `staleness-nag`, `dormant-honesty` and
-`journal-freshness` all assume that quiet means neglected. For a recurring job,
+`journal-freshness` all assume that quiet means neglected. For a Routine,
 quiet between runs is exactly correct — so copied unchanged they would nag
-daily about a job behaving perfectly. The Jobs equivalent is
+daily about a Routine behaving perfectly. The Routine equivalent is
 schedule-adherence, which needs a cadence concept Plans do not have.
 
-**The goal ledger never releases a Job.** A ledger entry retires when its plan
-reaches a terminal status. A Job has no terminal status, so it would enter the
-ledger once and never leave, challenging every stop for the rest of the
-session — forever.
+**The goal ledger never releases a Routine.** A ledger entry retires when its
+plan reaches a terminal status. A Routine has no terminal status, so it would
+enter the ledger once and never leave, challenging every stop for the rest of
+the session — forever.
 
 ## D14. Share the machinery, do not fork it — DECIDED
 
@@ -277,8 +278,8 @@ concrete refactor: `plan_qa/paths.py` (whose `classify()` is already documented
 as config-independent), the journal subsystem, and the numbering/counter layer
 (`mkplan.bash` already parameterises its root and renders a template).
 
-The strongest case is the **journal**: a Job's journal is *more* load-bearing
-than a Plan's, because it IS the per-run record.
+The strongest case is the **journal**: a Routine's journal is *more*
+load-bearing than a Plan's, because it IS the per-run record.
 
 Cost of forking instead, in severity order: ~60 lines of subtle lock, counter
 and drift-guard concurrency code gets duplicated and one copy gets a fix; the
@@ -288,8 +289,15 @@ the `JOURNAL`/`PLAN.md` ambiguity that `paths.py` removes *by construction*
 comes back.
 
 Note also that `docs_qa` already duplicated `plan_qa`'s type layer rather than
-sharing it. Jobs would make three copies. That is worth a deliberate ruling
+sharing it. Routines would make three copies. That is worth a deliberate ruling
 now, not a discovery later.
+
+**Contradicted by Task 2.2, and unresolved — see the adversarial review.** No
+task implements this decision, and Task 2.2 instructs the scaffolding to mirror
+`mkplan.bash`'s numbering, which IS the fork D14 rejects. Settling it interacts
+with the reviewer's §3 alternative: if Routines are hand-created and few, the
+numbering layer is not needed at all and the share-or-fork question for THAT
+layer dissolves rather than being answered. Owner's call, with Q2/Q4.
 
 ## D15. Defence Before Fix — where this project already conforms — DECIDED
 

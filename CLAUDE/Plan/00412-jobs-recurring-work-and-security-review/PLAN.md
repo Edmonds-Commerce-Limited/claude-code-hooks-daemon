@@ -157,7 +157,12 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   procedure that dispatches it.
 
 - [ ] ⬜ **Task 3.4**: Run it once, end to end, and fix what it finds under
-  Defence Before Fix — the Defence before the fix, every time.
+  Defence Before Fix — the Defence before the fix, every time. Each Defence is
+  a Detector in `scripts/qa/`, wired into `run_all.sh` like every other check.
+  Named explicitly because DBF clause 3.2 forbids the test from BEING the
+  Detector: a regression test proves one instance was fixed, while a Detector
+  finds the whole class and keeps finding it. Left implicit, this gets
+  re-litigated at each finding and settled the cheap way.
 
 ## Success Criteria
 
