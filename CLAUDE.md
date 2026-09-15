@@ -537,6 +537,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - dispatch_declaration — declare where a subagent's reports go
 
+<!-- handler: orchestrator-simulate -->
+
+- orchestrator-simulate — orchestrator-only mode, SIMULATE ONLY (Plan 00418)
+
 <!-- handler: flaggable-work-advisor -->
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
