@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from claude_code_hooks_daemon.constants import Priority
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
@@ -18,7 +19,7 @@ from claude_code_hooks_daemon.core.router import EventRouter
 
 class _ContextHandler(Handler):
     def __init__(self, name: str) -> None:
-        super().__init__(name=name, priority=50, terminal=False)
+        super().__init__(name=name, priority=Priority.DEFAULT, terminal=False)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return True
