@@ -177,14 +177,15 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   the overdue assertion, so shipping the scaffolder now would put half a
   feature in other people's repositories.
 
-- [ ] ⬜ **Task 2.3**: `hooks-daemon run-routine <id>`: resolve the definition,
-  open a run record, hand the agent the procedure, and record the outcome. The
-  existing `daemon/housekeeping.py` step-registry and
-  `config_optimisation/state.py`'s `record_run` are the closest existing
-  shapes to reuse.
+- [x] ✅ **Task 2.3**: `hooks-daemon run-routine <id>` — RED first, in three
+  pieces so the thing that can be wrong is testable without argparse:
+  `routines/ledger.py` (18 tests), `routines/resolver.py` (16) and the verb
+  itself (15). `cli.py` is already ~9,000 lines and the last collector that
+  grew inside it had to be extracted; this one starts outside.
 
-  **The record half is built**, RED first, in `routines/ledger.py` with 18
-  tests. The CLI verb itself is what remains.
+  Proven live as well as in tests: a scratch project's routine was started,
+  refused a finish with no interval, finished `clean`, and the ledger holds
+  the two rows.
 
   **One row per EVENT, not per run** — and that shape is forced rather than
   chosen. D10's `failed` means "started and did not finish", and nothing can
@@ -206,6 +207,16 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   humans read. That means this project's own `markdown_table_formatter` will
   re-align a ledger anyone opens, so the parser treats cell padding as
   presentation — pinned by a test that reformats the table and reads it back.
+
+  **Building it found a gap in D10's vocabulary, which Task 2.4 has to close.**
+  D10 has no IN-PROGRESS state, so a run that is running right now derives to
+  `failed` — "started and did not finish" is literally true of it. From the
+  record alone the two are indistinguishable, and that is the design working;
+  but a listing is read by someone asking about the world, so the verb renders
+  that state as `unfinished` rather than accusing a healthy run of dying.
+  Separating them for real needs D11's "period plus grace", which nothing has
+  yet. Recorded here rather than fixed in passing, because a grace window is a
+  policy decision and inventing one inside a display label would bury it.
 
 - [ ] ⬜ **Task 2.4**: QA checks for the new tree, mirroring `plan_qa`: an
   overdue run, a run with no recorded interval, a gap between consecutive

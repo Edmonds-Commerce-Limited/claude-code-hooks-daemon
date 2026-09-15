@@ -3891,8 +3891,7 @@ def cmd_signal(args: argparse.Namespace) -> int:
             return 1
         except OSError as e:
             print(
-                f"ERROR: failed to write operator signal for session "
-                f"'{target_session_id}': {e}",
+                f"ERROR: failed to write operator signal for session '{target_session_id}': {e}",
                 file=sys.stderr,
             )
             return 1
@@ -6337,8 +6336,7 @@ def _remote_docs_check(tree: Path, now: Any, known_sources: Mapping[str, str] | 
         )
         for drift in drifted:
             print(
-                f"{drift.document.path}: recorded `{drift.recorded}`, "
-                f"declared `{drift.expected}`"
+                f"{drift.document.path}: recorded `{drift.recorded}`, declared `{drift.expected}`"
             )
         print("  fix: bin/hooks-daemon remote-docs add <source_url>  (re-derives frontmatter)")
 
@@ -7352,6 +7350,192 @@ def cmd_session_actions(args: argparse.Namespace) -> int:
     else:
         _render_session_actions_text(entries)
 
+    return 0
+
+
+def _run_routine_project_root(args: argparse.Namespace) -> Path | None:
+    """The project root for a ``run-routine`` invocation.
+
+    Mirrors ``cmd_session_actions``: an explicit override wins, else the
+    config file's grandparent, so the verb works without a running daemon.
+    """
+    _init_project_context_for_explain(args)
+    override = getattr(args, "project_root", None)
+    if override:
+        return Path(override).resolve()
+    config_file = _find_config_file_for_explain(args)
+    return config_file.parent.parent if config_file is not None else None
+
+
+def _run_state_label(state: object | None) -> str:
+    """How a run's derived state reads in a listing.
+
+    Two renamings, both because the derived vocabulary is honest about the
+    RECORD while a listing is read by someone asking about the WORLD.
+
+    ``None`` is "never run" — the absence of a record, which D6 keeps out of
+    the state vocabulary entirely so nothing can report an unrun routine as
+    having a state.
+
+    ``FAILED`` is "unfinished". From the record alone, a run still in progress
+    and a run that died are IDENTICAL — that indistinguishability is the point
+    of deriving the state rather than writing it. Telling them apart needs a
+    grace window (D11's "period plus grace"), which nothing here has yet, so
+    the listing says what it knows: this run has no terminal event. Calling it
+    `failed` would accuse a run that is running fine.
+
+    Args:
+        state: A :class:`routines.ledger.RunState`, or None for never run.
+
+    Returns:
+        The label to print.
+    """
+    from claude_code_hooks_daemon.routines.ledger import RunState
+
+    if state is None:
+        return "never run"
+    if state is RunState.FAILED:
+        return "unfinished"
+    return str(state)
+
+
+def cmd_run_routine(args: argparse.Namespace) -> int:
+    """Start or finish a Routine run, or list what the project declares.
+
+    Plan 00412 Task 2.3. The honest contract, from D7: a cron PROMPTS a run
+    and the record PROVES one. This verb is the entry point a cron prompt (or
+    a session-start surface) names — it opens the record, hands over the
+    procedure, and later records the outcome. It cannot execute the procedure
+    itself, and does not pretend to.
+
+    Args:
+        args: Parsed CLI arguments — ``identifier``, ``list_routines``,
+            ``finish``, ``outcome``, ``from_ref``, ``to_ref``, ``note``,
+            ``run_id`` and an optional ``project_root``.
+
+    Returns:
+        0 on success, 1 when the routine, the procedure or the finish
+        arguments cannot be resolved.
+    """
+    from claude_code_hooks_daemon.routines.intervals import RunInterval
+    from claude_code_hooks_daemon.routines.ledger import (
+        LedgerEvent,
+        RunEvent,
+        RunState,
+        append_event,
+        next_run_id,
+        read_events,
+        run_states,
+    )
+    from claude_code_hooks_daemon.routines.resolver import (
+        ProcedureMissingError,
+        RoutineNotFoundError,
+        find_routine,
+        list_routines,
+        read_procedure,
+    )
+
+    project_root = _run_routine_project_root(args)
+    if project_root is None:
+        print("run-routine: could not resolve the project root", file=sys.stderr)
+        return 1
+
+    if getattr(args, "list_routines", False):
+        routines = list_routines(project_root)
+        if not routines:
+            print("No routines declared (CLAUDE/Routine/ is empty or absent).")
+            return 0
+        for routine in routines:
+            states = run_states(read_events(routine))
+            # "never run" is the ABSENCE of a record, not a state -- so it is
+            # reported from an empty map rather than looked up in one (D6).
+            last = list(states.values())[-1] if states else None
+            print(f"{routine.name}  {_run_state_label(last)}")
+        return 0
+
+    identifier = getattr(args, "identifier", None)
+    if not identifier:
+        print("run-routine: name a routine, or pass --list", file=sys.stderr)
+        return 1
+
+    try:
+        routine = find_routine(project_root, identifier)
+    except RoutineNotFoundError as error:
+        print(f"run-routine: {error}", file=sys.stderr)
+        return 1
+
+    now = datetime.datetime.now(datetime.UTC)
+    events = read_events(routine)
+
+    if not getattr(args, "finish", False):
+        try:
+            procedure = read_procedure(routine)
+        except ProcedureMissingError as error:
+            print(f"run-routine: {error}", file=sys.stderr)
+            return 1
+        run_id = next_run_id(events, now)
+        append_event(routine, RunEvent(run_id=run_id, event=LedgerEvent.STARTED, at=now))
+        print(f"Started run {run_id} of {routine.name}.\n")
+        print(procedure)
+        print(
+            f"\nWhen the run ends, record it:\n"
+            f"  hooks-daemon run-routine {identifier} --finish "
+            f"--outcome clean|findings --from <ref> --to <ref>\n"
+            f"A run that finds nothing is recorded as `clean`, which is NOT "
+            f"the same as leaving no record."
+        )
+        return 0
+
+    # An unfinished run is indistinguishable from an abandoned one FROM THE
+    # RECORD -- which is exactly why `failed` is derived rather than written.
+    # So the open runs are the ones currently deriving to FAILED.
+    open_runs = [run_id for run_id, state in run_states(events).items() if state is RunState.FAILED]
+    run_id = getattr(args, "run_id", None) or ""
+    if not run_id:
+        if len(open_runs) != 1:
+            print(
+                f"run-routine: {len(open_runs)} unfinished runs "
+                f"({', '.join(open_runs) or 'none'}) — name one with --run",
+                file=sys.stderr,
+            )
+            return 1
+        run_id = open_runs[0]
+
+    outcome = getattr(args, "outcome", None)
+    if outcome is None:
+        print(
+            "run-routine: --finish needs --outcome clean|findings|skipped",
+            file=sys.stderr,
+        )
+        return 1
+
+    note: str = getattr(args, "note", "") or ""
+    from_ref: str = getattr(args, "from_ref", None) or ""
+    to_ref: str = getattr(args, "to_ref", None) or ""
+    skipped = outcome == LedgerEvent.SKIPPED
+    if not skipped and not (from_ref and to_ref):
+        print(
+            "run-routine: --outcome clean|findings needs --from and --to — a "
+            "terminal record without its interval silently breaks gap detection",
+            file=sys.stderr,
+        )
+        return 1
+
+    interval = None if skipped else RunInterval(from_ref=from_ref, to_ref=to_ref)
+    try:
+        event = RunEvent(
+            run_id=run_id,
+            event=LedgerEvent(outcome),
+            at=now,
+            interval=interval,
+            note=note,
+        )
+    except ValueError as error:
+        print(f"run-routine: {error}", file=sys.stderr)
+        return 1
+
+    append_event(routine, event)
+    print(f"Recorded run {run_id} of {routine.name} as {event.event}.")
     return 0
 
 
@@ -8695,6 +8879,73 @@ def main() -> int:
         help="Project root override (default: auto-detected from cwd)",
     )
     parser_session_actions.set_defaults(func=cmd_session_actions)
+
+    # run-routine command (Plan 00412 Task 2.3) — the entry point a cron
+    # prompt or a session-start surface names. It opens the run record and
+    # hands over the procedure; it cannot EXECUTE the procedure, and the
+    # honest contract (D7) is that a cron prompts a run and the record proves
+    # one.
+    parser_run_routine = subparsers.add_parser(
+        "run-routine",
+        help="Start or finish a Routine run, or --list what this project declares",
+    )
+    parser_run_routine.add_argument(
+        "identifier",
+        nargs="?",
+        default=None,
+        help="Routine number (00001 or 1) or folder name",
+    )
+    parser_run_routine.add_argument(
+        "--list",
+        dest="list_routines",
+        action="store_true",
+        help="List declared routines with the state of their most recent run",
+    )
+    parser_run_routine.add_argument(
+        "--finish",
+        action="store_true",
+        help="Record the outcome of an already-started run",
+    )
+    parser_run_routine.add_argument(
+        "--outcome",
+        choices=["clean", "findings", "skipped"],
+        default=None,
+        help="Run outcome; `clean` means ran and found nothing, which is NOT no record",
+    )
+    parser_run_routine.add_argument(
+        "--from",
+        dest="from_ref",
+        metavar="REF",
+        default=None,
+        help="Commit or tag the run's coverage starts at",
+    )
+    parser_run_routine.add_argument(
+        "--to",
+        dest="to_ref",
+        metavar="REF",
+        default=None,
+        help="Commit or tag the run's coverage ends at",
+    )
+    parser_run_routine.add_argument(
+        "--run",
+        dest="run_id",
+        metavar="ID",
+        default=None,
+        help="Run to finish (only needed when more than one is unfinished)",
+    )
+    parser_run_routine.add_argument(
+        "--note",
+        default="",
+        help="Free text recorded with the outcome; REQUIRED for --outcome skipped",
+    )
+    parser_run_routine.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected from cwd)",
+    )
+    parser_run_routine.set_defaults(func=cmd_run_routine)
 
     # docs-qa command (Plan 00284) — sweep / single-file lint (staged: not
     # implemented in this slice)
