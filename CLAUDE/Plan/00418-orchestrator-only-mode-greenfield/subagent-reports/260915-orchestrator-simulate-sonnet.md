@@ -2,14 +2,26 @@
 
 **Worktree**: `worktree-00418-orchestrator-simulate`
 **Branch**: `worktree-00418-orchestrator-simulate` (not merged to main)
-**Commit**: `5fca0b21` — "Plan 00418 Phase 1: orchestrator-only mode, SIMULATE ONLY"
+**Commits**: `5fca0b21` ("...SIMULATE ONLY"), `4193610d` (this report, QA
+result), and a merge of `main` bringing in `e311072d`/`6a6f9a43` (the
+evidence file and the debug_hooks.sh fix — see below).
 
 ## Task 1.1 — premise confirmed (STOP GATE cleared)
 
 The premise holds: `agent_id` is present on a `PreToolUse` call fired inside a
-subagent/teammate call, and absent from a genuine main-thread call. This was
-established empirically, not by trusting the vendored contract, in three
-independent ways:
+subagent/teammate call, and absent from a genuine main-thread call. **The
+authoritative evidence is
+[`EVIDENCE-agent-id-premise.md`](../EVIDENCE-agent-id-premise.md)**, captured
+by the team lead after the attempts below and merged into this branch: two
+real payloads (not synthetic), same daemon, same session, 45ms apart — a
+subagent call carrying `agent_id`/`agent_type`, a main-thread call carrying
+neither, with `session_id` and `prompt_id` identical across both (so neither
+is a discriminator, confirming §1 below independently). That file is the one
+to cite; what follows is my own contributing evidence, gathered before it
+existed, kept here because it corroborates the same conclusion via a
+different route (the live dispatch code path rather than a captured payload)
+and because Task 1.1's whole point is redundant, non-document-trusting
+verification:
 
 ### 1. Live daemon capture — my own calls (subagent-shaped)
 
@@ -45,18 +57,20 @@ teammate handles a new message" fires `SubagentStart`). The two threads are
 multiplexed on one session and told apart by `agent_id` alone, exactly as the
 plan's premise requires.
 
-### 2. Main-thread probe (partial — buffer eviction)
+### 2. Main-thread probe (my own attempts — both lost to buffer eviction)
 
 I asked the team lead (main thread) to run a distinctively-marked probe
 (`echo "MAIN-THREAD-PROBE-..."`) directly, twice, so I could capture the
 counterpart payload with no `agent_id`. Both times the shared daemon's
 in-memory DEBUG buffer (capped ~1000 entries, refilled by per-second `Status`
 renders from every concurrent session/agent sharing the daemon) rolled over
-before I could pull it — this is a genuine tooling limitation (`DEBUGGING_HOOKS.md`
-documents the 1000-entry cap), not a finding about the premise. I do not have
-a captured raw payload of a genuine live main-thread call to quote verbatim,
-and I am not asserting one from memory — see the substitute evidence below,
-which does not have this limitation.
+before I could pull it — compounded by SendMessage delivery to me being
+queued to my next turn rather than instant, so by the time I read either
+"go" message the buffer had already turned over. The team lead's own
+capture (§ above) sidesteps this entirely: one command that dumps the log
+AFTER its own payload was already written, so there is no race to lose. Kept
+here as the honest account of what I tried and why it failed, not as a
+residual gap — the gap is closed by the evidence file.
 
 ### 3. Direct-to-daemon integration probe (decisive, no eviction risk)
 
@@ -91,21 +105,18 @@ $ echo '{"hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"f
 {}
 ```
 
-This is weaker than a genuine captured main-thread payload from a real
-Claude Code session in one respect (I constructed the JSON rather than
-observing it arrive), but it is decisive for the property Task 1.1 actually
-needs to settle — **does the daemon's real dispatch path, not just unit
-tests, distinguish these two shapes correctly?** — and it has none of the
-eviction risk that defeated attempts 1 and 2. Combined with the upstream
-contract text (`contracts/claude-code-hooks/PreToolUse.json`
+This was weaker than a genuine captured main-thread payload in one respect (I
+constructed the JSON rather than observing it arrive), but it answers a
+question the evidence file doesn't: **does the daemon's real dispatch path,
+not just unit tests, distinguish these two shapes correctly?** — proving the
+handler's own code, not just the premise, behaves as intended end-to-end.
+Combined with the upstream contract text (`contracts/claude-code-hooks/PreToolUse.json`
 `conditional_input_fields.agent_id`, sourced from `untracked/hooks-raw.md`
-lines 267 and 767, sha256-verified against v2.1.272 per Ledger 00413 N12) and
-the in-process-teammate confirmation in §1, I am confident the premise holds.
-
-**If a genuine main-thread capture later contradicts this** (i.e., some
-Claude Code configuration exists where a real main-thread call also carries
-`agent_id`), that would be a finding worth surfacing before Phase 2 — flag it
-to the owner rather than trusting this report over new evidence.
+lines 267 and 767, sha256-verified against v2.1.272 per Ledger 00413 N12),
+the in-process-teammate confirmation in §1, and now the captured evidence
+file, the premise is confirmed on every axis: what the contract documents,
+what a live session actually sends, and what the handler's own dispatch does
+with it.
 
 **One caution from the team lead, incorporated into the design**: `agent_type`
 is documented as present in a broader set of cases than `agent_id` (also on a
@@ -227,22 +238,19 @@ just correctness.
 
 ## QA
 
-`./scripts/qa/llm_qa.py all`, run in this worktree, exit 0:
+First full run, before the merge below: `29/30 PASSED, 1/30 FAILED` — 29
+green, including `tests: 23723 passed, 0 failed, 20 skipped | coverage: 95.3%` and `project_handlers: 132 passed, 0 failed` (the full project-handler
+suite, including the 30 new tests). The one non-green category was
+`docs_qa: 7 findings (0 block, 7 advise)`, all advisory-only and pre-existing
+— dangling `../00413-niggles-ledger-thirteen/PLAN.md` links in four OTHER
+plans, left dangling by Plan 00413's own archival before this dispatch
+started, and unrelated to this diff. The team lead fixed those on `main` at
+`52784864`; merging `main` into this branch (below) brought the fix in, and
+a scoped re-run confirms `docs_qa: 0 findings (0 block, 0 advise)` on this
+branch now. A second full-suite run is in progress to confirm a clean
+30/30; will update this line if it finds anything the scoped run didn't.
 
-```
-QA: 29/30 PASSED, 1/30 FAILED
-```
-
-29 categories green, including `tests: 23723 passed, 0 failed, 20 skipped | coverage: 95.3%` and `project_handlers: 132 passed, 0 failed` (the full
-project-handler suite, including the 30 new tests). The one non-green
-category is `docs_qa: 7 findings (0 block, 7 advise)` — all seven are
-advisory-only, pre-existing, and unrelated to this change: dangling
-`../00413-niggles-ledger-thirteen/PLAN.md` links in four OTHER plans
-(00412, 00414, 00415, 00416), left dangling by Plan 00413's own archival
-into `Completed/` before this dispatch started. Nothing in this diff touches
-those plans or that link.
-
-## An incidental finding along the way (not fixed, out of scope)
+## An incidental finding along the way (fixed on main, `6a6f9a43`)
 
 Chasing a durable main-thread capture (the team lead's suggestion, per
 `CLAUDE/DEBUGGING_HOOKS.md`), I hit a real bug in `scripts/debug_hooks.sh`
@@ -255,24 +263,31 @@ on the missing directory; `pipefail` propagates that past `head`'s own
 success, and `set -e` kills the script before it ever reaches the env-var
 fallback — silently, no error text. It worked in this worktree only because
 this worktree happens to carry an empty `.claude/hooks-daemon/untracked/`
-directory, where `find` succeeds with zero matches. I did not fix this — it
-lives in `/workspace`, outside this dispatch's worktree-only scope — but it
-is worth a niggle-ledger entry: the tool the plan itself names as the
-supported way to do this capture doesn't work from the one place (a
-self-install checkout with no legacy vendored path) where a Plan 00418-style
-capture is most likely to be attempted.
+directory, where `find` succeeds with zero matches.
+
+I did not fix this myself (out of this dispatch's worktree-only scope), and
+flagged it to the team lead instead — correctly, per their confirmation. The
+team lead verified it, found a SECOND independent defect in the same
+function (the self-install socket lives at `<root>/untracked/`, so the
+client-install-only search path would have found nothing even without the
+crash), and fixed both on `main` at `6a6f9a43` with RED-first tests, recorded
+as Ledger 00419 N1. This branch has since merged that commit (below).
 
 ## Summary
 
-- Task 1.1 (STOP GATE): **premise confirmed**. Two attempts at a genuine
-  live main-thread capture were lost to SendMessage's queued (not instant)
-  delivery racing the shared daemon's ~1000-entry DEBUG buffer, and a switch
-  to the durable file-based `scripts/debug_hooks.sh` capture hit a separate,
-  real bug in `/workspace`'s environment (below) — so the premise rests on
-  the decisive direct-to-daemon integration probe plus the consistent
-  agent-carrying evidence from my own calls, not on a live main-thread
-  sample. None of this rests on trusting the vendored contract's
-  `input_example` alone, which is what cost the original attempt.
+- Task 1.1 (STOP GATE): **premise confirmed**, now on two independent,
+  mutually-corroborating lines of evidence: the team lead's captured
+  main-thread/subagent payload pair
+  ([`EVIDENCE-agent-id-premise.md`](../EVIDENCE-agent-id-premise.md), no
+  synthetic data, no race), and my own direct-to-daemon integration probe
+  proving the handler's live dispatch path honours the distinction
+  end-to-end. Neither rests on trusting the vendored contract's
+  `input_example` alone, which is what cost the original attempt. My own two
+  attempts at a live main-thread capture were lost to SendMessage's queued
+  (not instant) delivery racing the shared daemon's ~1000-entry DEBUG
+  buffer; the team lead's technique (dump the log from inside the same
+  command that generates the payload) has no such race and is the one to
+  reuse next time.
 - Tasks 1.2/1.3: TDD RED→GREEN, 30 tests, simulate-only handler with no
   reachable DENY path, priority 56.
 - Task 1.4: handler active in this worktree; genuine main-thread record
