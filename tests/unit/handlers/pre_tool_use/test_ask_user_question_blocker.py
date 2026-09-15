@@ -57,6 +57,22 @@ class TestAskUserQuestionBlockerHandler:
 
         return _AdvisoryModeHandler()
 
+    @pytest.fixture
+    def unattended_handler(self):
+        """Create handler instance in unattended mode (no human on the other end)."""
+        from claude_code_hooks_daemon.handlers.pre_tool_use.ask_user_question_blocker import (
+            AskUserQuestionBlockerHandler,
+        )
+
+        class _UnattendedModeHandler(AskUserQuestionBlockerHandler):
+            """Test double declaring `_mode`, mirroring the advisory double above."""
+
+            def __init__(self) -> None:
+                super().__init__()
+                self._mode = "unattended"
+
+        return _UnattendedModeHandler()
+
     # ------------------------------------------------------------------
     # Initialisation
     # ------------------------------------------------------------------
@@ -314,6 +330,61 @@ class TestAskUserQuestionBlockerHandler:
         assert result.decision == Decision.ALLOW
         # No warning needed when the call is properly justified
         assert not result.context
+
+    # ------------------------------------------------------------------
+    # handle() — unattended mode (nobody is there to answer)
+    # ------------------------------------------------------------------
+    def test_unattended_mode_denies_justified_question(self, unattended_handler):
+        """The whole point: a PERFECTLY justified question is still fatal unattended.
+
+        Strict mode lets a prefixed question through because "the user is
+        watching and will interrupt". Unattended, nobody is — so the
+        justification is irrelevant and the question waits for an answer that
+        never comes. This is the case strict mode cannot express.
+        """
+        result = unattended_handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {
+                    "questions": [{"question": f"{REQUIRED_PREFIX} A and B are equally valid. Which?"}]
+                },
+            }
+        )
+        assert result.decision == Decision.DENY
+
+    def test_unattended_mode_denies_unjustified_question(self, unattended_handler):
+        result = unattended_handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": "Should I continue?"}]},
+            }
+        )
+        assert result.decision == Decision.DENY
+
+    def test_unattended_mode_reason_tells_the_agent_to_assume_and_continue(
+        self, unattended_handler
+    ):
+        """A deny is only better than a hang if the agent knows what to do next.
+
+        The strict-mode reason talks about retrying with the prefix, which is
+        exactly the wrong advice here — the prefix cannot help. The unattended
+        reason must say nobody is there and instruct the agent to choose and
+        proceed.
+        """
+        result = unattended_handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": f"{REQUIRED_PREFIX} which of A or B?"}]},
+            }
+        )
+        reason = result.reason or ""
+        assert "unattended" in reason.lower()
+        # Must NOT advise the retry that cannot work in this mode.
+        assert "retry every question prefixed" not in reason
+
+    def test_unattended_mode_does_not_match_other_tools(self, unattended_handler):
+        """The mode changes the verdict for AskUserQuestion, not the handler's scope."""
+        assert unattended_handler.matches({"tool_name": "Write"}) is False
 
     # ------------------------------------------------------------------
     # handle() — custom required_prefix override

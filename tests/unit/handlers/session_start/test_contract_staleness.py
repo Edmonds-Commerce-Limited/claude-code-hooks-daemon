@@ -133,7 +133,7 @@ class TestVendoredMetaIsCurrent:
         assert h.meta_path.is_file(), "vendored META.json must ship with the repository"
         meta = json.loads(h.meta_path.read_text(encoding="utf-8"))
         audited = meta["last_audited_claude_code_version"]
-        assert audited == "2.1.263"
+        assert audited == "2.1.272"
         h.installed_version_reader = lambda: audited
         h.self_install_reader = lambda: True
         assert h.matches(_hook_input()) is True

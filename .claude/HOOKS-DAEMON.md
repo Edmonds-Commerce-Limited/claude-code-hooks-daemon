@@ -114,7 +114,7 @@
 | 67 | config_optimisation_reminder | ADVISORY | Remind the agent when the config-optimisation review is stale |
 | 68 | remote_docs_staleness | ADVISORY | Report vendored documents that are stale or no longer parse |
 | 69 | lsp_noise_checker | ADVISORY | Advise when a project's LSP config lets noise into the diagnostics stream |
-| 70 | persistent_cron_assertor | NON-TERMINAL | State the project's declared crons and instruct a CronList reconcile |
+| 70 | persistent_cron_assertor | ADVISORY | State the project's declared crons and instruct a CronList reconcile |
 | 71 | reference_repo_sweep | ADVISORY | Fetch, safely fast-forward and record every governed reference repo |
 
 ### PreCompact (2 handlers)
@@ -153,11 +153,12 @@
 |----------|---------|----------|-------------|
 | 15 | subagent_report_size_blocker | TERMINAL | Block a SubagentStop whose ``last_assistant_message`` is oversized |
 
-### Status (14 handlers)
+### Status (15 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 2 | multithread_indicator | NON-TERMINAL | Show this thread's rank among live Agent-View threads (``🧵 Y/X``) |
+| 7 | host_hostname | NON-TERMINAL | Show ``@machine-name`` for the host this session is really running on |
 | 10 | model_context | NON-TERMINAL | Format model name with effort level and colour-coded context percentage |
 | 11 | downgrade_indicator | NON-TERMINAL | Surface a silent model-family downgrade (e.g. fable/opus -> lower) in the status line |
 | 11 | environment_indicator | NON-TERMINAL | Show 💻 (desktop/host) or a container icon (🐳 docker / 📦 podman / 🧊 lxc) |

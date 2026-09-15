@@ -8,10 +8,33 @@ denied with guidance to state the assumed answer in plain text and proceed,
 leaving an audit trail for the watching user to interrupt if the assumption
 is wrong.
 
-Two modes:
+Three modes:
   * ``strict`` (default): DENY when any question lacks the prefix.
   * ``advisory``: ALLOW with a context warning so projects can dogfood the
     convention before turning on hard blocking.
+  * ``unattended``: DENY every question, prefix or not.
+
+``unattended`` exists because strict mode's rationale — "the user is watching
+and will interrupt if the assumption is wrong" — is conditional on a user
+being there. In a cron tick, in CI, or in a ``claude -p`` run, nobody is, and
+a perfectly justified question is then exactly as fatal as a tautological one:
+both wait for an answer that never arrives. Strict mode has no way to express
+that, and rewards the well-behaved agent — the one that declines to guess and
+uses the documented escape hatch — with a hung run.
+
+The mode must be DECLARED. No hook event carries a headless or
+non-interactive signal, so the daemon cannot detect it: ``PreToolUse`` gets
+``session_id``, ``transcript_path``, ``cwd``, ``permission_mode`` and
+``scratchpad_dir``, none of which distinguishes an attended session from an
+unattended one.
+
+Claude Code's own launcher flags (``--permission-prompts none``,
+``--permission-mode dontAsk``) solve this for a genuinely headless process and
+should be preferred where they apply. They do NOT cover a ``CronCreate`` job,
+which fires into an already-running interactive session: that session has a
+TTY and the flag was decided when it launched, so at 3am the question is
+displayed to a terminal nobody is reading. This mode is the lever for that
+case.
 
 Enabled by default (Plan 00117; opt-out — on unless a project explicitly
 disables it). Disable in ``hooks-daemon.yaml`` for a fully unattended
@@ -41,6 +64,32 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 DEFAULT_REQUIRED_PREFIX = "ASKING BECAUSE:"
 MODE_STRICT = "strict"
 MODE_ADVISORY = "advisory"
+MODE_UNATTENDED = "unattended"
+
+# Unattended mode denies every question, justified or not, and the reason has
+# to differ from strict mode's in SUBSTANCE rather than tone. Strict mode's fix
+# is "retry with the prefix", which is the one thing that cannot work here: the
+# prefix declares why the agent could not decide, and unattended there is
+# nobody to decide instead. Repeating that advice would send the agent round a
+# loop whose exit does not exist.
+_UNATTENDED_VERBOSE = (
+    "This project is running UNATTENDED: no human is reading this session, so "
+    "a question waits for an answer that never arrives. Every AskUserQuestion "
+    "is denied here, including a properly justified one -- the justification "
+    "is not in doubt, the ANSWERER is.\n\n"
+    "Do NOT retry with a prefix. There is no prefix that makes a question "
+    "answerable when nobody is present.\n\n"
+    "WHAT TO DO INSTEAD:\n"
+    "1. Choose the option you would have recommended. If one option is the "
+    "safe or reversible one, choose that.\n"
+    "2. State the question and the answer you assumed, in your output text, "
+    "so the transcript records the decision for whoever reads it later.\n"
+    "3. Continue working. A recorded assumption is recoverable; a hung "
+    "session is not.\n\n"
+    "If the decision is genuinely too consequential to assume -- it is "
+    "irreversible, or destroys data -- do not guess it. Stop, and say plainly "
+    "what you needed decided and why you would not assume it."
+)
 
 # Full first-fire teaching content (Plan 00116). The prefix is a runtime
 # option (overridable per-handler-instance, even after construction — see
@@ -125,14 +174,49 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
             verbose=_RULE_VERBOSE_TEMPLATE.format(prefix=prefix),
         )
 
+    @staticmethod
+    def _build_unattended_rule() -> Rule:
+        """Build the Rule for unattended mode.
+
+        Deliberately carries no prefix: the prefix is the strict-mode remedy
+        and naming it here would advertise a retry that cannot succeed.
+        """
+        return Rule(
+            rule_id=RuleID.ASK_USER_QUESTION_UNJUSTIFIED,
+            blocked="AskUserQuestion while running unattended",
+            why="Nobody is reading this session, so a question waits for an answer that never comes",
+            fix=(
+                "Choose the option you would have recommended, state the "
+                "assumption in your output text, and continue"
+            ),
+            verbose=_UNATTENDED_VERBOSE,
+        )
+
     def get_rules(self) -> list[Rule]:
-        """Return the single Rule backing this handler's strict-mode blocking."""
+        """Return the single Rule backing this handler's blocking, per mode.
+
+        Mode-aware on purpose. This Rule is what the generated CLAUDE.md rule
+        table renders, so returning the strict-mode Rule while running
+        unattended would publish a row saying questions are blocked "without
+        the prefix" — telling the agent a prefix would work, in the one mode
+        where it never can.
+        """
+        if getattr(self, "_mode", MODE_STRICT) == MODE_UNATTENDED:
+            return [self._build_unattended_rule()]
         return [self._build_rule(DEFAULT_REQUIRED_PREFIX)]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Allow if every question carries the required prefix; otherwise act per mode."""
         prefix = getattr(self, "_required_prefix", DEFAULT_REQUIRED_PREFIX)
         mode = getattr(self, "_mode", MODE_STRICT)
+
+        # Checked BEFORE the justification test, because unattended the
+        # justification does not change the verdict — there is no reader.
+        if mode == MODE_UNATTENDED:
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=self._formatter.verbose(self._build_unattended_rule()),
+            )
 
         all_justified = self._all_questions_justified(hook_input, prefix)
 
@@ -199,6 +283,34 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
 
     def get_claude_md(self) -> str | None:
         prefix = getattr(self, "_required_prefix", DEFAULT_REQUIRED_PREFIX)
+        if getattr(self, "_mode", MODE_STRICT) == MODE_UNATTENDED:
+            return (
+                "## ask_user_question_blocker — UNATTENDED: never ask, assume "
+                "and continue\n\n"
+                "This project runs unattended, so **every** `AskUserQuestion` "
+                "is denied — including a properly justified one. Nobody is "
+                "reading the session; a question waits for an answer that "
+                "never arrives, and the run hangs.\n\n"
+                f"There is no `{prefix}` escape hatch in this mode. The prefix "
+                "declares why you could not decide, and the problem is not "
+                "your reasoning — it is that there is no one to decide "
+                "instead.\n\n"
+                "**What to do when you would have asked**:\n"
+                "1. Choose the option you would have recommended. Where one "
+                "option is the safe or reversible one, choose that.\n"
+                "2. State the question and the answer you assumed, in your "
+                "output text, so the transcript records the decision.\n"
+                "3. Continue. A recorded assumption is recoverable; a hung "
+                "session is not.\n\n"
+                "```\n"
+                "I would normally ask: <question>.\n"
+                "Assumed answer: <your assumption>, because <reason>.\n"
+                "Proceeding on that basis.\n"
+                "```\n\n"
+                "**The one exception**: a decision that is irreversible or "
+                "destroys data should not be guessed. Stop, and say plainly "
+                "what needed deciding and why you would not assume it."
+            )
         return (
             "## ask_user_question_blocker — questions need `"
             f"{prefix}` justification\n\n"

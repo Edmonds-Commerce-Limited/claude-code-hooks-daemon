@@ -58,19 +58,33 @@ Everything after this point is judgement, and stays manual by design.
    the raw markdown and record it in the plan's audit document. Extraction is
    a verified manual/agent step by design — never an automated summarisation
    (Plan 00271 Decision 3).
+
 2. A newly documented event gets a new `<Event>.json` file (the checker treats
    a documented event missing from the daemon's catalogue as a finding, which
    is the intended pressure).
+
 3. Update `META.json`: `fetch_date`, `docs_bytes`, `docs_sha256` (the values
    `contract-status` printed for the upstream body),
    `last_audited_claude_code_version` (the installed Claude Code version
-   audited against), `event_count`. `TestMetaProvenance` in
-   `tests/unit/qa/test_check_hook_contract.py` pins the same three values;
-   move them together. Re-run `contract-status` and expect exit 0.
+   audited against), `event_count`. Re-run `contract-status` and expect
+   exit 0.
+
+   **TWO test files pin these values, and missing the second is easy.**
+   `TestMetaProvenance` in `tests/unit/qa/test_check_hook_contract.py` pins
+   the sha256, the byte count and the version; and
+   `tests/unit/handlers/session_start/test_contract_staleness.py` pins
+   `last_audited_claude_code_version` a second time, because the staleness
+   advisory's whole contract is "silent on the audited version". Move all of
+   them in the same commit as `META.json`. Grepping the OLD version string
+   across `tests/` before you finish is the reliable check — a refresh that
+   updates only the first file leaves a failure that looks unrelated to the
+   refresh when it surfaces later.
+
 4. Re-run the guard: `./scripts/qa/llm_qa.py hook_contract`. Triage every new
    finding into either a fix task (preferred) or an `ALLOWLIST.yaml` entry
    carrying a reason and a linked plan/task. Stale allowlist entries FAIL the
    check — delete entries whose drift no longer exists.
+
 5. Re-triage the INPUT side (Plan 00273): run
    `./scripts/qa/llm_qa.py input_contract`, and diff the refreshed
    `input_example`s against the daemon's current read surface

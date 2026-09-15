@@ -389,9 +389,26 @@ handlers:
       enabled: true
       priority: 22
 
-    ask_user_question_blocker: # Prefix-positive: blocks AskUserQuestion unless every question begins with `ASKING BECAUSE:`
+    ask_user_question_blocker: # UNATTENDED: blocks EVERY AskUserQuestion, justified or not
       enabled: true
       priority: 23
+      options:
+        # This repository runs unattended most of the time -- hourly CronCreate
+        # ticks and headless runs -- so the strict-mode rationale ("the user is
+        # watching and will interrupt") is false here more often than it is
+        # true. Unattended, a justified question is exactly as fatal as a
+        # tautological one: both wait for an answer that never arrives.
+        #
+        # Claude Code's launcher flags (--permission-prompts none,
+        # --permission-mode dontAsk) do NOT cover this project's actual failure
+        # mode. Its crons are session-memory jobs that fire into an
+        # already-running interactive session, so the session has a TTY and the
+        # flag was decided hours earlier at launch; at 3am the question is
+        # displayed to a terminal nobody is reading.
+        #
+        # Set `mode: strict` temporarily for an attended working session where
+        # you WANT to be asked.
+        mode: unattended
 
     # CODE QUALITY HANDLERS (Priority 25-45)
     qa_suppression:        # Unified multi-language QA suppression blocker (11 languages)
