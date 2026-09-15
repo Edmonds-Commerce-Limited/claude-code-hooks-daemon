@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.config.models import (
     PersistentCronConfig,
     PersistentCronsConfig,
 )
+from claude_code_hooks_daemon.constants import HandlerTag
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.session_start.persistent_cron_assertor import (
     PersistentCronAssertorHandler,
@@ -160,3 +161,33 @@ class TestHandlerWiring:
         result: Any = handler.handle({})
         assert result.decision is Decision.ALLOW
         assert result.context == []
+
+
+class TestTheHandlerIsTagged:
+    """Plan 00412: this handler shipped in v3.64.0 carrying NO tags at all.
+
+    That is not cosmetic. Tags are how a handler is bucketed for the
+    config-optimisation review and for any tag-scoped query, so an untagged
+    handler is invisible to exactly the surfaces meant to surface it — and it
+    fails silently, which is why nobody noticed for a release.
+
+    The v3.64.0 config-changes manifest describes it as "PLANNING tagged", so
+    the DOCUMENTATION was right and the code was wrong. Worth stating, because
+    the tempting repair was to correct the manifest to match the code, which
+    would have written the defect down as intended behaviour.
+    """
+
+    def test_it_carries_tags(self) -> None:
+        assert PersistentCronAssertorHandler().tags, "handler declares no tags at all"
+
+    @pytest.mark.parametrize(
+        "expected",
+        [HandlerTag.ADVISORY, HandlerTag.PLANNING, HandlerTag.NON_TERMINAL, HandlerTag.WORKFLOW],
+    )
+    def test_it_carries_the_tags_its_siblings_do(self, expected: HandlerTag) -> None:
+        """Matched to `recovery_cron_advisor`, the closest analogue.
+
+        That handler is also a cron advisory that reports rather than verifies,
+        and it carries WORKFLOW, PLANNING, ADVISORY and NON_TERMINAL.
+        """
+        assert expected in PersistentCronAssertorHandler().tags

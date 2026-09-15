@@ -32,6 +32,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from claude_code_hooks_daemon.config.models import Config, PersistentCronConfig
+from claude_code_hooks_daemon.constants import HandlerTag
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
@@ -49,6 +50,19 @@ class PersistentCronAssertorHandler(SessionStartHandlerBase):
             handler_id=HandlerID.PERSISTENT_CRON_ASSERTOR,
             priority=Priority.PERSISTENT_CRON_ASSERTOR,
             terminal=False,
+            # Matched to `recovery_cron_advisor`, the closest analogue: also a
+            # cron advisory that reports what is declared rather than verifying
+            # what is running. Tags are how a handler is bucketed for the
+            # config-optimisation review, so an untagged one is invisible to
+            # exactly the surface meant to surface it — silently, which is how
+            # this shipped untagged for a release with the manifest describing
+            # it as PLANNING tagged.
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.PLANNING,
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
+            ],
         )
 
     def get_default_enabled(self) -> bool:

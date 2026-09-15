@@ -390,7 +390,7 @@ config_changes:
         So a project that wants a recurring job has to re-create it by hand in
         every new session, which is exactly the kind of step that gets skipped.
         This block lets the project DECLARE the jobs it always wants -- each
-        with a `name`, a `schedule` and the `prompt` to enqueue -- and the
+        with an `id`, a `schedule` and the `prompt` to enqueue -- and the
         `persistent_cron_assertor` handler re-states them at SessionStart so
         they are re-established rather than silently missing. The daemon cannot
         read session memory, so it reports what the project DECLARED rather
@@ -401,7 +401,7 @@ config_changes:
         persistent_crons:
           enabled: true
           jobs:
-            - name: issue-sdlc
+            - id: issue-sdlc
               schedule: "23 * * * *"
               description: One open GitHub issue through the delivery lifecycle
               prompt: |
