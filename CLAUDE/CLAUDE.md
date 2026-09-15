@@ -28,7 +28,7 @@ that owns the depth for every fact. The audience split (agent tree vs human
 | [SELF_INSTALL.md](SELF_INSTALL.md)                                     | Self-install (dogfood) mode guide                                                   |
 | [Worktree.md](Worktree.md)                                             | Git worktree workflow                                                               |
 | [AcceptanceTests/](AcceptanceTests/GENERATING.md)                      | Acceptance test generation and validation                                           |
-| [Architecture/](Architecture/StatusLine.md)                            | Component deep-dives (status line)                                                  |
+| [Architecture/](Architecture/StatusLine.md)                            | Component deep-dives (status line, operator signals)                                |
 | [Code/](Code/HooksSystem.md)                                           | Hooks system internals                                                              |
 | [Code/StrategyPattern.md](Code/StrategyPattern.md)                     | Language-aware handler Strategy Pattern archetype                                   |
 | [Code/WorkspaceResolution.md](Code/WorkspaceResolution.md)             | Resolving which sub-tree (and toolchain) a file belongs to in a monorepo            |

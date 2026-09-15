@@ -3778,6 +3778,127 @@ def cmd_clear_goal(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_signal(args: argparse.Namespace) -> int:
+    """Write an ``<session>.operator-signal`` file for the ccy supervisor (Plan 00417).
+
+    Host-side tool: warns one or every session of this project that the
+    machine is about to reboot/shut down. Mirrors ``inject-goal`` and
+    ``--emit-model-switch``, but the channel this writes is reachable from
+    OUTSIDE the container, so the payload is a closed ``kind`` plus, for the
+    two kinds that need one, a bare positive integer ``--minutes`` — never
+    free text. The wording the agent actually sees is composed entirely by
+    the supervisor's own ``_render_operator_message`` from fixed templates;
+    this command only ever carries a kind and a number (see
+    ``claude_code_hooks_daemon.utils.operator_signal`` for the full
+    rationale).
+
+    Without ``--all-sessions`` the signal is session-keyed exactly like
+    ``inject-goal``, resolved from ``CLAUDE_CODE_SESSION_ID`` (set when run
+    from a Claude Code Bash tool). ``--all-sessions`` is for the host-side
+    caller this plan is FOR — it need not run inside any session at all — and
+    reaches every session of THIS project by writing one signal per live
+    ``<session>.json`` context sidecar in the shared, project-scoped
+    directory the supervisor already watches, and no session outside it
+    (``discover_session_ids``).
+
+    Returns:
+        0 on every targeted signal written, 1 on refusal/failure.
+    """
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.utils.operator_signal import (
+        KINDS_WITH_MINUTES,
+        discover_session_ids,
+        write_operator_signal,
+    )
+
+    kind = str(args.kind)
+    minutes = getattr(args, "minutes", None)
+    needs_minutes = kind in KINDS_WITH_MINUTES
+    if needs_minutes and minutes is None:
+        print(f"ERROR: kind '{kind}' requires --minutes N", file=sys.stderr)
+        return 1
+    if not needs_minutes and minutes is not None:
+        print(f"ERROR: kind '{kind}' takes no --minutes payload", file=sys.stderr)
+        return 1
+
+    if getattr(args, "project_root", None):
+        project_path = Path(args.project_root).resolve()
+    else:
+        project_path = get_project_path(None)
+
+    # Same tolerance as inject-goal/clear-goal: a repeat initialise raises
+    # RuntimeError (an earlier step in this process already did it); a
+    # missing/invalid config is remembered rather than aborting, so a
+    # subsequent write failure can name the real cause.
+    context_init_error: str | None = None
+    try:
+        ProjectContext.initialize(project_path / ".claude" / "hooks-daemon.yaml")
+    except RuntimeError:
+        logger.debug("signal: project context already initialised; reusing it")
+    except ValueError as e:
+        context_init_error = str(e)
+        print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
+
+    try:
+        untracked_dir = ProjectContext.daemon_untracked_dir()
+    except RuntimeError as e:
+        detail = f" ({context_init_error})" if context_init_error is not None else ""
+        print(
+            f"ERROR: no untracked directory to write the signal into: {e}{detail}", file=sys.stderr
+        )
+        return 1
+
+    all_sessions = bool(getattr(args, "all_sessions", False))
+    if all_sessions:
+        session_ids = discover_session_ids(untracked_dir)
+        if not session_ids:
+            print(
+                "ERROR: --all-sessions found no live session (no <session>.json context "
+                f"sidecar under {untracked_dir}) -- nothing to signal",
+                file=sys.stderr,
+            )
+            return 1
+    else:
+        session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+        if not session_id:
+            print(
+                "ERROR: CLAUDE_CODE_SESSION_ID is not set. Without --all-sessions the "
+                "signal is session-keyed, so `signal` must run INSIDE the Claude Code "
+                "session it should target (a Bash tool call sets the variable) -- or "
+                "pass --all-sessions to reach every session of this project instead.",
+                file=sys.stderr,
+            )
+            return 1
+        session_ids = [session_id]
+
+    now = time.time()
+    written: list[Path] = []
+    for target_session_id in session_ids:
+        try:
+            path = write_operator_signal(
+                untracked_dir,
+                session_id=target_session_id,
+                kind=kind,
+                minutes=minutes,
+                now=now,
+            )
+        except ValueError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+        except OSError as e:
+            print(
+                f"ERROR: failed to write operator signal for session "
+                f"'{target_session_id}': {e}",
+                file=sys.stderr,
+            )
+            return 1
+        written.append(path)
+
+    for path in written:
+        print(f"Operator signal written: {path}")
+    return 0
+
+
 def cmd_approve_plan_close(args: argparse.Namespace) -> int:
     """Record a human's one-shot approval to close a plan (Plan 00367).
 
@@ -8968,6 +9089,39 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_clear_goal.set_defaults(func=cmd_clear_goal)
+
+    # signal command (Plan 00417) — the operator-signal closed channel:
+    # reboot/shutdown warnings for the ccy supervisor, host-reachable.
+    parser_signal = subparsers.add_parser(
+        "signal",
+        help="Write an operator-signal file for the ccy supervisor (reboot/shutdown warnings)",
+    )
+    parser_signal.add_argument(
+        "kind",
+        choices=("reboot-warning", "shutdown-warning", "reboot-cancelled"),
+        help="Signal kind",
+    )
+    parser_signal.add_argument(
+        "--minutes",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Minutes until the reboot/shutdown (required for *-warning kinds only)",
+    )
+    parser_signal.add_argument(
+        "--all-sessions",
+        dest="all_sessions",
+        action="store_true",
+        help="Reach every live session of this project instead of just $CLAUDE_CODE_SESSION_ID",
+    )
+    parser_signal.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_signal.set_defaults(func=cmd_signal)
 
     # approve-plan-close command (Plan 00367): a human's one-shot approval
     # for the plan_workflow.close_requires_human_approval gate

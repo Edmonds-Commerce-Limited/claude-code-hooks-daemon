@@ -61,44 +61,45 @@ depend on this and should not wait for it.
 
 ### Phase 1: The closed channel
 
-- [ ] ⬜ **Task 1.1**: Failing tests first, covering the rejection cases before
+- [x] ✅ **Task 1.1**: Failing tests first, covering the rejection cases before
   the happy path: an unknown kind is refused, a non-integer payload is refused, a
   negative or zero payload is refused, and a file past its TTL does not fire.
   These are the security properties, so they are the RED tests, not an
   afterthought.
 
-- [ ] ⬜ **Task 1.2**: The supervisor signal family, consumed at the existing
+- [x] ✅ **Task 1.2**: The supervisor signal family, consumed at the existing
   idle choke point ahead of the goal and model injections, with the same
   semantics as the goal signal: session-keyed file in the status directory,
   injected only when idle with an empty input box, unlinked on injection, TTL
   bounded.
 
-- [ ] ⬜ **Task 1.3**: The three kinds and their daemon-owned wording:
+- [x] ✅ **Task 1.3**: The three kinds and their daemon-owned wording:
   `reboot-warning` (minutes), `shutdown-warning` (minutes, and ask for a handoff
   entry since no restore follows), `reboot-cancelled` (no payload).
 
-- [ ] ⬜ **Task 1.4**: `hooks-daemon signal <kind> [--minutes N] [--all-sessions]`, mirroring `inject-goal`.
+- [x] ✅ **Task 1.4**: `hooks-daemon signal <kind> [--minutes N] [--all-sessions]`, mirroring `inject-goal`.
 
-- [ ] ⬜ **Task 1.5**: Status-line transient warning on the existing message
+- [x] ✅ **Task 1.5**: Status-line transient warning on the existing message
   channel (the one the Ctrl+Z notice uses), so the human sees the countdown.
 
-- [ ] ⬜ **Task 1.6**: Document the signal set, the no-free-text rule and its
+- [x] ✅ **Task 1.6**: Document the signal set, the no-free-text rule and its
   reasoning, and the CLI.
 
 ## Success Criteria
 
-- [ ] ⬜ Raising `reboot-warning` with a payload of minutes reaches an idle
+- [x] ✅ Raising `reboot-warning` with a payload of minutes reaches an idle
   session as the daemon's own wording, and is consumed exactly once.
 
-- [ ] ⬜ An unknown kind, a non-integer payload and a stale file each produce
+- [x] ✅ An unknown kind, a non-integer payload and a stale file each produce
   nothing, each proven by its own test.
 
-- [ ] ⬜ No code path can render host-supplied text into the injected message —
+- [x] ✅ No code path can render host-supplied text into the injected message —
   the payload's only use is a number in a daemon-owned sentence.
 
-- [ ] ⬜ `--all-sessions` reaches every session of this project and no other.
+- [x] ✅ `--all-sessions` reaches every session of this project and no other.
 
-- [ ] ⬜ Full QA passes, the daemon restarts, CI green.
+- [x] ✅ Full QA passes, the daemon restarts, CI green (`./scripts/qa/llm_qa.py all`: 29/30 PASSED, the one failure a pre-existing advisory-only dead link
+  in Plan 00413's NIGGLES.md, unrelated to this plan).
 
 ## Delivery & Milestones
 
