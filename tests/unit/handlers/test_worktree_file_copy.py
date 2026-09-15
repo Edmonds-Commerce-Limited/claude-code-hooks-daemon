@@ -491,3 +491,68 @@ class TestDisclosureLadder:
         assert "CATASTROPHIC" in first.reason
         assert second.reason is not None
         assert "CATASTROPHIC" in second.reason
+
+
+class TestItJudgesTheCommandNotTheProse:
+    """A span bash hands over as DATA is not a command (Plan 00412).
+
+    Hit by dogfooding: a `git commit` whose MESSAGE described this very
+    handler — naming a worktree path and the word `cp` — was denied. Nothing
+    was being copied anywhere; the message is prose that git stores.
+
+    This repository already has one answer to "what command is actually being
+    run": `utils.shell_segmentation.strip_inert_spans`, used by
+    `destructive_git`, `pipe_blocker`, `merge_to_main_approval` and
+    `daemon_location_guard`. This handler judged the raw string instead, which
+    makes it a call-path member of the same `asymmetric-sibling-protection`
+    class the Detector was built for — the helper existed and this site did not
+    reach it.
+
+    The cost of the false positive is worse than a nuisance: the deny names a
+    catastrophic data-loss scenario, so the reader is told they nearly
+    destroyed work when they were writing a sentence.
+    """
+
+    @pytest.fixture
+    def handler(self) -> WorktreeFileCopyHandler:
+        return WorktreeFileCopyHandler()
+
+    def _bash(self, command: str) -> dict:
+        return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+    def test_a_quoted_heredoc_commit_body_is_not_a_copy(
+        self, handler: WorktreeFileCopyHandler
+    ) -> None:
+        """The exact shape that fired: `git commit -F -` with `<<'EOF'`.
+
+        git is a data sink and the delimiter is quoted, so bash expands
+        nothing in the body — it was never going to run.
+        """
+        command = (
+            "git commit -F - <<'EOF'\n"
+            "Probed the handler: cp untracked/worktrees/wt-a/src/x.py src/x.py\n"
+            "is denied today, which is the behaviour under discussion.\n"
+            "EOF"
+        )
+        assert handler.matches(self._bash(command)) is False
+
+    def test_an_inline_commit_message_is_not_a_copy(
+        self, handler: WorktreeFileCopyHandler
+    ) -> None:
+        command = "git commit -m 'document that cp untracked/worktrees/b/src/x.py src/ is denied'"
+        assert handler.matches(self._bash(command)) is False
+
+    def test_a_real_copy_is_still_denied(self, handler: WorktreeFileCopyHandler) -> None:
+        """The guard must not be weakened by the fix — this is the whole point."""
+        assert handler.matches(self._bash("cp untracked/worktrees/branch/src/a.py src/")) is True
+
+    def test_an_executable_heredoc_body_is_still_judged(
+        self, handler: WorktreeFileCopyHandler
+    ) -> None:
+        """`bash <<'EOF'` RUNS the body, so the quoted delimiter buys nothing.
+
+        The exemption is about what the RECEIVER does with the bytes, not about
+        how the outer shell quoted them.
+        """
+        command = "bash <<'EOF'\ncp untracked/worktrees/branch/src/a.py src/\nEOF"
+        assert handler.matches(self._bash(command)) is True

@@ -12,6 +12,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_layout import main_repo_code_dirs
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
 
 # Both worktree root prefixes — untracked/ is manually managed, .claude/ is Claude Code managed
 _WORKTREE_PREFIXES = (ProjectPath.WORKTREES_DIR, ProjectPath.CLAUDE_WORKTREES_DIR)
@@ -105,10 +106,25 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
         return False
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if copying between worktree and main repo."""
+        """Check if copying between worktree and main repo.
+
+        Judges the command bash will RUN, not the raw string. A `git commit`
+        message describing this handler -- naming a worktree path and a
+        relocation verb -- is prose that git stores, and denying it reports a
+        catastrophic data-loss scenario to someone writing a sentence.
+
+        `strip_inert_spans` is this repository's existing answer to "what
+        command is actually being run", shared with `destructive_git`,
+        `pipe_blocker`, `merge_to_main_approval` and `daemon_location_guard`.
+        It blanks a `-m`/`-F` message value and a quoted-delimiter heredoc body
+        fed to a DATA SINK -- and only to a data sink, so `bash <<'EOF'` still
+        has its body judged, because the receiver runs those bytes whatever the
+        outer shell quoted.
+        """
         command = get_bash_command(hook_input)
         if not command:
             return False
+        command = strip_inert_spans(command)
 
         if not any(prefix in command for prefix in _WORKTREE_PREFIXES):
             return False
