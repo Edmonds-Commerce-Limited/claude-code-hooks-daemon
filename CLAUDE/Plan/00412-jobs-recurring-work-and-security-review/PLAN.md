@@ -183,6 +183,30 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   `config_optimisation/state.py`'s `record_run` are the closest existing
   shapes to reuse.
 
+  **The record half is built**, RED first, in `routines/ledger.py` with 18
+  tests. The CLI verb itself is what remains.
+
+  **One row per EVENT, not per run** — and that shape is forced rather than
+  chosen. D10's `failed` means "started and did not finish", and nothing can
+  WRITE that row, because whatever would have written it died with the run. So
+  `failed` is DERIVED from a start with no terminal event. A ledger recording
+  only what a run chose to say about itself could never report an abandoned
+  run, and an abandoned run would read exactly like one never attempted.
+  Row-per-run also cannot be append-only: it would have to go back and edit
+  the row when the run finished.
+
+  Both guards live in the constructor rather than downstream: a terminal
+  outcome with no interval is refused (it would silently break the gap
+  detection the whole design rests on) and a `skipped` with no reason is
+  refused (the reason IS the state — without it, it is an unexplained
+  absence). `skipped` is exempt from the interval rule, because it genuinely
+  covered nothing.
+
+  The on-disk form is a markdown table, since `CLAUDE/Routine/` is a tree
+  humans read. That means this project's own `markdown_table_formatter` will
+  re-align a ledger anyone opens, so the parser treats cell padding as
+  presentation — pinned by a test that reformats the table and reads it back.
+
 - [ ] ⬜ **Task 2.4**: QA checks for the new tree, mirroring `plan_qa`: an
   overdue run, a run with no recorded interval, a gap between consecutive
   runs, a definition with no runs at all.
