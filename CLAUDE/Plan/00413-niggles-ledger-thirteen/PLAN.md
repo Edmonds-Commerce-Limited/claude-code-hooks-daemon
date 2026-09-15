@@ -237,6 +237,60 @@ injected context did not.
 Full design input, evidence and the three distinct duplication problems:
 [DESIGN-cron-enforcement.md](DESIGN-cron-enforcement.md).
 
+### N7 — there is no sanctioned way to FIND a plan, so the number guard denies the only obvious one
+
+**Status**: ⬜ Open — needs a finder; the guard itself is correct and must stay strict
+
+Asked to locate a recently-created plan about Jobs, the obvious first move is
+`ls -d CLAUDE/Plan/*job*`. `plan_number_helper` denies it: the `ls_patterns`
+entry `ls\s+.*<plan_dir>/\*` matches any glob under the plan directory,
+whatever the glob contains.
+
+**This was filed as a false positive and it is not one.** The guard's stated
+reason — folder scans miss plans archived in `Completed/` — applies exactly as
+written: `CLAUDE/Plan/*job*` searches the 27 active plans and skips the 363 in
+`Completed/`, so it would have answered confidently and wrongly had the plan
+been archived. The deny prevented an unreliable answer, which is its job.
+
+What is missing is an AFFORDANCE, not a loosening. The deny message's entire
+remedy is *"Next plan number is 00415"* — an answer to a question the caller
+did not ask. A name search has no sanctioned route at all: `git ls-files`
+happens to work and is not mentioned anywhere, and
+`hooks-daemon-plan-dedupe-scout` is an agent dispatch, which is the right
+weight before filing a plan and the wrong weight for "where is the Jobs plan".
+
+So the guard blocks the unreliable route, stays silent about the reliable one,
+and offers a number instead. An agent that hits this either routes around it
+with an unblocked-but-equally-partial glob, or burns an agent dispatch.
+
+The fix is additive: a finder that searches the whole tree — active,
+`Completed/`, and any other subdirectory — and returns paths, named in the deny
+message beside the number. Nothing about the detector should be narrowed:
+deny-by-default is what makes a scan-derived number untrustworthy by
+construction, and a finder that covers `Completed/` is strictly better than the
+glob it replaces rather than a concession to it.
+
+Worth checking while there: whether the same silence applies to the other
+discovery shapes the handler blocks (`find`, `echo` glob expansion), and
+whether `README.md`'s index is already a searchable substrate the finder should
+read rather than walking the filesystem again.
+
+**N7b — and the detector has no git-message exemption, which IS a false
+positive.** Committing the entry above was denied, because the commit message
+quotes the offending command in its own prose. A `git commit -m`/`-F` message
+cannot scan anything; it is a description of a scan, which is exactly what a
+ledger entry about a scan must contain.
+
+`sed_blocker` already solves this and is the precedent to copy: its exemption 2
+spares a `git commit` message mentioning sed, with no command separator between
+the two. `plan_number_helper` has no equivalent, so the handler blocks writing
+down the defect it just raised — and the workaround (`git commit -F <file>`,
+since the file's CONTENT is never scanned) is discoverable only by hitting the
+wall first.
+
+This half is a straight detector fix rather than a new affordance, and it is
+cheap: the same exemption shape, applied to the same position in the command.
+
 ## Tasks
 
 - [x] ✅ **Task 1.1**: N1 — detector first, RED on both tracked paths, then the
@@ -264,6 +318,15 @@ Full design input, evidence and the three distinct duplication problems:
   the supervisor CHECKS about declared crons, and what it DOES when the check
   fails. Then settle duplication (env-var activation vs a GitHub-side lock) and
   the `agent-working` claim race as the separate problem it is.
+
+- [ ] ⬜ **Task 1.9**: N7 — a plan finder that searches the WHOLE tree
+  (`Completed/` included) and returns paths, named in `plan_number_helper`'s
+  deny message beside the number. Detector unchanged; check whether
+  `README.md`'s index already serves as the substrate.
+
+- [ ] ⬜ **Task 1.10**: N7b — give `plan_number_helper` the git-message
+  exemption `sed_blocker` already has, so a commit describing a discovery scan
+  is not mistaken for one. Detector fix, RED first.
 
 ## Success Criteria
 
