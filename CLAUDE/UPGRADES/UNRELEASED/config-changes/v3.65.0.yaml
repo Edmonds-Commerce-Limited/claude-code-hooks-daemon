@@ -29,6 +29,44 @@ config_changes:
       recommended: false
       dormant: true
 
+    - key: handlers.stop.cron_stop_enforcer
+      description: >-
+        Blocks a stop while a job declared under `persistent_crons` is VERIFIED
+        missing from the session. The SessionStart advisory could only declare
+        what the project wanted and ask for a `CronList` reconcile — the
+        `session_crons` field it would need to check is not delivered to that
+        event. It IS delivered to `Stop`, so this handler compares declared
+        against actual and denies the stop naming the exact `CronCreate` (id,
+        schedule and full prompt) for anything absent. An absent `session_crons`
+        field means "no information", never "no crons exist", and never blocks.
+      example_yaml: |
+        stop:
+          cron_stop_enforcer:
+            enabled: true
+            priority: 7
+      migration_note: >-
+        Silent unless `persistent_crons` is enabled with at least one declared
+        job, so a project that declares no crons needs no action. Keep
+        `priority` below `auto_continue_stop`'s 10 — a Stop handler placed above
+        it never runs on the common stop.
+      recommended: true
+      dormant: false
+
+    - key: handlers.subagent_stop.cron_subagent_stop_enforcer
+      description: >-
+        The `SubagentStop` twin of `handlers.stop.cron_stop_enforcer`, applying
+        the same declared-versus-actual comparison when a subagent stops.
+      example_yaml: |
+        subagent_stop:
+          cron_subagent_stop_enforcer:
+            enabled: true
+            priority: 7
+      migration_note: >-
+        Same conditions as the Stop twin. Keep `priority` below
+        `subagent_report_size_blocker`'s 15 so it is not shadowed.
+      recommended: true
+      dormant: false
+
   renamed: []
 
   removed: []
