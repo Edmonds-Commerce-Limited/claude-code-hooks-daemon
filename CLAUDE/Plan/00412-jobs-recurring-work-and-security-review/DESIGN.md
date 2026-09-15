@@ -441,3 +441,143 @@ plan. D3 is the sharper reason: a run recording "clean" without recording
 "clean under this scope" is the expensive kind of wrong, because it is cited
 later as coverage. The first run is the baseline every subsequent interval
 composes against, so it is the one run whose scope must not need an asterisk.
+
+## D17. Who the consumers are — OWNER'S RULING, and it overturns the review
+
+Recorded verbatim, because it answers the adversarial review's central finding
+rather than negotiating with it:
+
+> routine consumers would be something projects themselves design and create,
+> we are not expecting to create them here in hooks daemon - same way we dont
+> create plans for client projects
+
+> but yes we would not expect large numbers and they would generally be quite
+> stable i think
+
+The review's headline was "the abstraction has exactly one consumer", counted by
+reading the six SessionStart sweeps in THIS repository and finding none of them
+fits the Routine shape. That count was never the measure. **This repository
+ships the machinery; client projects create the instances** — exactly as it
+ships `mkplan.bash` and creates no plans for anyone else. A framework whose
+consumers are downstream cannot be judged by how many of its own handlers use
+it, and the six sweeps not fitting is unremarkable: they were never candidates.
+
+What SURVIVES the ruling, because each was established independently of the
+consumer count and none of them depends on it:
+
+- the interval model fits delta-able checks only (§2.4);
+- D10 has no `started` state, so `failed` has no writer (§4.1);
+- "whole repository" is not a statement of scope (Q4).
+
+What DOES NOT survive: the "one real consumer" objection, and with it the
+recommendation to defer the generic tree until a second consumer appears. The
+second consumer is the first client project that wants one.
+
+"Not large numbers, generally quite stable" is a sizing fact with teeth: it
+means the numbering-and-scaffolding layer Task 2.2 mirrors from `mkplan.bash`
+is solving a collision that does not occur at this population. That half of the
+D14 contradiction dissolves on population grounds rather than on principle.
+
+## D18. Runs are not git-tracked; findings become Plans — OWNER'S RULING
+
+> im really not sure we should be git tracking job runs at all
+>
+> what we can say is that job run failures or issues arising can trigger the
+> creation of plans to deal with them - that would make sense - plans are
+> tracked, job logs are not
+
+This is a cleaner separation than the design had, and it dissolves several
+open items at once:
+
+- **Q2 disappears entirely.** Yearly-ledger versus per-run-file was a question
+  about what to COMMIT. Nothing is committed, so neither shape is chosen.
+- **§4.2 disappears** — concurrent appends cannot conflict in git if the file
+  is not in git.
+- **§4.3 disappears** — the append-only guarantee being advisory stops
+  mattering for a file nothing merges.
+- **§4.1 is much reduced.** A run dying at dispatch 30 of 50 loses its own log,
+  but every finding it already turned into a Plan survives. The durable output
+  is the Plan; the run log is scaffolding.
+
+The durable, reviewable trail becomes: **a Routine run produces Plans.** That is
+the artefact this project already knows how to track, index, QA and archive, and
+it needs no new tracked format at all.
+
+### The one consequence that needs settling
+
+A clean run produces no Plan. That is correct — there is nothing to fix — but it
+means the record of "this ran and found nothing" is exactly the record that is
+now untracked. D6 already established that absence of a run is not observable
+from the runs; untracking them makes the absence observable only per-checkout.
+
+Concretely: a fresh clone cannot distinguish "the security review has never run"
+from "it ran last week and was clean", so a dead-man's switch either nags on
+every fresh clone or trusts a file that is not there.
+
+Three options, and this is the only open question D18 leaves:
+
+1. **Accept per-checkout.** A fresh checkout genuinely does not know, and saying
+   so is honest. Cost: the overdue advisory fires on every clone and gets
+   trained away, which is the failure mode this whole area exists to avoid.
+2. **Track a one-line pointer per Routine** — last run's timestamp, scope and
+   outcome. Not a log: no findings, no narrative, no per-chunk detail. Conflicts
+   are trivial and resolve by latest-wins. Keeps the dead-man's switch working
+   across clones while honouring "job logs are not tracked".
+3. **Derive it from the Plans the Routine created.** Rejected on inspection: a
+   clean run creates no Plan, so this cannot distinguish clean from never-ran —
+   which is precisely D6's point restated.
+
+Option 2 is the recommendation. The distinction it rests on is that WHEN a
+routine last ran is neither a log nor a finding; it is a third thing, and it is
+the only part of a run anything else needs to read.
+
+## D19. Spot-check, then Detect in bulk — OWNER'S RULING, and it answers Q4
+
+> security review - spot checking and DBF to catch found issues in bulk
+
+This is the security review's actual method, and recording it collapses the
+largest open problem in the plan.
+
+**The division of labour**: an agent SAMPLES to find a CLASS of defect; a
+Detector then finds every INSTANCE of that class, mechanically, across the whole
+repository, on every QA run, forever. Agents are good at noticing that something
+is a bad idea and poor at exhaustiveness; a Detector is the reverse. The method
+plays each to its strength instead of asking the agent to be exhaustive.
+
+### What this dissolves
+
+- **Q4 stops being a scaling problem.** The 3,516 tracked files and 140,167
+  lines of `src/` Python never need to pass through an agent's context. Nothing
+  reads the repository exhaustively — the Detector does, and it costs a
+  subprocess. "Whole repository coverage" is delivered by the Detectors, not by
+  the run.
+- **§2.4 (the interval model fits delta-able checks only) stops biting.**
+  Spot-checking was never interval-shaped and does not need to be. A run's
+  honest claim is "these areas were sampled, and these Detectors now exist" —
+  not "everything between SHA A and SHA B was examined".
+- **The coverage algebra largely dissolves with it.** If assurance for a known
+  class comes from a Detector that runs on every QA, the question "what did we
+  cover between A and B" stops carrying the weight D2 and Task 2.1 give it.
+  **Task 2.1's interval algebra should be reconsidered before it is built** —
+  on this method it may have no consumer, which would be the same mistake the
+  adversarial review caught once already.
+- **Assurance compounds instead of decaying.** A conventional sweep's value
+  decays from the moment it finishes. A Detector's value is permanent and
+  retroactive: the class it catches can never regress, in code written after it
+  as well as before.
+
+### The honest limitation
+
+Spot-checking gives no completeness guarantee for a class never sampled. That is
+real, and it is the correct trade rather than a flaw: unknown-unknowns can only
+be found by looking, and known classes should never be found by looking twice.
+It does mean a run must record WHAT it sampled, or successive runs will sample
+the same comfortable places. Sampling strategy is therefore a real design
+question, and the one part of this the plan still owes.
+
+### Constraint carried from D8/Q3
+
+Defence Before Fix clause 3.2 forbids the test being the Detector. So every
+Detector this produces lands in `scripts/qa/` or as a handler — never only in
+`tests/`. A test proves the fix; the Detector prevents the class. They are
+different artefacts and the plan must not let them collapse into one.
