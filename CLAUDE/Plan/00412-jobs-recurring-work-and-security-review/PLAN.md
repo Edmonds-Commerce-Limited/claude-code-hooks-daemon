@@ -267,8 +267,12 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   run reset the full sweep's overdue clock. `Trigger: release` added as a
   first-class value, deliberately with no clock of its own.
 
-- [ ] ⬜ **Task 3.2**: Living security documentation that grows by category as
+- [x] ✅ **Task 3.2**: Living security documentation that grows by category as
   findings arrive, with each category naming its Defence.
+  `CLAUDE/Security/`: an index carrying the contract and the category table,
+  one file per category. A register of CLASSES, not a log of incidents — dates
+  live in `RUNS/` and git. It opens with a real category rather than an empty
+  table, because the first defect arrived while the register was being written.
 
 - [ ] ⬜ **Task 3.3**: A specialist security-review sub-agent, and the run
   procedure that dispatches it.

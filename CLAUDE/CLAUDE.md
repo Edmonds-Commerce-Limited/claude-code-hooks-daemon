@@ -36,6 +36,7 @@ that owns the depth for every fact. The audience split (agent tree vs human
 | [Performance/](Performance/README.md)                                  | Performance baselines and measurements                                              |
 | [Plan/](Plan/README.md)                                                | Numbered development plans (see [Plan/CLAUDE.md](Plan/CLAUDE.md) for lifecycle)     |
 | [Routine/](Routine/README.md)                                          | Recurring work that never completes — a Plan finishes, a Routine recurs             |
+| [Security/](Security/README.md)                                        | Defect classes found in this project, each naming the Defence that keeps finding it |
 | [UPGRADES/](UPGRADES/README.md)                                        | Version upgrade guides, truth-changes and config-changes manifests                  |
 | [development/](development/CLAUDE.md)                                  | Daemon-repo contributor docs (QA patterns, releasing, lessons, client-mode testing) |
 
