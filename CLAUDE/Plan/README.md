@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00409: interpreter heredoc defeats the guards](00409-interpreter-heredoc-defeats-the-guards/PLAN.md) - Not Started (v3.64.0 REGRESSION, measured by running the shipped v3.63.0 module side by side: `bash <<'EOF'` executes its body, but `strip_quoted_heredoc_bodies` blanks it, so five destructive-git spellings v3.63.0 denied are now allowed. Keyed on the heredoc's quoting where it should key on its receiver; `curl_pipe_shell` already has the allowlist the other seven consumers lack)
+- [00409: interpreter heredoc defeats the guards](00409-interpreter-heredoc-defeats-the-guards/PLAN.md) - In Progress, fix landed at `60778567`, **BLOCKED ON A HUMAN `/release`** (v3.64.0 regression: `bash <<'EOF'` executes its body, so five destructive-git spellings v3.63.0 denied were allowed; every published installation runs the defect until a patch release carries the fix)
 
 - [00408: handler hygiene from the release review](00408-handler-hygiene-from-the-release-review/PLAN.md) - Not Started (the non-user-visible half of the v3.64.0 review: raw hook-field literals where `HookInputField` is the declared SSoT, `merge_qa_report` building the docs corpus on the hook budget while a sibling argues against exactly that, and four sub-bar items carried so they are not lost. Graduated from 00407 N6)
 

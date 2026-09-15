@@ -55,9 +55,17 @@ bypass"). Of the eight consumers that blank heredoc bodies, only
 
 ## Non-Goals
 
-- Publishing v3.64.1. A release requires a fresh human `/release`; the v3.64.0
+- TAKING the release. A release requires a fresh human `/release`; the v3.64.0
   authorisation was consumed and its state file archived and deleted. This plan
-  lands the fix on `main` and leaves the release decision with the human.
+  lands the fix on `main` and leaves the decision with the human.
+
+  It does NOT follow that the release is out of scope, and the distinction is
+  deliberate: until a published version carries this fix, every installation is
+  running a data-loss guard that `bash <<'EOF'` walks past. So the plan stays
+  open on that one criterion rather than closing on "the code is fixed" — a
+  completed plan is the wrong place for a live obligation, and an archived one
+  is worse. The Active list is where somebody looks.
+
 - Re-litigating release note 29. Blanking a `cat`/`git commit -F -` body stays
   correct and must keep working — those are the regression tests, not the bug.
 
@@ -107,12 +115,18 @@ bypass"). Of the eight consumers that blank heredoc bodies, only
 
 ## Success Criteria
 
-- [ ] ⬜ Running the shipped v3.63.0 `destructive_git` and the fixed one over
+- [x] ✅ Running the shipped v3.63.0 `destructive_git` and the fixed one over
   the same table yields no row where v3.63.0 denies and the fix allows, except
-  the `cat` row that release note 29 deliberately changed.
+  the `cat` row that release note 29 deliberately changed. One flip remains and
+  it is that row (`untracked/scratch/probe_v3630_regression.py`).
 - [ ] ⬜ Full QA passes, the daemon is restarted, and CI is green.
-- [ ] ⬜ The human is told, in plain terms, that v3.64.0 carries this defect and
+- [x] ✅ The human is told, in plain terms, that v3.64.0 carries this defect and
   that RELEASING.md's rollback table prescribes a patch release for it.
+- [ ] ⬜ **BLOCKED ON HUMAN — a published version carries the fix.** RELEASING.md's
+  rollback table prescribes "After push: Create immediate patch release (NEVER
+  force-push tags)". Only a human `/release` can start one, so this criterion
+  cannot be ticked by an agent and the plan cannot close without it. Everything
+  else above is done; this is the whole of what remains.
 
 ## Delivery & Milestones
 
