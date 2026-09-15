@@ -281,11 +281,33 @@ gateway. The segment therefore renders NOTHING rather than the container ID.
 
 **So the mechanism is an explicit hand-off.** Whatever starts the container —
 the ccy supervisor, a run script, a compose file — is the only thing that knows
-the host's name, so it exports it:
+the host's name, so it exports it. Two variables are read, in this order:
+
+| variable                     | set by                                      |
+| ---------------------------- | ------------------------------------------- |
+| `CCY_HOST_HOSTNAME`          | the ccy supervisor                          |
+| `HOOKS_DAEMON_HOST_HOSTNAME` | anything else — run script, compose, manual |
 
 ```bash
-HOOKS_DAEMON_HOST_HOSTNAME="$(hostname)" podman run …
+CCY_HOST_HOSTNAME="$(hostname)" podman run …
 ```
+
+ccy's variable is checked first because in a ccy session it is the real answer;
+the daemon's own is the route for setups without ccy. Both are equally
+authoritative — each is an explicit hand-off from outside the namespace, which
+is the only way the host's name can cross into a container.
+
+**The value is treated as untrusted and validated against an allowlist.** It is
+printed into a terminal once per second, so a name carrying an ANSI escape is
+not cosmetic: `\033[` can reposition the cursor and repaint the line, and OSC
+sequences can set the window title or reach the clipboard on some terminals. A
+name is accepted only if it consists of `A-Z a-z 0-9 . _ -` and is at most 64
+characters; anything else is refused outright, and refused values are never
+written to a log (a log is read in a terminal too). Refusing rather than
+stripping is deliberate — a name with the escape filtered out is no longer the
+machine's name, and showing the remains would be a quieter version of the lie
+the tilde marker exists to prevent. The same check applies to every rung,
+including `/etc/hosts`, which inside a container is written by the runtime.
 
 It must reach **the daemon's** environment, not an interactive shell's: the
 daemon renders the status line, and resolves the name once at first render.
@@ -295,13 +317,12 @@ perfectly well — check the real status line, not the explainer, when verifying
 
 Resolution is a ladder, first hit wins:
 
-| rung | source                                | rendered as  |
-| ---- | ------------------------------------- | ------------ |
-| 1    | `$HOOKS_DAEMON_HOST_HOSTNAME`         | `@name`      |
-| 2    | `options.host_name` in project config | `@name`      |
-| 3    | `gethostname()` — host or LXC ONLY    | `@name`      |
-| 4    | a `127.x` self-alias in `/etc/hosts`  | `@~name`     |
-| 5    | nothing resolvable                    | (no segment) |
+| rung | source                                                   | rendered as  |
+| ---- | -------------------------------------------------------- | ------------ |
+| 1    | `$CCY_HOST_HOSTNAME`, then `$HOOKS_DAEMON_HOST_HOSTNAME` | `@name`      |
+| 2    | `gethostname()` — host or LXC ONLY                       | `@name`      |
+| 3    | a `127.x` self-alias in `/etc/hosts`                     | `@~name`     |
+| 4    | nothing resolvable                                       | (no segment) |
 
 Rung 3 deliberately includes LXC: an LXC guest is normally a long-lived, named
 machine, so its own hostname is the answer. Podman and Docker containers are

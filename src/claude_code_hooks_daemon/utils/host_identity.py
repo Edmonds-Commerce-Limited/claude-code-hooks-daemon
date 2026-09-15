@@ -14,14 +14,20 @@ one.
 
 Resolution is a ladder, first hit wins:
 
-1. :data:`ENV_HOST_HOSTNAME` — the explicit hand-off. Authoritative.
-2. A configured override. Authoritative.
-3. :func:`socket.gethostname`, but ONLY where it means something: on a host,
+1. :data:`HOST_HOSTNAME_ENV_VARS` — the explicit hand-off, ``CCY_HOST_HOSTNAME``
+   first and ``HOOKS_DAEMON_HOST_HOSTNAME`` second. Authoritative.
+2. :func:`socket.gethostname`, but ONLY where it means something: on a host,
    or inside LXC. Authoritative.
-4. A self-alias in ``/etc/hosts``. **Inferred** — see below.
-5. Nothing. Rendered as nothing, never as a placeholder.
+3. A self-alias in ``/etc/hosts``. **Inferred** — see below.
+4. Nothing. Rendered as nothing, never as a placeholder.
 
-Rung 4 needs its caveat stated where the code is, because it looks more
+There is deliberately NO config-file override. A hostname is per-machine, and
+``.claude/hooks-daemon.yaml`` is tracked in git and routinely public — an
+option inviting a machine name into it is an invitation to publish one, and the
+resulting leak is discoverable only by searching history that is never
+rewritten. The environment carries per-machine values; the config does not.
+
+Rung 3 needs its caveat stated where the code is, because it looks more
 reliable than it is. Podman really does inherit the host's ``/etc/hosts``, so a
 host name genuinely can appear inside a container. But whether that file names
 the host is a property of the HOST DISTRIBUTION: Debian and Ubuntu write
@@ -36,6 +42,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import socket
 from dataclasses import dataclass
 from enum import Enum
@@ -45,10 +52,20 @@ from claude_code_hooks_daemon.utils.container_detection import detect_container_
 
 logger = logging.getLogger(__name__)
 
-#: Environment variable carrying the host's name across the namespace boundary.
-#: A wrapper that starts the container (the ccy supervisor, a run script) is the
-#: only thing positioned to know this, so it is the only thing that can set it.
+#: The ccy supervisor's variable. ccy starts the container, so it is the thing
+#: actually positioned to know the host's name — checked FIRST because in a ccy
+#: session it is the real answer, and anything else is a stand-in for it.
+ENV_CCY_HOST_HOSTNAME = "CCY_HOST_HOSTNAME"
+
+#: The daemon's own variable, for setups with no ccy: a run script, a compose
+#: file, a hand-rolled `podman run`. Same authority, second only because a ccy
+#: session should not depend on the operator also setting this one.
 ENV_HOST_HOSTNAME = "HOOKS_DAEMON_HOST_HOSTNAME"
+
+#: Checked in order, first non-blank wins. Both are authoritative: each is an
+#: explicit hand-off from outside the namespace, which is the only way the host
+#: name can cross into a container at all.
+HOST_HOSTNAME_ENV_VARS: tuple[str, ...] = (ENV_CCY_HOST_HOSTNAME, ENV_HOST_HOSTNAME)
 
 #: Overridable for tests; the real file otherwise.
 ENV_ETC_HOSTS_PATH = "HOOKS_DAEMON_ETC_HOSTS_PATH"
@@ -70,12 +87,35 @@ _LOCALHOST_ALIAS_PREFIX = "localhost"
 
 _COMMENT_MARKER = "#"
 
+#: Characters a host name may contain. RFC 1123 allows letters, digits and
+#: hyphens per label, dots between labels; underscores appear in practice.
+#:
+#: This is an ALLOWLIST, and that direction is the whole point. The resolved
+#: name is written STRAIGHT INTO A TERMINAL once per second, so a value
+#: carrying an ANSI escape is not a cosmetic problem: `\033[` sequences can
+#: reposition the cursor and repaint the line, and OSC sequences (`\033]`) can
+#: set the window title or, in some terminals, reach the clipboard. A blocklist
+#: of "dangerous" characters would have to anticipate every such sequence; an
+#: allowlist of the nine characters a hostname actually uses cannot be
+#: outflanked by one nobody thought of.
+#:
+#: The value is not hypothetically attacker-controlled either. It arrives from
+#: an environment variable set outside this process, or from `/etc/hosts` —
+#: which, inside a container, is a file the container runtime wrote and a
+#: compromised image or a hostile `--add-host` could shape.
+_DISALLOWED_HOST_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
+
+#: Longer than any real machine name, short enough that it cannot flood the
+#: status line. A DNS label maxes at 63 octets and a full name at 253; a value
+#: past this is not a hostname, so it is refused rather than truncated — a
+#: truncated unknown is still an unknown, displayed with more confidence.
+_MAX_HOST_NAME_CHARS = 64
+
 
 class HostNameSource(Enum):
     """Which rung of the ladder produced a name."""
 
     ENVIRONMENT = "environment"
-    CONFIG = "config"
     LOCAL = "local"
     ETC_HOSTS_HINT = "etc-hosts-hint"
 
@@ -117,8 +157,16 @@ def host_name_from_hosts_file(text: str) -> str | None:
         if len(fields) < 2 or not fields[0].startswith(_IPV4_LOOPBACK_PREFIX):
             continue
         for alias in fields[1:]:
-            if not alias.startswith(_LOCALHOST_ALIAS_PREFIX):
-                return alias
+            if alias.startswith(_LOCALHOST_ALIAS_PREFIX):
+                continue
+            # Sanitised HERE rather than only at the call site: this file is
+            # written by the container runtime and shaped by whoever built the
+            # image, so it is the least trustworthy rung of the ladder. A
+            # rejected alias falls through to the next candidate rather than
+            # abandoning the line, so one hostile entry cannot mask a real one.
+            cleaned = _clean_host_name(alias)
+            if cleaned is not None:
+                return cleaned
     return None
 
 
@@ -149,50 +197,67 @@ def _etc_hosts_path(override: Path | None) -> Path:
     return Path(os.environ.get(ENV_ETC_HOSTS_PATH, _DEFAULT_ETC_HOSTS_PATH))
 
 
-def _non_blank(value: object) -> str | None:
-    """Return ``value`` stripped, or None when it is absent, blank or not text.
+def _clean_host_name(value: str | None) -> str | None:
+    """Return ``value`` as a safe host name, or None if it is not one.
 
-    An exporter whose own lookup failed sets the variable to an empty string.
-    Treating that as an answer would render a blank name AND stop every lower
-    rung from being tried, which is the worst of both.
+    Applied to EVERY rung of the ladder, not only the environment variables.
+    ``/etc/hosts`` inside a container is written by the runtime and shaped by
+    whoever built the image; even ``gethostname()`` is only as trustworthy as
+    whatever set it. Sanitising centrally means a new rung cannot be added
+    without inheriting the check.
 
-    ``object`` rather than ``str | None`` because the configured override
-    reaches a handler through the registry's untyped ``setattr`` from
-    user-authored YAML. ``host_name: 12345`` is a plausible thing to write, and
-    it would otherwise raise inside a status-line render — where the cost of an
-    exception is a broken status line on every refresh.
+    Three refusals, each failing CLOSED — no segment rather than a bad one:
+
+    - blank or absent. An exporter whose own lookup failed sets the variable to
+      an empty string, and treating that as an answer would both render a blank
+      name and stop every lower rung from being tried.
+    - anything outside :data:`_DISALLOWED_HOST_NAME_CHARS`' allowlist, which is
+      what keeps terminal escape sequences out of a string printed to a
+      terminal once a second.
+    - longer than :data:`_MAX_HOST_NAME_CHARS`.
+
+    Refusing rather than stripping is deliberate. A name with the escape
+    sequence filtered out is no longer the machine's name, and displaying the
+    remains as though it were would be a quieter version of the same lie the
+    tilde marker exists to prevent.
     """
-    if not isinstance(value, str):
+    if value is None:
         return None
     stripped = value.strip()
-    return stripped or None
+    if not stripped:
+        return None
+    if len(stripped) > _MAX_HOST_NAME_CHARS:
+        logger.debug(
+            "Refusing host name: %d characters exceeds the %d-character limit",
+            len(stripped),
+            _MAX_HOST_NAME_CHARS,
+        )
+        return None
+    if _DISALLOWED_HOST_NAME_CHARS.search(stripped):
+        # The rejected value is deliberately NOT logged: it is the thing that
+        # might carry an escape sequence, and a log is read in a terminal too.
+        logger.debug("Refusing host name: contains characters outside the allowlist")
+        return None
+    return stripped
 
 
-def resolve_host_name(
-    configured: str | None = None,
-    *,
-    hosts_path: Path | None = None,
-) -> HostName | None:
+def resolve_host_name(*, hosts_path: Path | None = None) -> HostName | None:
     """Resolve the host's name, or None when no rung of the ladder answers.
 
     Args:
-        configured: A per-machine override from project config, if any.
         hosts_path: Override for the hosts file location (tests).
 
     Returns:
         A :class:`HostName` carrying the name and its provenance, or None.
     """
-    from_env = _non_blank(os.environ.get(ENV_HOST_HOSTNAME))
-    if from_env is not None:
-        return HostName(name=from_env, source=HostNameSource.ENVIRONMENT)
-
-    from_config = _non_blank(configured)
-    if from_config is not None:
-        return HostName(name=from_config, source=HostNameSource.CONFIG)
+    for env_var in HOST_HOSTNAME_ENV_VARS:
+        from_env = _clean_host_name(os.environ.get(env_var))
+        if from_env is not None:
+            return HostName(name=from_env, source=HostNameSource.ENVIRONMENT)
 
     runtime = detect_container_runtime()
     if runtime in _HOSTNAME_MEANINGFUL_RUNTIMES:
-        local = _non_blank(socket.gethostname())
+        local = _clean_host_name(socket.gethostname())
         if local is not None:
             return HostName(name=local, source=HostNameSource.LOCAL)
         return None

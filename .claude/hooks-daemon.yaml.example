@@ -716,19 +716,29 @@ handlers:
       # Opt-in: pure gain only if you work across several machines.
       #
       # Inside podman/docker the container's own hostname is the container ID
-      # and is never shown. Export HOOKS_DAEMON_HOST_HOSTNAME from whatever
-      # starts the container — that is the only authoritative route, because a
-      # UTS namespace genuinely hides the host's name. A desktop or LXC session
-      # needs no export; its own hostname is the answer.
+      # and is never shown. Export the host's name from whatever starts the
+      # container — CCY_HOST_HOSTNAME (set by the ccy supervisor, checked
+      # first) or HOOKS_DAEMON_HOST_HOSTNAME for any other launcher. That is
+      # the only authoritative route, because a UTS namespace genuinely hides
+      # the host's name. A desktop or LXC session needs no export; its own
+      # hostname is the answer.
+      #
+      # The value is validated against an allowlist (letters, digits, dot,
+      # underscore, hyphen; 64 chars max) and refused outright otherwise: it is
+      # printed to a terminal once per second, so an ANSI escape in it would be
+      # an injection vector, not a cosmetic problem.
       #
       # A name recovered from /etc/hosts renders as @~name: the tilde means
       # INFERRED. That read works on a Debian-family host (which writes
       # `127.0.1.1 <hostname>`) and finds nothing on Fedora, so it is a hint.
+      #
+      # There is NO option to set the name here, deliberately. A hostname is
+      # per-machine and this file is tracked in git — an option for it would
+      # invite a machine name into a committed, often public file, and that
+      # leak is findable only by searching history nobody rewrites. Per-machine
+      # values belong in the environment.
       enabled: false
       priority: 7
-      options:
-        # Per-machine override, beaten only by the environment variable.
-        # host_name: "my-workstation"
 
     supervisor_indicator:  # Top hat 🎩 w/ bg colour: green armed / yellow dry-run / orange down (ccy supervisor)
       # On by default; renders NOTHING when no ccy supervisor status file exists.

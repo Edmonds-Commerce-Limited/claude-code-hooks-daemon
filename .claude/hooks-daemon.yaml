@@ -962,9 +962,10 @@ handlers:
       # Dogfood: ENABLED here, and it costs nothing while it resolves to
       # nothing. This repo's sessions run in rootless podman on a Fedora host,
       # which is precisely the case with no readable host name — so the segment
-      # stays blank until HOOKS_DAEMON_HOST_HOSTNAME is exported by whatever
-      # starts the container, then shows it. Dogfooding the silent case is the
-      # point: a segment that renders nothing must actually render nothing.
+      # stays blank until CCY_HOST_HOSTNAME (or HOOKS_DAEMON_HOST_HOSTNAME) is
+      # exported by whatever starts the container, then shows it. Dogfooding
+      # the silent case is the point: a segment that renders nothing must
+      # actually render nothing.
       enabled: true
       priority: 7
 

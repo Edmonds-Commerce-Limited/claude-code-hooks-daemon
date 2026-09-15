@@ -143,12 +143,17 @@ class TestResolutionHappensOncePerDaemon:
         assert len(calls) == 1
 
 
-class TestTheConfiguredOverrideReachesTheResolver:
-    def test_the_host_name_option_is_passed_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Options arrive by setattr AFTER __init__, so resolution must be lazy.
+class TestNoNameCanBeSuppliedFromConfig:
+    def test_the_resolver_is_called_with_no_name_argument(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A hostname must not be settable from a file that gets committed.
 
-        Resolving in the constructor would read the option before the registry
-        had set it, and the override would silently never apply.
+        An earlier revision passed a `host_name` config option through to the
+        resolver. It was removed: `.claude/hooks-daemon.yaml` is tracked in git
+        and routinely public, so the option was an invitation to publish a
+        machine name, recoverable afterwards only by searching history nobody
+        rewrites. This pins that the handler asks for a name and supplies none.
         """
         seen: dict[str, object] = {}
 
@@ -157,12 +162,10 @@ class TestTheConfiguredOverrideReachesTheResolver:
             return None
 
         monkeypatch.setattr(host_hostname, "resolve_host_name", _capturing_resolver)
-        handler = HostHostnameHandler()
-        handler._host_name = "from-project-config"  # what the registry does
 
-        handler.handle(_status_input())
+        HostHostnameHandler().handle(_status_input())
 
-        assert seen.get("configured") == "from-project-config"
+        assert seen == {}
 
 
 class TestTheSegmentExplainsItsOwnProvenance:

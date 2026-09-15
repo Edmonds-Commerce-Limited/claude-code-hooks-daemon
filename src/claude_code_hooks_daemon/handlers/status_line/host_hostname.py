@@ -17,10 +17,13 @@ reading.
 
 **Resolution happens once.** The status line re-renders on every Claude Code
 refresh and the resolver may touch the filesystem, so the answer is cached on
-first render. It is cached lazily rather than in ``__init__`` because config
-options arrive by ``setattr`` AFTER construction — resolving in the constructor
-would read ``_host_name`` before the registry had set it, and a configured
-override would silently never apply.
+first render.
+
+**There is no config option for the name, deliberately.** A hostname is
+per-machine and ``.claude/hooks-daemon.yaml`` is tracked in git and routinely
+public, so an option for it would invite a machine name into a committed file —
+a leak findable only by searching history that is never rewritten. Per-machine
+values come from the environment.
 """
 
 import logging
@@ -81,11 +84,6 @@ class HostHostnameHandler(StatusLineHandlerBase):
         # is cached too rather than re-probed on every render forever.
         self._resolved: HostName | None = None
         self._has_resolved: bool = False
-        # Per-machine override from config (``options: {host_name: ...}``).
-        # Declared here rather than left implicit: the registry assigns options
-        # by untyped ``setattr``, so an undeclared attribute is invisible to the
-        # type checker and to anyone reading this class for its knobs.
-        self._host_name: str | None = None
 
     def get_default_enabled(self) -> bool:
         """Opt-in: only useful when you work across more than one machine."""
@@ -98,7 +96,7 @@ class HostHostnameHandler(StatusLineHandlerBase):
     def _host_name_once(self) -> HostName | None:
         """Resolve the host name on first call and cache it thereafter."""
         if not self._has_resolved:
-            self._resolved = resolve_host_name(configured=self._host_name)
+            self._resolved = resolve_host_name()
             self._has_resolved = True
             logger.debug("Host name resolved once: %s", self._resolved)
         return self._resolved
@@ -136,10 +134,10 @@ class HostHostnameHandler(StatusLineHandlerBase):
                 f"{_ICON}name = read as fact; {_ICON_INFERRED}name = INFERRED from "
                 "/etc/hosts and possibly wrong. Resolved once per daemon start, in order: "
                 f"{HostNameSource.ENVIRONMENT.value} (${ENV_HOST_HOSTNAME}), "
-                f"{HostNameSource.CONFIG.value}, "
                 f"{HostNameSource.LOCAL.value} (host or LXC only — a podman/docker hostname is "
                 f"the container ID), then {HostNameSource.ETC_HOSTS_HINT.value}. "
-                "Nothing resolvable renders nothing."
+                "No config option, by design: a hostname is per-machine and that file is "
+                "tracked in git. Nothing resolvable renders nothing."
             ),
             current_value=current_value,
         )

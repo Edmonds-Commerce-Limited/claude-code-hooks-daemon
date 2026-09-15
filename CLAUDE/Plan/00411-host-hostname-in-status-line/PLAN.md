@@ -40,9 +40,13 @@ guessing.
 ## Goals
 
 - An optional status-line segment naming the machine the session is really on.
-- Resolution order, first hit wins: an explicit environment variable (the ccy
-  supervisor's hand-off), then a configured override, then — only when NOT
+- Resolution order, first hit wins: an explicit environment variable
+  (`CCY_HOST_HOSTNAME` from the ccy supervisor, then
+  `HOOKS_DAEMON_HOST_HOSTNAME` for any other launcher), then — only when NOT
   containerised — the real `gethostname()`, then the `/etc/hosts` hint.
+- The resolved name is validated against an ALLOWLIST and refused outright if
+  it fails. It is printed to a terminal once per second, so an ANSI escape in
+  it is an injection vector rather than a cosmetic defect.
 - An INFERRED value renders visibly differently from a read one. Knowing which
   machine you are on is the whole point of the segment, so a confidently-wrong
   name is worse than no name.
@@ -53,6 +57,14 @@ guessing.
 - Making the host hostname readable from inside a container. It is not, and
   this plan does not add a privileged mount, a socket or a helper daemon to
   change that. An export is the fix; this consumes one.
+
+- A config-file setting for the name. `.claude/hooks-daemon.yaml` is tracked in
+  git and routinely public, so an option for a per-machine value is an
+  invitation to commit one — and that leak is findable afterwards only by
+  searching history nobody rewrites. An earlier revision of this plan had such
+  an option; it was removed at the owner's instruction, and tests now pin its
+  absence so it cannot quietly return. Per-machine values come from the
+  environment.
 
 - Showing the container's own hostname as a substitute. It is the container ID
   and answers a different question; the existing environment indicator already
