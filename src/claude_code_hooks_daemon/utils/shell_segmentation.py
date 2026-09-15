@@ -106,12 +106,42 @@ _INERT_BODY_PLACEHOLDER = "HEREDOC_BODY"
 # matched whole before the single `|` can claim its first character.
 _RECEIVER_SEPARATORS: tuple[str, ...] = ("&&", "||", ";", "|", "&")
 
+#: A receiving segment that OPENS with a command substitution. `$(cat <<'EOF'
+#: ... )` and its backtick spelling put the body's TEXT into command position:
+#: bash substitutes the output and then runs it. The heredoc's receiver really
+#: is `cat`, and nothing is piped on, so the other two checks both answer
+#: "prose" -- this is the third way a sink stops being one.
+#:
+#: Deliberately NOT matching a bare `(` or `{`. Those GROUP rather than
+#: substitute, so `( cat <<'EOF' ) > notes.md` sends the body to a redirect and
+#: never to command position; withholding there would scan every grouped prose
+#: write for nothing.
+_SUBSTITUTION_OPENER_PATTERN = re.compile(r"^(?:\$\(|`)")
+
+#: A file-descriptor redirect, whose `&` is punctuation rather than a command
+#: separator: `2>&1`, `>&2`, `1>&2`, `&>log`, `&>>log`, `2>&-`.
+#:
+#: These are blanked out of a segment BEFORE it is split, because
+#: `_RECEIVER_SEPARATORS` contains a lone `&` and would otherwise cut
+#: `cat 2>&1 <<'EOF'` into `cat 2>` and `1 `, resolving the receiver to `1`.
+#: That is on no allowlist, so the exemption is withheld and ordinary prose is
+#: scanned -- which re-opens the false positive Plan 00377 N7 closed, for
+#: `git commit -F - 2>&1 <<'EOF'`.
+_FD_REDIRECT_PATTERN = re.compile(r"[0-9]*[<>]&[0-9]*-?|&>>?")
+
 #: Separators that END the pipeline a heredoc feeds, as opposed to extending
 #: it. `|` is deliberately absent: it hands the body's bytes to another
 #: command, so that command is a consumer and must be judged too. `||` and `&&`
 #: hand over nothing, so a fallback branch on the opener line must not cause
 #: the body to be scanned. Longest-first, so `||` is matched whole.
-_PIPELINE_TERMINATORS: tuple[str, ...] = ("&&", "||", ";", "&")
+#:
+#: A LONE `&` is deliberately absent too, and that is a correction rather than
+#: an omission. It was here, and a stderr redirect contains one: `2>&1` cut
+#: `cat <<'EOF' 2>&1 | bash` before the pipe was ever seen, so a body bash runs
+#: was blanked. Dropping it costs only over-withholding -- a `|` belonging to
+#: something after a background `&` is read as downstream, which scans a body
+#: rather than exempting one -- and that is the safe direction.
+_PIPELINE_TERMINATORS: tuple[str, ...] = ("&&", "||", ";")
 
 #: Grouping and escaping characters bash strips off the front of a command
 #: word while deciding what command it names. `(` and `{` open a subshell or
@@ -472,7 +502,11 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
         'echo hi'
     """
 
-    def _blank_if_the_receiver_only_reads_it(match: re.Match[str]) -> str:
+    def _blank_if_nothing_can_execute_it(match: re.Match[str]) -> str:
+        # Three questions, because each was separately a real hole: who
+        # RECEIVES the body, what it is PIPED ON to, and whether the whole
+        # command sits in a SUBSTITUTION whose output lands in command
+        # position. Any one of them failing keeps the body.
         if not _receiver_is_data_sink(command, match.start("opener")):
             return match.group(0)
         if not _downstream_is_all_data_sinks(match.group("opener_tail")):
@@ -487,7 +521,7 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
             f"\n{_INERT_BODY_PLACEHOLDER}\n{match.group('closer')}"
         )
 
-    return _QUOTED_HEREDOC_BODY_PATTERN.sub(_blank_if_the_receiver_only_reads_it, command)
+    return _QUOTED_HEREDOC_BODY_PATTERN.sub(_blank_if_nothing_can_execute_it, command)
 
 
 def _receiver_is_data_sink(command: str, opener_start: int) -> bool:
@@ -501,8 +535,16 @@ def _receiver_is_data_sink(command: str, opener_start: int) -> bool:
     ``<<'EOF'`` redirection) resolves to ``None`` and is treated as unknown,
     so the body is scanned. Unknown means scan, always — that is the direction
     the allowlist exists to fix.
+
+    A segment OPENING with a command substitution is refused before the
+    receiver is even resolved, because there the receiver is not the whole
+    story: ``$(cat <<'EOF' … )`` really is fed to ``cat``, and bash then runs
+    what ``cat`` emitted. See :data:`_SUBSTITUTION_OPENER_PATTERN`.
     """
-    word = _segment_command_word(_receiving_segment(command, opener_start))
+    segment = _receiving_segment(command, opener_start)
+    if _SUBSTITUTION_OPENER_PATTERN.match(segment.lstrip()):
+        return False
+    word = _segment_command_word(segment)
     return word is not None and word in DATA_SINKS
 
 
@@ -598,7 +640,10 @@ def _receiving_segment(command: str, opener_start: int) -> str:
     """Return the command segment feeding the heredoc opening at ``opener_start``."""
     preceding = command[:opener_start]
     last_line = preceding.rsplit("\n", 1)[-1]
-    return split_unquoted(last_line, _RECEIVER_SEPARATORS)[-1]
+    # Blanked, not removed: an fd redirect's `&` is punctuation, and leaving it
+    # in lets `_RECEIVER_SEPARATORS`' lone `&` cut `cat 2>&1 ` at the redirect.
+    without_redirects = _FD_REDIRECT_PATTERN.sub(" ", last_line)
+    return split_unquoted(without_redirects, _RECEIVER_SEPARATORS)[-1]
 
 
 def quoted_heredoc_command_words(command: str) -> list[str]:

@@ -193,6 +193,45 @@ class TestTheGuardStillGuards:
         command = f"cat <<'EOF' | grep reset | wc -l\n{_RESET_HARD} HEAD\nEOF"
         assert _matches(handler, command) is False
 
+    @pytest.mark.parametrize(
+        ("channel", "command"),
+        [
+            (
+                "eval of a substituted cat heredoc",
+                f"eval \"$(cat <<'EOF'\n{_RESET_HARD} HEAD\nEOF\n)\"",
+            ),
+            ("bare substitution in command position", f"$(cat <<'EOF'\n{_RESET_HARD} HEAD\nEOF\n)"),
+            ("backtick substitution", f"`cat <<'EOF'\n{_RESET_HARD} HEAD\nEOF`"),
+            ("dot /dev/stdin", f". /dev/stdin <<'EOF'\n{_RESET_HARD} HEAD\nEOF"),
+            ("source /dev/stdin", f"source /dev/stdin <<'EOF'\n{_RESET_HARD} HEAD\nEOF"),
+            ("bash -s", f"bash -s <<'EOF'\n{_RESET_HARD} HEAD\nEOF"),
+            ("process substitution", f"bash <(cat <<'EOF'\n{_RESET_HARD} HEAD\nEOF\n)"),
+            (
+                "three-stage pipe ending in sh",
+                f"cat <<'EOF' | tee /tmp/x | sh\n{_RESET_HARD} HEAD\nEOF",
+            ),
+            ("stderr redirect then bash", f"cat <<'EOF' 2>&1 | bash\n{_RESET_HARD} HEAD\nEOF"),
+            ("env-wrapped receiver", f"env FOO=1 bash <<'EOF'\n{_RESET_HARD} HEAD\nEOF"),
+            ("timeout-wrapped receiver", f"timeout 5 bash <<'EOF'\n{_RESET_HARD} HEAD\nEOF"),
+        ],
+    )
+    def test_every_known_execution_channel_is_denied(
+        self, handler: DestructiveGitHandler, channel: str, command: str
+    ) -> None:
+        """The channel checklist, pinned as a test rather than left in a probe.
+
+        Each row is a way a quoted heredoc body actually reaches something that
+        runs it, and every one was verified against the SHIPPED v3.63.0 module
+        as having been denied there. They were found across six probing passes
+        (Plan 00409) — three of them after a fix was committed and green.
+
+        This lives here, not in `untracked/scratch/`, on purpose: the probes
+        that found these are gitignored and will not survive, and a checklist
+        that exists only where nobody can run it is the failure mode this plan
+        was filed about.
+        """
+        assert _matches(handler, command) is True, channel
+
     def test_an_unquoted_heredoc_body_is_still_scanned(
         self, handler: DestructiveGitHandler
     ) -> None:

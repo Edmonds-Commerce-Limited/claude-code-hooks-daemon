@@ -31,9 +31,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The whole pipeline is judged, not just its first stage: `cat <<'EOF' | bash`
   has a genuine data sink as its receiver and then hands the body to an
   interpreter, so every piped-on stage must also be a recognised sink. `|`
-  extends the pipeline; `&&`, `||`, `;` and `&` end it, so a fallback branch on
-  the opener line (`cat <<'EOF' > notes.md || echo failed`) does not cause a
-  prose body to be scanned.
+  extends the pipeline; `&&`, `||` and `;` end it, so a fallback branch on the
+  opener line (`cat <<'EOF' > notes.md || echo failed`) does not cause a prose
+  body to be scanned.
+
+  A heredoc inside a command SUBSTITUTION is judged too: `$(cat <<'EOF' … )`
+  standing alone, and its backtick spelling, put the body's text into command
+  position for bash to run. A bare `(` or `{` groups rather than substitutes,
+  so `( cat <<'EOF' ) > notes.md` stays exempt.
+
+  File-descriptor redirects no longer confuse any of this. `2>&1`, `>&2`,
+  `&>log` and friends contain an `&`, which was read as a command separator:
+  `cat <<'EOF' 2>&1 | bash` was cut before its pipe (a hole), and
+  `git commit -F - 2>&1 <<'EOF'` resolved its receiver to `1` and had its
+  message scanned (a false positive — the very one release note 29 closed).
 
   **Behaviour change worth knowing**: a `python3 <<'PY'` or `bash <<'EOF'` body
   is now scanned, so one that merely MENTIONS a destructive command in a string

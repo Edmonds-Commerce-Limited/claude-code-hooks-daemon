@@ -102,7 +102,9 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
         # "Whose receiver only reads it" is not a hedge. `bash <<'EOF'` EXECUTES
         # the body, and blanking it on the strength of the quoted delimiter let
         # a real `cd` past this rule in v3.64.0. `strip_inert_spans` now asks
-        # who is on the receiving end (Plan 00409).
+        # whether ANYTHING on the line can run the body: the receiver, every
+        # stage it is piped on to (`cat <<'EOF' | bash`), and whether the whole
+        # thing sits in a command substitution (Plan 00409).
         #
         # Blanking EVERY quoted literal as well is deliberately NOT done, and
         # that is a correction rather than an omission (Plan 00407 N12). A

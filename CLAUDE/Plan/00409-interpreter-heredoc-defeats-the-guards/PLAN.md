@@ -17,9 +17,10 @@ every guard that judges the stripped text sees an empty command.
 This is a REGRESSION published in v3.64.0, not a pre-existing gap, and the
 distinction is measured rather than argued. The shipped v3.63.0 module was
 recovered with `git show v3.63.0:…/destructive_git.py` and executed side by
-side with the installed one (`untracked/scratch/probe_v3630_regression.py`):
-v3.63.0 judged the RAW command and DENIED all five destructive spellings below;
-v3.64.0 allows every one of them.
+side with the installed one — the procedure is in this plan's `JOURNAL/`, since
+the script itself lives under gitignored `untracked/scratch/` and will not
+survive. v3.63.0 judged the RAW command and DENIED all five destructive
+spellings below; v3.64.0 allows every one of them.
 
 | command                                         | v3.63.0 | v3.64.0 |
 | ----------------------------------------------- | ------- | ------- |
@@ -33,7 +34,13 @@ v3.64.0 allows every one of them.
 The last row is the INTENDED change — release note 29 (Plan 00377 N7) set out
 to stop prose describing a destructive command being denied, and `cat` really
 does treat the body as data. The defect is that the fix keyed on the heredoc's
-QUOTING rather than on its RECEIVER, so it exempted the interpreter case too.
+QUOTING, which says nothing about whether anything runs the body.
+
+What DOES say so turned out to be three questions, not one, each found by
+probing after the previous answer looked complete: who RECEIVES the body, what
+it is PIPED ON to (`cat <<'EOF' | bash` has a sink as its receiver and an
+interpreter behind it), and whether the whole command sits in a SUBSTITUTION
+whose output lands in command position (`$(cat <<'EOF' … )`).
 
 The remedy already exists in this codebase and was reached deliberately: Plan
 00335 Decision 1 gave `curl_pipe_shell` an ALLOWLIST of data sinks, because
@@ -46,12 +53,15 @@ bypass"). Of the eight consumers that blank heredoc bodies, only
 
 ## Goals
 
-- A heredoc body is blanked only when every receiving word is a recognised
-  data sink; an unrecognised receiver withholds the exemption and the body is
-  scanned.
+- A heredoc body is blanked only when nothing on its line can EXECUTE it:
+  every receiving word, every piped-on stage, and the absence of an enclosing
+  command substitution. Anything unrecognised withholds the exemption and the
+  body is scanned.
 - The fix lives in `utils/shell_segmentation` so all eight consumers get it at
   once, rather than one of them growing a private copy.
-- The v3.63.0-vs-installed comparison is a permanent test, not a scratch probe.
+- The execution-channel checklist is a permanent TEST, not a scratch probe. The
+  v3.63.0-vs-installed comparison cannot be one (it needs `git show` of a tag),
+  so its procedure is recorded in `JOURNAL/` instead.
 
 ## Non-Goals
 
@@ -143,7 +153,23 @@ bypass"). Of the eight consumers that blank heredoc bodies, only
 
 - Found while verifying [Plan 00407](../Completed/00407-niggles-ledger-twelve/PLAN.md)
   N12, by a probe rather than by reading. The `review-n12` sub-agent reported
-  the same hole but characterised it as pre-existing and codebase-wide; running
-  the shipped v3.63.0 code disproved that. A peer agent's characterisation is a
-  hypothesis to verify, which is the same rule this project applies to issue
-  text.
+  the same hole and rated it the highest-value fix available — that finding is
+  theirs. What it got wrong was the severity: "not introduced by N12" is true,
+  and the reviewer's brief was N12's diff, but the RELEASE question is whether
+  behaviour changed since the last published version, and against v3.63.0 it
+  had. Nothing in the diff under review could have shown that; only the shipped
+  tag could. A peer agent's characterisation is a hypothesis to verify, which
+  is the rule this project already applies to issue text.
+
+- Delivered across `a02f75e9`…`b1c37fc8` plus the commits that follow it. The
+  defect was recorded at `a02f75e9` BEFORE any fix was attempted, deliberately:
+  it had been living in a gitignored report, and a session can end at any
+  point.
+
+- Six fix passes, every hole found by probing and none by reading — including
+  three found after a fix was committed, QA-green and pushed. The first three
+  were wrong about the UNIT of judgement (receiver, then pipeline, then command
+  position); the last two were ordinary shell punctuation defeating the parser
+  (`&` inside `2>&1`, in both directions). Two further passes found nothing and
+  are recorded anyway, because "probed and clean" is a different fact from "did
+  not probe". The blow-by-blow is in `JOURNAL/`.

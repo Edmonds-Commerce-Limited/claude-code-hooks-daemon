@@ -381,10 +381,80 @@ class TestABodyIsOnlyInertIfItsRECEIVERTreatsItAsData:
         command = f"cat <<'EOF' | {interpreter}\ngit reset --hard HEAD\nEOF"
         assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
 
+    def test_a_sink_inside_a_command_substitution_keeps_its_body(self) -> None:
+        """`$(cat <<'EOF' ... )` puts the body's TEXT in command position.
+
+        The receiver is `cat` and nothing is piped on, so both other checks say
+        "prose" — but bash substitutes the output and then runs it as a
+        command. `command_word` deliberately strips `$(` to find the command
+        inside, which is right for naming a receiver and wrong for deciding
+        whether an exemption is safe.
+        """
+        command = "$(cat <<'EOF'\ngit reset --hard HEAD\nEOF\n)"
+        assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
+
+    def test_the_backtick_spelling_of_that_substitution_is_covered_too(self) -> None:
+        command = "`cat <<'EOF'\ngit reset --hard HEAD\nEOF`"
+        assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
+
+    def test_a_plain_subshell_is_not_a_substitution_and_stays_blanked(self) -> None:
+        """`( cat <<'EOF' ) > f` groups; it does not substitute.
+
+        The output goes to a redirect, not into command position, so the body
+        is still prose. Withholding here would scan every grouped prose write.
+        """
+        command = "( cat <<'EOF' ) > notes.md\ngit reset --hard HEAD\nEOF"
+        assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
+
     @pytest.mark.parametrize("downstream", ["grep x", "jq -r .", "tee out.txt", "wc -l"])
     def test_a_pipeline_of_sinks_is_still_blanked(self, downstream: str) -> None:
         """Every stage reads; nothing runs. The exemption survives."""
         command = f"cat <<'EOF' | {downstream}\ngit reset --hard HEAD\nEOF"
+        assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
+
+    @pytest.mark.parametrize("interpreter", ["bash", "sh", "ssh host"])
+    def test_a_stderr_redirect_does_not_hide_the_pipe_after_it(self, interpreter: str) -> None:
+        """`2>&1` contains a bare `&`, and `&` used to end the pipeline scan.
+
+        So `cat <<'EOF' 2>&1 | bash` was cut at the redirect's ampersand, the
+        pipe was never seen, and the body bash runs was blanked. A stderr
+        redirect is ordinary enough that this is not an exotic spelling.
+        """
+        command = f"cat <<'EOF' 2>&1 | {interpreter}\ngit reset --hard HEAD\nEOF"
+        assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
+
+    def test_a_stderr_redirect_before_a_sink_still_blanks(self) -> None:
+        """The control: fixing the redirect must not withhold from real sinks."""
+        command = "cat <<'EOF' 2>&1 | grep x\ngit reset --hard HEAD\nEOF"
+        assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
+
+    @pytest.mark.parametrize(
+        "receiver",
+        ["cat 2>&1", "cat >&2", "git commit -F - 2>&1", "tee f 1>&2", "cat &> log"],
+    )
+    def test_a_redirect_ON_THE_RECEIVER_does_not_hide_which_command_it_is(
+        self, receiver: str
+    ) -> None:
+        """The same ampersand, on the other side of the opener.
+
+        `cat 2>&1 <<'EOF'` splits at the redirect's `&` and resolves the
+        receiver to `1`, which is on no allowlist — so the exemption is
+        withheld and prose gets scanned. That direction is safe, but it
+        re-opens the exact false positive release note 29 existed to close:
+        `git commit -F - 2>&1 <<'EOF'` describing a destructive command would
+        be denied again.
+        """
+        command = f"{receiver} <<'EOF' > notes.md\ngit reset --hard HEAD\nEOF"
+        assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
+
+    def test_a_redirect_on_an_INTERPRETER_receiver_still_keeps_the_body(self) -> None:
+        """Resolving the receiver correctly must not resolve it into safety."""
+        command = "bash 2>&1 <<'EOF'\ngit reset --hard HEAD\nEOF"
+        assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
+
+    def test_backgrounding_does_not_pipe_the_body_anywhere(self) -> None:
+        """`cat <<'EOF' & bash` runs bash separately; it never sees the body."""
+        command = "cat <<'EOF' & bash\ngit reset --hard HEAD\nEOF"
         assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
 
     def test_a_separator_ends_the_pipeline_rather_than_extending_it(self) -> None:
