@@ -1,10 +1,10 @@
 ---
 source_url: https://defence-before-fix.github.io/
-fetched_at: 2026-09-10T07:45:16.459448+00:00
+fetched_at: 2026-09-15T11:37:10.154339+00:00
 fidelity: converted
 source_sha256: 487f94c7996f15da009ac069e4db600e023497f69e241c6a634026b0582464bd
-licence: unreviewed
-stale_after: 2026-12-09
+licence: CC-BY-4.0
+stale_after: 2026-12-14
 fetch_method: agent-browser-lite-headless (llms-link)
 ---
 

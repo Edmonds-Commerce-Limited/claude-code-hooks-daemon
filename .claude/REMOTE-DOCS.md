@@ -12,7 +12,8 @@ Refresh everything:  `bin/hooks-daemon remote-docs refresh --all`
 
 | Document | Source | Captured | Fresh until |
 | -------- | ------ | -------- | ----------- |
-| `defence-before-fix.github.io/DETECTOR-SPEC.md` | https://defence-before-fix.github.io/DETECTOR-SPEC.html | 2026-09-10 | 2026-12-09 |
-| `defence-before-fix.github.io/SPEC.md` | https://defence-before-fix.github.io/SPEC.html | 2026-09-10 | 2026-12-09 |
-| `defence-before-fix.github.io/defence-before-fix-project-prompt.md` | https://defence-before-fix.github.io/defence-before-fix-project-prompt.md | 2026-09-10 | 2026-12-09 |
-| `defence-before-fix.github.io/index.md` | https://defence-before-fix.github.io/ | 2026-09-10 | 2026-12-09 |
+| `defence-before-fix.github.io/DETECTOR-SPEC.md` | https://defence-before-fix.github.io/DETECTOR-SPEC.html | 2026-09-15 | 2026-12-14 |
+| `defence-before-fix.github.io/SPEC.md` | https://defence-before-fix.github.io/SPEC.html | 2026-09-15 | 2026-12-14 |
+| `defence-before-fix.github.io/defence-before-fix-project-prompt.md` | https://defence-before-fix.github.io/defence-before-fix-project-prompt.md | 2026-09-15 | 2026-12-14 |
+| `defence-before-fix.github.io/index.md` | https://defence-before-fix.github.io/ | 2026-09-15 | 2026-12-14 |
+| `defence-before-fix.github.io/raw/TOOLING-SPEC.md` | https://defence-before-fix.github.io/raw/TOOLING-SPEC.md | 2026-09-15 | 2026-12-14 |

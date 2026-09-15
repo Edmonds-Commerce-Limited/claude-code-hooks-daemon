@@ -1,10 +1,10 @@
 ---
 source_url: https://defence-before-fix.github.io/DETECTOR-SPEC.html
-fetched_at: 2026-09-10T07:45:18.695477+00:00
+fetched_at: 2026-09-15T11:37:07.792727+00:00
 fidelity: converted
 source_sha256: 27de8f40380fa9448def102c05ae2d74d802ac3b0ec69aa6be25ba43556dffb9
-licence: unreviewed
-stale_after: 2026-12-09
+licence: CC-BY-4.0
+stale_after: 2026-12-14
 fetch_method: agent-browser-lite-headless (llms-link)
 ---
 

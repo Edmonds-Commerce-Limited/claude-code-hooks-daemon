@@ -1172,7 +1172,11 @@ documentation:
     default_staleness_days: 90
     # Domain -> SPDX licence, pre-filling the `licence` frontmatter field so
     # the review happens once per SOURCE rather than once per file (D13).
-    known_sources: {}
+    known_sources:
+      # Stated on the source itself, in the bytes we already hold: the
+      # index's "Source and licence" section and the last line of SPEC.md.
+      # Reviewed once here so no future capture from this domain repeats it.
+      defence-before-fix.github.io: CC-BY-4.0
   qa:
     edit_mode: warn
     commit_gate_mode: warn

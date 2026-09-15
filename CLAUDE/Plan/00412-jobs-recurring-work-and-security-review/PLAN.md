@@ -1,6 +1,6 @@
 # Plan 00412: jobs recurring work and security review
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-15
 **Owner**: joseph
 **Priority**: High
@@ -103,10 +103,13 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   argues "Job" collides locally and recommends "Routine"), the directory, and
   whether the run record is one file per run or an append-only ledger.
 
-- [ ] ⬜ **Task 1.2**: Capture the one Defence Before Fix document the
+- [x] ✅ **Task 1.2**: Capture the one Defence Before Fix document the
   remote-docs corpus is missing (`TOOLING-SPEC`), and correct the
   `licence: unreviewed` frontmatter on the vendored copies, which state CC
-  BY 4.0 on the site itself.
+  BY 4.0 on the site itself. Toolchain specification 0.2.0 is now vendored;
+  the licence is recorded once for the DOMAIN under
+  `documentation.remote.known_sources` rather than five times in
+  frontmatter, which is what the capture advisory asks for.
 
 ### Phase 2: The generic system
 

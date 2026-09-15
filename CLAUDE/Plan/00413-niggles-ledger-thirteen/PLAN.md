@@ -291,6 +291,65 @@ wall first.
 This half is a straight detector fix rather than a new affordance, and it is
 cheap: the same exemption shape, applied to the same position in the command.
 
+### N8 — a newly recorded licence never reaches the files already vendored under that domain
+
+Found doing Plan 00412 Task 1.2, correcting `licence: unreviewed` on four
+vendored Defence Before Fix documents whose source states CC BY 4.0 plainly.
+
+`documentation.remote.known_sources` maps a domain to an SPDX licence and, per
+`CLAUDE/RemoteDocs.md`, exists so "the review is recorded once per SOURCE rather
+than once per file". The capture advisory actively recommends it over per-file
+frontmatter. But it is consumed only on the CAPTURE path, so recording it has no
+effect on anything already vendored from that domain — which, for a domain
+anybody has actually used, is every file they care about.
+
+Neither obvious remedy works:
+
+- Hand-editing the frontmatter is DENIED by `remote_docs_provenance`, correctly:
+  this tree is captured, not authored.
+- `remote-docs refresh --path <file>` reports `unchanged` and rewrites nothing.
+  Refresh compares the SOURCE HASH; the licence is a local judgement rather than
+  source content, so a content-identical refresh has no reason to re-stamp it.
+  This is defensible behaviour on its own terms, which is what makes the gap
+  easy to miss.
+
+What does work is re-running `remote-docs add` on the original URL, because
+capture re-derives frontmatter from config. That is undocumented, reads as
+destructive (it overwrites a vendored file), and is discoverable only by
+exhausting the two documented routes first.
+
+The fix is a back-fill: either a `refresh --relicence` flag, or a plain check
+that reports any vendored file whose `licence` disagrees with the
+`known_sources` entry for its domain. The second is cheaper and fits the
+project's report-the-drift habit, but it does not close the loop on its own.
+
+Scale check before anyone over-builds this: it bites once per domain, at the
+moment a licence is first recorded. Reporting the drift may well be enough.
+
+### N9 — the provenance deny message misdiagnoses an Edit fragment as a whole file
+
+Same task, separate defect, and this one can actively cause damage.
+
+`Edit` on a vendored file with `new_string: "licence: CC-BY-4.0"` is denied
+with: `no YAML frontmatter found; a remote document must open with a --- delimited provenance block`.
+
+The verdict is right and must stand. The reason is wrong: the handler validated
+the edit's `new_string` — a one-line fragment — as though it were the whole
+file. Every single-line edit to every vendored file produces this message,
+including edits that would leave the frontmatter untouched and intact.
+
+**It misleads in a specific and harmful direction.** An agent reading the stated
+reason literally would satisfy it the way it asks — by pasting a `---`
+frontmatter block into the middle of the document, corrupting the file, having
+been invited to do so by the deny message. The guard would then pass the
+resulting write, because the fragment now does open with `---`.
+
+The honest reason is already in the rest of the message: this tree is captured,
+not hand-edited. Either judge the file the edit WOULD produce (`old_string`
+replaced in the real content), or drop the frontmatter diagnosis for `Edit`
+entirely and refuse hand-editing plainly. The second is simpler and loses
+nothing — no hand `Edit` of a vendored file is ever wanted.
+
 ## Tasks
 
 - [x] ✅ **Task 1.1**: N1 — detector first, RED on both tracked paths, then the
@@ -327,6 +386,17 @@ cheap: the same exemption shape, applied to the same position in the command.
 - [ ] ⬜ **Task 1.10**: N7b — give `plan_number_helper` the git-message
   exemption `sed_blocker` already has, so a commit describing a discovery scan
   is not mistaken for one. Detector fix, RED first.
+
+- [ ] ⬜ **Task 1.11**: N8 — close the loop between `known_sources` and the
+  files already vendored under that domain. Decide between a back-fill flag and
+  a drift check; the drift check is cheaper and matches the project's habits,
+  so start by establishing whether reporting alone is sufficient.
+
+- [ ] ⬜ **Task 1.12**: N9 — stop `remote_docs_provenance` diagnosing an `Edit`
+  fragment as a frontmatter-less file. RED first, on a single-line edit that
+  leaves valid frontmatter untouched. Prefer refusing hand-edits plainly over
+  reconstructing the resulting file, unless the reconstruction is needed
+  elsewhere.
 
 ## Success Criteria
 
