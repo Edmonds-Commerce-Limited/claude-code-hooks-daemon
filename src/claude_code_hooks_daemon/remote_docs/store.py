@@ -11,11 +11,12 @@ makes checking often actually affordable.
 """
 
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import Enum
 from pathlib import Path
+from urllib.parse import urlparse
 
 from claude_code_hooks_daemon.remote_docs.capture import (
     DEFAULT_STALE_AFTER_DAYS,
@@ -209,6 +210,65 @@ def _stale_window_days(provenance: Provenance) -> int | None:
         return None
     window = (provenance.stale_after - provenance.fetched_at.date()).days
     return window if window > 0 else DEFAULT_STALE_AFTER_DAYS
+
+
+@dataclass(frozen=True)
+class LicenceDrift:
+    """A vendored document whose licence disagrees with its domain's."""
+
+    document: StoredDocument
+    recorded: str
+    expected: str
+
+
+def check_licence_drift(tree_root: Path, known_sources: Mapping[str, str]) -> list[LicenceDrift]:
+    """Documents whose recorded licence disagrees with ``known_sources``.
+
+    ``known_sources`` is consumed on the CAPTURE path, so recording a domain's
+    licence has no effect on anything already vendored from it — which, for a
+    domain anyone has used, is every file they care about (ledger 00413 N8).
+
+    Neither documented remedy closes that gap. Hand-editing frontmatter is
+    denied, correctly, because this tree is captured rather than authored; and
+    ``refresh`` compares the SOURCE HASH, so a content-identical refresh has no
+    reason to re-stamp a licence, which is a local judgement rather than
+    something upstream served. Only re-running ``add`` re-derives it.
+
+    So the drift is REPORTED and the caller applies the fix. A report does not
+    close the loop by itself, and is chosen deliberately over a silent
+    rewrite: re-stamping a licence is a legal assertion about someone else's
+    work, and it should be a decision rather than a side effect.
+
+    A document with unreadable provenance is skipped, not reported here —
+    :func:`check_staleness` already flags it, and repeating it under a licence
+    heading would send the reader to fix the wrong thing.
+
+    Args:
+        tree_root: Root of the vendored remote-docs tree.
+        known_sources: Domain to SPDX licence, exactly as configured. Host
+            matching is exact, never a suffix, mirroring capture.
+
+    Returns:
+        One entry per disagreeing document. Empty when nothing disagrees, when
+        no domain is declared (opt-in: declaring nothing expresses no
+        expectation), and when the tree is absent.
+    """
+    drifted: list[LicenceDrift] = []
+    if not known_sources:
+        return drifted
+
+    for document in list_documents(tree_root):
+        provenance = document.provenance
+        if provenance is None:
+            continue
+        host = urlparse(provenance.source_url).hostname
+        expected = known_sources.get(host) if host else None
+        if expected is None or provenance.licence == expected:
+            continue
+        drifted.append(
+            LicenceDrift(document=document, recorded=provenance.licence, expected=expected)
+        )
+    return drifted
 
 
 def check_staleness(tree_root: Path, *, today: date | None = None) -> list[StoredDocument]:

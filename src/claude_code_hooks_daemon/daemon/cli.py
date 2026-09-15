@@ -39,6 +39,7 @@ import socket
 import subprocess  # nosec B404 - subprocess used for daemon management (systemctl) only
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
@@ -6047,7 +6048,7 @@ def cmd_remote_docs(args: argparse.Namespace) -> int:
     if action == "list":
         return _remote_docs_list(tree)
     if action == "check":
-        return _remote_docs_check(tree, now)
+        return _remote_docs_check(tree, now, _remote_docs_policy(resolved_root).known_sources)
 
     # Only the fetching actions resolve a fetcher, so `list`/`check` never
     # warn about a browser they were never going to use.
@@ -6179,20 +6180,44 @@ def _remote_docs_list(tree: Path) -> int:
     return 0
 
 
-def _remote_docs_check(tree: Path, now: Any) -> int:
-    from claude_code_hooks_daemon.remote_docs.store import check_staleness
+def _remote_docs_check(tree: Path, now: Any, known_sources: Mapping[str, str] | None = None) -> int:
+    from claude_code_hooks_daemon.remote_docs.store import check_licence_drift, check_staleness
 
     today = now.date() if now is not None else None
     flagged = check_staleness(tree, today=today)
-    if not flagged:
+    # Reported beside staleness rather than as its own verb: both answer
+    # "does this corpus need attention?", and a second command nobody runs
+    # would leave the drift exactly as invisible as it already is.
+    drifted = check_licence_drift(tree, known_sources or {})
+
+    if not flagged and not drifted:
         print("remote-docs: all vendored documents are fresh")
         return 0
+
     for document in flagged:
         if document.provenance is None:
             print(f"{document.path}: provenance unreadable")
         else:
             print(f"{document.path}: stale since {document.provenance.stale_after}")
-    print(f"remote-docs: {len(flagged)} document(s) need attention")
+
+    if drifted:
+        # `known_sources` applies at capture, so declaring a licence never
+        # reaches what is already vendored (ledger 00413 N8). Re-capturing is
+        # the only route that re-derives frontmatter, so it is named here --
+        # `refresh` compares the source hash and would report `unchanged`.
+        print(
+            "\nLicence disagrees with documentation.remote.known_sources "
+            "(recorded at capture time, so a later declaration does not reach "
+            "an already-vendored file):"
+        )
+        for drift in drifted:
+            print(
+                f"{drift.document.path}: recorded `{drift.recorded}`, "
+                f"declared `{drift.expected}`"
+            )
+        print("  fix: bin/hooks-daemon remote-docs add <source_url>  (re-derives frontmatter)")
+
+    print(f"\nremote-docs: {len(flagged) + len(drifted)} document(s) need attention")
     return 1
 
 

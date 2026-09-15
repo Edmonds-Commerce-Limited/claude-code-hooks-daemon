@@ -10,9 +10,10 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from claude_code_hooks_daemon.remote_docs.capture import CaptureError
-from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
+from claude_code_hooks_daemon.remote_docs.provenance import UNREVIEWED, Fidelity
 from claude_code_hooks_daemon.remote_docs.store import (
     RefreshOutcome,
+    check_licence_drift,
     check_staleness,
     list_documents,
     read_document,
@@ -229,6 +230,78 @@ class TestListAndCheck:
         bad.write_text("# no frontmatter\n")
 
         assert check_staleness(tmp_path, today=date(2026, 9, 4)) != []
+
+
+class TestLicenceDriftAgainstKnownSources:
+    """`known_sources` applies at CAPTURE, so it never reaches what is already
+    vendored (ledger 00413 N8).
+
+    Recording a domain's licence is advertised as the right move — the capture
+    advisory recommends it over per-file frontmatter — but it changes nothing
+    for the files already captured from that domain, which for any domain
+    anyone has actually used is every file they care about.
+
+    Neither documented route closes the gap: hand-editing frontmatter is
+    correctly denied, and `refresh` compares the SOURCE HASH, so a
+    content-identical refresh has no reason to re-stamp a licence that is a
+    local judgement rather than source content. Only re-running `add` works,
+    and that is undocumented and reads as destructive.
+
+    So the drift is REPORTED. The fix is then the caller's to apply, but they
+    can no longer be unaware of it.
+    """
+
+    def test_a_document_disagreeing_with_its_domain_is_reported(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+
+        drift = check_licence_drift(tmp_path, {"example.com": "CC-BY-4.0"})
+
+        assert len(drift) == 1
+        assert drift[0].expected == "CC-BY-4.0"
+
+    def test_the_report_names_the_recorded_licence_too(self, tmp_path: Path) -> None:
+        """A report saying only what is EXPECTED cannot be acted on."""
+        _seed(tmp_path)
+
+        drift = check_licence_drift(tmp_path, {"example.com": "CC-BY-4.0"})
+
+        assert drift[0].recorded == UNREVIEWED
+
+    def test_an_agreeing_document_is_silent(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+
+        assert check_licence_drift(tmp_path, {"example.com": UNREVIEWED}) == []
+
+    def test_an_undeclared_domain_is_silent(self, tmp_path: Path) -> None:
+        """Declaring nothing must not turn every document into a finding.
+
+        `known_sources` is opt-in; a project that has declared no domains has
+        expressed no expectation to disagree with.
+        """
+        _seed(tmp_path)
+
+        assert check_licence_drift(tmp_path, {}) == []
+
+    def test_a_different_domain_is_not_matched(self, tmp_path: Path) -> None:
+        """Host matching is exact, mirroring what RemoteDocs.md already states."""
+        _seed(tmp_path)
+
+        assert check_licence_drift(tmp_path, {"other.example.com": "CC-BY-4.0"}) == []
+
+    def test_a_malformed_document_is_skipped_rather_than_crashing(self, tmp_path: Path) -> None:
+        """Unparseable provenance is already `check_staleness`'s finding.
+
+        Reporting it twice, under a heading about licences, would send the
+        reader to fix the wrong thing.
+        """
+        bad = tmp_path / "example.com" / "bad.md"
+        bad.parent.mkdir(parents=True)
+        bad.write_text("# no frontmatter\n")
+
+        assert check_licence_drift(tmp_path, {"example.com": "CC-BY-4.0"}) == []
+
+    def test_a_missing_tree_is_not_an_error(self, tmp_path: Path) -> None:
+        assert check_licence_drift(tmp_path / "absent", {"example.com": "CC-BY-4.0"}) == []
 
 
 class TestFidelityIsCarriedThrough:

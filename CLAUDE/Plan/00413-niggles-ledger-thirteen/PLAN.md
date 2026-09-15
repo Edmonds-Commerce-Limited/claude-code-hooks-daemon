@@ -418,10 +418,14 @@ its author intended these to be environment-dependent.
   plan directory appears in exactly the messages this exemption allows. Both
   laundering shapes are pinned as still-denied.
 
-- [ ] ⬜ **Task 1.11**: N8 — close the loop between `known_sources` and the
-  files already vendored under that domain. Decide between a back-fill flag and
-  a drift check; the drift check is cheaper and matches the project's habits,
-  so start by establishing whether reporting alone is sufficient.
+- [x] ✅ **Task 1.11**: N8 — `remote-docs check` now reports licence drift
+  against `known_sources` beside staleness, and names re-capture as the fix
+  (`refresh` compares the source hash and reports `unchanged`). Reporting was
+  chosen over a back-fill flag deliberately: re-stamping a licence is a legal
+  assertion about someone else's work, so it should be a decision rather than
+  a side effect. Folded into the existing verb rather than a new one — a
+  second command nobody runs would leave the drift as invisible as it was.
+  Proved end-to-end on a scratch project, since the real corpus is clean.
 
 - [x] ✅ **Task 1.12**: N9 — an `Edit` in the tree is now refused outright,
   with a reason that names the real objection instead of a frontmatter
