@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00418: orchestrator only mode greenfield](00418-orchestrator-only-mode-greenfield/PLAN.md) - In Progress (restrict the MAIN THREAD to coordination tools; built once and deleted because hooks could not tell which agent fired an event, and `agent_id` now can. Greenfield by ruling, project-level handler, warn/simulate before ever blocking. From issue #14)
+
 - [00417: supervisor operator signals](00417-supervisor-operator-signals/PLAN.md) - In Progress (a closed channel letting a host warn every session that the machine reboots in N minutes, so work is committed and journalled first. Fixed kinds, integer payload, no free text anywhere — the wording is daemon-owned, because a channel from outside the container is a prompt-injection surface by default. From issue #39)
 
 - [00416: session start action tiers and teeth](00416-session-start-action-tiers-and-teeth/PLAN.md) - In Progress (SessionStart output is delivered but not ACTED ON — 25 handlers in one flat block read as scenery. ACTION_REQUIRED is COMPUTED from "has a verifier and it is failing", never declared, so the tier cannot inflate; the Stop hook blocks on a failing verifier. Carries N6/N15 from 00413)
@@ -209,7 +211,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00372: worktree reap two defects](Completed/00372-worktree-reap-two-defects/PLAN.md) - Complete + the archiving commit (a worktree with no commits yet passed every safety predicate vacuously, so a live agent's work was offered for deletion; and the branch delete had never once worked, passing a fully-qualified ref that `git branch -d` rejects)
 
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -261,11 +262,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 417 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 418 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 364 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 30 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 31 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
