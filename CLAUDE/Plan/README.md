@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00410: gitignore swallows deployed assets](00410-gitignore-swallows-deployed-assets/PLAN.md) - Not Started (an unanchored `hooks-daemon/` ignore pattern matches at every depth, so it hides the deployed `.claude/skills/hooks-daemon/` tree as well as the intended clone; this repo is already anchored, but nothing DETECTS the mistake, and an ignored file cannot drift visibly. Owner-reported from a client project)
+
 - [00409: interpreter heredoc defeats the guards](00409-interpreter-heredoc-defeats-the-guards/PLAN.md) - In Progress, fix landed at `60778567`, **BLOCKED ON A HUMAN `/release`** (v3.64.0 regression: `bash <<'EOF'` executes its body, so five destructive-git spellings v3.63.0 denied were allowed; every published installation runs the defect until a patch release carries the fix)
 
 - [00408: handler hygiene from the release review](00408-handler-hygiene-from-the-release-review/PLAN.md) - Not Started (the non-user-visible half of the v3.64.0 review: raw hook-field literals where `HookInputField` is the declared SSoT, `merge_qa_report` building the docs corpus on the hook budget while a sibling argues against exactly that, and four sub-bar items carried so they are not lost. Graduated from 00407 N6)
@@ -246,11 +248,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 409 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 410 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 363 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 23 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 24 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
