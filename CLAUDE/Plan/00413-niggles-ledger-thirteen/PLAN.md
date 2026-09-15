@@ -53,7 +53,7 @@ fixing earlier entries, and that sequence is part of the record.
 | N5  | that remedy also DESTROYS this repository's tracked config                                 | ✅ Fixed                                                                  |
 | N6  | the persistent-cron mechanism rests on output agents skim                                  | ⬜ Designed; implementation owner-gated                                   |
 | N7  | no sanctioned way to FIND a plan, so the guard denies the only obvious one                 | ✅ Fixed                                                                  |
-| N8  | a newly recorded licence never reaches already-vendored files                              | ⬜ Open — report-the-drift is likely enough                               |
+| N8  | a newly recorded licence never reaches already-vendored files                              | ✅ Fixed (Task 1.11 — drift is reported)                                  |
 | N9  | the provenance deny message invites the corruption it should prevent                       | ✅ Fixed                                                                  |
 | N10 | the question gate's escape hatch is fatal unattended                                       | ✅ Fixed                                                                  |
 | N11 | host-identity tests read the real machine's `/etc/hosts`                                   | ✅ Fixed                                                                  |
@@ -194,7 +194,7 @@ fixing earlier entries, and that sequence is part of the record.
   run from a bare clone it reaches 31/31 listeners and leaves the tracked tree
   clean, with no `.bak` files.
 
-- [x] ✅ Every entry above is terminal — fifteen niggles, eighteen tasks, each
+- [x] ✅ Every entry above is terminal — seventeen niggles, nineteen tasks, each
   either fixed with a RED-first test or determined from the record.
 
 - [ ] ⬜ **Owner-gated, and the only thing left**: N6/N15's enforcement is
