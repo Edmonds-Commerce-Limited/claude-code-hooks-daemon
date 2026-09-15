@@ -174,6 +174,25 @@ class TestTheGuardStillGuards:
         """
         assert _matches(handler, f"{receiver} <<'EOF'\n{body}\nEOF") is True
 
+    @pytest.mark.parametrize("interpreter", ["bash", "sh", "python3", "ssh host"])
+    def test_a_sink_piped_into_an_interpreter_is_still_blocked(
+        self, handler: DestructiveGitHandler, interpreter: str
+    ) -> None:
+        """`cat <<'EOF' | bash` — a sink is not a safe place to stop looking.
+
+        The heredoc's receiver IS `cat`, so asking only about the receiver
+        answers "prose" and blanks the body, which bash then executes. Found by
+        probing the fix rather than by reading it, after the receiver check was
+        already written and passing.
+        """
+        command = f"cat <<'EOF' | {interpreter}\n{_RESET_HARD} HEAD\nEOF"
+        assert _matches(handler, command) is True
+
+    def test_a_pipeline_of_sinks_is_still_prose(self, handler: DestructiveGitHandler) -> None:
+        """The control: every stage reads, nothing runs, so nothing is denied."""
+        command = f"cat <<'EOF' | grep reset | wc -l\n{_RESET_HARD} HEAD\nEOF"
+        assert _matches(handler, command) is False
+
     def test_an_unquoted_heredoc_body_is_still_scanned(
         self, handler: DestructiveGitHandler
     ) -> None:

@@ -106,6 +106,13 @@ _INERT_BODY_PLACEHOLDER = "HEREDOC_BODY"
 # matched whole before the single `|` can claim its first character.
 _RECEIVER_SEPARATORS: tuple[str, ...] = ("&&", "||", ";", "|", "&")
 
+#: Separators that END the pipeline a heredoc feeds, as opposed to extending
+#: it. `|` is deliberately absent: it hands the body's bytes to another
+#: command, so that command is a consumer and must be judged too. `||` and `&&`
+#: hand over nothing, so a fallback branch on the opener line must not cause
+#: the body to be scanned. Longest-first, so `||` is matched whole.
+_PIPELINE_TERMINATORS: tuple[str, ...] = ("&&", "||", ";", "&")
+
 #: Grouping and escaping characters bash strips off the front of a command
 #: word while deciding what command it names. `(` and `{` open a subshell or
 #: brace group, `` ` `` and `$` open a substitution, `\` escapes the next
@@ -468,6 +475,8 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
     def _blank_if_the_receiver_only_reads_it(match: re.Match[str]) -> str:
         if not _receiver_is_data_sink(command, match.start("opener")):
             return match.group(0)
+        if not _downstream_is_all_data_sinks(match.group("opener_tail")):
+            return match.group(0)
         # ``opener_tail`` is kept, not dropped: it holds whatever else the
         # opener line carried, and that is usually a REDIRECT
         # (`cat <<'EOF' > doc.md`). Erasing it would hide the destination from
@@ -495,6 +504,35 @@ def _receiver_is_data_sink(command: str, opener_start: int) -> bool:
     """
     word = _segment_command_word(_receiving_segment(command, opener_start))
     return word is not None and word in DATA_SINKS
+
+
+def _downstream_is_all_data_sinks(opener_tail: str) -> bool:
+    """Does every command the body is PIPED ON to also just read it?
+
+    ``cat <<'EOF' | bash`` passes :func:`_receiver_is_data_sink` — the receiver
+    really is ``cat`` — and then hands the body straight to an interpreter. The
+    exemption has to survive the whole pipeline, not merely its first stage, or
+    a sink becomes a way to smuggle one.
+
+    Only ``|`` extends the pipeline. ``&&``, ``||``, ``;`` and ``&`` end it and
+    everything after them is a separate command that never sees the body, so a
+    fallback branch on the opener line (``cat <<'EOF' > f || echo failed``)
+    must not cause the body to be scanned.
+
+    Args:
+        opener_tail: Whatever the opener line carried after the delimiter.
+
+    Returns:
+        True when there are no downstream stages, or every one of them names a
+        recognised data sink. An unrecognised or unnameable stage returns
+        False, which withholds the exemption and scans the body.
+    """
+    pipeline = split_unquoted(opener_tail, _PIPELINE_TERMINATORS)[0]
+    for stage in split_unquoted(pipeline, ("|",))[1:]:
+        word = _segment_command_word(stage)
+        if word is None or word not in DATA_SINKS:
+            return False
+    return True
 
 
 def quoted_heredoc_receivers(command: str) -> list[str]:

@@ -21,12 +21,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Measured rather than inferred: the shipped v3.63.0 module was recovered from
   the tag and executed beside the installed one, and it denied all five.
 
-  The exemption is now granted by RECEIVER, from an allowlist of commands that
+  The exemption is now granted by PIPELINE, from an allowlist of commands that
   consume their input as data (`cat`, `tee`, `git`, `jq`, `grep`, …). An
   unrecognised receiver — an interpreter, `ssh host`, or any name not on the
   list — has its body scanned like any other command. The direction is
   deliberate and is the one `curl_pipe_shell` already used: withholding the
   exemption costs a false positive, granting one wrongly costs the guard.
+
+  The whole pipeline is judged, not just its first stage: `cat <<'EOF' | bash`
+  has a genuine data sink as its receiver and then hands the body to an
+  interpreter, so every piped-on stage must also be a recognised sink. `|`
+  extends the pipeline; `&&`, `||`, `;` and `&` end it, so a fallback branch on
+  the opener line (`cat <<'EOF' > notes.md || echo failed`) does not cause a
+  prose body to be scanned.
 
   **Behaviour change worth knowing**: a `python3 <<'PY'` or `bash <<'EOF'` body
   is now scanned, so one that merely MENTIONS a destructive command in a string

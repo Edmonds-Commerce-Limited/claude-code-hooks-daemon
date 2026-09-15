@@ -365,6 +365,38 @@ class TestABodyIsOnlyInertIfItsRECEIVERTreatsItAsData:
         assert "git clean -fd" not in stripped
         assert "git reset --hard HEAD" in stripped
 
+    @pytest.mark.parametrize("interpreter", ["bash", "sh", "/bin/sh", "python3", "ssh host"])
+    def test_a_sink_whose_output_is_piped_into_an_interpreter_keeps_its_body(
+        self, interpreter: str
+    ) -> None:
+        """`cat <<'EOF' | bash` — the sink reads it, and bash then RUNS it.
+
+        Asking only "is the receiver a sink?" answers yes here and blanks the
+        body, which is a second execution channel wearing the first one's
+        clothes. The exemption has to survive the whole pipeline, not just its
+        first stage. `ssh host` is in the list because it is the case a
+        denylist of interpreters would miss — the same argument that made
+        DATA_SINKS an allowlist in the first place.
+        """
+        command = f"cat <<'EOF' | {interpreter}\ngit reset --hard HEAD\nEOF"
+        assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
+
+    @pytest.mark.parametrize("downstream", ["grep x", "jq -r .", "tee out.txt", "wc -l"])
+    def test_a_pipeline_of_sinks_is_still_blanked(self, downstream: str) -> None:
+        """Every stage reads; nothing runs. The exemption survives."""
+        command = f"cat <<'EOF' | {downstream}\ngit reset --hard HEAD\nEOF"
+        assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
+
+    def test_a_separator_ends_the_pipeline_rather_than_extending_it(self) -> None:
+        """`||` does not feed the body to anything, so it must not withhold.
+
+        Distinguishing this from `|` matters: treating any downstream word as a
+        consumer would scan ordinary prose bodies whose opener line merely has
+        a fallback branch after it.
+        """
+        command = "cat <<'EOF' > notes.md || echo failed\ngit reset --hard HEAD\nEOF"
+        assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
+
     @pytest.mark.parametrize(
         "receiver",
         ["cat > notes.md", "tee -a notes.md", "git commit -F -", "jq -r .", "grep x"],
