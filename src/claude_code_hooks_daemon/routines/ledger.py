@@ -25,6 +25,7 @@ the same data.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -32,6 +33,8 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.routines.intervals import RunInterval
+
+logger = logging.getLogger(__name__)
 
 #: Subdirectory of a routine folder holding the year files.
 RUNS_DIRNAME: Final[str] = "RUNS"
@@ -172,6 +175,37 @@ def read_events(routine_dir: Path) -> list[RunEvent]:
     return events
 
 
+def malformed_rows(routine_dir: Path) -> list[str]:
+    """Every row that could not become an event, described for a report.
+
+    The counterpart to :func:`read_events` skipping them. Skipping alone would
+    trade a crash for a silent omission, which is the worse of the two: a run
+    would vanish from the coverage chain with nothing saying so.
+
+    Args:
+        routine_dir: A scaffolded routine folder.
+
+    Returns:
+        One human-readable description per bad row, naming the file, the row
+        and why it could not be read. Empty for a healthy ledger.
+    """
+    runs_dir = routine_dir / RUNS_DIRNAME
+    if not runs_dir.is_dir():
+        return []
+
+    problems: list[str] = []
+    for path in sorted(runs_dir.glob("*.md")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            cells = _split_row(line)
+            if cells is None:
+                continue
+            try:
+                _event_from_cells(cells)
+            except ValueError as error:
+                problems.append(f"{path.name}: row '{cells[0]}' is unreadable ({error})")
+    return problems
+
+
 def run_states(events: list[RunEvent]) -> dict[str, RunState]:
     """Compose events into one state per run.
 
@@ -252,7 +286,19 @@ def _parse_file(path: Path) -> list[RunEvent]:
         cells = _split_row(line)
         if cells is None:
             continue
-        events.append(_event_from_cells(cells))
+        try:
+            events.append(_event_from_cells(cells))
+        except ValueError as error:
+            # A hand-edited row. Skipped rather than raised, because raising
+            # takes the whole QA sweep with it and a sweep that reports
+            # nothing is indistinguishable from one that found nothing.
+            # NOT swallowed: `malformed_rows` reports exactly these, so the
+            # row surfaces as a finding instead of a crash or a silence.
+            logger.warning(
+                "routines: unreadable ledger row in %s (%s); skipped — `malformed_rows` reports it",
+                path,
+                error,
+            )
     return events
 
 

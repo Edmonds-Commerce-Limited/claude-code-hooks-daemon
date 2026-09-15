@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.routines.ledger import (
     RunState,
     append_event,
     ledger_path,
+    malformed_rows,
     next_run_id,
     read_events,
     run_states,
@@ -220,6 +221,77 @@ class TestReadEvents:
 
         (event,) = read_events(routine_dir)
         assert event.run_id == "2026-001"
+
+
+class TestMalformedRows:
+    """A hand-edited ledger must be REPORTABLE, never fatal.
+
+    The write-time guards refuse to create a terminal row with no interval,
+    and they should. But nothing stops a human editing the file afterwards,
+    and a reader that raises on what it finds takes the whole QA sweep with
+    it — and a sweep that reports nothing looks exactly like a sweep that
+    found nothing. Same reasoning as the ancestry oracle returning False for
+    a ref git cannot resolve: surface it as a finding, not as a crash.
+    """
+
+    def _write_rows(self, routine_dir: Path, *rows: str) -> None:
+        """Put a hand-authored ledger on disk, header included."""
+        ledger_path(routine_dir, 2026).write_text(
+            "| run | at | event | from | to | note |\n"
+            "| --- | --- | --- | --- | --- | --- |\n" + "".join(f"{row}\n" for row in rows)
+        )
+
+    def test_reading_does_not_raise(self, routine_dir: Path) -> None:
+        """The defect this class exists for: the reader used to explode."""
+        self._write_rows(
+            routine_dir, "| 2026-001 | 2026-09-15T20:00:00+00:00 | clean | - | - | - |"
+        )
+
+        assert read_events(routine_dir) == []
+
+    def test_a_good_row_beside_a_bad_one_still_reads(self, routine_dir: Path) -> None:
+        """One corrupt row must not erase the runs recorded around it."""
+        self._write_rows(
+            routine_dir,
+            "| 2026-001 | 2026-09-15T20:00:00+00:00 | clean | - | - | - |",
+            "| 2026-002 | 2026-09-15T21:00:00+00:00 | clean | abc123 | def456 | - |",
+        )
+
+        assert [event.run_id for event in read_events(routine_dir)] == ["2026-002"]
+
+    def test_the_bad_row_is_reported(self, routine_dir: Path) -> None:
+        """Skipping quietly would trade a crash for a silent omission."""
+        self._write_rows(
+            routine_dir, "| 2026-001 | 2026-09-15T20:00:00+00:00 | clean | - | - | - |"
+        )
+
+        (problem,) = malformed_rows(routine_dir)
+        assert "2026.md" in problem
+        assert "2026-001" in problem
+
+    def test_an_unparseable_timestamp_is_reported(self, routine_dir: Path) -> None:
+        """Not only the interval rule — anything that cannot become an event."""
+        self._write_rows(routine_dir, "| 2026-001 | yesterday | started | - | - | - |")
+
+        assert len(malformed_rows(routine_dir)) == 1
+        assert read_events(routine_dir) == []
+
+    def test_an_unknown_event_kind_is_reported(self, routine_dir: Path) -> None:
+        """A row naming an outcome the vocabulary does not have."""
+        self._write_rows(
+            routine_dir, "| 2026-001 | 2026-09-15T20:00:00+00:00 | finished | - | - | - |"
+        )
+
+        assert len(malformed_rows(routine_dir)) == 1
+
+    def test_a_healthy_ledger_reports_nothing(self, routine_dir: Path) -> None:
+        """The check must be quiet when there is nothing wrong."""
+        append_event(
+            routine_dir,
+            RunEvent(run_id="2026-001", event=LedgerEvent.STARTED, at=_NOW),
+        )
+
+        assert malformed_rows(routine_dir) == []
 
 
 class TestRunStates:
