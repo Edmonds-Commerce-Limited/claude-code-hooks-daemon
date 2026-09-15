@@ -15,7 +15,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from claude_code_hooks_daemon.utils.authored_paths import authored_path_exists
+from claude_code_hooks_daemon.utils.authored_paths import (
+    authored_path,
+    authored_path_exists,
+    contained_authored_path,
+)
 
 
 class TestTheOriginatingBug:
@@ -82,3 +86,109 @@ class TestOrdinaryResolution:
     def test_a_walk_above_the_base_that_lands_nowhere_is_false(self, tmp_path: Path) -> None:
         """`..` is still resolved, not ignored — it just resolves by text."""
         assert not authored_path_exists(tmp_path, "../../definitely-not-here-00412")
+
+
+class TestTheNormalisedJoin:
+    """`authored_path` — the lexical join, with no filesystem access at all.
+
+    Extracted so a caller that needs the PATH rather than a yes/no answer does
+    not have to re-derive the normalisation and get it subtly different.
+    """
+
+    def test_a_parent_hop_is_resolved_by_text(self, tmp_path: Path) -> None:
+        assert authored_path(tmp_path / "Security", "../Routine/x.md") == (
+            tmp_path / "Routine" / "x.md"
+        )
+
+    def test_nothing_needs_to_exist(self, tmp_path: Path) -> None:
+        """The whole point: no stat, so an absent directory changes nothing."""
+        result = authored_path(tmp_path / "nowhere", "../also-nowhere/x.md")
+
+        assert result == tmp_path / "also-nowhere" / "x.md"
+        assert not result.exists()
+
+
+class TestContainment:
+    """`contained_authored_path` — a DIFFERENT question from existence.
+
+    Normalising makes `src/../../etc/passwd` resolve FAITHFULLY to a real
+    file; that is not the same as it being a file the daemon may open. This
+    helper answers "will the open land inside `base`", which is the question
+    to ask before reading a path a document named.
+    """
+
+    def test_an_ordinary_target_is_returned(self, tmp_path: Path) -> None:
+        (tmp_path / "a.md").write_text("hi")
+
+        assert contained_authored_path(tmp_path, "a.md") == tmp_path / "a.md"
+
+    def test_a_target_that_does_not_exist_is_still_contained(self, tmp_path: Path) -> None:
+        """Containment is about WHERE, not about whether it is there.
+
+        The caller still has to handle a missing file; conflating the two
+        would report an escape as a missing file and vice versa.
+        """
+        assert contained_authored_path(tmp_path, "sub/nope.md") == tmp_path / "sub" / "nope.md"
+
+    def test_a_parent_hop_inside_the_base_is_allowed(self, tmp_path: Path) -> None:
+        """`..` is not itself the hazard — leaving `base` is."""
+        (tmp_path / "Routine").mkdir()
+        (tmp_path / "Routine" / "x.md").write_text("hi")
+
+        assert contained_authored_path(tmp_path, "Security/../Routine/x.md") == (
+            tmp_path / "Routine" / "x.md"
+        )
+
+    def test_a_parent_hop_that_escapes_is_refused(self, tmp_path: Path) -> None:
+        """The traversal vector, refused by the only test that can see it."""
+        assert contained_authored_path(tmp_path / "repo", "../outside.md") is None
+
+    def test_an_absolute_target_is_refused(self, tmp_path: Path) -> None:
+        """`base / "/etc/passwd"` discards `base` entirely — pathlib's own rule.
+
+        So an absolute target needs no `..` at all to escape, and a rule that
+        only looked for `..` would miss it completely.
+        """
+        assert contained_authored_path(tmp_path, "/etc/passwd") is None
+
+    def test_a_symlink_pointing_out_of_the_base_is_refused(self, tmp_path: Path) -> None:
+        """The third vector, and the one lexical normalisation cannot see.
+
+        This is where containment and `authored_path_exists` DIVERGE on
+        purpose. A markdown renderer resolves a link by text, so a docs check
+        predicting what a reader sees must stay lexical. An open() follows the
+        symlink, so a check predicting what the daemon will READ must not.
+        Same input, two correct answers, because the questions differ.
+        """
+        outside = tmp_path / "outside.md"
+        outside.write_text("secret")
+        base = tmp_path / "repo"
+        base.mkdir()
+        (base / "link.md").symlink_to(outside)
+
+        assert contained_authored_path(base, "link.md") is None
+
+    def test_a_symlink_staying_inside_the_base_is_allowed(self, tmp_path: Path) -> None:
+        """Containment refuses ESCAPE, not symlinks as such."""
+        base = tmp_path / "repo"
+        (base / "real").mkdir(parents=True)
+        (base / "real" / "x.md").write_text("hi")
+        (base / "link.md").symlink_to(base / "real" / "x.md")
+
+        assert contained_authored_path(base, "link.md") == base / "link.md"
+
+    def test_a_symlinked_base_does_not_refuse_its_own_children(self, tmp_path: Path) -> None:
+        """The false positive that would make this unusable.
+
+        A checkout reached through a symlinked path (a worktree, a container
+        mount) has a real path that differs from `base`. Comparing a resolved
+        candidate against an UNRESOLVED base would refuse every file in such a
+        repository.
+        """
+        real = tmp_path / "real-repo"
+        real.mkdir()
+        (real / "a.md").write_text("hi")
+        base = tmp_path / "linked-repo"
+        base.symlink_to(real)
+
+        assert contained_authored_path(base, "a.md") == base / "a.md"

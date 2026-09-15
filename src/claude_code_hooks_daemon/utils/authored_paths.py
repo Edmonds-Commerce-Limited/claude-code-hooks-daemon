@@ -33,6 +33,72 @@ import os
 from pathlib import Path
 
 
+def authored_path(base: Path, target: str | Path) -> Path:
+    """``target``, written relative to ``base``, normalised LEXICALLY.
+
+    No filesystem access at all: ``..`` is resolved by text, so no directory
+    along the way has to exist and no symlink is followed.
+
+    Args:
+        base: The directory ``target`` is written relative to.
+        target: The path as the author wrote it.
+
+    Returns:
+        The normalised path. Nothing is asserted about it existing, or about
+        it staying under ``base`` — see :func:`contained_authored_path` for
+        the second question.
+    """
+    return Path(os.path.normpath(base / target))
+
+
+def contained_authored_path(base: Path, target: str | Path) -> Path | None:
+    """``target`` resolved, but only when the result stays inside ``base``.
+
+    A DIFFERENT question from :func:`authored_path_exists`, and the one to ask
+    before OPENING a path a document named. Normalising makes
+    ``src/../../etc/passwd`` resolve faithfully to a real file; that is not the
+    same as it being a file the daemon may read. Reading it would make the
+    daemon a content oracle over anything the filesystem can reach, and
+    ``secret_file_guard`` cannot help — that guard judges the path an AGENT
+    names, and nothing an agent typed names the file when the daemon follows a
+    marker inside a document.
+
+    Three vectors escape ``base``, and they need two different tests:
+
+    - a ``..`` hop, and an ABSOLUTE target (which discards ``base`` entirely,
+      by pathlib's own rule) — both caught lexically;
+    - a SYMLINK pointing out, caught only by resolving.
+
+    Resolving is right here and wrong in :func:`authored_path_exists`, which
+    stays lexical on purpose: that function predicts what a markdown renderer
+    will show a reader, and a renderer resolves a link by text. This one
+    predicts where an ``open()`` will land, and ``open()`` follows the link.
+    Same input, two correct answers, because the questions differ.
+
+    Args:
+        base: The directory the result must stay inside — normally the
+            repository root.
+        target: The path as the author wrote it.
+
+    Returns:
+        The normalised path, or ``None`` when it escapes ``base``. A contained
+        path that does not EXIST is still returned: containment is about where
+        the path lands, and folding the two answers together would report an
+        escape as a missing file.
+    """
+    candidate = authored_path(base, target)
+    if not candidate.is_relative_to(Path(os.path.normpath(base))):
+        return None
+    # `base` itself may be reached through a symlink (a worktree, a container
+    # mount), so its real path is the one to compare against -- measuring a
+    # resolved candidate against an unresolved base would refuse every file in
+    # such a checkout. `strict=False` keeps a not-yet-existing target
+    # answerable: it resolves the parts that do exist.
+    if not candidate.resolve(strict=False).is_relative_to(base.resolve(strict=False)):
+        return None
+    return candidate
+
+
 def authored_path_exists(base: Path, target: str) -> bool:
     """Whether ``target``, written relative to ``base``, names something on disk.
 

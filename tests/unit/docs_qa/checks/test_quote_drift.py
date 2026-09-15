@@ -376,3 +376,151 @@ class TestSweepStage:
         corpus = _build_corpus(tmp_path, policy)
         context = sweep_context(project_root=tmp_path, policy=policy, corpus=corpus)
         assert _run_sweep(context) == []
+
+
+class TestTheSourcePathIsContained:
+    """Plan 00412: an `ssot-quote` source path is AUTHORED, and it was READ.
+
+    Found by run 2026-001's `D-PATH` and `D-SEC` checks independently, which
+    is what marked it out from the other 29 sites the widened Detector
+    reports: those are daemon-enumerated or config-derived, this one comes
+    straight out of a document's text.
+
+    `secret_file_guard` does not cover it. That guard judges the path an AGENT
+    names in a tool call, and this is not one — nothing an agent typed names
+    the file when the daemon follows a marker inside a document it is
+    checking. So the check itself was the read primitive.
+    """
+
+    def test_a_parent_hop_out_of_the_repository_is_refused(self, tmp_path: Path) -> None:
+        root = tmp_path / "repo"
+        (root / "CLAUDE").mkdir(parents=True)
+        (tmp_path / "outside.md").write_text(f"## Anchor\n\n{_LONG_SENTENCE}\n")
+        quoter = root / "CLAUDE" / "Quoter.md"
+        quoter.write_text(_quote_block("../outside.md", "anchor", _LONG_SENTENCE))
+
+        context = edit_context(
+            project_root=root,
+            policy=DocumentationPolicy(),
+            file_path=quoter,
+            file_content=quoter.read_text(),
+            file_exists_before=False,
+        )
+        findings = _run_edit(context)
+
+        assert len(findings) == 1
+        assert "outside the repository" in findings[0].message
+
+    def test_an_absolute_source_path_is_refused(self, tmp_path: Path) -> None:
+        """No `..` needed at all: `root / "/etc/passwd"` discards `root`."""
+        root = tmp_path / "repo"
+        (root / "CLAUDE").mkdir(parents=True)
+        secret = tmp_path / "secret.md"
+        secret.write_text(f"## Anchor\n\n{_LONG_SENTENCE}\n")
+        quoter = root / "CLAUDE" / "Quoter.md"
+        quoter.write_text(_quote_block(str(secret), "anchor", _LONG_SENTENCE))
+
+        context = edit_context(
+            project_root=root,
+            policy=DocumentationPolicy(),
+            file_path=quoter,
+            file_content=quoter.read_text(),
+            file_exists_before=False,
+        )
+        findings = _run_edit(context)
+
+        assert len(findings) == 1
+        assert "outside the repository" in findings[0].message
+
+    def test_a_symlink_out_of_the_repository_is_refused(self, tmp_path: Path) -> None:
+        """The vector lexical normalisation cannot see.
+
+        The marker names an ordinary in-repo path; the filesystem redirects
+        the open. Only resolving catches it.
+        """
+        root = tmp_path / "repo"
+        (root / "CLAUDE").mkdir(parents=True)
+        (tmp_path / "outside.md").write_text(f"## Anchor\n\n{_LONG_SENTENCE}\n")
+        (root / "CLAUDE" / "Source.md").symlink_to(tmp_path / "outside.md")
+        quoter = root / "CLAUDE" / "Quoter.md"
+        quoter.write_text(_quote_block("CLAUDE/Source.md", "anchor", _LONG_SENTENCE))
+
+        context = edit_context(
+            project_root=root,
+            policy=DocumentationPolicy(),
+            file_path=quoter,
+            file_content=quoter.read_text(),
+            file_exists_before=False,
+        )
+        findings = _run_edit(context)
+
+        assert len(findings) == 1
+        assert "outside the repository" in findings[0].message
+
+    def test_the_refusal_does_not_echo_the_file_it_declined_to_read(
+        self, tmp_path: Path
+    ) -> None:
+        """A refusal that quotes the contents is not a refusal.
+
+        The finding travels into a deny message and the daemon's logs, so it
+        must carry the marker's own text and nothing the target held.
+        """
+        root = tmp_path / "repo"
+        (root / "CLAUDE").mkdir(parents=True)
+        (tmp_path / "outside.md").write_text("## Anchor\n\nTOPSECRETCANARY value\n")
+        quoter = root / "CLAUDE" / "Quoter.md"
+        quoter.write_text(_quote_block("../outside.md", "anchor", _LONG_SENTENCE))
+
+        context = edit_context(
+            project_root=root,
+            policy=DocumentationPolicy(),
+            file_path=quoter,
+            file_content=quoter.read_text(),
+            file_exists_before=False,
+        )
+        finding = _run_edit(context)[0]
+
+        assert "TOPSECRETCANARY" not in finding.message
+        assert "TOPSECRETCANARY" not in finding.remediation
+
+    def test_an_ordinary_in_repository_source_still_verifies(self, tmp_path: Path) -> None:
+        """Containment must not cost the check its actual job."""
+        root = tmp_path / "repo"
+        (root / "CLAUDE").mkdir(parents=True)
+        (root / "CLAUDE" / "Source.md").write_text(f"## Anchor\n\n{_LONG_SENTENCE}\n")
+        quoter = root / "CLAUDE" / "Quoter.md"
+        quoter.write_text(_quote_block("CLAUDE/Source.md", "anchor", _LONG_SENTENCE))
+
+        context = edit_context(
+            project_root=root,
+            policy=DocumentationPolicy(),
+            file_path=quoter,
+            file_content=quoter.read_text(),
+            file_exists_before=False,
+        )
+
+        assert _run_edit(context) == []
+
+    def test_a_parent_hop_that_stays_inside_the_repository_still_works(
+        self, tmp_path: Path
+    ) -> None:
+        """`..` is not the hazard; leaving the repository is.
+
+        Refusing every `..` would be the over-correction: a marker in a nested
+        directory legitimately walks up to reach a sibling tree.
+        """
+        root = tmp_path / "repo"
+        (root / "CLAUDE").mkdir(parents=True)
+        (root / "CLAUDE" / "Source.md").write_text(f"## Anchor\n\n{_LONG_SENTENCE}\n")
+        quoter = root / "CLAUDE" / "Quoter.md"
+        quoter.write_text(_quote_block("docs/../CLAUDE/Source.md", "anchor", _LONG_SENTENCE))
+
+        context = edit_context(
+            project_root=root,
+            policy=DocumentationPolicy(),
+            file_path=quoter,
+            file_content=quoter.read_text(),
+            file_exists_before=False,
+        )
+
+        assert _run_edit(context) == []

@@ -45,6 +45,10 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
+from claude_code_hooks_daemon.utils.authored_paths import (
+    authored_path,
+    contained_authored_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +79,23 @@ def _verify_block(
     project_root: Path, rel_path: str, block: QuoteBlock, severity: Severity
 ) -> Finding | None:
     """One quote block's finding, or ``None`` if it verifies clean."""
-    source_abs = project_root / block.source_path
+    source_abs = contained_authored_path(project_root, block.source_path)
+    if source_abs is None:
+        # The ONE authored path in this module: it comes out of a marker in a
+        # document, not from anything the daemon enumerated. Unchecked, the
+        # read below turned this check into a content oracle over any file the
+        # daemon can reach -- `secret_file_guard` does not cover it, because
+        # that guard judges the path an AGENT names and no agent named this.
+        return _finding(
+            rel_path,
+            f"`{rel_path}` quotes `{block.source_path}#{block.anchor}`, but that "
+            "source path resolves outside the repository.",
+            "Point the ssot-quote marker at a path inside the repository. A "
+            "quote's source has to be a file this project version-controls, "
+            "or the quote cannot be verified by anyone else. "
+            f"{_REMEDY_TAIL}",
+            severity,
+        )
     if not source_abs.is_file():
         return _finding(
             rel_path,
@@ -154,7 +174,11 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
     for rel_path, record in sorted(context.corpus.documents.items()):
         if not record.quotes:
             continue
-        abs_path = context.project_root / rel_path
+        # Daemon-enumerated, not authored: a corpus key is produced by walking
+        # the tree, so it is contained by construction. Normalising costs
+        # nothing and keeps the whole module on one chokepoint; the containment
+        # check is reserved for the value that really did come from a document.
+        abs_path = authored_path(context.project_root, rel_path)
         if not abs_path.is_file():
             continue
         try:
