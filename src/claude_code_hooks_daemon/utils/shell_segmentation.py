@@ -122,6 +122,77 @@ _WORD_GROUPING_PREFIXES = "(){}`\\$"
 #: DANGEROUS names, where reporting only `sudo` would hide the interpreter.
 _COMMAND_WORD_PREFIXES: frozenset[str] = frozenset({"sudo"})
 
+#: Commands that consume a heredoc body as DATA rather than executing it, and
+#: so are the only receivers for which blanking the body is sound.
+#:
+#: An ALLOWLIST, deliberately, per Plan 00335 Decision 1. The opposite shape --
+#: a list of interpreters to withhold from -- makes every name nobody thought
+#: of default to "safe to blank", and that failed four separate times in
+#: `curl_pipe_shell` before the direction was flipped: `eval "$(cat <<'EOF')"`,
+#: `. /dev/stdin`, seven punctuation spellings, six word-expansion spellings,
+#: and `ssh host <<'EOF'`, which runs the body on another machine entirely.
+#: Asking "is this a recognised sink?" makes the same unknown default to "scan
+#: the body", which costs a false positive rather than a guard.
+#:
+#: Lives here rather than in a handler because every caller that blanks a body
+#: needs it: `curl_pipe_shell` reached this conclusion alone and the other
+#: eight consumers did not inherit it, which is how `bash <<'EOF'` walked past
+#: five data-loss rules (Plan 00409).
+#:
+#: An omission here costs a FALSE POSITIVE, not a bypass: withholding the
+#: exemption scans the body rather than denying the command, so a denial
+#: follows only if that body independently trips a guard. Add names as they
+#: prove legitimate.
+#:
+#: Deliberately EXCLUDED despite looking like ordinary filters or clients:
+#:   sed  -- `sed -f -` runs the body as a script, and the `e` flag reaches a shell
+#:   awk  -- `awk -f /dev/stdin` runs the body as a program
+#:   ssh  -- executes the body on the remote host
+#:   crontab -- `crontab -` installs commands that execute later
+#:   sqlite3 -- the `.shell` / `.system` dot-commands run a shell command
+#:   psql -- the `\!` meta-command runs a shell command
+#:   mysql -- the `system` / `\!` client command runs a shell command
+#:
+#: The three database clients were on this list until a release review probed
+#: them: each reads its body from stdin and each offers a shell escape, so a
+#: body naming one was blanked before any scan. They are the same shape as
+#: `ssh` -- a client that looks like a data consumer and is also an executor --
+#: which is why the test that pins them names the escape rather than the
+#: command.
+DATA_SINKS: frozenset[str] = frozenset(
+    {
+        # Version control and text output
+        "git",
+        "cat",
+        "tee",
+        "sort",
+        "uniq",
+        "tr",
+        "cut",
+        "column",
+        "head",
+        "tail",
+        "wc",
+        "grep",
+        "diff",
+        "patch",
+        "less",
+        "more",
+        "base64",
+        "md5sum",
+        "sha1sum",
+        "sha256sum",
+        # Structured data
+        "jq",
+        "yq",
+        # Network and mail sinks that transfer rather than execute
+        "mail",
+        "mailx",
+        "sendmail",
+        "ftp",
+    }
+)
+
 
 #: Matches a `-m`/`--message`/`-F`/`--file` flag immediately followed by its
 #: VALUE, so the value can be excluded from a command scan. Three value shapes,
@@ -328,22 +399,41 @@ def strip_inert_spans(command: str) -> str:
     leaving an ordinary one-line ``git commit -m 'document --amend'`` still
     denied, because the single-line patterns match inside the message value.
 
+    "Hand over as data" is the load-bearing phrase, and the heredoc half reads
+    it strictly: a body is blanked only when its RECEIVER treats it as data.
+    ``bash <<'EOF'`` does not, so its body survives here and is judged like any
+    other command.
+
     Args:
         command: The raw Bash command string.
 
     Returns:
-        ``command`` with inert message values and quoted-heredoc bodies blanked.
+        ``command`` with inert message values and sink-fed quoted-heredoc
+        bodies blanked.
     """
     return strip_quoted_heredoc_bodies(strip_message_bodies(command))
 
 
 def strip_quoted_heredoc_bodies(command: str) -> str:
-    """Blank the body of every heredoc whose DELIMITER IS QUOTED.
+    """Blank the body of every quoted-delimiter heredoc fed to a DATA SINK.
 
     ``<<'EOF'`` and ``<<"EOF"`` disable every expansion, so bash hands the body
     to the receiving command verbatim and never parses it as shell syntax.
     Anything in that body — a pipe, a script name, a command that reads as
-    dangerous — is DATA.
+    dangerous — is DATA *to bash*.
+
+    That last qualifier is the whole contract, and omitting it shipped a
+    bypass. Bash not parsing the body says nothing about what the RECEIVER
+    does with it: ``bash <<'EOF'`` executes it, and the quoting governs only
+    what the outer shell expands on the way in. Blanking on the strength of the
+    delimiter alone therefore handed every caller an empty command while the
+    interpreter ran the real one — five data-loss rules in ``destructive_git``
+    among them (Plan 00409).
+
+    So the exemption is granted by receiver, from :data:`DATA_SINKS`. An
+    unrecognised receiver — an interpreter, ``ssh host``, or simply a name the
+    list does not carry — keeps its body, which is then scanned like any other
+    command.
 
     Call this BEFORE splitting a command into segments. Newlines are segment
     separators, so a caller that splits first will chop the body into lines and
@@ -361,27 +451,50 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
         command: The raw Bash command string.
 
     Returns:
-        ``command`` with each quoted-delimiter heredoc body replaced by a single
-        inert placeholder line. The opener and closing delimiter are preserved,
-        so the result still splits into well-formed segments.
+        ``command`` with each sink-fed quoted-delimiter heredoc body replaced by
+        a single inert placeholder line. The opener and closing delimiter are
+        preserved, so the result still splits into well-formed segments. A body
+        fed to anything else is returned untouched.
 
     Examples:
         >>> strip_quoted_heredoc_bodies("git commit -F - <<'EOF'\\nrm -rf /\\nEOF")
         "git commit -F - <<'EOF'\\nHEREDOC_BODY\\nEOF"
+        >>> strip_quoted_heredoc_bodies("bash <<'EOF'\\nrm -rf /\\nEOF")
+        "bash <<'EOF'\\nrm -rf /\\nEOF"
         >>> strip_quoted_heredoc_bodies("echo hi")
         'echo hi'
     """
-    # ``opener_tail`` is kept, not dropped: it holds whatever else the opener
-    # line carried, and that is usually a REDIRECT (`cat <<'EOF' > doc.md`).
-    # Erasing it would hide the destination from every caller that judges the
-    # blanked command -- blanking a body must remove no evidence but the body.
-    return _QUOTED_HEREDOC_BODY_PATTERN.sub(
-        lambda match: (
+
+    def _blank_if_the_receiver_only_reads_it(match: re.Match[str]) -> str:
+        if not _receiver_is_data_sink(command, match.start("opener")):
+            return match.group(0)
+        # ``opener_tail`` is kept, not dropped: it holds whatever else the
+        # opener line carried, and that is usually a REDIRECT
+        # (`cat <<'EOF' > doc.md`). Erasing it would hide the destination from
+        # every caller that judges the blanked command -- blanking a body must
+        # remove no evidence but the body.
+        return (
             f"{match.group('opener')}{match.group('opener_tail')}"
             f"\n{_INERT_BODY_PLACEHOLDER}\n{match.group('closer')}"
-        ),
-        command,
-    )
+        )
+
+    return _QUOTED_HEREDOC_BODY_PATTERN.sub(_blank_if_the_receiver_only_reads_it, command)
+
+
+def _receiver_is_data_sink(command: str, opener_start: int) -> bool:
+    """Does the command feeding the heredoc at ``opener_start`` only READ it?
+
+    Decided per heredoc rather than per command: ``cat > a <<'A' … bash <<'B'``
+    has one of each, and blanking is sound for the first and unsound for the
+    second.
+
+    A receiver that names no command word at all (bash allows a bare
+    ``<<'EOF'`` redirection) resolves to ``None`` and is treated as unknown,
+    so the body is scanned. Unknown means scan, always — that is the direction
+    the allowlist exists to fix.
+    """
+    word = _segment_command_word(_receiving_segment(command, opener_start))
+    return word is not None and word in DATA_SINKS
 
 
 def quoted_heredoc_receivers(command: str) -> list[str]:
@@ -437,12 +550,17 @@ def _heredoc_receiving_segments(command: str) -> list[str]:
     ``<<`` opener -- a pipe stage or an ``&&`` branch, not the whole line, so
     ``echo x | bash <<'EOF'`` resolves to bash rather than echo.
     """
-    segments: list[str] = []
-    for match in _QUOTED_HEREDOC_BODY_PATTERN.finditer(command):
-        preceding = command[: match.start("opener")]
-        last_line = preceding.rsplit("\n", 1)[-1]
-        segments.append(split_unquoted(last_line, _RECEIVER_SEPARATORS)[-1])
-    return segments
+    return [
+        _receiving_segment(command, match.start("opener"))
+        for match in _QUOTED_HEREDOC_BODY_PATTERN.finditer(command)
+    ]
+
+
+def _receiving_segment(command: str, opener_start: int) -> str:
+    """Return the command segment feeding the heredoc opening at ``opener_start``."""
+    preceding = command[:opener_start]
+    last_line = preceding.rsplit("\n", 1)[-1]
+    return split_unquoted(last_line, _RECEIVER_SEPARATORS)[-1]
 
 
 def quoted_heredoc_command_words(command: str) -> list[str]:
@@ -480,24 +598,34 @@ def quoted_heredoc_command_words(command: str) -> list[str]:
         >>> quoted_heredoc_command_words("sudo -E bash <<'EOF'\\nbody\\nEOF")
         ['bash']
     """
-    command_words: list[str] = []
-    for segment in _heredoc_receiving_segments(command):
-        for word in segment.split():
-            if not word or word.startswith("-"):
-                continue
-            resolved = command_word(word)
-            # An EMPTY resolution means the word was pure grouping punctuation
-            # (`{`, `(`), which `_WORD_GROUPING_PREFIXES` strips entirely. It
-            # names no command, so accepting it as the command word matched ''
-            # against the caller's allowlist, failed, and denied an ordinary
-            # `{ cat <<'DOC' ... } > doc.md`. Skipping it looks at the next
-            # word instead, which is the actual receiver -- so `( bash <<'X'`
-            # still resolves to `bash` and still withholds the exemption.
-            if not resolved or resolved in _COMMAND_WORD_PREFIXES:
-                continue
-            command_words.append(resolved)
-            break
-    return command_words
+    resolved_words = (
+        _segment_command_word(segment) for segment in _heredoc_receiving_segments(command)
+    )
+    return [word for word in resolved_words if word is not None]
+
+
+def _segment_command_word(segment: str) -> str | None:
+    """Return the one word naming the command a segment runs, or None.
+
+    An EMPTY resolution means the word was pure grouping punctuation (`{`,
+    `(`), which `_WORD_GROUPING_PREFIXES` strips entirely. It names no command,
+    so accepting it as the command word matched '' against the caller's
+    allowlist, failed, and denied an ordinary `{ cat <<'DOC' ... } > doc.md`.
+    Skipping it looks at the next word instead, which is the actual receiver --
+    so `( bash <<'X'` still resolves to `bash` and still withholds the
+    exemption.
+
+    None means the segment names no command at all, which every caller here
+    treats as unknown rather than safe.
+    """
+    for word in segment.split():
+        if not word or word.startswith("-"):
+            continue
+        resolved = command_word(word)
+        if not resolved or resolved in _COMMAND_WORD_PREFIXES:
+            continue
+        return resolved
+    return None
 
 
 def split_unquoted(text: str, separators: Sequence[str]) -> list[str]:

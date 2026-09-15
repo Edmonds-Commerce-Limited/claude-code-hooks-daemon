@@ -1,6 +1,6 @@
 # Plan 00409: interpreter heredoc defeats the guards
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: High
@@ -65,7 +65,7 @@ bypass"). Of the eight consumers that blank heredoc bodies, only
 
 ### Phase 1: Pin the regression
 
-- [ ] ⬜ **Task 1.1**: Failing tests first, at the `shell_segmentation` level
+- [x] ✅ **Task 1.1**: Failing tests first, at the `shell_segmentation` level
   and at the handler level for each of the eight consumers that blank bodies:
   `destructive_git`, `daemon_location_guard`, `merge_to_main_approval`,
   `pipe_blocker`, `plan_number_helper`, `bash_flags`, `process_probe`,
@@ -75,34 +75,35 @@ bypass"). Of the eight consumers that blank heredoc bodies, only
 
 ### Phase 2: Fix it where all consumers see it
 
-- [ ] ⬜ **Task 2.1**: Gate the blanking in `strip_quoted_heredoc_bodies` on the
+- [x] ✅ **Task 2.1**: Gate the blanking in `strip_quoted_heredoc_bodies` on the
   data-sink allowlist, promoting `_DATA_SINKS` from `curl_pipe_shell` into
   `utils/shell_segmentation` as the shared source of truth. Leave
   `curl_pipe_shell`'s extra pipe-into-interpreter check where it is — it guards
   a case the allowlist does not, and defence in depth costs nothing here.
 
-- [ ] ⬜ **Task 2.2**: `pipe_blocker`'s CLAUDE.md guidance states "A heredoc
+- [x] ✅ **Task 2.2**: `pipe_blocker`'s CLAUDE.md guidance states "A heredoc
   whose DELIMITER IS QUOTED is never scanned at all", which this change makes
   untrue. Correct it to the receiver rule and regenerate the guidance block.
 
 ### Phase 3: The rest of the review-n12 findings
 
-- [ ] ⬜ **Task 3.1**: Findings from the `review-n12` sub-agent that exist only
-  in gitignored `untracked/agent-reports/`, recorded here so they survive:
-  - `xargs git merge` and `git pull . <branch>` reach the default branch
-    without passing `merge_to_main_approval`.
-  - `issue_filing_gate._cwd_repo_slug` reads only `remote.origin.url`, so a
-    clone whose remote is named `upstream` stands the gate down. The reviewer's
-    correction matters more than the finding: "not ours" is the FAIL-OPEN
-    direction, which inverts the rationale recorded in the code.
-  - Further `cd` evasions past `R-DAEMON-DIR-CD`: `cd -- `, `cd -P `,
-    `cd .claude/'hooks-daemon'`, `cd .claude//hooks-daemon`, `cd .cl\aude/…`.
-    Same root as Task 3.5 of [Plan 00408](../00408-handler-hygiene-from-the-release-review/PLAN.md).
-  - Two `daemon/cli.py` nits: the `read_text` OSError path sets `holder = None`
-    and so drops the warning, directly under a comment arguing an unnamed
-    holder is better than none (one word, `"unknown"`, fixes it); and `LOCK_UN`
-    in the `else:` branch can propagate an OSError out of a restart.
-  - `git commit -m` alone on a line is swallowed by the message-body blanking.
+- [x] ✅ **Task 3.1**: The other `review-n12` findings existed only in
+  gitignored `untracked/agent-reports/`, so they were recorded here first to
+  stop them being lost. They have since been rehoused into
+  [Plan 00408](../00408-handler-hygiene-from-the-release-review/PLAN.md) Phase
+  3e (Tasks 3.7–3.10), which is where the review's leftovers belong — this plan
+  is one shipped regression, not the review's backlog.
+
+  Each was re-verified against the report before being moved rather than copied
+  from a summary, and the two merge-gate bypasses were re-run on the fixed code
+  to confirm they are not side effects of this plan's change. One item was
+  corrected in the move: the `cd`-evasion list omitted the double-quoted
+  spelling `cd .claude/"hooks-daemon"`.
+
+  Not rehoused, because re-reading the report shows it was mine rather than the
+  reviewer's: the claim that `git commit -m` alone on a line is swallowed. The
+  report says the swallow needs a VALUELESS `-m`, which git itself rejects, and
+  classes every message shape git actually accepts as unaffected.
 
 ## Success Criteria
 

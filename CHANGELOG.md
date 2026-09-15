@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **A heredoc fed to an INTERPRETER is no longer treated as inert (Plan
+  00409).** v3.64.0 blanked the body of every quoted-delimiter heredoc before
+  judging a command, on the grounds that bash never parses it. That is true of
+  bash and irrelevant to the receiver: `bash <<'EOF'` EXECUTES the body, and
+  the quoted delimiter governs only what the outer shell expands on the way in.
+  Five `destructive_git` rules could be walked past that way — `reset --hard`,
+  `checkout -- <file>`, `clean -f`, `push --force` and `branch -D` — along with
+  `R-DAEMON-DIR-CD`, the merge-to-main approval gate and the pipe blocker.
+
+  Measured rather than inferred: the shipped v3.63.0 module was recovered from
+  the tag and executed beside the installed one, and it denied all five.
+
+  The exemption is now granted by RECEIVER, from an allowlist of commands that
+  consume their input as data (`cat`, `tee`, `git`, `jq`, `grep`, …). An
+  unrecognised receiver — an interpreter, `ssh host`, or any name not on the
+  list — has its body scanned like any other command. The direction is
+  deliberate and is the one `curl_pipe_shell` already used: withholding the
+  exemption costs a false positive, granting one wrongly costs the guard.
+
+  **Behaviour change worth knowing**: a `python3 <<'PY'` or `bash <<'EOF'` body
+  is now scanned, so one that merely MENTIONS a destructive command in a string
+  can be denied. Write file content with the `Write`/`Edit` tools rather than a
+  heredoc and this does not arise.
+
+  Release note 29 of v3.64.0 carries an inline correction, since it claimed
+  nothing bash would actually run had been exempted.
+
 ## [3.64.0] - 2026-09-14
 
 _A dogfooding-driven hardening release. Four separate false-positive/false-

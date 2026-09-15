@@ -188,6 +188,82 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   into the next release's documentation pass rather than amending a published
   one.
 
+### Phase 3e: The `review-n12` findings, rehoused from Plan 00409
+
+These arrived with the finding that became
+[Plan 00409](../00409-interpreter-heredoc-defeats-the-guards/PLAN.md) and were
+recorded there first, because the alternative was losing them: the report lives
+in `untracked/agent-reports/`, which is gitignored. They belong here — 00409 is
+one shipped regression, this plan is the review's leftovers. Every reproduction
+below was re-verified against the report and, where cheap, re-run on current
+code.
+
+- [ ] ⬜ **Task 3.7**: `merge_to_main_approval` misses two real merges. Both
+  re-confirmed on current code after 00409 landed, so neither is a side effect
+  of that fix:
+
+  - `echo feature/x | xargs git merge` — the regex finds `git merge` but the
+    segment holds no positional, so `_first_positional` returns None and
+    `merge_target` answers "not a merge". The reviewer's suggestion is to treat
+    a positional-less `git merge` as a merge under a placeholder key, which the
+    `_GH_CURRENT_PR` pattern already establishes as an idiom.
+  - `git pull . feature/x` — `git pull` is simply not in the pattern set, and
+    with two positionals it performs a real merge into the checked-out branch.
+    A separate pattern and a separate judgement call.
+
+  `git merge $(cat branch.txt)`, `B=x; git merge $B` and `xargs -I{}` all DENY
+  with a garbled name — fail-closed and cosmetic, explicitly NOT holes.
+
+- [ ] ⬜ **Task 3.8**: `issue_filing_gate._cwd_repo_slug` reads only
+  `remote.origin.url` (`issue_filing_gate.py:258`), so a clone whose only
+  remote is named `upstream` answers None and the gate stands down — while `gh`
+  resolves its base repo from the remote SET and files against the PUBLIC
+  tracker anyway. Any remote pointing at `UPSTREAM_REPO_SLUG` should answer
+  "ours".
+
+  **Record the correction, not just the finding**: answering "not ours" is the
+  FAIL-OPEN direction here. The gate DENIES filings against upstream, so "not
+  ours" means it never fires; "assume upstream" would over-deny a client's own
+  filing at a cost of one refusal naming `hooks-daemon issue-report`. The
+  module docstring argues that trade-off consciously, so this is a settled call
+  being revisited on new evidence — that the fail-open is reachable — not a
+  defect the code failed to consider.
+
+- [ ] ⬜ **Task 3.9**: Six further `cd` spellings past `R-DAEMON-DIR-CD`, all
+  verified `matches=False` through the live handler, all of which really do
+  change directory. `pushd` is the seventh and is already Task 3.5.
+
+  - `cd -- <path>` and `cd -P <path>` — `cd[ \t]+[^\s;&|]*` cannot span the
+    whitespace after an option. `--` is the most plausible innocent spelling of
+    the set; it is what a careful script writes.
+  - `cd .claude/'hooks-daemon'`, `cd .claude/"hooks-daemon"`,
+    `cd .claude//hooks-daemon`, `cd .cl\aude/hooks-daemon` — the pattern needs
+    the path as one contiguous literal.
+
+  The option forms are a regex fix (`\b(?:cd|pushd)(?:[ \t]+-[A-Za-z-]+)*`,
+  plus `)` and a backtick in the terminating lookahead). The intra-token
+  quoting forms need a normalisation step — drop quotes and backslashes,
+  collapse `//` — not a wider regex.
+
+  Deliberately NOT holes: a bare `cd` inside backticks and `(cd <path>)` both
+  fail the lookahead, but a `cd` in a subshell that ends immediately changes
+  nothing. Add a command after either and both match.
+
+- [ ] ⬜ **Task 3.10**: Two `daemon/cli.py` nits from the same review.
+
+  - `cli.py:1699-1708`: the comment says "an unnamed holder is better than no
+    warning at all", and the adjacent `except OSError` sets `holder = None`,
+    which drops the warning entirely — only an EMPTY file gets `"unknown"`.
+    Behaviour is unchanged from before the restructure; what the restructure
+    did was put the contradiction on adjacent lines. One word fixes it:
+    `holder = "unknown"`.
+  - `cli.py:1713`: the `LOCK_UN` call sits in an `else:`, so an `OSError` from
+    it propagates out of `_warn_if_qa_run_in_progress` and ends
+    `hooks-daemon restart` with a traceback — the Plan 00407 N10 failure this
+    function was hardened against. Very unlikely, and the `finally`'s
+    `os.close` releases the lock regardless, which makes the explicit unlock
+    redundant. Drop it or wrap it.
+
 ### Phase 4: The sub-bar items, carried so they are not lost
 
 - [ ] ⬜ **Task 3.1**: Four items the reviewer put below the filing bar, each

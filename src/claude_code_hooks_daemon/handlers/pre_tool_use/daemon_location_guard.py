@@ -92,11 +92,17 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
         if not command:
             return False
 
-        # Match only what the shell would EXECUTE. A quoted heredoc body is
-        # DATA, so a `cd` NAMED in one is prose — and this denied a review agent
-        # writing a report that quoted one (Plan 00407 N3). `destructive_git`
-        # already stripped inert spans, and allowed the identical heredoc in the
-        # same command; this is the same step, not a new idea.
+        # Match only what the shell would EXECUTE. A quoted heredoc body whose
+        # RECEIVER only reads it is DATA, so a `cd` NAMED in one is prose — and
+        # this denied a review agent writing a report that quoted one (Plan
+        # 00407 N3). `destructive_git` already stripped inert spans, and allowed
+        # the identical heredoc in the same command; this is the same step, not
+        # a new idea.
+        #
+        # "Whose receiver only reads it" is not a hedge. `bash <<'EOF'` EXECUTES
+        # the body, and blanking it on the strength of the quoted delimiter let
+        # a real `cd` past this rule in v3.64.0. `strip_inert_spans` now asks
+        # who is on the receiving end (Plan 00409).
         #
         # Blanking EVERY quoted literal as well is deliberately NOT done, and
         # that is a correction rather than an omission (Plan 00407 N12). A

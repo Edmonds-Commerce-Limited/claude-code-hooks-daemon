@@ -192,9 +192,14 @@ def merge_target(command: str) -> str | None:
     can never be read as the branch.
 
     Matching is scoped to what the shell will EXECUTE by a single pass,
-    ``strip_inert_spans``: it removes both a ``<<'EOF'`` body, which is handed
-    to the receiving command verbatim, and a ``-m`` message body. A merge
-    NAMED in either is prose. Without it, the repository's own canonical commit
+    ``strip_inert_spans``: it removes a ``-m`` message body, and a ``<<'EOF'``
+    body whose RECEIVER only reads it. A merge named in either is prose.
+
+    That receiver qualifier is load-bearing and was missing here, which is how
+    ``bash <<'EOF'`` reached this gate unjudged in v3.64.0: this docstring
+    asserted a heredoc body is handed to the receiving command verbatim and
+    therefore prose, which is true of ``git commit -F -`` and false of ``bash``
+    (Plan 00409). Without it, the repository's own canonical commit
     idiom (``git commit -m "$(cat <<'EOF' ... EOF)"``) was read as a real merge
     and denied with a remediation about a command nobody ran. This is the Plan
     00377 N7 class that ``destructive_git._scan_target`` fixed for itself; the

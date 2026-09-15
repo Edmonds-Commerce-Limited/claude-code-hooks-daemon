@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, OPTIONAL_SUDO
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    DATA_SINKS,
     quoted_heredoc_command_words,
     strip_quoted_heredoc_bodies,
 )
@@ -46,72 +47,15 @@ _CURL_PIPE_SHELL_VERBOSE_CONTENT = (
 # these is a remote-code-execution risk and must be blocked.
 _PIPED_INTERPRETERS = ("bash", "sh", "zsh", "ksh", "dash", "python", "perl", "ruby")
 
-# Commands that consume a quoted heredoc body as DATA and never execute it.
-# This is an ALLOWLIST, and the direction is the whole point (Plan 00335
-# Decision 1): the exemption is granted only for a name ON this list, so an
-# unrecognised receiver withholds it rather than being waved through.
-#
-# The list it replaced enumerated receivers that EXECUTE, and that enumeration
-# failed four times: `eval`/`. /dev/stdin`/`source /dev/stdin` (B2), seven
-# punctuation spellings (B3), six word-expansion spellings recorded as an
-# unclosable limit, and `ssh` -- which executes the body on the REMOTE host and
-# was found by probing rather than review. Enumerating executors means every
-# receiver nobody thought of defaults to "safe"; enumerating sinks means it
-# defaults to "scan it".
-#
-# An omission here costs a FALSE DENIAL, not a bypass -- and only for a heredoc
-# that both names an unlisted receiver AND carries the `curl … | bash` pattern
-# in its body, since withholding the exemption scans the body rather than
-# denying the command. Add names as they prove legitimate.
-#
-# Deliberately EXCLUDED despite looking like ordinary filters or clients:
-#   sed  -- `sed -f -` runs the body as a script, and the `e` flag reaches a shell
-#   awk  -- `awk -f /dev/stdin` runs the body as a program
-#   ssh  -- executes the body on the remote host
-#   crontab -- `crontab -` installs commands that execute later
-#   sqlite3 -- the `.shell` / `.system` dot-commands run a shell command
-#   psql -- the `\!` meta-command runs a shell command
-#   mysql -- the `system` / `\!` client command runs a shell command
-#
-# The three database clients were on this list until a release review probed
-# them: each reads its body from stdin and each offers a shell escape, so a
-# body naming one was blanked before the pattern scan and this priority-10
-# guard saw nothing. They are the same shape as `ssh` -- a client that looks
-# like a data consumer and is also an executor -- which is why the test that
-# pins them names the escape rather than the command.
-_DATA_SINKS: Final[frozenset[str]] = frozenset(
-    {
-        # Version control and text output
-        "git",
-        "cat",
-        "tee",
-        "sort",
-        "uniq",
-        "tr",
-        "cut",
-        "column",
-        "head",
-        "tail",
-        "wc",
-        "grep",
-        "diff",
-        "patch",
-        "less",
-        "more",
-        "base64",
-        "md5sum",
-        "sha1sum",
-        "sha256sum",
-        # Structured data
-        "jq",
-        "yq",
-        # Network and mail sinks that transfer rather than execute
-        "mail",
-        "mailx",
-        "sendmail",
-        "ftp",
-    }
-)
+# The allowlist of heredoc receivers that consume a body as DATA now lives in
+# `utils.shell_segmentation` as DATA_SINKS. It was defined here, and the
+# reasoning behind it (Plan 00335 Decision 1) stayed here with it -- so the
+# eight other handlers that blank heredoc bodies never inherited the check,
+# and `bash <<'EOF'` walked past five data-loss rules until Plan 00409. The
+# constant moved to the module that does the blanking; this handler keeps its
+# OWN use of it below, because it withholds the exemption before the blanking
+# rather than relying on it.
+_DATA_SINKS: Final[frozenset[str]] = DATA_SINKS
 
 # An OPTIONAL version suffix on the interpreter name, e.g. `python3`,
 # `python3.12`, `ruby3`, `perl5`. `_PIPED_INTERPRETERS` lists BARE names and a

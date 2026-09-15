@@ -306,6 +306,80 @@ class TestDelimitersThatAreNotPlainWords:
         assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
 
 
+class TestABodyIsOnlyInertIfItsRECEIVERTreatsItAsData:
+    """A quoted delimiter says what the OUTER shell expands, not who runs it.
+
+    ``bash <<'EOF'`` executes its body. The quoting governs only expansion on
+    the way in, so blanking the body on the strength of the delimiter alone
+    hands every caller a clean bypass: the guard is shown an empty command and
+    the interpreter runs the real one.
+
+    That shipped. v3.64.0 added blanking here to stop prose describing a
+    destructive command being denied (release note 29, Plan 00377 N7) and keyed
+    it on the delimiter's QUOTING rather than on the heredoc's RECEIVER. The
+    shipped v3.63.0 module judged the raw string and denied all five spellings
+    below; the blanking allowed them.
+
+    The remedy is the one Plan 00335 Decision 1 already reached for
+    ``curl_pipe_shell``: an ALLOWLIST of data sinks. "Is the receiver
+    dangerous?" makes every name nobody thought of default to safe — which it
+    did four times there. "Is the receiver a recognised sink?" makes the same
+    unknown default to "scan it", and withholding an exemption costs a false
+    positive where granting one costs a guard.
+    """
+
+    DESTRUCTIVE = (
+        "git reset --hard HEAD",
+        "git checkout -- f.txt",
+        "git clean -fd",
+        "git push --force origin main",
+        "git branch -D main",
+    )
+
+    @pytest.mark.parametrize("body", DESTRUCTIVE)
+    def test_bash_heredoc_body_survives_because_bash_executes_it(self, body: str) -> None:
+        assert body in strip_quoted_heredoc_bodies(f"bash <<'EOF'\n{body}\nEOF")
+
+    @pytest.mark.parametrize(
+        "receiver",
+        ["bash", "sh", "/bin/sh", "zsh", "python3", "perl", "node", "ssh host"],
+    )
+    def test_an_unrecognised_receiver_withholds_the_exemption(self, receiver: str) -> None:
+        """Not a list of interpreters — anything not a known SINK withholds.
+
+        ``ssh host <<'EOF'`` runs the body on another machine, and no list of
+        local interpreters would have contained it.
+        """
+        command = f"{receiver} <<'EOF'\ngit reset --hard HEAD\nEOF"
+        assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
+
+    def test_sudo_does_not_hide_the_interpreter(self) -> None:
+        command = "sudo -E bash <<'EOF'\ngit reset --hard HEAD\nEOF"
+        assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
+
+    def test_only_the_interpreter_heredoc_of_two_keeps_its_body(self) -> None:
+        """The decision is per heredoc, not per command."""
+        command = "cat > a <<'A'\ngit clean -fd\nA\nbash <<'B'\ngit reset --hard HEAD\nB"
+        stripped = strip_quoted_heredoc_bodies(command)
+
+        assert "git clean -fd" not in stripped
+        assert "git reset --hard HEAD" in stripped
+
+    @pytest.mark.parametrize(
+        "receiver",
+        ["cat > notes.md", "tee -a notes.md", "git commit -F -", "jq -r .", "grep x"],
+    )
+    def test_a_recognised_sink_is_still_blanked(self, receiver: str) -> None:
+        """Release note 29's fix must keep working — this is the whole point.
+
+        These receivers treat the bytes as data, so a destructive command in
+        the body is prose. Denying it was the false positive that prompted the
+        blanking in the first place.
+        """
+        command = f"{receiver} <<'EOF'\ngit reset --hard HEAD\nEOF"
+        assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
+
+
 class TestQuotedHeredocReceivers:
     """WHO receives a quoted heredoc decides whether its body can run.
 

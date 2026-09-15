@@ -3,6 +3,19 @@
 **Plan**: 00377
 **Audience**: everyone
 
+> **CORRECTION (Plan 00409).** The "What still blocks, deliberately" section
+> below claims nothing bash would actually run has been exempted. That is
+> wrong, and it shipped in v3.64.0: the blanking keyed on the heredoc's
+> QUOTING rather than on its RECEIVER, so `bash <<'EOF'` — which bash
+> executes — had its body blanked too. Five `destructive_git` rules could be
+> walked past that way, along with the daemon-location, merge-approval and
+> pipe guards. Measured by running the shipped v3.63.0 module against the
+> v3.64.0 one, not inferred.
+>
+> The text below is left as written because it is the v3.64.0 record. The fix
+> grants the exemption by receiver, from an allowlist of commands that consume
+> their input as data; anything else has its body scanned.
+
 `destructive_git` judged the raw command text, so a span bash hands over as
 DATA could be read as a command. Writing a commit message that documented a
 newly added `--force` flag was denied as `R-GIT-PUSH-FORCE`, with a deny

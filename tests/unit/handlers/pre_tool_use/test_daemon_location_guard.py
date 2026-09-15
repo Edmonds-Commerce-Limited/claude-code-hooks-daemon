@@ -290,6 +290,18 @@ class TestProseAboutTheDaemonDirectoryIsNotADirectoryChange:
 
         assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
 
+    def test_a_heredoc_fed_to_bash_is_matched_because_bash_runs_it(self) -> None:
+        """Plan 00409. `cat` reads the body; `bash` EXECUTES it.
+
+        The quoted delimiter is the same in both, so the delimiter cannot be
+        what decides — only the receiver can. Blanking on the delimiter alone
+        shipped in v3.64.0 and made this command invisible here.
+        """
+        handler = DaemonLocationGuardHandler()
+        command = "bash <<'EOF'\ncd .claude/hooks-daemon\nEOF"
+
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
+
 
 class TestAQuotedStringCanItselfBeACommand:
     """Blanking every quoted literal is unsound for an EXISTENCE decision.

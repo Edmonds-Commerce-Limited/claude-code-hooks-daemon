@@ -67,9 +67,28 @@ class TestProseIsNotACommand:
     def test_a_quoted_heredoc_body_naming_a_reset_is_allowed(
         self, handler: DestructiveGitHandler
     ) -> None:
-        """This shape denied the throwaway probe written to investigate N7."""
-        command = f"python3 - <<'PY'\nexample = '{_RESET_HARD}'\nPY"
+        """A receiver that only READS the body makes its contents prose."""
+        command = f"cat > notes.md <<'EOF'\nexample = '{_RESET_HARD}'\nEOF"
         assert _matches(handler, command) is False
+
+    def test_a_python_heredoc_body_is_scanned_because_python_runs_it(
+        self, handler: DestructiveGitHandler
+    ) -> None:
+        """The accepted cost of Plan 00409, stated as a requirement.
+
+        This case was an ALLOW until it was measured: `python3 - <<'PY'` feeds
+        an interpreter, and a quoted delimiter governs only what the OUTER
+        shell expands on the way in. The body here is inert Python, so this is
+        a genuine false positive — and it is the cheap error. Granting the
+        exemption by receiver name is what let `bash <<'EOF'` walk past five
+        data-loss rules in v3.64.0, because a body that MIGHT be inert and one
+        that runs `subprocess.run` are the same string to this handler.
+
+        The mitigation is the house rule that already applies: file content
+        goes through Write/Edit, not a heredoc.
+        """
+        command = f"python3 - <<'PY'\nexample = '{_RESET_HARD}'\nPY"
+        assert _matches(handler, command) is True
 
     def test_a_message_naming_an_amend_is_allowed(self, handler: DestructiveGitHandler) -> None:
         """No heredoc involved — the `.*` patterns match inside a -m value."""
@@ -128,6 +147,32 @@ class TestTheGuardStillGuards:
         """
         command = f'git commit -m "$(git push {_FORCE} origin main)"'
         assert _matches(handler, command) is True
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            f"{_RESET_HARD} HEAD",
+            f"git checkout {_DISCARD} f.txt",
+            "git clean -fd",
+            f"git push {_FORCE} origin main",
+            "git branch -D main",
+        ],
+    )
+    @pytest.mark.parametrize("receiver", ["bash", "sh", "/bin/sh", "sudo -E bash", "ssh host"])
+    def test_a_heredoc_fed_to_an_interpreter_is_still_blocked(
+        self, handler: DestructiveGitHandler, receiver: str, body: str
+    ) -> None:
+        """Plan 00409, the regression this table pins.
+
+        Every one of these was DENIED by the shipped v3.63.0 handler and
+        ALLOWED by v3.64.0, which blanked the body because the delimiter was
+        quoted. Quoting governs what the OUTER shell expands on the way in; it
+        does not stop bash running the bytes. `ssh host` is in the receiver
+        list because it runs the body on another machine — no list of local
+        interpreters would have caught it, which is why the fix asks whether
+        the receiver is a recognised SINK instead.
+        """
+        assert _matches(handler, f"{receiver} <<'EOF'\n{body}\nEOF") is True
 
     def test_an_unquoted_heredoc_body_is_still_scanned(
         self, handler: DestructiveGitHandler

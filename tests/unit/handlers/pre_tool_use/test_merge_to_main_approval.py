@@ -251,6 +251,16 @@ class TestAMergeDescribedInAMessageIsNotAMerge:
         )
         assert merge_target(command) == self._BRANCH
 
+    def test_a_merge_inside_a_heredoc_fed_to_bash_is_named(self) -> None:
+        """Plan 00409. `git commit -F -` reads its body; `bash` runs it.
+
+        Both spell the delimiter the same way, so the delimiter cannot be what
+        separates them — the receiver is. Blanking on the delimiter alone let
+        this merge reach the default branch ungated in v3.64.0.
+        """
+        command = f"bash <<'EOF'\ngit merge --no-ff {self._BRANCH}\nEOF"
+        assert merge_target(command) == self._BRANCH
+
 
 class TestAQuotedStringCanItselfBeAMerge:
     """A quoted literal can BE the command, so blanking every one hides merges.
