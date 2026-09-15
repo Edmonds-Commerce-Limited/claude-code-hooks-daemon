@@ -4,6 +4,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00417: supervisor operator signals](00417-supervisor-operator-signals/PLAN.md) - In Progress (a closed channel letting a host warn every session that the machine reboots in N minutes, so work is committed and journalled first. Fixed kinds, integer payload, no free text anywhere — the wording is daemon-owned, because a channel from outside the container is a prompt-injection surface by default. From issue #39)
+
+- [00416: session start action tiers and teeth](00416-session-start-action-tiers-and-teeth/PLAN.md) - In Progress (SessionStart output is delivered but not ACTED ON — 25 handlers in one flat block read as scenery. ACTION_REQUIRED is COMPUTED from "has a verifier and it is failing", never declared, so the tier cannot inflate; the Stop hook blocks on a failing verifier. Carries N6/N15 from 00413)
+
 - [00415: config is invisible to the freshness guard](00415-config-is-invisible-to-the-freshness-guard/PLAN.md) - Not Started (the source fingerprint hashes `.py` only, exactly as documented, but its consumers gate a LIVE DISPATCH on it — so editing config without restarting yields FRESH while every dispatch is graded against the old config. Graduated from 00413 N17; deferred in 00371's non-goals and again by 00395)
 
 - [00414: absent protected path is silent](00414-absent-protected-path-is-silent/PLAN.md) - Not Started (a configured protected path that does NOT exist produces no advisory, so "your word list is fine" and "that guard has been inert since you cloned" are reported identically — by silence. Graduated from 00413 N3, which was filed with the wrong fix)
@@ -258,11 +262,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 415 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 417 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 363 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 29 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 31 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
