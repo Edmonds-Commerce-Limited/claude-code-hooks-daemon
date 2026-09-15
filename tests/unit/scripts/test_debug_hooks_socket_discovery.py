@@ -23,6 +23,13 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
+
+#: Ceiling for the discovery snippet's own shell run. The snippet does one
+#: `find` over a tmp_path holding at most one file, so this is a wedged-shell
+#: guard rather than a budget -- if it is ever approached, failing is right.
+_SHELL_TIMEOUT = Timeout.VALIDATION_CHECK
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SCRIPT = _REPO_ROOT / "scripts" / "debug_hooks.sh"
 
@@ -68,7 +75,9 @@ class TestSelfInstallLayoutIsFound:
         socket.touch()
 
         script = f'set -euo pipefail\nPROJECT_ROOT="{project_root}"\n{_discovery_snippet()}\necho "FOUND:$SOCKET_PATH"\n'
-        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, timeout=_SHELL_TIMEOUT
+        )
 
         assert result.returncode == 0, f"discovery died: {result.stderr}"
         assert (
@@ -97,7 +106,9 @@ class TestMissingDirectoryIsNotFatal:
             f"{_discovery_snippet()}\n"
             'echo "REACHED_END"\n'
         )
-        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, timeout=_SHELL_TIMEOUT
+        )
 
         # The script SHOULD reach its own "no socket found" branch and exit 1
         # with a readable message. What it must never do is die inside the
@@ -122,7 +133,9 @@ class TestMissingDirectoryIsNotFatal:
             f"{_discovery_snippet()}\n"
             'echo "FOUND:$SOCKET_PATH"\n'
         )
-        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, timeout=_SHELL_TIMEOUT
+        )
 
         assert str(override) in result.stdout, (
             "CLAUDE_HOOKS_SOCKET_PATH is documented as the escape hatch but is "
@@ -141,7 +154,9 @@ class TestBothLayoutsStillWork:
         socket.touch()
 
         script = f'set -euo pipefail\nPROJECT_ROOT="{project_root}"\n{_discovery_snippet()}\necho "FOUND:$SOCKET_PATH"\n'
-        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, timeout=_SHELL_TIMEOUT
+        )
 
         assert result.returncode == 0, f"discovery died: {result.stderr}"
         assert (

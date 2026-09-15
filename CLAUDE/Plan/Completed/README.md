@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00373: drift reached main unseen — merge bypass and QA blind spot](00373-drift-reached-main-unseen-merge-bypass-and-qa-blind-spot/PLAN.md) - Complete at `7a722965`…`016611de` + the archiving commit (a merge resurrected an archived plan folder and four plan-QA findings survived a green QA run, green CI and a release-slate check; both sweeps are now QA tools where any finding fails, and `merge_qa_report` reports what a merge/pull/rebase actually introduced)
+
 - [00372: worktree reap two defects](00372-worktree-reap-two-defects/PLAN.md) - Complete + the archiving commit (a worktree with no commits yet passed every safety predicate vacuously, so a live agent's work was offered for deletion; and the branch delete had never once worked, passing a fully-qualified ref that `git branch -d` rejects)
 
 - [00371: qa acceptance probes detect a stale daemon](00371-qa-acceptance-probes-detect-a-stale-daemon/PLAN.md) - Complete + the archiving commit (the acceptance harness graded whatever code the running daemon loaded at startup, so it could pass a broken tree; a startup source fingerprint now makes every live-dispatch test fail by name on a stale daemon)

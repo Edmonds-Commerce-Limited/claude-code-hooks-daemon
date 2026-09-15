@@ -8,8 +8,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00418: orchestrator only mode greenfield](00418-orchestrator-only-mode-greenfield/PLAN.md) - In Progress (restrict the MAIN THREAD to coordination tools; built once and deleted because hooks could not tell which agent fired an event, and `agent_id` now can. Greenfield by ruling, project-level handler, warn/simulate before ever blocking. From issue #14)
 
-- [00417: supervisor operator signals](00417-supervisor-operator-signals/PLAN.md) - In Progress (a closed channel letting a host warn every session that the machine reboots in N minutes, so work is committed and journalled first. Fixed kinds, integer payload, no free text anywhere — the wording is daemon-owned, because a channel from outside the container is a prompt-injection surface by default. From issue #39)
-
 - [00416: session start action tiers and teeth](00416-session-start-action-tiers-and-teeth/PLAN.md) - In Progress (SessionStart output is delivered but not ACTED ON — 25 handlers in one flat block read as scenery. ACTION_REQUIRED is COMPUTED from "has a verifier and it is failing", never declared, so the tier cannot inflate; the Stop hook blocks on a failing verifier. Carries N6/N15 from 00413)
 
 - [00415: config is invisible to the freshness guard](00415-config-is-invisible-to-the-freshness-guard/PLAN.md) - Not Started (the source fingerprint hashes `.py` only, exactly as documented, but its consumers gate a LIVE DISPATCH on it — so editing config without restarting yields FRESH while every dispatch is graded against the old config. Graduated from 00413 N17; deferred in 00371's non-goals and again by 00395)
@@ -21,7 +19,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00411: host hostname in status line](00411-host-hostname-in-status-line/PLAN.md) - Not Started (an optional segment naming the machine the session is really on; a container's own hostname is the container ID, and probing proved the host's name is unreadable from inside one — the `/etc/hosts` loopback read is host-distro-dependent, so an explicit export is the mechanism and the read is only a hint)
 
 - [00410: gitignore swallows deployed assets](00410-gitignore-swallows-deployed-assets/PLAN.md) - Not Started (an unanchored `hooks-daemon/` ignore pattern matches at every depth, so it hides the deployed `.claude/skills/hooks-daemon/` tree as well as the intended clone; this repo is already anchored, but nothing DETECTS the mistake, and an ignored file cannot drift visibly. Owner-reported from a client project)
-
 
 - [00408: handler hygiene from the release review](00408-handler-hygiene-from-the-release-review/PLAN.md) - Not Started (the non-user-visible half of the v3.64.0 review: raw hook-field literals where `HookInputField` is the declared SSoT, `merge_qa_report` building the docs corpus on the hook budget while a sibling argues against exactly that, and four sub-bar items carried so they are not lost. Graduated from 00407 N6)
 
@@ -152,6 +149,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00417: supervisor operator signals](Completed/00417-supervisor-operator-signals/PLAN.md) - Complete at `5237f62a`…`3edc1ba4` + the archiving commit (a closed channel letting a host warn every session that the machine reboots in N minutes; fixed kinds, integer payload, no free text, because a channel from outside the container is a prompt-injection surface by default. From issue #39)
+
 - [00409: interpreter heredoc defeats the guards](Completed/00409-interpreter-heredoc-defeats-the-guards/PLAN.md) - Complete at `60778567` + the archiving commit (a v3.64.0 regression: `bash <<'EOF'` executes its body, so five destructive-git spellings v3.63.0 denied were allowed; the exemption now keys on whether anything can EXECUTE the body, not on the delimiter's quoting)
 
 - [00413: niggles ledger thirteen](Completed/00413-niggles-ledger-thirteen/PLAN.md) - Complete at `1861a5ec`…`c2e52bb5` + the archiving commit (seventeen entries, all terminal; opened by a new collaborator's fresh clone, the one environment this project structurally cannot dogfood. N3→00414, N17→00415, N6/N15→00416)
@@ -210,8 +209,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00374: the global `--project-root` is clobbered by a subparser default](Completed/00374-global-project-root-clobbered-by-subparser-default/PLAN.md) - Complete at `05d526be`…`692b32c5` + the archiving commit (`bin/hooks-daemon` refuses to run rather than let the CLI fall back to the caller's directory, but argparse's subparser default silently discarded the anchor it passed, and the anchoring suite asserted the argv rather than the behaviour)
 
-- [00373: drift reached main unseen — merge bypass and QA blind spot](Completed/00373-drift-reached-main-unseen-merge-bypass-and-qa-blind-spot/PLAN.md) - Complete at `7a722965`…`016611de` + the archiving commit (a merge resurrected an archived plan folder and four plan-QA findings survived a green QA run, green CI and a release-slate check; both sweeps are now QA tools where any finding fails, and `merge_qa_report` reports what a merge/pull/rebase actually introduced)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -265,25 +262,25 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 419 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 365 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 366 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 31 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 30 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 23 + 363 + 13 = **399 folders**, spanning
-  **396 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 30 + 366 + 13 = **409 folders**, spanning
+  **406 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  409 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  419 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  396 + 13 = 409. ✅
+  406 + 13 = 419. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267

@@ -191,7 +191,7 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
 ### Phase 3e: The `review-n12` findings, rehoused from Plan 00409
 
 These arrived with the finding that became
-[Plan 00409](../00409-interpreter-heredoc-defeats-the-guards/PLAN.md) and were
+[Plan 00409](../Completed/00409-interpreter-heredoc-defeats-the-guards/PLAN.md) and were
 recorded there first, because the alternative was losing them: the report lives
 in `untracked/agent-reports/`, which is gitignored. They belong here — 00409 is
 one shipped regression, this plan is the review's leftovers. Every reproduction

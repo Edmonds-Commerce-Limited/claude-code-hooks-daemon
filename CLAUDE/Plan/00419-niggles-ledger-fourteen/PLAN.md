@@ -106,6 +106,58 @@ it does not fix the eight that already broke, and it is the sweep's own
 credibility at stake: a sweep that says "clean" while a tree is not is worse
 than no sweep, because it is believed.
 
+**New evidence, and it narrows the fork to one option.** Archiving 00409 broke
+two inbound links in Plan 00408 — one in `PLAN.md`, one in a `JOURNAL/`
+day-file. Repointing the `PLAN.md` one was uneventful. Repointing the JOURNAL
+one tripped `journal-append-only`, because a journal is append-only and a
+repoint is by definition a rewrite of an earlier entry. Leaving it dead tripped
+`pointer-resolves` at BLOCK. Both were observed as real handler output, in that
+order, rather than reasoned about.
+
+So the two rules genuinely contradict each other on a journal link, and no
+archival procedure can satisfy both: **"repoint outbound links at archival
+time" is not a remedy a JOURNAL can accept.** That leaves teaching the resolver
+that a plan may have moved to `Completed/` as the only option which fixes the
+class without rewriting an append-only record — and it is independently the
+better guard. The fork this ledger recorded as open is closed by the
+constraint, not by preference.
+
+### N3 — the two plan-close gates are mutually exclusive on the legal close path
+
+Closing a plan legitimately requires two changes to `PLAN.md`: a ticked
+holding-area success criterion, and a terminal status header. Each gate refuses
+the other's change when it arrives first:
+
+- `plan_done_requires_holding_area` refuses the status flip while no
+  holding-area criterion is present.
+- `header-body-coherence` refuses a fully-ticked body under a non-terminal
+  header — which is exactly what adding the criterion first produces.
+
+So neither order works. Both gates are individually correct and neither is
+wrong about the state it refuses; the defect is that no sequence of single
+edits satisfies both, because each is judging an intermediate state that only
+exists on the way to a valid one.
+
+The escape is a single whole-file `Write` carrying both changes, so the content
+is judged once in its final shape. That works, but nothing says so — an agent
+discovers it by being blocked twice and inferring it. This happened three times
+in one session (00409, 00417, and once more before that), each time costing two
+blocked calls and a re-read of the file.
+
+**Candidate remedies**, none chosen:
+
+1. Have `header-body-coherence` ignore the holding-area criterion specifically
+   when judging "the body claims completion" — it is a step TOWARDS closing,
+   not a claim of being closed.
+2. Have `plan_done_requires_holding_area` accept a status flip when the
+   criterion is being added in the same write (it already sees whole content).
+3. Document the whole-file `Write` as the sanctioned close move, and have
+   whichever gate fires second say so in its remediation.
+
+(3) is the cheapest and the weakest: it makes the workflow learnable without
+making it sound. (1) looks most correct — the criterion is a precondition of
+closing, so reading it as a completion claim is the actual category error.
+
 ## Tasks
 
 - [x] ✅ **Task 1.1**: N1 — RED first, both defects tested separately, in
@@ -121,9 +173,14 @@ than no sweep, because it is believed.
   pins that the fix does not reach for `|| true`.
 
 - [x] ✅ **Task 1.2**: N1 fixed. Both layouts are searched in order, each
-  directory tested with `-d` before it is searched, and `mapfile` from a process
-  substitution replaces `find | head -n1` — which also removes a latent SIGPIPE
-  in the producer when the reader closes early. The
+  directory tested with `-d` before it is searched, and a `read` loop over a
+  process substitution replaces `find | head -n1` — which also removes a latent
+  SIGPIPE in the producer when the reader closes early. The first version of
+  this fix used `mapfile`, which is bash 4+ and broke this project's own macOS
+  `/bin/bash` 3.2.57 portability gate; caught by the full QA run on merged main,
+  not by the targeted tests, because the portability check is a separate sweep
+  over shell scripts. Fixing one defect inside a block is exactly when the next
+  one gets introduced. The
   `CLAUDE_HOOKS_SOCKET_PATH` fallback is now reachable, and the not-found error
   names both searched locations instead of only the one that does not exist
   here.
@@ -136,10 +193,17 @@ than no sweep, because it is believed.
   repointed (`../` to `../../` in `PLAN.md` and `NIGGLES.md`), and each verified
   to resolve on disk rather than by eye.
 
-- [ ] ⬜ **Task 1.4**: N2's remedy — decide between repointing at archival time
-  and teaching `plan_qa` to resolve links, then build it. Owner-gated: the
-  second changes what `--sweep` blocks on across every project, which is not a
-  change to make unasked.
+- [ ] ⬜ **Task 1.4**: N2's remedy — build the resolver that knows a plan may
+  have moved to `Completed/`. The fork this task was opened to decide is now
+  settled by constraint rather than preference (see N2's new evidence): a
+  journal link cannot be repointed without violating append-only, so
+  "repoint at archival time" is not available. Still owner-gated, because it
+  changes what `--sweep` blocks on across every project.
+
+- [ ] ⬜ **Task 1.5**: N3 — choose between the three candidate remedies and
+  build it. Owner-gated: (1) and (2) both relax a gate that currently blocks,
+  and relaxing a correct gate to fix a sequencing problem is the kind of change
+  that should be asked for rather than assumed.
 
 ## Success Criteria
 

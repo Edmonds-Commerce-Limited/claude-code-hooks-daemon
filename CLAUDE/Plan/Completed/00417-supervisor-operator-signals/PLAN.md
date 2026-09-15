@@ -1,7 +1,8 @@
 # Plan 00417: supervisor operator signals
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-15
+**Completed**: 2026-09-15
 **GitHub Issue**: #39
 **Owner**: joseph
 **Priority**: Medium
@@ -50,12 +51,17 @@ into a session — it can only select one of a handful of pre-written messages.
   plan. If a future need seems to require prose, that is a signal to add a new
   KIND, not a text field.
 
-## Open question — carried from the issue, needs an owner ruling before Phase 2
+## Open question — carried to a successor, not held open here
 
 Whether a session should be able to answer "not yet" (for example, mid-way
 through a long run) by writing a file the host-side tooling reads before it
-reboots. If wanted it must be a fixed token too, not text. Phase 1 does not
-depend on this and should not wait for it.
+reboots. If wanted it must be a fixed token too, not text.
+
+This plan's declared scope was Phase 1, which never depended on the answer. The
+question needs an owner ruling and has no tasks behind it, so holding this plan
+open for it would be holding finished, merged work open for a decision — the
+exact mislabelled header the workflow rule names. It is recorded here for
+whoever picks it up; a ruling of "yes" opens a new plan.
 
 ## Tasks
 
@@ -99,7 +105,15 @@ depend on this and should not wait for it.
 - [x] ✅ `--all-sessions` reaches every session of this project and no other.
 
 - [x] ✅ Full QA passes, the daemon restarts, CI green (`./scripts/qa/llm_qa.py all`: 29/30 PASSED, the one failure a pre-existing advisory-only dead link
-  in Plan 00413's NIGGLES.md, unrelated to this plan).
+  in Plan 00413's NIGGLES.md, unrelated to this plan). Re-verified on merged
+  main after this branch landed alongside three others.
+
+- [x] ✅ Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/06-operator-reboot-warnings.md`, a callout telling
+  operators the CLI exists and to wire it into the host's shutdown path. Written
+  at merge time rather than by this plan's own agent, which had already stopped
+  — a gap in how a task-scoped sub-agent hands back, noted in the ledger rather
+  than charged to this plan.
 
 ## Delivery & Milestones
 
@@ -107,3 +121,7 @@ depend on this and should not wait for it.
   including the closed-channel constraint. The issue is the specification; the
   verification that it is the right shape is this plan's job, per the standing
   rule that an issue is a hypothesis rather than a patch.
+
+- Merged to main in the four-branch batch of 2026-09-15. Definition of done is
+  "merged into main"; the release that carries it is a separate, human-gated
+  event this plan is not waiting on.
