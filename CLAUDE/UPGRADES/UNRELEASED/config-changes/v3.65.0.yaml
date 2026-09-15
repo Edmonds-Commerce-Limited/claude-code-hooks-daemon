@@ -67,6 +67,30 @@ config_changes:
       recommended: true
       dormant: false
 
+    - key: handlers.session_start.session_actions_directive
+      description: >-
+        Delivers the ACTION_REQUIRED list as a TURN instead of as session-start
+        context. When a session starts with one or more items whose verifier is
+        failing, the daemon writes a `<session>.session-actions` signal and the
+        ccy supervisor types one short directive naming the count. The signal
+        carries a positive integer and nothing else — the supervisor composes
+        every word from a fixed template it owns, so the channel has no text to
+        forge. Adds nothing to the session-start block itself.
+      example_yaml: |
+        session_start:
+          session_actions_directive:
+            enabled: true
+            priority: 72
+      migration_note: >-
+        Opt-in, because it types a line into your terminal. Useful only where
+        an armed ccy supervisor is live to read the signal — without one the
+        handler stands down and writes nothing. Keep `priority` last among
+        SessionStart handlers: it counts what is STILL ACTION_REQUIRED after
+        every other handler has run, and `hook_registration_checker` self-heals
+        inside its own handler.
+      recommended: false
+      dormant: true
+
   renamed: []
 
   removed: []

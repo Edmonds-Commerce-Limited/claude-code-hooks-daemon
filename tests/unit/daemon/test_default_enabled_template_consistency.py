@@ -45,6 +45,10 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     "flaggable_content_channel_guard",
     "quarantine_artefact_read_guard",
     "tool_disable_advisor",
+    # Plan 00416 Task 2.3: types one line into a human's terminal via the ccy
+    # supervisor, so a project enables it deliberately — the same stance every
+    # other supervisor-actuated handler above takes.
+    "session_actions_directive",
 }
 
 

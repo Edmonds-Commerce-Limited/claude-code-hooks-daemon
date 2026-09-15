@@ -2,12 +2,19 @@
 
 Exercised against the REAL handlers package and this repo's own
 `.claude/hooks-daemon.yaml`, the same integration-test convention
-`test_cli_status_line_explained.py` uses. None of this repo's 25 shipped
-SessionStart handlers implements a verifier yet (Task 2.1/2.2 wires real
-ones in) -- so the baseline expectation against the real package is an EMPTY
-list, and the positive case is exercised by monkeypatching a real handler
-class the same way `test_cli_status_line_explained.py` monkeypatches
-`explain_segment`.
+`test_cli_status_line_explained.py` uses. Two of this repo's shipped
+SessionStart handlers now implement a verifier (Task 2.2:
+`project_handler_load_checker` and `hook_registration_checker`), and this
+repository's own session is healthy -- so the baseline expectation against
+the real package is still an EMPTY list, but for a stronger reason than
+"nothing has a verifier": the verifiers exist and are PASSING. The positive
+case is exercised by monkeypatching a real handler class the same way
+`test_cli_status_line_explained.py` monkeypatches `explain_segment`.
+
+The collector itself moved to `utils/session_action_items.py` in Task 2.3,
+so the `session_actions_directive` handler and this command cannot disagree
+about what is ACTION_REQUIRED; `tests/unit/utils/test_session_action_items.py`
+pins that sharing.
 """
 
 from __future__ import annotations

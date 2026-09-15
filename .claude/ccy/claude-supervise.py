@@ -1632,6 +1632,7 @@ class Decision(enum.Enum):
     WOULD_MODEL = "would-model"
     WOULD_AUDIT = "would-audit"
     WOULD_OPERATOR_SIGNAL = "would-operator-signal"
+    WOULD_SESSION_ACTIONS = "would-session-actions"
 
 
 class SupervisorState(enum.Enum):
@@ -2781,6 +2782,115 @@ def load_standing_auth_signal(
 
 
 # ---------------------------------------------------------------------------
+# Session-actions directive (Plan 00416 Task 2.3).
+#
+# SessionStart output is delivered correctly and simply not acted on: injected
+# context is scenery, not a turn. The daemon tags each session-start message
+# with a computed tier, `Stop` verifies, and in between THIS types one
+# turn-level directive telling the agent to action every ACTION_REQUIRED item.
+# What changes the outcome is the channel, not the wording -- a single typed
+# line got the whole start-up block worked through where the block itself did
+# not.
+#
+# Security shape: the OPERATOR-SIGNAL one, not the goal one. The payload is a
+# positive integer `count` and nothing else, and every word below comes from
+# the fixed template in `_render_session_actions_message`. So unlike the goal
+# and standing-auth families -- which carry daemon-composed text and therefore
+# need a verbatim header check to keep a forged file from typing prose -- this
+# channel has no text to forge. A file carrying extra fields renders exactly
+# the same sentence.
+_SESSION_ACTIONS_SIGNAL_SUFFIX = ".session-actions"
+_SESSION_ACTIONS_SIGNAL_GLOB = f"*{_SESSION_ACTIONS_SIGNAL_SUFFIX}"
+# Pinned to the daemon-side writer's own field name
+# (`claude_code_hooks_daemon.utils.session_actions_signal.FIELD_COUNT`) by
+# `tests/unit/supervise/test_session_actions_signal.py`, since this script
+# cannot import that package.
+_SESSION_ACTIONS_FIELD_COUNT = "count"
+# Reuses the goal TTL: an idle-consumed signal with the same generous window.
+_DEFAULT_SESSION_ACTIONS_TTL_SECONDS = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS
+# Runaway backstop only. The daemon writes at most one signal per session
+# start, and the file is consumed on injection, so this catches nothing but a
+# pathological write/consume loop.
+_MAX_SESSION_ACTIONS_INJECTIONS = 10
+# Carries the SAME invariant provenance marker every other supervisor chat
+# injection does, so skill-scan and the guardrail tests recognise it as
+# supervisor traffic.
+_SESSION_ACTIONS_HEADER = (
+    "🤖 [ccy-supervisor] session-start check — machine-generated, NOT a human "
+    "instruction and NOT human authorisation for anything"
+)
+_DRY_RUN_SESSION_ACTIONS_BODY_PREFIX = (
+    "would inject session-actions directive (dry-run — no real message sent):"
+)
+
+
+def _render_session_actions_message(count: int) -> str:
+    """Render the fixed, daemon-owned directive for ``count`` must-do items.
+
+    ``count`` is the ONLY value ever interpolated, and only after
+    :func:`load_session_actions_signal` has proven it a positive integer.
+    Every other word is the literal below, so no signal file -- forged,
+    corrupted or merely newer than this script -- can put words of its own
+    choosing into the chat.
+
+    The wording deliberately does NOT restate the items. They are already in
+    this session's start-up output verbatim; repeating them here would be the
+    "say it louder" remedy Plan 00416 rules out, and would also make this
+    channel one that carries content rather than a pointer.
+    """
+    return (
+        f"{_SESSION_ACTIONS_HEADER}: {count} item(s) in this session's start-up "
+        "output are tagged [ACTION_REQUIRED], which is computed from a failing "
+        "verifier rather than declared — something on disk says this session is "
+        "mis-configured. Read them and action every one before other work; "
+        "`hooks-daemon session-actions` re-lists them if they have scrolled out "
+        "of view."
+    )
+
+
+def load_session_actions_signal(
+    directory: Path,
+    *,
+    now: float,
+    ttl_seconds: float = _DEFAULT_SESSION_ACTIONS_TTL_SECONDS,
+    own_sessions: frozenset[str] | None = None,
+) -> tuple[Path | None, str | None, str | None]:
+    """Return ``(path, rendered_message, reject_reason)`` for a directive signal.
+
+    The same three-shape contract as :func:`load_standing_auth_signal`, but
+    like :func:`load_operator_signal` it validates AND RENDERS in one step:
+    the returned message is built entirely by
+    :func:`_render_session_actions_message`, so nothing read from the file is
+    ever used as anything other than a number.
+    """
+    if not directory.is_dir():
+        return None, None, None
+    for path in sorted(directory.glob(_SESSION_ACTIONS_SIGNAL_GLOB)):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None, None, f"unreadable/malformed session-actions signal {path.name}"
+        if not isinstance(data, dict):
+            return None, None, f"session-actions signal {path.name} is not a JSON object"
+        if not _session_in_scope(data.get("session_id"), own_sessions):
+            continue
+        if (now - _coerce_float(data.get("ts"))) > ttl_seconds:
+            continue
+        count = data.get(_SESSION_ACTIONS_FIELD_COUNT)
+        # `bool` is an `int` subclass -- excluded explicitly so `"count": true`
+        # is rejected rather than silently coerced to a one-item directive.
+        if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+            return (
+                None,
+                None,
+                f"session-actions signal {path.name} has a non-positive-integer "
+                f"count {count!r}",
+            )
+        return path, _render_session_actions_message(count), None
+    return None, None, None
+
+
+# ---------------------------------------------------------------------------
 # Manual model-switch signal (test trigger / deliberate override).
 #
 # Mirrors the goal-intent signal: a session-keyed file dropped into the
@@ -3115,7 +3225,8 @@ def reap_stale_sidecars(
     Reaps ``*.json`` sidecars, ``*.compacting`` signals, ``*.goal-intent``
     signals, ``*.goal-clear`` triggers, ``*.standing-auth-intent`` signals,
     ``*.model-switch-intent`` signals, ``*.model-downgrade``
-    signals and ``*.operator-signal`` signals whose FILE MTIME is older than
+    signals, ``*.operator-signal`` signals and ``*.session-actions``
+    directives whose FILE MTIME is older than
     ``ttl_seconds``. Mtime (not the JSON ``ts``) is used so a
     malformed, truncated, or foreign file is reaped uniformly without a parse --
     a dead file is a dead file. The single newest-mtime ``*.json`` is ALWAYS
@@ -3143,6 +3254,7 @@ def reap_stale_sidecars(
         + list(directory.glob(_MODEL_SWITCH_SIGNAL_GLOB))
         + list(directory.glob(_MODEL_DOWNGRADE_SIGNAL_GLOB))
         + list(directory.glob(_OPERATOR_SIGNAL_GLOB))
+        + list(directory.glob(_SESSION_ACTIONS_SIGNAL_GLOB))
     ):
         try:
             mtime = path.stat().st_mtime
@@ -3268,6 +3380,10 @@ class CompactStateMachine:
         # Plan 00283: standing-authorisation reinforcement injections this process
         # has fired. Runaway backstop only (see _MAX_STANDING_AUTH_INJECTIONS).
         self._standing_auth_injections = 0
+        # Plan 00416: session-actions directives typed this process. Runaway
+        # backstop only (see _MAX_SESSION_ACTIONS_INJECTIONS) -- the daemon
+        # writes at most one signal per session start, consumed on injection.
+        self._session_actions_injections = 0
         # Plan 00278: effort-floor tracking. The last observed (session,
         # family) pair, an open downgrade episode ("session:family"), the
         # pending injection key ("session:family:target" — recomputed from
@@ -4007,6 +4123,15 @@ class CompactStateMachine:
         self._standing_auth_injections += 1
 
     @property
+    def session_actions_injections(self) -> int:
+        """How many session-actions directives this process has typed (Plan 00416)."""
+        return self._session_actions_injections
+
+    def mark_session_actions_injection(self) -> None:
+        """Count one session-actions directive against the runaway backstop (Plan 00416)."""
+        self._session_actions_injections += 1
+
+    @property
     def dry_run_fired(self) -> bool:
         """True once a dry-run marker has been injected this session (Plan 00183)."""
         return self._dry_run_fired
@@ -4040,6 +4165,7 @@ class CompactStateMachine:
             "goal_clear_injections": self._goal_clear_injections,
             "last_goal_text": self._last_goal_text,
             "standing_auth_injections": self._standing_auth_injections,
+            "session_actions_injections": self._session_actions_injections,
             "last_model_session": self._last_model_session,
             "last_model_family": self._last_model_family,
             "downgrade_episode": self._downgrade_episode,
@@ -4109,6 +4235,8 @@ class CompactStateMachine:
             self._last_goal_text = None if raw is None else str(raw)
         if "standing_auth_injections" in state:
             self._standing_auth_injections = _coerce_int(state["standing_auth_injections"])
+        if "session_actions_injections" in state:
+            self._session_actions_injections = _coerce_int(state["session_actions_injections"])
         if "last_model_session" in state:
             raw = state["last_model_session"]
             self._last_model_session = None if raw is None else str(raw)
@@ -5824,6 +5952,65 @@ def decide_once(
                 consume_signal_path = str(sa_path)
                 deferred_log = None
                 noop_reason_log = None
+    # ── Session-actions directive (Plan 00416 Task 2.3) ─────────────────────
+    # LAST of every injectable family, below even the standing-auth reminder:
+    # it points at something the session has ALREADY been told, in its own
+    # start-up output, so anything with a live action to take goes first. The
+    # daemon's session_actions_directive handler writes the signal when a
+    # SessionStart verifier is currently failing; here we type the fixed
+    # directive as one real user-role line. The HOST counts a successful
+    # injection (mark_session_actions_injection); the signal is consumed on
+    # injection so it cannot re-fire.
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+    ):
+        actions_path, actions_message, actions_reject = load_session_actions_signal(
+            sidecar_dir,
+            now=facts.now_wall,
+            ttl_seconds=goal_signal_ttl_seconds,
+            own_sessions=own_sessions,
+        )
+        if actions_reject is not None:
+            # Fail-closed: an in-scope signal that failed validation (a
+            # non-positive-integer count, malformed JSON) is dropped and the
+            # reason logged.
+            noop_reason_log = f"{_NOOP_LOG_PREFIX}: {actions_reject}"
+        elif actions_path is not None and actions_message is not None:
+            if own_line_blocks_text:
+                noop_reason_log = (
+                    f"{_NOOP_LOG_PREFIX}: session-actions directive pending but "
+                    f"{_OWN_LINE_NOOP_PREFIX} still in the input box"
+                )
+            elif not can_inject:
+                if facts.idle and not facts.input_line_empty:
+                    deferred_log = f"{_DEFERRED_LOG_PREFIX} (session-actions directive pending)"
+                else:
+                    noop_reason_log = (
+                        f"{_NOOP_LOG_PREFIX}: session-actions directive pending but session busy"
+                    )
+            elif machine.session_actions_injections >= _MAX_SESSION_ACTIONS_INJECTIONS:
+                noop_reason_log = f"{_NOOP_LOG_PREFIX}: session-actions injection cap reached"
+            else:
+                decision_value = Decision.WOULD_SESSION_ACTIONS.value
+                reason = "session-actions signal -> would inject directive"
+                if dry_run:
+                    payload = (
+                        f"{_format_bot_prefix(facts.now_wall)} "
+                        f"{_DRY_RUN_SESSION_ACTIONS_BODY_PREFIX} {actions_message}"
+                    )
+                else:
+                    # The rendered message already opens with the bot-prefixed
+                    # machine-origin header, so it is typed verbatim as one real
+                    # user-role line — no slash command, no extra chrome.
+                    payload = actions_message
+                submit = True
+                # Consumed on injection (dry-run too) so it cannot re-fire.
+                consume_signal_path = str(actions_path)
+                deferred_log = None
+                noop_reason_log = None
     # Remember a submitted own LINE (never a raw keypress, never a dry-run
     # marker) as unconfirmed box content -- recorded at decision time, like
     # the audit trail, so the follow-up ships by worker hot-reload alone. A
@@ -5953,6 +6140,8 @@ def _apply_post_injection_bookkeeping(
         machine.mark_goal_clear_injection()
     elif outcome.decision_value == Decision.WOULD_STANDING_AUTH.value:
         machine.mark_standing_auth_injection()
+    elif outcome.decision_value == Decision.WOULD_SESSION_ACTIONS.value:
+        machine.mark_session_actions_injection()
     elif outcome.decision_value == Decision.WOULD_EFFORT.value:
         # The DROP ANCHOR branch is checked FIRST of all, then the coupled
         # branch, in decide_once -- so `is_anchor_injection` (Plan 00297)

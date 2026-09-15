@@ -110,6 +110,10 @@ from claude_code_hooks_daemon.utils.hook_registration import (
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms
+from claude_code_hooks_daemon.utils.session_action_items import (
+    SessionActionItem,
+    collect_session_action_items,
+)
 from claude_code_hooks_daemon.utils.settings_repair import repair_settings_registrations
 
 from .init_config import generate_config
@@ -7283,105 +7287,14 @@ def cmd_status_line_explained(args: argparse.Namespace) -> int:
     return 0
 
 
-#: The event directory `session-actions` scans -- SessionStart only (Plan
-#: 00416 Task 1.2). The tier mechanism itself (`session_start_tiers`) is
-#: event-agnostic; this command is the one place that says "only SessionStart
-#: handlers are asked".
-_SESSION_START_EVENT_DIR = "session_start"
-
-
-class _SessionActionEntry:
-    """One currently-ACTION_REQUIRED SessionStart handler.
-
-    Deliberately thin: the full advisory text already reaches the agent
-    through the tagged SessionStart block (`session_start_tiers.
-    prefix_context_with_tier`) every session start. This command exists to
-    let the agent re-fetch the SHORT must-do list on demand, not to
-    duplicate the advisory prose.
-    """
-
-    __slots__ = ("class_name", "config_key", "handler_name")
-
-    def __init__(self, *, config_key: str, class_name: str, handler_name: str) -> None:
-        self.config_key = config_key
-        self.class_name = class_name
-        self.handler_name = handler_name
-
-
-def _collect_session_action_entries(project_root: Path | None) -> list[_SessionActionEntry]:
-    """Every SessionStart handler whose verifier is CURRENTLY failing.
-
-    Mirrors `_collect_status_line_segment_entries`'s discovery shape: walk the
-    registry directly rather than dispatching a real SessionStart event, so
-    this works without a running daemon. A handler that fails to instantiate,
-    or is disabled by config, is silently excluded rather than reported as an
-    error -- an ACTION_REQUIRED item for a handler that cannot even run would
-    be a command with nothing actionable to say about it.
-
-    `compute_tier` already degrades a raising verifier to the declared tier
-    internally, so one broken verifier here cannot hide another handler's
-    genuine ACTION_REQUIRED item, and never raises out of this loop.
-
-    Args:
-        project_root: Resolved project root, or ``None`` if unresolvable.
-
-    Returns:
-        Entries for handlers computed as ACTION_REQUIRED right now, sorted by
-        config key for stable output.
-    """
-    from claude_code_hooks_daemon.core.session_start_tiers import SessionTier, compute_tier
-    from claude_code_hooks_daemon.handlers.registry import (
-        HandlerRegistry,
-        _get_config_key,
-        event_dir_name_matches_module,
-        handler_is_enabled,
-    )
-
-    event_config: dict[str, Any] = {}
-    if project_root is not None:
-        config_path = project_root / ".claude" / "hooks-daemon.yaml"
-        if config_path.exists():
-            try:
-                config = Config.load(config_path)
-                event_config = config.handlers.model_dump().get(_SESSION_START_EVENT_DIR) or {}
-            except (PydanticValidationError, OSError, ValueError) as exc:
-                logger.debug("Could not load config for session-actions: %s", exc)
-
-    registry = HandlerRegistry()
-    registry.discover()
-
-    entries: list[_SessionActionEntry] = []
-    for handler_class_name in registry.list_handlers():
-        handler_class = registry.get_handler_class(handler_class_name)
-        if handler_class is None:
-            continue
-        if not event_dir_name_matches_module(_SESSION_START_EVENT_DIR, handler_class.__module__):
-            continue
-
-        config_key = _get_config_key(handler_class_name)
-
-        try:
-            instance = handler_class()
-        except Exception:
-            logger.exception("Failed to instantiate %s for session-actions", handler_class_name)
-            continue
-
-        if not handler_is_enabled(event_config, config_key, instance.tags):
-            continue
-
-        if compute_tier(instance) is not SessionTier.ACTION_REQUIRED:
-            continue
-
-        entries.append(
-            _SessionActionEntry(
-                config_key=config_key,
-                class_name=handler_class_name,
-                handler_name=instance.name,
-            )
-        )
-
-    entries.sort(key=lambda e: e.config_key)
-    return entries
+#: The collector is SHARED with the `session_actions_directive` SessionStart
+#: handler (Plan 00416 Task 2.3), which counts the same list to decide whether
+#: the ccy supervisor should type its directive. Two implementations of "what
+#: is ACTION_REQUIRED right now" would let the directive and the command it
+#: names disagree, and a directive that fires while this command reports
+#: nothing teaches the agent to ignore the next one.
+_SessionActionEntry = SessionActionItem
+_collect_session_action_entries = collect_session_action_items
 
 
 def _render_session_actions_text(entries: list[_SessionActionEntry]) -> None:

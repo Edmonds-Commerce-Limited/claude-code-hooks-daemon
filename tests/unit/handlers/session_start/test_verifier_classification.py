@@ -97,9 +97,7 @@ class TestHookRegistrationCheckerIsVerifiable:
         assert handler.verify_still_needed() is False
         assert compute_tier(handler) is not SessionTier.ACTION_REQUIRED
 
-    def test_absent_settings_is_not_action_required(
-        self, tmp_path: Path, monkeypatch: Any
-    ) -> None:
+    def test_absent_settings_is_not_action_required(self, tmp_path: Path, monkeypatch: Any) -> None:
         # No settings.json at all means "not a hooks-daemon project", which the
         # handler already treats as nothing to say. It must not become an alarm.
         (tmp_path / ".claude").mkdir()
@@ -120,7 +118,11 @@ class TestHookRegistrationCheckerIsVerifiable:
                 {
                     "hooks": {
                         "PreToolUse": [
-                            {"hooks": [{"type": "command", "command": ".claude/hooks/pre-tool-use"}]}
+                            {
+                                "hooks": [
+                                    {"type": "command", "command": ".claude/hooks/pre-tool-use"}
+                                ]
+                            }
                         ]
                     }
                 }

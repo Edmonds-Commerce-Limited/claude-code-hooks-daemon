@@ -700,6 +700,15 @@ class HandlerID:
         config_key="reference_repo_sweep",
         display_name="reference-repo-sweep",
     )
+    # Plan 00416 Task 2.3: the sensor half of the supervisor directive -- it
+    # writes a signal the ccy supervisor types, and says NOTHING in the
+    # SessionStart block itself. Adding a line there would be "saying it
+    # louder", which this plan's Non-Goals rule out by construction.
+    SESSION_ACTIONS_DIRECTIVE = HandlerIDMeta(
+        class_name="SessionActionsDirectiveHandler",
+        config_key="session_actions_directive",
+        display_name="session-actions-directive",
+    )
     REFERENCE_REPO_FRESHNESS = HandlerIDMeta(
         class_name="ReferenceRepoFreshnessHandler",
         config_key="reference_repo_freshness",

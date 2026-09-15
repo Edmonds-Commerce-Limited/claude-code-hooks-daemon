@@ -769,6 +769,13 @@ handlers:
       # `reference_repos:` block, not here — one block feeds the sweep, the
       # PreToolUse backstop and the CLI, so the three cannot disagree.
 
+    session_actions_directive:  # The must-do list arrives as a TURN, not as context (Plan 00416)
+      enabled: true             # Opt-in upstream; enabled here because this repo dogfoods it
+      priority: 72              # Last, deliberately: it counts what is STILL ACTION_REQUIRED after
+                                # every other handler has run, and hook_registration_checker
+                                # self-heals in its handle(). Writes nothing without an armed
+                                # ccy supervisor, and adds nothing to the session-start block.
+
     suggest_status_line:  # Suggests daemon-based status line setup
       enabled: true      # Enable to suggest status line configuration
       priority: 55

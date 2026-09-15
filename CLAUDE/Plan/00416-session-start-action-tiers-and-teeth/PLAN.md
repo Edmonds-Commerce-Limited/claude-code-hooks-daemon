@@ -150,22 +150,60 @@ enforcement and therefore neither can be gamed into teeth.
   no ACTION_REQUIRED items, which is correct here and shows the mechanism does
   not false-alarm on a healthy session.
 
-- [ ] ⬜ **Task 2.3**: The supervisor directive, and dogfood it in this
-  repository. Ship the nudge; the Stop block is what makes it more than a nudge.
+- [x] ✅ **Task 2.3**: The supervisor directive, shipped as a sixth signal
+  family: `session_actions_directive` (SessionStart, priority 72) writes a
+  `<session>.session-actions` signal, and the supervisor types one fixed
+  directive as a real user-role line. Enabled in this repository's own config,
+  opt-in everywhere else — it types into a human's terminal.
+
+  **The payload is a positive integer and nothing else.** That is the
+  `operator-signal` shape rather than the `goal-intent` one, and it was chosen
+  rather than inherited: a nudge whose whole message is "go read what you were
+  already told" never needed to carry prose, and a channel that cannot carry
+  prose cannot later be widened into one. A test writes a signal carrying
+  forged `message` and `rendered_lines` fields and asserts the rendered output
+  is byte-identical to the fixed template.
+
+  Three conditions gate the write, and the third is the one that keeps it from
+  being litter: a verifier is failing, the handler is enabled, AND an armed ccy
+  supervisor is live to read the signal. Without a supervisor nothing would
+  ever consume the file.
+
+  Priority 72 is load-bearing, not tidiness: `hook_registration_checker`
+  SELF-HEALS inside its own `handle()`, so counting anywhere but last would
+  nudge the agent about a problem the session had already fixed.
+
+  The count comes from the same collector `hooks-daemon session-actions` uses,
+  extracted to `utils/session_action_items.py` and pinned by test. The
+  directive's entire content is *go action those items*; a directive that fired
+  while that command reported nothing would teach the agent to ignore the next
+  one, which is the exact failure this plan exists to fix.
 
 ## Success Criteria
 
-- [ ] ⬜ Deleting a declared cron and ending the session blocks the stop, with a
-  message naming the exact `CronCreate` to run.
+- [x] ✅ Deleting a declared cron and ending the session blocks the stop, with a
+  message naming the exact `CronCreate` to run. Proven by test
+  (`TestADeclaredCronAbsentFromSessionCronsBlocks`) and observed live — though
+  the live observation arrived as a DEFECT: the enforcer blocked every stop in
+  this session on the day it merged (00419 N4), because the delivered prompt is
+  re-rendered and matching compared bytes. The block and its `CronCreate`
+  message worked exactly as designed; what was wrong was the comparison
+  deciding a present cron was absent.
 
-- [ ] ⬜ `bin/hooks-daemon session-actions` lists exactly the failing-verifier
-  items and nothing else.
+- [x] ✅ `bin/hooks-daemon session-actions` lists exactly the failing-verifier
+  items and nothing else. Its baseline against this repository's real handler
+  set is EMPTY, which since Task 2.2 means something stronger than "nothing has
+  a verifier": two handlers ship one and both are currently passing.
 
-- [ ] ⬜ A handler with no verifier cannot produce `ACTION_REQUIRED`, proven by
-  test rather than by review convention.
+- [x] ✅ A handler with no verifier cannot produce `ACTION_REQUIRED`, proven by
+  test rather than by review convention — including the defence-in-depth case
+  where `declared_tier` is set to `ACTION_REQUIRED` directly, which is clamped
+  to `INFO` and logged at ERROR.
 
-- [ ] ⬜ An absent `session_crons` does not produce a block — proven, because
-  absent-is-not-empty is the trap most likely to make this nag wrongly.
+- [x] ✅ An absent `session_crons` does not produce a block — proven
+  (`TestAbsentSessionCronsNeverBlocks`), alongside its mirror image: a PRESENT
+  but empty list is real information and DOES block. Absent-is-not-empty is the
+  trap most likely to make this nag wrongly, and the pair is what pins it.
 
 - [ ] ⬜ Full QA passes, the daemon restarts, CI green.
 

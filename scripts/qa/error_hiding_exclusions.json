@@ -183,10 +183,16 @@
       "reason": "Plan 00369 status-line-explained: an unreadable/invalid hooks-daemon.yaml degrades to event_config={} (every handler resolves 'enabled' via its own default), matching explain-rule/explain-handler's own _init_project_context_for_explain degrade-gracefully contract for a command that must work without a fully validated installation. Already logged at debug level."
     },
     {
-      "file": "daemon/cli.py",
-      "function": "_collect_session_action_entries",
+      "file": "handlers/session_start/session_actions_directive.py",
+      "function": "_project_root",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00416 Task 2.3: identical contract to hook_registration_checker._get_project_root -- ProjectContext.project_root() raises RuntimeError when the root cannot be resolved, which for a SessionStart advisory means 'nothing to check', not an error. Logged at debug; the sole caller treats None as 'stand down' and writes no signal."
+    },
+    {
+      "file": "utils/session_actions_signal.py",
+      "function": "clear_session_actions_signal",
       "rule": "log-and-continue",
-      "reason": "Plan 00416 session-actions: identical shape and identical justification to _collect_status_line_segment_entries directly above -- an unreadable/invalid hooks-daemon.yaml degrades to event_config={} (every handler resolves 'enabled' via its own default) rather than failing the whole command. Already logged at debug level."
+      "reason": "Plan 00416 Task 2.3: retracting a directive is best-effort hygiene on a session-start path. The common case is that the file is absent (most sessions are healthy), and an unreadable untracked directory is not worth failing a session start over -- that would cost the agent every other SessionStart handler's output to avoid one stale nudge. Logged at warning. The WRITE half deliberately does NOT have this contract: it propagates OSError so a caller that cares can report it."
     },
     {
       "file": "handlers/post_tool_use/goal_injection.py",

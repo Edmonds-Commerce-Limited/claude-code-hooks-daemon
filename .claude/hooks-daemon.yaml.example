@@ -534,6 +534,15 @@ handlers:
       # `reference_repos:` block, not here — one block feeds the sweep, the
       # PreToolUse backstop and the CLI, so the three cannot disagree.
 
+    session_actions_directive:  # The must-do list arrives as a TURN, not as context (Plan 00416)
+      enabled: false            # Opt-in: it types one line into your terminal via the ccy supervisor
+      priority: 72              # Last: counts what is STILL ACTION_REQUIRED after every other
+                                # handler has run (hook_registration_checker self-heals in its own).
+      # Writes a `<session>.session-actions` signal ONLY when a SessionStart
+      # verifier is currently failing AND an armed ccy supervisor is live to
+      # read it. Adds nothing to the session-start block itself — the whole
+      # point is the second channel, so saying it twice would dilute both.
+
     suggest_status_line:  # Suggests daemon-based status line setup
       enabled: true      # Recommends status line if not configured
       priority: 55
