@@ -5672,6 +5672,51 @@ def cmd_reference_repos(args: argparse.Namespace) -> int:
     return 1 if any(state.needs_attention for state in states) else 0
 
 
+def cmd_find_plan(args: argparse.Namespace) -> int:
+    """Find plans by number, folder name or title (ledger 00413 N7).
+
+    The sanctioned answer to "where is the Jobs plan". ``plan_number_helper``
+    denies a folder scan of the plan directory because such a scan misses
+    everything under ``Completed/`` — correctly, but it left no route to a
+    name lookup at all, since its deny message answers with the next plan
+    NUMBER instead.
+
+    Args:
+        args: Parsed CLI arguments with ``query`` and optional
+            ``project_root``.
+
+    Returns:
+        0 when at least one plan matched, 1 when none did, 2 on operational
+        errors (unresolvable project root).
+    """
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.plan_finder import find_plans
+
+    resolved_root = resolve_tree_root(args)
+    if resolved_root is None:
+        return 2
+    project_root = resolved_root
+    config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+    plan_dir_rel = config.plan_workflow.directory
+
+    query = " ".join(args.query) if args.query else ""
+    matches = find_plans(project_root, plan_dir_rel, query)
+
+    if not matches:
+        # Not an error: "no plan covers this" is frequently the answer the
+        # caller wanted, and is the whole point of a dedupe check.
+        print(f"No plan matches {query!r} in {plan_dir_rel}/ (archives included).")
+        return 1
+
+    for match in matches:
+        status = match.status or "?"
+        print(f"{match.number:05d}  {status:<12}  {match.path}")
+        if match.title:
+            print(f"         {match.title}")
+    print(f"\n{len(matches)} plan(s) matched, searched {plan_dir_rel}/ including archives.")
+    return 0
+
+
 def cmd_plan_qa(args: argparse.Namespace) -> int:
     """Run plan QA checks (Plan 00144): sweep, staged gate, or single-file lint.
 
@@ -8203,6 +8248,27 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_reference_repos.set_defaults(func=cmd_reference_repos)
+
+    # find-plan command (ledger 00413 N7) — the name lookup the number guard
+    # denies a folder scan for. Searches the archives too, which is the whole
+    # reason the folder scan is refused.
+    parser_find_plan = subparsers.add_parser(
+        "find-plan",
+        help="Find plans by number, name or title — searches Completed/ too",
+    )
+    parser_find_plan.add_argument(
+        "query",
+        nargs="*",
+        help="Plan number or free text; omit to list every plan",
+    )
+    parser_find_plan.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_find_plan.set_defaults(func=cmd_find_plan)
 
     # plan-qa command (Plan 00144) — sweep / staged gate / single-file lint
     parser_plan_qa = subparsers.add_parser(

@@ -563,6 +563,19 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
             # teaching content.
             message += f"\n\nNext plan number is {next_number}. Use this instead of bash commands to discover plan numbers."
 
+            # LOOKING FOR A PLAN, not for a number (ledger 00413 N7). The
+            # number above answers only one of the two questions a scan of
+            # this directory is asked. Without naming the finder, a caller who
+            # wanted "where is the Jobs plan" is told the next number -- an
+            # answer to a question they did not ask -- and routes around the
+            # guard with an equally partial glob.
+            message += (
+                "\n\nLooking for an EXISTING plan rather than the next number?"
+                "\n  bin/hooks-daemon find-plan <number|name|words>"
+                "\nIt searches the archives too, which is exactly what a folder"
+                " scan misses."
+            )
+
             # Add workflow docs reference if configured
             if self._plan_workflow_docs:
                 workflow_path = self._workspace_root / self._plan_workflow_docs
@@ -622,7 +635,16 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
             "**Do NOT** scan `CLAUDE/Plan/` with `ls`/`find`/glob pipelines to discover the "
             "next number. Folder scans miss plans in `Completed/` and other subdirectories, "
             "and disagree across branches. The folder scan is only used to bootstrap the "
-            "counter when the git key is unset (which `mkplan.bash` and the daemon both handle)."
+            "counter when the git key is unset (which `mkplan.bash` and the daemon both handle).\n\n"
+            "**To FIND an existing plan** — a different question from the next "
+            "number, and the one a folder scan is usually reaching for:\n\n"
+            "```\n"
+            "bin/hooks-daemon find-plan 412\n"
+            'bin/hooks-daemon find-plan "jobs"\n'
+            "```\n\n"
+            "It searches the WHOLE tree including `Completed/`, which is "
+            "precisely what a folder scan misses, and prints each plan's "
+            "number, status and path."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

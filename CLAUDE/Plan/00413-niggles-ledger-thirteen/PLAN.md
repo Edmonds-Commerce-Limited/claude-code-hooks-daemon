@@ -402,10 +402,14 @@ its author intended these to be environment-dependent.
   fails. Then settle duplication (env-var activation vs a GitHub-side lock) and
   the `agent-working` claim race as the separate problem it is.
 
-- [ ] ⬜ **Task 1.9**: N7 — a plan finder that searches the WHOLE tree
-  (`Completed/` included) and returns paths, named in `plan_number_helper`'s
-  deny message beside the number. Detector unchanged; check whether
-  `README.md`'s index already serves as the substrate.
+- [x] ✅ **Task 1.9**: N7 — `bin/hooks-daemon find-plan <number|name|words>`,
+  named in the deny message beside the number and in the injected guidance.
+  Detector unchanged, as intended: it still denies, and now says what to do
+  instead. Substrate question answered NO — the README index is complete today
+  (404 rows against 404 folders) but a plan missing a row would be invisible to
+  a reader told the search covers everything, which is the guard's own failure
+  mode one layer up. The finder walks the filesystem, which cannot have that
+  gap. Live-verified on the archived plan a folder scan misses.
 
 - [x] ✅ **Task 1.10**: N7b — `plan_number_helper` now exempts a `git commit`
   message, RED first on the live reproduction. Anchored on the LAST mention,
