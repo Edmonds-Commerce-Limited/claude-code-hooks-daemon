@@ -129,8 +129,8 @@ there, not inside the job.
 
 ## D7. What the cron can and cannot promise — DECIDED
 
-Claude Code crons live in session memory, `durable` has no effect, recurring
-jobs expire after seven days, and the daemon cannot enumerate them. Therefore:
+Claude Code crons live in session memory, `durable` has no effect, and
+recurring jobs expire after seven days. Therefore:
 
 - A cron **prompts** a run. It is not evidence of one.
 - A run record **proves** a run, including a run that found nothing.
@@ -140,6 +140,24 @@ jobs expire after seven days, and the daemon cannot enumerate them. Therefore:
 
 Stated plainly because the tempting design — treating a declared cron as
 evidence of execution — records an intention and calls it a fact.
+
+**CORRECTION — "the daemon cannot enumerate them" was false, and is struck.**
+`Stop` and `SubagentStop` receive `session_crons`: one entry per wakeup
+"sourced from `CronCreate`, `ScheduleWakeup`, and `/loop`", carrying `id`,
+`schedule`, `recurring` and `prompt`. It is in the vendored contract
+(`Stop.json:48`) and nothing reads it. See ledger
+[00413](../00413-niggles-ledger-thirteen/PLAN.md) N15.
+
+The three bullets above SURVIVE — a declared cron still is not evidence that a
+run happened, and the run record is still what proves one. What does not
+survive is the reason given for D9's delivery-guarantee inversion: that
+`session_start` is structurally privileged because the daemon "cannot even see
+a cron". It can see the cron's EXISTENCE, though still not whether it fired.
+Combined with the adversarial review's §3 — the daemon cannot EXECUTE agent
+work at `session_start` either, only prompt it — the asymmetry that made
+triggers-as-kinds look structurally important is materially weaker than
+recorded. The trigger-kind idea may still be right; the argument for it needs
+rebuilding on something true.
 
 **Related finding worth acting on separately:** two of the three crons
 currently running in this repository are not declared in `persistent_crons` at
@@ -198,6 +216,16 @@ SessionStart hook is executed by the daemon itself. So the trigger kind with
 the WEAKEST delivery guarantee is the clock, and the strongest is the one the
 daemon already owns. A design that treats cron as the primary mechanism has it
 backwards.
+
+> **This paragraph is the one the review damaged, and it is now twice wrong.**
+> The daemon CAN see a cron — `session_crons` at `Stop`
+> ([00413](../00413-niggles-ledger-thirteen/PLAN.md) N15) — and it cannot
+> EXECUTE agent work at SessionStart either, only inject context that prompts a
+> run, exactly as a cron prompts one (adversarial review §3). Both halves of
+> the asymmetry fail. The CONCLUSION — that a trigger is a kind, not a clock —
+> may well still be right, and the composition argument below stands on its own
+> feet. But this justification does not support it and must not be cited as
+> though it does.
 
 **It composes with the overdue check (D6) instead of duplicating it.** A
 monthly job does not need a monthly cron at all: a `session_start` trigger that
