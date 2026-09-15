@@ -59,35 +59,28 @@ visible error for a silent misroute.
 comment was misleading
 
 Filed as a defect and it was not one; proving N4 is what showed it. The guard
-reads two UNTRACKED signals and deliberately ignores the tracked
-`self_install_mode: true`, because the config declares INTENT while the env file
-and `HOOKS_DAEMON_ROOT_DIR` are evidence the runtime was actually BUILT — and a
-fresh clone has the intent with none of the runtime. Believing the config would
-have routed the clone to advice that overwrites this repository's own tracked
-config (see N5), making the outcome strictly worse.
+ignores the tracked `self_install_mode: true` deliberately — the config
+declares INTENT, while the untracked signals are evidence the runtime was
+actually BUILT, and a fresh clone has the intent with none of the runtime.
+Believing the config would have routed the clone to advice that overwrites this
+repository's own tracked config (N5).
 
-What WAS wrong was the comment: an unfinished-TODO shape that invited exactly
-the change about to be made. Replaced with the rationale. N1 is what made this
-expensive rather than annoying — the guard already named its remedy, and N1 is
-why nobody read it.
+What WAS wrong was the comment: an unfinished-TODO shape inviting exactly the
+change about to be made. Replaced with the rationale.
 
 ### N3 — a fresh clone has no template for the secret word list
 
 **Status**: ⬜ Open — but NOT as filed; the ignore rule is deliberate and the
 fix is elsewhere
 
-`.gitignore:220` ignores `*.secret.example` on purpose, with its reason stated:
-the rule ships *"BEFORE any such file is created so a broad `git add` can never
-catch one"*. That is defence in depth against someone copying a real list to an
-`.example` name, and tracking the template would weaken it. My proposed fix was
-wrong.
+`.gitignore:220` ignores `*.secret.example` on purpose: the rule ships
+*"BEFORE any such file is created so a broad `git add` can never catch one"*.
+Tracking the template would weaken that, so my proposed fix was wrong.
 
-The gap underneath it is still real, and it is about VISIBILITY rather than the
-template. `secret_file_hygiene_checker` reports only on protected paths *that
-exist on disk*, so a missing list produces no advisory at all — a new
-collaborator gets a working daemon with one guard permanently inert and nothing
-anywhere saying so. Surfacing the absence is a handler behaviour change, so it
-wants its own plan rather than a ledger quick-fix.
+The gap underneath is real and is about VISIBILITY.
+`secret_file_hygiene_checker` reports only on protected paths *that exist*, so
+a missing list produces no advisory at all — a new collaborator gets a working
+daemon with one guard permanently inert and nothing saying so.
 
 Graduated to Plan
 [00414](../00414-absent-protected-path-is-silent/PLAN.md) (Task 1.7).
@@ -97,11 +90,11 @@ Graduated to Plan
 **Status**: ✅ Fixed at `48a9ff74` (and superseded by N5 — the whole command was
 wrong, not just the interpreter)
 
-The guard advised `python install.py --self-install`. The flag was right; the
-interpreter was not — bare `python` is absent by default on modern Fedora,
-Debian 12+ and Ubuntu, and from this container. A reader following it verbatim
-got `command not found`, which reads as a broken repository rather than a wrong
-instruction. Swept for the same spelling across user-facing output.
+The guard advised `python install.py --self-install`. Bare `python` is absent
+by default on modern Fedora, Debian 12+ and Ubuntu, and from this container, so
+a reader following it verbatim got `command not found` — which reads as a
+broken repository rather than a wrong instruction. Swept for the same spelling
+across user-facing output.
 
 ### N5 — the advertised remedy DESTROYS this repository's tracked config
 
@@ -117,12 +110,11 @@ daemon that will not start. Fixed by packaging the procedure `qa.yml` proves on
 every run as `scripts/bootstrap-self-install.sh`, and having the message name
 that and warn explicitly against `install.py`.
 
-**The broader lesson, worth more than the fix**: four entries that each looked
-independent were ONE sequential failure, and fixing any prefix of them without
-the last would have made things worse. N2 routes the reader to the guard; N1
-discards the guard's explanation; N4 garbles the command; N5 makes the command
-destructive. Repairing N1 alone — the obvious first move, and the one made —
-delivered destructive advice to a reader who previously could not read it.
+**The broader lesson, worth more than the fix**: N1–N5 are ONE sequential
+failure, not four independent ones, and fixing any prefix without the last
+makes things worse. Repairing N1 alone — the obvious first move, and the one
+made — delivers destructive advice to a reader who previously could not read
+it. Chain and reasoning in the JOURNAL.
 
 ### N6 — the whole persistent-cron mechanism rests on output agents skim
 
@@ -376,6 +368,14 @@ said otherwise, because nothing compares a scoped verdict against its scope.
   can never be. **Implementation is NOT started**: it adds a config key and
   changes the public issue loop, so it needs the owner's go.
 
+- [x] ✅ **Task 1.18**: N15 — `session_crons` and `background_tasks` declared in
+  `Stop`/`SubagentStop` `conditional_input_fields`, carrying the two traps that
+  would each have produced a plausible broken check: the 1000-character
+  `prompt` cap (exact-equality against this project's own long `issue-sdlc`
+  prompt never matches) and absent-is-not-empty. N12's slot earning its keep
+  within the hour. 00412's D7/D9 corrected in the same pass, since they rest on
+  the same false premise.
+
 - [x] ✅ **Task 1.9**: N7 — `bin/hooks-daemon find-plan <number|name|words>`,
   named in the deny message beside the number and in the injected guidance.
   Detector unchanged, as intended: it still denies, and now says what to do
@@ -456,7 +456,13 @@ said otherwise, because nothing compares a scoped verdict against its scope.
   run from a bare clone it reaches 31/31 listeners and leaves the tracked tree
   clean, with no `.bak` files.
 
-- [ ] ⬜ Every entry above is terminal.
+- [x] ✅ Every entry above is terminal — fifteen niggles, eighteen tasks, each
+  either fixed with a RED-first test or determined from the record.
+
+- [ ] ⬜ **Owner-gated, and the only thing left**: N6/N15's enforcement is
+  DESIGNED, not built. It adds a `when_env:` config key and changes the public
+  `issue-sdlc` claim from a label to a branch-ref push, so it is not a change
+  to make unasked. Everything else in this ledger is complete.
 
 ## Delivery & Milestones
 
