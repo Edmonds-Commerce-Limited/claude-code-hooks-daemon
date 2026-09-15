@@ -7162,6 +7162,165 @@ def cmd_status_line_explained(args: argparse.Namespace) -> int:
     return 0
 
 
+#: The event directory `session-actions` scans -- SessionStart only (Plan
+#: 00416 Task 1.2). The tier mechanism itself (`session_start_tiers`) is
+#: event-agnostic; this command is the one place that says "only SessionStart
+#: handlers are asked".
+_SESSION_START_EVENT_DIR = "session_start"
+
+
+class _SessionActionEntry:
+    """One currently-ACTION_REQUIRED SessionStart handler.
+
+    Deliberately thin: the full advisory text already reaches the agent
+    through the tagged SessionStart block (`session_start_tiers.
+    prefix_context_with_tier`) every session start. This command exists to
+    let the agent re-fetch the SHORT must-do list on demand, not to
+    duplicate the advisory prose.
+    """
+
+    __slots__ = ("class_name", "config_key", "handler_name")
+
+    def __init__(self, *, config_key: str, class_name: str, handler_name: str) -> None:
+        self.config_key = config_key
+        self.class_name = class_name
+        self.handler_name = handler_name
+
+
+def _collect_session_action_entries(project_root: Path | None) -> list[_SessionActionEntry]:
+    """Every SessionStart handler whose verifier is CURRENTLY failing.
+
+    Mirrors `_collect_status_line_segment_entries`'s discovery shape: walk the
+    registry directly rather than dispatching a real SessionStart event, so
+    this works without a running daemon. A handler that fails to instantiate,
+    or is disabled by config, is silently excluded rather than reported as an
+    error -- an ACTION_REQUIRED item for a handler that cannot even run would
+    be a command with nothing actionable to say about it.
+
+    `compute_tier` already degrades a raising verifier to the declared tier
+    internally, so one broken verifier here cannot hide another handler's
+    genuine ACTION_REQUIRED item, and never raises out of this loop.
+
+    Args:
+        project_root: Resolved project root, or ``None`` if unresolvable.
+
+    Returns:
+        Entries for handlers computed as ACTION_REQUIRED right now, sorted by
+        config key for stable output.
+    """
+    from claude_code_hooks_daemon.core.session_start_tiers import SessionTier, compute_tier
+    from claude_code_hooks_daemon.handlers.registry import (
+        HandlerRegistry,
+        _get_config_key,
+        event_dir_name_matches_module,
+        handler_is_enabled,
+    )
+
+    event_config: dict[str, Any] = {}
+    if project_root is not None:
+        config_path = project_root / ".claude" / "hooks-daemon.yaml"
+        if config_path.exists():
+            try:
+                config = Config.load(config_path)
+                event_config = config.handlers.model_dump().get(_SESSION_START_EVENT_DIR) or {}
+            except (PydanticValidationError, OSError, ValueError) as exc:
+                logger.debug("Could not load config for session-actions: %s", exc)
+
+    registry = HandlerRegistry()
+    registry.discover()
+
+    entries: list[_SessionActionEntry] = []
+    for handler_class_name in registry.list_handlers():
+        handler_class = registry.get_handler_class(handler_class_name)
+        if handler_class is None:
+            continue
+        if not event_dir_name_matches_module(_SESSION_START_EVENT_DIR, handler_class.__module__):
+            continue
+
+        config_key = _get_config_key(handler_class_name)
+
+        try:
+            instance = handler_class()
+        except Exception:
+            logger.exception("Failed to instantiate %s for session-actions", handler_class_name)
+            continue
+
+        if not handler_is_enabled(event_config, config_key, instance.tags):
+            continue
+
+        if compute_tier(instance) is not SessionTier.ACTION_REQUIRED:
+            continue
+
+        entries.append(
+            _SessionActionEntry(
+                config_key=config_key,
+                class_name=handler_class_name,
+                handler_name=instance.name,
+            )
+        )
+
+    entries.sort(key=lambda e: e.config_key)
+    return entries
+
+
+def _render_session_actions_text(entries: list[_SessionActionEntry]) -> None:
+    """Print the text-mode rendering: one line per ACTION_REQUIRED item."""
+    if not entries:
+        print("No ACTION_REQUIRED items — every declared verifier is currently passing.")
+        return
+    print(f"{len(entries)} ACTION_REQUIRED item(s):")
+    for entry in entries:
+        print(f"  - [{entry.config_key}] {entry.handler_name} ({entry.class_name})")
+
+
+def _render_session_actions_json(entries: list[_SessionActionEntry]) -> None:
+    """Print the JSON-mode rendering: one object per ACTION_REQUIRED item."""
+    payload = [
+        {
+            "config_key": e.config_key,
+            "class_name": e.class_name,
+            "handler_name": e.handler_name,
+        }
+        for e in entries
+    ]
+    print(json.dumps(payload, indent=2))
+
+
+def cmd_session_actions(args: argparse.Namespace) -> int:
+    """Print exactly the SessionStart items currently ACTION_REQUIRED.
+
+    Plan 00416 Task 1.2. Lets the agent (or the supervisor, Task 2.3) re-fetch
+    the must-do list on demand — naming a command rather than relying on
+    scrolling back through a long-past SessionStart block. Works without a
+    running daemon, the same way `explain-rule`/`explain-handler`/
+    `status-line-explained` do.
+
+    Args:
+        args: Parsed CLI arguments with ``project_root`` (optional override)
+            and ``output_format`` (``"text"`` default, or ``"json"``).
+
+    Returns:
+        0 always — an individual handler that cannot be checked is excluded,
+        not treated as a command failure (mirrors `status-line-explained`).
+    """
+    _init_project_context_for_explain(args)
+
+    override = getattr(args, "project_root", None)
+    project_root = Path(override).resolve() if override else None
+    if project_root is None:
+        config_file = _find_config_file_for_explain(args)
+        project_root = config_file.parent.parent if config_file is not None else None
+
+    entries = _collect_session_action_entries(project_root)
+
+    if getattr(args, "output_format", "text") == "json":
+        _render_session_actions_json(entries)
+    else:
+        _render_session_actions_text(entries)
+
+    return 0
+
+
 _BUG_REPORT_LOG_LINES = 100
 _BUG_REPORT_DIR_NAME = "bug-reports"
 _BUG_REPORT_ENV_VARS = (
@@ -8480,6 +8639,28 @@ def main() -> int:
         help="Project root override (default: auto-detected from cwd)",
     )
     parser_status_line_explained.set_defaults(func=cmd_status_line_explained)
+
+    # session-actions command (Plan 00416 Task 1.2) — the currently
+    # ACTION_REQUIRED SessionStart items, and nothing else.
+    parser_session_actions = subparsers.add_parser(
+        "session-actions",
+        help="List SessionStart items that are currently ACTION_REQUIRED",
+    )
+    parser_session_actions.add_argument(
+        "--format",
+        dest="output_format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text)",
+    )
+    parser_session_actions.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected from cwd)",
+    )
+    parser_session_actions.set_defaults(func=cmd_session_actions)
 
     # docs-qa command (Plan 00284) — sweep / single-file lint (staged: not
     # implemented in this slice)
