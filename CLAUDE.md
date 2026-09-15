@@ -219,6 +219,15 @@ Add 1 to that value (zero-pad to 5 digits, e.g. counter `117` → next plan `001
 
 **Do NOT** scan `CLAUDE/Plan/` with `ls`/`find`/glob pipelines to discover the next number. Folder scans miss plans in `Completed/` and other subdirectories, and disagree across branches. The folder scan is only used to bootstrap the counter when the git key is unset (which `mkplan.bash` and the daemon both handle).
 
+**To FIND an existing plan** — a different question from the next number, and the one a folder scan is usually reaching for:
+
+```
+bin/hooks-daemon find-plan 412
+bin/hooks-daemon find-plan "jobs"
+```
+
+It searches the WHOLE tree including `Completed/`, which is precisely what a folder scan misses, and prints each plan's number, status and path.
+
 <!-- handler: enforce-tdd -->
 
 ## tdd_enforcement — test file must exist before source file
