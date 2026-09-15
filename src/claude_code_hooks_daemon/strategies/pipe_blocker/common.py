@@ -53,7 +53,15 @@ UNIVERSAL_WHITELIST_PATTERNS: tuple[str, ...] = (
     r"^whoami\b",
     r"^id\b",
     r"^pwd\b",
-    r"^env\b",
+    # `env` is deliberately ABSENT. It is a command RUNNER, not a cheap
+    # filter: `env pytest tests/ | head -20` truncates pytest's output, which
+    # is exactly the information loss this handler exists to prevent, and
+    # whitelisting the head attributed the pipe to `env` instead. Every other
+    # guard in this repository already sees through it -- `_WRAPPERS` in
+    # utils/process_probe.py classifies it as a wrapper, and the evasion suite
+    # asserts `env git commit`, `env gh issue create` and `env cat` are all
+    # judged on the WRAPPED command. This was the one site that disagreed.
+    # `printenv` below is the non-wrapper spelling and covers the cheap use.
     r"^printenv\b",
     r"^find\b",
     r"^ps\b",
