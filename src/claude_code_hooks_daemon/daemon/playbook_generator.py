@@ -47,6 +47,34 @@ PSEUDO_EVENT_LABEL_PREFIX = "pseudo:"
 PSEUDO_EVENT_SOURCE = "pseudo-event"
 
 
+def _apply_configured_options(instance: object, handler_config: Any) -> None:
+    """Set a handler's configured options before asking what it declares.
+
+    A handler whose behaviour is switched by an option declares DIFFERENT
+    acceptance tests per option value — `ask_user_question_blocker` in
+    `mode: unattended` denies the justified question every other mode allows.
+    Instantiating it bare made the playbook describe the DEFAULT mode while the
+    daemon ran the configured one.
+
+    That is not a documentation nit, because the acceptance harness DISPATCHES
+    these declarations against the live daemon, which does apply options. The
+    two disagreed, and the harness reported it as the handler misbehaving.
+
+    Mirrors the registry's mechanism (``_``-prefixed attributes) deliberately,
+    so a handler reads its options the same way whoever built it. Option
+    INHERITANCE (``shares_options_with``) is not reproduced here: it needs the
+    registry's two-pass collection over every handler, and no handler currently
+    both inherits options and varies its declared tests by one.
+    """
+    if not isinstance(handler_config, dict):
+        return
+    options = handler_config.get(ConfigKey.OPTIONS) or {}
+    if not isinstance(options, dict):
+        return
+    for option_key, option_value in options.items():
+        setattr(instance, f"_{option_key}", option_value)
+
+
 def _event_type_label(handler: object, default: str) -> str:
     """Name the event a plugin/project handler is registered for.
 
@@ -279,6 +307,7 @@ class PlaybookGenerator:
 
                 try:
                     instance = handler_class()
+                    _apply_configured_options(instance, handler_config)
 
                     if hasattr(instance, "get_acceptance_tests"):
                         tests = instance.get_acceptance_tests()

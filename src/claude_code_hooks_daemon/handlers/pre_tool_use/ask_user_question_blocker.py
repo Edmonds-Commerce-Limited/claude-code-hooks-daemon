@@ -389,6 +389,16 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
         # unjustified one into the user's lap.
         mixed = _ask(f"{prefix} A or B?", "Should I continue?")
 
+        # Mode-aware for the same reason get_rules() is, and the consequence is
+        # sharper here: these probes are DISPATCHED against the running daemon
+        # by the playbook harness. A probe declaring that a justified question
+        # is allowed does not merely describe the wrong mode — it fails, and
+        # reads as a defect in the handler rather than a stale declaration.
+        if getattr(self, "_mode", MODE_STRICT) == MODE_UNATTENDED:
+            return self._unattended_acceptance_tests(
+                AcceptanceTest, RecommendedModel, TestType, unjustified, justified, mixed
+            )
+
         return [
             AcceptanceTest(
                 title="Deny AskUserQuestion without prefix",
@@ -440,4 +450,57 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
             ),
+        ]
+
+    def _unattended_acceptance_tests(
+        self,
+        acceptance_test: Any,
+        recommended_model: Any,
+        test_type: Any,
+        unjustified: Any,
+        justified: Any,
+        mixed: Any,
+    ) -> list[Any]:
+        """Every shape denies, so the probes say so — the justified one loudest.
+
+        Unattended, the interesting claim is not that a bad question is
+        refused; it is that a GOOD one is refused too. That is the property the
+        mode exists for, and the one a reader is most likely to disbelieve.
+        """
+        declarations = [
+            (
+                "Deny AskUserQuestion without prefix (unattended)",
+                unjustified,
+                "Denied as in every mode — but for the unattended reason, "
+                "not the missing prefix.",
+            ),
+            (
+                "Deny a properly justified AskUserQuestion (unattended)",
+                justified,
+                "The mode's whole point: nobody is reading this session, so a "
+                "justification cannot change the outcome. Choose the option "
+                "you would have recommended and state the assumption instead.",
+            ),
+            (
+                "Deny mixed AskUserQuestion (unattended)",
+                mixed,
+                "Denied without reaching the prefix-laundering test, which "
+                "unattended has nothing left to protect.",
+            ),
+        ]
+        return [
+            acceptance_test(
+                title=title,
+                command=payload.as_instruction(),
+                tool_payload=payload,
+                description=description,
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"BLOCKED", r"(?i)unattended"],
+                safety_notes="Only active when explicitly enabled in config",
+                test_type=test_type.BLOCKING,
+                requires_event="PreToolUse for AskUserQuestion",
+                recommended_model=recommended_model.SONNET,
+                requires_main_thread=True,
+            )
+            for title, payload, description in declarations
         ]

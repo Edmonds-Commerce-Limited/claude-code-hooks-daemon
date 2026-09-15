@@ -1967,3 +1967,70 @@ def test_generate_markdown_with_null_priority_falls_back_to_instance() -> None:
 
     assert "Null priority handler test" in markdown
     assert "Set priority handler test" in markdown
+
+
+class MockHandlerWithConfiguredMode(Handler):
+    """A handler whose DECLARED tests depend on a configured option.
+
+    The realistic shape: `ask_user_question_blocker` in `mode: unattended`
+    denies every question, including a justified one that any other mode
+    allows.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            handler_id=HandlerID.DESTRUCTIVE_GIT, priority=Priority.DESTRUCTIVE_GIT, terminal=False
+        )
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return True
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult(decision=Decision.ALLOW)
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        configured = getattr(self, "_mode", "default-mode")
+        return [
+            AcceptanceTest(
+                title=f"Behaviour in {configured}",
+                command="echo test",
+                description="Declared behaviour depends on the configured mode",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[],
+            )
+        ]
+
+
+def test_configured_options_reach_the_declared_tests() -> None:
+    """The playbook must describe the CONFIGURED handler, not the default one.
+
+    The generator instantiated handlers bare, reading the config only for
+    `enabled` and `priority`, so a handler whose behaviour is switched by an
+    option declared the behaviour of a mode the daemon was not running.
+
+    That is not a documentation nit. `tests/acceptance/test_playbook_harness.py`
+    DISPATCHES these declarations against the live daemon, which does apply
+    options — so the mismatch surfaced as three probes "failing", reading as a
+    defect in the handler rather than a stale declaration.
+    """
+    MockHandlerWithConfiguredMode.__module__ = (
+        "claude_code_hooks_daemon.handlers.pre_tool_use.configured"
+    )
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithConfiguredMode"] = MockHandlerWithConfiguredMode
+    config = {
+        "pre_tool_use": {
+            "mock_handler_with_configured_mode": {
+                "enabled": True,
+                "options": {"mode": "unattended"},
+            }
+        }
+    }
+
+    markdown = PlaybookGenerator(config=config, registry=registry).generate_markdown()
+
+    assert "Behaviour in unattended" in markdown
+    assert "Behaviour in default-mode" not in markdown

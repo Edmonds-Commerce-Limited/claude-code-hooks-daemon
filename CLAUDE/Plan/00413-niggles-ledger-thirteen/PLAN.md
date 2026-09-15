@@ -271,26 +271,26 @@ the wrong lever:
 
 A `mode: unattended` was added and enabled here, RED first on the test that
 matters — a PROPERLY JUSTIFIED question must be denied — and live-verified
-through the real hook. `get_rules()` is mode-aware too, because it renders the
-CLAUDE.md rule table and the strict Rule would have published "blocked without
-the prefix" in the one mode where a prefix can never help.
+through the real hook. A deny is strictly better than a hang: the agent keeps
+working and the transcript records what it assumed. `get_rules()` and
+`get_acceptance_tests()` are both mode-aware, because each publishes the
+handler's behaviour to a different consumer and the strict text is wrong in
+this mode. Full reasoning in the JOURNAL.
 
-The shape of the fix, once the mode is known: a mode in which `AskUserQuestion`
-is denied unconditionally, prefix or not, with a reason that tells the agent to
-pick the best option, state the assumption in output text, and continue. A deny
-is strictly better than a hang — the agent keeps working and the transcript
-records what it assumed, which is exactly the audit trail the attended case gets
-from the user's silence.
+### N14 — the acceptance playbook describes the DEFAULT handler, not the configured one
 
-Two things to establish before building it, because either could make a new
-handler mode the wrong answer:
+`PlaybookGenerator` instantiated every handler bare (`handler_class()`),
+reading the config only for `enabled` and `priority`. Configured `options`
+never reached the instance, so a handler whose behaviour is switched by an
+option declared the behaviour of a mode the daemon was not running.
 
-1. whether Claude Code already offers a question timeout, or a supported
-   disable (`disallowedTools`, a permission deny rule) that returns a
-   recoverable tool error rather than stalling — if so this is configuration,
-   not a handler change;
-2. whether a denied `AskUserQuestion` reliably leaves the model working, rather
-   than stopping anyway, which is the failure this entry exists to prevent.
+Not a documentation nit: `tests/acceptance/test_playbook_harness.py`
+DISPATCHES those declarations against the live daemon, which DOES apply
+options. So the two disagreed and the harness reported three probes failing —
+which reads as a defect in the handler, not a stale declaration. Found only
+because N10 made the first handler whose declared tests vary by option.
+
+Latent for every future option-switched handler, and silent until one exists.
 
 ### N11 — host-identity tests read the real machine's `/etc/hosts`, so they pass or fail by machine
 
@@ -438,6 +438,15 @@ said otherwise, because nothing compares a scoped verdict against its scope.
   halves: the artefact is byte-identical after a scoped run, and the scoped
   verdict still lands. The 20 existing tests stop reading a file the whole QA
   suite also writes. 21 pass.
+
+- [x] ✅ **Task 1.17**: N14 — the generator now applies configured `options`
+  before asking a handler what it declares, mirroring the registry's
+  `_`-prefixed mechanism; `ask_user_question_blocker` declares unattended
+  probes to match. RED first on both. Option INHERITANCE
+  (`shares_options_with`) is deliberately NOT reproduced — it needs the
+  registry's two-pass collection, and no handler today both inherits options
+  and varies its declared tests by one. 224/224 probes behave as declared;
+  2,025 acceptance + daemon tests pass.
 
 ## Success Criteria
 
