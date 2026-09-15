@@ -168,6 +168,11 @@ class TestTheDenial:
     ) -> None:
         result = handler.handle(bash_hook_input("ruff format src"))
 
+        # `reason` is `str | None`; asserting it is present first is what makes
+        # the membership checks below type-safe, and it is a real assertion in
+        # its own right — a deny with no reason at all would be a worse defect
+        # than one whose wording drifted.
+        assert result.reason is not None
         assert "Black" in result.reason
 
     def test_it_names_the_command_to_run_instead(
@@ -179,6 +184,7 @@ class TestTheDenial:
         """
         result = handler.handle(bash_hook_input("ruff format src"))
 
+        assert result.reason is not None
         assert "run_autofix.sh" in result.reason
 
     def test_it_says_ruff_is_still_the_linter(
@@ -187,4 +193,5 @@ class TestTheDenial:
         """Otherwise the lesson taken away is 'ruff is banned', which is wrong."""
         result = handler.handle(bash_hook_input("ruff format src"))
 
+        assert result.reason is not None
         assert "ruff check" in result.reason

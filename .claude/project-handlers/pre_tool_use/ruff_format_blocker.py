@@ -104,7 +104,16 @@ class RuffFormatBlockerHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             handler_id="ruff-format-blocker",
-            priority=41,
+            # 52 — a genuinely free slot, read off `hooks-daemon handlers`
+            # rather than guessed. Copying the sibling `enforce_llm_qa`'s 41
+            # collided with it, and 42 then collided with `advise-global-npm`:
+            # a collision makes the daemon log a warning on every start and
+            # leaves the two handlers' relative order arbitrary. Grepping the
+            # source for `priority=` does NOT answer this, because library
+            # handlers take their priority from config. Ordering against
+            # `enforce_llm_qa` does not matter either way here — the two match
+            # disjoint commands.
+            priority=52,
             terminal=True,
             tags=["project", "blocking", "qa"],
         )
