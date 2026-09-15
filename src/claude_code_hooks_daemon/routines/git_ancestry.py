@@ -12,6 +12,14 @@ rebased-away sha, a path that is not a repository at all. The protocol's
 contract is that an unknown or unreachable ref **is not an ancestor of
 anything**, so every one of those becomes False.
 
+Spawned through :func:`utils.git_repo.run_git` rather than directly, which is
+the project's single git entry point (Plan 00246): it declines git's optional
+index lock and carries a timeout by construction. Declining the lock matters
+even for a read like this one, because the sweep runs in the working tree an
+agent is actively using. ``run_git`` also never raises — a missing binary or a
+timeout arrives as a non-zero return code — which folds neatly into the
+exit-code reading below instead of needing a second failure path.
+
 That is a deliberate choice about WHERE a problem surfaces, not a swallowed
 error. Returning False sends the pair to :data:`Continuity.UNRELATED`, which
 is a finding a QA sweep reports and a human can act on. Raising instead would
@@ -22,9 +30,10 @@ that found nothing.
 from __future__ import annotations
 
 import logging
-import subprocess  # nosec B404 - git invoked with a fixed argv, never a shell
 from pathlib import Path
 from typing import Final
+
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 logger = logging.getLogger(__name__)
 
@@ -69,32 +78,14 @@ class GitAncestry:
             True only when git says so. Every other outcome — not an ancestor,
             an unresolvable ref, not a repository — is False.
         """
-        try:
-            completed = subprocess.run(  # nosec B603,B607 - fixed argv, no shell
-                [
-                    "git",
-                    "-C",
-                    str(self._repo_root),
-                    "merge-base",
-                    "--is-ancestor",
-                    earlier,
-                    later,
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=_TIMEOUT_SECONDS,
-            )
-        except (OSError, subprocess.SubprocessError) as error:
-            logger.warning(
-                "routines: ancestry check for %s..%s could not run in %s (%s); "
-                "treating as not-an-ancestor, which reports as UNRELATED",
-                earlier,
-                later,
-                self._repo_root,
-                error,
-            )
-            return False
+        completed = run_git(
+            self._repo_root,
+            "merge-base",
+            "--is-ancestor",
+            earlier,
+            later,
+            timeout=_TIMEOUT_SECONDS,
+        )
 
         if completed.returncode == _IS_ANCESTOR:
             return True

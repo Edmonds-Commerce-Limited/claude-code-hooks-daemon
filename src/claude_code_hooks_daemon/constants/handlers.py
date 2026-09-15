@@ -785,6 +785,15 @@ class HandlerID:
         config_key="docs_qa_sweep",
         display_name="docs-qa-sweep",
     )
+    # Routine QA sweep (SessionStart handler) — Plan 00412 Task 2.5: the
+    # dead-man's switch. A run that never happened leaves NO record, so the
+    # absence is not observable from the records themselves and something
+    # outside them has to assert it. Opt-in; silent when the tree is clean.
+    ROUTINE_QA_SWEEP = HandlerIDMeta(
+        class_name="RoutineQaSweepHandler",
+        config_key="routine_qa_sweep",
+        display_name="routine-qa-sweep",
+    )
     # Tool-disable advisory (Plan 00293): when a project declares a tool in
     # tool_policy.never_want, advise at session start if its source-level
     # disable is not actually in place. Opt-in; report-only, never edits.

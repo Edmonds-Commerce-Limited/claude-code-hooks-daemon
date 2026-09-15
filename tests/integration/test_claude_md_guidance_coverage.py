@@ -262,6 +262,14 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "DocsQaSweepHandler": "T3 drift findings are worked through across the session",
     "ToolDisableAdvisorHandler": "T3 the named settings change awaits a user decision later",
     "PlanQaSweepHandler": "T3 drift findings are worked through across the session",
+    "RoutineQaSweepHandler": (
+        "T3 drift findings are worked through across the session, same as "
+        "plan_qa_sweep — but this one needs a durable fact the fire-time report "
+        "cannot carry: a Routine is recurring work that never completes, and every "
+        "finding here describes an absence rather than a defect. Without that, "
+        "'never run' and 'overdue' read as bookkeeping instead of as the only "
+        "evidence that a recurring obligation has quietly stopped being met"
+    ),
     "MergeQaReportHandler": (
         "T3 drift findings from what a merge/pull/rebase introduced are worked "
         "through across the session, same as plan_qa_sweep/docs_qa_sweep; the "

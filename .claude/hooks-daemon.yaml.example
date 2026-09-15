@@ -534,9 +534,17 @@ handlers:
       # `reference_repos:` block, not here — one block feeds the sweep, the
       # PreToolUse backstop and the CLI, so the three cannot disagree.
 
+    routine_qa_sweep:  # Recurring work that has stopped recurring (Plan 00412)
+      enabled: false   # Opt-in: most projects have no CLAUDE/Routine/ tree
+      priority: 72     # Before session_actions_directive, which must stay last
+      # The dead-man's switch. A run that never happened writes no record, so
+      # its absence cannot be seen in the records themselves — something
+      # outside them has to assert it, and this is that something. Silent
+      # when the tree is clean. Re-check with `hooks-daemon routine-qa`.
+
     session_actions_directive:  # The must-do list arrives as a TURN, not as context (Plan 00416)
       enabled: false            # Opt-in: it types one line into your terminal via the ccy supervisor
-      priority: 72              # Last: counts what is STILL ACTION_REQUIRED after every other
+      priority: 73              # Last: counts what is STILL ACTION_REQUIRED after every other
                                 # handler has run (hook_registration_checker self-heals in its own).
       # Writes a `<session>.session-actions` signal ONLY when a SessionStart
       # verifier is currently failing AND an armed ccy supervisor is live to

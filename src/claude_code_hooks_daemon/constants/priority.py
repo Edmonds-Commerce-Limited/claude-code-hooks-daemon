@@ -358,13 +358,19 @@ class Priority:
     # repositories, so running it after the cheap advisories means a slow or
     # offline remote delays nothing else.
     REFERENCE_REPO_SWEEP = 71
-    # Plan 00416 Task 2.3: the supervisor directive sensor -- next free
-    # SessionStart priority after reference_repo_sweep (71), so ADVISORY_MAX
+    # Plan 00412 Task 2.5: the routine dead-man's switch -- next free
+    # SessionStart priority after reference_repo_sweep (71). Placed BEFORE
+    # session_actions_directive rather than after it, which is why that one
+    # moves up a number: see its note below for why last is load-bearing
+    # there and merely conventional here.
+    ROUTINE_QA_SWEEP = 72
+    # Plan 00416 Task 2.3: the supervisor directive sensor -- so ADVISORY_MAX
     # widens by one again. Last is REQUIRED here, not merely tidy: it counts
     # what is still ACTION_REQUIRED after every other handler has run, and
     # hook_registration_checker SELF-HEALS in its handle(). Counting first
     # would nudge the agent about a problem the session had already fixed.
-    SESSION_ACTIONS_DIRECTIVE = 72
+    # Anything added to this band goes BEFORE it, never after.
+    SESSION_ACTIONS_DIRECTIVE = 73
 
     # Advisory handlers (Priority: 55-65)
     CRITICAL_THINKING_ADVISORY = 55
@@ -427,10 +433,10 @@ class PriorityRange:
     # contract_staleness (60). Widened again to 66 for monorepo_detector
     # (Plan 00296 Task 3.4), and to 67 for config_optimisation_reminder
     # (Plan 00308), 68 for remote_docs_staleness (Plan 00326) and 69 for
-    # lsp_noise_checker (Plan 00368), 71 for reference_repo_sweep (Plan 00401)
-    # and 72 for session_actions_directive (Plan 00416). Documented in root
-    # CLAUDE.md's Priority Ranges.
-    ADVISORY_MAX = 72
+    # lsp_noise_checker (Plan 00368), 71 for reference_repo_sweep (Plan 00401),
+    # 72 for routine_qa_sweep (Plan 00412) and 73 for session_actions_directive
+    # (Plan 00416). Documented in root CLAUDE.md's Priority Ranges.
+    ADVISORY_MAX = 73
 
     LOGGING_MIN = 100
     LOGGING_MAX = 199

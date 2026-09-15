@@ -152,30 +152,20 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   temporary git repository — the behaviour under test is shell semantics and
   git-config state, neither of which a Python-level assertion could observe.
 
-  **The two counters are separate keys, and a test pins it.** Both trees live
-  in one repository and both counters live in one git config, so a copy-paste
-  that left `latestPlanNumber` in place would work perfectly while silently
-  consuming plan numbers — unrecoverable once a plan is filed against one.
-  That is the guard that matters most here, so it is asserted directly rather
-  than implied by the happy path.
+  **The two counters are separate keys, and a test pins it** — both live in one
+  git config, so a copy-paste leaving `latestPlanNumber` in place would pass
+  every other test while silently consuming plan numbers.
 
-  **The duplication with `mkplan.bash` is deliberate, not laziness.** That
-  script documents self-containment as a design property: the installer
-  deploys it standalone into client projects, so factoring the numbering into
-  a sourced library would break what makes it deployable. The cost — a fix
-  applied to one and not the other — is paid in the test file, which pins the
-  properties both must agree on: counter-over-scan, the drift guard, the
-  archived-routine high-water mark, and the lock that makes two concurrent
-  runners take distinct numbers.
+  The duplication with `mkplan.bash` is deliberate: that script documents
+  self-containment as a design property because the installer deploys it
+  standalone, so a shared library would break what makes it deployable. The
+  drift cost is paid by tests pinning the properties both must satisfy.
 
   `RUNS/` is created empty rather than on first use, so an empty directory
-  always means never ran — D6's distinction made structural instead of
-  remembered.
+  always means never ran — D6 made structural instead of remembered.
 
-  **Not deployed to client projects**, and that is a scope decision rather
-  than an oversight: Tasks 2.3–2.5 still owe the run CLI, the QA checks and
-  the overdue assertion, so shipping the scaffolder now would put half a
-  feature in other people's repositories.
+  **Not deployed to client projects** until 2.3–2.5 exist, so a scaffolder for
+  half a feature does not land in other people's repositories.
 
 - [x] ✅ **Task 2.3**: `hooks-daemon run-routine <id>` — RED first, in three
   pieces so the thing that can be wrong is testable without argparse:
@@ -183,40 +173,31 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   itself (15). `cli.py` is already ~9,000 lines and the last collector that
   grew inside it had to be extracted; this one starts outside.
 
-  Proven live as well as in tests: a scratch project's routine was started,
-  refused a finish with no interval, finished `clean`, and the ledger holds
-  the two rows.
+  Proven live as well as in tests: a routine was started, refused a finish with
+  no interval, finished `clean`, and the ledger holds both rows.
 
-  **One row per EVENT, not per run** — and that shape is forced rather than
+  **One row per EVENT, not per run**, and the shape is forced rather than
   chosen. D10's `failed` means "started and did not finish", and nothing can
-  WRITE that row, because whatever would have written it died with the run. So
-  `failed` is DERIVED from a start with no terminal event. A ledger recording
-  only what a run chose to say about itself could never report an abandoned
-  run, and an abandoned run would read exactly like one never attempted.
-  Row-per-run also cannot be append-only: it would have to go back and edit
-  the row when the run finished.
+  WRITE that row — whatever would have written it died with the run. So
+  `failed` is DERIVED from a start with no terminal event, which needs two
+  rows; row-per-run also cannot be append-only, since finishing would edit a
+  row already on disk.
 
-  Both guards live in the constructor rather than downstream: a terminal
-  outcome with no interval is refused (it would silently break the gap
-  detection the whole design rests on) and a `skipped` with no reason is
-  refused (the reason IS the state — without it, it is an unexplained
-  absence). `skipped` is exempt from the interval rule, because it genuinely
-  covered nothing.
+  Both validity guards sit in the constructor: a terminal outcome with no
+  interval silently breaks gap detection, and a `skipped` with no reason is the
+  unexplained absence that state exists to replace. `skipped` is exempt from
+  the interval rule because it genuinely covered nothing.
 
-  The on-disk form is a markdown table, since `CLAUDE/Routine/` is a tree
-  humans read. That means this project's own `markdown_table_formatter` will
-  re-align a ledger anyone opens, so the parser treats cell padding as
-  presentation — pinned by a test that reformats the table and reads it back.
+  The on-disk form is a markdown table, since this is a tree humans read — so
+  the parser treats cell padding as presentation, because this project's own
+  `markdown_table_formatter` re-aligns a ledger anyone opens.
 
-  **Building it found a gap in D10's vocabulary, which Task 2.4 has to close.**
-  D10 has no IN-PROGRESS state, so a run that is running right now derives to
-  `failed` — "started and did not finish" is literally true of it. From the
-  record alone the two are indistinguishable, and that is the design working;
-  but a listing is read by someone asking about the world, so the verb renders
-  that state as `unfinished` rather than accusing a healthy run of dying.
-  Separating them for real needs D11's "period plus grace", which nothing has
-  yet. Recorded here rather than fixed in passing, because a grace window is a
-  policy decision and inventing one inside a display label would bury it.
+  **It exposed a gap in D10's vocabulary**: there is no IN-PROGRESS state, so a
+  run happening right now derives to `failed`. That is literally true, and
+  genuinely indistinguishable in the record — which is why the state is derived
+  — but the listing renders it `unfinished` rather than accusing a healthy run
+  of dying. Separating them for real needs D11's "period plus grace", so it was
+  recorded for 2.4 rather than settled inside a display label.
 
 - [x] ✅ **Task 2.4**: QA checks for the new tree, in `routines/qa.py` with a
   `hooks-daemon routine-qa` verb, plus the two things they had to be able to
@@ -230,34 +211,47 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   unrecognised value silently removes a routine from all of them. A check a
   typo can switch off is worse than no check, because it still looks like one.
 
-  **Grace is not optional, and its default is not zero** (D11). A monthly
-  routine with no grace is overdue on day 31, every month, for ever — a nag
-  that arrives reliably and is ignored just as reliably. An omitted `Grace`
-  takes a fifth of the period, floor one day; a `Grace` declared as `0` is
-  honoured, because only an omission takes a default. The fifth is a CHOSEN
-  value and is overridable for exactly that reason.
+  **Grace is not optional and its default is not zero** (D11): an omitted
+  `Grace` takes a fifth of the period, floor one day, while a declared `0` is
+  honoured — only an omission takes a default. The fifth is a CHOSEN value,
+  which is why it is overridable.
 
-  **Only a run that FINISHED counts as coverage.** Letting a start reset the
-  overdue clock would make the obligation read as met because somebody began,
-  not because anything was looked at — the pointer bug in another costume.
+  **Only a run that FINISHED counts as coverage**, or a start would reset the
+  overdue clock and the obligation would read as met because somebody began.
 
-  `OVERLAP` is deliberately not reported: ground covered twice is wasteful and
-  never dangerous, and reporting it would bury the finding that matters.
-  Retired routines are skipped by overdue and never-run, which reads as
-  leniency and is not — reporting one for ever trains its reader to skim the
-  section.
+  `OVERLAP` is not reported (wasteful, never dangerous, and it would bury the
+  finding that matters), and retired routines are skipped by overdue and
+  never-run — reporting one for ever trains its reader to skim the section.
 
-  **A defect in Task 2.3's own ledger surfaced here and was fixed first.** A
+  **A defect in 2.3's own ledger surfaced here and was fixed first**: a
   hand-edited row that could not become a `RunEvent` made `read_events` RAISE,
-  so a sweep over a corrupted ledger would have reported nothing at all — the
-  exact shape this plan exists to design out, since a sweep that reports
-  nothing is indistinguishable from one that found nothing. Reading now skips
-  and logs, and `malformed_rows()` reports; the pair ships together because
-  skipping alone would have traded a crash for a silent omission.
+  so a sweep over a corrupted ledger would have reported nothing at all.
+  Reading now skips and logs, and `malformed_rows()` reports — shipped as a
+  pair, since skipping alone trades a crash for a silent omission.
 
-- [ ] ⬜ **Task 2.5**: The overdue assertion — the dead-man's switch. A run
-  that never happened leaves no record, so a session-start surface must notice
-  the absence.
+- [x] ✅ **Task 2.5**: The overdue assertion — the dead-man's switch, as the
+  `routine_qa_sweep` SessionStart handler (priority 72, opt-in, 12 tests).
+  Session start is the right surface for it because it is the one the daemon
+  EXECUTES itself rather than one it can only hope fired (D9).
+
+  Three properties are pinned, each mattering more than the wording: **silent
+  when clean** (a handler that speaks every session is scenery); **opt-in**
+  (most projects have no Routine tree, and a handler learned as noise is not
+  read later when it has something to say); and **it never raises** (a sweep
+  that dies reports nothing, and so does a healthy tree — the reporting surface
+  must not reintroduce the ambiguity the design removes).
+
+  `session_actions_directive` moved 72 → 73: its "last" position is
+  load-bearing rather than tidy, and the constant now says so.
+
+  **The project's own gate caught a defect in this work.**
+  `test_git_spawns_are_bounded` failed: `git_ancestry.py` spawned git directly
+  instead of through `utils.git_repo.run_git`, so it neither declined git's
+  optional index lock nor carried a timeout — and the sweep runs in the working
+  tree an agent is using. Fixed by routing through the bounded runner, which
+  also deleted a failure path, since `run_git` reports a missing binary or a
+  timeout as a return code
+  rather than raising.
 
 ### Phase 3: The first routine — security review
 

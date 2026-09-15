@@ -49,6 +49,10 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     # supervisor, so a project enables it deliberately — the same stance every
     # other supervisor-actuated handler above takes.
     "session_actions_directive",
+    # Plan 00412 Task 2.5: most projects have no CLAUDE/Routine/ tree, and a
+    # handler that fires for them is noise on day one — a handler learned as
+    # noise is not read later when it has something to say.
+    "routine_qa_sweep",
 }
 
 

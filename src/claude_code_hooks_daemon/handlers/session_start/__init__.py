@@ -16,6 +16,7 @@ from .persistent_cron_assertor import PersistentCronAssertorHandler
 from .plan_qa_sweep import PlanQaSweepHandler
 from .project_handler_load_checker import ProjectHandlerLoadCheckerHandler
 from .remote_docs_staleness import RemoteDocsStalenessHandler
+from .routine_qa_sweep import RoutineQaSweepHandler
 from .skill_opportunity_detector import SkillOpportunityDetectorHandler
 from .suggest_statusline import SuggestStatusLineHandler
 from .tool_disable_advisor import ToolDisableAdvisorHandler
@@ -41,6 +42,7 @@ __all__ = [
     "PlanQaSweepHandler",
     "ProjectHandlerLoadCheckerHandler",
     "RemoteDocsStalenessHandler",
+    "RoutineQaSweepHandler",
     "SecretFileHygieneCheckerHandler",
     "SkillOpportunityDetectorHandler",
     "SuggestStatusLineHandler",

@@ -87,7 +87,7 @@
 | 34 | merge_qa_report | ADVISORY | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced |
 | 35 | daemon_sync_after_merge | ADVISORY | Advise a restart when a merge/pull/rebase changed daemon config or handlers |
 
-### SessionStart (25 handlers)
+### SessionStart (27 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -116,6 +116,8 @@
 | 69 | lsp_noise_checker | ADVISORY | Advise when a project's LSP config lets noise into the diagnostics stream |
 | 70 | persistent_cron_assertor | ADVISORY | State the project's declared crons and instruct a CronList reconcile |
 | 71 | reference_repo_sweep | ADVISORY | Fetch, safely fast-forward and record every governed reference repo |
+| 72 | routine_qa_sweep | ADVISORY | Advisory SessionStart sweep over the Routine tree (silent when clean) |
+| 73 | session_actions_directive | ADVISORY | Signal the ccy supervisor when a session starts with must-do items |
 
 ### PreCompact (2 handlers)
 
@@ -193,7 +195,7 @@
 |----------|---------|----------|-------------|
 | 2 | DogfoodingReminderHandler | ADVISORY | Reminds developers of dogfooding workflow and bug handling protocol |
 
-### Project (4 handlers)
+### Project (5 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -201,6 +203,7 @@
 | 24 | DaemonRestartVerifierHandler | ADVISORY | Advise verifying the daemon restarts before a commit, in this repo |
 | 41 | EnforceLlmQaHandler | BLOCKING | Block run_all.sh and direct LLM agents to llm_qa.py |
 | 51 | PlanDoneRequiresHoldingAreaHandler | BLOCKING | Deny a Complete flip whose Success Criteria never mention the holding area |
+| 56 | OrchestratorSimulateHandler | ADVISORY | Record what orchestrator-only mode WOULD deny on the main thread; deny nothing |
 
 ### Pseudo Nitpick (2 handlers)
 
