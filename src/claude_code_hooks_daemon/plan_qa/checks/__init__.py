@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.plan_qa.checks import (
     plan_doc_size,
     plan_ref_format,
     plan_shrink_without_journal,
+    release_blocked_plan,
     row_folder_bijection,
     same_commit_plan_doc,
     staleness_nag,
@@ -96,6 +97,7 @@ def all_checks() -> tuple[CheckSpec, ...]:
         journal_entry_with_progress.CHECK,
         journal_completion_entry.CHECK,
         plan_shrink_without_journal.CHECK,
+        *release_blocked_plan.CHECKS,
         # Stage 3 — sweep-only checks
         staleness_nag.CHECK,
         dormant_honesty.CHECK,

@@ -1,6 +1,6 @@
 # Plan 00409: interpreter heredoc defeats the guards
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: High
@@ -69,12 +69,20 @@ bypass"). Of the eight consumers that blank heredoc bodies, only
   authorisation was consumed and its state file archived and deleted. This plan
   lands the fix on `main` and leaves the decision with the human.
 
-  It does NOT follow that the release is out of scope, and the distinction is
-  deliberate: until a published version carries this fix, every installation is
-  running a data-loss guard that `bash <<'EOF'` walks past. So the plan stays
-  open on that one criterion rather than closing on "the code is fixed" — a
-  completed plan is the wrong place for a live obligation, and an archived one
-  is worse. The Active list is where somebody looks.
+  **This paragraph used to argue the opposite, and the argument was wrong.** It
+  reasoned that because every installation runs an unfixed guard until a version
+  ships, the plan should stay open on that criterion — "a completed plan is the
+  wrong place for a live obligation, and an archived one is worse. The Active
+  list is where somebody looks."
+
+  The premise is true and the conclusion does not follow. The obligation is
+  real, but it belongs to the RELEASE, not to this plan, and the project already
+  has the right place to park it: a callout staged in
+  `CLAUDE/UPGRADES/UNRELEASED/`, which is exactly "somewhere somebody looks" —
+  the release reads that directory and a leftover callout aborts it (Plan
+  00360). Using a plan's Active row as the reminder instead kept finished work
+  reading as in-flight, held a goal-ledger slot, and made every session that
+  looked at the index believe there was work to do here. There was none.
 
 - Re-litigating release note 29. Blanking a `cat`/`git commit -F -` body stays
   correct and must keep working — those are the regression tests, not the bug.
@@ -108,7 +116,7 @@ bypass"). Of the eight consumers that blank heredoc bodies, only
 - [x] ✅ **Task 3.1**: The other `review-n12` findings existed only in
   gitignored `untracked/agent-reports/`, so they were recorded here first to
   stop them being lost. They have since been rehoused into
-  [Plan 00408](../00408-handler-hygiene-from-the-release-review/PLAN.md) Phase
+  [Plan 00408](../../00408-handler-hygiene-from-the-release-review/PLAN.md) Phase
   3e (Tasks 3.7–3.10), which is where the review's leftovers belong — this plan
   is one shipped regression, not the review's backlog.
 
@@ -152,11 +160,26 @@ bypass"). Of the eight consumers that blank heredoc bodies, only
 - [x] ✅ The human is told, in plain terms, that v3.64.0 carries this defect and
   that RELEASING.md's rollback table prescribes a patch release for it.
 
-- [ ] ⬜ **BLOCKED ON HUMAN — a published version carries the fix.** RELEASING.md's
-  rollback table prescribes "After push: Create immediate patch release (NEVER
-  force-push tags)". Only a human `/release` can start one, so this criterion
-  cannot be ticked by an agent and the plan cannot close without it. Everything
-  else above is done; this is the whole of what remains.
+- [x] ✅ Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/03-heredoc-guard-regression.md`, which tells an
+  operator plainly to upgrade if they are on v3.64.0 and states that earlier
+  versions are unaffected.
+
+  **This criterion previously read "BLOCKED ON HUMAN — a published version
+  carries the fix", and that was wrong.** `PlanWorkflow.core.md` is explicit:
+  *"Definition of done: merged into main, never released... A plan with such an
+  item is not `In Progress`; it is finished work with a mislabelled header."*
+  The fix landed at `60778567` and has been on main since, so the plan was
+  finished and mislabelled -- holding a goal-ledger slot and reading as
+  in-flight work to every session that looked at the index.
+
+  RELEASING.md's rollback table does prescribe an immediate patch release, and
+  that remains true. It is a fact about the RELEASE, which a human decides and
+  which bundles whatever is on main at the time; it was never a fact about this
+  plan. Staging the callout is the step that actually belonged here, and it is
+  done. Enforced from now on by the `release-blocked-plan` plan-QA check
+  (ledger [00419](../../00419-niggles-ledger-fourteen/PLAN.md) N3), whose first
+  run against the real tree caught this plan and nothing else.
 
 ## Delivery & Milestones
 
