@@ -25,6 +25,10 @@ from typing import Any, Final
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
+from claude_code_hooks_daemon.core.session_start_tiers import (
+    SessionStartVerifiable,
+    SessionTier,
+)
 from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
@@ -52,7 +56,7 @@ def _validate_cmd() -> str:
     return daemon_cli_command(_VALIDATE_SUBCOMMAND)
 
 
-class ProjectHandlerLoadCheckerHandler(SessionStartHandlerBase):
+class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandlerBase):
     """Loudly alert at session start when project handlers failed to load.
 
     Reads the persisted load-failure state and injects a high-visibility
@@ -62,7 +66,13 @@ class ProjectHandlerLoadCheckerHandler(SessionStartHandlerBase):
 
     def __init__(self) -> None:
         """Initialise the project-handler load checker handler."""
-        super().__init__(
+        # ACTION_SUGGESTED is the floor, not the ceiling: whenever the verifier
+        # below reports a genuinely degraded session, `compute_tier` raises this
+        # to ACTION_REQUIRED. The declared value only governs the case where
+        # the state cannot be read at all (Plan 00416 Task 2.2).
+        SessionStartVerifiable.__init__(self, declared_tier=SessionTier.ACTION_SUGGESTED)
+        SessionStartHandlerBase.__init__(
+            self,
             handler_id=HandlerID.PROJECT_HANDLER_LOAD_CHECKER,
             priority=Priority.PROJECT_HANDLER_LOAD_CHECKER,
             terminal=False,
@@ -86,6 +96,25 @@ class ProjectHandlerLoadCheckerHandler(SessionStartHandlerBase):
         )
 
         return read_load_failures()
+
+    def verify_still_needed(self) -> bool:
+        """True while project handlers are still failing to load.
+
+        The admission test for ACTION_REQUIRED is not "is this worth saying"
+        but "is this session objectively mis-configured". A degraded load
+        means guards the project DECLARED are simply off, and an agent reading
+        past the notice works without protections it has every reason to
+        assume are in force. That is a broken session, not an improvable one.
+
+        Read-only by construction: it reads the same persisted state the alert
+        renders from, and writes nothing. That matters because a tier is also
+        computed by `hooks-daemon session-actions`, which a human runs to
+        inspect a session without changing it.
+
+        Returns:
+            True iff one or more project handlers failed to load.
+        """
+        return bool(self._read_state().is_degraded)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Only fire when project-handler loading is degraded.

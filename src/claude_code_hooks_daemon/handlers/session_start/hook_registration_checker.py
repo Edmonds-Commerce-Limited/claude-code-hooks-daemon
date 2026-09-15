@@ -17,6 +17,10 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.session_start_tiers import (
+    SessionStartVerifiable,
+    SessionTier,
+)
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.hook_command_migration import (
     MigrationResult,
@@ -43,7 +47,7 @@ _SETTINGS_LOCAL_FILE = "settings.local.json"
 _CLAUDE_DIR = ".claude"
 
 
-class HookRegistrationCheckerHandler(SessionStartHandlerBase):
+class HookRegistrationCheckerHandler(SessionStartVerifiable, SessionStartHandlerBase):
     """Validate hook registrations in Claude Code settings on session start.
 
     Checks:
@@ -56,7 +60,11 @@ class HookRegistrationCheckerHandler(SessionStartHandlerBase):
 
     def __init__(self) -> None:
         """Initialise the hook registration checker handler."""
-        super().__init__(
+        # See verify_still_needed(): ACTION_SUGGESTED is the floor, raised to
+        # ACTION_REQUIRED only when the wiring is actually broken.
+        SessionStartVerifiable.__init__(self, declared_tier=SessionTier.ACTION_SUGGESTED)
+        SessionStartHandlerBase.__init__(
+            self,
             handler_id=HandlerID.HOOK_REGISTRATION_CHECKER,
             priority=Priority.HOOK_REGISTRATION_CHECKER,
             terminal=False,
@@ -118,6 +126,44 @@ class HookRegistrationCheckerHandler(SessionStartHandlerBase):
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             logger.debug("Failed to read %s: %s", path, exc)
             return {}
+
+    def verify_still_needed(self) -> bool:
+        """True while the hook wiring is still broken after any self-heal.
+
+        Broken registrations mean events never reach the daemon, so the
+        session's guards are not running — objectively mis-configured rather
+        than improvable, which is the admission test ACTION_REQUIRED applies.
+
+        **Deliberately skips the migrate/repair path that `handle` runs.** A
+        verifier is called to COMPUTE A TIER, including by
+        `hooks-daemon session-actions`, which a human runs to inspect a session
+        without changing it. Rewriting `settings.json` as a side effect of
+        asking "how urgent is this?" would be indefensible, so this runs the
+        validators alone. The consequence is honest rather than awkward: it
+        reports what is wrong RIGHT NOW, and `handle` may then repair some of
+        it — a tier that was momentarily pessimistic is the safe direction.
+
+        Returns:
+            True iff the audit finds at least one registration issue. False
+            when there is no project root or no `settings.json` at all, since
+            neither is a hooks-daemon project to be wrong about.
+        """
+        project_root = self._get_project_root()
+        if project_root is None:
+            return False
+
+        settings = self._read_json_file(project_root / _CLAUDE_DIR / _SETTINGS_FILE)
+        if not settings:
+            return False
+        local_settings = self._read_json_file(project_root / _CLAUDE_DIR / _SETTINGS_LOCAL_FILE)
+
+        issues: list[str] = []
+        issues.extend(validate_settings_hooks(settings))
+        issues.extend(detect_duplicate_hooks(settings, local_settings))
+        issues.extend(detect_local_hooks_misplacement(local_settings))
+        issues.extend(validate_hook_commands(settings))
+        issues.extend(detect_legacy_hook_commands(settings))
+        return bool(issues)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Only match on new sessions (not resumes).

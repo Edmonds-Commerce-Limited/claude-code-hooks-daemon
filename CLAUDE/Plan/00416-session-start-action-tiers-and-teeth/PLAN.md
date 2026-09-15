@@ -129,11 +129,26 @@ enforcement and therefore neither can be gamed into teeth.
   verifier — but nothing at that point in the lifecycle can see a session's
   crons, so there may be no such signal to find.
 
-- [ ] ⬜ **Task 2.2**: Classify the remaining handlers. Candidates for a
-  verifier beyond crons: `project_handler_load_checker` and
-  `hook_registration_checker` — both mean the session is not protected as
-  configured. Everything else starts `ACTION_SUGGESTED` or `INFO` and earns a
-  promotion only by supplying a verifier.
+- [x] ✅ **Task 2.2**: Classify the remaining handlers. Both named candidates
+  now carry real verifiers, RED first: `project_handler_load_checker` (guards
+  the project declared are OFF) and `hook_registration_checker` (events never
+  reach the daemon). Each is the admission test's "objectively mis-configured"
+  rather than "improvable" — an agent reading past either works without
+  protections it has every reason to assume are live.
+
+  Both declare `ACTION_SUGGESTED` as a floor, raised to `ACTION_REQUIRED` only
+  by the verifier. Everything else keeps no verifier and stays `INFO`,
+  which is the promotion rule working as designed rather than an omission.
+
+  `hook_registration_checker`'s verifier deliberately SKIPS the migrate/repair
+  path `handle()` runs, and a test pins that `settings.json` is byte-identical
+  afterwards: a tier is also computed by `session-actions`, which a human runs
+  to inspect a session, and rewriting their settings as a side effect of asking
+  "how urgent is this?" would be indefensible.
+
+  Verified live on this session, not only in tests: `session-actions` reports
+  no ACTION_REQUIRED items, which is correct here and shows the mechanism does
+  not false-alarm on a healthy session.
 
 - [ ] ⬜ **Task 2.3**: The supervisor directive, and dogfood it in this
   repository. Ship the nudge; the Stop block is what makes it more than a nudge.
