@@ -114,20 +114,28 @@ enforcement and therefore neither can be gamed into teeth.
 ### Phase 2: Wire together and dogfood
 
 - [ ] ⬜ **Task 2.1**: ~~Point `persistent_cron_assertor` at Task 1.1's checker
-  as its verifier~~ — **not buildable as written, and the reason is the same
-  one that created Task 1.1.** The checker's only input is `session_crons`,
-  which is not delivered to `SessionStart`; that absence is precisely why the
-  teeth had to live at `Stop`. A SessionStart verifier would have nothing to
-  verify against, and a verifier that cannot fail can never compute
-  `ACTION_REQUIRED` — so wiring it up would produce a permanently-`INFO`
-  advisory dressed as a tier.
+  as its verifier~~ — **buildable, and permanently failing. Declining it is a
+  design call, not a missing mechanism.** An earlier statement of this task
+  called it "not buildable" and reasoned that a verifier with nothing to verify
+  against "cannot fail". Both halves are wrong, and in opposite directions:
+  wiring it up works, and the verifier fails on every session without exception.
 
-  Needs a restatement rather than an attempt. The honest options: leave the
-  cron case OUT of the computed tier and let the Stop block carry it alone
-  (the tier system is for things checkable at session start, and this is not
-  one); or give the assertor a different, genuinely-SessionStart-checkable
-  verifier — but nothing at that point in the lifecycle can see a session's
-  crons, so there may be no such signal to find.
+  `find_missing_crons(declared, session_crons)` returns the declared jobs it
+  could not match. `SessionStart` delivers no `session_crons`, so the list is
+  empty and *every* declared job comes back missing — proven, not inferred:
+  `find_missing_crons([job], [])` returns `[job]`. Combined with `matches()`,
+  which fires whenever the project declares any job at all, the verifier is
+  failing at every session start, for ever. That computes `ACTION_REQUIRED`
+  unconditionally — the opposite failure to a permanent `INFO`, and the worse
+  one: a tier that is always at its maximum carries no information, and the
+  flat-noise problem this plan exists to fix arrives one word louder.
+
+  The honest options are unchanged: leave the cron case OUT of the computed
+  tier and let the Stop block carry it alone (the tier system is for things
+  checkable at session start, and this is not one); or give the assertor a
+  different, genuinely-SessionStart-checkable verifier — but nothing at that
+  point in the lifecycle can see a session's crons, so there may be no such
+  signal to find. Owner-gated between the two.
 
 - [x] ✅ **Task 2.2**: Classify the remaining handlers. Both named candidates
   now carry real verifiers, RED first: `project_handler_load_checker` (guards
