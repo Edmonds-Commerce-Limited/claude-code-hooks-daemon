@@ -67,6 +67,7 @@ def all_checks() -> tuple[CheckSpec, ...]:
         *journal_dayfile_naming.CHECKS,
         *journal_entry_ordering.CHECKS,
         *journal_entry_future_dated.CHECKS,
+        *release_blocked_plan.CHECKS,
         # Stage 1 — checks about the ACT OF WRITING, with no batch equivalent
         # by design (see common.WRITE_ACT_ONLY_RULES for the reason each).
         template_metadata.CHECK,
@@ -97,7 +98,6 @@ def all_checks() -> tuple[CheckSpec, ...]:
         journal_entry_with_progress.CHECK,
         journal_completion_entry.CHECK,
         plan_shrink_without_journal.CHECK,
-        *release_blocked_plan.CHECKS,
         # Stage 3 — sweep-only checks
         staleness_nag.CHECK,
         dormant_honesty.CHECK,

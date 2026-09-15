@@ -35,7 +35,9 @@ def _discovery_snippet() -> str:
     """
     lines = _SCRIPT.read_text().splitlines()
     start = next(
-        i for i, line in enumerate(lines) if "daemon socket" in line and line.lstrip().startswith("#")
+        i
+        for i, line in enumerate(lines)
+        if "daemon socket" in line and line.lstrip().startswith("#")
     )
     end = next(
         i for i, line in enumerate(lines[start:], start) if 'if [[ ! -f "$VENV_PYTHON"' in line
@@ -66,14 +68,12 @@ class TestSelfInstallLayoutIsFound:
         socket.touch()
 
         script = f'set -euo pipefail\nPROJECT_ROOT="{project_root}"\n{_discovery_snippet()}\necho "FOUND:$SOCKET_PATH"\n'
-        result = subprocess.run(
-            ["bash", "-c", script], capture_output=True, text=True, timeout=30
-        )
+        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
 
         assert result.returncode == 0, f"discovery died: {result.stderr}"
-        assert str(socket) in result.stdout, (
-            f"self-install socket not discovered; got: {result.stdout!r}"
-        )
+        assert (
+            str(socket) in result.stdout
+        ), f"self-install socket not discovered; got: {result.stdout!r}"
 
 
 class TestMissingDirectoryIsNotFatal:
@@ -97,9 +97,7 @@ class TestMissingDirectoryIsNotFatal:
             f"{_discovery_snippet()}\n"
             'echo "REACHED_END"\n'
         )
-        result = subprocess.run(
-            ["bash", "-c", script], capture_output=True, text=True, timeout=30
-        )
+        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
 
         # The script SHOULD reach its own "no socket found" branch and exit 1
         # with a readable message. What it must never do is die inside the
@@ -124,9 +122,7 @@ class TestMissingDirectoryIsNotFatal:
             f"{_discovery_snippet()}\n"
             'echo "FOUND:$SOCKET_PATH"\n'
         )
-        result = subprocess.run(
-            ["bash", "-c", script], capture_output=True, text=True, timeout=30
-        )
+        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
 
         assert str(override) in result.stdout, (
             "CLAUDE_HOOKS_SOCKET_PATH is documented as the escape hatch but is "
@@ -145,14 +141,12 @@ class TestBothLayoutsStillWork:
         socket.touch()
 
         script = f'set -euo pipefail\nPROJECT_ROOT="{project_root}"\n{_discovery_snippet()}\necho "FOUND:$SOCKET_PATH"\n'
-        result = subprocess.run(
-            ["bash", "-c", script], capture_output=True, text=True, timeout=30
-        )
+        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
 
         assert result.returncode == 0, f"discovery died: {result.stderr}"
-        assert str(socket) in result.stdout, (
-            f"client-install socket no longer discovered; got: {result.stdout!r}"
-        )
+        assert (
+            str(socket) in result.stdout
+        ), f"client-install socket no longer discovered; got: {result.stdout!r}"
 
 
 @pytest.mark.parametrize("suppressor", ["|| true", "|| :"])

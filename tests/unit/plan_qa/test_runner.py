@@ -104,6 +104,7 @@ class TestRegistryCatalogue:
             "journal-entry-future-dated",
             "journal-append-only",
             "plan-doc-size",
+            "release-blocked-plan",
             # Cross-file tree checks (dual COMMIT+SWEEP registration)
             "no-new-collisions",
             "row-folder-bijection",
@@ -143,7 +144,8 @@ class TestRegistryCatalogue:
         # + index-row-length (Plan 00218) + index-no-log
         # + journal-entry-ordering (Plan 00377 N1)
         # + journal-entry-future-dated (Plan 00377 N9; EDIT only by design)
-        assert len(by_stage[Stage.EDIT]) == 16
+        # + release-blocked-plan (Plan 00419 N3)
+        assert len(by_stage[Stage.EDIT]) == 17
         # 5 commit-only + 5 dual tree checks + 2 journal COMMIT checks (Plan 00163)
         # + plan-shrink-without-journal (Plan 00190) + index-row-length (Plan 00218)
         # + index-no-log + archived-status-coherence (Plan 00286)
@@ -154,7 +156,8 @@ class TestRegistryCatalogue:
         # twins and the journal-dayfile-naming sweep twin (Plan 00230)
         # + the journal-entry-ordering sweep twin (Plan 00377 N1)
         # + index-retention-window (Plan 00379 N1)
-        assert len(by_stage[Stage.SWEEP]) == 20
+        # + release-blocked-plan (Plan 00419 N3)
+        assert len(by_stage[Stage.SWEEP]) == 21
 
     def test_dual_stage_checks_share_run_function(self) -> None:
         from claude_code_hooks_daemon.plan_qa.checks import all_checks

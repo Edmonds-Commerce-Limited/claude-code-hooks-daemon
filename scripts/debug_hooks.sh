@@ -38,14 +38,19 @@ fi
 # `set -euo pipefail` a failing command substitution killed this script outright
 # — before it could reach the CLAUDE_HOOKS_SOCKET_PATH fallback below, making
 # that documented escape hatch unreachable on exactly the layout that needed it.
-# `mapfile` from a process substitution also avoids the SIGPIPE a `| head -n1`
-# can raise in the producer once the reader closes early.
+# Reading from a process substitution rather than a pipe keeps the assignment in
+# THIS shell (a pipe would subshell it and discard the result) and avoids the
+# SIGPIPE a `| head -n1` can raise in the producer once the reader closes early.
+# `read` is used rather than `mapfile`, which is bash 4+ and breaks on macOS
+# /bin/bash 3.2.57 — the portability gate this project enforces.
 SOCKET_PATH=""
 for socket_dir in "$PROJECT_ROOT/untracked" "$PROJECT_ROOT/.claude/hooks-daemon/untracked"; do
     if [[ -d "$socket_dir" ]]; then
-        mapfile -t found_sockets < <(find "$socket_dir" -name "daemon*.sock")
-        if [[ ${#found_sockets[@]} -gt 0 ]]; then
-            SOCKET_PATH="${found_sockets[0]}"
+        while IFS= read -r found_socket; do
+            SOCKET_PATH="$found_socket"
+            break
+        done < <(find "$socket_dir" -name "daemon*.sock")
+        if [[ -n "$SOCKET_PATH" ]]; then
             break
         fi
     fi
