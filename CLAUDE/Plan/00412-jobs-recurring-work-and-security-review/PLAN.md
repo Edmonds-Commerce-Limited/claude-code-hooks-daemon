@@ -218,9 +218,42 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   yet. Recorded here rather than fixed in passing, because a grace window is a
   policy decision and inventing one inside a display label would bury it.
 
-- [ ] ⬜ **Task 2.4**: QA checks for the new tree, mirroring `plan_qa`: an
-  overdue run, a run with no recorded interval, a gap between consecutive
-  runs, a definition with no runs at all.
+- [x] ✅ **Task 2.4**: QA checks for the new tree, in `routines/qa.py` with a
+  `hooks-daemon routine-qa` verb, plus the two things they had to be able to
+  read first: `routines/model.py` (the ROUTINE.md header) and
+  `routines/git_ancestry.py` (the oracle). RED first throughout — 16, 9 and 26
+  tests, and the model's red was a genuine 2-failed/14-passed rather than a
+  bare import error.
+
+  **Five checks, not the four listed above.** `routine-not-configured` was
+  added because every other check consults `Status` and `Trigger`, so an
+  unrecognised value silently removes a routine from all of them. A check a
+  typo can switch off is worse than no check, because it still looks like one.
+
+  **Grace is not optional, and its default is not zero** (D11). A monthly
+  routine with no grace is overdue on day 31, every month, for ever — a nag
+  that arrives reliably and is ignored just as reliably. An omitted `Grace`
+  takes a fifth of the period, floor one day; a `Grace` declared as `0` is
+  honoured, because only an omission takes a default. The fifth is a CHOSEN
+  value and is overridable for exactly that reason.
+
+  **Only a run that FINISHED counts as coverage.** Letting a start reset the
+  overdue clock would make the obligation read as met because somebody began,
+  not because anything was looked at — the pointer bug in another costume.
+
+  `OVERLAP` is deliberately not reported: ground covered twice is wasteful and
+  never dangerous, and reporting it would bury the finding that matters.
+  Retired routines are skipped by overdue and never-run, which reads as
+  leniency and is not — reporting one for ever trains its reader to skim the
+  section.
+
+  **A defect in Task 2.3's own ledger surfaced here and was fixed first.** A
+  hand-edited row that could not become a `RunEvent` made `read_events` RAISE,
+  so a sweep over a corrupted ledger would have reported nothing at all — the
+  exact shape this plan exists to design out, since a sweep that reports
+  nothing is indistinguishable from one that found nothing. Reading now skips
+  and logs, and `malformed_rows()` reports; the pair ships together because
+  skipping alone would have traded a crash for a silent omission.
 
 - [ ] ⬜ **Task 2.5**: The overdue assertion — the dead-man's switch. A run
   that never happened leaves no record, so a session-start surface must notice

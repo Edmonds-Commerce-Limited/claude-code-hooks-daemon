@@ -7367,6 +7367,47 @@ def _run_routine_project_root(args: argparse.Namespace) -> Path | None:
     return config_file.parent.parent if config_file is not None else None
 
 
+def cmd_routine_qa(args: argparse.Namespace) -> int:
+    """Report drift across the Routine tree.
+
+    Plan 00412 Task 2.4, and the analogue of ``plan-qa --sweep``. Every check
+    it runs exists because the failure it catches is silent: a recurring
+    obligation that stops being met produces an ABSENCE, which looks exactly
+    like everything being fine.
+
+    Args:
+        args: Parsed CLI arguments with an optional ``project_root``.
+
+    Returns:
+        1 when anything was reported, so a caller can gate on it; 0 when the
+        tree is clean or the project declares no routines.
+    """
+    import datetime as _datetime
+
+    from claude_code_hooks_daemon.routines.git_ancestry import GitAncestry
+    from claude_code_hooks_daemon.routines.qa import sweep
+
+    project_root = _run_routine_project_root(args)
+    if project_root is None:
+        print("routine-qa: could not resolve the project root", file=sys.stderr)
+        return 1
+
+    findings = sweep(
+        project_root,
+        today=_datetime.date.today(),
+        ancestry=GitAncestry(project_root),
+    )
+    if not findings:
+        print("Routine tree: no drift.")
+        return 0
+
+    for finding in findings:
+        print(f"[{finding.level}] {finding.routine}: {finding.message}")
+        print(f"    -> {finding.remediation}")
+    print(f"\n{len(findings)} finding(s).")
+    return 1
+
+
 def _run_state_label(state: object | None) -> str:
     """How a run's derived state reads in a listing.
 
@@ -8946,6 +8987,21 @@ def main() -> int:
         help="Project root override (default: auto-detected from cwd)",
     )
     parser_run_routine.set_defaults(func=cmd_run_routine)
+
+    # routine-qa command (Plan 00412 Task 2.4) — the analogue of
+    # `plan-qa --sweep` for the Routine tree.
+    parser_routine_qa = subparsers.add_parser(
+        "routine-qa",
+        help="Report drift across the Routine tree (exit 1 when anything is found)",
+    )
+    parser_routine_qa.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected from cwd)",
+    )
+    parser_routine_qa.set_defaults(func=cmd_routine_qa)
 
     # docs-qa command (Plan 00284) — sweep / single-file lint (staged: not
     # implemented in this slice)
