@@ -204,6 +204,124 @@ Consequence for D7: the cron entry point remains useful, but `run-job` should
 be invokable from a session-start surface too, and a job's declaration names
 its trigger kind rather than assuming a schedule.
 
+## D10. Run states, and why "clean" must never mean "absent" — DECIDED
+
+PCI DSS requires four **passing** scans over four quarters, not four scans. So
+"is this job in good standing?" is a query over run OUTCOMES, never over run
+existence — and a finding that repeats unremediated across runs is itself a
+finding.
+
+The run-state vocabulary must therefore distinguish five things, and the
+default mistake is collapsing the first two:
+
+| State                 | Meaning                                        |
+| --------------------- | ---------------------------------------------- |
+| `no record`           | never ran — invisible from the records (D6)    |
+| `clean`               | ran, found nothing                             |
+| `findings`            | ran, found something                           |
+| `failed`              | started and did not finish                     |
+| `skipped-with-reason` | deliberately not run, with the reason recorded |
+
+## D11. Falling behind must be LOUD — DECIDED
+
+Kubernetes CronJob, past 100 missed schedules, stops scheduling **entirely**
+and only logs it: a recurring job that silently stops recurring, permanently.
+
+Any "too far behind to reason about" branch in this design must be loud —
+reported at session start, not logged. A quiet failure of a recurring
+obligation is indistinguishable from the obligation being met.
+
+The dead man's switch (D6) also needs **period plus grace**, not just period.
+Grace is what stops a monthly cadence nagging on day 31.
+
+## D12. Delta scope is changed code PLUS changed rules — DECIDED
+
+This validates the owner's original instinct and gives it its reason: **a new
+rule makes unchanged code newly reviewable.** That is the one failure mode a
+naive delta cannot self-detect, because nothing in the diff points at it.
+
+Consequences:
+
+- Scope a delta run by `(code changed in the interval) ∪ (everything, if the rule set changed)`.
+- Classify every check as delta-able or full-only. CodeQL has a precedent tag
+  for exactly this (`exclude-from-incremental`).
+- Enumerate the escalation triggers that force a full run: first run, criteria
+  or tooling changed, baseline unresolvable, delta too large, full run overdue.
+
+**Anchor runs to release TAGS, not dates.** Third-party audit practice anchors
+to versions; dates drift and mean nothing to a reader six months later.
+
+## D13. Two traps inherited from the Plan machinery — DECIDED
+
+Found by auditing what makes Plans work. Both would be silent.
+
+**The staleness checks invert.** `staleness-nag`, `dormant-honesty` and
+`journal-freshness` all assume that quiet means neglected. For a recurring job,
+quiet between runs is exactly correct — so copied unchanged they would nag
+daily about a job behaving perfectly. The Jobs equivalent is
+schedule-adherence, which needs a cadence concept Plans do not have.
+
+**The goal ledger never releases a Job.** A ledger entry retires when its plan
+reaches a terminal status. A Job has no terminal status, so it would enter the
+ledger once and never leave, challenging every stop for the rest of the
+session — forever.
+
+## D14. Share the machinery, do not fork it — DECIDED
+
+Three modules are structurally generic but textually plan-named, and are the
+concrete refactor: `plan_qa/paths.py` (whose `classify()` is already documented
+as config-independent), the journal subsystem, and the numbering/counter layer
+(`mkplan.bash` already parameterises its root and renders a template).
+
+The strongest case is the **journal**: a Job's journal is *more* load-bearing
+than a Plan's, because it IS the per-run record.
+
+Cost of forking instead, in severity order: ~60 lines of subtle lock, counter
+and drift-guard concurrency code gets duplicated and one copy gets a fix; the
+counter's `{expected, expected-1}` window loses its documented reason; two
+append-only implementations of the single guarantee both systems rest on; and
+the `JOURNAL`/`PLAN.md` ambiguity that `paths.py` removes *by construction*
+comes back.
+
+Note also that `docs_qa` already duplicated `plan_qa`'s type layer rather than
+sharing it. Jobs would make three copies. That is worth a deliberate ruling
+now, not a discovery later.
+
+## D15. Defence Before Fix — where this project already conforms — DECIDED
+
+Measured against the Toolchain spec, this project already satisfies most of it
+by convergent design: `handlers` enumerates its defences, `explain-rule`
+resolves an identifier offline, every deny carries a stable `R-*` identifier,
+and the auto-generated `<hooksdaemon>` CLAUDE.md block is literally clause
+8.6/7.2.
+
+Two real gaps:
+
+1. **No record of exceptions carrying a hazard-naming justification.**
+   `exclude_paths` entries are exceptions with no recorded reason — the spec
+   requires an Exception to be an Owner decision with the hazard named.
+2. **No red-commit discipline** — clause 3.3 wants the rule proved to fire in a
+   commit of its own.
+
+Closest published analogue to DBF found in the wild: **GitLab's Secure Coding
+Guidelines**, which require every guideline to cite its originating
+vulnerability and carry a CI rule. Also **variant analysis** (CodeQL, 400+
+CVEs) — the same sweep, but performed after the fix and as research rather than
+as a permanent gate.
+
+**Do not cite as precedent** (checked and found wanting): the widely-repeated
+claim that Django requires a test with every security fix appears to be
+folklore with no written policy behind it, and an annual Kubernetes/CNCF audit
+cadence could not be verified — observed intervals are roughly triennial.
+
+## D16. Squash-merge bans are load-bearing for this design — NOTED
+
+`R-GIT-MERGE-SQUASH` and `R-GH-PR-MERGE-SQUASH` exist for ancestry reasons
+unrelated to this plan, but they are what keeps a stored baseline ref
+**resolvable**. Squashing severs ancestry, so relaxing those rules later would
+break job coverage retroactively and non-obviously — every stored `from` that
+pointed into a squashed branch becomes unresolvable at once.
+
 ## Open questions for the owner
 
 1. **D1 — the name.** Job (yours) or Routine (research recommendation)?
