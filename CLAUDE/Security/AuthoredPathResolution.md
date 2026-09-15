@@ -158,10 +158,28 @@ because the un-normalised stat walked a `docs/` that need not exist.
   that cries wolf gets suppressed, and a suppressed rule protects nothing.
 
 - **The rule forces the chokepoint; it does not choose the helper.** Reaching
-  `authored_path` satisfies it, and that only normalises. Only
-  `contained_authored_path` establishes containment, and which one a site needs
-  is still a human judgement the Detector cannot grade. Two sites currently
-  take normalisation where containment was arguable:
+  `authored_path` — or `authored_path_exists` — satisfies it, and those only
+  normalise. Only `contained_authored_path` establishes containment, and which
+  one a site needs is a human judgement the Detector cannot grade.
+
+  **This blind spot had a live member, and the abstract wording hid it.** The
+  bullet above used to end here, naming the gap in principle with no instance
+  under it — which reads as theoretical. `pointer_resolves.py` was routed
+  through `authored_path_exists` by the FIRST fix in this category, passed the
+  Detector green, and remained an existence oracle: a link target may be
+  absolute, pathlib discards the base for an absolute right operand, and
+  whether a finding appeared reported whether the named host path existed.
+
+  Found by the run 2026-001 consolidation, not by the Detector, and fixed by
+  giving `contained_authored_path` a separate `within` boundary — the join base
+  and the containment boundary are different questions, and every earlier
+  caller wanting one value for both was luck rather than design.
+
+  The general lesson is worth more than the instance: a chokepoint rule proves
+  a call site *reached the helper*, never that it reached the *right* one. Read
+  "routed through the helper" as a weaker guarantee than it sounds.
+
+  Two sites still take normalisation where containment was arguable:
 
   - `plan_qa/context.py`'s plan dir — config-derived, but it has no "not
     there" branch to refuse into, so containment would mean inventing a

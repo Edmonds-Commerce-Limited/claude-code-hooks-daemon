@@ -36,9 +36,27 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
-from claude_code_hooks_daemon.utils.authored_paths import authored_path_exists
+from claude_code_hooks_daemon.utils.authored_paths import contained_authored_path
 
 CHECK_ID: Final[str] = "pointer-resolves"
+
+
+def _exists_within(base: Path, target: str, root: Path) -> bool:
+    """Whether ``target`` resolves from ``base`` AND lands inside ``root``.
+
+    Containment is the half `authored_path_exists` does not do, and the half
+    this check needs. A link target is AUTHORED, and a plain existence answer
+    over it is an ORACLE: `[x](/etc/passwd)` needs no `..` to escape, because
+    pathlib discards the base for an absolute right operand, and whether a
+    finding appears then tells the reader whether that host path exists.
+
+    `base` and `root` differ on purpose. A link resolves relative to its own
+    DOCUMENT, so `../sibling.md` legitimately leaves the document's directory
+    — it is leaving the REPOSITORY that is the hazard.
+    """
+    resolved = contained_authored_path(base, target, within=root)
+    return resolved is not None and resolved.exists()
+
 
 _EXTERNAL_SCHEME_RE: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
 _MAILTO_PREFIX: Final[str] = "mailto:"
@@ -82,22 +100,33 @@ def _resolves(project_root: Path, file_path: Path | None, target: str) -> bool:
     a fallback (a plain link written without a leading ``/`` commonly means
     "from the repo root" in this project's own docs).
 
-    Every branch goes through :func:`authored_path_exists`, which resolves
-    ``..`` lexically before touching the filesystem. Stat-ing the join walks
-    ``..`` through the filesystem instead, so a link in the FIRST document of a
-    new directory read as dead while naming a real file — and being new, it
-    was graded BLOCK and denied a write that no retry could make succeed.
+    Every branch goes through :func:`_exists_within`, which does TWO things
+    the plain stat did not.
+
+    It resolves ``..`` lexically before touching the filesystem. Stat-ing the
+    join walks ``..`` through the filesystem instead, so a link in the FIRST
+    document of a new directory read as dead while naming a real file — and
+    being new, it was graded BLOCK and denied a write that no retry could make
+    succeed.
+
+    It also CONTAINS the result to ``project_root``. Normalising alone left
+    this an existence oracle: a target may be absolute, and pathlib discards
+    the base for an absolute right operand, so ``[x](/etc/passwd)`` was stat-ed
+    as written and the presence or absence of a finding reported whether that
+    host path exists. Containment is why the leading-``/`` branch can stay —
+    the project's OWN fully-qualified path is inside ``project_root``, and a
+    path outside it is not a link any reader of this repository can follow.
     """
     file_target = _strip_fragment(target)
     if not file_target:
         return True
     if file_target.startswith("/"):
-        if authored_path_exists(project_root, file_target):
+        if _exists_within(project_root, file_target, project_root):
             return True
-        return authored_path_exists(project_root, file_target.lstrip("/"))
-    if file_path is not None and authored_path_exists(file_path.parent, file_target):
+        return _exists_within(project_root, file_target.lstrip("/"), project_root)
+    if file_path is not None and _exists_within(file_path.parent, file_target, project_root):
         return True
-    return authored_path_exists(project_root, file_target)
+    return _exists_within(project_root, file_target, project_root)
 
 
 def _matches_allowlist(rel_path: str, patterns: Sequence[str]) -> bool:

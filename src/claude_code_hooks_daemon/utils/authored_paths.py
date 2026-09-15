@@ -51,7 +51,9 @@ def authored_path(base: Path, target: str | Path) -> Path:
     return Path(os.path.normpath(base / target))
 
 
-def contained_authored_path(base: Path, target: str | Path) -> Path | None:
+def contained_authored_path(
+    base: Path, target: str | Path, within: Path | None = None
+) -> Path | None:
     """``target`` resolved, but only when the result stays inside ``base``.
 
     A DIFFERENT question from :func:`authored_path_exists`, and the one to ask
@@ -76,9 +78,12 @@ def contained_authored_path(base: Path, target: str | Path) -> Path | None:
     Same input, two correct answers, because the questions differ.
 
     Args:
-        base: The directory the result must stay inside — normally the
-            repository root.
+        base: The directory ``target`` is written relative to.
         target: The path as the author wrote it.
+        within: The directory the result must stay inside. Defaults to
+            ``base``, which is right whenever the two coincide; pass it
+            explicitly when the author's path is relative to a DOCUMENT but
+            must stay inside the REPOSITORY.
 
     Returns:
         The normalised path, or ``None`` when it escapes ``base``. A contained
@@ -86,15 +91,21 @@ def contained_authored_path(base: Path, target: str | Path) -> Path | None:
         the path lands, and folding the two answers together would report an
         escape as a missing file.
     """
+    # The join base and the containment boundary are DIFFERENT questions, and
+    # every caller wanting one value for both was luck rather than design. A
+    # markdown link resolves relative to its own DOCUMENT but must stay inside
+    # the REPOSITORY: `../sibling.md` from a nested page leaves the page's
+    # directory and is perfectly contained.
+    boundary = base if within is None else within
     candidate = authored_path(base, target)
-    if not candidate.is_relative_to(Path(os.path.normpath(base))):
+    if not candidate.is_relative_to(Path(os.path.normpath(boundary))):
         return None
     # `base` itself may be reached through a symlink (a worktree, a container
     # mount), so its real path is the one to compare against -- measuring a
     # resolved candidate against an unresolved base would refuse every file in
     # such a checkout. `strict=False` keeps a not-yet-existing target
     # answerable: it resolves the parts that do exist.
-    if not candidate.resolve(strict=False).is_relative_to(base.resolve(strict=False)):
+    if not candidate.resolve(strict=False).is_relative_to(boundary.resolve(strict=False)):
         return None
     return candidate
 

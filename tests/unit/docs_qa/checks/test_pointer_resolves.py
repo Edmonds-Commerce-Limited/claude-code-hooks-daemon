@@ -296,6 +296,73 @@ class TestResolvesDirect:
         assert _resolves(tmp_path, None, str(tmp_path / "Real.md")) is True
 
 
+class TestTheResolverIsNotAnExistenceOracle:
+    """Plan 00412: a link target is AUTHORED, and this check stats it.
+
+    Found by the run 2026-001 consolidation, INSIDE the tree the
+    `authored-path-stat` Detector already covers — and passing that Detector
+    green, because reaching the sanctioned helper is the whole of what a
+    chokepoint rule can check. `authored_path_exists` normalises but does not
+    CONTAIN, so routing a site through it proves the join is lexical, not that
+    the result stays in the repository.
+
+    The leak is existence, not content: whether a finding appears tells the
+    reader whether the named host path is there. Milder than the `quote_drift`
+    read, and the same class.
+    """
+
+    def test_an_absolute_path_outside_the_repository_does_not_resolve(self, tmp_path: Path) -> None:
+        """No `..` needed: `base / "/etc/passwd"` discards `base` entirely.
+
+        `/etc/hostname` is chosen because it exists on this container, so a
+        passing assertion means containment refused it — not that the file was
+        simply absent, which would make the test vacuous.
+        """
+        root = tmp_path / "repo"
+        root.mkdir()
+
+        assert _resolves(root, None, "/etc/hostname") is False
+
+    def test_a_parent_hop_out_of_the_repository_does_not_resolve(self, tmp_path: Path) -> None:
+        outside = tmp_path / "outside.md"
+        outside.write_text("# outside\n")
+        root = tmp_path / "repo"
+        (root / "docs").mkdir(parents=True)
+
+        assert _resolves(root, root / "docs" / "page.md", "../../outside.md") is False
+
+    def test_the_projects_own_absolute_path_still_resolves(self, tmp_path: Path) -> None:
+        """The deliberate case the leading-`/` branch exists for.
+
+        An author writing the project's own fully-qualified path is supported,
+        and containment must not take that away — `/workspace/CHANGELOG.md` is
+        INSIDE `project_root` when the root really is `/workspace`. Seven of
+        this repo's eight absolute link targets are exactly this shape.
+        """
+        (tmp_path / "Real.md").write_text("# real\n")
+
+        assert _resolves(tmp_path, None, str(tmp_path / "Real.md")) is True
+
+    def test_a_repo_root_relative_link_still_resolves(self, tmp_path: Path) -> None:
+        """GitHub-style `/CHANGELOG.md` shorthand, the branch's other half."""
+        (tmp_path / "CHANGELOG.md").write_text("# changes\n")
+
+        assert _resolves(tmp_path, None, "/CHANGELOG.md") is True
+
+    def test_a_parent_hop_that_stays_inside_still_resolves(self, tmp_path: Path) -> None:
+        """`..` is not the hazard; leaving the repository is.
+
+        A nested document legitimately walks up to reach a sibling tree, and
+        refusing every `..` would be the over-correction that makes the check
+        wrong in the common case.
+        """
+        (tmp_path / "CLAUDE").mkdir()
+        (tmp_path / "CLAUDE" / "Target.md").write_text("# target\n")
+        (tmp_path / "docs").mkdir()
+
+        assert _resolves(tmp_path, tmp_path / "docs" / "page.md", "../CLAUDE/Target.md") is True
+
+
 class TestEditStageMissingPayload:
     def test_no_file_path_produces_no_findings(self, tmp_path: Path) -> None:
         context = CheckContext(

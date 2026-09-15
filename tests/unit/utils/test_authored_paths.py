@@ -177,6 +177,36 @@ class TestContainment:
 
         assert contained_authored_path(base, "link.md") == base / "link.md"
 
+    def test_the_containment_boundary_can_differ_from_the_join_base(self, tmp_path: Path) -> None:
+        """Two different questions, and conflating them was luck, not design.
+
+        A markdown link resolves relative to its own DOCUMENT, but it must stay
+        inside the REPOSITORY — `../sibling.md` from a nested page legitimately
+        leaves the page's directory and is perfectly contained. Every caller so
+        far happened to want one path for both, which hid the distinction.
+        """
+        root = tmp_path / "repo"
+        (root / "CLAUDE").mkdir(parents=True)
+        (root / "CLAUDE" / "Target.md").write_text("hi")
+        page_dir = root / "docs"
+        page_dir.mkdir()
+
+        assert contained_authored_path(page_dir, "../CLAUDE/Target.md", within=root) == (
+            root / "CLAUDE" / "Target.md"
+        )
+
+    def test_a_hop_past_the_wider_boundary_is_still_refused(self, tmp_path: Path) -> None:
+        """The boundary still binds when it is wider than the base."""
+        root = tmp_path / "repo"
+        page_dir = root / "docs"
+        page_dir.mkdir(parents=True)
+
+        assert contained_authored_path(page_dir, "../../outside.md", within=root) is None
+
+    def test_omitting_the_boundary_keeps_the_base_as_the_boundary(self, tmp_path: Path) -> None:
+        """The existing callers' behaviour must not shift underneath them."""
+        assert contained_authored_path(tmp_path / "repo", "../outside.md") is None
+
     def test_a_symlinked_base_does_not_refuse_its_own_children(self, tmp_path: Path) -> None:
         """The false positive that would make this unusable.
 
