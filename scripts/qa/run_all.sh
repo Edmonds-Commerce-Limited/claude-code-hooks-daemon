@@ -344,6 +344,16 @@ else
 fi
 echo ""
 
+echo "26. Running Declared-Invariant-Pairs Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_declared_invariant_pairs.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Declared-invariant-pairs check FAILED"
+else
+    echo "✅ Declared-invariant-pairs check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -383,6 +393,7 @@ results = {
     "Hook Contract": "untracked/qa/hook_contract.json",
     "Input Contract": "untracked/qa/input_contract.json",
     "Authored Path Stat": "untracked/qa/authored_path_stat.json",
+    "Declared Invariant Pairs": "untracked/qa/declared_invariant_pairs.json",
 }
 
 all_passed = True

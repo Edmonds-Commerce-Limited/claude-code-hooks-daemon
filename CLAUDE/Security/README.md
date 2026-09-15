@@ -10,9 +10,10 @@ anyone about to change a guard.
 
 ## Categories
 
-| Category                                              | Defence                                  | Detects                                                                                                                                                                              |
-| ----------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [authored path resolution](AuthoredPathResolution.md) | `scripts/qa/check_authored_path_stat.py` | A stat predicate on a joined path in the trees that resolve what an author wrote — `..` walked through the filesystem, so a missing intermediate directory reads as a missing target |
+| Category                                                        | Defence                                        | Detects                                                                                                                                                                                                      |
+| --------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [authored path resolution](AuthoredPathResolution.md)           | `scripts/qa/check_authored_path_stat.py`       | A stat predicate on a joined path in the trees that resolve what an author wrote — `..` walked through the filesystem, so a missing intermediate directory reads as a missing target                         |
+| [asymmetric sibling protection](AsymmetricSiblingProtection.md) | `scripts/qa/check_declared_invariant_pairs.py` | A site that re-derives, shortens or omits behaviour this codebase already implements correctly at a sibling site — asserted as a declared relation between the two, because neither side is wrong on its own |
 
 **A category whose Defence cell is empty is the most important row in this
 table.** It says a class of defect is known and nothing is watching for it,
@@ -89,12 +90,19 @@ Every category in the table must name a Defence, and every Defence must be a
 Detector in `scripts/qa/` wired into `run_all.sh` like any other check — not a
 regression test, not a note, not a convention.
 
-The first category honours it: `authored-path-stat` is a Detector, it is check
-25 in `run_all.sh`, and it fails rather than warns.
+Both categories honour it. `authored-path-stat` is check 25 in `run_all.sh` and
+`declared-invariant-pairs` is check 26; each is a Detector, each is also a step
+in `llm_qa.py`, and each fails rather than warns.
 
-**Nothing yet enforces that the NEXT one will.** A second category could name a
+**Nothing yet enforces that the NEXT one will.** A third category could name a
 regression test as its Defence, or name nothing, and no gate would object. That
 is recorded here rather than left implicit because an unenforced invariant in a
 security register decays in exactly the way this whole plan exists to make
 visible — and the honest place to say so is beside the invariant, not in a
 backlog.
+
+The second category also shows the obligation is not sufficient on its own. Its
+Defence is wired in and failing correctly, and it covers **one declared pair out
+of thirteen known instances** — so "has a Defence" and "the class is watched"
+are different facts, and only the category page's own blind-spot section carries
+the second one.
