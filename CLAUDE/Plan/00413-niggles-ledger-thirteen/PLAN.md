@@ -309,50 +309,49 @@ REFUSED" get a successful resolution instead and fail:
 `assert HostName(name='dc-lts-dev-vm', ...)`.
 
 The failure mode is the expensive one: green on the author's machine, red on
-everyone else's, and the redness has nothing to do with the change under test.
-A developer meeting this for the first time spends their first hour hunting a
-defect in their own work.
+everyone else's, with the redness unrelated to the change under test.
 
-Worth stating precisely, because the fix could easily be the wrong one: the
-LADDER is not what is wrong — reading `/etc/hosts` is a deliberate, documented
-rung with a recorded reason (Debian-family hosts write `127.0.1.1 <hostname>`;
-Fedora ones do not, which is why "returns nothing" is pinned behaviour). What
-is wrong is that the TESTS consult the real file instead of a controlled one.
-The fix is to make them hermetic — inject the path or the file's content — not
-to weaken the resolver or delete the assertions.
+The LADDER is not what is wrong — reading `/etc/hosts` is a deliberate rung
+with a recorded reason. The TESTS are, by consulting the real file instead of a
+controlled one. Make them hermetic; do not weaken the resolver or drop the
+assertions.
 
-**DETERMINED from the record — not deliberate, and no owner decision needed.**
-Plan 00411's Task 1.1 mandates fixtures for exactly these two `/etc/hosts`
-shapes, the mechanism exists (`hosts_path` parameter, `ENV_ETC_HOSTS_PATH`),
-and the sibling ladder tests already use it. The 13 failures omit it and reach
-the real file. The assertion is wrong too: refusing a hostile env value does
-not mean NOTHING resolves — the ladder correctly continues to the `/etc/hosts`
-rung, which is silent on Fedora and speaks in this container. Full reasoning in
-the JOURNAL (13:05 entry).
+**DETERMINED from the record — no owner decision needed.** Plan 00411's Task
+1.1 mandates fixtures for exactly these two shapes, the `hosts_path` mechanism
+exists, and the sibling tests already use it. Full reasoning in the JOURNAL.
 
 ### N12 — the vendored contract cannot express a CONDITIONAL input field, and the gap produced a wrong answer
 
 Found by getting it wrong. Asked whether `PreToolUse` carries agent identity —
-the fact deciding whether GitHub issue #14 is buildable — I checked
-`PreToolUse.json`'s `input_example` and grepped every contract file, got "no"
-from both, and reported it. The raw v2.1.272 docs say YES: `agent_id` is
-delivered to `PreToolUse` inside a subagent call, explicitly "to distinguish
+the fact deciding whether GitHub issue #14 is buildable — the `input_example`
+and a sweep of every contract file both said no. The raw v2.1.272 docs say
+YES: `agent_id` is delivered inside a subagent call, explicitly "to distinguish
 subagent hook calls from main-thread calls".
 
-The contract could not have shown it. `agent_id`/`agent_type` sit in their own
-table — "When running with `--agent` or inside a subagent, two additional
-fields are included" — so they are CONDITIONAL, and a `PreToolUse` example
-depicting a main-thread call omits them correctly.
+The contract could not have shown it: those fields are CONDITIONAL, and an
+example depicting a main-thread call omits them correctly. The trap is the
+project's own reading convention (recorded in `Elicitation.json`) that the
+per-event example is authoritative — right for an UNCONDITIONAL field, a
+confident FALSE NEGATIVE for a conditional one. Fix the SLOT, not these two
+fields. Full reasoning in the JOURNAL.
 
-The trap is the project's own reading convention, recorded in
-`Elicitation.json`: the per-event example is authoritative for whether a field
-is delivered. That is right for an UNCONDITIONAL field and produces a
-confident FALSE NEGATIVE for a conditional one. The contract has
-`input_example` and nothing else, so "may arrive, under this condition" has no
-slot to live in.
+### N13 — a scoped QA scan publishes its verdict as the repository's own
 
-Fix the SLOT, not these two fields: `permission_mode` and `scratchpad_dir` are
-also documented as conditionally absent. Full reasoning in the JOURNAL (13:20).
+`check_sensitive_content.py --json` wrote the shared repo artefact whatever it
+scanned, so a `--path` run answering "is this DIRECTORY clean" overwrote the
+answer to "is this REPOSITORY clean". Twenty tests scan a `tmp_path` through
+that flag, one of them deliberately naming a file with a blocked term — so a
+plain test run left `untracked/qa/sensitive_content.json` reading
+`passed: false, files_scanned: 1` against a path under `/tmp`, while the
+repository was clean across 3,514 tracked files.
+
+That artefact is what `llm_qa.py` publishes for an agent to READ, so the false
+verdict is consumed as fact. It was: I read it in-session and reported the repo
+had a violation before checking. The tests also read the same shared path back,
+so they depended on a file the whole suite writes.
+
+Found by dogfooding, not by the suite — every check passed while the artefact
+said otherwise, because nothing compares a scoped verdict against its scope.
 
 ## Tasks
 
@@ -433,6 +432,12 @@ also documented as conditionally absent. Full reasoning in the JOURNAL (13:20).
   got NO entry, contrary to this task's original wording — upstream resolves it
   via each event's example, so the existing convention already answers it.
   Detail and the `Stop`/`SubagentStop` boundary in JOURNAL.
+
+- [x] ✅ **Task 1.16**: N13 — a `--path` scan now reports BESIDE what it
+  scanned and never overwrites the repository artefact. RED first, on both
+  halves: the artefact is byte-identical after a scoped run, and the scoped
+  verdict still lands. The 20 existing tests stop reading a file the whole QA
+  suite also writes. 21 pass.
 
 ## Success Criteria
 

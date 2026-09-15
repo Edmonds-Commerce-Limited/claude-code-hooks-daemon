@@ -42,7 +42,8 @@ import yaml
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
-_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "sensitive_content.json"
+_ARTEFACT_NAME: Final[str] = "sensitive_content.json"
+_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 _DEFAULT_CONFIG: Final[Path] = _REPO_ROOT / ".claude" / "hooks-daemon.yaml"
 
 _PUBLIC_RULE_PREFIX: Final[str] = "public-pattern"
@@ -389,8 +390,16 @@ def main() -> int:
     }
 
     if json_mode:
-        _QA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        _OUTPUT_FILE.write_text(json.dumps(output, indent=2))
+        # A --path scan answers "is this DIRECTORY clean", which is not the
+        # question the repository artefact answers. Writing a scoped verdict
+        # there states something the scan never established, and llm_qa.py
+        # publishes that artefact for an agent to read as fact — so a scoped
+        # run reports beside what it scanned, and never overwrites it.
+        output_file = (
+            path_override / _ARTEFACT_NAME if path_override is not None else _OUTPUT_FILE
+        )
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(json.dumps(output, indent=2))
 
     if violations:
         print(f"Found {len(violations)} sensitive-content violation(s):")

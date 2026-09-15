@@ -19,6 +19,7 @@ from typing import Any
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CHECKER = _REPO_ROOT / "scripts" / "qa" / "check_sensitive_content.py"
 _JSON_OUTPUT = _REPO_ROOT / "untracked" / "qa" / "sensitive_content.json"
+_ARTEFACT_NAME = "sensitive_content.json"
 
 # Split across concatenated literals so this FILE's own on-disk text never
 # contains the contiguous trigger string this repo's dogfood config blocks.
@@ -40,8 +41,13 @@ def _run_checker(scan_path: Path, config_path: Path) -> dict[str, Any]:
         text=True,
         check=False,
     )
-    assert _JSON_OUTPUT.exists(), f"Expected JSON output at {_JSON_OUTPUT}"
-    return json.loads(_JSON_OUTPUT.read_text())
+    # A scoped scan reports BESIDE what it scanned. Reading the repository-wide
+    # artefact here would make every test below depend on a file the whole QA
+    # suite also writes, and would leave this fixture's verdict standing as the
+    # repository's own.
+    scoped = scan_path / _ARTEFACT_NAME
+    assert scoped.exists(), f"Expected JSON output at {scoped}"
+    return json.loads(scoped.read_text())
 
 
 def _write_config(
@@ -347,3 +353,46 @@ class TestFilesScannedCount:
 
         data = _run_checker(tmp_path, config)
         assert data["summary"]["files_scanned"] == 2
+
+
+class TestAScopedScanNeverPublishesTheRepositoryVerdict:
+    """``untracked/qa/sensitive_content.json`` means "this REPOSITORY is clean".
+
+    A ``--path`` scan answers a different question — "is this directory clean"
+    — and writing its answer to the repository artefact states something the
+    scan never established. The artefact is what ``llm_qa.py`` produces for an
+    agent to read, so the wrong verdict is consumed as fact rather than noticed.
+
+    This was not hypothetical. A test fixture named with a blocked term left
+    the artefact reading ``passed: false, files_scanned: 1`` against a path
+    under ``/tmp``, while the repository itself was clean across 3,514 tracked
+    files — and it was believed, in session, before being checked.
+    """
+
+    def test_the_repository_artefact_is_untouched_by_a_scoped_scan(
+        self, tmp_path: Path
+    ) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+        (tmp_path / "harmless.txt").write_text("nothing to see\n")
+        before = _JSON_OUTPUT.read_bytes() if _JSON_OUTPUT.exists() else None
+
+        _run_checker(tmp_path, config)
+
+        after = _JSON_OUTPUT.read_bytes() if _JSON_OUTPUT.exists() else None
+        assert after == before, (
+            "a --path scan overwrote the repository-wide QA artefact; its "
+            "verdict describes the scanned directory, not this repository"
+        )
+
+    def test_the_scoped_verdict_is_written_beside_what_was_scanned(
+        self, tmp_path: Path
+    ) -> None:
+        """It still has to land somewhere — the caller asked for --json."""
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+        (tmp_path / "harmless.txt").write_text("nothing to see\n")
+
+        _run_checker(tmp_path, config)
+
+        assert (tmp_path / _ARTEFACT_NAME).is_file()
