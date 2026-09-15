@@ -119,10 +119,49 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
         if not relative.startswith(prefix):
             return False
 
+        # An EDIT is refused outright, without inspecting the fragment
+        # (ledger 00413 N9). `new_string` is a FRAGMENT, not a file, so
+        # parsing it for frontmatter answers a question nobody asked: every
+        # single-line edit lacks frontmatter, including one that leaves the
+        # real frontmatter untouched and intact.
+        #
+        # Inspecting it was also actively harmful. A fragment that DOES parse
+        # as valid provenance passed the gate — so an agent following the old
+        # "no frontmatter found" reason literally, by pasting a `---` block
+        # into the middle of the document, corrupted the file AND was let
+        # through. The message invited the corruption and then waved it past.
+        #
+        # There is no content that makes hand-editing a captured file correct,
+        # so there is nothing here worth inspecting.
+        if hook_input.get(HookInputField.TOOL_NAME) == ToolName.EDIT:
+            return True
+
         return parse_provenance(self._added_text(hook_input)).provenance is None
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny, naming every invalid field and the way to do it properly."""
+        if hook_input.get(HookInputField.TOOL_NAME) == ToolName.EDIT:
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=(
+                    "REMOTE-DOCS FILES ARE CAPTURED, NOT HAND-EDITED\n\n"
+                    "This file was fetched from upstream and its frontmatter "
+                    "records the exact bytes that arrived (`source_sha256`) "
+                    "and how faithfully (`fidelity`). Editing it by hand "
+                    "makes both untrue, silently: the file would still claim "
+                    "to be what upstream served.\n\n"
+                    "There is no content that makes a hand edit correct here, "
+                    "so nothing about your change was inspected.\n\n"
+                    "To pick up what upstream now says:\n"
+                    "  bin/hooks-daemon remote-docs refresh --path <file>\n\n"
+                    "To re-capture from scratch — which also re-derives the "
+                    "frontmatter from config, and is how a corrected "
+                    "`licence` reaches an already-vendored file:\n"
+                    "  bin/hooks-daemon remote-docs add <url>\n\n"
+                    "If you need to record something ABOUT this document, "
+                    "write it in your own docs and link to the vendored copy."
+                ),
+            )
         result = parse_provenance(self._added_text(hook_input))
         problems = "\n".join(f"  - {error.field}: {error.message}" for error in result.errors)
         return GatingResult(
@@ -148,8 +187,11 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
         """Guidance injected into the project's CLAUDE.md."""
         return (
             "## remote_docs_provenance — vendored docs are captured, not written\n\n"
-            "The remote-docs tree holds documentation fetched from upstream. A "
-            "`Write`/`Edit` there is DENIED unless the content carries valid "
+            "The remote-docs tree holds documentation fetched from upstream.\n\n"
+            "**An `Edit` there is ALWAYS denied**, whatever it contains — "
+            "hand-editing a captured file silently falsifies its recorded "
+            "`source_sha256` and `fidelity`, so nothing about the change is "
+            "inspected. A `Write` is denied unless the content carries valid "
             "provenance frontmatter (`source_url`, `fetched_at`, `fidelity`, "
             "`source_sha256`, `licence`, `stale_after`).\n\n"
             "**Capture, do not author**: `bin/hooks-daemon remote-docs add <url>`. "

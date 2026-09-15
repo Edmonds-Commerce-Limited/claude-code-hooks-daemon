@@ -109,9 +109,10 @@ class TestGate:
 
         assert "remote-docs add" in reason
 
-    def test_an_edit_is_gated_on_the_resulting_content(
+    def test_an_edit_in_the_tree_is_denied(
         self, handler: RemoteDocsProvenanceHandler
     ) -> None:
+        """Hand-editing a captured file is refused, whatever the fragment says."""
         hook_input = {
             "tool_name": "Edit",
             "tool_input": {
@@ -121,6 +122,63 @@ class TestGate:
         }
 
         assert handler.matches(hook_input) is True
+
+
+class TestAnEditFragmentIsNotAFile:
+    """An Edit's `new_string` is a FRAGMENT, and judging it as a file misleads.
+
+    Ledger 00413 N9. A one-line edit — `licence: CC-BY-4.0` — was denied with
+    "no YAML frontmatter found; a remote document must open with a ---
+    delimited provenance block". The verdict is right and must stand. The
+    REASON is wrong: it validated the fragment as though it were the whole
+    file, which is true of EVERY single-line edit to EVERY vendored file,
+    including ones that leave the frontmatter untouched and intact.
+    """
+
+    @staticmethod
+    def _edit(new_string: str) -> dict[str, Any]:
+        return {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(_ROOT / "remote-docs/x/p.md"),
+                "new_string": new_string,
+            },
+        }
+
+    def test_the_deny_reason_does_not_diagnose_missing_frontmatter(
+        self, handler: RemoteDocsProvenanceHandler
+    ) -> None:
+        """The misdiagnosis itself.
+
+        Telling the author their fragment lacks frontmatter invites them to add
+        some, which is the one thing that must not happen.
+        """
+        result = handler.handle(self._edit("licence: CC-BY-4.0"))
+
+        reason = result.reason or ""
+        assert "no YAML frontmatter found" not in reason
+        assert "must open with a" not in reason
+
+    def test_the_deny_reason_says_the_tree_is_captured_not_hand_edited(
+        self, handler: RemoteDocsProvenanceHandler
+    ) -> None:
+        """The honest reason, which the rest of the message already carried."""
+        result = handler.handle(self._edit("licence: CC-BY-4.0"))
+
+        assert "captured" in (result.reason or "").lower()
+
+    def test_an_edit_pasting_a_frontmatter_block_is_still_denied(
+        self, handler: RemoteDocsProvenanceHandler
+    ) -> None:
+        """The damage the misdiagnosis causes, closed.
+
+        An agent that follows the old reason literally pastes a `---` block
+        into the MIDDLE of the document to satisfy the stated complaint. That
+        corrupts the file — and the old gate then let the write through,
+        because the fragment now parsed as valid provenance. The deny message
+        invited the corruption and then waved it past.
+        """
+        assert handler.matches(self._edit(_VALID)) is True
 
     def test_a_reconfigured_tree_is_honoured(self) -> None:
         layout = ProjectLayout.built_in_default()

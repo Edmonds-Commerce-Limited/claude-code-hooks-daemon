@@ -419,11 +419,13 @@ its author intended these to be environment-dependent.
   a drift check; the drift check is cheaper and matches the project's habits,
   so start by establishing whether reporting alone is sufficient.
 
-- [ ] ⬜ **Task 1.12**: N9 — stop `remote_docs_provenance` diagnosing an `Edit`
-  fragment as a frontmatter-less file. RED first, on a single-line edit that
-  leaves valid frontmatter untouched. Prefer refusing hand-edits plainly over
-  reconstructing the resulting file, unless the reconstruction is needed
-  elsewhere.
+- [x] ✅ **Task 1.12**: N9 — an `Edit` in the tree is now refused outright,
+  with a reason that names the real objection instead of a frontmatter
+  complaint. RED first. The fix closed a HOLE the misdiagnosis had opened: a
+  fragment that parsed as valid provenance previously PASSED, so the message
+  invited pasting a `---` block into the document and then waved the corrupted
+  write through. The new message also names the `remote-docs add` re-capture
+  route, which N8 found was discoverable only by trial.
 
 - [x] ✅ **Task 1.13**: N10 — both facts established, and neither removed the
   need: Claude Code's mechanisms are LAUNCHER flags and cannot reach a
