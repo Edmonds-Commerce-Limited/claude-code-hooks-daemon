@@ -89,6 +89,73 @@ class TestTheRuleFires:
         assert violations[0].line == 2
 
 
+class TestOneStatementAway:
+    """The blind spot that turned out to be the majority of the surface.
+
+    The original rule required the join to BE the receiver at the call site, so
+    binding it to a local on the previous line made it invisible. Measured in
+    run 2026-001: 7 sites seen, 28 unseen in the same two directories — two of
+    them a live instance of the hazard the rule exists for.
+    """
+
+    def test_a_join_bound_to_a_local_then_stat_ed_is_reported(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """The exact shape of `quote_drift.py:79`."""
+        source = "def f(root, block):\n    p = root / block.source_path\n    return p.is_file()\n"
+
+        assert _scan(checker, tmp_path, source) == ["authored-path-stat"]
+
+    def test_a_join_bound_to_a_local_then_READ_is_reported(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """Reading is the security-relevant consume, not just stat-ing.
+
+        `quote_drift.py:89` reads the file, which is how the daemon becomes a
+        content oracle over any repo-relative path a document names.
+        """
+        source = "def f(root, target):\n    p = root / target\n    return p.read_text()\n"
+
+        assert _scan(checker, tmp_path, source) == ["authored-path-stat"]
+
+    @pytest.mark.parametrize("consume", ["read_bytes", "open", "iterdir", "glob", "rglob"])
+    def test_every_consuming_call_counts(
+        self, checker: ModuleType, tmp_path: Path, consume: str
+    ) -> None:
+        """Each reaches the target's content or its children."""
+        source = f"def f(root, target):\n    p = root / target\n    return p.{consume}()\n"
+
+        assert _scan(checker, tmp_path, source) == ["authored-path-stat"]
+
+    def test_a_literal_operand_bound_to_a_local_is_not_reported(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """The literal exemption must survive the widening."""
+        source = 'def f(root):\n    p = root / "README.md"\n    return p.read_text()\n'
+
+        assert _scan(checker, tmp_path, source) == []
+
+    def test_the_binding_does_not_leak_across_functions(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """Function scope, not module scope.
+
+        The reviewer's own scanner used module scope and over-reported on a
+        reused name; 31 sites became 28 once scoped properly. A rule that
+        over-reports on name reuse is one people stop believing.
+        """
+        source = (
+            "def f(root, target):\n"
+            "    p = root / target\n"
+            "    return p.exists()\n"
+            "\n"
+            "def g(p):\n"
+            "    return p.read_text()\n"
+        )
+
+        assert _scan(checker, tmp_path, source) == ["authored-path-stat"]
+
+
 class TestTheRuleStaysQuiet:
     """The false positives that would get it suppressed."""
 

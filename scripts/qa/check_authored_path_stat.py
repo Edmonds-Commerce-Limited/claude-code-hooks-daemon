@@ -72,6 +72,18 @@ _RULE: Final[str] = "authored-path-stat"
 #: identically here, so all three count.
 _PREDICATES: Final[frozenset[str]] = frozenset({"exists", "is_file", "is_dir"})
 
+#: Calls that CONSUME the target — its bytes, or its children. Added when run
+#: 2026-001 measured the stat-only rule at 7 sites against 28 it could not see,
+#: two of which read a document-authored path with no containment test. Reading
+#: is the consume that matters most: a stat answers a question, a read makes the
+#: daemon an oracle over whatever the path resolved to.
+_CONSUMERS: Final[frozenset[str]] = frozenset(
+    {"read_text", "read_bytes", "open", "iterdir", "glob", "rglob"}
+)
+
+#: Everything the rule reacts to, once the receiver is established.
+_WATCHED: Final[frozenset[str]] = _PREDICATES | _CONSUMERS
+
 #: Trees whose job is resolving paths an AUTHOR wrote in a document: a markdown
 #: link target, a path quoted in a plan. Elsewhere in the daemon a joined path
 #: is overwhelmingly one the daemon chose itself, where ``..`` cannot appear
@@ -79,21 +91,35 @@ _PREDICATES: Final[frozenset[str]] = frozenset({"exists", "is_file", "is_dir"})
 _SCOPED_TREES: Final[tuple[str, ...]] = ("docs_qa", "plan_qa")
 
 _REMEDIATION: Final[str] = (
-    "Each site above answers 'does this target exist?' by stat-ing a path it\n"
-    "built by joining. A `..` in the joined value is then walked through the\n"
-    "filesystem, so the answer depends on the intermediate directories\n"
-    "existing rather than on the target existing -- and a document being\n"
-    "written into a NEW directory has no intermediate directory yet.\n"
+    "Each site above STATS or READS a path it built by joining. A `..` in the\n"
+    "joined value is walked through the filesystem, so a stat answers a\n"
+    "question about the intermediate directories rather than about the target\n"
+    "-- and a document written into a NEW directory has no intermediate\n"
+    "directory yet.\n"
     "\n"
-    "Fix: normalise lexically first, via the canonical helper:\n"
+    "A READ is worse than a stat. It does not merely answer wrongly: it makes\n"
+    "the daemon a content oracle over whatever the path resolved to, including\n"
+    "somewhere the author was never meant to reach. `secret_file_guard` judges\n"
+    "the path an AGENT names, and this is not one -- nothing an agent typed\n"
+    "names the file when the daemon follows a marker inside a document.\n"
+    "\n"
+    "Fix, for an existence question: normalise lexically first, via the\n"
+    "canonical helper:\n"
     "\n"
     "    from claude_code_hooks_daemon.utils.authored_paths import (\n"
     "        authored_path_exists,\n"
     "    )\n"
     "    if authored_path_exists(base, target):\n"
     "\n"
-    "A join whose operand is a LITERAL filename is not reported -- it cannot\n"
-    "carry a `..` -- so there is no exemption marker here and none is wanted."
+    "Fix, for a read: normalise, then establish CONTAINMENT before opening --\n"
+    "normalising makes `src/../../etc/passwd` resolve faithfully to a real\n"
+    "file, which is not the same as it being a file you may read.\n"
+    "\n"
+    "A join whose operand is an inline STRING LITERAL is not reported -- it\n"
+    "cannot carry a `..` -- so there is no exemption marker here and none is\n"
+    "wanted. A name bound to the join one statement earlier IS reported: that\n"
+    "spelling hid 28 sites from the first version of this rule, two of them a\n"
+    "live instance of the hazard."
 )
 
 
@@ -135,8 +161,68 @@ def _is_in_scope(path: Path, scan_root: Path) -> bool:
     return any(part in _SCOPED_TREES for part in path.relative_to(scan_root).parts)
 
 
+def _is_unsafe_join(node: ast.expr) -> bool:
+    """Whether ``node`` is a ``/`` join whose right operand may carry ``..``."""
+    return (
+        isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.Div)
+        and not _is_literal_operand(node.right)
+    )
+
+
+def _walk_scope(scope: ast.AST) -> list[ast.AST]:
+    """Every node in ``scope``, NOT descending into a nested function.
+
+    Without the boundary, walking the module reaches inside every function, so
+    a name bound in one leaks into its siblings — which is the module-scope
+    over-reporting this rule exists to avoid. Each function is visited as its
+    own scope instead.
+
+    A nested function therefore does not inherit its enclosing binding, so a
+    closure over a joined local is missed. That is an under-report, and it is
+    the safe direction: a rule that cries wolf gets suppressed, and a rule that
+    is suppressed protects nothing.
+    """
+    nodes: list[ast.AST] = []
+    stack: list[ast.AST] = list(ast.iter_child_nodes(scope))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+            continue
+        nodes.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return nodes
+
+
+def _joined_locals(scope: ast.AST) -> set[str]:
+    """Names bound to an unsafe join in ONE scope's own body.
+
+    Scoped deliberately. A module-wide pass over the same question reported 31
+    sites where a properly scoped one reports 28: the difference is a name
+    reused in an unrelated function, and a rule that over-reports on name reuse
+    is one people stop believing.
+    """
+    bound: set[str] = set()
+    for node in _walk_scope(scope):
+        if isinstance(node, ast.Assign) and _is_unsafe_join(node.value):
+            bound.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and node.value is not None
+            and _is_unsafe_join(node.value)
+            and isinstance(node.target, ast.Name)
+        ):
+            bound.add(node.target.id)
+    return bound
+
+
 def scan_file(path: Path, scan_root: Path) -> list[Violation]:
-    """Every joined-then-stat-ed authored path in one module."""
+    """Every joined-then-consumed authored path in one module.
+
+    Two shapes, because run 2026-001 measured the second as the majority:
+    the join AT the call site, and a local bound to the join one statement
+    earlier. The hazard is identical; only the spelling differs.
+    """
     if not _is_in_scope(path, scan_root):
         return []
 
@@ -148,18 +234,30 @@ def scan_file(path: Path, scan_root: Path) -> list[Violation]:
         return []
 
     reported = str(path.relative_to(_REPO_ROOT)) if path.is_relative_to(_REPO_ROOT) else str(path)
+    scopes: list[ast.AST] = [tree]
+    scopes += [
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    ]
+
+    seen: set[tuple[int, str]] = set()
     violations: list[Violation] = []
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-            continue
-        if node.func.attr not in _PREDICATES:
-            continue
-        receiver = node.func.value
-        if not (isinstance(receiver, ast.BinOp) and isinstance(receiver.op, ast.Div)):
-            continue
-        if _is_literal_operand(receiver.right):
-            continue
-        violations.append(Violation(file=reported, line=node.lineno, predicate=node.func.attr))
+    for scope in scopes:
+        bound = _joined_locals(scope)
+        for node in _walk_scope(scope):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                continue
+            if node.func.attr not in _WATCHED:
+                continue
+            receiver = node.func.value
+            direct = _is_unsafe_join(receiver)
+            indirect = isinstance(receiver, ast.Name) and receiver.id in bound
+            if not (direct or indirect):
+                continue
+            key = (node.lineno, node.func.attr)
+            if key in seen:
+                continue
+            seen.add(key)
+            violations.append(Violation(file=reported, line=node.lineno, predicate=node.func.attr))
     return sorted(violations, key=lambda v: (v.file, v.line))
 
 
