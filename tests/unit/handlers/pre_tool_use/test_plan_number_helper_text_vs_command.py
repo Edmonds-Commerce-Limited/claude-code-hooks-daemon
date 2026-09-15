@@ -268,3 +268,80 @@ class TestHandlerSelfDescriptionMatchesBehaviour:
 
         assert "non-blocking" not in docstring
         assert "doesn't prevent execution" not in docstring
+
+
+class TestAGitCommitMessageIsNotAScan:
+    """A commit message DESCRIBING a scan cannot perform one (ledger 00413 N7b).
+
+    Hit live: the commit recording this handler's own niggle entry was denied,
+    because the message quoted the command that had just been blocked. A ledger
+    entry about a scan must contain the scan it is about, so the handler blocked
+    writing down the defect it had itself raised.
+
+    `sed_blocker` already ships exactly this exemption (its exemption 2) and is
+    the precedent copied here: sed must follow `git commit` with no command
+    separator between the two.
+    """
+
+    def test_a_commit_message_quoting_a_plan_glob_is_not_a_discovery_command(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """The reproduction. A `-m` message is text; it lists nothing."""
+        command = "git commit -m 'the guard denied ls CLAUDE/Plan/*job* and was right to'"
+
+        assert handler.matches(_bash(command)) is False
+
+    def test_a_commit_message_quoting_a_find_on_the_plan_dir_is_not_a_command(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """Every discovery rule is covered by the exemption, not just the ls one."""
+        command = 'git commit -m "do not use find CLAUDE/Plan to get the next number"'
+
+        assert handler.matches(_bash(command)) is False
+
+    def test_staging_then_committing_a_message_about_a_glob_is_still_text(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """A separator BEFORE `git commit` is normal; only one AFTER it matters."""
+        command = "git add -A && git commit -m 'ls CLAUDE/Plan/* is blocked deliberately'"
+
+        assert handler.matches(_bash(command)) is False
+
+    def test_a_real_scan_chained_after_a_commit_is_still_denied(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """The exemption must not become a laundering route.
+
+        `git commit -m 'x' && ls CLAUDE/Plan/*` really does run the scan. The
+        separator between the commit and the glob is what distinguishes a
+        message from a chained command, and it is why the exemption is
+        position-sensitive rather than a blanket "contains git commit" test.
+        """
+        command = "git commit -m 'unrelated' && ls CLAUDE/Plan/*"
+
+        assert handler.matches(_bash(command)) is True
+
+    def test_a_scan_piped_into_a_commit_message_is_still_denied(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """A scan BEFORE the commit is executed regardless of what follows it."""
+        command = "ls CLAUDE/Plan/* && git commit -m 'recorded the listing'"
+
+        assert handler.matches(_bash(command)) is True
+
+    def test_a_message_mentioning_the_dir_cannot_launder_a_real_scan_after_it(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """The hole an exact copy of sed_blocker's exemption would have left.
+
+        sed_blocker anchors on the FIRST occurrence of its trigger word. Copied
+        literally, a commit message that mentions the plan directory would
+        satisfy the exemption on its first occurrence and carry a genuine scan
+        chained after it straight through.
+
+        So this exemption anchors on the LAST occurrence instead: every
+        occurrence must sit inside the message for the command to be text.
+        """
+        command = "git commit -m 'why ls CLAUDE/Plan/* is blocked' && ls CLAUDE/Plan/*"
+
+        assert handler.matches(_bash(command)) is True

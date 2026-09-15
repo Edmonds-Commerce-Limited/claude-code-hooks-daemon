@@ -407,9 +407,12 @@ its author intended these to be environment-dependent.
   deny message beside the number. Detector unchanged; check whether
   `README.md`'s index already serves as the substrate.
 
-- [ ] ⬜ **Task 1.10**: N7b — give `plan_number_helper` the git-message
-  exemption `sed_blocker` already has, so a commit describing a discovery scan
-  is not mistaken for one. Detector fix, RED first.
+- [x] ✅ **Task 1.10**: N7b — `plan_number_helper` now exempts a `git commit`
+  message, RED first on the live reproduction. Anchored on the LAST mention,
+  not the first as `sed_blocker` does: a first-match anchor would let
+  `git commit -m '...<dir>...' && ls <dir>/*` launder a real scan, and the
+  plan directory appears in exactly the messages this exemption allows. Both
+  laundering shapes are pinned as still-denied.
 
 - [ ] ⬜ **Task 1.11**: N8 — close the loop between `known_sources` and the
   files already vendored under that domain. Decide between a back-fill flag and

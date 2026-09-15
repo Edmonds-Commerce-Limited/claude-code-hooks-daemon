@@ -277,6 +277,36 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         return plan_dir in without_specific_references
 
     @staticmethod
+    def _is_git_commit_message_mentioning_plans(command: str, plan_dir: str) -> bool:
+        """True when every plan-dir mention sits inside a `git commit` message.
+
+        A commit message is text. It lists nothing, expands no glob and reaches
+        no filesystem, so a message that DESCRIBES a plan-directory scan is not
+        one (ledger 00413 N7b). Without this, recording why a scan was denied
+        is itself denied.
+
+        Anchors on the LAST mention rather than the first. `sed_blocker`'s
+        equivalent uses the first, which is safe there only because its trigger
+        word is rare in prose; here the plan directory appears in exactly the
+        messages this exemption exists to allow, so a first-match anchor would
+        let `git commit -m '...<dir>...' && ls <dir>/*` through. Requiring the
+        last mention to be inside the message means EVERY mention is.
+
+        A separator between `git commit` and the mention means the mention
+        belongs to a chained command, not to the message.
+        """
+        git_match = re.search(r"\bgit\s+commit\b", command)
+        if not git_match:
+            return False
+
+        last_mention = command.rfind(plan_dir)
+        if last_mention < git_match.start():
+            return False
+
+        text_between = command[git_match.start() : last_mention]
+        return re.search(f"[{_COMMAND_SEPARATORS}]", text_between) is None
+
+    @staticmethod
     def _covers_archive_subdirectories(command: str, plan_dir: str) -> bool:
         """True when the command demonstrably reaches the plan dir's archives.
 
@@ -387,6 +417,22 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         if self._covers_archive_subdirectories(command, plan_dir) and not self._extracts_latest(
             command
         ):
+            return False
+
+        # A COMMIT MESSAGE, not a scan (ledger 00413 N7b). A `git commit`
+        # message describing a scan cannot perform one, and a ledger entry
+        # about this handler's own deny must quote the command that was denied
+        # -- so without this, the handler blocks writing down the defect it
+        # just raised. `sed_blocker` ships the same exemption (its exemption 2)
+        # and is the precedent.
+        #
+        # It anchors on the LAST occurrence, NOT the first as sed_blocker does.
+        # Anchoring on the first would let a message that mentions the plan
+        # directory carry a real scan chained after it
+        # (`git commit -m 'why ls <dir>/* is blocked' && ls <dir>/*`) straight
+        # through. Requiring every occurrence to sit inside the message closes
+        # that, at the cost of nothing a caller legitimately wants.
+        if self._is_git_commit_message_mentioning_plans(command, plan_dir):
             return False
 
         # 0. CREATION, not discovery. `mkdir CLAUDE/Plan/NNNNN-name` does not ask
