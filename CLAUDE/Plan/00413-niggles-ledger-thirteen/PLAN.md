@@ -35,90 +35,41 @@ every checkout the maintainers work in has already been installed into.
 
 ## Niggles
 
+> **Resolved entries are compressed to their verdict.** Full reasoning for
+> N1 and N2 is in
+> [JOURNAL/00413-Journal-26-09-15.md](JOURNAL/00413-Journal-26-09-15.md)
+> (11:58 entry), relocated when `plan-doc-size` passed its warning threshold.
+> Nothing was deleted.
+
 ### N1 — `hookEventName: "Unknown"` is not a valid event name, so the whole hook response is discarded
 
 **Status**: ✅ Fixed at `48a9ff74`
 
-`init.sh`'s `emit_hook_error()` takes an event name as `$1` and embeds it
-verbatim in `{"hookSpecificOutput": {"hookEventName": $event, ...}}`. Three
-call sites pass the literal string `Unknown`, and the function's own default is
-`${1:-Unknown}`:
-
-| line | error type                   |
-| ---- | ---------------------------- |
-| 265  | `init_path_error`            |
-| 285  | `nested_installation`        |
-| 323  | `hooks_daemon_repo_detected` |
-
-Claude Code validates `hookEventName` against a closed enum (`PreToolUse`,
-`UserPromptSubmit`, `UserPromptExpansion`, `SessionStart`, `Setup`,
-`PreModelSwitch`, …). `Unknown` is not in it, so the response fails schema
-validation and is thrown away wholesale.
-
-The consequence is the inverse of what the code intends. `emit_hook_error` is
-documented as **CRITICAL: This ensures the agent sees errors and can take
-action** — and on these three paths it guarantees the agent sees nothing. The
-carefully-worded remedy text is discarded along with the envelope. What the
-human gets instead is a raw JSON blob in the status-line area and a
-`SessionStart:startup hook error` banner, neither of which names a cause.
-
-Reproduction: clone this repository fresh and start an agent in it.
-
-The fix must supply a REAL event name rather than substituting a valid-looking
-one — mislabelling a `PreToolUse` failure as `SessionStart` would trade a
-visible error for a silent misroute. The wrappers already know their own event
-(`.claude/hooks/session-start` passes `"SessionStart"` correctly to its own
-`emit_hook_error` call); only the guards that run at `source` time, before the
-wrapper reaches its body, lack it.
+`init.sh`'s `emit_hook_error()` embedded the literal `Unknown` as
+`hookEventName` on three `source`-time guard paths. Claude Code validates that
+field against a closed enum, so the whole response was discarded — the exact
+inverse of the function's documented purpose ("ensures the agent sees errors").
+The human got a raw JSON blob and an unexplained banner. Fixed by supplying the
+REAL event name, never a valid-looking substitute, which would have traded a
+visible error for a silent misroute.
 
 ### N2 — the self-install guard ignores the tracked config that answers it
 
 **Status**: ✅ Resolved as NOT A DEFECT at `a39ec0d5` — the guard is right, its
 comment was misleading
 
-**The original entry below was wrong, and proving N4 is what showed it.** The
-guard reads two untracked signals and deliberately does not read the tracked
-`self_install_mode: true`. That is correct: the config declares INTENT, while
-the env file and `HOOKS_DAEMON_ROOT_DIR` are evidence the runtime was actually
-BUILT. A fresh clone has the intent and none of the runtime.
+Filed as a defect and it was not one; proving N4 is what showed it. The guard
+reads two UNTRACKED signals and deliberately ignores the tracked
+`self_install_mode: true`, because the config declares INTENT while the env file
+and `HOOKS_DAEMON_ROOT_DIR` are evidence the runtime was actually BUILT — and a
+fresh clone has the intent with none of the runtime. Believing the config would
+have routed the clone to advice that overwrites this repository's own tracked
+config (see N5), making the outcome strictly worse.
 
-Had the guard believed the config, it would have waved the clone through to the
-`NOT_INSTALLED` branch — whose advice is to run the client installer, which
-overwrites this repository's own tracked config (see N5). So the "defect" I
-filed would have made the outcome strictly worse.
-
-What was genuinely wrong was the comment, which read as an unfinished TODO
-(*"requires Python, done later — for now, just trust the override"*) and invited
-exactly the change I was about to make. Replaced with the rationale.
-
-`init.sh:309-327` refuses to initialise when the checkout's git remote says
-this is the hooks-daemon repository, unless self-install is established. It
-tests exactly two things: the `HOOKS_DAEMON_ROOT_DIR` environment variable, and
-the presence of `.claude/hooks-daemon.env`.
-
-Both are **untracked and per-checkout**. The repository's own
-`.claude/hooks-daemon.yaml` is **tracked** and declares `self_install_mode: true` on line 7 — the fact the guard needs is committed, and the guard does not
-read it. The code says so directly:
-
-```
-# Check config file for self_install_mode (requires Python, done later)
-# For now, just trust the HOOKS_DAEMON_ROOT_DIR override
-```
-
-Deferring to keep Python off the hot path is a sound instinct; the cost landed
-somewhere unintended. `self_install_mode: true` is a line of YAML that bash can
-read without spawning anything, and the guard is not on the hot path — it runs
-once, and only in this repository.
-
-This is the same shape as ledger four's entry: **a canonical home must be one
-the reader actually receives.** There, two tracked documents pointed at an
-untracked home and were dead in every fresh clone. Here, a tracked declaration
-is ignored in favour of an untracked one, and the same class of reader — the
-one who just cloned — is the one who pays.
-
-N1 is what makes N2 expensive rather than merely annoying: the guard's message
-already names the remedy (`python install.py --self-install`), and N1 is why
-nobody reads it.
+What WAS wrong was the comment: an unfinished-TODO shape that invited exactly
+the change about to be made. Replaced with the rationale. N1 is what made this
+expensive rather than annoying — the guard already named its remedy, and N1 is
+why nobody read it.
 
 ### N3 — a fresh clone has no template for the secret word list
 
@@ -158,60 +109,32 @@ rather than to force-add the template.
 **Status**: ✅ Fixed at `48a9ff74` (and superseded by N5 — the whole command was
 wrong, not just the interpreter)
 
-The `hooks_daemon_repo_detected` message ends with:
-
-> To install for development, run: `python install.py --self-install`
-
-The flag is correct — `install.py --help` confirms `--self-install`. The
-interpreter is not. Bare `python` is absent from this container's `PATH`
-(`python3` is present), and it is absent by default on modern Fedora, Debian 12+
-and Ubuntu, none of which ship an unversioned `python` without an explicit
-compatibility package. `install.py`'s own shebang is `#!/usr/bin/env python3`.
-
-So a reader who follows the instruction verbatim gets `command not found`, which
-reads as a broken repository rather than a wrong instruction.
-
-This is minor in isolation and compounds badly in sequence: N2 sends the reader
-here, N1 stops them ever seeing the sentence, and if N1 is fixed so they finally
-read it, N4 is what they hit next. Worth sweeping for the same `python `
-spelling elsewhere in user-facing output rather than fixing just this line.
+The guard advised `python install.py --self-install`. The flag was right; the
+interpreter was not — bare `python` is absent by default on modern Fedora,
+Debian 12+ and Ubuntu, and from this container. A reader following it verbatim
+got `command not found`, which reads as a broken repository rather than a wrong
+instruction. Swept for the same spelling across user-facing output.
 
 ### N5 — the advertised remedy DESTROYS this repository's tracked config
 
 **Status**: ✅ Fixed at `a39ec0d5`
 
-Found by trying N4's advice instead of trusting it. `.github/workflows/qa.yml`
-already documented what `install.py --self-install` does to an existing
-checkout, in a comment that exists because a CI runner proved it:
-
-> `create_daemon_config` and `create_settings_json` do NOT skip an existing file
-> — they RENAME it to `.bak` and write a default template over it. The `force`
-> flag only controls whether that backup is taken, so BOTH paths overwrite. On
-> the runner it replaced this repo's 1188-line hooks-daemon.yaml, and the daemon
-> then refused to start because the template it wrote is invalid against the
-> current schema.
-
-So the one instruction a fresh cloner was given would have cost them the
-repository's config and left them with a daemon that will not start — and N1
-plus N4 had both been "fixed" in a way that made that instruction MORE
-prominent and MORE likely to be followed.
-
-`install.py` is the CLIENT installer. Its job is to create files a client
-project does not have yet, and every one of them is already tracked here.
-Nothing in a clone of this repository needs installing; only the two gitignored
-per-checkout runtime artefacts need building.
-
-Fixed by packaging the procedure qa.yml proves on every run as
-`scripts/bootstrap-self-install.sh`, and having the message name that and warn
-explicitly against `install.py`.
+Found by trying N4's advice instead of trusting it. `install.py` is the CLIENT
+installer: `create_daemon_config` and `create_settings_json` do NOT skip an
+existing file — they rename it `.bak` and write a default template over it, on
+BOTH paths. A CI runner had already proved this, replacing this repo's
+1188-line config with a template invalid against the current schema. So the one
+instruction a fresh cloner was given would have destroyed the config and left a
+daemon that will not start. Fixed by packaging the procedure `qa.yml` proves on
+every run as `scripts/bootstrap-self-install.sh`, and having the message name
+that and warn explicitly against `install.py`.
 
 **The broader lesson, worth more than the fix**: four entries that each looked
-independent were one sequential failure, and fixing any prefix of them without
-the last would have made things worse, not better. N2 routes the reader to the
-guard; N1 discards the guard's explanation; N4 garbles the command; N5 makes the
-command destructive. Repairing N1 alone — the obvious first move, and the one I
-made — delivered destructive advice to a reader who previously could not read
-it.
+independent were ONE sequential failure, and fixing any prefix of them without
+the last would have made things worse. N2 routes the reader to the guard; N1
+discards the guard's explanation; N4 garbles the command; N5 makes the command
+destructive. Repairing N1 alone — the obvious first move, and the one made —
+delivered destructive advice to a reader who previously could not read it.
 
 ### N6 — the whole persistent-cron mechanism rests on output agents skim
 
@@ -382,6 +305,26 @@ infer its own applicability from the payload — it has to be DECLARED (config o
 environment) by whatever launches the unattended run, or detected outside the
 hook contract entirely.
 
+**RESOLVED.** Both facts were established, and neither made a handler change
+the wrong lever:
+
+- Claude Code 2.1.272 DOES offer mechanisms — the installed CLI confirms
+  `--permission-prompts none` ("anything that would prompt is denied
+  automatically") and `--permission-mode dontAsk` — and a denied tool leaves
+  the model working rather than stalling. But `--permission-prompts` defaults
+  to `host`, not `none`, so an unattended run with no flags is NOT covered.
+- Decisively for this repository, those are LAUNCHER flags and this project's
+  crons are `CronCreate` session-memory jobs firing into an already-running
+  interactive session. That session has a TTY and its flags were fixed at
+  launch, so the 3am question is drawn to a terminal nobody is reading. No
+  launcher flag reaches that case.
+
+A `mode: unattended` was added and enabled here, RED first on the test that
+matters — a PROPERLY JUSTIFIED question must be denied — and live-verified
+through the real hook. `get_rules()` is mode-aware too, because it renders the
+CLAUDE.md rule table and the strict Rule would have published "blocked without
+the prefix" in the one mode where a prefix can never help.
+
 The shape of the fix, once the mode is known: a mode in which `AskUserQuestion`
 is denied unconditionally, prefix or not, with a reason that tells the agent to
 pick the best option, state the assumption in output text, and continue. A deny
@@ -398,6 +341,38 @@ handler mode the wrong answer:
    not a handler change;
 2. whether a denied `AskUserQuestion` reliably leaves the model working, rather
    than stopping anyway, which is the failure this entry exists to prevent.
+
+### N11 — host-identity tests read the real machine's `/etc/hosts`, so they pass or fail by machine
+
+Found by a full `tests/unit` run while working on N10. **Thirteen** tests in
+`tests/unit/utils/test_host_identity.py` fail in this container and passed in
+the previous session on another machine — the handoff for Plan 00411 records
+"23,528 tests" green at `d1ed6e88`, which is the commit that introduced them.
+
+Not caused by anything in this ledger: the file imports only
+`claude_code_hooks_daemon.utils.host_identity`, which nothing here touches.
+
+The tests pin a resolution LADDER whose bottom rung reads a name out of
+`/etc/hosts`. That file is real machine state. This container's carries a name
+that satisfies the resolver, so assertions of the form "a hostile value is
+REFUSED" get a successful resolution instead and fail:
+`assert HostName(name='dc-lts-dev-vm', ...)`.
+
+The failure mode is the expensive one: green on the author's machine, red on
+everyone else's, and the redness has nothing to do with the change under test.
+A developer meeting this for the first time spends their first hour hunting a
+defect in their own work.
+
+Worth stating precisely, because the fix could easily be the wrong one: the
+LADDER is not what is wrong — reading `/etc/hosts` is a deliberate, documented
+rung with a recorded reason (Debian-family hosts write `127.0.1.1 <hostname>`;
+Fedora ones do not, which is why "returns nothing" is pinned behaviour). What
+is wrong is that the TESTS consult the real file instead of a controlled one.
+The fix is to make them hermetic — inject the path or the file's content — not
+to weaken the resolver or delete the assertions.
+
+Belongs to Plan 00411, which is otherwise complete; needs confirming whether
+its author intended these to be environment-dependent.
 
 ## Tasks
 
@@ -447,12 +422,15 @@ handler mode the wrong answer:
   reconstructing the resulting file, unless the reconstruction is needed
   elsewhere.
 
-- [ ] ⬜ **Task 1.13**: N10 — establish the two facts first (does Claude Code
-  offer a question timeout or a supported disable; does a denied
-  `AskUserQuestion` leave the model working). Then, only if a handler change is
-  still the right lever, add the unattended mode: deny unconditionally, with a
-  reason that tells the agent to assume and continue. The mode must be
-  DECLARED, not inferred — no hook payload carries the signal.
+- [x] ✅ **Task 1.13**: N10 — both facts established, and neither removed the
+  need: Claude Code's mechanisms are LAUNCHER flags and cannot reach a
+  `CronCreate` job firing into a live interactive session. `mode: unattended`
+  added RED-first and enabled here; live-verified through the real hook.
+
+- [ ] ⬜ **Task 1.14**: N11 — make the host-identity tests hermetic: inject the
+  `/etc/hosts` path or its content rather than reading real machine state.
+  Confirm with Plan 00411's author first, in case environment-dependence was
+  deliberate. Do NOT weaken the resolver or drop the assertions.
 
 ## Success Criteria
 
