@@ -123,6 +123,28 @@ Scope check before fixing: confirm the ignore rule is not deliberately
 prefix-matching the real file, in which case the fix is to anchor the rule
 rather than to force-add the template.
 
+### N4 — the remedy the guard prints names an interpreter that is not installed
+
+**Status**: ⬜ Open
+
+The `hooks_daemon_repo_detected` message ends with:
+
+> To install for development, run: `python install.py --self-install`
+
+The flag is correct — `install.py --help` confirms `--self-install`. The
+interpreter is not. Bare `python` is absent from this container's `PATH`
+(`python3` is present), and it is absent by default on modern Fedora, Debian 12+
+and Ubuntu, none of which ship an unversioned `python` without an explicit
+compatibility package. `install.py`'s own shebang is `#!/usr/bin/env python3`.
+
+So a reader who follows the instruction verbatim gets `command not found`, which
+reads as a broken repository rather than a wrong instruction.
+
+This is minor in isolation and compounds badly in sequence: N2 sends the reader
+here, N1 stops them ever seeing the sentence, and if N1 is fixed so they finally
+read it, N4 is what they hit next. Worth sweeping for the same `python `
+spelling elsewhere in user-facing output rather than fixing just this line.
+
 ## Tasks
 
 - [ ] ⬜ **Task 1.1**: N1 — detector first: a test that asserts every
@@ -135,7 +157,10 @@ rather than to force-add the template.
 - [ ] ⬜ **Task 1.3**: N3 — establish whether the `.example` exclusion is
   deliberate, then track the template or anchor the ignore rule.
 
-- [ ] ⬜ **Task 1.4**: Prove the composite fix the only way that counts —
+- [ ] ⬜ **Task 1.4**: N4 — sweep user-facing output for bare `python `
+  invocations and correct them to `python3`.
+
+- [ ] ⬜ **Task 1.5**: Prove the composite fix the only way that counts —
   a genuinely fresh clone, with an agent started in it.
 
 ## Success Criteria
