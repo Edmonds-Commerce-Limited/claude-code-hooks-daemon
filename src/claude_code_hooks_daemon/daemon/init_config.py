@@ -357,6 +357,7 @@ class ConfigTemplate:
             "  status_line:\n"
             "    git_repo_name: {enabled: true, priority: 5}      # Git repository name\n"
             "    account_display: {enabled: true, priority: 6}    # Account information\n"
+            "    host_hostname: {enabled: false, priority: 7}    # Which MACHINE this session is on (opt-in)\n"
             "    model_context: {enabled: true, priority: 10}    # Model name and context %\n"
             "    downgrade_indicator: {enabled: true, priority: 11}  # Warn on a silent model-family downgrade\n"
             "    context_sidecar: {enabled: false, priority: 12}  # Observe-only context sidecar for PTY supervisor (opt-in)\n"

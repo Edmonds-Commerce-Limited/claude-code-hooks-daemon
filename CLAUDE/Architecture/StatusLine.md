@@ -266,6 +266,62 @@ handlers:
       priority: 8   # Move git branch before model context
 ```
 
+### Naming the HOST machine (`host_hostname`, Plan 00411)
+
+`environment_indicator` says what KIND of environment a session runs in
+(desktop / docker / podman / lxc). `host_hostname` says WHICH machine — the
+opt-in segment for people who work across several boxes.
+
+**Inside podman or docker the host's name cannot be read.** A container has its
+own UTS namespace, so `hostname`, `uname -n`, `/etc/hostname` and `$HOSTNAME`
+all return the container ID. Probing a real one (rootless podman, Debian guest,
+Fedora host) closed off every other route as well: no `/run/host`, no container
+socket mounted, a zero-byte `/run/.containerenv`, and no reverse DNS for the
+gateway. The segment therefore renders NOTHING rather than the container ID.
+
+**So the mechanism is an explicit hand-off.** Whatever starts the container —
+the ccy supervisor, a run script, a compose file — is the only thing that knows
+the host's name, so it exports it:
+
+```bash
+HOOKS_DAEMON_HOST_HOSTNAME="$(hostname)" podman run …
+```
+
+It must reach **the daemon's** environment, not an interactive shell's: the
+daemon renders the status line, and resolves the name once at first render.
+Note that `hooks-daemon status-line-explained` resolves in the CLI's OWN
+process, so it can report "not resolved" while the daemon is rendering the name
+perfectly well — check the real status line, not the explainer, when verifying.
+
+Resolution is a ladder, first hit wins:
+
+| rung | source                                | rendered as  |
+| ---- | ------------------------------------- | ------------ |
+| 1    | `$HOOKS_DAEMON_HOST_HOSTNAME`         | `@name`      |
+| 2    | `options.host_name` in project config | `@name`      |
+| 3    | `gethostname()` — host or LXC ONLY    | `@name`      |
+| 4    | a `127.x` self-alias in `/etc/hosts`  | `@~name`     |
+| 5    | nothing resolvable                    | (no segment) |
+
+Rung 3 deliberately includes LXC: an LXC guest is normally a long-lived, named
+machine, so its own hostname is the answer. Podman and Docker containers are
+ephemeral and named by ID, so theirs is not.
+
+**Rung 4 is a HINT, and the tilde says so.** Podman inherits the host's
+`/etc/hosts`, so a host name genuinely can appear inside a container — but
+whether that file NAMES the host depends on the host distribution: Debian and
+Ubuntu write `127.0.1.1 <hostname>` at install, Fedora leaves it generic
+because `systemd-hostnamed` owns the hostname. The same read succeeds on one
+host and finds nothing on the next, and nothing inside the container can tell
+which case it is in. A segment answering "which machine am I on?" is worse than
+blank when it is confidently wrong, so an inferred name never looks like a read
+one.
+
+**Keep a real hostname out of a shared config.** `options.host_name` works
+without any export, but `.claude/hooks-daemon.yaml` is usually committed — and
+in a public repository that publishes an internal machine name. Prefer the
+environment variable.
+
 ---
 
 ## Performance

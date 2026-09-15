@@ -363,6 +363,7 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "EnvironmentIndicatorHandler": "status-line renderer, no agent-facing action",
     "GitBranchHandler": "status-line renderer, no agent-facing action",
     "GitRepoNameHandler": "status-line renderer, no agent-facing action",
+    "HostHostnameHandler": "status-line renderer, no agent-facing action",
     "ModelContextHandler": "status-line renderer, no agent-facing action",
     "MultithreadIndicatorHandler": "status-line renderer, no agent-facing action",
     "StartupCleanupHandler": "status-line renderer, no agent-facing action",

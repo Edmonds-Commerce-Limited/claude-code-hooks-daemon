@@ -712,6 +712,24 @@ handlers:
       enabled: true
       priority: 11
 
+    host_hostname:  # Shows @machine — WHICH host, not which KIND of environment (opt-in)
+      # Opt-in: pure gain only if you work across several machines.
+      #
+      # Inside podman/docker the container's own hostname is the container ID
+      # and is never shown. Export HOOKS_DAEMON_HOST_HOSTNAME from whatever
+      # starts the container — that is the only authoritative route, because a
+      # UTS namespace genuinely hides the host's name. A desktop or LXC session
+      # needs no export; its own hostname is the answer.
+      #
+      # A name recovered from /etc/hosts renders as @~name: the tilde means
+      # INFERRED. That read works on a Debian-family host (which writes
+      # `127.0.1.1 <hostname>`) and finds nothing on Fedora, so it is a hint.
+      enabled: false
+      priority: 7
+      options:
+        # Per-machine override, beaten only by the environment variable.
+        # host_name: "my-workstation"
+
     supervisor_indicator:  # Top hat 🎩 w/ bg colour: green armed / yellow dry-run / orange down (ccy supervisor)
       # On by default; renders NOTHING when no ccy supervisor status file exists.
       enabled: true

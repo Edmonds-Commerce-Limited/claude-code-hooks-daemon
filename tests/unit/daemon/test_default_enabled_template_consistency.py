@@ -36,6 +36,7 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     "context_sidecar",
     "compaction_signal",
     "daemon_stats",
+    "host_hostname",
     "idle_housekeeping_advisory",
     "goal_injection",
     "skill_opportunity_detector",

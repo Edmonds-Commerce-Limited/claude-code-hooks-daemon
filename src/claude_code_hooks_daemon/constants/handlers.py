@@ -179,6 +179,11 @@ class HandlerID:
         config_key="environment_indicator",
         display_name="status-environment-indicator",
     )
+    HOST_HOSTNAME = HandlerIDMeta(
+        class_name="HostHostnameHandler",
+        config_key="host_hostname",
+        display_name="status-host-hostname",
+    )
     CURRENT_TIME = HandlerIDMeta(
         class_name="CurrentTimeHandler",
         config_key="current_time",

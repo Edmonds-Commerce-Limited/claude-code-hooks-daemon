@@ -35,7 +35,7 @@ _STATUS_LINE_EVENT_DIR = "status_line"
 
 # Pinned so an added/removed handler is a deliberate, visible change to this
 # test rather than a silent shift in what the sweep covers.
-_EXPECTED_HANDLER_COUNT = 14
+_EXPECTED_HANDLER_COUNT = 15
 
 
 def _status_line_handler_classes() -> list[type[StatusLineSegmentHandler]]:

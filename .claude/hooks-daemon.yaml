@@ -958,6 +958,16 @@ handlers:
       enabled: true
       priority: 11
 
+    host_hostname:  # Shows @machine — WHICH host, not which KIND of environment
+      # Dogfood: ENABLED here, and it costs nothing while it resolves to
+      # nothing. This repo's sessions run in rootless podman on a Fedora host,
+      # which is precisely the case with no readable host name — so the segment
+      # stays blank until HOOKS_DAEMON_HOST_HOSTNAME is exported by whatever
+      # starts the container, then shows it. Dogfooding the silent case is the
+      # point: a segment that renders nothing must actually render nothing.
+      enabled: true
+      priority: 7
+
     supervisor_indicator:  # Top hat 🎩 w/ bg colour: green armed / yellow dry-run / orange down (ccy supervisor)
       # On by default (renders nothing when no supervisor is configured).
       # Explicitly enabled here for this repo's always-armed ccy sessions.

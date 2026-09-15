@@ -1,6 +1,6 @@
 # Plan 00411: host hostname in status line
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-15
 **Owner**: joseph
 **Priority**: Medium
@@ -64,7 +64,7 @@ guessing.
 
 ### Phase 1: Resolution
 
-- [ ] ⬜ **Task 1.1**: Failing tests first — one per rung of the ladder, plus
+- [x] ✅ **Task 1.1**: Failing tests first — one per rung of the ladder, plus
   the precedence between them: the env var beats config; config beats
   `gethostname()`; `gethostname()` is consulted ONLY when not containerised;
   the `/etc/hosts` read is last and is marked inferred; nothing resolvable
@@ -75,32 +75,40 @@ guessing.
   (must yield nothing) and a Debian-style file carrying `127.0.1.1 <name>`
   (must yield that name, marked inferred).
 
-- [ ] ⬜ **Task 1.2**: Implement resolution in a util, resolved ONCE at daemon
+- [x] ✅ **Task 1.2**: Implement resolution in a util, resolved ONCE at daemon
   startup and cached the way `container_runtime()` already is. The status line
   re-renders on every Claude Code refresh, and per-render file reads are the
   mistake this handler directory's own guidance calls out.
 
 ### Phase 2: The segment
 
-- [ ] ⬜ **Task 2.1**: New `status_line` handler, disabled by default, showing
+- [x] ✅ **Task 2.1**: New `status_line` handler, disabled by default, showing
   the resolved name with inferred values visibly distinguished from read ones.
   `explain_segment()` names which rung produced the current value, so the
   segment explains its own provenance rather than leaving the reader to guess.
 
-- [ ] ⬜ **Task 2.2**: Document the environment-variable contract, so the ccy
+- [x] ✅ **Task 2.2**: Document the environment-variable contract, so the ccy
   supervisor (or any wrapper) has a name to export against, and record why the
   loopback read is a hint rather than the mechanism.
 
 ## Success Criteria
 
-- [ ] ⬜ With the variable exported, the segment shows that name as
-  authoritative inside this podman container.
+- [x] ✅ With the variable exported, the segment shows that name as
+  authoritative inside this podman container. Verified end-to-end through the
+  real hook (`.claude/hooks/status-line` → daemon), not through the CLI
+  explainer — which resolves in its OWN process and therefore reported "not
+  resolved" while the daemon was rendering the name correctly. That near-miss
+  is recorded in `JOURNAL/`.
 
-- [ ] ⬜ With nothing exported, this Fedora-hosted container renders no segment
-  rather than the container ID or a wrong guess.
+- [x] ✅ With nothing exported, this Fedora-hosted container renders no segment
+  rather than the container ID or a wrong guess. Verified by restarting without
+  the variable and re-rendering: the segment disappears.
 
 - [ ] ⬜ On a desktop host and under LXC, the real hostname shows with no
-  export needed.
+  export needed. Covered by unit tests, and NOT live-verified: this session has
+  neither machine available. Left unticked deliberately rather than ticked on
+  the strength of a passing test, because the whole point of the other two
+  criteria was that the live behaviour surprised the tests once already.
 
 - [ ] ⬜ Full QA passes, the daemon is restarted, and CI is green.
 
