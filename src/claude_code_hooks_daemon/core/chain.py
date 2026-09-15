@@ -21,7 +21,7 @@ owns both the reason shown and the ``To disable:`` attribution (Task 3.3).
 
 import logging
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -245,18 +245,33 @@ class HandlerChain:
             an ALLOW never ends the chain.
     """
 
-    __slots__ = ("_handlers", "_sorted", "allow_is_final")
+    __slots__ = ("_handlers", "_sorted", "allow_is_final", "context_transform")
 
-    def __init__(self, *, allow_is_final: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        allow_is_final: bool = False,
+        context_transform: "Callable[[Handler, list[str]], list[str]] | None" = None,
+    ) -> None:
         """Initialise empty handler chain.
 
         Args:
             allow_is_final: Let a terminal ALLOW end the chain (see class
                 docstring). Keyword-only so the opt-in is always spelled out.
+            context_transform: Optional per-handler post-processing applied to
+                a matched handler's OWN context lines, right after
+                ``handle()`` returns and before they are flattened into the
+                merged response — the only point in dispatch where a context
+                line is still paired with the handler that produced it. Never
+                called for a handler whose context is empty. ``HandlerChain``
+                stays event-agnostic: it knows nothing about what the
+                transform does (Plan 00416's SessionStart tier tagging is one
+                caller; the router wires that in, not this class).
         """
         self._handlers: list[Handler] = []
         self._sorted = True
         self.allow_is_final = allow_is_final
+        self.context_transform = context_transform
 
     def add(self, handler: "Handler") -> None:
         """Add a handler to the chain.
@@ -402,6 +417,8 @@ class HandlerChain:
                         result.decision,
                         handler.terminal,
                     )
+                    if self.context_transform is not None and result.context:
+                        result.context = self.context_transform(handler, result.context)
                     handlers_executed.append(handler.name)
                     executed_handlers.append(handler)
                     matched_results.append(result)
