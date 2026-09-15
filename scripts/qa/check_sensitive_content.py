@@ -395,9 +395,7 @@ def main() -> int:
         # there states something the scan never established, and llm_qa.py
         # publishes that artefact for an agent to read as fact — so a scoped
         # run reports beside what it scanned, and never overwrites it.
-        output_file = (
-            path_override / _ARTEFACT_NAME if path_override is not None else _OUTPUT_FILE
-        )
+        output_file = path_override / _ARTEFACT_NAME if path_override is not None else _OUTPUT_FILE
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text(json.dumps(output, indent=2))
 

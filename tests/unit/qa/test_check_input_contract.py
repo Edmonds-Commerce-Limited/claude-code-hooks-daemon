@@ -360,9 +360,7 @@ class TestConditionalInputFields:
 
         assert "agent_id" not in known["Elicitation"]
 
-    def test_an_empty_example_stays_empty_despite_conditional_fields(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_empty_example_stays_empty_despite_conditional_fields(self, tmp_path: Path) -> None:
         """An event with no example has no substrate, and the slot is not one.
 
         ``check_read_surface`` skips such an event deliberately. Synthesising a

@@ -369,9 +369,7 @@ class TestAScopedScanNeverPublishesTheRepositoryVerdict:
     files — and it was believed, in session, before being checked.
     """
 
-    def test_the_repository_artefact_is_untouched_by_a_scoped_scan(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_repository_artefact_is_untouched_by_a_scoped_scan(self, tmp_path: Path) -> None:
         config = tmp_path / "hooks-daemon.yaml"
         _write_config(config)
         (tmp_path / "harmless.txt").write_text("nothing to see\n")
@@ -385,9 +383,7 @@ class TestAScopedScanNeverPublishesTheRepositoryVerdict:
             "verdict describes the scanned directory, not this repository"
         )
 
-    def test_the_scoped_verdict_is_written_beside_what_was_scanned(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_scoped_verdict_is_written_beside_what_was_scanned(self, tmp_path: Path) -> None:
         """It still has to land somewhere — the caller asked for --json."""
         config = tmp_path / "hooks-daemon.yaml"
         _write_config(config)
