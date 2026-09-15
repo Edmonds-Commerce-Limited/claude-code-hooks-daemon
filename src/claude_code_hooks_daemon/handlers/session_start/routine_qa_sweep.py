@@ -100,7 +100,9 @@ class RoutineQaSweepHandler(SessionStartHandlerBase):
             # Reported, not swallowed and not raised. Silence here would be
             # indistinguishable from a clean tree, which is the one outcome
             # this whole design refuses to allow.
-            logger.warning("routine_qa_sweep: could not read %s (%s)", routines_dir(project_root), error)
+            logger.warning(
+                "routine_qa_sweep: could not read %s (%s)", routines_dir(project_root), error
+            )
             return AdvisoryResult(
                 decision=Decision.ALLOW,
                 context=[
@@ -140,7 +142,6 @@ class RoutineQaSweepHandler(SessionStartHandlerBase):
             "Re-check after fixing: "
             f"`{daemon_cli_command_for_docs('routine-qa')}`.\n"
         )
-
 
     def get_acceptance_tests(self) -> list[Any]:
         """The one behaviour worth proving against a live session."""
