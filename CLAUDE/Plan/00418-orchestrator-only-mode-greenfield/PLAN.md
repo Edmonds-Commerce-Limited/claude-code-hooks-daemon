@@ -178,7 +178,22 @@ does. The simulated run exists to answer this from data rather than taste.
   Two samples now: 437 in the first session, 1,385 in a second with the
   classifier live. The record has already ruled one option out on arithmetic.
 
-- [ ] ⬜ Nothing is blocked by this plan. Blocking is a later, separate decision.
+- [x] ✅ Nothing is blocked by this plan. Blocking is a later, separate
+  decision. Established three independent ways, because "it never blocked"
+  is the kind of claim that is easy to assert and easy to be wrong about:
+
+  1. **Structural** — the module contains zero `DENY` tokens, so there is no
+     blocking code path for a future edit to reach by forgetting a flag.
+  2. **By reading** — `handle()` has exactly one gating return, and it is
+     `Decision.ALLOW`.
+  3. **Empirically** — 1,787 live `orchestrator-simulate` records in
+     `verdicts.jsonl`, every one `allow`.
+
+  The third is only worth anything because of its control: the same log
+  carries thousands of `deny` records from other handlers, so "all allow"
+  means this handler never denied, not that the log fails to record denials.
+  Without that check the evidence would have been indistinguishable from a
+  broken logger.
 
 - [ ] ⬜ Full QA passes, the daemon restarts, CI green.
 
