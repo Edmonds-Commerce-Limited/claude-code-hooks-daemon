@@ -6,7 +6,7 @@ a common vector for malware and system compromise.
 """
 
 import re
-from typing import Any, Final
+from typing import Any
 
 from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
@@ -47,15 +47,13 @@ _CURL_PIPE_SHELL_VERBOSE_CONTENT = (
 # these is a remote-code-execution risk and must be blocked.
 _PIPED_INTERPRETERS = ("bash", "sh", "zsh", "ksh", "dash", "python", "perl", "ruby")
 
-# The allowlist of heredoc receivers that consume a body as DATA now lives in
-# `utils.shell_segmentation` as DATA_SINKS. It was defined here, and the
-# reasoning behind it (Plan 00335 Decision 1) stayed here with it -- so the
-# eight other handlers that blank heredoc bodies never inherited the check,
-# and `bash <<'EOF'` walked past five data-loss rules until Plan 00409. The
-# constant moved to the module that does the blanking; this handler keeps its
-# OWN use of it below, because it withholds the exemption before the blanking
-# rather than relying on it.
-_DATA_SINKS: Final[frozenset[str]] = DATA_SINKS
+# The allowlist of heredoc receivers that consume a body as DATA is imported
+# from `utils.shell_segmentation` rather than defined here. It WAS defined
+# here, and the reasoning behind it (Plan 00335 Decision 1) stayed here with
+# it -- so the eight other handlers that blank heredoc bodies never inherited
+# the check, and `bash <<'EOF'` walked past five data-loss rules until Plan
+# 00409. This handler still applies it itself below, because it withholds the
+# exemption BEFORE the blanking rather than relying on it.
 
 # An OPTIONAL version suffix on the interpreter name, e.g. `python3`,
 # `python3.12`, `ruby3`, `perl5`. `_PIPED_INTERPRETERS` lists BARE names and a
@@ -198,7 +196,7 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
         safety-critical handler.
 
         The exemption is therefore granted only when EVERY quoted heredoc in
-        the command feeds a recognised data sink (``_DATA_SINKS``). An
+        the command feeds a recognised data sink (``DATA_SINKS``). An
         unrecognised receiver withholds it, so the body is scanned rather than
         blanked (Plan 00335 Decision 1).
 
@@ -216,11 +214,11 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
         Withholding is deliberately the cheap error, and cheaper than it looks:
         it does not deny the command, it scans the body. A denial follows only
         if that body ALSO carries the ``curl … | bash`` pattern, so an omission
-        from ``_DATA_SINKS`` costs a false denial in a narrow case, while an
+        from ``DATA_SINKS`` costs a false denial in a narrow case, while an
         omission from a list of executors cost remote code execution.
         """
         command_words = quoted_heredoc_command_words(command)
-        if any(word not in _DATA_SINKS for word in command_words):
+        if any(word not in DATA_SINKS for word in command_words):
             return command
         blanked = strip_quoted_heredoc_bodies(command)
         # A sink's output can itself be piped into an interpreter, which

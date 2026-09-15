@@ -828,7 +828,7 @@ class TestSinkAllowlistFailsClosed:
     def test_a_database_client_shell_escape_is_not_a_data_sink(self, handler, client, escape):
         """Three clients on the sink list run shell commands from stdin.
 
-        `_DATA_SINKS` says its members "consume a quoted heredoc body as DATA
+        `DATA_SINKS` says its members "consume a quoted heredoc body as DATA
         and never execute it", and excludes `awk`, `ssh`, `sed` and `crontab`
         for exactly this reason. But `sqlite3` has `.shell`/`.system`, `psql`
         has `\\!` and `mysql` has `system`, so each executes a line of the body
