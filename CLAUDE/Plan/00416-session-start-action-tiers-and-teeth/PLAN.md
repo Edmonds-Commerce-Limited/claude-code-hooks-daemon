@@ -113,9 +113,21 @@ enforcement and therefore neither can be gamed into teeth.
 
 ### Phase 2: Wire together and dogfood
 
-- [ ] ⬜ **Task 2.1**: Point `persistent_cron_assertor` at Task 1.1's checker as
-  its verifier, so the cron case flows through the computed tier rather than
-  being special-cased.
+- [ ] ⬜ **Task 2.1**: ~~Point `persistent_cron_assertor` at Task 1.1's checker
+  as its verifier~~ — **not buildable as written, and the reason is the same
+  one that created Task 1.1.** The checker's only input is `session_crons`,
+  which is not delivered to `SessionStart`; that absence is precisely why the
+  teeth had to live at `Stop`. A SessionStart verifier would have nothing to
+  verify against, and a verifier that cannot fail can never compute
+  `ACTION_REQUIRED` — so wiring it up would produce a permanently-`INFO`
+  advisory dressed as a tier.
+
+  Needs a restatement rather than an attempt. The honest options: leave the
+  cron case OUT of the computed tier and let the Stop block carry it alone
+  (the tier system is for things checkable at session start, and this is not
+  one); or give the assertor a different, genuinely-SessionStart-checkable
+  verifier — but nothing at that point in the lifecycle can see a session's
+  crons, so there may be no such signal to find.
 
 - [ ] ⬜ **Task 2.2**: Classify the remaining handlers. Candidates for a
   verifier beyond crons: `project_handler_load_checker` and

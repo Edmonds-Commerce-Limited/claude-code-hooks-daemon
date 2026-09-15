@@ -113,8 +113,17 @@ does. The simulated run exists to answer this from data rather than taste.
 
 ### Phase 2: Decide from the record
 
-- [ ] ⬜ **Task 2.1**: Review what it would have denied, and settle the
-  coordination-tool boundary from that evidence.
+- [ ] 🔄 **Task 2.1**: Review what it would have denied, and settle the
+  coordination-tool boundary from that evidence. **Review done, boundary not
+  settled — and the record is why.** 437 would-be denials in one session:
+  Bash 277, Write 122, Edit 33, Artifact 4, CronList 1, ToolSearch 1, and
+  `Read` zero. Reads are already exempt, so the boundary is not too tight in
+  the way first suspected. But Bash is 63% of the total and spans both sides of
+  the line — `git status` and a QA run are coordination, and both are Bash —
+  while the verdict record carries `tool` without the command. The evidence
+  cannot separate them. Owner input needed: record enough to classify Bash, or
+  draw the boundary on `Write`/`Edit` alone, where 155 calls need no
+  interpretation at all.
 
 - [ ] ⬜ **Task 2.2**: Owner decision on promoting to blocking, and separately
   on promoting to the shipped library. Either may be "no".
