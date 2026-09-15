@@ -1257,6 +1257,24 @@ documentation:
       - "src/claude_code_hooks_daemon/skills/**"
       - "src/claude_code_hooks_daemon/guides/**"
       - "src/claude_code_hooks_daemon/install/templates/**"
+      # Plan 00412: a subagent report is TESTIMONY -- what one reviewer found,
+      # at one commit, in one dispatch. Same principle as the versioned upgrade
+      # guides above ("truth is enforced on LIVE plans, never on the historical
+      # record"), and the reports are even less editable: they are the evidence
+      # a finding was graded from.
+      #
+      # `duplicate-block` is the check that reaches them, and on this tree it
+      # is inverted. Two independent reviewers quoting the same source is
+      # CORROBORATION -- it is precisely what made run 2026-001's quote_drift
+      # finding credible, since D-PATH and D-SEC arrived at it separately. The
+      # check cannot distinguish that from copy-paste drift, and the remedy it
+      # would prescribe (collapse one copy) would destroy the agreement.
+      #
+      # Excluded rather than grandfathered because this is permanent and
+      # correct, not legacy debt: every future security-review run produces a
+      # fresh batch, and a check that reports the same benign thing every time
+      # teaches its reader to skim the section it lives in.
+      - "**/subagent-reports/**"
     generated_docs:
       - glob: ".claude/HOOKS-DAEMON.md"
         generator: "bin/hooks-daemon generate-docs"
