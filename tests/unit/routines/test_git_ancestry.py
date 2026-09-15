@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.routines.git_ancestry import GitAncestry
 
 
@@ -32,7 +33,7 @@ def _git(repo: Path, *args: str) -> str:
         capture_output=True,
         text=True,
         check=True,
-        timeout=30,
+        timeout=Timeout.GIT_COMMIT,
     )
     return completed.stdout.strip()
 

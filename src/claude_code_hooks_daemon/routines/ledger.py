@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
 from claude_code_hooks_daemon.routines.intervals import RunInterval
 
@@ -171,7 +171,7 @@ def read_events(routine_dir: Path) -> list[RunEvent]:
 
     events: list[RunEvent] = []
     for path in sorted(runs_dir.glob("*.md")):
-        events.extend(_parse_file(path))
+        events.extend(_parse_file(path).events)
     return events
 
 
@@ -195,14 +195,7 @@ def malformed_rows(routine_dir: Path) -> list[str]:
 
     problems: list[str] = []
     for path in sorted(runs_dir.glob("*.md")):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            cells = _split_row(line)
-            if cells is None:
-                continue
-            try:
-                _event_from_cells(cells)
-            except ValueError as error:
-                problems.append(f"{path.name}: row '{cells[0]}' is unreadable ({error})")
+        problems.extend(_parse_file(path).unreadable)
     return problems
 
 
@@ -275,13 +268,28 @@ def _unescaped(cell: str) -> str:
     return cell.replace("\\|", "|")
 
 
-def _parse_file(path: Path) -> list[RunEvent]:
+class _ParsedRows(NamedTuple):
+    """One year file, split into what parsed and what did not."""
+
+    events: list[RunEvent]
+    unreadable: list[str]
+
+
+def _parse_file(path: Path) -> _ParsedRows:
     """Every data row in one year file, in file order.
 
     Header and divider rows are skipped by shape rather than by position, so a
     file someone has annotated above the table still parses.
+
+    A row that cannot become an event is RETURNED, not logged. Raising would
+    take the whole QA sweep with it, and a sweep that reports nothing is
+    indistinguishable from one that found nothing — but logging and dropping
+    has the same end state for every reader who is not tailing the log. Handing
+    both halves back means the two callers cannot disagree about a row: it is
+    either an event or a reported problem, never neither.
     """
     events: list[RunEvent] = []
+    unreadable: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         cells = _split_row(line)
         if cells is None:
@@ -289,17 +297,8 @@ def _parse_file(path: Path) -> list[RunEvent]:
         try:
             events.append(_event_from_cells(cells))
         except ValueError as error:
-            # A hand-edited row. Skipped rather than raised, because raising
-            # takes the whole QA sweep with it and a sweep that reports
-            # nothing is indistinguishable from one that found nothing.
-            # NOT swallowed: `malformed_rows` reports exactly these, so the
-            # row surfaces as a finding instead of a crash or a silence.
-            logger.warning(
-                "routines: unreadable ledger row in %s (%s); skipped — `malformed_rows` reports it",
-                path,
-                error,
-            )
-    return events
+            unreadable.append(f"{path.name}: row '{cells[0]}' is unreadable ({error})")
+    return _ParsedRows(events=events, unreadable=unreadable)
 
 
 def _split_row(line: str) -> list[str] | None:

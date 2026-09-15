@@ -192,9 +192,8 @@ def _section(document: str, heading: str) -> str | None:
         treats differently from absence.
     """
     lines = document.splitlines()
-    try:
-        start = next(i for i, line in enumerate(lines) if line.strip() == heading)
-    except StopIteration:
+    start = next((i for i, line in enumerate(lines) if line.strip() == heading), None)
+    if start is None:
         return None
 
     body: list[str] = []

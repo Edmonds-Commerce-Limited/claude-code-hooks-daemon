@@ -25,6 +25,9 @@ def test_register_and_get_strategy() -> None:
         def is_production_source(self, file_path: str) -> bool:
             return True
 
+        def is_excluded_source_file(self, file_path: str) -> bool:
+            return False
+
         def should_skip(self, file_path: str, content: str = "") -> bool:
             return False
 
@@ -68,6 +71,9 @@ def test_get_strategy_case_insensitive() -> None:
         def is_production_source(self, file_path: str) -> bool:
             return True
 
+        def is_excluded_source_file(self, file_path: str) -> bool:
+            return False
+
         def should_skip(self, file_path: str, content: str = "") -> bool:
             return False
 
@@ -104,6 +110,9 @@ def test_register_multiple_extensions() -> None:
 
         def is_production_source(self, file_path: str) -> bool:
             return True
+
+        def is_excluded_source_file(self, file_path: str) -> bool:
+            return False
 
         def should_skip(self, file_path: str, content: str = "") -> bool:
             return False
@@ -144,6 +153,9 @@ def test_registered_languages() -> None:
         def is_production_source(self, file_path: str) -> bool:
             return True
 
+        def is_excluded_source_file(self, file_path: str) -> bool:
+            return False
+
         def should_skip(self, file_path: str, content: str = "") -> bool:
             return False
 
@@ -169,6 +181,9 @@ def test_registered_languages() -> None:
 
         def is_production_source(self, file_path: str) -> bool:
             return True
+
+        def is_excluded_source_file(self, file_path: str) -> bool:
+            return False
 
         def should_skip(self, file_path: str, content: str = "") -> bool:
             return False
