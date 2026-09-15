@@ -593,9 +593,9 @@ class TestAWideRangeIsRejectedBeforeItIsBuilt:
         start = time.perf_counter()
         assert sfm.find_protected_mention(content, ("*.secret*",)) is None
         elapsed = time.perf_counter() - start
-        assert elapsed < _WIDE_RANGE_BUDGET_SECONDS, (
-            f"twenty wide-range tokens took {elapsed:.3f}s on the PreToolUse hot path"
-        )
+        assert (
+            elapsed < _WIDE_RANGE_BUDGET_SECONDS
+        ), f"twenty wide-range tokens took {elapsed:.3f}s on the PreToolUse hot path"
 
     def test_edge_predicates_are_left_untouched(self) -> None:
         """The fix deliberately does NOT redefine the edge predicates — the

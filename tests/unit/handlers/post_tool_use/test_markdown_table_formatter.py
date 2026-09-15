@@ -542,7 +542,7 @@ class TestConcurrentWriteIsNotDiscarded:
         ):
             result = handler.handle({"tool_name": "Write", "tool_input": {"file_path": str(path)}})
 
-        assert path.read_text(encoding="utf-8") == newer, (
-            "the formatter silently reverted a write it did not make"
-        )
+        assert (
+            path.read_text(encoding="utf-8") == newer
+        ), "the formatter silently reverted a write it did not make"
         assert result.decision == Decision.ALLOW

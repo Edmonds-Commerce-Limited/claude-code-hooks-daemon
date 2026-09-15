@@ -244,9 +244,9 @@ class TestProfileHandlerListIntegrity:
 
     def test_every_profile_handler_exists_in_shipped_example(self) -> None:
         """Each profile handler name MUST be a key in the shipped example config."""
-        assert SHIPPED_EXAMPLE_CONFIG.is_file(), (
-            f"shipped example config missing: {SHIPPED_EXAMPLE_CONFIG}"
-        )
+        assert (
+            SHIPPED_EXAMPLE_CONFIG.is_file()
+        ), f"shipped example config missing: {SHIPPED_EXAMPLE_CONFIG}"
         declared = config_handler_names(SHIPPED_EXAMPLE_CONFIG.read_text())
         unknown = sorted(all_profile_handler_names() - declared)
         assert not unknown, (
@@ -292,6 +292,6 @@ class TestProfileHandlerListIntegrity:
             apply_profile(config_path, "recommended")
 
         # tdd_enforcement is in 'recommended' but absent from this config.
-        assert any("tdd_enforcement" in rec.message for rec in caplog.records), (
-            f"expected a warning naming the absent handler, got: {caplog.records!r}"
-        )
+        assert any(
+            "tdd_enforcement" in rec.message for rec in caplog.records
+        ), f"expected a warning naming the absent handler, got: {caplog.records!r}"

@@ -352,9 +352,9 @@ class TestCooldownIsNotSpentOnADeniedCall:
         assert handler.handle(hook_input).context == []  # 0 calls since fire
         handler.commit_side_effects(hook_input, Decision.DENY)  # that call never ran
 
-        assert handler.handle(hook_input).context == [], (
-            "a denied call was counted as a call between fires"
-        )
+        assert (
+            handler.handle(hook_input).context == []
+        ), "a denied call was counted as a call between fires"
 
     def test_a_second_handle_without_a_commit_keeps_the_first_firing(
         self, handler: CommandHintsHandler

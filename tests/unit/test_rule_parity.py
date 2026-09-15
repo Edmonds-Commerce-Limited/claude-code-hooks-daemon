@@ -116,9 +116,9 @@ class TestNoDuplicateRuleIds:
                 )
             else:
                 seen[rule.rule_id] = handler.config_key
-        assert not duplicates, (
-            "Duplicate RuleID(s) declared by more than one handler: " + "; ".join(duplicates)
-        )
+        assert (
+            not duplicates
+        ), "Duplicate RuleID(s) declared by more than one handler: " + "; ".join(duplicates)
 
     def test_every_rule_id_is_a_declared_ruleid_constant(
         self, all_rules: list[tuple[HandlerRules, Rule]]
@@ -146,9 +146,9 @@ class TestNoDuplicateRuleIds:
                 if not _RULE_ID_PATTERN.match(rule.rule_id)
             }
         )
-        assert not malformed, (
-            f"Rule ID(s) violating the R-SCREAMING-KEBAB-CASE convention: {malformed}"
-        )
+        assert (
+            not malformed
+        ), f"Rule ID(s) violating the R-SCREAMING-KEBAB-CASE convention: {malformed}"
 
 
 # ---------------------------------------------------------------------------
@@ -418,9 +418,9 @@ class TestDenyingHandlerDeclaresRulesOrIsAllowlisted:
     @pytest.mark.parametrize("class_name", sorted(_DENY_WITHOUT_RULES_ALLOWLIST))
     def test_every_allowlist_entry_carries_a_reason(self, class_name: str) -> None:
         reason = _DENY_WITHOUT_RULES_ALLOWLIST[class_name]
-        assert len(reason.split()) >= 10, (
-            f"{class_name}: the allowlist reason is too short to be an argument ({reason!r})."
-        )
+        assert (
+            len(reason.split()) >= 10
+        ), f"{class_name}: the allowlist reason is too short to be an argument ({reason!r})."
 
     @pytest.mark.parametrize("class_name", sorted(_DENY_WITHOUT_RULES_ALLOWLIST))
     def test_an_allowlist_entry_is_dropped_once_it_declares_rules(self, class_name: str) -> None:

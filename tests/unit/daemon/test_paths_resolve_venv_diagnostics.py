@@ -413,9 +413,9 @@ class TestMetadataDrivenResolution:
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved == py
-        assert any("step 2" in s and "metadata" in s.lower() and "OK" in s for s in steps), (
-            f"expected step 2 metadata OK in trace; got: {steps}"
-        )
+        assert any(
+            "step 2" in s and "metadata" in s.lower() and "OK" in s for s in steps
+        ), f"expected step 2 metadata OK in trace; got: {steps}"
 
     def test_metadata_match_preferred_over_fingerprint_keyed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -437,9 +437,9 @@ class TestMetadataDrivenResolution:
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved == py_meta, "metadata-bearing venv must win over fingerprint-keyed legacy"
-        assert any("step 2" in s and "OK" in s for s in steps), (
-            f"trace must show step 2 metadata hit; got: {steps}"
-        )
+        assert any(
+            "step 2" in s and "OK" in s for s in steps
+        ), f"trace must show step 2 metadata hit; got: {steps}"
 
     def test_metadata_lock_hash_mismatch_is_skipped_as_stale(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -505,9 +505,9 @@ class TestMetadataDrivenResolution:
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved is None
         step2 = next(s for s in steps if s.startswith("step 2"))
-        assert "missing" in step2.lower() or "not executable" in step2.lower(), (
-            f"step 2 must report missing python_path; got: {step2}"
-        )
+        assert (
+            "missing" in step2.lower() or "not executable" in step2.lower()
+        ), f"step 2 must report missing python_path; got: {step2}"
 
     def test_metadata_malformed_json_falls_through(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -558,9 +558,9 @@ class TestMetadataDrivenResolution:
         # Scan fallback still hits bin/python.
         assert resolved == py
         step2 = next(s for s in steps if s.startswith("step 2"))
-        assert "pyproject" in step2.lower() or "no lock" in step2.lower(), (
-            f"step 2 must mention inability to compute current lock_hash; got: {step2}"
-        )
+        assert (
+            "pyproject" in step2.lower() or "no lock" in step2.lower()
+        ), f"step 2 must mention inability to compute current lock_hash; got: {step2}"
 
 
 class TestLegacyStampMigration:
@@ -584,15 +584,15 @@ class TestLegacyStampMigration:
         (keyed / ".daemon-version").write_text("v3.2.0\n")  # legacy stamp, no metadata
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
-        assert resolved is None, (
-            "legacy-stamp-only venv must NOT be resolvable — it's stale and needs rebuild"
-        )
+        assert (
+            resolved is None
+        ), "legacy-stamp-only venv must NOT be resolvable — it's stale and needs rebuild"
         migration_step = next(
             (s for s in steps if "legacy" in s.lower() and "stamp" in s.lower()), None
         )
-        assert migration_step is not None, (
-            f"expected clear migration diagnostic naming 'legacy stamp'; got: {steps}"
-        )
+        assert (
+            migration_step is not None
+        ), f"expected clear migration diagnostic naming 'legacy stamp'; got: {steps}"
 
     def test_scan_fallback_skips_legacy_stamped_venv(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -843,12 +843,12 @@ class TestMissingPersistedPythonRecovery:
             "the fallthrough lets ensure_venv rebuild with the alternative"
         )
         recovery_step = next((s for s in steps if "compatible alternative" in s.lower()), None)
-        assert recovery_step is not None, (
-            f"expected diagnostic mentioning 'compatible alternative'; got: {steps}"
-        )
-        assert str(alternative) in recovery_step, (
-            f"recovery diagnostic must name the alternative path {alternative}; got: {recovery_step}"
-        )
+        assert (
+            recovery_step is not None
+        ), f"expected diagnostic mentioning 'compatible alternative'; got: {steps}"
+        assert (
+            str(alternative) in recovery_step
+        ), f"recovery diagnostic must name the alternative path {alternative}; got: {recovery_step}"
 
     def test_missing_python_with_no_compatible_alternative(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -881,9 +881,9 @@ class TestMissingPersistedPythonRecovery:
             (s for s in steps if "install" in s.lower() and ("3.11" in s or "3.11+" in s)),
             None,
         )
-        assert actionable_step is not None, (
-            f"expected actionable 'install Python 3.11+' diagnostic; got: {steps}"
-        )
+        assert (
+            actionable_step is not None
+        ), f"expected actionable 'install Python 3.11+' diagnostic; got: {steps}"
 
     def test_missing_python_diagnostic_names_the_lost_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -911,9 +911,9 @@ class TestMissingPersistedPythonRecovery:
 
         _, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         joined = " | ".join(steps)
-        assert lost_path in joined, (
-            f"expected lost python_path {lost_path} named in diagnostics; got: {joined}"
-        )
+        assert (
+            lost_path in joined
+        ), f"expected lost python_path {lost_path} named in diagnostics; got: {joined}"
 
     def test_find_latest_python_returns_none_when_empty_path(
         self, monkeypatch: pytest.MonkeyPatch

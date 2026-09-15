@@ -728,9 +728,9 @@ class TestClaudeMdInjectorAutoCommit:
             capture_output=True,
             text=True,
         )
-        assert result.stdout.strip().startswith("A"), (
-            "other.txt should still be staged, not committed"
-        )
+        assert result.stdout.strip().startswith(
+            "A"
+        ), "other.txt should still be staged, not committed"
 
     def test_auto_commit_failure_does_not_raise(self, tmp_path: Path) -> None:
         """If git commit fails for any reason, inject still succeeds."""
@@ -999,9 +999,9 @@ class TestAutoCommitDoesNotFightTheAgentForTheIndexLock:
 
         warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
         assert warnings, "lock contention produced no WARNING"
-        assert any("index.lock" in r.getMessage() for r in warnings), (
-            f"the WARNING did not carry git's own reason: {[r.getMessage() for r in warnings]}"
-        )
+        assert any(
+            "index.lock" in r.getMessage() for r in warnings
+        ), f"the WARNING did not carry git's own reason: {[r.getMessage() for r in warnings]}"
 
 
 class TestClaudeMdInjectorFormatting:
@@ -1136,9 +1136,9 @@ class TestConcurrentEditIsNotDiscarded:
         ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
 
         final = claude_md.read_text()
-        assert "CONCURRENT USER EDIT" in final, (
-            "the daemon silently discarded an edit made outside the generated block"
-        )
+        assert (
+            "CONCURRENT USER EDIT" in final
+        ), "the daemon silently discarded an edit made outside the generated block"
         assert _OPEN_TAG in final, "the generated block must still be injected"
         assert "Original prose." in final, "pre-existing user content must survive too"
 
@@ -1172,9 +1172,9 @@ class TestConcurrentEditIsNotDiscarded:
         ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
 
         final = claude_md.read_text()
-        assert f"EDIT NUMBER {len(counter)}" in final, (
-            "the last writer's content must survive untouched"
-        )
+        assert (
+            f"EDIT NUMBER {len(counter)}" in final
+        ), "the last writer's content must survive untouched"
         assert _OPEN_TAG not in final, "no block should be written from a stale snapshot"
 
 
@@ -1364,9 +1364,9 @@ class TestTwoTierPromotedBlock:
         injector.inject()
 
         content = claude_md.read_text()
-        assert "This prose must not be resident when nothing is promoted." not in content, (
-            "empty promoted_handlers must still reduce rules-bearing handlers to table rows"
-        )
+        assert (
+            "This prose must not be resident when nothing is promoted." not in content
+        ), "empty promoted_handlers must still reduce rules-bearing handlers to table rows"
         assert "R-SED-EXEC" in content
         assert "some_advisory — a reminder" in content, "advisory heading one-liner present"
         assert "Advisory body prose." not in content, "advisory body must not be resident"

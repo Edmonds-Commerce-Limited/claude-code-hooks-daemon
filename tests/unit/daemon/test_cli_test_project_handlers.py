@@ -101,9 +101,9 @@ class TestTestProjectHandlers:
 
         output = "".join(capsys.readouterr()[:2])
         assert "pytest" in output
-        assert "pip install" in output, (
-            f"Error must tell the user how to install pytest. Got:\n{output}"
-        )
+        assert (
+            "pip install" in output
+        ), f"Error must tell the user how to install pytest. Got:\n{output}"
 
     def test_does_not_invoke_pytest_when_it_is_absent(self, tmp_path: Path) -> None:
         """Fail fast: do not spawn a subprocess that is known to fail."""

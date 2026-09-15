@@ -114,9 +114,9 @@ class TestLedger:
         which is how four template revisions shipped unledgered.
         """
         for spec in SHIPPED_AGENTS:
-            assert spec.md5 == content_md5(spec_source_path(spec).read_text()), (
-                f"{spec.name}: bundled content does not match the declared md5 for v{spec.version}"
-            )
+            assert spec.md5 == content_md5(
+                spec_source_path(spec).read_text()
+            ), f"{spec.name}: bundled content does not match the declared md5 for v{spec.version}"
 
     def test_the_ledger_reports_the_declared_md5_not_the_file(
         self, monkeypatch: pytest.MonkeyPatch

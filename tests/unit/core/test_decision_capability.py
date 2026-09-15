@@ -228,9 +228,9 @@ class TestAnEventThatCannotDeliverIsReported:
         ["SessionStart", "SessionEnd", "Notification"],
     )
     def test_a_deny_on_a_message_only_event_is_reported(self, event_name: str) -> None:
-        assert undeliverable_decisions(RefusingProbe, event_name), (
-            f"a DENY on {event_name} cannot block, and was not reported"
-        )
+        assert undeliverable_decisions(
+            RefusingProbe, event_name
+        ), f"a DENY on {event_name} cannot block, and was not reported"
 
     def test_a_deny_on_a_permissive_schema_event_is_still_reported(self) -> None:
         """The case schema validation alone cannot catch.

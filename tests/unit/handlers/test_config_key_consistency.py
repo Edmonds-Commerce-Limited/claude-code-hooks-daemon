@@ -47,13 +47,12 @@ class TestConfigKeyConsistency:
                 )
 
         # This will FAIL with current constants
-        assert len(mismatches) == 0, (
-            f"Found {len(mismatches)} config key mismatches:\n"
-            + "\n".join(
-                f"  {m['handler']}: constant='{m['constant']}' != "
-                f"auto_gen='{m['auto_generated']}' (class={m['class_name']})"
-                for m in mismatches
-            )
+        assert (
+            len(mismatches) == 0
+        ), f"Found {len(mismatches)} config key mismatches:\n" + "\n".join(
+            f"  {m['handler']}: constant='{m['constant']}' != "
+            f"auto_gen='{m['auto_generated']}' (class={m['class_name']})"
+            for m in mismatches
         )
 
     def test_registry_should_use_handler_id_constants(self) -> None:
@@ -114,9 +113,9 @@ class TestConfigKeyConsistency:
 
         for class_name, expected_key in test_cases:
             actual_key = _to_snake_case(class_name)
-            assert actual_key == expected_key, (
-                f"_to_snake_case('{class_name}') = '{actual_key}', expected '{expected_key}'"
-            )
+            assert (
+                actual_key == expected_key
+            ), f"_to_snake_case('{class_name}') = '{actual_key}', expected '{expected_key}'"
 
     def test_handler_id_constants_have_required_fields(self) -> None:
         """Test that all HandlerID constants have required fields.
@@ -135,30 +134,30 @@ class TestConfigKeyConsistency:
                 continue
 
             # All three fields must be non-empty strings
-            assert isinstance(attr.class_name, str) and attr.class_name, (
-                f"{attr_name}.class_name must be non-empty string"
-            )
-            assert isinstance(attr.config_key, str) and attr.config_key, (
-                f"{attr_name}.config_key must be non-empty string"
-            )
-            assert isinstance(attr.display_name, str) and attr.display_name, (
-                f"{attr_name}.display_name must be non-empty string"
-            )
+            assert (
+                isinstance(attr.class_name, str) and attr.class_name
+            ), f"{attr_name}.class_name must be non-empty string"
+            assert (
+                isinstance(attr.config_key, str) and attr.config_key
+            ), f"{attr_name}.config_key must be non-empty string"
+            assert (
+                isinstance(attr.display_name, str) and attr.display_name
+            ), f"{attr_name}.display_name must be non-empty string"
 
             # class_name should be PascalCase (starts with uppercase)
-            assert attr.class_name[0].isupper(), (
-                f"{attr_name}.class_name '{attr.class_name}' should be PascalCase"
-            )
+            assert attr.class_name[
+                0
+            ].isupper(), f"{attr_name}.class_name '{attr.class_name}' should be PascalCase"
 
             # config_key should be snake_case (no uppercase, no hyphens)
-            assert attr.config_key.islower(), (
-                f"{attr_name}.config_key '{attr.config_key}' should be lowercase"
-            )
-            assert "-" not in attr.config_key, (
-                f"{attr_name}.config_key '{attr.config_key}' should not contain hyphens"
-            )
+            assert (
+                attr.config_key.islower()
+            ), f"{attr_name}.config_key '{attr.config_key}' should be lowercase"
+            assert (
+                "-" not in attr.config_key
+            ), f"{attr_name}.config_key '{attr.config_key}' should not contain hyphens"
 
             # display_name should be kebab-case (lowercase with hyphens allowed)
-            assert attr.display_name.islower() or "-" in attr.display_name, (
-                f"{attr_name}.display_name '{attr.display_name}' should be kebab-case"
-            )
+            assert (
+                attr.display_name.islower() or "-" in attr.display_name
+            ), f"{attr_name}.display_name '{attr.display_name}' should be kebab-case"

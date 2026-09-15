@@ -132,9 +132,9 @@ def test_non_executable_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
     result = find_latest_python((3, 11))
 
-    assert result == expected, (
-        f"non-exec python3.13 must be skipped; expected python3.14, got {result!r}"
-    )
+    assert (
+        result == expected
+    ), f"non-exec python3.13 must be skipped; expected python3.14, got {result!r}"
 
 
 def test_glob_does_not_match_python3_config(
@@ -283,9 +283,9 @@ def test_pyproject_requires_python_never_lowers_floor(
     result = find_latest_python((3, 13), require_pyproject=pyproject)
 
     assert result is not None
-    assert result.name == "python3.13", (
-        f"caller floor 3.13 must hold even when pyproject says 3.10; got {result!r}"
-    )
+    assert (
+        result.name == "python3.13"
+    ), f"caller floor 3.13 must hold even when pyproject says 3.10; got {result!r}"
 
 
 # ----- find_latest_python_or_explain (diagnostics) -----
@@ -309,9 +309,9 @@ def test_explain_returns_probe_list_when_below_floor(
     chosen, probes = find_latest_python_or_explain((3, 11))
 
     assert chosen is None
-    assert any("3.9" in p.version_full for p in probes), (
-        f"probes must include observed python3.9, got {probes!r}"
-    )
+    assert any(
+        "3.9" in p.version_full for p in probes
+    ), f"probes must include observed python3.9, got {probes!r}"
 
 
 def test_explain_returns_chosen_with_probes_on_success(
@@ -608,6 +608,6 @@ def test_env_override_relative_unresolvable_fails_fast(
 
     result = find_latest_python((3, 11))
 
-    assert result is None, (
-        f"unresolvable bare HOOKS_DAEMON_PYTHON must NOT fall back to PATH, got {result!r}"
-    )
+    assert (
+        result is None
+    ), f"unresolvable bare HOOKS_DAEMON_PYTHON must NOT fall back to PATH, got {result!r}"

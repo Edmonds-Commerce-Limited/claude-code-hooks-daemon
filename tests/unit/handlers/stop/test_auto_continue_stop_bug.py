@@ -106,9 +106,9 @@ class TestAutoContinueStopBug:
             }
 
             # All variations should match
-            assert handler.matches(hook_input) is True, (
-                f"Handler should match '{message_text}' but didn't"
-            )
+            assert (
+                handler.matches(hook_input) is True
+            ), f"Handler should match '{message_text}' but didn't"
 
     def test_error_patterns_match_with_default_continue_on_errors(self, tmp_path: Path) -> None:
         """With default continue_on_errors=True, error+question patterns SHOULD match."""
@@ -142,9 +142,9 @@ class TestAutoContinueStopBug:
             }
 
             # Error patterns SHOULD match with continue_on_errors=True
-            assert handler.matches(hook_input) is True, (
-                f"Handler should match error pattern '{message_text}' with continue_on_errors=True"
-            )
+            assert (
+                handler.matches(hook_input) is True
+            ), f"Handler should match error pattern '{message_text}' with continue_on_errors=True"
 
     def test_error_patterns_blocked_with_continue_on_errors_false(self, tmp_path: Path) -> None:
         """With continue_on_errors=False, error patterns should NOT match."""
@@ -178,13 +178,13 @@ class TestAutoContinueStopBug:
             }
 
             # matches() always returns True now — routing is in handle()
-            assert handler.matches(hook_input) is True, (
-                f"Handler should always match (routing moved to handle()): '{message_text}'"
-            )
+            assert (
+                handler.matches(hook_input) is True
+            ), f"Handler should always match (routing moved to handle()): '{message_text}'"
             result = handler.handle(hook_input)
             assert result.decision == Decision.DENY
             # Must NOT emit auto-continue confirmation — requires stop explanation instead
             reason: str = result.reason or ""
-            assert not reason.startswith("AUTO-CONTINUE: Yes"), (
-                f"Handler should not auto-continue for error message: '{message_text}'"
-            )
+            assert not reason.startswith(
+                "AUTO-CONTINUE: Yes"
+            ), f"Handler should not auto-continue for error message: '{message_text}'"

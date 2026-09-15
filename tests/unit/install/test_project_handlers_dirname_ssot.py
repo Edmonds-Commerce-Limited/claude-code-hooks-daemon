@@ -124,12 +124,11 @@ class TestEventJsonKeyDerivation:
             if derived != meta.json_key:
                 mismatches.append((meta.config_key, derived, meta.json_key))
 
-        assert not mismatches, (
-            "install.py's event-name derivation disagrees with EventID for: "
-            + ", ".join(
-                f"{key}: derived {derived!r} != json_key {actual!r}"
-                for key, derived, actual in mismatches
-            )
+        assert (
+            not mismatches
+        ), "install.py's event-name derivation disagrees with EventID for: " + ", ".join(
+            f"{key}: derived {derived!r} != json_key {actual!r}"
+            for key, derived, actual in mismatches
         )
 
     def test_derivation_is_exercised_by_real_events(self) -> None:

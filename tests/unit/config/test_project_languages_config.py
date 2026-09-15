@@ -136,9 +136,9 @@ class TestRegistryLanguageInjection:
         found_handler = False
         for event_type, handlers in all_handlers.items():
             for handler in handlers:
-                assert hasattr(handler, "_project_languages"), (
-                    f"Handler {handler.name} missing _project_languages"
-                )
+                assert hasattr(
+                    handler, "_project_languages"
+                ), f"Handler {handler.name} missing _project_languages"
                 assert handler._project_languages == [
                     "Python",
                     "Go",
@@ -164,12 +164,12 @@ class TestRegistryLanguageInjection:
         found_handler = False
         for event_type, handlers in all_handlers.items():
             for handler in handlers:
-                assert hasattr(handler, "_project_languages"), (
-                    f"Handler {handler.name} missing _project_languages"
-                )
-                assert handler._project_languages is None, (
-                    f"Handler {handler.name} has wrong _project_languages"
-                )
+                assert hasattr(
+                    handler, "_project_languages"
+                ), f"Handler {handler.name} missing _project_languages"
+                assert (
+                    handler._project_languages is None
+                ), f"Handler {handler.name} has wrong _project_languages"
                 found_handler = True
 
         assert found_handler, "At least one handler should be registered"

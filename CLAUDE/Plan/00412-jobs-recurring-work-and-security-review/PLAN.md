@@ -261,34 +261,45 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   delta run MUST record which checks it did not run — a delta scan is
   structurally blind to a class of finding, which is what makes the periodic
   full sweep a compensating control rather than belt-and-braces.
-  Delivered as **two** routines, 00001 full (schedule) and 00002 delta
-  (release), sharing one check inventory: they cover different check sets, so
-  they need different coverage timelines, and a shared ledger would let a delta
-  run reset the full sweep's overdue clock. `Trigger: release` added as a
-  first-class value, deliberately with no clock of its own.
+  Two routines sharing one inventory — 00001 full (schedule), 00002 delta
+  (release) — because a shared ledger would let a delta run reset the full
+  sweep's overdue clock. `Trigger: release` added, with no clock of its own.
 
 - [x] ✅ **Task 3.2**: Living security documentation that grows by category as
   findings arrive, with each category naming its Defence.
-  `CLAUDE/Security/`: an index carrying the contract and the category table,
-  one file per category. A register of CLASSES, not a log of incidents — dates
-  live in `RUNS/` and git. It opens with a real category rather than an empty
-  table, because the first defect arrived while the register was being written.
+  `CLAUDE/Security/`: contract plus category table, one file per category. A
+  register of CLASSES, not a log of incidents. Opened with a real category —
+  the first defect arrived while the register was being written.
 
 - [x] ✅ **Task 3.3**: A specialist security-review sub-agent, and the run
   procedure that dispatches it.
   `.claude/agents/security-reviewer.md` — read-only, one CHECK per dispatch,
-  and every finding carries the class, why the tests miss it and a Detector
-  hypothesis, because the net is the deliverable and the fix is not. Distinct
-  from `hooks-daemon-opus-security`, which is a quarantine EXECUTOR for a
-  different problem. Both routines' step 3 dispatch it.
+  every finding carrying the class, why the tests miss it and a Detector
+  hypothesis. Distinct from `hooks-daemon-opus-security`, a quarantine
+  EXECUTOR for a different problem. Dispatched by both routines' step 3.
 
-- [ ] ⬜ **Task 3.4**: Run it once, end to end, and fix what it finds under
+- [ ] 🔄 **Task 3.4**: Run it once, end to end, and fix what it finds under
   Defence Before Fix — the Defence before the fix, every time. Each Defence is
   a Detector in `scripts/qa/`, wired into `run_all.sh` like every other check.
   Named explicitly because DBF clause 3.2 forbids the test from BEING the
   Detector: a regression test proves one instance was fixed, while a Detector
   finds the whole class and keeps finding it. Left implicit, this gets
   re-litigated at each finding and settled the cheap way.
+
+  **The run half is done.** Run `2026-001` performed all 15 checks, none
+  unanswerable, and is closed as `findings` over
+  `74b0989c -> 5d59f7ff` with 77 findings recorded in `subagent-reports/`.
+
+  **The fix half is not.** One class has completed DBF end to end —
+  `authored-path-resolution`: Detector committed red over 7 instances
+  (`20f5fe82`), fix after (`344ebf16`), `run_all.sh` check 25, register
+  category with five blind spots stated. The remaining ~6 classes are recorded
+  and unfixed. Several remedies are owner-gated because they change the gate
+  surface in every installing project.
+
+  Next unit is a consolidated worklist: 77 findings across 15 reports collapse
+  to roughly seven classes, and building Defences per REPORT would produce
+  overlapping Detectors for the same nets.
 
 ## Success Criteria
 

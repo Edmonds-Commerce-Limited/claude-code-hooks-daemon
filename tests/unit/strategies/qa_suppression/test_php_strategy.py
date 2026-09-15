@@ -137,9 +137,9 @@ def test_matches_phpstan_ignore_base() -> None:
     strategy = PhpQaSuppressionStrategy()
     patterns = strategy.forbidden_patterns
     text = f"/** {_phpstan_ignore_base_text()} argument.type */"
-    assert any(re.search(p, text, re.IGNORECASE) for p in patterns), (
-        "Should block @phpstan-ignore with error identifier"
-    )
+    assert any(
+        re.search(p, text, re.IGNORECASE) for p in patterns
+    ), "Should block @phpstan-ignore with error identifier"
 
 
 def test_matches_phpstan_ignore_without_identifier() -> None:
@@ -147,9 +147,9 @@ def test_matches_phpstan_ignore_without_identifier() -> None:
     strategy = PhpQaSuppressionStrategy()
     patterns = strategy.forbidden_patterns
     text = f"// {_phpstan_ignore_base_text()}"
-    assert any(re.search(p, text, re.IGNORECASE) for p in patterns), (
-        "Should block @phpstan-ignore base pattern"
-    )
+    assert any(
+        re.search(p, text, re.IGNORECASE) for p in patterns
+    ), "Should block @phpstan-ignore base pattern"
 
 
 def test_matches_phpcs_disable() -> None:
@@ -169,9 +169,9 @@ def test_matches_phpcs_disable_with_sniffs() -> None:
     strategy = PhpQaSuppressionStrategy()
     patterns = strategy.forbidden_patterns
     text = f"// {_phpcs_disable_text()} PEAR,Squiz.Arrays"
-    assert any(re.search(p, text, re.IGNORECASE) for p in patterns), (
-        "Should block phpcs:disable with sniff specifications"
-    )
+    assert any(
+        re.search(p, text, re.IGNORECASE) for p in patterns
+    ), "Should block phpcs:disable with sniff specifications"
 
 
 def test_matches_phpcs_enable() -> None:
@@ -207,9 +207,9 @@ def test_matches_coding_standards_ignore_start() -> None:
     strategy = PhpQaSuppressionStrategy()
     patterns = strategy.forbidden_patterns
     text = f"// {_coding_standards_ignore_start_text()}"
-    assert any(re.search(p, text, re.IGNORECASE) for p in patterns), (
-        "Should block @codingStandardsIgnoreStart (deprecated)"
-    )
+    assert any(
+        re.search(p, text, re.IGNORECASE) for p in patterns
+    ), "Should block @codingStandardsIgnoreStart (deprecated)"
 
 
 def test_matches_coding_standards_ignore_end() -> None:
@@ -221,9 +221,9 @@ def test_matches_coding_standards_ignore_end() -> None:
     strategy = PhpQaSuppressionStrategy()
     patterns = strategy.forbidden_patterns
     text = f"// {_coding_standards_ignore_end_text()}"
-    assert any(re.search(p, text, re.IGNORECASE) for p in patterns), (
-        "Should block @codingStandardsIgnoreEnd (deprecated)"
-    )
+    assert any(
+        re.search(p, text, re.IGNORECASE) for p in patterns
+    ), "Should block @codingStandardsIgnoreEnd (deprecated)"
 
 
 def test_matches_coding_standards_ignore_file() -> None:
@@ -235,6 +235,6 @@ def test_matches_coding_standards_ignore_file() -> None:
     strategy = PhpQaSuppressionStrategy()
     patterns = strategy.forbidden_patterns
     text = f"// {_coding_standards_ignore_file_text()}"
-    assert any(re.search(p, text, re.IGNORECASE) for p in patterns), (
-        "Should block @codingStandardsIgnoreFile (deprecated)"
-    )
+    assert any(
+        re.search(p, text, re.IGNORECASE) for p in patterns
+    ), "Should block @codingStandardsIgnoreFile (deprecated)"

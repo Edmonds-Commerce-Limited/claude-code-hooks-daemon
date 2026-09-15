@@ -117,9 +117,9 @@ class TestANewlineEndsTheCommand:
         self, label: str, handler_cls: type[Handler], first: str, second: str, genuine: str
     ) -> None:
         """Handlers fail CLOSED: narrowing the boundary must not open a hole."""
-        assert handler_cls().matches(_bash(genuine)) is True, (
-            f"{label}: stopped denying {genuine!r}, which is the real violation."
-        )
+        assert (
+            handler_cls().matches(_bash(genuine)) is True
+        ), f"{label}: stopped denying {genuine!r}, which is the real violation."
 
 
 class TestTheLineContinuationHoleStaysClosed:

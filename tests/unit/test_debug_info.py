@@ -60,9 +60,9 @@ def test_detects_client_project_root_not_daemon_clone(
 
     gen = debug_info_module.DebugInfoGenerator(output_file=str(tmp_path / "out.md"))
 
-    assert gen.project_root == project, (
-        f"project root must be the client project ({project}), not {gen.project_root}"
-    )
+    assert (
+        gen.project_root == project
+    ), f"project root must be the client project ({project}), not {gen.project_root}"
 
 
 def test_explicit_project_root_override(debug_info_module, tmp_path: Path) -> None:

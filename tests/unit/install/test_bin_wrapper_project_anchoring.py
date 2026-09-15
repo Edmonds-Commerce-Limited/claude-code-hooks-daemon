@@ -141,9 +141,9 @@ class TestWrapperAnchorsToItsOwnProject:
 
         argv = _run(wrapper, other, "status")
 
-        assert _anchored_root(argv) == str(mine.resolve()), (
-            f"wrapper at {wrapper} run from {other} did not anchor to its own project. argv={argv}"
-        )
+        assert _anchored_root(argv) == str(
+            mine.resolve()
+        ), f"wrapper at {wrapper} run from {other} did not anchor to its own project. argv={argv}"
 
     def test_self_install_wrapper_run_from_elsewhere_targets_its_own_project(
         self, tmp_path: Path
@@ -199,9 +199,9 @@ class TestExplicitOverrideStillWins:
 
         argv = _run(wrapper, mine, _PROJECT_ROOT_FLAG, str(chosen), "status")
 
-        assert _anchored_root(argv) == str(chosen), (
-            f"an explicit --project-root must override the derived anchor. argv={argv}"
-        )
+        assert _anchored_root(argv) == str(
+            chosen
+        ), f"an explicit --project-root must override the derived anchor. argv={argv}"
 
     def test_all_user_arguments_are_preserved(self, tmp_path: Path) -> None:
         """Injection must not drop, reorder or mangle the caller's own argv."""

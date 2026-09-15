@@ -186,9 +186,9 @@ class TestPlanNumberHelperHandler:
             "tool_name": "Bash",
             "tool_input": {"command": command},
         }
-        assert not handler_enabled.matches(hook_input), (
-            "Should NOT match: echo and CLAUDE/Plan/ path are in different subcommands"
-        )
+        assert not handler_enabled.matches(
+            hook_input
+        ), "Should NOT match: echo and CLAUDE/Plan/ path are in different subcommands"
 
     def test_ignores_echo_and_plan_glob_on_separate_lines(
         self, handler_enabled: PlanNumberHelperHandler
@@ -213,9 +213,9 @@ class TestPlanNumberHelperHandler:
             "tool_name": "Bash",
             "tool_input": {"command": command},
         }
-        assert not handler_enabled.matches(hook_input), (
-            "Should NOT match: echo and the plan glob are on separate lines"
-        )
+        assert not handler_enabled.matches(
+            hook_input
+        ), "Should NOT match: echo and the plan glob are on separate lines"
 
     def test_ignores_safe_commands(self, handler_enabled: PlanNumberHelperHandler) -> None:
         """Should not match safe commands."""
@@ -488,9 +488,9 @@ class TestPlanNumberHelperHandler:
                 "tool_name": "Bash",
                 "tool_input": {"command": command},
             }
-            assert not handler_enabled.matches(hook_input), (
-                f"Should NOT match (find on specific folder): {command}"
-            )
+            assert not handler_enabled.matches(
+                hook_input
+            ), f"Should NOT match (find on specific folder): {command}"
 
     def test_ignores_find_piped_to_wc_for_a_count(
         self, handler_enabled: PlanNumberHelperHandler
@@ -515,9 +515,9 @@ class TestPlanNumberHelperHandler:
                 "tool_name": "Bash",
                 "tool_input": {"command": command},
             }
-            assert not handler_enabled.matches(hook_input), (
-                f"Should NOT match (counting, not discovery): {command}"
-            )
+            assert not handler_enabled.matches(
+                hook_input
+            ), f"Should NOT match (counting, not discovery): {command}"
 
     def test_still_detects_find_with_sort_and_tail_despite_wc_guard(
         self, handler_enabled: PlanNumberHelperHandler
@@ -551,9 +551,9 @@ class TestPlanNumberHelperHandler:
                 "tool_name": "Bash",
                 "tool_input": {"command": command},
             }
-            assert not handler_enabled.matches(hook_input), (
-                f"Should NOT match (echo/printf of specific folder): {command}"
-            )
+            assert not handler_enabled.matches(
+                hook_input
+            ), f"Should NOT match (echo/printf of specific folder): {command}"
 
     def test_ignores_git_mv_within_specific_plan_folder(
         self, handler_enabled: PlanNumberHelperHandler
@@ -569,9 +569,9 @@ class TestPlanNumberHelperHandler:
             "tool_name": "Bash",
             "tool_input": {"command": command},
         }
-        assert not handler_enabled.matches(hook_input), (
-            f"Should NOT match (git mv within specific folder): {command}"
-        )
+        assert not handler_enabled.matches(
+            hook_input
+        ), f"Should NOT match (git mv within specific folder): {command}"
 
     def test_ignores_ls_specific_folder_grep_non_numeric(
         self, handler_enabled: PlanNumberHelperHandler
@@ -588,9 +588,9 @@ class TestPlanNumberHelperHandler:
             "tool_name": "Bash",
             "tool_input": {"command": command},
         }
-        assert not handler_enabled.matches(hook_input), (
-            f"Should NOT match (ls plan dir | grep literal substring): {command}"
-        )
+        assert not handler_enabled.matches(
+            hook_input
+        ), f"Should NOT match (ls plan dir | grep literal substring): {command}"
 
     def test_ignores_git_config_counter_read(
         self, handler_enabled: PlanNumberHelperHandler
@@ -623,9 +623,9 @@ class TestPlanNumberHelperHandler:
                 "tool_name": "Bash",
                 "tool_input": {"command": command},
             }
-            assert not handler_enabled.matches(hook_input), (
-                f"Should NOT match (recommended git-config counter read): {command}"
-            )
+            assert not handler_enabled.matches(
+                hook_input
+            ), f"Should NOT match (recommended git-config counter read): {command}"
 
     def test_get_claude_md_names_mkplan_as_canonical(self) -> None:
         """Guidance must name mkplan.bash as the canonical create-a-plan action.
@@ -668,9 +668,9 @@ class TestPlanNumberHelperHandler:
 
         for command in reconciliation_scans:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
-            assert not handler_enabled.matches(hook_input), (
-                f"Should NOT match (covers archive subdirs, so the block reason is void): {command}"
-            )
+            assert not handler_enabled.matches(
+                hook_input
+            ), f"Should NOT match (covers archive subdirs, so the block reason is void): {command}"
 
     def test_recursive_find_over_whole_plan_tree_is_not_blocked(
         self, handler_enabled: PlanNumberHelperHandler
@@ -689,9 +689,9 @@ class TestPlanNumberHelperHandler:
 
         for command in targeted_finds:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
-            assert not handler_enabled.matches(hook_input), (
-                f"Should NOT match (names a specific plan / non-numeric target): {command}"
-            )
+            assert not handler_enabled.matches(
+                hook_input
+            ), f"Should NOT match (names a specific plan / non-numeric target): {command}"
 
     def test_generic_number_glob_find_is_still_blocked(
         self, handler_enabled: PlanNumberHelperHandler
@@ -712,9 +712,9 @@ class TestPlanNumberHelperHandler:
 
         for command in ambiguous_finds:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
-            assert handler_enabled.matches(hook_input), (
-                f"Should STILL match (generic/ambiguous plan sweep): {command}"
-            )
+            assert handler_enabled.matches(
+                hook_input
+            ), f"Should STILL match (generic/ambiguous plan sweep): {command}"
 
     def test_letter_led_file_in_plan_root_does_not_exempt_a_discovery_scan(
         self, handler_enabled: PlanNumberHelperHandler
@@ -732,9 +732,9 @@ class TestPlanNumberHelperHandler:
             "tool_input": {"command": "cat CLAUDE/Plan/README.md; ls -d CLAUDE/Plan/[0-9]*/"},
         }
 
-        assert handler_enabled.matches(hook_input), (
-            "A letter-led FILE is not a subdirectory and must not exempt the scan beside it"
-        )
+        assert handler_enabled.matches(
+            hook_input
+        ), "A letter-led FILE is not a subdirectory and must not exempt the scan beside it"
 
     def test_discovery_idiom_stays_blocked_even_when_it_covers_archives(
         self, handler_enabled: PlanNumberHelperHandler
@@ -754,9 +754,9 @@ class TestPlanNumberHelperHandler:
 
         for command in discovery_commands:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
-            assert handler_enabled.matches(hook_input), (
-                f"Should STILL match (latest-value discovery idiom): {command}"
-            )
+            assert handler_enabled.matches(
+                hook_input
+            ), f"Should STILL match (latest-value discovery idiom): {command}"
 
 
 def _bash(command: str) -> dict[str, Any]:
@@ -822,9 +822,9 @@ class TestHandRolledPlanFolderCreation:
         """The common, legitimate case: adding JOURNAL/ to a plan that exists."""
         (handler._workspace_root / "CLAUDE" / "Plan" / "00250-some-feature").mkdir()
 
-        assert not handler.matches(_bash("mkdir -p CLAUDE/Plan/00250-some-feature/JOURNAL")), (
-            "A plan folder that already exists is not being created"
-        )
+        assert not handler.matches(
+            _bash("mkdir -p CLAUDE/Plan/00250-some-feature/JOURNAL")
+        ), "A plan folder that already exists is not being created"
 
     def test_recreating_an_existing_plan_folder_is_allowed(
         self, handler: PlanNumberHelperHandler

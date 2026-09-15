@@ -273,9 +273,9 @@ class TestRedirectConsumptionRule:
 
         risky_violations = [v for v in violations if v.file == str(risky_file)]
         unrelated_violations = [v for v in violations if v.file == str(unrelated_file)]
-        assert "capture-corruption" in _rules(risky_violations), (
-            "The redirect-consumed ensure_venv (risky.sh) must still be caught"
-        )
+        assert "capture-corruption" in _rules(
+            risky_violations
+        ), "The redirect-consumed ensure_venv (risky.sh) must still be caught"
         assert unrelated_violations == [], (
             "The unrelated, never-redirected ensure_venv (unrelated.sh) must NOT "
             f"be flagged just because a same-named function elsewhere is at risk: "

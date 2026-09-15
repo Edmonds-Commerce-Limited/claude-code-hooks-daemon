@@ -119,9 +119,9 @@ def test_check_venv_fresh_does_not_crash_when_tomllib_unavailable(tmp_path: Path
         f"check-venv-fresh must not surface ModuleNotFoundError when tomllib "
         f"is unavailable. stderr=\n{result.stderr}"
     )
-    assert "No module named 'tomllib'" not in result.stderr, (
-        f"check-venv-fresh must not surface module-load tomllib failure. stderr=\n{result.stderr}"
-    )
+    assert (
+        "No module named 'tomllib'" not in result.stderr
+    ), f"check-venv-fresh must not surface module-load tomllib failure. stderr=\n{result.stderr}"
     assert result.returncode == 0, (
         f"check-venv-fresh with matching lock_hash must exit 0 even under "
         f"<3.11 (it does not actually need tomllib). "
@@ -149,9 +149,9 @@ def test_check_venv_fresh_returns_1_on_mismatch_when_tomllib_unavailable(
         site_dir=site_dir,
     )
 
-    assert "ModuleNotFoundError" not in result.stderr, (
-        f"check-venv-fresh must not surface ModuleNotFoundError. stderr=\n{result.stderr}"
-    )
+    assert (
+        "ModuleNotFoundError" not in result.stderr
+    ), f"check-venv-fresh must not surface ModuleNotFoundError. stderr=\n{result.stderr}"
     assert result.returncode == 1, (
         f"check-venv-fresh with non-matching lock_hash must exit 1. "
         f"Got returncode={result.returncode}, stderr=\n{result.stderr}"

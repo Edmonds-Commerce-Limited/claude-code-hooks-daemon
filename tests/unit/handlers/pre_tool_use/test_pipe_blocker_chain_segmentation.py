@@ -52,9 +52,9 @@ class TestNewlineSeparatedChains:
         ],
     )
     def test_whitelisted_producer_after_a_newline_is_allowed(self, command: str) -> None:
-        assert not _matches(command), (
-            "grep is whitelisted; a preceding cd on its own line must not change that"
-        )
+        assert not _matches(
+            command
+        ), "grep is whitelisted; a preceding cd on its own line must not change that"
 
     @pytest.mark.parametrize(
         "command",
@@ -98,9 +98,9 @@ class TestChainSplitIsQuoteAware:
         ],
     )
     def test_quoted_separator_does_not_cut_the_producer(self, command: str) -> None:
-        assert not _matches(command), (
-            "the separator is inside a quoted pattern, so the producer is still grep"
-        )
+        assert not _matches(
+            command
+        ), "the separator is inside a quoted pattern, so the producer is still grep"
 
     def test_quoted_separator_does_not_hide_an_expensive_producer(self) -> None:
         """Quote-awareness must not let a quoted separator mask a real blacklist hit."""
@@ -137,9 +137,9 @@ class TestEscapedQuotesCannotHideAChain:
         ],
     )
     def test_escaped_quote_cannot_launder_an_expensive_producer(self, command: str) -> None:
-        assert _matches(command), (
-            "an escaped quote must not hide the chain separator that precedes pytest"
-        )
+        assert _matches(
+            command
+        ), "an escaped quote must not hide the chain separator that precedes pytest"
 
     @pytest.mark.parametrize(
         "command",

@@ -192,13 +192,13 @@ class TestSynonymWideningDidNotCreateFalsePositives:
     def test_near_miss_stays_allowed(self, class_name: str, command: str) -> None:
         handler = _build(class_name)
 
-        assert handler.matches(_bash(command)) is False, (
-            f"FALSE POSITIVE: {class_name} matches the safe command {command!r}."
-        )
+        assert (
+            handler.matches(_bash(command)) is False
+        ), f"FALSE POSITIVE: {class_name} matches the safe command {command!r}."
 
     def test_every_synonym_handler_has_false_positive_cover(self) -> None:
         missing = set(_SYNONYM_CASES) - set(self._MUST_NOT_MATCH)
 
-        assert not missing, (
-            f"Handler(s) with synonym cases but no false-positive cases: {sorted(missing)}."
-        )
+        assert (
+            not missing
+        ), f"Handler(s) with synonym cases but no false-positive cases: {sorted(missing)}."

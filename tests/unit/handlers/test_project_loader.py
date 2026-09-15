@@ -381,12 +381,12 @@ class SecondHandler(Handler):
             ProjectHandlerLoader.load_handler_from_file(handler_file)
 
         error_message = str(exc_info.value)
-        assert "get_claude_md" in error_message, (
-            f"Error should name the missing method, got: {error_message}"
-        )
-        assert "2.30.0" in error_message, (
-            f"Error should include the version that introduced the method, got: {error_message}"
-        )
+        assert (
+            "get_claude_md" in error_message
+        ), f"Error should name the missing method, got: {error_message}"
+        assert (
+            "2.30.0" in error_message
+        ), f"Error should include the version that introduced the method, got: {error_message}"
 
     def test_an_imported_base_is_not_blamed_for_the_missing_method(
         self,

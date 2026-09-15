@@ -236,9 +236,9 @@ class TestBatchGuardCoversEverySurface:
 
         data = _run(_HISTORY_CHECKER, _HISTORY_JSON, "--repo", str(repo), "--config", str(config))
 
-        assert expected in {v["surface"] for v in data["violations"]}, (
-            f"{surface} is unguarded in committed history"
-        )
+        assert expected in {
+            v["surface"] for v in data["violations"]
+        }, f"{surface} is unguarded in committed history"
 
 
 def _contaminate(repo: Path, surface: str) -> None:

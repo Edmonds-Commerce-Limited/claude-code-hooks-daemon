@@ -225,9 +225,9 @@ class TestUpstreamWasRewritten:
         # A genuinely new local commit AFTER the rewrite: trees now differ.
         _commit(clone, "later.txt", "later\n")
 
-        assert git_sync.upstream_tree_matches(clone) is False, (
-            "fixture failed to make the trees differ — it would not exercise the patch-id path"
-        )
+        assert (
+            git_sync.upstream_tree_matches(clone) is False
+        ), "fixture failed to make the trees differ — it would not exercise the patch-id path"
         assert git_sync.upstream_was_rewritten(clone) is True
 
     def test_false_for_ordinary_divergence(self, tmp_path: Path) -> None:

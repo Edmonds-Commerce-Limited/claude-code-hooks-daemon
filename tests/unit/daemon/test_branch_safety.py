@@ -707,9 +707,9 @@ class TestARefusalCarriesItsDiagnosis:
         assert precondition.refused is True
         for report in (unproven, precondition):
             assert report.blockers, "precondition: each case must produce a blocker"
-            assert not any("disagreed with git" in b for b in report.blockers), (
-                "the diagnosis must not appear where git was never asked: " + repr(report.blockers)
-            )
+            assert not any(
+                "disagreed with git" in b for b in report.blockers
+            ), "the diagnosis must not appear where git was never asked: " + repr(report.blockers)
 
     def test_the_diagnosis_names_both_causes_and_forbids_forcing(self) -> None:
         """The text is the deliverable, so assert what it must carry."""
@@ -925,9 +925,9 @@ class TestMergedWhileHeadIsElsewhere:
         )
 
         assert refusal.returncode != 0, "git must refuse the safe delete here"
-        assert classification.tier != TIER_MERGED, (
-            f"so the classifier must NOT promise the safe delete will work: {classification.tier}"
-        )
+        assert (
+            classification.tier != TIER_MERGED
+        ), f"so the classifier must NOT promise the safe delete will work: {classification.tier}"
         assert classification.is_safe is True, "the ancestry proof is unaffected"
 
 
@@ -1021,12 +1021,12 @@ class TestAGitRefusalMidBatchIsReportedNotRaised:
                 report = delete_branches(repo, ["shipped"], bundle_path=bundle_path)
 
         assert report.refused is True
-        assert any("read-only file system" in blocker for blocker in report.blockers), (
-            report.blockers
-        )
-        assert any("NOT evidence of a deletion" in blocker for blocker in report.blockers), (
-            report.blockers
-        )
+        assert any(
+            "read-only file system" in blocker for blocker in report.blockers
+        ), report.blockers
+        assert any(
+            "NOT evidence of a deletion" in blocker for blocker in report.blockers
+        ), report.blockers
         assert report.bundle == bundle_path, "the bundle is still there, so still report it"
 
     def test_a_bundle_is_KEPT_when_something_was_deleted(self, repo: Path, remote: Path) -> None:
@@ -1116,9 +1116,9 @@ class TestBudgetsSuitTheWorkNotTheHookContext:
             "the bundle PACKS objects and is the only copy of the work once the "
             "delete proceeds, so it must not inherit the read budget: " + repr(timeouts)
         )
-        assert Timeout.GIT_BUNDLE_CREATE > Timeout.GIT_BRANCH_SAFETY, (
-            "and that budget must actually be the larger of the two"
-        )
+        assert (
+            Timeout.GIT_BUNDLE_CREATE > Timeout.GIT_BRANCH_SAFETY
+        ), "and that budget must actually be the larger of the two"
 
     def test_a_timed_out_bundle_raises_for_the_cli_to_convert(self, repo: Path) -> None:
         """A budget overrun must reach the CLI as an exception it can catch.
@@ -1312,9 +1312,9 @@ class TestABranchThatMovedAfterItsProofIsNotDeleted:
 
         report, _ = self._delete_while_a_peer_commits(repo, "done", tmp_path, monkeypatch)
 
-        assert "done" in _local_branches(repo), (
-            "the guard must follow the BRANCH, not a same-named tag"
-        )
+        assert "done" in _local_branches(
+            repo
+        ), "the guard must follow the BRANCH, not a same-named tag"
         assert report.refused is True
 
 
@@ -1381,9 +1381,9 @@ class TestASameNamedTagCannotHijackTheProtectedRef:
 
         classification = classify_branch(repo, "tidy", protected_ref="origin/main")
 
-        assert classification.is_safe, (
-            f"a remote-tracking protected ref must still resolve — got tier {classification.tier!r}"
-        )
+        assert (
+            classification.is_safe
+        ), f"a remote-tracking protected ref must still resolve — got tier {classification.tier!r}"
 
 
 class TestASameNamedTagCannotHijackTheProof:

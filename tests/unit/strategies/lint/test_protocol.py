@@ -109,6 +109,6 @@ class TestRealImplementationsSatisfyProtocol:
 
         # Instantiate and check isinstance
         strategy = strategy_cls()
-        assert isinstance(strategy, LintStrategy), (
-            f"{strategy_class} should satisfy LintStrategy protocol"
-        )
+        assert isinstance(
+            strategy, LintStrategy
+        ), f"{strategy_class} should satisfy LintStrategy protocol"

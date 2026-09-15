@@ -604,7 +604,7 @@ enforced rules — which makes it a credibility problem as much as a security on
 **Citation**: `scripts/upgrade.sh:305-308`
 
 ```bash
-_CLONE_URL="${HOOKS_DAEMON_CLONE_URL:-https://github.com/.../claude-code-hooks-daemon.git}"
+_CLONE_URL="${HOOKS_DAEMON_CLONE_URL:-https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git}"
 git -C "$PROJECT_ROOT" -c protocol.file.allow=always clone --quiet "$_CLONE_URL" "$DAEMON_DIR"
 ```
 

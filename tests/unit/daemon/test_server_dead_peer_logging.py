@@ -216,9 +216,9 @@ class TestAnUndeliveredBlockDecisionIsWorthAWarning:
         with _returning(_DENY_RESPONSE):
             await daemon._handle_client(reader, writer)
 
-        assert _exactly(logged, logging.WARNING), (
-            "an undelivered blocking decision must not be logged at DEBUG"
-        )
+        assert _exactly(
+            logged, logging.WARNING
+        ), "an undelivered blocking decision must not be logged at DEBUG"
         assert _at_least(logged, logging.ERROR) == []
 
     @pytest.mark.anyio

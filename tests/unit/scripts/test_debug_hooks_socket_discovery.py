@@ -80,9 +80,9 @@ class TestSelfInstallLayoutIsFound:
         )
 
         assert result.returncode == 0, f"discovery died: {result.stderr}"
-        assert str(socket) in result.stdout, (
-            f"self-install socket not discovered; got: {result.stdout!r}"
-        )
+        assert (
+            str(socket) in result.stdout
+        ), f"self-install socket not discovered; got: {result.stdout!r}"
 
 
 class TestMissingDirectoryIsNotFatal:
@@ -159,9 +159,9 @@ class TestBothLayoutsStillWork:
         )
 
         assert result.returncode == 0, f"discovery died: {result.stderr}"
-        assert str(socket) in result.stdout, (
-            f"client-install socket no longer discovered; got: {result.stdout!r}"
-        )
+        assert (
+            str(socket) in result.stdout
+        ), f"client-install socket no longer discovered; got: {result.stdout!r}"
 
 
 @pytest.mark.parametrize("suppressor", ["|| true", "|| :"])
