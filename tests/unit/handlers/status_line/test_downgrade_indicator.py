@@ -214,8 +214,7 @@ class TestDowngradeIndicatorHandler:
             raise OSError("state dir unwritable")
 
         monkeypatch.setattr(
-            "claude_code_hooks_daemon.handlers.status_line.downgrade_indicator."
-            "evaluate_downgrade",
+            "claude_code_hooks_daemon.handlers.status_line.downgrade_indicator.evaluate_downgrade",
             _raise_oserror,
         )
         result = handler.handle(_hook_input(session_id="sess-a"))

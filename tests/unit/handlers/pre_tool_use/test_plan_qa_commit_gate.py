@@ -57,8 +57,7 @@ def repo(tmp_path: Path) -> Path:
         "# Plan 00001: first\n\n**Status**: In Progress\n\n- [ ] ⬜ **Task 1.1**: x\n"
     )
     (plan_dir / "README.md").write_text(
-        "# Plans Index\n\n## Active Plans\n\n"
-        "- [00001: first](00001-first/PLAN.md) - In Progress\n"
+        "# Plans Index\n\n## Active Plans\n\n- [00001: first](00001-first/PLAN.md) - In Progress\n"
     )
     _git(root, "init")
     _git(root, "config", "user.email", "t@example.com")
@@ -184,7 +183,7 @@ class TestHandleWarnMode:
 
         plan_md = repo / _PLAN_DIR_REL / "00001-first/PLAN.md"
         plan_md.write_text(
-            "# Plan 00001: first\n\n**Status**: In Progress\n\n" "- [x] ✅ **Task 1.1**: x\n"
+            "# Plan 00001: first\n\n**Status**: In Progress\n\n- [x] ✅ **Task 1.1**: x\n"
         )
         # Deliberately NOT staged — only named on the commit line.
 

@@ -88,18 +88,18 @@ class TestDeploySlashCommandsSelfInstallSafety:
         # symlink instead of real content, the bug has reoccurred. A dangling
         # self-loop raises OSError (ELOOP) on read — that IS the failure mode
         # under test, so it is reported as an assertion, not an uncaught crash.
-        assert (
-            command_file.is_symlink() or command_file.is_file()
-        ), "Command path vanished entirely after self-install deploy"
+        assert command_file.is_symlink() or command_file.is_file(), (
+            "Command path vanished entirely after self-install deploy"
+        )
         try:
             content = command_file.read_text(encoding="utf-8")
         except OSError as exc:
             raise AssertionError(
-                f"Source content was destroyed by self-install deploy " f"(unreadable: {exc})"
+                f"Source content was destroyed by self-install deploy (unreadable: {exc})"
             ) from exc
-        assert (
-            content == _COMMAND_CONTENT
-        ), f"Source content was destroyed by self-install deploy (got: {content!r})"
+        assert content == _COMMAND_CONTENT, (
+            f"Source content was destroyed by self-install deploy (got: {content!r})"
+        )
 
     def test_no_self_referential_symlink_created(self, tmp_path: Path) -> None:
         project_root = _self_install_project(tmp_path)
@@ -114,9 +114,9 @@ class TestDeploySlashCommandsSelfInstallSafety:
         if command_file.is_symlink():
             target = command_file.readlink()
             resolved = Path(os.path.normpath(str(command_file.parent / target)))
-            assert resolved != Path(
-                os.path.normpath(str(command_file))
-            ), f"Symlink {command_file} points at itself: {target}"
+            assert resolved != Path(os.path.normpath(str(command_file))), (
+                f"Symlink {command_file} points at itself: {target}"
+            )
 
     def test_symlink_target_is_not_absolute(self, tmp_path: Path) -> None:
         """A self-install symlink must be repo-relative, never leak the checkout path."""
@@ -131,9 +131,9 @@ class TestDeploySlashCommandsSelfInstallSafety:
 
         if command_file.is_symlink():
             target = command_file.readlink()
-            assert (
-                not target.is_absolute()
-            ), f"Self-install symlink stores an ABSOLUTE target: {target}"
+            assert not target.is_absolute(), (
+                f"Self-install symlink stores an ABSOLUTE target: {target}"
+            )
 
     def test_source_file_survives_single_command_deploy(self, tmp_path: Path) -> None:
         """``deploy_single_slash_command`` has the identical source==dest hazard."""
@@ -155,6 +155,5 @@ class TestDeploySlashCommandsSelfInstallSafety:
                 f"deploy (unreadable: {exc})"
             ) from exc
         assert content == _COMMAND_CONTENT, (
-            f"Source content was destroyed by single-command self-install deploy "
-            f"(got: {content!r})"
+            f"Source content was destroyed by single-command self-install deploy (got: {content!r})"
         )

@@ -471,8 +471,7 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
             (
                 "Deny AskUserQuestion without prefix (unattended)",
                 unjustified,
-                "Denied as in every mode — but for the unattended reason, "
-                "not the missing prefix.",
+                "Denied as in every mode — but for the unattended reason, not the missing prefix.",
             ),
             (
                 "Deny a properly justified AskUserQuestion (unattended)",

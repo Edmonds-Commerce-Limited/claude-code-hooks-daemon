@@ -143,10 +143,10 @@ def _run(context: CheckContext) -> list[Finding]:
                 check_id=CHECK_ID,
                 level=Level.ADVISE,
                 message=(
-                    f"Commit claims work on Plan {number:05d} but does not " "update its PLAN.md"
+                    f"Commit claims work on Plan {number:05d} but does not update its PLAN.md"
                 ),
                 remediation=(
-                    "Tick the tasks / update status in the plan document in " "this same commit."
+                    "Tick the tasks / update status in the plan document in this same commit."
                 ),
             )
         )

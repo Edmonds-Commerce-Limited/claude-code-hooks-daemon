@@ -199,6 +199,6 @@ class TestHandlerGetRulesTypeAnnotation:
 
         # The return annotation should mention 'Rule' or 'list'
         return_hint = str(hints.get("return", ""))
-        assert (
-            "Rule" in return_hint or "list" in return_hint
-        ), f"get_rules() return annotation does not mention Rule or list: {return_hint!r}"
+        assert "Rule" in return_hint or "list" in return_hint, (
+            f"get_rules() return annotation does not mention Rule or list: {return_hint!r}"
+        )

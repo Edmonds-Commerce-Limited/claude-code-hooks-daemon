@@ -93,9 +93,9 @@ class TestARefusalIsNeverSilentlyWeakened:
         """The operator needs to see WHAT the handler tried to refuse."""
         response = HookResult(decision=Decision.DENY, reason="uniquereason123").to_json(event_name)
 
-        assert "uniquereason123" in str(
-            response
-        ), f"the reason was discarded along with the decision on {event_name}"
+        assert "uniquereason123" in str(response), (
+            f"the reason was discarded along with the decision on {event_name}"
+        )
 
 
 class TestTheSubstituteIsValidForEveryEventAndDecision:

@@ -39,8 +39,9 @@ def _finding(rel_path: str, anchor: str, quoters: tuple[str, ...]) -> Finding:
         check_id=CHECK_ID,
         severity=Severity.ADVISE,
         message=(
-            f"`{rel_path}#{anchor}` changed, and {quoter_list} "
-            "quote{} it.".format("s" if len(quoters) == 1 else "")
+            f"`{rel_path}#{anchor}` changed, and {quoter_list} quote{{}} it.".format(
+                "s" if len(quoters) == 1 else ""
+            )
         ),
         remediation=(
             f"Re-check the ssot-quote block(s) in {quoter_list} against the "

@@ -120,4 +120,4 @@ class RuleFormatter:
         Returns:
             The complete first-fire block message string.
         """
-        return f"BLOCKED [{rule.rule_id}]: {rule.blocked}\n\n" f"{rule.verbose}"
+        return f"BLOCKED [{rule.rule_id}]: {rule.blocked}\n\n{rule.verbose}"

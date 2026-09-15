@@ -408,7 +408,7 @@ class TestPlanDeployLegSubshellGuard:
     def test_inside_command_substitution_kills_the_whole_run(self, tmp_path: Path) -> None:
         result = _run_bash(
             tmp_path,
-            "plan_mode deploy\n" 'out="$(plan_deploy_leg "bad" true)"\n' 'echo "unreachable"\n',
+            'plan_mode deploy\nout="$(plan_deploy_leg "bad" true)"\necho "unreachable"\n',
         )
         assert result.returncode != 0
         assert "unreachable" not in result.stdout
@@ -484,11 +484,7 @@ class TestPlanTtyOpenable:
     def test_no_controlling_terminal_is_detected(self, tmp_path: Path) -> None:
         result = _run_bash(
             tmp_path,
-            "if _plan_tty_openable; then\n"
-            '    echo "openable"\n'
-            "else\n"
-            '    echo "not-openable"\n'
-            "fi\n",
+            'if _plan_tty_openable; then\n    echo "openable"\nelse\n    echo "not-openable"\nfi\n',
             setsid=True,
         )
         assert result.returncode == 0

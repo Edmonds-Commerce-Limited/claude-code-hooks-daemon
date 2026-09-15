@@ -542,9 +542,7 @@ class TestGitStatusIcons:
     def test_behind_shows_down_arrow(self, handler: GitBranchHandler, tmp_path: Path) -> None:
         """`# branch.ab +0 -3` should render ↓3 in red."""
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
-        status_stdout = (
-            b"# branch.head main\n" b"# branch.upstream origin/main\n" b"# branch.ab +0 -3\n"
-        )
+        status_stdout = b"# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -3\n"
         mocks = self._make_mocks(status_stdout=status_stdout)
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = mocks
@@ -556,9 +554,7 @@ class TestGitStatusIcons:
     def test_ahead_and_behind_both_shown(self, handler: GitBranchHandler, tmp_path: Path) -> None:
         """Diverged branch shows both arrows."""
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
-        status_stdout = (
-            b"# branch.head main\n" b"# branch.upstream origin/main\n" b"# branch.ab +2 -1\n"
-        )
+        status_stdout = b"# branch.head main\n# branch.upstream origin/main\n# branch.ab +2 -1\n"
         mocks = self._make_mocks(status_stdout=status_stdout)
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = mocks
@@ -570,9 +566,7 @@ class TestGitStatusIcons:
     def test_staged_change_shown(self, handler: GitBranchHandler, tmp_path: Path) -> None:
         """`1 M. ...` (staged modification) renders ●1 in green."""
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
-        status_stdout = (
-            b"# branch.head main\n" b"1 M. N... 100644 100644 100644 abc abc src/foo.py\n"
-        )
+        status_stdout = b"# branch.head main\n1 M. N... 100644 100644 100644 abc abc src/foo.py\n"
         mocks = self._make_mocks(status_stdout=status_stdout)
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = mocks
@@ -583,9 +577,7 @@ class TestGitStatusIcons:
     def test_unstaged_change_shown(self, handler: GitBranchHandler, tmp_path: Path) -> None:
         """`1 .M ...` (unstaged modification) renders ✚1 in yellow."""
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
-        status_stdout = (
-            b"# branch.head main\n" b"1 .M N... 100644 100644 100644 abc abc src/foo.py\n"
-        )
+        status_stdout = b"# branch.head main\n1 .M N... 100644 100644 100644 abc abc src/foo.py\n"
         mocks = self._make_mocks(status_stdout=status_stdout)
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = mocks
@@ -598,9 +590,7 @@ class TestGitStatusIcons:
     ) -> None:
         """`1 MM ...` (staged AND unstaged on same file) counts in both."""
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
-        status_stdout = (
-            b"# branch.head main\n" b"1 MM N... 100644 100644 100644 abc abc src/foo.py\n"
-        )
+        status_stdout = b"# branch.head main\n1 MM N... 100644 100644 100644 abc abc src/foo.py\n"
         mocks = self._make_mocks(status_stdout=status_stdout)
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = mocks
@@ -624,7 +614,7 @@ class TestGitStatusIcons:
         """`u UU ...` (unmerged) renders ✖1 in red."""
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
         status_stdout = (
-            b"# branch.head main\n" b"u UU N... 100644 100644 100644 100644 a b c d conflict.py\n"
+            b"# branch.head main\nu UU N... 100644 100644 100644 100644 a b c d conflict.py\n"
         )
         mocks = self._make_mocks(status_stdout=status_stdout)
         with patch("subprocess.run") as mock_run:
@@ -636,7 +626,7 @@ class TestGitStatusIcons:
     def test_stashed_shown(self, handler: GitBranchHandler, tmp_path: Path) -> None:
         """`git stash list` with 2 lines renders ⚑2 in cyan."""
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
-        stash_stdout = "stash@{0}: WIP on main: abc Fix\n" "stash@{1}: WIP on main: def Other\n"
+        stash_stdout = "stash@{0}: WIP on main: abc Fix\nstash@{1}: WIP on main: def Other\n"
         mocks = self._make_mocks(stash_stdout=stash_stdout)
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = mocks
@@ -647,9 +637,7 @@ class TestGitStatusIcons:
     def test_clean_repo_shows_only_branch(self, handler: GitBranchHandler, tmp_path: Path) -> None:
         """Clean repo with synced upstream and no changes shows only branch."""
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
-        status_stdout = (
-            b"# branch.head main\n" b"# branch.upstream origin/main\n" b"# branch.ab +0 -0\n"
-        )
+        status_stdout = b"# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -0\n"
         mocks = self._make_mocks(status_stdout=status_stdout)
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = mocks

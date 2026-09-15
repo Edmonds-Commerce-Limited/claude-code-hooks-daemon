@@ -118,8 +118,7 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
         return [
             AcceptanceTest(
                 title=(
-                    "cron subagent-stop enforcer - blocks when session_crons "
-                    "is present but empty"
+                    "cron subagent-stop enforcer - blocks when session_crons is present but empty"
                 ),
                 command="echo 'session_crons: []'",
                 description=(

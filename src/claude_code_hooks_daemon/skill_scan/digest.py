@@ -38,8 +38,7 @@ def build_digest(
     for idx, cluster in enumerate(clusters[:max_clusters], start=1):
         rep = redact_text(normalise(cluster.representative), terms)
         lines.append(
-            f"[{idx}] count={len(cluster.prompts)} sessions={cluster.distinct_sessions} "
-            f"rep={rep!r}"
+            f"[{idx}] count={len(cluster.prompts)} sessions={cluster.distinct_sessions} rep={rep!r}"
         )
     digest = "\n".join(lines)
     return digest[:MAX_PAYLOAD_CHARS]

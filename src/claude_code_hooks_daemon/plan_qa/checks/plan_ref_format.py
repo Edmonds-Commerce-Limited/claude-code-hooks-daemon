@@ -21,7 +21,7 @@ CHECK_ID: Final[str] = "plan-ref-format"
 _CANONICAL_REF_RE: Final[re.Pattern[str]] = re.compile(r"Plan \d{5}")
 
 _REMEDIATION: Final[str] = (
-    "Reference the plan as `Plan NNNNN:` (zero-padded, capitalised) for " "greppable traceability."
+    "Reference the plan as `Plan NNNNN:` (zero-padded, capitalised) for greppable traceability."
 )
 
 

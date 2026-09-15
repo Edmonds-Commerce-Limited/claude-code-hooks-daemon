@@ -340,8 +340,7 @@ class TestSupervisorIndicatorScanHelper:
 
         with (
             patch(
-                "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator."
-                "Path.iterdir",
+                "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator.Path.iterdir",
                 return_value=[Path("/proc/100"), Path("/proc/200")],
             ),
             patch(_CMDLINE_PATCH, side_effect=_cmdline),
@@ -359,8 +358,7 @@ class TestSupervisorIndicatorScanHelper:
 
         with (
             patch(
-                "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator."
-                "Path.iterdir",
+                "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator.Path.iterdir",
                 return_value=[Path("/proc/100"), Path("/proc/xyz")],
             ),
             patch(_CMDLINE_PATCH, side_effect=_cmdline),
@@ -380,8 +378,7 @@ class TestSupervisorIndicatorScanHelper:
 
         with (
             patch(
-                "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator."
-                "Path.iterdir",
+                "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator.Path.iterdir",
                 return_value=[Path("/proc/100"), Path("/proc/200")],
             ),
             patch(_CMDLINE_PATCH, side_effect=_cmdline),
@@ -393,8 +390,7 @@ class TestSupervisorIndicatorScanHelper:
         handler = SupervisorIndicatorHandler()
         with (
             patch(
-                "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator."
-                "Path.iterdir",
+                "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator.Path.iterdir",
                 return_value=[Path("/proc/100")],
             ),
             patch(_CMDLINE_PATCH, return_value="python3 unrelated.py"),

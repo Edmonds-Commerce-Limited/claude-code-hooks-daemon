@@ -123,9 +123,9 @@ class TestNormalisingDoesNotMakeEverythingMatch:
         truncated = "\n\n".join(_DECLARED_PROMPT.splitlines()[:2])
         delivered = [SessionCron(id="c0000000", schedule="23 * * * *", prompt=truncated)]
 
-        assert not cron_is_asserted(
-            _JOB, delivered
-        ), "dropping a paragraph changes the words, not the whitespace"
+        assert not cron_is_asserted(_JOB, delivered), (
+            "dropping a paragraph changes the words, not the whitespace"
+        )
 
     def test_a_different_schedule_still_does_not_match(self) -> None:
         delivered = [SessionCron(id="c0000000", schedule="47 * * * *", prompt=_DELIVERED_PROMPT)]

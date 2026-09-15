@@ -107,11 +107,7 @@ class TestSilentFallbackRule:
 
     def test_single_statement_assign_handler_is_flagged(self) -> None:
         source = (
-            "def f():\n"
-            "    try:\n"
-            "        risky()\n"
-            "    except ValueError:\n"
-            "        result = []\n"
+            "def f():\n    try:\n        risky()\n    except ValueError:\n        result = []\n"
         )
         tree = ast.parse(source)
         visitor = ErrorHidingVisitor(REPO_ROOT / "scripts" / "qa" / "fake.py")
@@ -171,7 +167,7 @@ class TestHeredocPythonExtraction:
     """Gap #2: Python embedded in a shell heredoc must be found and parsed."""
 
     def test_extracts_single_quoted_python3_heredoc(self) -> None:
-        content = "#!/bin/bash\n" "python3 << 'EOF'\n" "print('hi')\n" "EOF\n" "echo done\n"
+        content = "#!/bin/bash\npython3 << 'EOF'\nprint('hi')\nEOF\necho done\n"
         blocks = extract_heredoc_python_blocks(content)
         assert len(blocks) == 1
         body_start_line, source = blocks[0]
@@ -179,29 +175,29 @@ class TestHeredocPythonExtraction:
         assert source == "print('hi')"
 
     def test_extracts_unquoted_delimiter_heredoc(self) -> None:
-        content = "python3 - << PYEOF\n" "print('hi')\n" "PYEOF\n"
+        content = "python3 - << PYEOF\nprint('hi')\nPYEOF\n"
         blocks = extract_heredoc_python_blocks(content)
         assert len(blocks) == 1
         assert blocks[0][1] == "print('hi')"
 
     def test_extracts_venv_python_variable_heredoc(self) -> None:
-        content = '"${VENV_PYTHON}" - << PYEOF\n' "print('hi')\n" "PYEOF\n"
+        content = "\"${VENV_PYTHON}\" - << PYEOF\nprint('hi')\nPYEOF\n"
         blocks = extract_heredoc_python_blocks(content)
         assert len(blocks) == 1
 
     def test_extracts_dash_delimiter_with_indented_terminator(self) -> None:
-        content = "python3 <<-'EOF'\n" "print('hi')\n" "\tEOF\n"
+        content = "python3 <<-'EOF'\nprint('hi')\n\tEOF\n"
         blocks = extract_heredoc_python_blocks(content)
         assert len(blocks) == 1
         assert blocks[0][1] == "print('hi')"
 
     def test_ignores_non_python_heredoc(self) -> None:
-        content = "cat << EOF\n" "just some text\n" "EOF\n"
+        content = "cat << EOF\njust some text\nEOF\n"
         assert extract_heredoc_python_blocks(content) == []
 
     def test_ignores_heredoc_used_as_loop_input(self) -> None:
         # `done <<EOF` feeds a while-read loop, not a python invocation.
-        content = "while read -r line; do\n" '    echo "$line"\n' "done <<EOF\n" "a\nb\nEOF\n"
+        content = 'while read -r line; do\n    echo "$line"\ndone <<EOF\na\nb\nEOF\n'
         assert extract_heredoc_python_blocks(content) == []
 
     def test_reports_correct_body_start_line_with_preamble(self) -> None:

@@ -379,9 +379,7 @@ class TestHandle:
     ) -> None:
         """Only the leading frontmatter is stripped; `---` in body still gets thematic-break treatment."""
         test_file = tmp_path / "doc.md"
-        test_file.write_text(
-            "---\n" "title: Test\n" "---\n" "\n" "# Top\n" "\n" "---\n" "\n" "## Section\n"
-        )
+        test_file.write_text("---\ntitle: Test\n---\n\n# Top\n\n---\n\n## Section\n")
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {"file_path": str(test_file)},
@@ -544,7 +542,7 @@ class TestConcurrentWriteIsNotDiscarded:
         ):
             result = handler.handle({"tool_name": "Write", "tool_input": {"file_path": str(path)}})
 
-        assert (
-            path.read_text(encoding="utf-8") == newer
-        ), "the formatter silently reverted a write it did not make"
+        assert path.read_text(encoding="utf-8") == newer, (
+            "the formatter silently reverted a write it did not make"
+        )
         assert result.decision == Decision.ALLOW

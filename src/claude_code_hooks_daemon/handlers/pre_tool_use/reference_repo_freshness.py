@@ -715,8 +715,7 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "The path is a probe that never exists, and rm -rf of a missing path "
-                    "is a no-op"
+                    "The path is a probe that never exists, and rm -rf of a missing path is a no-op"
                 ),
                 test_type=TestType.BLOCKING,
                 hook_input={

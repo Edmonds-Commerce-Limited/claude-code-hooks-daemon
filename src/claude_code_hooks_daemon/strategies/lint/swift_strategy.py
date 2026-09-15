@@ -77,8 +77,7 @@ class SwiftLintStrategy:
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. "
-                    "Creates temporary Swift file."
+                    "Inside the gitignored scratch directory - safe. Creates temporary Swift file."
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[f"mkdir -p {fixture_root}"],

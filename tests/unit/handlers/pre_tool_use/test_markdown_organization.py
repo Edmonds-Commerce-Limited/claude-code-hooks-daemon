@@ -262,9 +262,9 @@ class TestMarkdownOrganizationHandler:
         self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
     ) -> None:
         """Handler allows markdown in CLAUDE/Plan/Completed/NNN-*/ directories."""
-        write_input["tool_input"][
-            "file_path"
-        ] = "CLAUDE/Plan/Completed/00051-critical-thinking/PLAN.md"
+        write_input["tool_input"]["file_path"] = (
+            "CLAUDE/Plan/Completed/00051-critical-thinking/PLAN.md"
+        )
         assert handler.matches(write_input) is False
 
     def test_matches_returns_false_for_cancelled_plan_directory(
@@ -511,9 +511,9 @@ class TestMarkdownOrganizationHandler:
         self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
     ) -> None:
         """Handler allows markdown in src/claude_code_hooks_daemon/guides/ directory."""
-        write_input["tool_input"][
-            "file_path"
-        ] = "src/claude_code_hooks_daemon/guides/llm-command-wrappers.md"
+        write_input["tool_input"]["file_path"] = (
+            "src/claude_code_hooks_daemon/guides/llm-command-wrappers.md"
+        )
         assert handler.matches(write_input) is False
 
     def test_matches_returns_true_for_other_src_markdown(
@@ -658,9 +658,9 @@ class TestMarkdownOrganizationHandler:
         handler = MarkdownOrganizationHandler()
         handler._allow_untracked_claude_memory = True
         # Memory directory is outside project root
-        write_input["tool_input"][
-            "file_path"
-        ] = "/root/.claude/projects/-workspace/memory/MEMORY.md"
+        write_input["tool_input"]["file_path"] = (
+            "/root/.claude/projects/-workspace/memory/MEMORY.md"
+        )
         assert handler.matches(write_input) is False
 
     def test_matches_returns_false_for_claude_auto_memory(
@@ -669,9 +669,9 @@ class TestMarkdownOrganizationHandler:
         """Generic logic does NOT match Claude auto memory (when policy opted out)."""
         handler = MarkdownOrganizationHandler()
         handler._allow_untracked_claude_memory = True
-        write_input["tool_input"][
-            "file_path"
-        ] = "/root/.claude/projects/my-project/memory/MEMORY.md"
+        write_input["tool_input"]["file_path"] = (
+            "/root/.claude/projects/my-project/memory/MEMORY.md"
+        )
         assert handler.matches(write_input) is False
 
     def test_matches_returns_false_for_memory_path_with_symlink_resolving_into_project(
@@ -708,9 +708,9 @@ class TestMarkdownOrganizationHandler:
         ]
         for path in test_paths:
             write_input["tool_input"]["file_path"] = path
-            assert (
-                handler.matches(write_input) is False
-            ), f"Should NOT match outside-project path: {path}"
+            assert handler.matches(write_input) is False, (
+                f"Should NOT match outside-project path: {path}"
+            )
 
     def test_matches_returns_true_for_project_relative_invalid_location(
         self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
@@ -733,9 +733,9 @@ class TestMarkdownOrganizationHandler:
         so CLAUDE/LLM-UPDATE.md became .claude/worktrees/<name>/CLAUDE/... and
         was wrongly blocked. Project root is /tmp/test (autouse fixture).
         """
-        write_input["tool_input"][
-            "file_path"
-        ] = "/tmp/test/.claude/worktrees/agent-X/CLAUDE/LLM-UPDATE.md"
+        write_input["tool_input"]["file_path"] = (
+            "/tmp/test/.claude/worktrees/agent-X/CLAUDE/LLM-UPDATE.md"
+        )
         assert handler.matches(write_input) is False
 
     def test_matches_false_for_plan_file_in_untracked_worktree(
@@ -743,9 +743,9 @@ class TestMarkdownOrganizationHandler:
     ) -> None:
         """A plan file inside an untracked worktree is classified relative to the
         worktree root (allowed, not matched)."""
-        write_input["tool_input"][
-            "file_path"
-        ] = "/tmp/test/untracked/worktrees/agent-Y/CLAUDE/Plan/00001-foo/PLAN.md"
+        write_input["tool_input"]["file_path"] = (
+            "/tmp/test/untracked/worktrees/agent-Y/CLAUDE/Plan/00001-foo/PLAN.md"
+        )
         assert handler.matches(write_input) is False
 
     def test_matches_true_for_disallowed_file_in_worktree(
@@ -753,9 +753,9 @@ class TestMarkdownOrganizationHandler:
     ) -> None:
         """Re-rooting is not a blanket bypass: a junk location inside a worktree
         is still blocked (matched)."""
-        write_input["tool_input"][
-            "file_path"
-        ] = "/tmp/test/.claude/worktrees/agent-Z/random/notes.md"
+        write_input["tool_input"]["file_path"] = (
+            "/tmp/test/.claude/worktrees/agent-Z/random/notes.md"
+        )
         assert handler.matches(write_input) is True
 
 
@@ -1029,9 +1029,9 @@ class TestPlanningModeIntegration:
         mock_get_next.return_value = "00001"
 
         # Use a filename with special characters
-        legacy_plan_write_input["tool_input"][
-            "file_path"
-        ] = "/home/user/.claude/plans/My Plan: (with special chars!).md"
+        legacy_plan_write_input["tool_input"]["file_path"] = (
+            "/home/user/.claude/plans/My Plan: (with special chars!).md"
+        )
 
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         plan_dir.mkdir(parents=True)

@@ -164,8 +164,7 @@ class TestWriteTimeGuardCoversEverySurface:
         # under a listed directory. So the root must be the fixture's own root,
         # or there is no relative portion left to match.
         with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content."
-            "resolve_project_root",
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
             return_value=str(tmp_path),
         ):
             assert handler.matches(hook_input) is True
@@ -237,9 +236,9 @@ class TestBatchGuardCoversEverySurface:
 
         data = _run(_HISTORY_CHECKER, _HISTORY_JSON, "--repo", str(repo), "--config", str(config))
 
-        assert expected in {
-            v["surface"] for v in data["violations"]
-        }, f"{surface} is unguarded in committed history"
+        assert expected in {v["surface"] for v in data["violations"]}, (
+            f"{surface} is unguarded in committed history"
+        )
 
 
 def _contaminate(repo: Path, surface: str) -> None:

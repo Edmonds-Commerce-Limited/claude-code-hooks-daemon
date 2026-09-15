@@ -38,7 +38,7 @@ def _make_tomllib_unavailable_site(tmp_path: Path) -> Path:
     site_dir = tmp_path / "no_tomllib_site"
     site_dir.mkdir()
     (site_dir / "sitecustomize.py").write_text(
-        "import sys\n" "sys.modules['tomllib'] = None\n",
+        "import sys\nsys.modules['tomllib'] = None\n",
         encoding="utf-8",
     )
     return site_dir
@@ -120,8 +120,7 @@ def test_check_venv_fresh_does_not_crash_when_tomllib_unavailable(tmp_path: Path
         f"is unavailable. stderr=\n{result.stderr}"
     )
     assert "No module named 'tomllib'" not in result.stderr, (
-        f"check-venv-fresh must not surface module-load tomllib failure. "
-        f"stderr=\n{result.stderr}"
+        f"check-venv-fresh must not surface module-load tomllib failure. stderr=\n{result.stderr}"
     )
     assert result.returncode == 0, (
         f"check-venv-fresh with matching lock_hash must exit 0 even under "
@@ -151,7 +150,7 @@ def test_check_venv_fresh_returns_1_on_mismatch_when_tomllib_unavailable(
     )
 
     assert "ModuleNotFoundError" not in result.stderr, (
-        f"check-venv-fresh must not surface ModuleNotFoundError. " f"stderr=\n{result.stderr}"
+        f"check-venv-fresh must not surface ModuleNotFoundError. stderr=\n{result.stderr}"
     )
     assert result.returncode == 1, (
         f"check-venv-fresh with non-matching lock_hash must exit 1. "

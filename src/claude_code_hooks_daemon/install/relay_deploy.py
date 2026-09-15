@@ -272,9 +272,7 @@ def _default_fetch(url: str) -> bytes:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme != "https":
         raise ValueError(f"refusing to fetch non-https URL: {url!r}")
-    with urllib.request.urlopen(
-        url, timeout=_FETCH_TIMEOUT_SECONDS
-    ) as response:  # nosec B310 - scheme validated to https above
+    with urllib.request.urlopen(url, timeout=_FETCH_TIMEOUT_SECONDS) as response:  # nosec B310 - scheme validated to https above
         return bytes(response.read())
 
 

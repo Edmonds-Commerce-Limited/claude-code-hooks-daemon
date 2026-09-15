@@ -78,7 +78,7 @@ def _edit_input(
 
 def _patched_root(root: Path) -> Any:
     target = (
-        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_qa_edit." "ProjectContext.project_root"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_qa_edit.ProjectContext.project_root"
     )
     return patch(target, return_value=root)
 
@@ -471,7 +471,7 @@ class TestCounterAllocationOnNewPlan:
     """
 
     _RECORDER = (
-        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_qa_edit." "record_new_plan_document"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_qa_edit.record_new_plan_document"
     )
 
     def test_creating_a_plan_document_records_the_allocation(self, tmp_path: Path) -> None:

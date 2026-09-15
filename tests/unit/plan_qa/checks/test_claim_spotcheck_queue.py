@@ -74,8 +74,7 @@ class TestFindings:
 
     def test_in_review_claim_advises(self) -> None:
         text = (
-            "# Plans Index\n\n## Active Plans\n"
-            "- [00004: Thing](00004-thing/PLAN.md) - in review\n"
+            "# Plans Index\n\n## Active Plans\n- [00004: Thing](00004-thing/PLAN.md) - in review\n"
         )
         findings = CHECK.run(_context(text))
         assert len(findings) == 1

@@ -145,10 +145,7 @@ class TestRemotePolicy:
 
         self._configure(
             tmp_path,
-            "documentation:\n"
-            "  remote:\n"
-            "    known_sources:\n"
-            "      example.com: CC-BY-4.0\n",
+            "documentation:\n  remote:\n    known_sources:\n      example.com: CC-BY-4.0\n",
         )
 
         cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))

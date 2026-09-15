@@ -93,8 +93,7 @@ def _scaffold_plan_repo(tmp_path: Path) -> Path:
     )
     (folder / "JOURNAL").mkdir()
     (plan_dir / "README.md").write_text(
-        "# Plans Index\n\n## Active Plans\n\n"
-        "- [00001: first](00001-first/PLAN.md) - In Progress\n"
+        "# Plans Index\n\n## Active Plans\n\n- [00001: first](00001-first/PLAN.md) - In Progress\n"
     )
     _init_git_identity(root)
     _git(root, "add", "-A")

@@ -75,5 +75,5 @@ class TestStripInertSpans:
 
     def test_order_does_not_matter_for_a_message_holding_a_heredoc(self) -> None:
         """The canonical multi-line message idiom is inert as a whole."""
-        command = "git commit -m \"$(cat <<'EOF'\n" f"names {_FORCE}\n" 'EOF\n)"'
+        command = f"git commit -m \"$(cat <<'EOF'\nnames {_FORCE}\nEOF\n)\""
         assert _FORCE not in strip_inert_spans(command)

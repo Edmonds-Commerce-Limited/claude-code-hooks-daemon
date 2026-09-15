@@ -189,7 +189,7 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
                     tmp_path.unlink()
                 except OSError as cleanup_exc:
                     logger.warning(
-                        "artifact source-disable: also failed to remove stale temp " "file %s: %s",
+                        "artifact source-disable: also failed to remove stale temp file %s: %s",
                         tmp_path,
                         cleanup_exc,
                     )

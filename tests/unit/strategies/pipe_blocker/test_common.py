@@ -74,9 +74,9 @@ class TestUniversalWhitelistPatterns:
         self, subcommand: str, prefix: str
     ) -> None:
         command = f"{prefix}{subcommand} --oneline"
-        assert any(
-            re.match(pattern, command) for pattern in UNIVERSAL_WHITELIST_PATTERNS
-        ), f"{command!r} should be whitelisted but matched no pattern"
+        assert any(re.match(pattern, command) for pattern in UNIVERSAL_WHITELIST_PATTERNS), (
+            f"{command!r} should be whitelisted but matched no pattern"
+        )
 
     def test_contains_date(self) -> None:
         assert r"^date\b" in UNIVERSAL_WHITELIST_PATTERNS
@@ -105,9 +105,9 @@ class TestUniversalWhitelistPatterns:
             (r"^git\s+diff\b", "git diff HEAD"),
         ]
         for pattern, command in cases:
-            assert re.search(
-                pattern, command, re.IGNORECASE
-            ), f"Pattern {pattern!r} should match {command!r}"
+            assert re.search(pattern, command, re.IGNORECASE), (
+                f"Pattern {pattern!r} should match {command!r}"
+            )
 
     def test_patterns_do_not_match_non_commands(self) -> None:
         """Verify patterns do NOT match non-whitelist commands."""

@@ -336,9 +336,9 @@ class OldStyleHandler(Handler):
             "Upgrade-guide hint is a bare relative path. It does not resolve "
             f"from a client project root. Got:\n{output}"
         )
-        assert (
-            "hooks-daemon/CLAUDE/UPGRADES" in output or str(project_path) in output
-        ), f"Upgrade-guide hint is not anchored to the daemon root:\n{output}"
+        assert "hooks-daemon/CLAUDE/UPGRADES" in output or str(project_path) in output, (
+            f"Upgrade-guide hint is not anchored to the daemon root:\n{output}"
+        )
 
     def test_counts_handlers_per_event_type(self, tmp_path: Path, capsys: Any) -> None:
         """validate-project-handlers shows handler count per event type."""

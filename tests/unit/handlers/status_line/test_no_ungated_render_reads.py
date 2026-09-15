@@ -74,7 +74,9 @@ def _direct_read_lines(module: Path) -> list[int]:
         name = (
             func.attr
             if isinstance(func, ast.Attribute)
-            else func.id if isinstance(func, ast.Name) else None
+            else func.id
+            if isinstance(func, ast.Name)
+            else None
         )
         if name in _READ_CALLS:
             lines.append(node.lineno)

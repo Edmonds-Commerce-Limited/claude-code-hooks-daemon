@@ -338,7 +338,7 @@ class TestWrapperPidWaits:
     """
 
     _SETSID = (
-        "setsid nohup ./job.bash > j.log 2>&1 & sleep 1; " "until ! kill -0 $! ; do sleep 5; done"
+        "setsid nohup ./job.bash > j.log 2>&1 & sleep 1; until ! kill -0 $! ; do sleep 5; done"
     )
 
     def test_the_setsid_waiter_is_denied(self, handler: SelfMatchingProcessProbeHandler) -> None:

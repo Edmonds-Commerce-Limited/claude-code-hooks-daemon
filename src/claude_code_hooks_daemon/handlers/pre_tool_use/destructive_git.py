@@ -706,8 +706,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="a commit message describing destructive flags is not a command",
                 command=(
-                    "git commit --dry-run --allow-empty "
-                    "-m 'documents --force and git reset --hard'"
+                    "git commit --dry-run --allow-empty -m 'documents --force and git reset --hard'"
                 ),
                 dispatch_as_bash=True,
                 description=(

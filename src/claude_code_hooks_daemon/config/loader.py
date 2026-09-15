@@ -78,7 +78,7 @@ class ConfigLoader:
                     return config_path
 
         raise FileNotFoundError(
-            "No hooks-daemon.yaml configuration found. " "Searched upward from current directory."
+            "No hooks-daemon.yaml configuration found. Searched upward from current directory."
         )
 
     @staticmethod

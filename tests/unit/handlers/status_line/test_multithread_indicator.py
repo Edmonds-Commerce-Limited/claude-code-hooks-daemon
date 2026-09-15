@@ -179,8 +179,7 @@ class TestMultithreadIndicatorHandler:
             raise OSError("registry unwritable")
 
         monkeypatch.setattr(
-            "claude_code_hooks_daemon.handlers.status_line.multithread_indicator."
-            "upsert_heartbeat",
+            "claude_code_hooks_daemon.handlers.status_line.multithread_indicator.upsert_heartbeat",
             _raise_oserror,
         )
         result = handler.handle(_hook_input(session_id="sess-a"))

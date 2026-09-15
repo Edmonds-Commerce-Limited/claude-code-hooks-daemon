@@ -123,8 +123,7 @@ class HostHostnameHandler(StatusLineHandlerBase):
         else:
             marker = INFERRED_MARKER if resolved.inferred else ""
             current_value = (
-                f"Currently shows: {_ICON}{marker}{resolved.name} "
-                f"(source: {resolved.source.value})"
+                f"Currently shows: {_ICON}{marker}{resolved.name} (source: {resolved.source.value})"
             )
         return SegmentExplanation(
             glyphs=(_ICON, _ICON_INFERRED),

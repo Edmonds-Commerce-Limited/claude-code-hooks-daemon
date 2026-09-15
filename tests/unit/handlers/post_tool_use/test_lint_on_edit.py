@@ -406,7 +406,7 @@ class TestHandle:
         fail_result.stdout = ""
         toolchain_name = "stable-x86_64-unknown-linux-gnu"
         fail_result.stderr = (
-            "error: 'clippy-driver' is not installed for the " f"toolchain '{toolchain_name}'.\n"
+            f"error: 'clippy-driver' is not installed for the toolchain '{toolchain_name}'.\n"
         )
 
         hook_input: dict[str, Any] = {

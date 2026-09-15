@@ -111,9 +111,9 @@ class TestAmbiguousNamesCannotSlipThrough:
         collect_orphaned_branches(Path("/repo"), "main", run_fn=git)
         formats = [arg for call in git.calls for arg in call if arg.startswith("--format=")]
         assert formats
-        assert all(
-            fmt == "--format=%(refname)" for fmt in formats
-        ), f"`:short` yields the shortest UNAMBIGUOUS name, not a branch name: {formats}"
+        assert all(fmt == "--format=%(refname)" for fmt in formats), (
+            f"`:short` yields the shortest UNAMBIGUOUS name, not a branch name: {formats}"
+        )
 
     def test_the_reported_name_is_the_bare_branch(self) -> None:
         found = collect_orphaned_branches(Path("/repo"), "main", run_fn=_FakeGit())

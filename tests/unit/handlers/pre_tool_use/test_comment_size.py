@@ -238,7 +238,7 @@ class TestEscapeHatch:
         self, handler: CommentSizeHandler
     ) -> None:
         old = "x = 1  # short\n"
-        new = "x = 1  # " + ("y" * 60) + "\n" "# MUST_EXCEED_COMMENT_SIZE_BECAUSE:\n"
+        new = "x = 1  # " + ("y" * 60) + "\n# MUST_EXCEED_COMMENT_SIZE_BECAUSE:\n"
         hook_input = _make_edit_input("/workspace/src/mod.py", old, new)
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY

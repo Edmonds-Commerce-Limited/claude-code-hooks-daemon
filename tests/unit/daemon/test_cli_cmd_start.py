@@ -114,12 +114,12 @@ class TestCmdStartParentProcess:
             cmd_start(args)
 
         assert "fork" in call_order, "Test did not exercise the fork path"
-        assert (
-            "flush" in call_order
-        ), "stdout was never flushed; the fork will duplicate buffered output"
-        assert call_order.index("flush") < call_order.index(
-            "fork"
-        ), f"stdout must be flushed BEFORE fork, got order: {call_order}"
+        assert "flush" in call_order, (
+            "stdout was never flushed; the fork will duplicate buffered output"
+        )
+        assert call_order.index("flush") < call_order.index("fork"), (
+            f"stdout must be flushed BEFORE fork, got order: {call_order}"
+        )
 
     def test_parent_does_not_unlink_socket_outside_lock(self, tmp_path: Path) -> None:
         """cmd_start must NOT unlink the daemon socket in the parent.
@@ -490,9 +490,9 @@ class TestCmdStartChildProcess:
             # Verify project_handlers_config was passed to initialise()
             mock_controller.initialise.assert_called_once()
             call_kwargs = mock_controller.initialise.call_args
-            assert (
-                "project_handlers_config" in call_kwargs.kwargs
-            ), "project_handlers_config must be passed to controller.initialise()"
+            assert "project_handlers_config" in call_kwargs.kwargs, (
+                "project_handlers_config must be passed to controller.initialise()"
+            )
             assert call_kwargs.kwargs["project_handlers_config"] is mock_project_handlers
 
     def test_daemon_process_with_existing_paths(self, tmp_path: Path) -> None:

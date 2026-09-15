@@ -137,9 +137,9 @@ class TestSafeCommandsStillAllowed:
         ],
     )
     def test_safe_command_is_not_denied(self, handler: DestructiveGitHandler, command: str) -> None:
-        assert (
-            _denies(handler, command) is False
-        ), f"FALSE POSITIVE: {command!r} is safe but was blocked."
+        assert _denies(handler, command) is False, (
+            f"FALSE POSITIVE: {command!r} is safe but was blocked."
+        )
 
     def test_subcommand_named_in_a_path_is_not_a_subcommand(
         self, handler: DestructiveGitHandler

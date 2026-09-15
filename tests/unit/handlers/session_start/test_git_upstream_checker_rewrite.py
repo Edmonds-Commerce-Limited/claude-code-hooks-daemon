@@ -79,23 +79,23 @@ class TestRewriteDivergence:
         """agent-pull is the most dangerous mode: it instructs, not suggests."""
         text = _context("agent-pull", tree_matches=True)
 
-        assert (
-            _PULL_ADVICE not in text
-        ), f"agent-pull ordered a pull after a rewrite. Emitted:\n{text}"
+        assert _PULL_ADVICE not in text, (
+            f"agent-pull ordered a pull after a rewrite. Emitted:\n{text}"
+        )
 
     def test_auto_pull_mode_does_not_recommend_pull(self) -> None:
         text = _context("auto-pull", tree_matches=True)
 
-        assert (
-            _PULL_ADVICE not in text
-        ), f"auto-pull advised a pull after a rewrite. Emitted:\n{text}"
+        assert _PULL_ADVICE not in text, (
+            f"auto-pull advised a pull after a rewrite. Emitted:\n{text}"
+        )
 
     def test_names_the_rewrite_so_the_reader_can_act(self) -> None:
         text = _context("warn", tree_matches=True)
 
-        assert (
-            "rewritten" in text.lower()
-        ), f"Suppressed the pull advice but never explained why. Emitted:\n{text}"
+        assert "rewritten" in text.lower(), (
+            f"Suppressed the pull advice but never explained why. Emitted:\n{text}"
+        )
         assert "identical" in text.lower() or "same content" in text.lower(), (
             "Did not state the evidence (the trees match), so a reader cannot "
             f"check the diagnosis. Emitted:\n{text}"

@@ -68,9 +68,7 @@ class TestCollectReads:
         assert cic.collect_reads_from_source(source, {}) == set()
 
     def test_get_with_default_argument(self) -> None:
-        source = (
-            "def f(hook_input: dict):\n" '    return hook_input.get("stop_hook_active", False)\n'
-        )
+        source = 'def f(hook_input: dict):\n    return hook_input.get("stop_hook_active", False)\n'
         assert cic.collect_reads_from_source(source, {}) == {"stop_hook_active"}
 
 
@@ -157,8 +155,7 @@ def _write_tree(
 
 
 _CLEAN_HANDLER = (
-    "def matches(hook_input: dict) -> bool:\n"
-    '    return bool(hook_input.get("stop_hook_active"))\n'
+    'def matches(hook_input: dict) -> bool:\n    return bool(hook_input.get("stop_hook_active"))\n'
 )
 
 
@@ -231,7 +228,7 @@ class TestScan:
             handler_source=_CLEAN_HANDLER,
             stop_example={"stop_hook_active": True},
             core_source=(
-                "def f(hook_input: dict):\n" '    return hook_input.get("core_only_field")\n'
+                'def f(hook_input: dict):\n    return hook_input.get("core_only_field")\n'
             ),
         )
         report = cic.scan(tmp_path)

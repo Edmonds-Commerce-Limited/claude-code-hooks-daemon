@@ -111,6 +111,6 @@ class TestRealImplementationsSatisfyProtocol:
 
         # Instantiate and check isinstance
         strategy = strategy_cls()
-        assert isinstance(
-            strategy, TddStrategy
-        ), f"{strategy_class} should satisfy TddStrategy protocol"
+        assert isinstance(strategy, TddStrategy), (
+            f"{strategy_class} should satisfy TddStrategy protocol"
+        )

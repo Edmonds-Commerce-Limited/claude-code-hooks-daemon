@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.plan_qa.types import (
     Finding,
     Level,
 )
+from claude_code_hooks_daemon.utils.authored_paths import authored_path_exists
 
 CHECK_ID: Final[str] = "path-existence"
 
@@ -63,7 +64,7 @@ def _rule(context: CheckContext, target: DocumentTarget) -> list[Finding]:
                 continue
             if span in missing:
                 continue
-            if not (context.project_root / span).exists():
+            if not authored_path_exists(context.project_root, span):
                 missing.append(span)
 
     if not missing:

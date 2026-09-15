@@ -481,9 +481,9 @@ class TestExactlyOneCronEverExists:
             "Progress guidance must tell the agent to CronDelete extras when "
             f"more than one recovery cron is listed. Guidance was:\n{_PROGRESS_GUIDANCE}"
         )
-        assert (
-            "more than one" in lowered or "duplicate" in lowered
-        ), "Progress guidance must name the duplicate case explicitly."
+        assert "more than one" in lowered or "duplicate" in lowered, (
+            "Progress guidance must name the duplicate case explicitly."
+        )
 
     def test_claude_md_table_matches_the_guidance(self) -> None:
         """Resident guidance must not contradict the injected advisory.
@@ -500,9 +500,9 @@ class TestExactlyOneCronEverExists:
             "instruction as the creation advisory."
         )
         lowered = claude_md.lower()
-        assert (
-            "exactly one" in lowered or "only one" in lowered
-        ), "The CLAUDE.md table must state the one-cron-per-session invariant."
+        assert "exactly one" in lowered or "only one" in lowered, (
+            "The CLAUDE.md table must state the one-cron-per-session invariant."
+        )
 
 
 class TestHandleCreation:
@@ -871,9 +871,9 @@ class TestAdviceIsNotSpentOnADeniedCall:
             assert not handler.handle(_progress_edit(path)).context
             handler.commit_side_effects(_progress_edit(path), Decision.DENY)
 
-        assert not handler.handle(
-            _progress_edit(path)
-        ).context, "denied edits advanced the progress counter"
+        assert not handler.handle(_progress_edit(path)).context, (
+            "denied edits advanced the progress counter"
+        )
 
     def test_denied_completion_write_is_advised_again_next_time(
         self, handler: RecoveryCronAdvisorHandler

@@ -270,8 +270,7 @@ class TestQuoteSourceStaleWiring:
         source = tmp_path / "CLAUDE" / "Source.md"
         source.write_text(f"## Anchor\n\n{long_sentence}\n")
         (tmp_path / "CLAUDE" / "Quoter.md").write_text(
-            f"<!-- ssot-quote: CLAUDE/Source.md#anchor -->\n{long_sentence}\n"
-            "<!-- /ssot-quote -->\n"
+            f"<!-- ssot-quote: CLAUDE/Source.md#anchor -->\n{long_sentence}\n<!-- /ssot-quote -->\n"
         )
         policy = DocumentationPolicy(enabled=True, qa=DocumentationQaPolicy(edit_mode="warn"))
         handler = _handler(policy)

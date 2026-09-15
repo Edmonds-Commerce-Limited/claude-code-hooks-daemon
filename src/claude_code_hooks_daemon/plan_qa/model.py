@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME
+from claude_code_hooks_daemon.utils.authored_paths import authored_path_exists
 
 
 class PlanStatus(StrEnum):
@@ -483,9 +484,15 @@ class PlanTree:
             cancelled_dir_name=cancelled_dir,
             folders=tuple(folders),
             stray_files=tuple(stray_files),
-            has_readme=(root / README_FILENAME).is_file(),
-            has_completed_dir=(root / completed_dir).is_dir(),
-            has_cancelled_dir=(cancelled_dir is not None and (root / cancelled_dir).is_dir()),
+            # Through the normalising helper like every other path resolution
+            # in this tree: these three names are configured, not literal, and
+            # the rule that keeps `..` out of a stat is a chokepoint rather
+            # than a judgement about which value can carry one.
+            has_readme=authored_path_exists(root, README_FILENAME),
+            has_completed_dir=authored_path_exists(root, completed_dir),
+            has_cancelled_dir=(
+                cancelled_dir is not None and authored_path_exists(root, cancelled_dir)
+            ),
         )
 
     def collisions(self) -> dict[int, list[PlanFolder]]:

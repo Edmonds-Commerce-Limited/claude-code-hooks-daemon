@@ -149,9 +149,7 @@ class TestConsumedResults:
     def test_captured_exit_code_with_a_conditional(
         self, handler: VerificationResultGateHandler
     ) -> None:
-        command = (
-            "ansible-lint x; rc=$?\n" 'if [ "$rc" -ne 0 ]; then exit 1; fi\n' "git commit -m y"
-        )
+        command = 'ansible-lint x; rc=$?\nif [ "$rc" -ne 0 ]; then exit 1; fi\ngit commit -m y'
 
         assert not _fires(handler, command)
 

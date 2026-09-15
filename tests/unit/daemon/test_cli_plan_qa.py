@@ -47,8 +47,7 @@ def _scaffold(tmp_path: Path, config_body: str = _CONFIG_ENABLED) -> Path:
     # (has_journal → folder-present passes; no dated file → freshness skips).
     (folder / "JOURNAL").mkdir()
     (plan_dir / "README.md").write_text(
-        "# Plans Index\n\n## Active Plans\n\n"
-        "- [00001: first](00001-first/PLAN.md) - In Progress\n"
+        "# Plans Index\n\n## Active Plans\n\n- [00001: first](00001-first/PLAN.md) - In Progress\n"
     )
     subprocess.run(
         ["git", "init", str(root)],

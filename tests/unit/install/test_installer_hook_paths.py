@@ -36,7 +36,7 @@ def test_create_settings_json_uses_project_dir_variable(tmp_path):
 
     # Check statusLine uses $CLAUDE_PROJECT_DIR
     assert "$CLAUDE_PROJECT_DIR" in settings["statusLine"]["command"], (
-        f"statusLine must use $CLAUDE_PROJECT_DIR, " f"got: {settings['statusLine']['command']}"
+        f"statusLine must use $CLAUDE_PROJECT_DIR, got: {settings['statusLine']['command']}"
     )
 
     # Check all hook events use $CLAUDE_PROJECT_DIR
@@ -45,9 +45,9 @@ def test_create_settings_json_uses_project_dir_variable(tmp_path):
             for hook in hook_config["hooks"]:
                 if hook["type"] == "command":
                     cmd = hook["command"]
-                    assert (
-                        "$CLAUDE_PROJECT_DIR" in cmd
-                    ), f"{event_name} hook must use $CLAUDE_PROJECT_DIR, got: {cmd}"
+                    assert "$CLAUDE_PROJECT_DIR" in cmd, (
+                        f"{event_name} hook must use $CLAUDE_PROJECT_DIR, got: {cmd}"
+                    )
 
 
 def test_create_settings_json_invokes_hooks_via_bash(tmp_path):
@@ -86,8 +86,7 @@ def test_create_settings_json_invokes_hooks_via_bash(tmp_path):
                     f"so the exec bit is irrelevant — got: {cmd!r}"
                 )
                 assert "/.claude/hooks/" in cmd, (
-                    f"{event_name} hook command must still reference "
-                    f".claude/hooks/, got: {cmd!r}"
+                    f"{event_name} hook command must still reference .claude/hooks/, got: {cmd!r}"
                 )
 
 
@@ -125,9 +124,9 @@ def test_create_settings_json_invokes_status_line_via_bash(tmp_path):
         "statusLine command must invoke the wrapper via `bash` so the exec "
         f"bit is irrelevant — got: {command!r}"
     )
-    assert command.endswith(
-        "/.claude/hooks/status-line"
-    ), f"statusLine command must still reference the wrapper, got: {command!r}"
+    assert command.endswith("/.claude/hooks/status-line"), (
+        f"statusLine command must still reference the wrapper, got: {command!r}"
+    )
 
 
 def test_status_line_command_matches_the_hook_command_template(tmp_path):

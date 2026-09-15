@@ -57,8 +57,7 @@ def _drifted_plan_tree(tmp_path: Path) -> Path:
     )
     (folder / "JOURNAL").mkdir()
     (plan_dir / "README.md").write_text(
-        "# Plans Index\n\n## Active Plans\n\n"
-        "- [00001: first](00001-first/PLAN.md) - In Progress\n"
+        "# Plans Index\n\n## Active Plans\n\n- [00001: first](00001-first/PLAN.md) - In Progress\n"
     )
     rogue = plan_dir / "00002-rogue"
     rogue.mkdir()

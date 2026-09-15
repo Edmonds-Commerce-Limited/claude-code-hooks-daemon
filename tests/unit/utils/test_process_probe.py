@@ -615,7 +615,7 @@ class TestWrapperPidWaits:
     """
 
     _SETSID = (
-        "setsid nohup ./job.bash > j.log 2>&1 & sleep 1; " "until ! kill -0 $! ; do sleep 5; done"
+        "setsid nohup ./job.bash > j.log 2>&1 & sleep 1; until ! kill -0 $! ; do sleep 5; done"
     )
 
     def _only(self, command: str) -> WrapperPidWait:

@@ -69,7 +69,7 @@ class TestTextThatOnlyMentionsThePlanDirectory:
         no filesystem access here at all.
         """
         command = (
-            'echo "harmless text mentioning CLAUDE/Plan and the words ' 'sort and tail -1 together"'
+            'echo "harmless text mentioning CLAUDE/Plan and the words sort and tail -1 together"'
         )
 
         assert handler.matches(_bash(command)) is False

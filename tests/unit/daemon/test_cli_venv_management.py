@@ -320,9 +320,9 @@ class TestEnumerateVenvsInstallModes:
             rc = cli.cmd_prune_venvs(_args(tmp_path, legacy=True, force=True))
 
         assert rc == 0
-        assert (
-            not legacy.exists()
-        ), "Regression: prune-venvs --legacy --force was a no-op in normal-install mode"
+        assert not legacy.exists(), (
+            "Regression: prune-venvs --legacy --force was a no-op in normal-install mode"
+        )
 
     def test_self_install_layout_still_works(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

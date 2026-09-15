@@ -62,11 +62,7 @@ class TestCapturedFunctionRule:
         defn = _write(
             tmp_path,
             "lib.sh",
-            "#!/bin/bash\n"
-            "resolve_path() {\n"
-            '    echo "found path"\n'
-            '    echo "$resolved"\n'
-            "}\n",
+            '#!/bin/bash\nresolve_path() {\n    echo "found path"\n    echo "$resolved"\n}\n',
         )
         caller = _write(tmp_path, "use.sh", "#!/bin/bash\nVAR=$(resolve_path /a)\n")
         violations = audit_files([defn, caller])
@@ -77,7 +73,7 @@ class TestCapturedFunctionRule:
         defn = _write(
             tmp_path,
             "lib.sh",
-            "#!/bin/bash\n" "show_status() {\n" '    echo "step 1"\n' '    echo "step 2"\n' "}\n",
+            '#!/bin/bash\nshow_status() {\n    echo "step 1"\n    echo "step 2"\n}\n',
         )
         violations = audit_files([defn])
         assert violations == []
@@ -161,7 +157,7 @@ class TestRedirectConsumptionRule:
         defn = _write(
             tmp_path,
             "lib.sh",
-            "#!/bin/bash\n" "run_tool() {\n" '    echo "banner"\n' '    "$1"\n' "}\n",
+            '#!/bin/bash\nrun_tool() {\n    echo "banner"\n    "$1"\n}\n',
         )
         caller = _write(tmp_path, "use.sh", '#!/bin/bash\nrun_tool ruff > "${OUT}.raw"\n')
         violations = audit_files([defn, caller])
@@ -183,7 +179,7 @@ class TestRedirectConsumptionRule:
         defn = _write(
             tmp_path,
             "lib.sh",
-            "#!/bin/bash\n" "run_tool() {\n" '    echo "banner"\n' "    return 0\n" "}\n",
+            '#!/bin/bash\nrun_tool() {\n    echo "banner"\n    return 0\n}\n',
         )
         caller = _write(tmp_path, "use.sh", '#!/bin/bash\nrun_tool > "${OUT}.raw"\n')
         violations = audit_files([defn, caller])
@@ -193,7 +189,7 @@ class TestRedirectConsumptionRule:
         defn = _write(
             tmp_path,
             "lib.sh",
-            "#!/bin/bash\n" "run_tool() {\n" '    echo "banner"\n' "}\n",
+            '#!/bin/bash\nrun_tool() {\n    echo "banner"\n}\n',
         )
         caller = _write(tmp_path, "use.sh", '#!/bin/bash\nrun_tool >> "${OUT}.raw"\n')
         violations = audit_files([defn, caller])
@@ -204,7 +200,7 @@ class TestRedirectConsumptionRule:
         defn = _write(
             tmp_path,
             "lib.sh",
-            "#!/bin/bash\n" "run_tool() {\n" '    echo "banner"\n' "}\n",
+            '#!/bin/bash\nrun_tool() {\n    echo "banner"\n}\n',
         )
         caller = _write(tmp_path, "use.sh", "#!/bin/bash\nrun_tool 2>&1\n")
         violations = audit_files([defn, caller])
@@ -277,9 +273,9 @@ class TestRedirectConsumptionRule:
 
         risky_violations = [v for v in violations if v.file == str(risky_file)]
         unrelated_violations = [v for v in violations if v.file == str(unrelated_file)]
-        assert "capture-corruption" in _rules(
-            risky_violations
-        ), "The redirect-consumed ensure_venv (risky.sh) must still be caught"
+        assert "capture-corruption" in _rules(risky_violations), (
+            "The redirect-consumed ensure_venv (risky.sh) must still be caught"
+        )
         assert unrelated_violations == [], (
             "The unrelated, never-redirected ensure_venv (unrelated.sh) must NOT "
             f"be flagged just because a same-named function elsewhere is at risk: "
@@ -290,7 +286,7 @@ class TestRedirectConsumptionRule:
         defn = _write(
             tmp_path,
             "lib.sh",
-            "#!/bin/bash\n" 'run_tool() {\n    echo "banner" >&2\n    "$1"\n}\n',
+            '#!/bin/bash\nrun_tool() {\n    echo "banner" >&2\n    "$1"\n}\n',
         )
         caller = _write(tmp_path, "use.sh", '#!/bin/bash\nrun_tool ruff > "${OUT}.raw"\n')
         violations = audit_files([defn, caller])
@@ -307,7 +303,7 @@ class TestLogHelperRule:
         src = _write(
             tmp_path,
             "out.sh",
-            "#!/bin/bash\n" "print_info() {\n" '    echo "  $1"\n' "}\n",
+            '#!/bin/bash\nprint_info() {\n    echo "  $1"\n}\n',
         )
         violations = audit_files([src])
         assert "log-helper-stdout" in _rules(violations)
@@ -316,7 +312,7 @@ class TestLogHelperRule:
         src = _write(
             tmp_path,
             "out.sh",
-            "#!/bin/bash\n" "print_info() {\n" '    echo "  $1" >&2\n' "}\n",
+            '#!/bin/bash\nprint_info() {\n    echo "  $1" >&2\n}\n',
         )
         violations = audit_files([src])
         assert violations == []
@@ -341,7 +337,7 @@ class TestLogHelperRule:
         src = _write(
             tmp_path,
             "out.sh",
-            "#!/bin/bash\n" "log_thing() {\n" '    echo "$1" | tr a-z A-Z >&2\n' "}\n",
+            '#!/bin/bash\nlog_thing() {\n    echo "$1" | tr a-z A-Z >&2\n}\n',
         )
         violations = audit_files([src])
         assert violations == []

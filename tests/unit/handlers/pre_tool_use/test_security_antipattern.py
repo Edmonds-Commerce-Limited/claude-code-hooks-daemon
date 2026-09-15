@@ -646,7 +646,7 @@ class TestSecurityAntipatternHandler:
             "tool_name": "Write",
             "tool_input": {
                 "file_path": "/workspace/src/bad.php",
-                "content": ("<?php\n" '$key = "AKIAIOSFODNN7EXAMPLE1";\n' "eval($userInput);\n"),
+                "content": ('<?php\n$key = "AKIAIOSFODNN7EXAMPLE1";\neval($userInput);\n'),
             },
         }
         result = handler.handle(hook_input)

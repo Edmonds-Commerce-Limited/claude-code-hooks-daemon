@@ -247,7 +247,7 @@ _TIER_DETAIL = {
         "is still lossless because every commit is already in the protected ref"
     ),
     TIER_PATCH_EQUIVALENT: (
-        "every commit is already upstream by patch-id — the shape a history " "rewrite produces"
+        "every commit is already upstream by patch-id — the shape a history rewrite produces"
     ),
     TIER_CONTENT_PRESERVED: (
         "every file version on this branch is byte-identical to one still "

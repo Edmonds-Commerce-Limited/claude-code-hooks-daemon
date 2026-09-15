@@ -178,9 +178,7 @@ class TestTheCwdIsAThirdWayToNameARepository:
     def test_merely_naming_us_in_the_title_is_not_targeting_us(self) -> None:
         """The false positive that would get this handler switched off."""
         assert not _handler().matches(
-            _bash(
-                f"gh issue create --repo {_CLIENT_REPO} " f'--title "upgrade {_UPSTREAM} to 3.64"'
-            )
+            _bash(f'gh issue create --repo {_CLIENT_REPO} --title "upgrade {_UPSTREAM} to 3.64"')
         )
 
     def test_reading_our_tracker_is_not_touched(self) -> None:

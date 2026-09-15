@@ -142,9 +142,9 @@ class TestHolderIsIdentified:
         with llm_qa.run_lock(lock_path):
             recorded = lock_path.read_text()
 
-        assert (
-            str(os.getpid()) in recorded
-        ), f"lock file must record the holder pid, got {recorded!r}"
+        assert str(os.getpid()) in recorded, (
+            f"lock file must record the holder pid, got {recorded!r}"
+        )
 
     def test_refusal_message_names_the_pid_and_what_to_do(self, tmp_path: Path) -> None:
         lock_path = tmp_path / "qa.lock"
@@ -179,7 +179,7 @@ class TestReadOnlyIsNotLocked:
             )
 
         assert "already running" not in result.stdout.lower(), (
-            "--read-only must not be refused by the run lock. " f"stdout={result.stdout!r}"
+            f"--read-only must not be refused by the run lock. stdout={result.stdout!r}"
         )
 
 

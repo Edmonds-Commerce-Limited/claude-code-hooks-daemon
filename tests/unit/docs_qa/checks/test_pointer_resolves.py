@@ -84,6 +84,44 @@ class TestEditStageNewFile:
         )
         assert _run_edit(context) == []
 
+    def test_parent_link_resolves_from_a_directory_that_does_not_exist_yet(
+        self, tmp_path: Path
+    ) -> None:
+        """The first document written into a NEW directory (Plan 00412).
+
+        ``Path.exists()`` stats the path as written, so ``..`` is walked
+        through the filesystem: with ``CLAUDE/Security/`` not yet on disk, the
+        join could not be stat-ed at all and a link to a real file read as
+        dead. A new dead link is BLOCK, so the write was denied — and no retry
+        could succeed, because the directory only comes into being by the write
+        being allowed. Creating the first document in a new docs directory was
+        impossible if it linked to a sibling with ``../``.
+        """
+        (tmp_path / "CLAUDE" / "Routine").mkdir(parents=True)
+        (tmp_path / "CLAUDE" / "Routine" / "Target.md").write_text("# target\n")
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE" / "Security" / "README.md",
+            file_content="See [target](../Routine/Target.md).\n",
+            file_exists_before=False,
+        )
+        assert _run_edit(context) == []
+
+    def test_a_genuinely_dead_parent_link_is_still_reported(self, tmp_path: Path) -> None:
+        """The fix must not turn every ``../`` link into an unchecked one."""
+        (tmp_path / "CLAUDE" / "Routine").mkdir(parents=True)
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE" / "Security" / "README.md",
+            file_content="See [gone](../Routine/Nope.md).\n",
+            file_exists_before=False,
+        )
+        findings = _run_edit(context)
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.BLOCK
+
     def test_repo_root_relative_link_resolves(self, tmp_path: Path) -> None:
         (tmp_path / "docs").mkdir()
         (tmp_path / "docs" / "Guide.md").write_text("# guide\n")

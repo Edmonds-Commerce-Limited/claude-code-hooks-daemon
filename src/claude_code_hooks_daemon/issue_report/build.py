@@ -95,9 +95,7 @@ def _parse(data: Mapping[str, Any]) -> _Parsed:
     for name in _REQUIRED_TEXT_FIELDS:
         raw = data.get(name)
         if raw is None:
-            problems.append(
-                ReportProblem(reason=f"`{name}` is missing from the report fields.")
-            )
+            problems.append(ReportProblem(reason=f"`{name}` is missing from the report fields."))
             values[name] = ""
         else:
             values[name] = str(raw)

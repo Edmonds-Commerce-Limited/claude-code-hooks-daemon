@@ -225,8 +225,7 @@ class TestEscapeHatch:
         self, handler: AncestryPreservingMergeHandler
     ) -> None:
         hook_input = _bash(
-            'MUST_SQUASH_BECAUSE="platform mandates rebase-only merging"; '
-            "gh pr merge --rebase 123"
+            'MUST_SQUASH_BECAUSE="platform mandates rebase-only merging"; gh pr merge --rebase 123'
         )
         assert handler.matches(hook_input) is False
 

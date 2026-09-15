@@ -41,7 +41,7 @@ def _make_tomllib_unavailable_site(tmp_path: Path) -> Path:
     site_dir = tmp_path / "no_tomllib_site"
     site_dir.mkdir()
     (site_dir / "sitecustomize.py").write_text(
-        "import sys\n" "sys.modules['tomllib'] = None\n",
+        "import sys\nsys.modules['tomllib'] = None\n",
         encoding="utf-8",
     )
     return site_dir
@@ -103,12 +103,12 @@ def test_resolve_venv_works_when_tomllib_unavailable(tmp_path: Path) -> None:
         f"resolve-venv stdout must be the venv bin/python. "
         f"Got stdout={result.stdout!r}, stderr={result.stderr!r}"
     )
-    assert (
-        "ModuleNotFoundError" not in result.stderr
-    ), f"resolve-venv must not surface ModuleNotFoundError. stderr=\n{result.stderr}"
-    assert (
-        "tomllib" not in result.stderr
-    ), f"resolve-venv must not mention tomllib in stderr. stderr=\n{result.stderr}"
+    assert "ModuleNotFoundError" not in result.stderr, (
+        f"resolve-venv must not surface ModuleNotFoundError. stderr=\n{result.stderr}"
+    )
+    assert "tomllib" not in result.stderr, (
+        f"resolve-venv must not mention tomllib in stderr. stderr=\n{result.stderr}"
+    )
 
 
 def test_resolve_venv_with_fallback_target_works_when_tomllib_unavailable(
@@ -146,5 +146,5 @@ def test_resolve_venv_with_fallback_target_works_when_tomllib_unavailable(
         f"Got stdout={out!r}"
     )
     assert out.endswith("/bin/python"), (
-        f"resolve-venv --fallback-target stdout must end in /bin/python. " f"Got stdout={out!r}"
+        f"resolve-venv --fallback-target stdout must end in /bin/python. Got stdout={out!r}"
     )

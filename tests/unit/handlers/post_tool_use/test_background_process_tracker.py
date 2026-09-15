@@ -238,9 +238,9 @@ class TestWatchdogCronIsNeverStacked:
 
     def test_advisory_makes_creation_conditional(self) -> None:
         lowered = self._advisory().lower()
-        assert (
-            "only if" in lowered or "if none" in lowered or "if no " in lowered
-        ), "The CronCreate step must be gated on none already existing."
+        assert "only if" in lowered or "if none" in lowered or "if no " in lowered, (
+            "The CronCreate step must be gated on none already existing."
+        )
 
     def test_advisory_states_the_one_cron_invariant(self) -> None:
         lowered = self._advisory().lower()

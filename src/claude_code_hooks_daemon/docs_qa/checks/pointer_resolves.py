@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
+from claude_code_hooks_daemon.utils.authored_paths import authored_path_exists
 
 CHECK_ID: Final[str] = "pointer-resolves"
 
@@ -80,17 +81,23 @@ def _resolves(project_root: Path, file_path: Path | None, target: str) -> bool:
     Otherwise relative-to-the-file is tried first, then relative-to-root as
     a fallback (a plain link written without a leading ``/`` commonly means
     "from the repo root" in this project's own docs).
+
+    Every branch goes through :func:`authored_path_exists`, which resolves
+    ``..`` lexically before touching the filesystem. Stat-ing the join walks
+    ``..`` through the filesystem instead, so a link in the FIRST document of a
+    new directory read as dead while naming a real file — and being new, it
+    was graded BLOCK and denied a write that no retry could make succeed.
     """
     file_target = _strip_fragment(target)
     if not file_target:
         return True
     if file_target.startswith("/"):
-        if Path(file_target).exists():
+        if authored_path_exists(project_root, file_target):
             return True
-        return (project_root / file_target.lstrip("/")).exists()
-    if file_path is not None and (file_path.parent / file_target).exists():
+        return authored_path_exists(project_root, file_target.lstrip("/"))
+    if file_path is not None and authored_path_exists(file_path.parent, file_target):
         return True
-    return (project_root / file_target).exists()
+    return authored_path_exists(project_root, file_target)
 
 
 def _matches_allowlist(rel_path: str, patterns: Sequence[str]) -> bool:

@@ -319,9 +319,9 @@ class TestIdentityAndRefSurfaces:
         data = _run_checker(repo, config)
 
         offenders = {v["locator"] for v in data["violations"] if v["surface"] == "ref-name"}
-        assert any(
-            "origin/" in name for name in offenders
-        ), f"Remote-tracking ref name was not scanned. ref-name findings: {offenders}"
+        assert any("origin/" in name for name in offenders), (
+            f"Remote-tracking ref name was not scanned. ref-name findings: {offenders}"
+        )
 
 
 class TestPublicPatterns:

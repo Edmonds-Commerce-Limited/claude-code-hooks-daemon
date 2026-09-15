@@ -237,13 +237,13 @@ class TestNonCIDaemonFailure:
         context = parsed["hookSpecificOutput"]["additionalContext"]
         # Must say "Not installed" and point to the install guide
         assert "Not installed" in context, f"Expected 'Not installed' in context, got: {context!r}"
-        assert (
-            "hooks-daemon skill to install" in context
-        ), f"Expected install skill reference in context, got: {context!r}"
+        assert "hooks-daemon skill to install" in context, (
+            f"Expected install skill reference in context, got: {context!r}"
+        )
         # Must NOT look like passthrough advisory
-        assert (
-            "not installed in CI" not in context
-        ), "Non-CI not-installed should not show CI advisory language"
+        assert "not installed in CI" not in context, (
+            "Non-CI not-installed should not show CI advisory language"
+        )
 
     def test_non_ci_installed_but_not_running_shows_restart_guidance(self, tmp_path: Path) -> None:
         """Non-CI, daemon installed but not starting: hookSpecificOutput says 'Not currently running'."""
@@ -256,13 +256,13 @@ class TestNonCIDaemonFailure:
         parsed = json.loads(stdout)
         assert "hookSpecificOutput" in parsed, f"Expected hookSpecificOutput, got: {parsed}"
         context = parsed["hookSpecificOutput"]["additionalContext"]
-        assert (
-            "Not currently running" in context
-        ), f"Expected 'Not currently running' in context, got: {context!r}"
+        assert "Not currently running" in context, (
+            f"Expected 'Not currently running' in context, got: {context!r}"
+        )
         assert "restart" in context, f"Expected restart instruction in context, got: {context!r}"
-        assert (
-            "LLM-INSTALL.md" not in context
-        ), "Installed-but-not-running should not show install guide"
+        assert "LLM-INSTALL.md" not in context, (
+            "Installed-but-not-running should not show install guide"
+        )
 
     def test_non_ci_stop_event_blocked(self, tmp_path: Path) -> None:
         """Non-CI daemon failure returns decision: block for Stop events."""
@@ -272,9 +272,9 @@ class TestNonCIDaemonFailure:
         assert result.returncode == 0
         stdout = result.stdout.strip()
         parsed = json.loads(stdout)
-        assert (
-            parsed.get("decision") == "block"
-        ), f"Expected block for Stop in non-CI, got: {parsed}"
+        assert parsed.get("decision") == "block", (
+            f"Expected block for Stop in non-CI, got: {parsed}"
+        )
 
     def test_non_ci_no_passthrough_flag_created(self, tmp_path: Path) -> None:
         """Non-CI daemon failure must NOT create the passthrough state file."""
@@ -282,9 +282,9 @@ class TestNonCIDaemonFailure:
         _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
 
         state_file = project / ".claude" / "hooks-daemon" / "untracked" / ".hooks-passthrough"
-        assert (
-            not state_file.exists()
-        ), "Passthrough state file must NOT be created in non-CI environments"
+        assert not state_file.exists(), (
+            "Passthrough state file must NOT be created in non-CI environments"
+        )
 
     def test_non_ci_second_call_also_returns_error(self, tmp_path: Path) -> None:
         """Each non-CI call returns an error independently (no flag suppression)."""
@@ -337,9 +337,9 @@ class TestCIEnvironmentPassthrough:
         assert result.returncode == 0
         stdout = result.stdout.strip()
         parsed = json.loads(stdout)
-        assert (
-            "hookSpecificOutput" in parsed
-        ), f"CI first failure should return advisory hookSpecificOutput, got: {parsed}"
+        assert "hookSpecificOutput" in parsed, (
+            f"CI first failure should return advisory hookSpecificOutput, got: {parsed}"
+        )
         context = parsed["hookSpecificOutput"]["additionalContext"]
         assert "INACTIVE" in context, f"Advisory should mention INACTIVE, got: {context!r}"
 
@@ -350,12 +350,12 @@ class TestCIEnvironmentPassthrough:
             "pre-tool-use", _PRE_TOOL_INPUT, project, extra_env={"CI": "true"}
         )
 
-        assert (
-            "passthrough mode" in result.stderr
-        ), f"Expected 'passthrough mode' in stderr, got: {result.stderr!r}"
-        assert (
-            "handlers inactive" in result.stderr.lower()
-        ), f"Expected 'handlers inactive' in stderr, got: {result.stderr!r}"
+        assert "passthrough mode" in result.stderr, (
+            f"Expected 'passthrough mode' in stderr, got: {result.stderr!r}"
+        )
+        assert "handlers inactive" in result.stderr.lower(), (
+            f"Expected 'handlers inactive' in stderr, got: {result.stderr!r}"
+        )
 
     def test_ci_state_file_created(self, tmp_path: Path) -> None:
         """CI=true → first failure creates passthrough state file."""
@@ -380,9 +380,9 @@ class TestCIEnvironmentPassthrough:
         assert result.returncode == 0
         stdout = result.stdout.strip()
         assert stdout == "{}", f"CI second call should return '{{}}', got: {stdout!r}"
-        assert (
-            "passthrough mode" not in result.stderr
-        ), "Second CI call should not repeat the noisy warning"
+        assert "passthrough mode" not in result.stderr, (
+            "Second CI call should not repeat the noisy warning"
+        )
 
     def test_ci_github_actions_also_passthrough(self, tmp_path: Path) -> None:
         """GITHUB_ACTIONS=true (without CI var) → passthrough mode."""
@@ -398,13 +398,13 @@ class TestCIEnvironmentPassthrough:
         stdout = result.stdout.strip()
         parsed = json.loads(stdout)
         # Should be advisory (passthrough first call) not error
-        assert (
-            "hookSpecificOutput" in parsed
-        ), f"GITHUB_ACTIONS should trigger passthrough advisory, got: {parsed}"
+        assert "hookSpecificOutput" in parsed, (
+            f"GITHUB_ACTIONS should trigger passthrough advisory, got: {parsed}"
+        )
         context = parsed["hookSpecificOutput"]["additionalContext"]
-        assert (
-            "INACTIVE" in context
-        ), f"GITHUB_ACTIONS passthrough should mention INACTIVE, got: {context!r}"
+        assert "INACTIVE" in context, (
+            f"GITHUB_ACTIONS passthrough should mention INACTIVE, got: {context!r}"
+        )
 
     def test_ci_jenkins_also_passthrough(self, tmp_path: Path) -> None:
         """JENKINS_URL set → passthrough mode (Jenkins does not set CI var)."""
@@ -419,13 +419,13 @@ class TestCIEnvironmentPassthrough:
         assert result.returncode == 0
         stdout = result.stdout.strip()
         parsed = json.loads(stdout)
-        assert (
-            "hookSpecificOutput" in parsed
-        ), f"JENKINS_URL should trigger passthrough advisory, got: {parsed}"
+        assert "hookSpecificOutput" in parsed, (
+            f"JENKINS_URL should trigger passthrough advisory, got: {parsed}"
+        )
         context = parsed["hookSpecificOutput"]["additionalContext"]
-        assert (
-            "INACTIVE" in context
-        ), f"Jenkins passthrough should mention INACTIVE, got: {context!r}"
+        assert "INACTIVE" in context, (
+            f"Jenkins passthrough should mention INACTIVE, got: {context!r}"
+        )
 
 
 class TestCIEnforcedFailClosed:
@@ -510,9 +510,9 @@ class TestPassthroughRecovery:
 
         # Non-CI failure — no state file should be written
         _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
-        assert (
-            not state_file.exists()
-        ), "Non-CI daemon failure must not create passthrough state file"
+        assert not state_file.exists(), (
+            "Non-CI daemon failure must not create passthrough state file"
+        )
 
     def test_ci_state_file_persists_when_daemon_still_down(self, tmp_path: Path) -> None:
         """CI state file remains when daemon still cannot start after second call."""

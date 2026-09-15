@@ -375,6 +375,6 @@ class TestImportTimeBoundary:
             "print('LEAKED:' + ','.join(leaked))\n"
         )
         assert result.returncode == 0, result.stderr
-        assert (
-            result.stdout.strip() == "LEAKED:"
-        ), f"docs_qa/plan_qa modules leaked into core import time: {result.stdout!r}"
+        assert result.stdout.strip() == "LEAKED:", (
+            f"docs_qa/plan_qa modules leaked into core import time: {result.stdout!r}"
+        )

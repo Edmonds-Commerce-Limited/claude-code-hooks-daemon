@@ -168,8 +168,7 @@ class TestAllWiredEventsBindAtRealisticClientDepth(_EventSocketPathTestBase):
 
         # `<some-org>/<some-deeply-nested-monorepo>/services/billing-api/.claude/hooks-daemon/untracked`
         realistic_client_project = Path(
-            "/home/runner/work/some-org/some-deeply-nested-monorepo-checkout/"
-            "services/billing-api"
+            "/home/runner/work/some-org/some-deeply-nested-monorepo-checkout/services/billing-api"
         )
         events_dir = get_event_socket_dir(realistic_client_project)
         for meta in wired_event_metas():

@@ -308,10 +308,7 @@ class TestLintSeverityMatchesHandler:
         huge_body = "\n".join(f"line {i}" for i in range(1000))
         module_doc.write_text(huge_body)
         (root / ".claude" / "hooks-daemon.yaml").write_text(
-            "version: '2.0'\n"
-            "documentation:\n"
-            "  qa:\n"
-            "    registered_module_docs: ['src/CLAUDE.md']\n"
+            "version: '2.0'\ndocumentation:\n  qa:\n    registered_module_docs: ['src/CLAUDE.md']\n"
         )
 
         assert cmd_docs_qa(_args(root, lint=module_doc)) == 1

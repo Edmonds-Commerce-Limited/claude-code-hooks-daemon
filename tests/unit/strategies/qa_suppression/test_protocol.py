@@ -113,6 +113,6 @@ class TestRealImplementationsSatisfyProtocol:
 
         # Instantiate and check isinstance
         strategy = strategy_cls()
-        assert isinstance(
-            strategy, QaSuppressionStrategy
-        ), f"{strategy_class} should satisfy QaSuppressionStrategy protocol"
+        assert isinstance(strategy, QaSuppressionStrategy), (
+            f"{strategy_class} should satisfy QaSuppressionStrategy protocol"
+        )

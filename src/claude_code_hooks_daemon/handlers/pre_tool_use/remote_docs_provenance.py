@@ -234,7 +234,7 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
             tool_name=ToolName.WRITE,
             tool_input={
                 "file_path": (
-                    "$CLAUDE_PROJECT_DIR/untracked/scratch/" "acceptance-test-remote-docs/notes.md"
+                    "$CLAUDE_PROJECT_DIR/untracked/scratch/acceptance-test-remote-docs/notes.md"
                 ),
                 "content": "# Notes\n\nOrdinary documentation, carrying no provenance.\n",
             },

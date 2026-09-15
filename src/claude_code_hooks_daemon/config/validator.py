@@ -438,8 +438,7 @@ class ConfigValidator:
             if event_type not in ConfigValidator.VALID_EVENT_TYPES:
                 valid_events_str = ", ".join(sorted(ConfigValidator.VALID_EVENT_TYPES))
                 errors.append(
-                    f"Invalid event type 'handlers.{event_type}'. "
-                    f"Valid types: {valid_events_str}"
+                    f"Invalid event type 'handlers.{event_type}'. Valid types: {valid_events_str}"
                 )
                 continue
 

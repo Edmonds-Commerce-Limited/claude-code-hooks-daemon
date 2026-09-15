@@ -124,8 +124,7 @@ def _verify_block(
         return None
     return _finding(
         rel_path,
-        f"`{rel_path}` quote of `{block.source_path}#{block.anchor}` has drifted "
-        "from its source.",
+        f"`{rel_path}` quote of `{block.source_path}#{block.anchor}` has drifted from its source.",
         f"Update the quoted excerpt in `{rel_path}` to match the current text of "
         f"`{block.source_path}#{block.anchor}`. {_REMEDY_TAIL}",
         severity,

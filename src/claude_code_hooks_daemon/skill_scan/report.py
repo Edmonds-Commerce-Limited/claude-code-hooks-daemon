@@ -73,8 +73,7 @@ def write_report(
         # (including embedded paths) never reaches the report either.
         rep = redact_text(normalise(cluster.representative), terms)
         lines.append(
-            f"{idx}. **{len(cluster.prompts)}x / {cluster.distinct_sessions} session(s)** — "
-            f"`{rep}`"
+            f"{idx}. **{len(cluster.prompts)}x / {cluster.distinct_sessions} session(s)** — `{rep}`"
         )
     lines.extend(
         [

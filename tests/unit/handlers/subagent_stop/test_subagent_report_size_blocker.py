@@ -237,14 +237,14 @@ class TestDeclaredAcceptanceTestsAreProducible:
         assert tests, "fixture handler declared no BLOCKING tests"
 
         for test in tests:
-            assert (
-                test.hook_input is not None
-            ), f"{test.title!r} declares no hook_input to drive it with"
+            assert test.hook_input is not None, (
+                f"{test.title!r} declares no hook_input to drive it with"
+            )
             result = handler.handle(test.hook_input)
-            assert (
-                result.decision == test.expected_decision
-            ), f"{test.title!r}: expected {test.expected_decision}, got {result.decision}"
+            assert result.decision == test.expected_decision, (
+                f"{test.title!r}: expected {test.expected_decision}, got {result.decision}"
+            )
             for pattern in test.expected_message_patterns:
-                assert re.search(
-                    pattern, result.reason or ""
-                ), f"{test.title!r}: pattern {pattern!r} not found in: {result.reason}"
+                assert re.search(pattern, result.reason or ""), (
+                    f"{test.title!r}: pattern {pattern!r} not found in: {result.reason}"
+                )

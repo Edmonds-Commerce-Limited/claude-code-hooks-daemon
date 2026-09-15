@@ -1837,9 +1837,9 @@ class TestBranch3StaleReaderRace:
         # Branch 4 starts with "You stopped without explaining" — distinct from Branch 3
         assert result.decision == Decision.DENY
         reason = result.reason or ""
-        assert reason.startswith(
-            f"BLOCKED [{RuleID.STOP_CONFIRMATION_QUESTION}]"
-        ), f"Expected Branch 3 auto-continue but got: {reason[:80]}"
+        assert reason.startswith(f"BLOCKED [{RuleID.STOP_CONFIRMATION_QUESTION}]"), (
+            f"Expected Branch 3 auto-continue but got: {reason[:80]}"
+        )
         assert "AUTO-CONTINUE: Yes, proceed" in reason
 
     def test_confirmation_in_fresh_transcript_after_user_as_last_message(
@@ -1912,9 +1912,9 @@ class TestBranch3StaleReaderRace:
 
         assert result.decision == Decision.DENY
         reason = result.reason or ""
-        assert reason.startswith(
-            f"BLOCKED [{RuleID.STOP_CONFIRMATION_QUESTION}]"
-        ), f"Expected Branch 3 auto-continue but got: {reason[:80]}"
+        assert reason.startswith(f"BLOCKED [{RuleID.STOP_CONFIRMATION_QUESTION}]"), (
+            f"Expected Branch 3 auto-continue but got: {reason[:80]}"
+        )
         assert "AUTO-CONTINUE: Yes, proceed" in reason
 
 
@@ -1976,9 +1976,9 @@ class TestHasStopExplanationStaleTranscriptRace:
         with patch("claude_code_hooks_daemon.handlers.stop.auto_continue_stop.time.sleep"):
             result = handler._has_stop_explanation(reader)
 
-        assert (
-            result is False
-        ), "STOPPING BECAUSE: from previous turn should not satisfy current stop"
+        assert result is False, (
+            "STOPPING BECAUSE: from previous turn should not satisfy current stop"
+        )
 
     def test_explanation_in_current_turn_accepted(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -2398,9 +2398,7 @@ class TestSilentStopAfterToolErrorReentryGuard:
                                 "type": "tool_result",
                                 "is_error": True,
                                 "content": (
-                                    "<tool_use_error>"
-                                    "File has not been read yet"
-                                    "</tool_use_error>"
+                                    "<tool_use_error>File has not been read yet</tool_use_error>"
                                 ),
                                 "tool_use_id": "tu_1",
                             }
@@ -3021,7 +3019,7 @@ class TestAutoContinueStopAfterToolUseError:
         assert result.decision == Decision.DENY, f"Case A must DENY (block stop). Got: {result}"
         reason = (result.reason or "").lower()
         assert "tool_use_error" in reason or "tool error" in reason, (
-            "Case A reason must name the tool error explicitly. " f"Got reason: {result.reason!r}"
+            f"Case A reason must name the tool error explicitly. Got reason: {result.reason!r}"
         )
         assert "retry" in reason or "read the file" in reason, (
             "Case A reason must instruct the agent to retry (Read + retry). "
@@ -3069,7 +3067,7 @@ class TestAutoContinueStopAfterToolUseError:
         hook_input = {"transcript_path": str(path)}
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW, (
-            "Case B: STOPPING BECAUSE: must override the tool-error branch. " f"Got: {result}"
+            f"Case B: STOPPING BECAUSE: must override the tool-error branch. Got: {result}"
         )
 
     def test_case_c_tool_result_success_silent_turn_uses_default_branch(
@@ -3096,9 +3094,9 @@ class TestAutoContinueStopAfterToolUseError:
         hook_input = {"transcript_path": str(path)}
         result = handler.handle(hook_input)
 
-        assert (
-            result.decision == Decision.DENY
-        ), f"Case C must still DENY (existing default branch). Got: {result}"
+        assert result.decision == Decision.DENY, (
+            f"Case C must still DENY (existing default branch). Got: {result}"
+        )
         reason = (result.reason or "").lower()
         assert "tool_use_error" not in reason and "tool error" not in reason, (
             "Case C must NOT trigger the tool-error recovery branch — "
@@ -3140,12 +3138,12 @@ class TestExplainOrContinueReasonContent:
             _EXPLAIN_OR_CONTINUE_REASON,
         )
 
-        assert (
-            "STOPPING BECAUSE:" in _EXPLAIN_OR_CONTINUE_REASON
-        ), "Branch 4 reason must keep the STOPPING BECAUSE: prefix guidance."
-        assert (
-            "AUTO-CONTINUE" in _EXPLAIN_OR_CONTINUE_REASON
-        ), "Branch 4 reason must keep the AUTO-CONTINUE escape hatch."
+        assert "STOPPING BECAUSE:" in _EXPLAIN_OR_CONTINUE_REASON, (
+            "Branch 4 reason must keep the STOPPING BECAUSE: prefix guidance."
+        )
+        assert "AUTO-CONTINUE" in _EXPLAIN_OR_CONTINUE_REASON, (
+            "Branch 4 reason must keep the AUTO-CONTINUE escape hatch."
+        )
 
 
 class TestRhetoricalContinueHardBlock:

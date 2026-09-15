@@ -98,6 +98,6 @@ class TestPermissionRequestRefusalExplainsItself:
 
         assert not validate_response(_EVENT, response)
         if result.decision == Decision.DENY:
-            assert "non-read tool" in str(
-                response
-            ), "the handler's own refusal text did not reach the response"
+            assert "non-read tool" in str(response), (
+                "the handler's own refusal text did not reach the response"
+            )

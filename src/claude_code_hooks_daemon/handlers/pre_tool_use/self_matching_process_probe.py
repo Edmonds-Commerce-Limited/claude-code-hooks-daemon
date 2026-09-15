@@ -682,7 +682,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "'false &&' short-circuits, so nothing runs and `wait` " "returns immediately."
+                    "'false &&' short-circuits, so nothing runs and `wait` returns immediately."
                 ),
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,

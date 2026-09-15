@@ -76,9 +76,9 @@ class TestSmokeTestScript:
         script = SCRIPTS_DIR / "run_smoke_test.sh"
         assert script.exists(), "Script missing"
         first_line = script.read_text().splitlines()[0]
-        assert first_line.startswith(
-            "#!/bin/bash"
-        ), f"Expected #!/bin/bash shebang, got: {first_line!r}"
+        assert first_line.startswith("#!/bin/bash"), (
+            f"Expected #!/bin/bash shebang, got: {first_line!r}"
+        )
 
 
 # ── llm_qa.py registry integration ────────────────────────────────
@@ -90,16 +90,16 @@ class TestLlmQaRegistry:
     def test_smoke_test_in_registry(self) -> None:
         module = _load_llm_qa()
         registry: dict[str, Any] = module.TOOL_REGISTRY
-        assert (
-            "smoke_test" in registry
-        ), f"'smoke_test' missing from TOOL_REGISTRY. Keys: {list(registry)}"
+        assert "smoke_test" in registry, (
+            f"'smoke_test' missing from TOOL_REGISTRY. Keys: {list(registry)}"
+        )
 
     def test_smoke_test_in_all_tool_names(self) -> None:
         module = _load_llm_qa()
         all_names: list[str] = module.ALL_TOOL_NAMES
-        assert (
-            "smoke_test" in all_names
-        ), "'smoke_test' not in ALL_TOOL_NAMES — won't run with 'llm_qa.py all'"
+        assert "smoke_test" in all_names, (
+            "'smoke_test' not in ALL_TOOL_NAMES — won't run with 'llm_qa.py all'"
+        )
 
     def test_smoke_test_registry_has_required_fields(self) -> None:
         module = _load_llm_qa()
@@ -108,9 +108,9 @@ class TestLlmQaRegistry:
             pytest.skip("smoke_test not in registry yet")
         config = registry["smoke_test"]
         assert config.command, "command must be non-empty"
-        assert (
-            config.json_file == "smoke_test.json"
-        ), f"json_file should be 'smoke_test.json', got {config.json_file!r}"
+        assert config.json_file == "smoke_test.json", (
+            f"json_file should be 'smoke_test.json', got {config.json_file!r}"
+        )
         assert config.jq_hint, "jq_hint must be non-empty"
 
     def test_smoke_test_has_summarizer(self) -> None:
@@ -124,9 +124,9 @@ class TestLlmQaRegistry:
         all_names: list[str] = module.ALL_TOOL_NAMES
         if "smoke_test" not in all_names:
             pytest.skip("smoke_test not in registry yet")
-        assert (
-            all_names[-1] == "smoke_test"
-        ), f"smoke_test should be the last tool, but order is: {all_names}"
+        assert all_names[-1] == "smoke_test", (
+            f"smoke_test should be the last tool, but order is: {all_names}"
+        )
 
 
 # ── Summarizer output ──────────────────────────────────────────────
@@ -140,27 +140,27 @@ class TestSmokeTestSummarizer:
         summarizers: dict[str, Callable[[dict[str, Any]], str]] = module.SUMMARIZERS
         data = _make_smoke_json(passed=True, passed_probes=3, failed_probes=0)
         result = summarizers["smoke_test"](data)
-        assert (
-            "3/3" in result or "3 passed" in result
-        ), f"Expected pass count in summary, got: {result!r}"
+        assert "3/3" in result or "3 passed" in result, (
+            f"Expected pass count in summary, got: {result!r}"
+        )
 
     def test_partial_fail_summary(self) -> None:
         module = _load_llm_qa()
         summarizers: dict[str, Callable[[dict[str, Any]], str]] = module.SUMMARIZERS
         data = _make_smoke_json(passed=False, passed_probes=2, failed_probes=1)
         result = summarizers["smoke_test"](data)
-        assert (
-            "2/3" in result or "1 failed" in result
-        ), f"Expected fail info in summary, got: {result!r}"
+        assert "2/3" in result or "1 failed" in result, (
+            f"Expected fail info in summary, got: {result!r}"
+        )
 
     def test_all_fail_summary(self) -> None:
         module = _load_llm_qa()
         summarizers: dict[str, Callable[[dict[str, Any]], str]] = module.SUMMARIZERS
         data = _make_smoke_json(passed=False, passed_probes=0, failed_probes=3)
         result = summarizers["smoke_test"](data)
-        assert (
-            "0/3" in result or "3 failed" in result
-        ), f"Expected fail count in summary, got: {result!r}"
+        assert "0/3" in result or "3 failed" in result, (
+            f"Expected fail count in summary, got: {result!r}"
+        )
 
 
 # ── JSON schema ────────────────────────────────────────────────────
@@ -182,9 +182,9 @@ class TestSmokeTestJsonSchema:
         is_passed_fn: Callable[[dict[str, Any]], bool] = module._is_passed
         data = _make_smoke_json(passed=passed, passed_probes=p, failed_probes=f)
         result = is_passed_fn(data)
-        assert (
-            result is passed
-        ), f"_is_passed({data['summary']}) returned {result!r}, expected {passed!r}"
+        assert result is passed, (
+            f"_is_passed({data['summary']}) returned {result!r}, expected {passed!r}"
+        )
 
     def test_required_top_level_keys(self) -> None:
         data = _make_smoke_json(passed=True)

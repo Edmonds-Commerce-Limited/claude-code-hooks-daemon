@@ -118,9 +118,9 @@ class TestProjectPathSlugTruncation:
             :4
         ]
         result = project_path_slug(self._long_path)
-        assert result.endswith(
-            f"-{expected_suffix}"
-        ), f"{result!r} should end with -{expected_suffix}"
+        assert result.endswith(f"-{expected_suffix}"), (
+            f"{result!r} should end with -{expected_suffix}"
+        )
 
 
 class TestProjectPathSlugHostContainerIsolation:
@@ -181,9 +181,9 @@ class TestGetVenvPathEmbedsSlug:
         (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
         result = get_venv_path(tmp_path)
         expected_slug = project_path_slug(tmp_path)
-        assert f"venv-{expected_slug}-py" in str(
-            result.name
-        ), f"Expected slug {expected_slug!r} in dir name {result.name!r}"
+        assert f"venv-{expected_slug}-py" in str(result.name), (
+            f"Expected slug {expected_slug!r} in dir name {result.name!r}"
+        )
 
     def test_venv_dir_name_includes_slug_normal_install(self, tmp_path: Path) -> None:
         """Normal install: same slug embedding applies."""

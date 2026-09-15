@@ -195,7 +195,7 @@ class TestLongRealCommandsAreNotProse:
     # verbatim rather than parameterised: the point is that a REAL command
     # from this repo's ordinary workflow crossed the old 80-char trigger.
     FIELD_CASE = (
-        "git merge-tree --write-tree --name-only main " "agent-ad3d35fcc36d13959-4c36fb42 2>&1"
+        "git merge-tree --write-tree --name-only main agent-ad3d35fcc36d13959-4c36fb42 2>&1"
     )
 
     def test_the_field_case_is_long_enough_to_have_tripped_the_old_trigger(self) -> None:
@@ -243,9 +243,9 @@ class TestLongRealCommandsAreNotProse:
             )
             assert result.decision == Decision.DENY
             assert result.reason is not None
-            assert (
-                "does not look like a real shell command" not in result.reason
-            ), f"real command misclassified as prose: {command}"
+            assert "does not look like a real shell command" not in result.reason, (
+                f"real command misclassified as prose: {command}"
+            )
 
     def test_commands_carrying_quoted_english_are_not_prose(self) -> None:
         """Shell quoting is where English legitimately lives inside a command.
@@ -273,9 +273,9 @@ class TestLongRealCommandsAreNotProse:
             assert handler.matches(hook_input), f"fixture is whitelisted, proves nothing: {command}"
             result = handler.handle(hook_input)
             assert result.reason is not None
-            assert (
-                "does not look like a real shell command" not in result.reason
-            ), f"quoted English misread as prose: {command}"
+            assert "does not look like a real shell command" not in result.reason, (
+                f"quoted English misread as prose: {command}"
+            )
 
     def test_prose_is_still_detected(self) -> None:
         """Negative control: fixing the false positive must not blind the

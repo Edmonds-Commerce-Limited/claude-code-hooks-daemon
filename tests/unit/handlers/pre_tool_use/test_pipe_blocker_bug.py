@@ -74,9 +74,9 @@ class TestPipeBlockerRegressionBehavior:
         }
 
         # ls is whitelisted — handler should NOT match (not blocked)
-        assert not handler.matches(
-            hook_input
-        ), "Handler should NOT match ls | tail (ls is whitelisted)"
+        assert not handler.matches(hook_input), (
+            "Handler should NOT match ls | tail (ls is whitelisted)"
+        )
 
     def test_does_not_block_find_pipe_tail(self) -> None:
         """Test that find piped to tail is ALLOWED (find is whitelisted).
@@ -94,9 +94,9 @@ class TestPipeBlockerRegressionBehavior:
         }
 
         # find is whitelisted — handler should NOT match (not blocked)
-        assert not handler.matches(
-            hook_input
-        ), "Handler should NOT match find | tail (find is whitelisted)"
+        assert not handler.matches(hook_input), (
+            "Handler should NOT match find | tail (find is whitelisted)"
+        )
 
     def test_does_not_block_grep_pipe_tail(self) -> None:
         """Test that whitelisted commands (grep) are allowed through."""
@@ -137,9 +137,9 @@ class TestPipeBlockerRegressionBehavior:
         }
 
         # grep is whitelisted — must NOT be blocked despite | inside the quoted pattern
-        assert not handler.matches(
-            hook_input
-        ), "Handler should NOT match grep | head when grep pattern contains | (whitelisted)"
+        assert not handler.matches(hook_input), (
+            "Handler should NOT match grep | head when grep pattern contains | (whitelisted)"
+        )
 
     def test_extract_source_segment_handles_quoted_pipe_in_grep_pattern(self) -> None:
         """Unit test: _extract_source_segment returns grep command, not fragment of its pattern.
@@ -151,15 +151,15 @@ class TestPipeBlockerRegressionBehavior:
 
         # Double-quoted pattern
         segment = handler._extract_source_segment('python logs | grep -E "15:56|15:57" | head -30')
-        assert segment.startswith(
-            "grep"
-        ), f"Source segment should start with 'grep', got: {segment!r}"
+        assert segment.startswith("grep"), (
+            f"Source segment should start with 'grep', got: {segment!r}"
+        )
 
         # Single-quoted pattern
         segment2 = handler._extract_source_segment("cat file | grep -E '15:56|15:57' | tail -20")
-        assert segment2.startswith(
-            "grep"
-        ), f"Source segment should start with 'grep', got: {segment2!r}"
+        assert segment2.startswith("grep"), (
+            f"Source segment should start with 'grep', got: {segment2!r}"
+        )
 
     def test_blocks_pytest_pipe_tail_as_blacklisted(self) -> None:
         """Test that pytest piped to tail is blocked as a known expensive command."""

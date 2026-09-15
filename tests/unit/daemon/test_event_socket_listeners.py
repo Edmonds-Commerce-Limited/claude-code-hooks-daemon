@@ -445,9 +445,9 @@ class TestSocketHygiene:
             await asyncio.sleep(0.1)
 
         assert refused, "the fixture must actually have interfered with a chmod"
-        assert (
-            len(daemon._event_servers) == len(wired_event_metas()) - 1
-        ), "exactly the one unsecurable socket is skipped; the rest still bind"
+        assert len(daemon._event_servers) == len(wired_event_metas()) - 1, (
+            "exactly the one unsecurable socket is skipped; the rest still bind"
+        )
         assert not refused[0].exists(), "an unsecured socket file must not be left behind"
 
         logs = "\n".join(get_memory_logs())

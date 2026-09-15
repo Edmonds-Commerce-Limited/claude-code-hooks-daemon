@@ -106,7 +106,7 @@ class TestFindings:
         assert CHECK.run(context) == []
 
     def test_duplicate_missing_paths_are_deduped_and_ordered(self, tmp_path: Path) -> None:
-        content = "# Plan 00042: Widget\n\n" "See `src/a.py` and `src/b.py` and `src/a.py` again.\n"
+        content = "# Plan 00042: Widget\n\nSee `src/a.py` and `src/b.py` and `src/a.py` again.\n"
         context = _context(tmp_path, "CLAUDE/Plan/00042-widget/PLAN.md", content)
         findings = CHECK.run(context)
         assert len(findings) == 1

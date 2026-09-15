@@ -123,7 +123,7 @@ def format_plugin_load_error(exception_text: str, handler_path: str) -> Enhanced
         details = f"""
 Handler class '{violation.class_name}' must implement '{violation.method_name}()' method.
 
-This method became mandatory in daemon version {version or 'a recent version'}.
+This method became mandatory in daemon version {version or "a recent version"}.
 
 Handler location: {handler_path}
 """.strip()

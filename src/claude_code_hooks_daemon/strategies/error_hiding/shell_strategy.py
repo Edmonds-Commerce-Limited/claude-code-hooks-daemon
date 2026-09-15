@@ -107,8 +107,7 @@ class ShellErrorHidingStrategy:
                 command=bad_probe.as_instruction(),
                 tool_payload=bad_probe,
                 description=(
-                    "Blocks shell script with '|| true' error-hiding pattern "
-                    "written via Write tool"
+                    "Blocks shell script with '|| true' error-hiding pattern written via Write tool"
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

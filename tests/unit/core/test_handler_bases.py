@@ -200,7 +200,7 @@ class TestEveryHandlerDescendsFromItsEventBase:
             base = handler_base_for_event(event_name)
             if not issubclass(handler_class, base):
                 failures.append(
-                    f"{name} answers {event_name} but does not descend from " f"{base.__name__}"
+                    f"{name} answers {event_name} but does not descend from {base.__name__}"
                 )
 
         assert not failures, (

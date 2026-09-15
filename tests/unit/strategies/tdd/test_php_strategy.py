@@ -132,8 +132,7 @@ def test_should_not_skip_abstract_class_by_content() -> None:
     """Abstract classes are not interfaces — they should NOT be skipped."""
     strategy = PhpTddStrategy()
     content = (
-        "<?php\n\nabstract class BaseService\n{\n"
-        "    abstract public function execute(): void;\n}\n"
+        "<?php\n\nabstract class BaseService\n{\n    abstract public function execute(): void;\n}\n"
     )
     assert strategy.should_skip("/workspace/src/Service/BaseService.php", content=content) is False
 

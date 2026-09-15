@@ -210,8 +210,7 @@ class TestFindAllDaemonProcessesProjectRootFilter:
         other = self._proc(
             pid=200,
             cmdline=[
-                "/home/user/project/.claude/hooks-daemon/untracked/"
-                "venv-py314-fefc85e6/bin/python",
+                "/home/user/project/.claude/hooks-daemon/untracked/venv-py314-fefc85e6/bin/python",
                 "-m",
                 "claude_code_hooks_daemon.daemon.cli",
                 "restart",
@@ -228,8 +227,7 @@ class TestFindAllDaemonProcessesProjectRootFilter:
         other = self._proc(
             pid=300,
             cmdline=[
-                "/home/user/project/.claude/hooks-daemon/untracked/"
-                "venv-py314-fefc85e6/bin/python",
+                "/home/user/project/.claude/hooks-daemon/untracked/venv-py314-fefc85e6/bin/python",
                 "-m",
                 "claude_code_hooks_daemon.daemon.cli",
                 "start",
@@ -322,8 +320,7 @@ class TestFindAllDaemonProcessesProjectRootFilter:
         other = self._proc(
             pid=200,
             cmdline=[
-                "/home/user/project/.claude/hooks-daemon/untracked/"
-                "venv-py314-fefc85e6/bin/python",
+                "/home/user/project/.claude/hooks-daemon/untracked/venv-py314-fefc85e6/bin/python",
                 "-m",
                 "claude_code_hooks_daemon.daemon.cli",
                 "start",

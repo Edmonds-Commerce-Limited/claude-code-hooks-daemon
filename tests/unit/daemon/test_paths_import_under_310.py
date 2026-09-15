@@ -92,8 +92,7 @@ def test_paths_imports_when_tomllib_unavailable(tmp_path: Path) -> None:
         f"stderr={result.stderr!r}"
     )
     assert "OK" in result.stdout, (
-        f"Expected 'OK' marker confirming both CLI symbols are callable. "
-        f"stdout={result.stdout!r}"
+        f"Expected 'OK' marker confirming both CLI symbols are callable. stdout={result.stdout!r}"
     )
 
 

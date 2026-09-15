@@ -273,7 +273,7 @@ class TestStatusParsing:
         ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
         ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
         (folder / "PLAN.md").write_text(
-            "**Status**: In Progress\n\n" "```markdown\n**Status**: Complete\n```\n",
+            "**Status**: In Progress\n\n```markdown\n**Status**: Complete\n```\n",
             encoding="utf-8",
         )
         # The fenced Complete must not falsely retire the plan.

@@ -95,8 +95,7 @@ def _rule(_context: CheckContext, target: DocumentTarget) -> list[Finding]:
                 check_id=CHECK_ID,
                 level=Level.BLOCK,
                 message=(
-                    f"{target.rel_path}: an unticked item waits on a RELEASE — "
-                    f"{line.strip()[:120]}"
+                    f"{target.rel_path}: an unticked item waits on a RELEASE — {line.strip()[:120]}"
                 ),
                 remediation=_REMEDIATION,
                 path=target.rel_path,

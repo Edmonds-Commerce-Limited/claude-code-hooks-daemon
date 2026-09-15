@@ -44,11 +44,7 @@ class TestCollectEnforcementStatusLines:
         )
         (tmp_path / "infra").mkdir()
         (claude_dir / "hooks-daemon.yaml").write_text(
-            "projects:\n"
-            "  - name: web\n"
-            "    root: web\n"
-            "  - name: infra\n"
-            "    root: infra\n",
+            "projects:\n  - name: web\n    root: web\n  - name: infra\n    root: infra\n",
             encoding="utf-8",
         )
         statuses = _collect_enforcement_status_lines(tmp_path)

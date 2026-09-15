@@ -64,8 +64,7 @@ class TestToolUnavailableDetection:
         self, strategy: GoLintStrategy
     ) -> None:
         output = (
-            "# example.com/m\n"
-            "./main.go:5:2: fmt.Printf format %d has arg s of wrong type string\n"
+            "# example.com/m\n./main.go:5:2: fmt.Printf format %d has arg s of wrong type string\n"
         )
         assert strategy.is_tool_unavailable_output(output) is False
 

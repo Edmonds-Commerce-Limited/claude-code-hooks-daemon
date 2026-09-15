@@ -143,7 +143,7 @@ class TestStopHardBlockProbe:
     def test_reason_missing_from_stderr_fails(self, tmp_path: Path) -> None:
         _write_script(
             tmp_path / "stop",
-            "cat >/dev/null\n" 'echo \'{"decision":"block","reason":"the reason"}\'\n' "exit 2\n",
+            'cat >/dev/null\necho \'{"decision":"block","reason":"the reason"}\'\nexit 2\n',
         )
         result = probe_stop_hard_block(tmp_path)
         assert not result.passed

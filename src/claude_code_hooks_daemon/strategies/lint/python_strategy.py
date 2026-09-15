@@ -79,8 +79,7 @@ class PythonLintStrategy:
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. "
-                    "Creates temporary Python file."
+                    "Inside the gitignored scratch directory - safe. Creates temporary Python file."
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[f"mkdir -p {fixture_root}"],

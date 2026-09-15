@@ -277,9 +277,9 @@ class TestAResolvedNameIsNeverAllowedToBeAnythingButAHostName:
         monkeypatch.setenv(_ENV_VAR, hostile)
         _force_runtime(monkeypatch, "podman")
 
-        assert (
-            resolve_host_name(hosts_path=_silent_hosts(tmp_path)) is None
-        ), f"{label} was not refused"
+        assert resolve_host_name(hosts_path=_silent_hosts(tmp_path)) is None, (
+            f"{label} was not refused"
+        )
 
     def test_an_absurdly_long_value_is_refused_rather_than_truncated(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

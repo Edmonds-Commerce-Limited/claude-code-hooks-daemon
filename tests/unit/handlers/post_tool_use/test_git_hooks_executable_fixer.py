@@ -16,7 +16,7 @@ from claude_code_hooks_daemon.handlers.post_tool_use.git_hooks_executable_fixer 
 )
 
 _GIT_WARNING = (
-    "hint: The '.git/hooks/pre-push' hook was ignored because " "it's not set as executable."
+    "hint: The '.git/hooks/pre-push' hook was ignored because it's not set as executable."
 )
 
 
@@ -217,7 +217,7 @@ class TestGitHooksExecutableFixerHandlerHandle:
             )
 
         monkeypatch.setattr(
-            "claude_code_hooks_daemon.handlers.post_tool_use." "git_hooks_executable_fixer.run_git",
+            "claude_code_hooks_daemon.handlers.post_tool_use.git_hooks_executable_fixer.run_git",
             _unavailable,
         )
 

@@ -99,9 +99,9 @@ class TestWhitelistedInnerProducerIsStillAllowed:
     ) -> None:
         handler = PipeBlockerHandler()
         command = wrapper.format(producer=WHITELISTED_PRODUCER)
-        assert not handler.matches(
-            _bash(command)
-        ), f"{description} wrongly blocks a whitelisted producer: {command}"
+        assert not handler.matches(_bash(command)), (
+            f"{description} wrongly blocks a whitelisted producer: {command}"
+        )
 
 
 class TestTopLevelBehaviourIsUnchanged:

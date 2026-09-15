@@ -464,8 +464,7 @@ def get_response_schema(event_name: str) -> dict[str, Any]:
     """
     if event_name not in RESPONSE_SCHEMAS:
         raise ValueError(
-            f"Unknown hook event: {event_name}. "
-            f"Valid events: {', '.join(RESPONSE_SCHEMAS.keys())}"
+            f"Unknown hook event: {event_name}. Valid events: {', '.join(RESPONSE_SCHEMAS.keys())}"
         )
     return RESPONSE_SCHEMAS[event_name]
 

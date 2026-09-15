@@ -73,9 +73,9 @@ class TestWorktreeEventsHaveARealContract:
         response = HookResult(decision=Decision.DENY, reason="uniquereason456").to_json(event_name)
 
         assert not validate_response(event_name, response)
-        assert "uniquereason456" in str(
-            response
-        ), f"the refusal reason was discarded on {event_name} instead of surfaced"
+        assert "uniquereason456" in str(response), (
+            f"the refusal reason was discarded on {event_name} instead of surfaced"
+        )
 
     @pytest.mark.parametrize("event_name", _WORKTREE_EVENTS)
     def test_a_silent_allow_is_still_valid(self, event_name: str) -> None:
@@ -112,6 +112,6 @@ class TestWorktreeEventsHaveARealContract:
         test above, losing the distinction that WorktreeRemove has no path to
         report.
         """
-        assert validate_response(
-            "WorktreeRemove", {"worktreePath": _WORKTREE_PATH}
-        ), "WorktreeRemove accepted a worktreePath it never emits"
+        assert validate_response("WorktreeRemove", {"worktreePath": _WORKTREE_PATH}), (
+            "WorktreeRemove accepted a worktreePath it never emits"
+        )

@@ -216,9 +216,7 @@ class TestHasRecentStopHookBlock:
                                 "type": "tool_result",
                                 "is_error": True,
                                 "content": (
-                                    "<tool_use_error>"
-                                    "File has not been read yet"
-                                    "</tool_use_error>"
+                                    "<tool_use_error>File has not been read yet</tool_use_error>"
                                 ),
                                 "tool_use_id": "tu_1",
                             }

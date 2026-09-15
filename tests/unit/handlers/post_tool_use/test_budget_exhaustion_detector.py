@@ -346,8 +346,7 @@ class TestLedgerSelfFeedStructural:
         loose it swallows a genuine structured tool response that merely
         happens to be a JSON object."""
         partial = (
-            '{"tool_name": "Bash", "timestamp": "2026-01-01T00:00:00+00:00"} '
-            "budget exhausted here"
+            '{"tool_name": "Bash", "timestamp": "2026-01-01T00:00:00+00:00"} budget exhausted here'
         )
         hook_input = _tool_input("Bash", {"stdout": partial, "stderr": ""})
         assert handler.matches(hook_input) is True

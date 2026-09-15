@@ -184,8 +184,7 @@ class AnsibleLintStrategy:
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. "
-                    "Creates a temporary playbook."
+                    "Inside the gitignored scratch directory - safe. Creates a temporary playbook."
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[f"mkdir -p {fixture_root}/playbooks"],

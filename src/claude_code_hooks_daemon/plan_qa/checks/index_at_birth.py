@@ -53,8 +53,7 @@ def _run(context: CheckContext) -> list[Finding]:
                 check_id=CHECK_ID,
                 level=level_for_plan(context, number),
                 message=(
-                    f"Commit creates plan folder {number:05d} but stages no "
-                    "README index row for it"
+                    f"Commit creates plan folder {number:05d} but stages no README index row for it"
                 ),
                 remediation=(
                     f"Add a row for {number:05d} under Active Plans in "

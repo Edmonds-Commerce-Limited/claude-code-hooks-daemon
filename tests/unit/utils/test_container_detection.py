@@ -542,8 +542,7 @@ class TestIsYoloSandbox:
                     return_value=Path("/workspace"),
                 ),
                 patch(
-                    "claude_code_hooks_daemon.utils.container_detection.ProjectContext"
-                    ".config_dir",
+                    "claude_code_hooks_daemon.utils.container_detection.ProjectContext.config_dir",
                     return_value=mock_config_dir,
                 ),
             ):
@@ -561,8 +560,7 @@ class TestIsYoloSandbox:
                     return_value=Path("/home/user/myproject"),
                 ),
                 patch(
-                    "claude_code_hooks_daemon.utils.container_detection.ProjectContext"
-                    ".config_dir",
+                    "claude_code_hooks_daemon.utils.container_detection.ProjectContext.config_dir",
                     return_value=mock_config_dir,
                 ),
             ):
@@ -580,8 +578,7 @@ class TestIsYoloSandbox:
                     return_value=Path("/workspace"),
                 ),
                 patch(
-                    "claude_code_hooks_daemon.utils.container_detection.ProjectContext"
-                    ".config_dir",
+                    "claude_code_hooks_daemon.utils.container_detection.ProjectContext.config_dir",
                     return_value=mock_config_dir,
                 ),
             ):
@@ -603,8 +600,7 @@ class TestIsYoloSandbox:
                     return_value=Path("/home/user/project"),
                 ),
                 patch(
-                    "claude_code_hooks_daemon.utils.container_detection.ProjectContext"
-                    ".config_dir",
+                    "claude_code_hooks_daemon.utils.container_detection.ProjectContext.config_dir",
                     return_value=mock_config_dir,
                 ),
             ):
@@ -622,8 +618,7 @@ class TestIsYoloSandbox:
                     return_value=Path("/home/user/project"),
                 ),
                 patch(
-                    "claude_code_hooks_daemon.utils.container_detection.ProjectContext"
-                    ".config_dir",
+                    "claude_code_hooks_daemon.utils.container_detection.ProjectContext.config_dir",
                     return_value=mock_config_dir,
                 ),
             ):
@@ -633,7 +628,7 @@ class TestIsYoloSandbox:
         """ProjectContext raising OSError → fail-safe False, no exception."""
         with patch.dict(os.environ, {}, clear=True):
             with patch(
-                "claude_code_hooks_daemon.utils.container_detection.ProjectContext" ".project_root",
+                "claude_code_hooks_daemon.utils.container_detection.ProjectContext.project_root",
                 side_effect=OSError("filesystem error"),
             ):
                 result = is_yolo_sandbox()
@@ -643,7 +638,7 @@ class TestIsYoloSandbox:
         """ProjectContext raising RuntimeError → fail-safe False, no exception."""
         with patch.dict(os.environ, {}, clear=True):
             with patch(
-                "claude_code_hooks_daemon.utils.container_detection.ProjectContext" ".project_root",
+                "claude_code_hooks_daemon.utils.container_detection.ProjectContext.project_root",
                 side_effect=RuntimeError("context error"),
             ):
                 result = is_yolo_sandbox()

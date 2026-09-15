@@ -587,9 +587,9 @@ class TestGoalInjectionHandler:
 
         self._signal_path().unlink()
         handler.handle(self._hook_input(plan))
-        assert (
-            not self._signal_path().exists()
-        ), f"second write happened despite latch (first mtime {first_mtime})"
+        assert not self._signal_path().exists(), (
+            f"second write happened despite latch (first mtime {first_mtime})"
+        )
 
 
 class TestGoalLedgerIntegration:

@@ -47,7 +47,7 @@ class TestBarePythonModule:
     def test_ignores_python_m_in_comments(self, tmp_path: Path) -> None:
         """Comments with python -m should not be flagged (not agent-facing)."""
         source = tmp_path / "ok.py"
-        source.write_text("# Run python -m claude_code_hooks_daemon.daemon.cli restart\n" "x = 1\n")
+        source.write_text("# Run python -m claude_code_hooks_daemon.daemon.cli restart\nx = 1\n")
         data = _run_checker("--path", str(tmp_path))
         assert data["summary"]["passed"]
 
@@ -120,7 +120,7 @@ class TestBashScripts:
         """Bare python -m in bash echo/printf should be flagged."""
         source = tmp_path / "bad.sh"
         source.write_text(
-            "#!/bin/bash\n" 'echo "Run python -m claude_code_hooks_daemon.daemon.cli restart"\n'
+            '#!/bin/bash\necho "Run python -m claude_code_hooks_daemon.daemon.cli restart"\n'
         )
         data = _run_checker("--path", str(tmp_path))
         assert not data["summary"]["passed"]
@@ -128,7 +128,7 @@ class TestBashScripts:
     def test_flags_slash_hooks_daemon_in_bash(self, tmp_path: Path) -> None:
         """'/hooks-daemon health' in bash should be flagged."""
         source = tmp_path / "bad.sh"
-        source.write_text("#!/bin/bash\n" 'echo "Run /hooks-daemon health"\n')
+        source.write_text('#!/bin/bash\necho "Run /hooks-daemon health"\n')
         data = _run_checker("--path", str(tmp_path))
         assert not data["summary"]["passed"]
 

@@ -189,7 +189,7 @@ def _sweep_check_ids(
         _PREAMBLE + _entry("13:00") + _entry("12:50")
     )
     (plan_dir / "README.md").write_text(
-        "# Plans Index\n\n## Active Plans\n\n" f"- [00001: first](00001-first/PLAN.md) - {status}\n"
+        f"# Plans Index\n\n## Active Plans\n\n- [00001: first](00001-first/PLAN.md) - {status}\n"
     )
     subprocess.run(
         ["git", "init", str(root)],

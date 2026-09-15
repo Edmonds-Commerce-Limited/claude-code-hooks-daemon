@@ -79,27 +79,27 @@ class TestStrategyAcceptanceTests:
         strategy = strategy_class()
         tests = strategy.get_acceptance_tests()
         for test in tests:
-            assert isinstance(
-                test, AcceptanceTest
-            ), f"{strategy_class.__name__} returned non-AcceptanceTest: {type(test)}"
+            assert isinstance(test, AcceptanceTest), (
+                f"{strategy_class.__name__} returned non-AcceptanceTest: {type(test)}"
+            )
 
     def test_expected_decision_is_deny(self, strategy_class: type) -> None:
         """All tests have expected_decision=Decision.DENY (blocking behavior)."""
         strategy = strategy_class()
         tests = strategy.get_acceptance_tests()
         for test in tests:
-            assert (
-                test.expected_decision == Decision.DENY
-            ), f"{strategy_class.__name__} test has wrong decision: {test.expected_decision}"
+            assert test.expected_decision == Decision.DENY, (
+                f"{strategy_class.__name__} test has wrong decision: {test.expected_decision}"
+            )
 
     def test_has_expected_message_patterns(self, strategy_class: type) -> None:
         """All tests have non-empty expected_message_patterns."""
         strategy = strategy_class()
         tests = strategy.get_acceptance_tests()
         for test in tests:
-            assert (
-                test.expected_message_patterns
-            ), f"{strategy_class.__name__} test has empty message patterns"
+            assert test.expected_message_patterns, (
+                f"{strategy_class.__name__} test has empty message patterns"
+            )
             assert isinstance(test.expected_message_patterns, list)
             assert all(isinstance(p, str) for p in test.expected_message_patterns)
 
@@ -125,9 +125,9 @@ class TestStrategyAcceptanceTests:
         strategy = strategy_class()
         tests = strategy.get_acceptance_tests()
         for test in tests:
-            assert (
-                test.test_type == TestType.BLOCKING
-            ), f"{strategy_class.__name__} test has wrong type: {test.test_type}"
+            assert test.test_type == TestType.BLOCKING, (
+                f"{strategy_class.__name__} test has wrong type: {test.test_type}"
+            )
 
     def test_has_setup_commands(self, strategy_class: type) -> None:
         """All tests have setup_commands for directory creation."""
@@ -152,9 +152,9 @@ class TestStrategyAcceptanceTests:
         strategy = strategy_class()
         tests = strategy.get_acceptance_tests()
         for test in tests:
-            assert (
-                f"{ProjectPath.SCRATCH_DIR}/" in test.command
-            ), f"{strategy_class.__name__} test doesn't use the scratch path: {test.command}"
+            assert f"{ProjectPath.SCRATCH_DIR}/" in test.command, (
+                f"{strategy_class.__name__} test doesn't use the scratch path: {test.command}"
+            )
 
     def test_has_safety_notes(self, strategy_class: type) -> None:
         """All tests have safety_notes explaining why they're safe."""

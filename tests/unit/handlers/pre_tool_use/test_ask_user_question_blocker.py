@@ -200,11 +200,7 @@ class TestAskUserQuestionBlockerHandler:
             "tool_name": "AskUserQuestion",
             "tool_input": {
                 "questions": [
-                    {
-                        "question": (
-                            f"Should I do X? {REQUIRED_PREFIX} actually I " "want this allowed"
-                        )
-                    }
+                    {"question": (f"Should I do X? {REQUIRED_PREFIX} actually I want this allowed")}
                 ]
             },
         }

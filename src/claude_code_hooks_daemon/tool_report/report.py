@@ -155,7 +155,7 @@ def render_markdown(report: ToolReport) -> str:
             lines.append(f"- **{row.tool}** ({row.tier.value}): {row.disable_route}")
     lines.append("")
     lines.append(
-        f"Low-use floor: {report.low_use_max_calls} call(s) " "(`tool_policy.low_use_max_calls`)."
+        f"Low-use floor: {report.low_use_max_calls} call(s) (`tool_policy.low_use_max_calls`)."
     )
     return "\n".join(lines) + "\n"
 

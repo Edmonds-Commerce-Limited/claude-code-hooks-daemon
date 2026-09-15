@@ -289,7 +289,7 @@ def validate_hook_commands(settings: dict[str, object]) -> list[str]:
         command = commands[0]
         if not command.endswith(expected_suffix):
             issues.append(
-                f"{json_key} command does not end with {expected_suffix}: " f"got {command!r}"
+                f"{json_key} command does not end with {expected_suffix}: got {command!r}"
             )
         elif not command.startswith(BASH_INVOCATION_PREFIX):
             # Plan 00102 Phase 6. Ending with the right wrapper path was the

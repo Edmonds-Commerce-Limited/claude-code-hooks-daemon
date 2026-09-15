@@ -87,6 +87,6 @@ class TestRealImplementationsSatisfyProtocol:
         strategy_cls = getattr(module, strategy_class)
 
         strategy = strategy_cls()
-        assert isinstance(
-            strategy, LspNoiseStrategy
-        ), f"{strategy_class} should satisfy LspNoiseStrategy protocol"
+        assert isinstance(strategy, LspNoiseStrategy), (
+            f"{strategy_class} should satisfy LspNoiseStrategy protocol"
+        )
