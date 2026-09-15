@@ -183,6 +183,12 @@
       "reason": "Plan 00369 status-line-explained: an unreadable/invalid hooks-daemon.yaml degrades to event_config={} (every handler resolves 'enabled' via its own default), matching explain-rule/explain-handler's own _init_project_context_for_explain degrade-gracefully contract for a command that must work without a fully validated installation. Already logged at debug level."
     },
     {
+      "file": "daemon/cli.py",
+      "function": "_collect_session_action_entries",
+      "rule": "log-and-continue",
+      "reason": "Plan 00416 session-actions: identical shape and identical justification to _collect_status_line_segment_entries directly above -- an unreadable/invalid hooks-daemon.yaml degrades to event_config={} (every handler resolves 'enabled' via its own default) rather than failing the whole command. Already logged at debug level."
+    },
+    {
       "file": "handlers/post_tool_use/goal_injection.py",
       "function": "write_goal_signal",
       "rule": "return-none-on-error",

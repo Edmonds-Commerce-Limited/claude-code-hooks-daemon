@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.core.session_start_tiers import prefix_context_with_tier
 from claude_code_hooks_daemon.utils.secret_redaction import (
     get_active_secret_terms,
     redact_structure,
@@ -24,6 +25,13 @@ logger = logging.getLogger(__name__)
 # is an EVENT-level opt-in, never a handler flag: "approve and stop" is the
 # meaning of a PermissionRequest approval and of nothing else.
 _ALLOW_IS_FINAL_EVENTS: frozenset[EventType] = frozenset({EventType.PERMISSION_REQUEST})
+
+# Events whose chain tags each matched handler's context with its computed
+# SessionStart tier (Plan 00416 Task 1.2). SessionStart only: the mechanism in
+# ``session_start_tiers`` is generic, but rendering it into the emitted block
+# is specific to the one event this plan's Stop-time teeth and
+# ``session-actions`` CLI both key off.
+_SESSION_TIER_EVENTS: frozenset[EventType] = frozenset({EventType.SESSION_START})
 
 # Format string for the config key disable footer appended to DENY/ASK reasons
 _DISABLE_FOOTER_TEMPLATE = (
@@ -85,7 +93,12 @@ class EventRouter:
         Every other chain lets an ALLOW fall through to the next handler.
         """
         self._chains: dict[EventType, HandlerChain] = {
-            event_type: HandlerChain(allow_is_final=event_type in _ALLOW_IS_FINAL_EVENTS)
+            event_type: HandlerChain(
+                allow_is_final=event_type in _ALLOW_IS_FINAL_EVENTS,
+                context_transform=(
+                    prefix_context_with_tier if event_type in _SESSION_TIER_EVENTS else None
+                ),
+            )
             for event_type in EventType
         }
 
