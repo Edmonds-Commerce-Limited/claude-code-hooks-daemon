@@ -31,7 +31,7 @@ _WORKTREE_RE = "(?:" + "|".join(re.escape(prefix) for prefix in _WORKTREE_PREFIX
 # The declared relation is a SUPERSET, not equality: `rsync` matters to this
 # handler and is not a plain write indicator, so it is absent from the sibling
 # by design.
-_RELOCATION_VERBS: tuple[str, ...] = ("cp", "mv", "rsync")
+_RELOCATION_VERBS: tuple[str, ...] = ("cp", "mv", "rsync", "install", "dd")
 
 _RELOCATION_VERB_RE = re.compile(r"\b(" + "|".join(_RELOCATION_VERBS) + r")\b", re.IGNORECASE)
 

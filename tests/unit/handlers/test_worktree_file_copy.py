@@ -536,9 +536,7 @@ class TestItJudgesTheCommandNotTheProse:
         )
         assert handler.matches(self._bash(command)) is False
 
-    def test_an_inline_commit_message_is_not_a_copy(
-        self, handler: WorktreeFileCopyHandler
-    ) -> None:
+    def test_an_inline_commit_message_is_not_a_copy(self, handler: WorktreeFileCopyHandler) -> None:
         command = "git commit -m 'document that cp untracked/worktrees/b/src/x.py src/ is denied'"
         assert handler.matches(self._bash(command)) is False
 
@@ -556,3 +554,59 @@ class TestItJudgesTheCommandNotTheProse:
         """
         command = "bash <<'EOF'\ncp untracked/worktrees/branch/src/a.py src/\nEOF"
         assert handler.matches(self._bash(command)) is True
+
+
+class TestEveryRelocationVerbIsCovered:
+    """`install` and `dd` relocate a file too (Plan 00412).
+
+    Found by the `declared-invariant-pairs` Detector holding this handler's
+    verb list against `core.utils._WRITE_INDICATOR_RE`, which had carried both
+    all along. The verbs here were an alternation inlined at its only call
+    site, so there was nothing for a sibling to be checked against.
+
+    The guard's purpose is stopping a file crossing the worktree boundary
+    outside git. Which verb does the crossing is irrelevant to that harm.
+    """
+
+    @pytest.fixture
+    def handler(self) -> WorktreeFileCopyHandler:
+        return WorktreeFileCopyHandler()
+
+    def _bash(self, command: str) -> dict:
+        return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cp untracked/worktrees/wt-a/src/x.py src/x.py",
+            "mv untracked/worktrees/wt-a/src/x.py src/x.py",
+            "rsync untracked/worktrees/wt-a/ src/",
+            "install untracked/worktrees/wt-a/src/x.py src/x.py",
+            "install -m 644 untracked/worktrees/wt-a/src/x.py src/x.py",
+            "dd if=untracked/worktrees/wt-a/src/x.py of=src/x.py",
+        ],
+    )
+    def test_a_relocation_out_of_a_worktree_is_denied(
+        self, handler: WorktreeFileCopyHandler, command: str
+    ) -> None:
+        assert handler.matches(self._bash(command)) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd untracked/worktrees/wt-a && npm install",
+            "cd untracked/worktrees/wt-a && pip install -r requirements.txt",
+            "cd untracked/worktrees/wt-a/src && npm install --save-dev typescript",
+        ],
+    )
+    def test_a_package_install_inside_a_worktree_is_not_a_relocation(
+        self, handler: WorktreeFileCopyHandler, command: str
+    ) -> None:
+        """The false positive that adding `install` could have bought.
+
+        `install` is a common English word in package-manager commands, and
+        these shapes name a worktree path in the same breath. They stay allowed
+        because the path patterns still require a worktree path followed by a
+        main-repo code directory — the verb alone never denies anything.
+        """
+        assert handler.matches(self._bash(command)) is False
