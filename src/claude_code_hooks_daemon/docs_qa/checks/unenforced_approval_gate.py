@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
+from claude_code_hooks_daemon.utils.authored_paths import authored_path
 
 CHECK_ID: Final[str] = "unenforced-approval-gate"
 
@@ -194,7 +195,7 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         if not _is_core_doc(rel_path, context.policy.trees.agent):
             continue
         try:
-            content = (context.project_root / rel_path).read_text(encoding="utf-8")
+            content = authored_path(context.project_root, rel_path).read_text(encoding="utf-8")
         except OSError as exc:
             # A core document the sweep cannot read is itself reported: a
             # silent skip would count an unreadable file as a clean one.

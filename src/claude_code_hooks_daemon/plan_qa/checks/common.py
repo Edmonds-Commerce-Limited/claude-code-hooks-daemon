@@ -26,6 +26,10 @@ from claude_code_hooks_daemon.plan_qa.types import (
     Level,
     Stage,
 )
+from claude_code_hooks_daemon.utils.authored_paths import (
+    authored_path,
+    contained_authored_path,
+)
 
 _PLAN_FOLDER_NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"^(\d{1,5})-[a-zA-Z]")
 
@@ -111,7 +115,7 @@ def tree_targets(context: CheckContext) -> list[DocumentTarget]:
     for folder in context.tree.folders:
         if folder.location == PlanLocation.OTHER or folder.doc is None:
             continue
-        plan_md = folder.path / PLAN_DOC_FILENAME
+        plan_md = authored_path(folder.path, PLAN_DOC_FILENAME)
         targets.append(
             DocumentTarget(
                 rel_path=str(plan_md.relative_to(context.project_root)),
@@ -314,8 +318,10 @@ def journal_tree_targets(context: CheckContext) -> list[JournalEditTarget]:
 
     targets: list[JournalEditTarget] = []
     for folder in context.tree.folders:
-        journal_dir = folder.path / context.journal_dir_name
-        if not journal_dir.is_dir():
+        # CONFIG-derived, so contained: the journal directory name comes from
+        # `.claude/hooks-daemon.yaml`, and nothing guards writes to that file.
+        journal_dir = contained_authored_path(folder.path, context.journal_dir_name)
+        if journal_dir is None or not journal_dir.is_dir():
             continue
         for entry in sorted(journal_dir.iterdir()):
             if not entry.is_file() or entry.suffix != _MARKDOWN_SUFFIX:

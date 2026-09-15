@@ -56,6 +56,7 @@ from claude_code_hooks_daemon.plan_qa.types import (
     DEFAULT_PLAN_DOC_ADVISORY_LINES,
     DEFAULT_PLAN_DOC_BLOCK_LINES,
 )
+from claude_code_hooks_daemon.utils.authored_paths import authored_path
 from claude_code_hooks_daemon.utils.vendor_paths import (
     VendorScope,
     is_vendored_path_in_scopes,
@@ -318,7 +319,7 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         )
     )
     for rel_path in rel_paths:
-        abs_path = context.project_root / rel_path
+        abs_path = authored_path(context.project_root, rel_path)
         if not abs_path.is_file():
             continue
         try:

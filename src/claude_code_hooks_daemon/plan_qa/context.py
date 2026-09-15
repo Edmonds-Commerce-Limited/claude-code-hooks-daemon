@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.plan_qa.model import README_FILENAME, PlanTree
 from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, PlanDocSizeLimits
+from claude_code_hooks_daemon.utils.authored_paths import authored_path
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
@@ -135,14 +136,20 @@ def _tree_and_readme(
         FileNotFoundError: when the configured plan directory is missing —
             FAIL FAST; callers surface it as a structural problem.
     """
-    plan_dir = project_root / plan_dir_rel
+    # Normalised, NOT contained, and the difference is deliberate. Containment
+    # is used where a "not there" branch already exists to fall into (the
+    # corpus trees, the journal dirs); here there is none, so refusing an
+    # escaping plan dir would mean INVENTING a failure behaviour for a
+    # misconfigured tree -- a decision that belongs with the wider
+    # config-validation question, not smuggled into a path-hygiene pass.
+    plan_dir = authored_path(project_root, plan_dir_rel)
     tree = PlanTree.scan(
         plan_dir,
         completed_dir=policy.completed_dir,
         cancelled_dir=policy.cancelled_dir,
         extra_root_files=policy.extra_root_files,
     )
-    readme_path = plan_dir / README_FILENAME
+    readme_path = authored_path(plan_dir, README_FILENAME)
     readme = ReadmeIndex.parse(readme_path.read_text()) if readme_path.is_file() else None
 
     # Plan 00310: aged-out completed rows live verbatim in an archive index
@@ -156,7 +163,7 @@ def _tree_and_readme(
     # the union of both files. Archive row links are relative to the
     # completed dir, not ``plan_dir`` — rewritten here so link resolution
     # (relative to ``plan_dir``) still finds the real folder.
-    archive_path = plan_dir / policy.completed_dir / README_FILENAME
+    archive_path = authored_path(plan_dir, f"{policy.completed_dir}/{README_FILENAME}")
     if readme is not None and archive_path.is_file():
         archive_readme = ReadmeIndex.parse(archive_path.read_text())
         rewritten_rows = tuple(

@@ -51,6 +51,10 @@ from claude_code_hooks_daemon.docs_qa.structured_blocks import (
     extract_structured_block_locations,
 )
 from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
+from claude_code_hooks_daemon.utils.authored_paths import (
+    authored_path,
+    contained_authored_path,
+)
 from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 from claude_code_hooks_daemon.utils.vendor_paths import (
     VendorScope,
@@ -465,11 +469,15 @@ def iter_corpus_paths(project_root: Path, policy: DocumentationPolicy) -> list[P
         if entry.is_file():
             candidates.add(entry)
     for tree_name in (policy.trees.agent, policy.trees.human):
-        tree_dir = project_root / tree_name
-        if tree_dir.is_dir():
+        # CONFIG-derived, so contained rather than merely normalised: a tree
+        # name is read from `.claude/hooks-daemon.yaml`, and nothing guards
+        # writes to that file. Checked once per tree, not per document, so the
+        # resolve() costs nothing measurable on a corpus of ~1,000 files.
+        tree_dir = contained_authored_path(project_root, tree_name)
+        if tree_dir is not None and tree_dir.is_dir():
             candidates.update(p for p in tree_dir.rglob("*.md") if p.is_file())
     for satellite in _SATELLITE_DIR_NAMES:
-        satellite_dir = project_root / _CLAUDE_DIR_NAME / satellite
+        satellite_dir = authored_path(project_root, f"{_CLAUDE_DIR_NAME}/{satellite}")
         if satellite_dir.is_dir():
             candidates.update(p for p in satellite_dir.rglob("*.md") if p.is_file())
     return sorted(p for p in candidates if is_in_scope(p, project_root, policy))
@@ -723,7 +731,12 @@ def revalidate_corpus(corpus: DocCorpus, project_root: Path) -> DocCorpus:
 
     documents: dict[str, DocRecord] = {}
     for rel_path, record in corpus.documents.items():
-        abs_path = project_root / rel_path
+        # A corpus key is daemon-enumerated, but it reaches here through a
+        # CACHE FILE, so it is only as trustworthy as that file. Normalising
+        # is what a revalidation inside a PreToolUse budget can afford --
+        # resolving ~1,000 documents on every documentation edit is the cost
+        # this function's own docstring exists to avoid.
+        abs_path = authored_path(project_root, rel_path)
         try:
             stat = abs_path.stat()
         except OSError as exc:

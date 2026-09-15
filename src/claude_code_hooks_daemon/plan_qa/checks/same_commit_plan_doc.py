@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.plan_qa.types import (
     Level,
     Stage,
 )
+from claude_code_hooks_daemon.utils.authored_paths import contained_authored_path
 
 CHECK_ID: Final[str] = "same-commit-plan-doc"
 
@@ -75,7 +76,10 @@ def _plan_status(
             text = gitfacts.staged_file_text(change.path)
             return PlanDoc.parse(text).status if text is not None else None
 
-    plan_dir = context.project_root / context.plan_dir_rel
+    # CONFIG-derived, so contained: the plan directory is a configured value.
+    plan_dir = contained_authored_path(context.project_root, context.plan_dir_rel)
+    if plan_dir is None:
+        return None
     for candidate in sorted(plan_dir.glob(f"**/{number:05d}-*/PLAN.md")):
         try:
             return PlanDoc.parse(candidate.read_text(encoding="utf-8")).status

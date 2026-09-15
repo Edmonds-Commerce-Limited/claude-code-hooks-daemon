@@ -457,9 +457,7 @@ class TestTheSourcePathIsContained:
         assert len(findings) == 1
         assert "outside the repository" in findings[0].message
 
-    def test_the_refusal_does_not_echo_the_file_it_declined_to_read(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_refusal_does_not_echo_the_file_it_declined_to_read(self, tmp_path: Path) -> None:
         """A refusal that quotes the contents is not a refusal.
 
         The finding travels into a deny message and the daemon's logs, so it

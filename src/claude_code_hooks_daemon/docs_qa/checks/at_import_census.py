@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Severity,
 )
 from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
+from claude_code_hooks_daemon.utils.authored_paths import authored_path
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
     findings: list[Finding] = []
     resident = context.policy.qa.resident_at_imports
     for rel_path in sorted(context.corpus.documents):
-        abs_path = context.project_root / rel_path
+        abs_path = authored_path(context.project_root, rel_path)
         if not abs_path.is_file():
             continue
         try:

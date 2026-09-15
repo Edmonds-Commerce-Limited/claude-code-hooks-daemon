@@ -33,6 +33,10 @@ from claude_code_hooks_daemon.plan_qa.types import (
     Level,
     Stage,
 )
+from claude_code_hooks_daemon.utils.authored_paths import (
+    authored_path,
+    contained_authored_path,
+)
 
 CHECK_ID: Final[str] = "journal-entry-ordering"
 
@@ -145,8 +149,9 @@ def _live_journal_targets(context: CheckContext) -> list[JournalEditTarget]:
     for folder in context.tree.folders:
         if folder.location != PlanLocation.ROOT:
             continue
-        journal_dir = folder.path / context.journal_dir_name
-        if not journal_dir.is_dir():
+        # CONFIG-derived, so contained -- see the twin in `checks/common.py`.
+        journal_dir = contained_authored_path(folder.path, context.journal_dir_name)
+        if journal_dir is None or not journal_dir.is_dir():
             continue
         for entry in sorted(journal_dir.iterdir()):
             if not entry.is_file() or entry.suffix != ".md":
@@ -169,7 +174,7 @@ def _live_journal_targets(context: CheckContext) -> list[JournalEditTarget]:
 def _run_sweep(context: CheckContext) -> list[Finding]:
     findings: list[Finding] = []
     for target in _live_journal_targets(context):
-        path = context.project_root / target.rel_path
+        path = authored_path(context.project_root, target.rel_path)
         try:
             content = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:

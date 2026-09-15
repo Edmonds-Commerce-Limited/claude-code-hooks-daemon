@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.docs_qa.corpus import (
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.types import CheckContext
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
+from claude_code_hooks_daemon.utils.authored_paths import authored_path
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
@@ -143,7 +144,9 @@ def staged_context(
             # `git show :path` would read the INDEX instead, which can
             # disagree with what this commit actually contains.
             try:
-                content: str | None = (project_root / change.path).read_text(encoding="utf-8")
+                content: str | None = authored_path(project_root, change.path).read_text(
+                    encoding="utf-8"
+                )
             except OSError:
                 content = None
         else:

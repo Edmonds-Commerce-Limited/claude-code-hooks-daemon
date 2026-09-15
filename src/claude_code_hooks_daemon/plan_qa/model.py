@@ -31,7 +31,11 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME
-from claude_code_hooks_daemon.utils.authored_paths import authored_path_exists
+from claude_code_hooks_daemon.utils.authored_paths import (
+    authored_path,
+    authored_path_exists,
+    contained_authored_path,
+)
 
 
 class PlanStatus(StrEnum):
@@ -392,8 +396,11 @@ def _scan_journal(plan_folder: Path, journal_dir_name: str) -> tuple[bool, date 
     ``latest_journal_date`` is the newest well-formed day-file date, or
     ``None`` when the directory is empty or holds only malformed names.
     """
-    journal_dir = plan_folder / journal_dir_name
-    if not journal_dir.is_dir():
+    # CONFIG-derived, so contained -- see the twin in `checks/common.py`. The
+    # "no journal directory" answer is already this function's own None case,
+    # so an escaping name falls into a branch that exists rather than a new one.
+    journal_dir = contained_authored_path(plan_folder, journal_dir_name)
+    if journal_dir is None or not journal_dir.is_dir():
         return False, None
     dates = [
         parsed.date
@@ -512,7 +519,7 @@ def _load_plan_folder(
     match = _PLAN_FOLDER_RE.match(path.name)
     if match is None:  # pragma: no cover - callers pre-filter on the pattern
         raise ValueError(f"Not a plan folder name: {path.name}")
-    plan_md = path / PLAN_DOC_FILENAME
+    plan_md = authored_path(path, PLAN_DOC_FILENAME)
     has_plan_md = plan_md.is_file()
     has_journal, latest_journal_date = _scan_journal(path, journal_dir_name)
     return PlanFolder(
