@@ -46,15 +46,19 @@ full sweep for ever while every record read as healthy.
 
 ## Procedure
 
-1. Establish the interval. `from` is the `to` ref of this routine's last
-   recorded run (any outcome — a skipped run covered nothing, so the next run
-   inherits its ground, D5); `to` is the current release tag, or `HEAD` if
-   there is no tag since. A first run's `from` is the repository's root commit.
-
-2. Open the run: `bin/hooks-daemon run-routine 00001-security-review-full`.
+1. Open the run: `bin/hooks-daemon run-routine 00001-security-review-full`.
    This writes a `started` row. A run that dies from here on is derivable as
    `failed` — started and did not finish — which is a different fact from
    never having started.
+
+   It also **states the interval**, so `from` is derived rather than
+   remembered: it is the `to` of the last run that recorded COVERING
+   something, read out of `RUNS/`. A skipped run carries no `to` because it
+   covered nothing, so it leaves the start where it was and widens this run's
+   interval instead (D5). A first run's `from` is the repository's root commit,
+   which the ledger cannot know and will say so rather than guess.
+
+2. Choose `to`: the current release tag, or `HEAD` if there is no tag since.
 
 3. Dispatch the `security-reviewer` agent once per check in
    [CHECKS.md](CHECKS.md), giving it the interval and that check alone. One

@@ -116,10 +116,10 @@ class TestNumbering:
 
     def test_bootstraps_to_one_in_an_empty_tree(self, routine_repo: Path) -> None:
         """No counter and no routines is a new project, which starts at 00001."""
-        result = _run(routine_repo, "security-review")
+        result = _run(routine_repo, "dependency-audit")
 
         assert result.returncode == 0, result.stderr
-        assert (routine_repo / "CLAUDE" / "Routine" / "00001-security-review").is_dir()
+        assert (routine_repo / "CLAUDE" / "Routine" / "00001-dependency-audit").is_dir()
 
     def test_takes_the_counter_plus_one(self, routine_repo: Path) -> None:
         """An existing counter is authoritative, even over an empty tree."""
@@ -148,7 +148,7 @@ class TestNumbering:
         """
         _git(routine_repo, "config", "--local", _PLAN_COUNTER_KEY, "412")
 
-        _run(routine_repo, "security-review")
+        _run(routine_repo, "dependency-audit")
 
         assert _git_config_or_none(routine_repo, _PLAN_COUNTER_KEY) == "412"
 
@@ -161,7 +161,7 @@ class TestNumbering:
         (routine_repo / "CLAUDE" / "Routine" / "00009-already-here").mkdir()
         _git(routine_repo, "config", "--local", _ROUTINE_COUNTER_KEY, "3")
 
-        result = _run(routine_repo, "security-review")
+        result = _run(routine_repo, "dependency-audit")
 
         assert result.returncode != 0
         assert _ROUTINE_COUNTER_KEY in result.stderr
@@ -176,7 +176,7 @@ class TestNumbering:
         archived.mkdir(parents=True)
         _git(routine_repo, "config", "--local", _ROUTINE_COUNTER_KEY, "3")
 
-        result = _run(routine_repo, "security-review")
+        result = _run(routine_repo, "dependency-audit")
 
         assert result.returncode != 0
         assert "00012" in result.stderr or "12" in result.stderr
@@ -187,13 +187,13 @@ class TestScaffolding:
 
     def test_writes_routine_md(self, routine_repo: Path) -> None:
         """The definition document is the routine's PLAN.md equivalent."""
-        _run(routine_repo, "security-review")
+        _run(routine_repo, "dependency-audit")
 
-        routine_md = routine_repo / "CLAUDE" / "Routine" / "00001-security-review" / "ROUTINE.md"
+        routine_md = routine_repo / "CLAUDE" / "Routine" / "00001-dependency-audit" / "ROUTINE.md"
         assert routine_md.is_file()
         body = routine_md.read_text()
         assert "00001" in body
-        assert "security review" in body
+        assert "dependency audit" in body
 
     def test_scaffolded_header_parses_as_undeclared(self, routine_repo: Path) -> None:
         """A fresh routine declares nothing, and says so to the parser.
@@ -206,9 +206,9 @@ class TestScaffolding:
         """
         from claude_code_hooks_daemon.routines.model import Trigger, parse_routine
 
-        _run(routine_repo, "security-review")
+        _run(routine_repo, "dependency-audit")
 
-        doc = parse_routine(routine_repo / "CLAUDE" / "Routine" / "00001-security-review")
+        doc = parse_routine(routine_repo / "CLAUDE" / "Routine" / "00001-dependency-audit")
         assert doc.trigger is Trigger.UNKNOWN
         assert doc.period_days is None
 
@@ -219,9 +219,9 @@ class TestScaffolding:
         never created are different facts, and only the first is interesting.
         Creating it up front means an absent ledger always means "never ran".
         """
-        _run(routine_repo, "security-review")
+        _run(routine_repo, "dependency-audit")
 
-        runs = routine_repo / "CLAUDE" / "Routine" / "00001-security-review" / "RUNS"
+        runs = routine_repo / "CLAUDE" / "Routine" / "00001-dependency-audit" / "RUNS"
         assert runs.is_dir()
         assert list(runs.iterdir()) == []
 
@@ -236,12 +236,12 @@ class TestScaffolding:
         template = routine_repo / "CLAUDE" / "Routine" / "_TEMPLATE_.md"
         template.write_text("# Routine {{ROUTINE_NUMBER}}: {{ROUTINE_TITLE}}\n\nours\n")
 
-        _run(routine_repo, "security-review")
+        _run(routine_repo, "dependency-audit")
 
         body = (
-            routine_repo / "CLAUDE" / "Routine" / "00001-security-review" / "ROUTINE.md"
+            routine_repo / "CLAUDE" / "Routine" / "00001-dependency-audit" / "ROUTINE.md"
         ).read_text()
-        assert body.startswith("# Routine 00001: security review")
+        assert body.startswith("# Routine 00001: dependency audit")
         assert "ours" in body
         assert "## Procedure" not in body
 
@@ -254,10 +254,10 @@ class TestScaffolding:
         template = routine_repo / "CLAUDE" / "Routine" / "_TEMPLATE_.md"
         template.write_text("{{ROUTINE_NUMBER}} {{ROUTINE_TITLE}} {{CREATED_DATE}} {{OWNER}}\n")
 
-        _run(routine_repo, "security-review")
+        _run(routine_repo, "dependency-audit")
 
         body = (
-            routine_repo / "CLAUDE" / "Routine" / "00001-security-review" / "ROUTINE.md"
+            routine_repo / "CLAUDE" / "Routine" / "00001-dependency-audit" / "ROUTINE.md"
         ).read_text()
         assert "{{" not in body
         assert "Scaffolder Test" in body
@@ -268,9 +268,9 @@ class TestScaffolding:
         Everything human-facing goes to stderr, exactly as ``mkplan.bash``
         does, so ``dir=$(mkroutine.bash name)`` works.
         """
-        result = _run(routine_repo, "security-review")
+        result = _run(routine_repo, "dependency-audit")
 
-        assert result.stdout.strip().endswith("CLAUDE/Routine/00001-security-review")
+        assert result.stdout.strip().endswith("CLAUDE/Routine/00001-dependency-audit")
 
 
 class TestNameHandling:
@@ -278,14 +278,14 @@ class TestNameHandling:
 
     def test_normalises_whitespace_to_kebab(self, routine_repo: Path) -> None:
         """A quoted sentence is a legitimate way to name a routine."""
-        result = _run(routine_repo, "Quarterly security review")
+        result = _run(routine_repo, "Quarterly dependency audit")
 
         assert result.returncode == 0, result.stderr
-        assert (routine_repo / "CLAUDE" / "Routine" / "00001-Quarterly-security-review").is_dir()
+        assert (routine_repo / "CLAUDE" / "Routine" / "00001-Quarterly-dependency-audit").is_dir()
 
     def test_rejects_a_name_not_starting_with_a_letter(self, routine_repo: Path) -> None:
         """The number prefix is the script's to assign, never the caller's."""
-        result = _run(routine_repo, "00007-security-review")
+        result = _run(routine_repo, "00007-dependency-audit")
 
         assert result.returncode != 0
         assert not list((routine_repo / "CLAUDE" / "Routine").glob("0*-*"))

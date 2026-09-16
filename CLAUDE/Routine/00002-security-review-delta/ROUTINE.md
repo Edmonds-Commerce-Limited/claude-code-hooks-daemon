@@ -36,11 +36,16 @@ reliably is ignored just as reliably.
 
 ## Procedure
 
-1. Establish the interval: `from` is the `to` ref of this routine's last
-   recorded run, `to` is the tag being reviewed. A first run's `from` is the
-   previous release tag.
+1. Open the run: `bin/hooks-daemon run-routine 00002-security-review-delta`.
 
-2. Open the run: `bin/hooks-daemon run-routine 00002-security-review-delta`.
+   It **states the interval**, so `from` is derived rather than remembered: it
+   is the `to` of the last run that recorded COVERING something, read out of
+   `RUNS/`. A skipped run carries no `to` because it covered nothing, so it
+   leaves the start where it was and widens this run's interval instead (D5).
+   A first run's `from` is the previous release tag, which the ledger cannot
+   know and will say so rather than guess.
+
+2. Choose `to`: the tag being reviewed.
 
 3. Produce the diff for the interval and dispatch the `security-reviewer` agent
    once per delta-able check, giving it the diff and that check alone. A

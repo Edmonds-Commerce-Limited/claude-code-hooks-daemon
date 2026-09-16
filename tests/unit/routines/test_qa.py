@@ -57,7 +57,7 @@ class _ListAncestry:
 
 def _routine(
     project_root: Path,
-    name: str = "00001-security-review",
+    name: str = "00001-dependency-audit",
     *,
     status: str = "Active",
     trigger: str = "schedule",
@@ -379,7 +379,7 @@ class TestSweepShape:
 
         findings = sweep(tmp_path, today=_TODAY)
         assert findings
-        assert all(finding.routine == "00001-security-review" for finding in findings)
+        assert all(finding.routine == "00001-dependency-audit" for finding in findings)
 
     def test_every_finding_carries_a_remediation(self, tmp_path: Path) -> None:
         """Naming the problem without the fix is how a sweep gets ignored."""

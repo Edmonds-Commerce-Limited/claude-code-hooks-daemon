@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.routines.ledger import (
     append_event,
     ledger_path,
     malformed_rows,
+    next_from_ref,
     next_run_id,
     read_events,
     run_states,
@@ -42,7 +43,7 @@ _LATER = datetime(2026, 9, 15, 21, 2, 0, tzinfo=UTC)
 @pytest.fixture
 def routine_dir(tmp_path: Path) -> Path:
     """A scaffolded routine folder with an empty ``RUNS/``."""
-    target = tmp_path / "00001-security-review"
+    target = tmp_path / "00001-dependency-audit"
     (target / "RUNS").mkdir(parents=True)
     return target
 
@@ -385,3 +386,69 @@ class TestNextRunId:
         )
 
         assert next_run_id(read_events(routine_dir), _LATER) == "2026-002"
+
+
+class TestNextFromRef:
+    """Where the NEXT run must start, read out of the records alone.
+
+    This is the interval model's whole promise made usable. The ground a run
+    must cover is not a fact anybody remembers or a pointer anybody bumps — it
+    is the `to` of the last run that recorded covering anything, and it is
+    derivable from the file with nothing else consulted.
+
+    Leaving that derivation to whoever reads the ledger is how the pointer bug
+    comes back through the front door: read it wrongly once and the next run
+    records an interval it did not cover, and no later run can tell.
+    """
+
+    def test_a_routine_that_has_never_covered_anything_has_no_from(self, routine_dir: Path) -> None:
+        """D6 again: nothing to compose against is not an answer of "the root".
+
+        Which ref a FIRST run starts from is the routine's own decision — the
+        root commit for one, the previous release tag for another — so the
+        ledger must say it does not know rather than guess.
+        """
+        assert next_from_ref(read_events(routine_dir)) is None
+
+    def test_it_is_the_to_ref_of_the_last_covering_run(self, routine_dir: Path) -> None:
+        """The interval composes end to end, so the next `from` is the last `to`."""
+        append_event(
+            routine_dir,
+            RunEvent(
+                run_id="2026-001",
+                event=LedgerEvent.CLEAN,
+                at=_NOW,
+                interval=RunInterval(from_ref="abc123", to_ref="def456"),
+            ),
+        )
+
+        assert next_from_ref(read_events(routine_dir)) == "def456"
+
+    def test_a_later_skip_does_not_move_it(self, routine_dir: Path) -> None:
+        """D5: a missed run WIDENS the next interval rather than moving its start.
+
+        A skip carries no interval because it covered nothing, so taking the
+        latest row rather than the latest COVERING row would find no ref at all
+        and silently drop back to "first run" — quietly re-reviewing everything,
+        or quietly reviewing nothing.
+        """
+        append_event(
+            routine_dir,
+            RunEvent(
+                run_id="2026-001",
+                event=LedgerEvent.CLEAN,
+                at=_NOW,
+                interval=RunInterval(from_ref="abc123", to_ref="def456"),
+            ),
+        )
+        append_event(
+            routine_dir,
+            RunEvent(
+                run_id="2026-002",
+                event=LedgerEvent.SKIPPED,
+                at=_LATER,
+                note="release frozen",
+            ),
+        )
+
+        assert next_from_ref(read_events(routine_dir)) == "def456"

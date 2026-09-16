@@ -24,7 +24,7 @@ from claude_code_hooks_daemon.routines.resolver import ROUTINE_DOC
 
 _PROCEDURE_STEP = "Draw a weighted random sample."
 
-_ROUTINE_BODY = f"""# Routine 00001: security review
+_ROUTINE_BODY = f"""# Routine 00001: dependency audit
 
 **Status**: Active
 
@@ -37,7 +37,7 @@ _ROUTINE_BODY = f"""# Routine 00001: security review
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     """A project root with one runnable routine."""
-    target = tmp_path / "CLAUDE" / "Routine" / "00001-security-review"
+    target = tmp_path / "CLAUDE" / "Routine" / "00001-dependency-audit"
     (target / "RUNS").mkdir(parents=True)
     (target / ROUTINE_DOC).write_text(_ROUTINE_BODY)
     return tmp_path
@@ -115,7 +115,7 @@ class TestStart:
         """The record is opened before the work, so an abandoned run is visible."""
         cmd_run_routine(_args(project, identifier="00001"))
 
-        ledger = project / "CLAUDE" / "Routine" / "00001-security-review" / "RUNS"
+        ledger = project / "CLAUDE" / "Routine" / "00001-dependency-audit" / "RUNS"
         assert [path.name for path in ledger.iterdir()]
 
     def test_unknown_routine_exits_one(self, project: Path) -> None:
@@ -124,7 +124,7 @@ class TestStart:
 
     def test_unfilled_procedure_exits_one(self, project: Path) -> None:
         """A run against a scaffolded placeholder would record work nobody did."""
-        routine = project / "CLAUDE" / "Routine" / "00001-security-review"
+        routine = project / "CLAUDE" / "Routine" / "00001-dependency-audit"
         (routine / ROUTINE_DOC).write_text(
             "# Routine 00001\n\n## Procedure\n\n<!-- The steps a run performs. -->\n"
         )
@@ -134,6 +134,47 @@ class TestStart:
     def test_no_identifier_and_no_list_exits_one(self, project: Path) -> None:
         """Doing nothing silently would look like a run that found nothing."""
         assert cmd_run_routine(_args(project)) == 1
+
+    def test_it_states_the_interval_a_second_run_must_cover(
+        self, project: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The ground to cover is DERIVED here, never remembered by the runner.
+
+        Every procedure in the tree opens by telling its reader to work out the
+        interval from the last recorded run. Leaving that to prose is how the
+        mutable pointer returns: read it wrongly once and the run records an
+        interval it did not cover, and no later run can tell.
+        """
+        cmd_run_routine(_args(project, identifier="00001"))
+        cmd_run_routine(
+            _args(
+                project,
+                identifier="00001",
+                finish=True,
+                outcome="clean",
+                from_ref="abc123",
+                to_ref="def456",
+            )
+        )
+        capsys.readouterr()
+
+        cmd_run_routine(_args(project, identifier="00001"))
+
+        assert "def456" in capsys.readouterr().out
+
+    def test_a_first_run_says_it_has_no_from_rather_than_guessing(
+        self, project: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Which ref a first run starts from is the routine's own decision.
+
+        The root commit for the full sweep, the previous release tag for the
+        delta — so printing a guess would be printing one routine's answer to
+        another routine's question.
+        """
+        cmd_run_routine(_args(project, identifier="00001"))
+
+        out = capsys.readouterr().out
+        assert "no recorded run has covered anything" in out
 
 
 class TestFinish:
