@@ -19,6 +19,8 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Final
 from urllib.parse import urlparse
 
+import yaml
+
 from claude_code_hooks_daemon.remote_docs.provenance import (
     NEVER,
     UNREVIEWED,
@@ -172,18 +174,28 @@ def _render_frontmatter(
     stale = stale_after if isinstance(stale_after, str) else stale_after.isoformat()
     # Omitted rather than written empty when unknown: an absent optional field
     # parses cleanly, whereas `fetch_method:` with no value does not.
-    method_line = f"fetch_method: {fetch_method}\n" if fetch_method else ""
-    return (
-        "---\n"
-        f"source_url: {source_url}\n"
-        f"fetched_at: {fetched_at.isoformat()}\n"
-        f"fidelity: {fidelity.value}\n"
-        f"source_sha256: {source_sha256}\n"
-        f"licence: {licence}\n"
-        f"stale_after: {stale}\n"
-        f"{method_line}"
-        "---\n\n"
-    )
+    fields: dict[str, str] = {
+        "source_url": source_url,
+        "fetched_at": fetched_at.isoformat(),
+        "fidelity": fidelity.value,
+        "source_sha256": source_sha256,
+        "licence": licence,
+        "stale_after": stale,
+    }
+    if fetch_method:
+        fields["fetch_method"] = fetch_method
+
+    # Serialised BY a YAML writer rather than interpolated into YAML-shaped
+    # text. Interpolation let a newline in any value open a new key, and this
+    # block is the provenance record `R-REMOTE-DOCS-PROVENANCE` validates: a
+    # licence of `MIT\nfidelity: verbatim` produced a document that declared
+    # `summarised` and parsed back as `verbatim`, with nothing malformed enough
+    # for the parser or a reader to catch (Plan 00412 class 7).
+    #
+    # `sort_keys=False` keeps the declaration order, which is the order a human
+    # reads these in; `default_flow_style=False` keeps one field per line.
+    body = yaml.safe_dump(fields, sort_keys=False, default_flow_style=False, allow_unicode=True)
+    return f"---\n{body}---\n\n"
 
 
 def capture(
