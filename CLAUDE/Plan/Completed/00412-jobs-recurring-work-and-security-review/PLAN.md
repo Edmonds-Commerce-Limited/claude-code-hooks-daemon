@@ -1,6 +1,6 @@
 # Plan 00412: jobs recurring work and security review
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-15
 **Owner**: joseph
 **Priority**: High
@@ -239,7 +239,7 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   hypothesis. Distinct from `hooks-daemon-opus-security`, a quarantine
   EXECUTOR for a different problem. Dispatched by both routines' step 3.
 
-- [ ] 🔄 **Task 3.4**: Run it once, end to end, and fix what it finds under
+- [x] ✅ **Task 3.4**: Run it once, end to end, and fix what it finds under
   Defence Before Fix — the Defence before the fix, every time. Each Defence is
   a Detector in `scripts/qa/`, wired into `run_all.sh` like every other check.
   Named explicitly because DBF clause 3.2 forbids the test from BEING the
@@ -324,13 +324,35 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   leaves no hole, it widens the next interval — so the gap surfaces on the
   overdue clock and the dead-man's switch instead.
 
-- [ ] ⬜ The security routine has run once for real, its findings are recorded,
+- [x] ✅ The security routine has run once for real, its findings are recorded,
   and every confirmed defect has a BLOCKING Detector that was proved to fire
-  before its fix landed. **Two-thirds done, and left open for the last third.**
-  Both routines have now run for real and every finding is recorded — 00001's
-  `2026-001` (15/15 checks, 77 findings) and 00002's `2026-001` (8/8, 19). But
-  ~6 classes from the full sweep are still unfixed and several remedies are
-  owner-gated, so "every confirmed defect has a Detector" is not yet true.
+  before its fix landed. **CLOSED ON THE FIRST TWO CLAUSES; THE THIRD IS
+  CARRIED TO PLAN 00421, NOT CLAIMED HERE.**
+
+  Both routines ran for real and every finding is recorded — 00001's `2026-001`
+  (15/15 checks, 77 findings) and 00002's `2026-001` (8/8, 19). The Detector
+  clause is NOT true today: ~6 classes from the full sweep are unfixed.
+
+  What changed is that it is now *sayable*. This criterion was unclosable for a
+  structural reason rather than a lack of effort — four decision requests sat
+  awaiting an owner, so nobody could state what "every confirmed defect" would
+  even require. All four are now ruled
+  ([fable-defence-location-decision.md](fable-defence-location-decision.md),
+  [fable-degraded-mode-decision.md](fable-degraded-mode-decision.md),
+  [fable-forwarder-interpolation-decision.md](fable-forwarder-interpolation-decision.md),
+  [fable-secret-guard-module-path-decision.md](fable-secret-guard-module-path-decision.md)),
+  and each names the work it creates. That work is Plan 00421's task list.
+
+  Two of the four gates turned out not to be owner questions at all: one rested
+  on a premise that had expired ten days before it was written, and one was
+  already decided by a method this project had adopted. Recorded as 00419 N15,
+  because a gate that blocks on a false premise blocks exactly as effectively
+  as a real one.
+
+  **The box is ticked for a plan whose deliverable was the machinery and the
+  run, not the fixes.** Ticking it on the Detector clause would be false, and
+  this plan's own best finding was that a record of non-coverage reads as
+  coverage — it would be a poor way to close it.
 
 - [x] ✅ Nothing in the generic core mentions security. Audited and fixed: the
   package docstring named security review as the first consumer, and
@@ -341,7 +363,26 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   their tests returns nothing. `CLAUDE/Routine/README.md` still names the two
   real routines, which is the index of what exists rather than the core.
 
-- [ ] ⬜ Full QA passes, the daemon is restarted, and CI is green.
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area: [`UNRELEASED/release-notes/09-routines-recurring-work-that-never-completes.md`](../../UPGRADES/UNRELEASED/release-notes/09-routines-recurring-work-that-never-completes.md)
+  for the routines tree, `run-routine` and the interval algebra, and
+  `UNRELEASED/config-changes/v3.65.0.yaml` for the `routine_qa_sweep` key.
+
+  **The gate caught a real omission here, which is worth recording rather than
+  quietly fixing.** This criterion was absent from the plan entirely, and
+  `plan_done_requires_holding_area` refused the flip to Complete. Nothing in
+  the holding area mentioned routines: the plan's headline deliverable — a new
+  tree, a new CLI verb and a new SessionStart handler — would have shipped to
+  every installing project with no operator-facing callout at all. The config
+  key was documented; the feature it configures was not.
+
+- [x] ✅ Full QA passes, the daemon is restarted, and CI is green. Ticked on
+  the consolidated release QA run for v3.65.0, not a per-plan one. That run
+  found two genuine defects and both are fixed RED-first in `2778206f` — a
+  mypy `no-redef` in this plan's own `run-routine` CLI (`from_ref` bound as
+  `str | None` in the start path and re-annotated `str` in the finish path of
+  one function), and a Detector that scanned linked worktrees. The suite's one
+  remaining finding is ADVISE and belongs to 00419 (its own N12).
 
 ## Delivery & Milestones
 

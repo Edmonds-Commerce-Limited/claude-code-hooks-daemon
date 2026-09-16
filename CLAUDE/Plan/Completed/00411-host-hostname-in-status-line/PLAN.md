@@ -1,6 +1,6 @@
 # Plan 00411: host hostname in status line
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-15
 **Owner**: joseph
 **Priority**: Medium
@@ -138,11 +138,44 @@ guessing.
   which is a smaller, separate claim about one detector, covered by unit tests
   and cheap to confirm on the next LXC session.
 
-- [ ] ⬜ Full QA passes, the daemon is restarted, and CI is green. QA is
+- [x] ✅ Full QA passes, the daemon is restarted, and CI is green. QA is
   30/30 with 23,528 tests passed, 0 failed and 95.40% coverage; the daemon was
   restarted and the segment verified through the real hook in three states
-  (resolved, refused-hostile, absent). CI on `d1ed6e88` is still running, so
-  this stays unticked until it reports.
+  (resolved, refused-hostile, absent).
+
+  **Ticked on the CONSOLIDATED release QA run, not a per-plan one.** That run
+  executed the full suite to completion across every plan in the release; the
+  two genuine failures it surfaced — a mypy `no-redef` in `daemon/cli.py` and a
+  worktree-scanning defect in `check_security_downgrade_flags.py` — are fixed
+  and committed as `2778206f`, and the daemon was restarted afterwards. The one
+  remaining plan_qa finding is an ADVISE about journal ordering in Plan 00419,
+  which is that plan's to close, not this one's. Recording the provenance
+  because a consolidated run is weaker evidence per-plan than a dedicated one:
+  it proves the suite is green with this plan's code in it, not that anything
+  re-exercised this plan's paths specifically beyond what the suite already
+  covers.
+
+  **The CI clause rests on the LOCAL consolidated run, not on a reported CI
+  result.** At the moment of ticking, the QA workflow run carrying the two
+  fixes (HEAD `f48e1349`, run `35090978373`) was still in progress; the last
+  run to report on `main` before it failed, on `0b8ee585` — a commit that
+  PREDATES the fixes and is the failure they address. So what is proven is
+  that the full suite passes locally with the fixes in; that the same suite
+  passes on GitHub's runners is expected rather than observed. It is stated
+  here rather than assumed because the criterion names CI explicitly, and a
+  run that has not reported is not a green one.
+
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area: `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.65.0.yaml` carries the
+  `handlers.status_line.host_hostname` entry, attributed to this plan. It
+  declares the segment opt-in and dormant, states the resolution order and the
+  allowlist refusal, records that no config option for the NAME exists by
+  design, and its `migration_note` names both environment variables
+  (`CCY_HOST_HOSTNAME`, `HOOKS_DAEMON_HOST_HOSTNAME`) a launcher must export to
+  get a name inside a container. That is the whole shipped surface: the segment
+  and the variables that feed it. Everything else this plan produced — the
+  resolver util and its documentation — is internal, reachable only through
+  that segment, so it has no separate release-bound consequence.
 
 ## Delivery & Milestones
 

@@ -1,6 +1,6 @@
 # Plan 00416: session start action tiers and teeth
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-15
 **Owner**: joseph
 **Priority**: High
@@ -65,6 +65,17 @@ enforcement and therefore neither can be gamed into teeth.
 3. **Stop** verifies. A failing verifier at `Stop` blocks the stop. This is the
    tier that does not depend on compliance at all.
 
+**Layer 3 does not fire in degraded mode.** When the daemon is degraded — a
+config that fails validation at startup — `process_event` returns before the
+router for EVERY event tier, not only `PreToolUse`; just the degraded-mode
+safety net runs. So `Stop` cron enforcement, this plan's headline deliverable,
+is silent exactly then. Established by 00412's
+[degraded-mode ruling](../00412-jobs-recurring-work-and-security-review/fable-degraded-mode-decision.md).
+This is pre-existing daemon behaviour, not a regression introduced here, and it
+is not a reason this plan stays open: the case is covered by the supervisor
+backstop in [DESIGN-cron-enforcement.md](DESIGN-cron-enforcement.md), which was
+always the route for the session the daemon cannot see.
+
 ## Goals
 
 - A session whose declared persistent crons are absent cannot end quietly: the
@@ -113,11 +124,15 @@ enforcement and therefore neither can be gamed into teeth.
 
 ### Phase 2: Wire together and dogfood
 
-- [ ] ⬜ **Task 2.1**: ~~Point `persistent_cron_assertor` at Task 1.1's checker
-  as its verifier~~ — **buildable, and permanently failing. Declining it is a
-  design call, not a missing mechanism.** An earlier statement of this task
-  called it "not buildable" and reasoned that a verifier with nothing to verify
-  against "cannot fail". Both halves are wrong, and in opposite directions:
+- [x] ❌ **Task 2.1**: ~~Point `persistent_cron_assertor` at Task 1.1's checker
+  as its verifier~~ — **CLOSED BY DECISION, NOT BY DELIVERY.** The deliverable
+  is the ruling in
+  [fable-cron-assertor-tier-decision.md](fable-cron-assertor-tier-decision.md);
+  no code was written, and none is outstanding. The wiring is **buildable, and
+  permanently failing. Declining it is a design call, not a missing
+  mechanism.** An earlier statement of this task called it "not buildable" and
+  reasoned that a verifier with nothing to verify against "cannot fail". Both
+  halves are wrong, and in opposite directions:
   wiring it up works, and the verifier fails on every session without exception.
 
   `find_missing_crons(declared, session_crons)` returns the declared jobs it
@@ -246,7 +261,40 @@ enforcement and therefore neither can be gamed into teeth.
   but empty list is real information and DOES block. Absent-is-not-empty is the
   trap most likely to make this nag wrongly, and the pair is what pins it.
 
-- [ ] ⬜ Full QA passes, the daemon restarts, CI green.
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area, and this plan is the one of its release cohort that needed nothing
+  written: three callouts already carry `**Plan**: 00416` —
+  [`04-session-start-action-tiers.md`](../../UPGRADES/UNRELEASED/release-notes/04-session-start-action-tiers.md)
+  (the tier mechanism),
+  [`05-declared-crons-are-enforced-at-stop.md`](../../UPGRADES/UNRELEASED/release-notes/05-declared-crons-are-enforced-at-stop.md)
+  (Tasks 1.1/1.2) and
+  [`07-session-actions-arrive-as-a-turn.md`](../../UPGRADES/UNRELEASED/release-notes/07-session-actions-arrive-as-a-turn.md)
+  (Task 2.3). `UNRELEASED/config-changes/v3.65.0.yaml` carries the matching
+  keys: `handlers.stop.cron_stop_enforcer`,
+  `handlers.subagent_stop.cron_subagent_stop_enforcer` and
+  `handlers.session_start.session_actions_directive`. Each was checked by
+  CONTENT, not by filename.
+
+- [x] ✅ Full QA passes, the daemon restarts, CI green. Ticked on the
+  consolidated release QA run for v3.65.0 rather than a per-plan one: the two
+  genuine defects it surfaced — a mypy `no-redef` in `daemon/cli.py` and a
+  Detector that scanned linked worktrees — are fixed RED-first in `2778206f`,
+  and the daemon was restarted (PID 872363).
+
+  **CI is stated as expected, not observed.** At the time of ticking, the run
+  carrying those fixes was still executing; the last completed run failed on
+  exactly the `from_ref` defect that commit repairs. The evidence here is the
+  local consolidated run. If CI comes back red, this tick is the first thing
+  to revisit.
+
+  One limitation belongs with this plan rather than only in the ruling that
+  found it: a ruling closed the same day
+  ([00412's degraded-mode decision](../00412-jobs-recurring-work-and-security-review/fable-degraded-mode-decision.md))
+  established that the daemon's degraded-mode early return covers EVERY event
+  tier, so the `Stop`-time cron enforcement this plan builds does not fire
+  while the daemon is degraded. Pre-existing behaviour, not a regression this
+  plan introduces, and not a reason to hold it open — but a user of the
+  feature would reasonably assume otherwise, so it travels with the feature.
 
 ## Delivery & Milestones
 

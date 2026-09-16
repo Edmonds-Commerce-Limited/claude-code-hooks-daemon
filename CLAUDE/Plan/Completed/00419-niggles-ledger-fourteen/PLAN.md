@@ -1,6 +1,6 @@
 # Plan 00419: niggles ledger fourteen
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-15
 **Owner**: joseph
 **Priority**: Medium
@@ -26,34 +26,30 @@ seventeen entries terminal, so this is the open one.
 
 ## Niggles
 
-Full write-ups, with evidence and candidate remedies, are in
-[NIGGLES.md](NIGGLES.md). One line each here so the ledger's shape is readable
-without opening it:
+Fifteen entries. Full write-ups, with evidence and candidate remedies, are in
+[NIGGLES.md](NIGGLES.md); deeper narrative is in
+[JOURNAL/00419-Journal-26-09-16.md](JOURNAL/00419-Journal-26-09-16.md). One
+line each here so the
+ledger's shape is readable without opening it, with the verdict each entry was
+given when this ledger closed:
 
-- **N1** — `debug_hooks.sh` could not run in the repository that dogfoods it.
-  Fixed; the fix then introduced a bash-4-only `mapfile`, also fixed.
-- **N2** — archiving a plan breaks every link it makes to a sibling. Fork
-  closed by constraint: a journal cannot accept repointing, so the resolver is
-  the only remedy left. Remedy owner-gated.
-- **N3** — the two plan-close gates are mutually exclusive on the legal close
-  path. Three occurrences in one session. Remedy owner-gated.
-- **N4** — `cron_stop_enforcer` wedged every Stop on the day it merged, because
-  the delivered cron prompt is re-rendered and matching compared bytes. Fixed,
-  RED first, verified against a captured payload.
-- **N5** — the supervisor's goal check counts idle teammates as running work,
-  so a session that correctly harvests its parallel work cannot satisfy its own
-  stop condition. Remedy owner-gated.
-- **N6** — declaring `layout.source_dirs` silently switched off every TDD
-  language strategy's file-level exclusions, so a project that describes itself
-  carefully lost Python's `__init__.py` exemption. Fixed, RED first.
-- **N7** — Black is the formatter of record, Ruff the linter, and nothing stops
-  an agent running `ruff format`: an eight-file fix commit went in carrying 163.
-  Documented in `CLAUDE/QA.md` and broken anyway, by the author, hours after
-  reading it. Remedy owner-gated.
-- **N8** — the `Priority` constants are not the numbers a fresh install ships;
-  the whole `status_line` template diverges and one segment it references is
-  absent from it. Relative order holds, so nothing misbehaves and nothing can
-  detect it. Remedy owner-gated.
+| #   | Verdict                                                                    | Status                                                                                                                                                                             |
+| --- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| N1  | `debug_hooks.sh` could not run in the repository that dogfoods it          | ✅ Fixed — RED first, both defects separately; the fix's own `mapfile` too                                                                                                         |
+| N2  | archiving a plan silently breaks every link it makes to a sibling          | ✅ Fixed — RED first, archive-aware link resolver (Task 1.4)                                                                                                                       |
+| N3  | the two plan-close gates are mutually exclusive on the legal close path    | ✅ Fixed — RED first, stage move plus a new COMMIT registration (Task 1.5)                                                                                                         |
+| N4  | `cron_stop_enforcer` wedged every Stop on the day it merged                | ✅ Fixed — RED first, verified against a captured payload (Task 1.6)                                                                                                               |
+| N5  | the goal check counts idle teammates as running work                       | ✅ Determined — the defect is UPSTREAM in Claude Code's own `/goal` evaluator; the local counterpart was built RED-first (Task 1.7)                                                |
+| N6  | declaring `layout.source_dirs` disables the TDD file-level exclusions      | ✅ Fixed — RED first, `is_excluded_source_file` (Task 1.8)                                                                                                                         |
+| N7  | Black is the formatter of record and nothing stopped `ruff format`         | ✅ Fixed — project handler `ruff_format_blocker`, 20 tests                                                                                                                         |
+| N8  | the `Priority` constants are not the numbers a fresh install ships         | ⬜ NOT terminal — remedy owner-gated and unbuilt; graduated to [00422 N1](../00422-niggles-ledger-fifteen/NIGGLES.md)                                                              |
+| N9  | worktree creation was dead here, because seeding cannot say "if it exists" | ✅ Fixed — RED first, `SeedEntry.optional`                                                                                                                                         |
+| N10 | a handler exception is reported as a configuration question                | ✅ Fixed — RED first, `print_worktree` reports the real reason                                                                                                                     |
+| N11 | the linter runs on gitignored scratch output                               | ⬜ NOT terminal — remedy chosen and un-gated, but unbuilt; graduated to [00422 N2](../00422-niggles-ledger-fifteen/NIGGLES.md)                                                     |
+| N12 | a committed future-dated entry makes the journal permanently uncorrectable | ⬜ NOT terminal — remedies recorded, none chosen; its advisory is still live against this plan's own day-file; graduated to [00422 N3](../00422-niggles-ledger-fifteen/NIGGLES.md) |
+| N13 | a cron cannot be both cancelled for a session and declared in config       | ⬜ NOT terminal — remedy owner-gated and unbuilt; graduated to [00422 N4](../00422-niggles-ledger-fifteen/NIGGLES.md), which names the class it shares with N3 and N12             |
+| N14 | the security-downgrade scan descended into linked worktrees                | ✅ Fixed — RED first, commit `2778206f`                                                                                                                                            |
+| N15 | an owner gate whose premise had expired ten days before it was filed       | ✅ Determined from the record — the premise was false, F-PRIV-4 is unblocked and the guard is unchanged                                                                            |
 
 ## Tasks
 
@@ -198,13 +194,55 @@ without opening it:
   not a silent `set -e` death, and the documented env-var escape hatch is
   reachable.
 
-- [ ] ⬜ **Assessed when this ledger closes, not before**: every entry is
-  terminal — fixed with a RED-first test, determined from the record, or
-  graduated to its own numbered plan. Open while this is the current ledger,
-  because a rolling ledger exists to keep collecting.
+- [x] ✅ **Assessed at close, not before**: every entry judged one by one
+  against the terminal states this plan's Goals define — fixed with a RED-first
+  test, determined from the record, or graduated to its own numbered plan. The
+  verdict per entry is the table above, and **the assessment does not come out
+  clean**. Eleven of fifteen are terminal: nine fixed RED-first, and two
+  determined from the record (N5, whose defect is upstream in Claude Code's own
+  `/goal` evaluator and cannot be fixed here; N15, whose premise was already
+  false when the gate was filed). **Four are not, and they are named rather
+  than counted** — N8 and N13 are owner-gated with the remedy recorded and
+  unbuilt, N11 and N12 have an un-gated remedy nobody built. Counting those
+  four as terminal would be the one failure this ledger could not recover from,
+  because nothing downstream re-reads a closed plan. They are graduated instead,
+  by the house precedent 00413 set: all four are re-filed in full as N1-N4 of
+  [00422](../00422-niggles-ledger-fifteen/PLAN.md), which also owns naming the
+  class N3/N12/N13 share.
+
+- [x] ✅ **QA and CI**: the full suite ran, its two genuine failures are fixed
+  and committed as `2778206f` (a `mypy` re-binding in `daemon/cli.py`, and
+  N14's worktree scan), and the daemon was restarted with the fix live. **One
+  finding is still open and is not suppressed**: `plan_qa` reports
+  `journal-entry-ordering` at ADVISE against this plan's own day-file
+  `JOURNAL/00419-Journal-26-09-16.md`. That finding IS N12 — the entries were
+  appended with a heredoc, bypassed the future-dated guard at write time, and
+  reached history, where the append-only rule makes them uncorrectable. This
+  ledger therefore closes carrying a live advisory finding against itself that
+  it has itself documented as unfixable, which is the accurate state rather
+  than a clean one.
+
+- [x] ✅ **Holding area is current**: every release-bound consequence is in
+  `CLAUDE/UPGRADES/UNRELEASED/` — `teammate_reap_advisor` and
+  `seed.entries[].optional` in `config-changes/v3.65.0.yaml`; the
+  `header-body-coherence` stage move and the new `plan-link-resolves` check in
+  `truth-changes/v3.65.0.yaml`; N4's prompt-matching rule inside 00416's
+  callout `release-notes/05-declared-crons-are-enforced-at-stop.md`; and this
+  plan's own callout
+  `release-notes/10-worktrees-layouts-and-diagnostics.md` for the five
+  client-visible fixes that had none (N1, N6, N9, N10, N14).
 
 ## Delivery & Milestones
 
 - Opened because ledger thirteen closed, by the convention recorded in
   `CLAUDE/Plan/CLAUDE.md`: a niggle is appended to the open ledger, and if none
   is open a new one is scaffolded.
+
+- N14 and the two genuine QA failures this close was gated on landed in
+  `2778206f`; the rest of the work is in this session's merges to `main`.
+
+- Closing hands four entries on rather than absorbing them: N8, N11, N12 and
+  N13 are unresolved, and are re-filed in full as N1-N4 of
+  [00422](../00422-niggles-ledger-fifteen/PLAN.md), each citing the entry here
+  that it came from. A rolling ledger ends when it is closed, not when it is
+  empty.

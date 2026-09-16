@@ -418,6 +418,10 @@ Remedy owner-gated — (1) makes a currently-silent divergence loud across the
 whole template, which may surface more than the status-line block and is a
 scope decision rather than a bug fix.
 
+**Graduated to [00422 N1](../00422-niggles-ledger-fifteen/NIGGLES.md)**: not
+terminal when this ledger closed, so it was re-filed in full rather than
+counted.
+
 ### N9 — worktree creation was dead in this repository, and the seed list said why
 
 Every `WorktreeCreate` in this checkout failed. Four `isolation: "worktree"`
@@ -530,6 +534,10 @@ when the reader is least interested in its style.
 Not owner-gated: this is a scope question about one project's own exclude list,
 and remedy (1) turns nothing off for any file that can reach history.
 
+**Graduated to [00422 N2](../00422-niggles-ledger-fifteen/NIGGLES.md)**: not
+terminal when this ledger closed, so it was re-filed in full rather than
+counted.
+
 ### N12 — a committed future-dated entry makes the journal permanently uncorrectable
 
 Found by hitting it, minutes after N9 and N10, in this plan's own day-file.
@@ -583,3 +591,169 @@ those checks"). The identical mistake in plan 00411's journal went through
 session. `journal-entry-future-dated` is also deliberately EDIT-only (a batch
 scan meets the entry when the append-only rule forbids acting on it), so a
 heredoc append is not caught late either — it is caught never.
+
+**Graduated to [00422 N3](../00422-niggles-ledger-fifteen/NIGGLES.md)**: not
+terminal when this ledger closed, so it was re-filed in full rather than
+counted. Its advisory against this plan's own day-file is still live, and is
+the regression case for whichever remedy 00422 builds.
+
+### N13 — a cron cannot be both cancelled for a session and declared in config
+
+**Found**: by obeying the owner. The instruction was to cancel the `issue-sdlc`
+cron, and `CronDelete` removed it. The next `Stop` BLOCKED.
+
+`cron_stop_enforcer` (Stop, priority 7 — `.claude/hooks-daemon.yaml:970-972`)
+compares the session's `session_crons` against every job declared under
+`persistent_crons`, and `issue-sdlc` is declared there
+(`.claude/hooks-daemon.yaml:1129-1144`). A declared job the session does not
+have is precisely the state that handler exists to refuse, and it refused it
+correctly.
+
+**So a session-scoped cancellation is unexpressible.** There are two moves and
+each fails the other's test: obeying the owner fails the stop gate, satisfying
+the stop gate disobeys the owner. The cron was re-created to clear the block —
+which restored the very thing that had just been asked to stop — and the
+conflict was surfaced for a ruling rather than settled by whoever happened to
+be standing in front of it.
+
+**The knob that does exist is a different and larger act.** Removing the
+`issue-sdlc` job from `persistent_crons`, or setting `enabled: false` on it,
+genuinely stops the enforcement, because enforcement is downstream of the
+declaration. But that is committed config: it stops the job for every session,
+on every branch, until someone puts it back. "Cancel it for now" and "we no
+longer run this job" are different decisions with different blast radii, and
+only the second one has a spelling.
+
+**THE CLASS, and this is the third sighting.** N3 (the two plan-close gates),
+N12 (the three journal rules) and now this: a gate that no legal sequence of
+moves can satisfy. Three occurrences in three unrelated subsystems inside one
+ledger is a class, not a coincidence. The shape is the same each time — a guard
+judging a STATE correctly, in a workflow where that state is a legitimate
+INTERMEDIATE (N3's all-ticked body) or a legitimate TEMPORARY (N12's honest
+out-of-order correction, this one's pause). The guard is right about the state
+and wrong about the moment. N3's remedy is the precedent worth copying: it did
+not relax the check, it moved it to the stage where the state is settled.
+
+**Candidate remedies**, cheapest first:
+
+1. A session-scoped pause the enforcer honours, recorded the way the Stop
+   handler already records "blocked only on human input" — a marker the daemon
+   writes and expires on its own, not a config edit. It gives "cancelled for
+   now" a spelling, and leaves the declaration intact so the next session
+   re-creates the job.
+2. Have the enforcer's deny text name the config knob and say plainly that a
+   session-scoped cancellation has no spelling, so whoever is blocked learns
+   the wall is real instead of inferring it from two failed attempts. The
+   N3-(3) shape: cheapest, and weakest, because it makes an unsatisfiable gate
+   learnable rather than satisfiable.
+3. Nothing. An owner instruction to cancel a declared cron is rare, and the
+   cost is one blocked stop plus a re-creation.
+
+Remedy owner-gated — (1) hands a session the ability to switch off a guard the
+project itself declared, which is a decision about that guard's authority
+rather than a bug fix, and the thing it would be overriding is the owner's own
+instruction.
+
+**Graduated to [00422 N4](../00422-niggles-ledger-fifteen/NIGGLES.md)**: not
+terminal when this ledger closed, so it was re-filed in full rather than
+counted. 00422 also owns naming the class this entry shares with N3 and N12,
+so a fourth sighting is filed against the class rather than as a new niggle.
+
+### N14 — the security-downgrade scan descended into linked worktrees
+
+**Found**: a full QA run on this repository with four merged agent worktrees
+still open under `.claude/worktrees/`. `check_security_downgrade_flags.py`
+reported 28 violations and failed
+`test_the_shipped_inventory_matches_the_shipped_tree`. Every one of the 28 was
+a file the same scan had already judged at its real path.
+
+**Cause.** The excluded-directory set matches a path COMPONENT, and a linked
+worktree's components are `.claude`, `worktrees` and the agent BRANCH NAME —
+none of them in the set — so the walk descended into a complete second checkout
+of the repository and counted it as new findings.
+
+**Client-facing, not our local mess.** Pruning the four worktrees cleared the
+symptom, which is exactly why the exclusion has to exist: the next worktree
+brings it straight back. The gate fails for ANY installing project that has a
+worktree open when QA runs, citing paths that vanish with the worktree and that
+the project cannot fix by editing any file it owns. The only move such a client
+has left is to switch the check off, which is the worst outcome a security gate
+can produce.
+
+**Fixed**, RED first, in commit `2778206f`: `worktrees` joins `_EXCLUDED_DIRS`
+in `scripts/qa/check_security_downgrade_flags.py`, pinned by
+`TestScope::test_a_linked_worktree_is_excluded` (43 passed). The comment above
+the set records why this entry is the one that bites a CLIENT, so the next
+reader does not have to re-derive it. Consequent, measured on the same tree:
+the check goes from 28 findings to 0, and pyright stops analysing 9,656 files
+for a tree that holds about 1,667.
+
+**The class.** An exclusion expressed as a NAME rather than as a fact about the
+tree — the walk asks "is this directory called something I skip?" when the
+question it needs answered is "is this a second checkout of the repository I am
+already scanning?". Same family as N6, where a declared `layout.source_dirs`
+answered *is this file in a source DIRECTORY?* for a gate that needed *is this
+a production source FILE?*. Both are a proxy standing in for the real predicate
+and quietly disagreeing with it.
+
+### N15 — an owner gate whose premise had expired ten days before it was filed
+
+**Found**: while ruling on it.
+[`DECISION-secret-guard-module-path-false-positive.md`](../00412-jobs-recurring-work-and-security-review/DECISION-secret-guard-module-path-false-positive.md)
+recorded that `secret_file_guard` matches the dotted module path of the
+daemon's own redaction utility (`utils/secret_redaction`) against the shipped
+`*.secret*` glob, concluded that "any edit that re-authors one of those import
+lines is therefore denied", and on that basis held worklist row **F-PRIV-4** as
+unbuildable pending an owner choice between four options.
+
+Import STATEMENTS have been exempt since `b149808f` (2026-09-06) — TEN DAYS
+before the document was filed on 2026-09-16. The guard blanks the module-path
+span of every line-anchored `from|import` statement before it tokenises at all.
+So the gate holding F-PRIV-4 rested on a condition that was already false when
+it was written, and it stayed up for the whole of its life.
+
+**What made it invulnerable.** The observation underneath it was real: a write
+WAS denied, and the token the deny echoed WAS the dotted path. Only the CONTEXT
+was inferred — and the document elided the token's surroundings, so the
+spelling that actually tripped the guard cannot be recovered from the document
+at all. The ruling
+([`fable-secret-guard-module-path-decision.md`](../00412-jobs-recurring-work-and-security-review/fable-secret-guard-module-path-decision.md))
+settled it by EXECUTING the guard rather than reading it: two live `Write`s in
+one session against the running daemon — the `try:` plus `from … import …`
+shape ALLOWED, a dotted string literal handed to `sys.modules` DENIED — plus 17
+tests that already drew exactly that boundary.
+
+**THE CLASS.** A decision document is a snapshot of a belief about the world,
+and nothing re-checks it. An expired premise is indistinguishable from a live
+one for as long as it is blocking, because it blocks exactly as effectively: no
+error, no failing test, no signal of any kind. The work simply does not happen
+and the row simply stays gated — and the longer a gate holds, the more
+confidently it gets cited by everything downstream of it.
+
+**Pair it with N10**, which is the same failure one level down. N10 was a
+diagnostic that confidently named a cause that was provably false ("is the
+`worktree_create` handler enabled?" while the handler was enabled and had
+already raised), and it sent the first diagnostic step to check a registration
+nobody doubted. This is a decision document that confidently named a blocker
+that had already been removed, and sent a worklist row to an owner instead of
+to a developer. Both cost more than silence would have, because both were
+actionable and both actions were wrong. Confidently wrong beats silent, in the
+bad direction.
+
+**Candidate remedies**, cheapest first:
+
+1. A decision document cites the commit and `file:line` its blocking premise
+   was read out of, so the next reader can re-verify the premise in one command
+   instead of inheriting it. This document's premise would have failed that
+   check on the day it was written.
+2. Establish a "the guard denies X" premise by EXECUTING the guard — a scratch
+   `Write` against the running daemon — rather than by reading its globs. That
+   is what the ruling did, and it cost two writes.
+3. Nothing, and rely on the ruling stage to catch it. That is what happened
+   here and it worked; the cost is that the gate held for ten days first, and
+   finding out took a dispatched ruling rather than a glance.
+
+Not owner-gated: (1) and (2) are authoring conventions for this repository's
+own decision documents, and neither changes any gate. The INSTANCE is closed —
+F-PRIV-4 is unblocked, the guard is unchanged, and nothing needs building for
+that to stay true.

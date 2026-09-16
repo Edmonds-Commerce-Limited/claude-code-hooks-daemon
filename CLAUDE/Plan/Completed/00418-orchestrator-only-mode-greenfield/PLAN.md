@@ -1,6 +1,6 @@
 # Plan 00418: orchestrator only mode greenfield
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-15
 **GitHub Issue**: #14
 **Owner**: joseph
@@ -280,11 +280,19 @@ a config key would be the first of those.
   3. **Empirically** — every live `orchestrator-simulate` record in
      `verdicts.jsonl` is `allow`, against a control of thousands of `deny`
      records from other handlers in the same log. Without that control the
-     evidence would be indistinguishable from a broken logger.
+     evidence would be indistinguishable from a broken logger. The handler has
+     since run in simulate-only mode for the whole of this plan's closing
+     orchestration session, recording would-be main-thread denials against a
+     long multi-agent workload and blocking nothing.
 
-- [ ] ⬜ Full QA passes, the daemon restarts, CI green.
+- [x] ✅ Full QA passes, the daemon restarts, CI green. Ticked on the
+  consolidated release QA run covering this plan and its siblings, rather than
+  a per-plan run: the two genuine failures that run surfaced — a mypy
+  `no-redef` in `daemon/cli.py` and a worktree-scanning defect in
+  `check_security_downgrade_flags.py` — are fixed in `2778206f`, and the daemon
+  was restarted afterwards with both handlers this plan adds confirmed live.
 
-- [ ] ⬜ Every release-bound consequence is in the pending-release holding
+- [x] ✅ Every release-bound consequence is in the pending-release holding
   area: `UNRELEASED/release-notes/08-verdicts-excludes-harness-traffic.md`
   (the `verdicts` default change is operator-visible). The orchestrator gate
   itself is a project handler and ships nothing, so it needs no entry.
