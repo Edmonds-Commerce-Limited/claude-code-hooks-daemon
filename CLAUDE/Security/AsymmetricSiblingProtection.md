@@ -281,6 +281,44 @@ exactly when a site's hard-won extra care gets dropped.
 - Defence: `ab93117f`, committed deliberately red.
 - Fix: `1a74bf90`.
 
+**The unguarded rmtree** — `install/skills.py`, `_deploy_one_skill`, against
+`_remove_retired_skills` twenty lines below it. **Recorded with no registry
+row, for a reason distinct from the other two rowless instances.**
+
+What it allowed: deploying a skill called `shutil.rmtree` on its target with no
+provenance test. The sibling refuses to delete a same-named directory that does
+not look daemon-deployed, and its docstring states the principle the other site
+ignores — doing so "would destroy project work with no backup, which is far
+worse than leaving an orphan". The correct reasoning was already written down,
+in the same file, twenty lines away.
+
+The realistic loss is not a name collision. It is a user CUSTOMISING a deployed
+skill and losing the edit silently on the next upgrade.
+
+**Provenance had to be derived rather than read.** A deployed skill is a byte
+copy of the shipped source, so nothing in it was written by the daemon and not
+by a user — there is no marker to test, which is why the deploy path had no
+test. Comparing the trees supplies one, and survives a version bump: a target
+matching what is about to be written IS our own copy; one that differs may not
+be.
+
+The rescue nearly introduced a worse defect than the one it fixed. Claude Code
+discovers skills by DIRECTORY, so preserving the old copy beside the new one
+would register a second, stale slash command. The backup lives outside
+`.claude/skills/`, and an unchanged skill leaves none at all — clutter is how a
+warning stops being read.
+
+**Why no row**: the two sites take DIFFERENT correct actions on the same duty.
+One refuses and warns; the other preserves and proceeds. A `reaches` row would
+assert they call the same helper, which is a similarity that is not the
+invariant. The invariant is "do not destroy what you did not write", and the
+registry has no relation that expresses an obligation discharged two ways.
+That is a third distinct reason for rowlessness, beside "the row would be
+satisfied by a partial fix" (the forwarder) and "expressible but not yet
+written" (`strip_inert_spans`).
+
+- Fix: `e8683948`, verified 32/32.
+
 Ten further table rows are recorded in
 [the consolidated worklist](../Plan/00412-jobs-recurring-work-and-security-review/subagent-reports/260915-consolidated-defence-worklist.md),
 with the registry's design notes in
