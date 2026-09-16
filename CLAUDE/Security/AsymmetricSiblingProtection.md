@@ -111,10 +111,33 @@ judged, because the receiver RUNS those bytes whatever the outer shell quoted.
 - Fix: `c23b1b8c`, whose own message carries the previously-denied shape and is
   therefore the regression proof.
 
-This instance has **no registry row**, and that is the honest entry in this
-section: a call-path pair is a rule kind the Detector does not yet implement, so
-nothing would catch a recurrence. It is recorded as an instance because it
-happened, not because it is covered.
+This instance has **no registry row**. A call-path row needs a single named
+helper both sites must call, and this site's fix was to route its whole scan
+target through one — expressible, but not yet written. It is recorded as an
+instance because it happened, not because it is covered.
+
+**The unguarded refresh** — `remote_docs/store.py::refresh_document` against
+`write_capture`, on the helper `content_guard`. The first instance found by the
+**call-path** rule kind rather than by comparing two constants.
+
+What it allowed: `write_capture` refuses to vendor content the sensitive-content
+scanner rejects, because a capture writes from a CLI and bypasses the `Write`
+hook that would otherwise inspect it. `refresh_document` ran the same fetch and
+the same write with no scan at all.
+
+The reasoning applies more strongly on the refresh path, which is what makes
+this more than tidiness: a capture is something a human ran deliberately once,
+while a refresh exists *because upstream may have changed*, and those new bytes
+have had no review by anyone.
+
+The fix added a `REFUSED` outcome rather than reusing `FAILED` — a failed fetch
+is transient and retryable, a refusal means upstream is now serving something
+that must not enter the repository — and placed the scan BEFORE the
+unchanged-hash short-circuit, so the short-circuit cannot become a route past
+the guard.
+
+- Defence: `5b6ac98b`, committed deliberately red.
+- Fix: `a6ce7bb7`.
 
 Twelve further table rows are recorded in
 [the consolidated worklist](../Plan/00412-jobs-recurring-work-and-security-review/subagent-reports/260915-consolidated-defence-worklist.md),
@@ -130,8 +153,8 @@ fail-closed on an oversized body file, and F-HYG-3's new deny in
 - **Only declared pairs.** This is the defining limitation and it is
   structural, not an oversight. A divergence with no row in
   `scripts/qa/declared-invariant-pairs.yaml` is invisible, and the registry
-  currently holds two rows against thirteen known instances. **Read a green run
-  as "every declared pair holds", never as "the class is clear."**
+  currently holds three rows against thirteen known instances. **Read a green
+  run as "every declared pair holds", never as "the class is clear."**
 
   The third instance above proves the point from inside: it is a real member of
   this category, found while building the Defence, and the Defence does not
@@ -154,14 +177,24 @@ fail-closed on an oversized body file, and F-HYG-3's new deny in
   the cheap error for this rule is missing a member, because crying wolf once
   costs the whole check.
 
-- **Constant pairs only.** `disjoint` and `superset` are implemented; `equal`
-  and `same-normalisation` are designed and not built.
+- **Three relations.** `disjoint`, `superset` and `reaches` are implemented;
+  `equal` and `same-normalisation` are designed and not built.
 
-  The bigger gap is the rule KIND. Every row so far compares two member sets.
-  The **call-path** kind — "a named helper reached from site A is also reached
-  from site B" — is designed and unbuilt, and it is the kind several known
-  instances need, including `_escape_for_double_quotes`, `path_is_protected`,
-  `content_guard` and the `strip_inert_spans` instance recorded above.
+- **`reaches` proves a CALL, not an effect.** It asserts that the named helper
+  is invoked somewhere in the function body. It cannot tell whether the result
+  is acted on, whether the call sits behind a condition that is never true, or
+  whether it runs before the write it is supposed to guard. Ordering was the
+  load-bearing detail in the `content_guard` fix and no rule checked it — a
+  test did.
+
+  It also cannot see a helper reached through an alias, a partial, or a
+  dispatch table, and a name-only match means a DIFFERENT function of the same
+  name satisfies the row.
+
+- **Still only declared pairs.** Rows cover `pipe_blocker`/`process_probe`,
+  the worktree verbs, and the remote-docs writers. Known instances needing
+  rows include `_escape_for_double_quotes` (drafted and withdrawn: the
+  function names had to be read, not guessed) and `path_is_protected`.
 
 - **A row must name which MEMBERS participate.** This was bought the hard way.
   The first row drafted asserted a superset between two relocation-verb

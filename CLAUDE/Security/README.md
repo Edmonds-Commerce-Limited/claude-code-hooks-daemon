@@ -102,8 +102,8 @@ visible — and the honest place to say so is beside the invariant, not in a
 backlog.
 
 The second category also shows the obligation is not sufficient on its own. Its
-Defence is wired in and failing correctly, and it covers **two declared pairs out
-of thirteen known instances** — so "has a Defence" and "the class is watched"
+Defence is wired in and failing correctly, and it covers **three declared pairs
+out of thirteen known instances** — so "has a Defence" and "the class is watched"
 are different facts, and only the category page's own blind-spot section carries
 the second one.
 
