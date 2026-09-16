@@ -201,7 +201,47 @@ because it converts an open defect into a closed one on paper.
 The remaining fork is an owner decision, written up with a recommendation in
 [DECISION-forwarder-interpolation-contexts.md](../Plan/00412-jobs-recurring-work-and-security-review/DECISION-forwarder-interpolation-contexts.md).
 
-Twelve further table rows are recorded in
+**The bare-name `gh` anchor** —
+`handlers/pre_tool_use/sensitive_content.py`, `_GH_BODY_PATTERN`, against
+`sudo_pip.py`'s `_SUDO_PIP_PATTERN` and the git surface in its own file. The
+first instance to need a **fragment** row rather than a constant or a
+call-path one.
+
+What it allowed: `/usr/bin/gh issue create --body "<term>"` and `./gh …` did
+not match the publish guard **at all** — no deny, no advisory — while the same
+term in `git commit` was denied whether or not the binary was path-qualified.
+Confirmed by probing the handler, not by reading the regex. `gh` is the surface
+of the two that no history rewrite can retract.
+
+The siblings had all settled this. `git` is recognised here through
+`endswith(f"/{_GIT_EXECUTABLE}")`, and `curl_pipe_shell`, `sudo_pip` and the
+pipe whitelist each interpolate `command_evasion.OPTIONAL_PATH`. Four sites
+agreed that a binary may be named by path; one disagreed, and it was the
+irreversible one.
+
+The fix keeps the strict left boundary rather than relaxing it to `\b`.
+Widening was the cheaper edit and would have been wrong: `\b` matches inside
+`foo-gh`, so the guard would start judging a command that is not `gh`. A test
+pins that boundary alongside the path tolerance.
+
+**This row needed a fourth relation, and that is the interesting part.**
+`reaches` asserts a CALL; a shared regex fragment is a module-level constant
+interpolated into a pattern, so a `reaches` row would have stayed false after a
+correct fix. `interpolates` asserts that both symbols are BUILT FROM the named
+fragment. What earns it a row where the forwarder pair was refused one: **it
+cannot be satisfied by a partial fix** — the fragment is either in the pattern
+or it is not. That is the test worth applying to every future row.
+
+The row pairs the `gh` anchor with `sudo_pip`, deliberately **not** with the
+git surface twenty lines away in the same file. That one hand-rolls its path
+tolerance and is correct, merely bespoke; a row demanding one idiom of both
+would assert style rather than protection, and a registry that starts policing
+style is one that gets switched off.
+
+- Defence: `2696cffe`, committed deliberately red.
+- Fix: `8489b6dd`.
+
+Eleven further table rows are recorded in
 [the consolidated worklist](../Plan/00412-jobs-recurring-work-and-security-review/subagent-reports/260915-consolidated-defence-worklist.md),
 with the registry's design notes in
 [DESIGN-declared-invariant-pairs.md](../Plan/00412-jobs-recurring-work-and-security-review/DESIGN-declared-invariant-pairs.md).
@@ -248,7 +288,7 @@ and telling those apart is the reading a registry exists to capture.
 - **Only declared pairs.** This is the defining limitation and it is
   structural, not an oversight. A divergence with no row in
   `scripts/qa/declared-invariant-pairs.yaml` is invisible, and the registry
-  currently holds four rows against thirteen known instances. **Read a green
+  currently holds five rows against thirteen known instances. **Read a green
   run as "every declared pair holds", never as "the class is clear."**
 
   The third instance above proves the point from inside: it is a real member of
@@ -272,8 +312,20 @@ and telling those apart is the reading a registry exists to capture.
   the cheap error for this rule is missing a member, because crying wolf once
   costs the whole check.
 
-- **Three relations.** `disjoint`, `superset` and `reaches` are implemented;
-  `equal` and `same-normalisation` are designed and not built.
+- **Four relations.** `disjoint`, `superset`, `reaches` and `interpolates` are
+  implemented; `equal` and `same-normalisation` are designed and not built.
+
+- **`interpolates` proves a REFERENCE, not an effect.** It asserts the named
+  fragment appears in the symbol's value expression. It cannot tell whether the
+  fragment was placed where it does any good — a path qualifier interpolated at
+  the wrong end of a pattern satisfies the row and protects nothing. Position
+  was checked by a test, not by the rule, exactly as ordering was for `reaches`.
+
+  A relation added to the Detector also has TWO renderers — the JSON message
+  and the terminal label — and the first version of this one had only the
+  first, so a real violation crashed the Detector instead of reporting it. A
+  test now asserts over the whole relation set so the next relation cannot
+  repeat it.
 
 - **`reaches` proves a CALL, not an effect.** It asserts that the named helper
   is invoked somewhere in the function body. It cannot tell whether the result
@@ -287,7 +339,8 @@ and telling those apart is the reading a registry exists to capture.
   name satisfies the row.
 
 - **Still only declared pairs.** Rows cover `pipe_blocker`/`process_probe`,
-  the worktree verbs, the remote-docs writers, and the write-target resolvers.
+  the worktree verbs, the remote-docs writers, the write-target resolvers, and
+  the executable anchors.
 
 - **A proposed pair can be WRONG, and nothing mechanical says so.** The
   `path_is_protected` pair came from two independent checks and would have
