@@ -154,6 +154,17 @@ It lives **outside** the tree deliberately: inside, it would carry no
 `source_url` of its own and the provenance gate would deny it, and exempting a
 filename from that gate would hole the invariant.
 
+**Deletion is the one mutation `add`/`refresh` cannot see.** Removing a
+capture with `rm` runs no daemon command, so nothing regenerates the index —
+it keeps naming a file that is gone. `remote-docs check` compares the
+rendered index against what is on disk (exact string comparison; `render_index`
+is pure and path-ordered) and reports a disagreement as a finding, alongside
+staleness and licence drift, with exit `1`. The repair is
+`bin/hooks-daemon remote-docs index`, which re-renders the file without
+touching the network — `check` never repairs it itself, since a read-only
+reporting command that writes files would be surprising in CI and could never
+report the index as stale.
+
 ## What enforces this
 
 | Surface                                | Enforces                                                                                                 |

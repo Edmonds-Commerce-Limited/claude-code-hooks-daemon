@@ -168,6 +168,43 @@ class TestListAndCheck:
         out = capsys.readouterr().out
         assert "remote-docs add --force <source_url>" in out
 
+    def test_check_reports_a_stale_index_after_a_deletion(self, tmp_path: Path) -> None:
+        """Issue #43: `rm` runs no command, so nothing regenerates the index.
+
+        `check` must not answer "fresh" while the index still names a file
+        that is no longer on disk.
+        """
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/a"))
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/b"))
+
+        import shutil
+
+        shutil.rmtree(_tree(tmp_path) / "example.com")
+        (_tree(tmp_path) / "example.com").mkdir()
+
+        assert cmd_remote_docs(_args(tmp_path, "check")) == 1
+
+    def test_check_names_the_index_command_as_the_stale_index_remedy(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        from claude_code_hooks_daemon.remote_docs.index import INDEX_RELATIVE_PATH
+
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/a"))
+        (tmp_path / INDEX_RELATIVE_PATH).write_text("stale\n", encoding="utf-8")
+
+        code = cmd_remote_docs(_args(tmp_path, "check"))
+
+        assert code == 1
+        assert "remote-docs index" in capsys.readouterr().out
+
+    def test_check_reports_a_missing_index_as_stale(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.remote_docs.index import INDEX_RELATIVE_PATH
+
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/a"))
+        (tmp_path / INDEX_RELATIVE_PATH).unlink()
+
+        assert cmd_remote_docs(_args(tmp_path, "check")) == 1
+
 
 class TestRefresh:
     def test_refresh_all_succeeds_on_unchanged_upstream(self, tmp_path: Path) -> None:
@@ -335,6 +372,36 @@ class TestGeneratedIndex:
         cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
 
         assert _tree(tmp_path) not in self._index(tmp_path).parents
+
+
+class TestIndexAction:
+    """Issue #43: a network-free way to re-render the index on demand."""
+
+    def _index(self, root: Path) -> Path:
+        from claude_code_hooks_daemon.remote_docs.index import INDEX_RELATIVE_PATH
+
+        return root / INDEX_RELATIVE_PATH
+
+    def _no_network_fetch_fn(self, url: str) -> bytes:
+        raise AssertionError(f"remote-docs index must not fetch: {url}")
+
+    def test_index_re_renders_the_file(self, tmp_path: Path) -> None:
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+        self._index(tmp_path).write_text("stale\n", encoding="utf-8")
+
+        code = cmd_remote_docs(_args(tmp_path, "index", fetch_fn=self._no_network_fetch_fn))
+
+        assert code == 0
+        content = self._index(tmp_path).read_text(encoding="utf-8")
+        assert "stale" not in content
+        assert "https://example.com/p" in content
+
+    def test_index_touches_no_network(self, tmp_path: Path) -> None:
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+
+        code = cmd_remote_docs(_args(tmp_path, "index", fetch_fn=self._no_network_fetch_fn))
+
+        assert code == 0
 
 
 class TestFetcherSelection:
