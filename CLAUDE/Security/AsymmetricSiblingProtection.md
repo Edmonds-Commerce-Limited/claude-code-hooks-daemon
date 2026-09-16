@@ -199,7 +199,7 @@ remained broken. A row satisfiable by a partial fix is worse than no row,
 because it converts an open defect into a closed one on paper.
 
 The remaining fork is an owner decision, written up with a recommendation in
-[DECISION-forwarder-interpolation-contexts.md](../Plan/00412-jobs-recurring-work-and-security-review/DECISION-forwarder-interpolation-contexts.md).
+[DECISION-forwarder-interpolation-contexts.md](../Plan/Completed/00412-jobs-recurring-work-and-security-review/DECISION-forwarder-interpolation-contexts.md).
 
 **The bare-name `gh` anchor** —
 `handlers/pre_tool_use/sensitive_content.py`, `_GH_BODY_PATTERN`, against
@@ -397,9 +397,9 @@ quiet way for a registry to under-cover.
 - Fix: `54368a76`.
 
 Nine further table rows are recorded in
-[the consolidated worklist](../Plan/00412-jobs-recurring-work-and-security-review/subagent-reports/260915-consolidated-defence-worklist.md),
+[the consolidated worklist](../Plan/Completed/00412-jobs-recurring-work-and-security-review/subagent-reports/260915-consolidated-defence-worklist.md),
 with the registry's design notes in
-[DESIGN-declared-invariant-pairs.md](../Plan/00412-jobs-recurring-work-and-security-review/DESIGN-declared-invariant-pairs.md).
+[DESIGN-declared-invariant-pairs.md](../Plan/Completed/00412-jobs-recurring-work-and-security-review/DESIGN-declared-invariant-pairs.md).
 Each becomes an instance here as its row lands. Two of their fixes are
 owner-gated, because both add a refusal in installing projects: D-PUB-3's
 fail-closed on an oversized body file, and F-HYG-3's new deny in

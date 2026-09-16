@@ -5,7 +5,7 @@ status and the tasks; the reasoning, evidence and candidate remedies live here,
 because they are findings rather than plan state.
 
 The first four entries are inherited from ledger fourteen
-([00419](../00419-niggles-ledger-fourteen/NIGGLES.md)), which closed with
+([00419](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)), which closed with
 eleven of its fifteen entries terminal and these four not. Each carries its
 original number, the reason it failed that ledger's closing criterion, and its
 evidence in full — a re-filed entry that summarises itself is a re-filed entry
@@ -13,7 +13,7 @@ nobody can act on.
 
 ### N1 — the `Priority` constants are not the numbers a fresh install ships
 
-**Re-filed from [00419 N8](../00419-niggles-ledger-fourteen/NIGGLES.md).**
+**Re-filed from [00419 N8](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md).**
 **Why it failed ledger fourteen's closing criterion**: the remedy is recorded
 and OWNER-GATED, and unbuilt. Nothing about it was decided or deferred by
 argument; the question was simply never put.
@@ -74,7 +74,7 @@ question is whether the test's blast radius is the whole template or only the
 
 ### N2 — the linter runs on gitignored scratch output
 
-**Re-filed from [00419 N11](../00419-niggles-ledger-fourteen/NIGGLES.md).**
+**Re-filed from [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md).**
 **Why it failed ledger fourteen's closing criterion**: the remedy is chosen,
 explicitly NOT owner-gated, and nobody built it. This one has no argument
 against it on record at all — it was simply never done.
@@ -117,7 +117,7 @@ and remedy (1) turns nothing off for any file that can reach history.
 
 ### N3 — a committed future-dated entry makes the journal permanently uncorrectable
 
-**Re-filed from [00419 N12](../00419-niggles-ledger-fourteen/NIGGLES.md).**
+**Re-filed from [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md).**
 **Why it failed ledger fourteen's closing criterion**: two remedies are
 recorded, neither is owner-gated, and neither was chosen or built. **Its
 advisory is still live**, against ledger fourteen's own day-file
@@ -183,7 +183,7 @@ heredoc append is not caught late either — it is caught never.
 
 ### N4 — a cron cannot be both cancelled for a session and declared in config
 
-**Re-filed from [00419 N13](../00419-niggles-ledger-fourteen/NIGGLES.md).**
+**Re-filed from [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md).**
 **Why it failed ledger fourteen's closing criterion**: the conflict was
 surfaced for a ruling in the same session it was found, the remedy is recorded
 and OWNER-GATED, and no ruling has been given.

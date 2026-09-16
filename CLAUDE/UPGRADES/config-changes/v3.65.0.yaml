@@ -2,7 +2,7 @@
 # a target, not a decision — releases are human-gated in this project, and the
 # release agent confirms or renames this file. Only the content is asserted here.
 version: "3.65.0"
-date: "UNRELEASED"
+date: "2026-09-16"
 
 breaking: true
 

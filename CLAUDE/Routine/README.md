@@ -12,7 +12,7 @@ A Routine has no completion. It has a definition (`ROUTINE.md`) and a record
 per **run**, in `RUNS/`.
 
 Design rationale, decisions and the research behind them:
-[Plan 00412](../Plan/00412-jobs-recurring-work-and-security-review/DESIGN.md).
+[Plan 00412](../Plan/Completed/00412-jobs-recurring-work-and-security-review/DESIGN.md).
 
 ## Active Routines
 

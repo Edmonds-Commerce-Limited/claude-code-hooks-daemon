@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.65.0] - 2026-09-16
 
 _A guard-review release. Plan 00412 turns security review into a routine
 with its own append-only ledger (`CLAUDE/Routine/`, `run-routine`,
@@ -130,6 +130,14 @@ plan for a work area, not as the origin of every fix in it._
   reported beside staleness, with re-capture named as the fix.
   Re-stamping is reported rather than auto-applied, because a licence is
   a legal assertion about someone else's work.
+
+- **`teammate_reap_advisor`, a new Stop advisory (Plan 00419 N5).**
+  Reports the `background_tasks` count the Stop payload carries and names
+  `TaskStop` as the way to clear them. Claude Code defers its own `/goal`
+  stop-condition evaluation while any background work is registered, and
+  an in-process teammate that has finished and gone IDLE is still
+  registered — so a session that looks quiet can be holding `/goal` open.
+  Advisory only: it never denies a stop.
 
 - **`scripts/bootstrap-self-install.sh`, the supported fresh-clone route
   for the daemon's own repository (Plan 00413).** Resolves the
@@ -274,6 +282,46 @@ plan for a work area, not as the origin of every fix in it._
 
 ### Fixed
 
+- **`gh issue create --title` is scanned again (release review).**
+  Widening the `sensitive_content` publication surface simultaneously
+  narrowed the match with a lookahead requiring a BODY flag, and `--title`
+  was not one — so a blocked term in an issue or PR title was published to
+  an irretractable public page, where v3.64.0 had denied it. Title and
+  description spellings are back in the flag set.
+
+- **`pip install` inside a worktree is no longer a terminal deny (release
+  review).** `worktree_file_copy` gained `install` as a relocation verb and
+  tested it with a bare search over the whole command, so any command that
+  named a worktree path and later a main-repo dir — an ordinary
+  `pip install -r requirements.txt` — tripped a terminal deny announcing
+  catastrophic data loss. The verb is now matched in command position, so
+  `install -m 644` and `dd if=` stay covered while `pip`/`npm install` do
+  not match.
+
+- **The run ledger no longer drops a row it wrote itself (release
+  review).** `_escaped` writes `|` as `\|`; `_split_row` split on a raw
+  `|`, so a note containing one yielded too many cells and the row was
+  discarded — without reaching `malformed_rows`. A completed run read as
+  FAILED, `next_from_ref` lost its anchor, and `routine-ledger-unreadable`
+  stayed silent: exactly the silent omission that field's docstring says
+  must not happen. The split is now escape-aware.
+
+- **`read_message_files` no longer raises out of a guard (release
+  review).** The `stat()` size check sat outside the `try` that guards the
+  same check-then-use race the surrounding comment reasons about, so a
+  file unlinked in that window took the calling guard down with it.
+
+- **`gitignore_safety_checker` reads the project's effective protected set
+  (release review),** not the shipped defaults, so a project that
+  configures its own never-commit paths is judged against what it actually
+  protects.
+
+- **`guard_config_drift` no longer prescribes a command this daemon denies
+  (release review),** and `release-blocked-plan`, `quote-source-stale` and
+  `PlanTree.scan` each keep a contract they had been breaking — a
+  false-fire on owner-gated items, a crash on a braced path or anchor, and
+  a structural gate weakened from `is_file()`/`is_dir()` to `exists()`.
+
 - **`cron_stop_enforcer` no longer wedges every Stop (Plan 00416).**
   Diagnosed from a real captured payload: the declared prompt is 576
   characters with single newlines and the delivered one is 580, the same
@@ -357,6 +405,27 @@ plan for a work area, not as the origin of every fix in it._
   names the logs instead of guessing.
 
 ### Security
+
+- **An unquoted `-m`/`-F` value no longer swallows the command after it
+  (release review).** The bare-word alternative in the inert-span scan was
+  `\S+`, and `\S` matches `&` and `;`, so `git commit -m x&&git reset --hard` had `x&&git` blanked as prose and every guard downstream of
+  `strip_inert_spans` — `destructive_git`, `pipe_blocker`,
+  `daemon_location_guard`, `worktree_file_copy`, `merge_to_main_approval`,
+  `reference_repo_freshness` — saw `reset --hard` with no `git` in front of
+  it while bash ran both commands. The same five `destructive_git` rules as
+  the heredoc entry below could be walked past this way. The value now stops
+  at the metacharacter that ends it. Quoting the value avoided the gap,
+  which is why the suite missed it: every existing test quoted.
+
+- **A separator inside a command substitution no longer defeats the
+  heredoc containment check (Plan 00409, release review).** The check
+  added this cycle was anchored to the start of the RECEIVING SEGMENT,
+  which is produced by splitting on `&&`/`||`/`;`/`|`/`&` and keeping the
+  last piece — so `$(true && cat <<'EOF' … )` moved the `$(` out of the
+  segment, the anchor missed, and the body was blanked while bash
+  substituted the output and ran it. Containment is now decided from the
+  raw text before the opener, quote-aware, erring towards withholding the
+  exemption.
 
 - **A heredoc fed to an INTERPRETER is no longer treated as inert (Plan
   00409).** v3.64.0 blanked the body of every quoted-delimiter heredoc before
