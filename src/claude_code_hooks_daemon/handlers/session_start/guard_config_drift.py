@@ -61,6 +61,21 @@ class _ReadAttempt:
     reason: str | None = None
 
 
+def _known_handlers() -> frozenset[str]:
+    """Config keys of every handler the registry still knows about.
+
+    Read from the HandlerID declarations rather than the filesystem so it is
+    correct in a client install too, where the daemon's own modules live
+    somewhere this project does not enumerate. ``HandlerID`` is a plain class of
+    ``HandlerIDMeta`` attributes, not an enum, so it is walked with ``vars()``.
+    """
+    return frozenset(
+        member.config_key
+        for name, member in vars(HandlerID).items()
+        if not name.startswith("_") and hasattr(member, "config_key")
+    )
+
+
 def _read_text_or_reason(path: Path) -> _ReadAttempt:
     """Read ``path``, carrying any failure back as a reason rather than raising."""
     try:
@@ -146,7 +161,7 @@ class GuardConfigDriftHandler(SessionStartHandlerBase):
         if committed is None or working is None:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
-        report = compare_guard_config(committed, working)
+        report = compare_guard_config(committed, working, known_handlers=_known_handlers())
         return AdvisoryResult(decision=Decision.ALLOW, context=_render(report))
 
     def get_claude_md(self) -> str | None:

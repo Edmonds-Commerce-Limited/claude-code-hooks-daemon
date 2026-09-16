@@ -148,12 +148,22 @@ def _is_explicitly_disabled(spec: dict[str, Any]) -> bool:
     return spec.get(_ENABLED_KEY) is False
 
 
-def compare_guard_config(committed: str, working: str) -> DriftReport:
+def compare_guard_config(
+    committed: str,
+    working: str,
+    known_handlers: frozenset[str] | None = None,
+) -> DriftReport:
     """Report how ``working`` weakens the guards relative to ``committed``.
 
     Args:
         committed: the config as recorded in git, empty when there is none.
         working: the config the daemon will actually load.
+        known_handlers: config keys of handlers that still exist. A removed
+            block only disables something if the handler is still there to run;
+            without it, a mass config reorganisation reads as twenty weakenings.
+            Supplied by the caller so this comparison stays pure. ``None`` means
+            "cannot enumerate", and every removal is reported rather than
+            silently dropped.
 
     Returns:
         A :class:`DriftReport`. It is empty when the two agree, when there is no
@@ -179,13 +189,21 @@ def compare_guard_config(committed: str, working: str) -> DriftReport:
     for name, before_spec in sorted(before_handlers.items()):
         after_spec = after_handlers.get(name)
         if after_spec is None:
-            changes.append(
-                GuardChange(
-                    handler=name,
-                    kind=DriftKind.REMOVED,
-                    detail="the handler's config block is gone from the working tree",
+            # A removed block only DISABLES something if the handler is still
+            # there to run. Measured over this repository's history, counting
+            # every removal made two ordinary config reorganisations look like
+            # 21 and 19 weakenings apiece.
+            config_key = name.split(".", 1)[-1]
+            if known_handlers is None or config_key in known_handlers:
+                changes.append(
+                    GuardChange(
+                        handler=name,
+                        kind=DriftKind.REMOVED,
+                        detail="the handler's config block is gone from the working tree",
+                    )
                 )
-            )
+            else:
+                other += 1
             continue
         reported_disable = _is_explicitly_disabled(after_spec) and not _is_explicitly_disabled(
             before_spec

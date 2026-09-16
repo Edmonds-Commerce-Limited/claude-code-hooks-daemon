@@ -153,6 +153,58 @@ class TestUnenumeratedDriftIsCountedNotClaimedSafe:
         assert report.other_changes > 0
 
 
+class TestARemovedBlockIsOnlyAWeakeningIfTheHandlerSurvives:
+    """Measured against real history: `removed` alone is noisy.
+
+    Two commits in this repository's past produce 21 and 19 `removed` findings
+    each. Neither weakened anything — both are mass config restructures where
+    handler blocks moved, and one is titled "Add comprehensive client
+    installation safety checks". A gate firing twenty times on a reorganisation
+    is a gate that gets switched off.
+
+    The discriminator: a block removed while the handler STILL EXISTS silently
+    disables a guard that is still there to run. A block removed for a handler
+    that no longer exists is housekeeping. The caller supplies the known set, so
+    the comparison stays pure.
+    """
+
+    def test_a_removed_block_for_a_surviving_handler_is_a_weakening(self) -> None:
+        working = _COMMITTED.replace("    sed_blocker:\n      enabled: true\n", "")
+
+        report = compare_guard_config(
+            _COMMITTED, working, known_handlers=frozenset({"sed_blocker"})
+        )
+
+        assert [c.kind for c in report.guard_changes] == [DriftKind.REMOVED]
+
+    def test_a_removed_block_for_a_deleted_handler_is_not_a_weakening(self) -> None:
+        working = _COMMITTED.replace("    sed_blocker:\n      enabled: true\n", "")
+
+        report = compare_guard_config(_COMMITTED, working, known_handlers=frozenset())
+
+        assert report.guard_changes == ()
+        assert report.other_changes > 0, "still drift, just not a weakening"
+
+    def test_omitting_the_known_set_reports_every_removal(self) -> None:
+        """A caller that cannot enumerate handlers must not silently lose findings."""
+        working = _COMMITTED.replace("    sed_blocker:\n      enabled: true\n", "")
+
+        report = compare_guard_config(_COMMITTED, working)
+
+        assert [c.kind for c in report.guard_changes] == [DriftKind.REMOVED]
+
+    def test_a_disabled_handler_is_unaffected_by_the_known_set(self) -> None:
+        """Only REMOVED needs the discriminator; `enabled: false` is unambiguous."""
+        working = _COMMITTED.replace(
+            "    sed_blocker:\n      enabled: true",
+            "    sed_blocker:\n      enabled: false",
+        )
+
+        report = compare_guard_config(_COMMITTED, working, known_handlers=frozenset())
+
+        assert [c.kind for c in report.guard_changes] == [DriftKind.DISABLED]
+
+
 class TestTheOtherChangesCountIsNotInflated:
     """`other_changes` means "a difference I could NOT name".
 
