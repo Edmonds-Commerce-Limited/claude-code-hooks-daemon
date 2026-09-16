@@ -410,11 +410,11 @@ def check_row(repo_root: Path, row: Row) -> list[Violation]:
         # BOTH sides are checked. A row is a claim about the pair, so a
         # reference site that stops reaching the helper has broken the relation
         # just as surely as the site the row was written about.
-        missing = {
+        missing = frozenset(
             side.function
             for side in (row.left, row.right)
             if not reaches_helper(repo_root, side, row.helper)
-        }
+        )
         offending = missing - row.allow
         if not offending:
             return []

@@ -51,6 +51,11 @@ class RefreshOutcome(Enum):
     UNREADABLE = "unreadable"
     #: The fetch itself failed.
     FAILED = "failed"
+    #: ``content_guard`` rejected the newly fetched body; nothing was written.
+    #: Distinct from ``FAILED`` on purpose -- a failed fetch is a transient
+    #: problem to retry, while a refusal means upstream is now serving
+    #: something that must not enter the repository, which needs a human.
+    REFUSED = "refused"
 
 
 @dataclass(frozen=True)
@@ -152,8 +157,19 @@ def refresh_document(
     now: datetime | None = None,
     fidelity: Fidelity = Fidelity.VERBATIM,
     fetch_method: str | None = None,
+    content_guard: ContentGuard | None = None,
 ) -> RefreshOutcome:
     """Re-fetch one stored document from the URL recorded inside it.
+
+    ``content_guard`` is the same scanner :func:`write_capture` takes, and for
+    the same reason: this writes to disk from a CLI, bypassing the ``Write``
+    hook that would otherwise inspect the content. The reasoning applies more
+    strongly here than at capture time, because upstream can have CHANGED since
+    the capture a human ran deliberately -- noticing that change is the whole
+    purpose of a refresh, and the new bytes have had no review at all.
+
+    A rejection returns :attr:`RefreshOutcome.REFUSED` and leaves the stored
+    file untouched.
 
     ``fidelity`` describes the fetcher doing THIS refresh, not the one that
     made the original capture: the body about to be written is the new
@@ -188,6 +204,16 @@ def refresh_document(
     except CaptureError as exc:
         logger.debug("refresh fetch failed for %s: %s", path, exc)
         return RefreshOutcome.FAILED
+
+    # Scanned BEFORE the unchanged short-circuit is consulted, so the
+    # short-circuit cannot become a route past the guard: an unchanged hash
+    # still rewrites the file, and a guard's pattern list can grow between runs
+    # even when upstream has not moved.
+    if content_guard is not None:
+        reason = content_guard(result.content)
+        if reason is not None:
+            logger.debug("refresh refused for %s: the fetched content %s", path, reason)
+            return RefreshOutcome.REFUSED
 
     unchanged = result.source_sha256 == previous.source_sha256
     try:

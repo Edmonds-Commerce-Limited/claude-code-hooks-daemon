@@ -6367,9 +6367,18 @@ def _remote_docs_refresh(args: argparse.Namespace, tree: Path, fetcher: Any, now
             fidelity=fetcher.fidelity,
             fetch_method=fetcher.method,
             now=now,
+            # The same guard `remote-docs add` applies. A refresh writes from a
+            # CLI just as a capture does, so it bypasses the same hook.
+            content_guard=getattr(args, "content_guard", None) or _sensitive_content_guard(),
         )
         print(f"{target}: {outcome.value}")
-        if outcome in (RefreshOutcome.FAILED, RefreshOutcome.UNREADABLE):
+        if outcome is RefreshOutcome.REFUSED:
+            print(
+                f"  {target}: upstream is now serving content the sensitive-content "
+                "scanner rejects. The stored file was left untouched -- look at the "
+                "source before refreshing again."
+            )
+        if outcome in (RefreshOutcome.FAILED, RefreshOutcome.UNREADABLE, RefreshOutcome.REFUSED):
             failed += 1
     return 1 if failed else 0
 

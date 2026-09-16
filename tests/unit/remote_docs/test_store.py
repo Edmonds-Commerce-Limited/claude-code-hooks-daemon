@@ -120,6 +120,105 @@ class TestContentGuard:
         assert "secret-ish payload" in seen[0]
 
 
+class TestTheRefreshPathIsGuardedToo:
+    """Plan 00412: the same guarantee, on the path that skipped it.
+
+    `write_capture` refuses to vendor content the sensitive-content scanner
+    rejects, because a CLI write bypasses the Write-tool hook. `refresh_document`
+    performs the same fetch and the same write, so the same reasoning applies —
+    and it applies MORE strongly, because upstream content can have changed
+    since the capture a human ran deliberately. That is the point of a refresh.
+
+    Found by the `declared-invariant-pairs` Detector's first call-path row.
+
+    The rejected body below is a harmless placeholder: the guard is a stub, so
+    what makes these tests work is the stub's verdict, never the bytes. Writing
+    a realistic credential here would put one in git history to no purpose.
+    """
+
+    _REJECTED_BODY = b"# Upstream\n\nlooks-like-a-credential\n"
+
+    def test_a_refresh_whose_new_body_is_rejected_writes_nothing(self, tmp_path: Path) -> None:
+        written = _seed(tmp_path)
+        before = written.read_text()
+
+        outcome = refresh_document(
+            written,
+            fetch_fn=_fetch(self._REJECTED_BODY),
+            now=_LATER,
+            content_guard=lambda content: "matches the sensitive-content pattern `aws-key`",
+        )
+
+        assert outcome is RefreshOutcome.REFUSED
+        assert written.read_text() == before
+
+    def test_a_refusal_is_distinct_from_a_failed_fetch(self) -> None:
+        """`REFUSED` and `FAILED` are different facts and must read differently.
+
+        A failed fetch is a transient network problem to retry; a refusal means
+        upstream is now serving something that must not enter the repository,
+        which is a thing for a human to look at.
+        """
+        assert RefreshOutcome.REFUSED is not RefreshOutcome.FAILED
+        assert RefreshOutcome.REFUSED.value == "refused"
+
+    def test_a_clean_refresh_still_updates(self, tmp_path: Path) -> None:
+        written = _seed(tmp_path)
+
+        outcome = refresh_document(
+            written,
+            fetch_fn=_fetch(b"# Upstream\n\nNew body.\n"),
+            now=_LATER,
+            content_guard=lambda content: None,
+        )
+
+        assert outcome is RefreshOutcome.UPDATED
+        assert "New body." in written.read_text()
+
+    def test_the_guard_sees_the_newly_fetched_body(self, tmp_path: Path) -> None:
+        written = _seed(tmp_path)
+        seen: list[str] = []
+
+        def record(content: str) -> str | None:
+            seen.append(content)
+            return None
+
+        refresh_document(
+            written,
+            fetch_fn=_fetch(b"# Upstream\n\nfreshly served payload\n"),
+            now=_LATER,
+            content_guard=record,
+        )
+
+        assert "freshly served payload" in seen[0]
+
+    def test_an_unchanged_refresh_is_still_scanned(self, tmp_path: Path) -> None:
+        """The short-circuit must not become a way past the guard.
+
+        An unchanged hash still rewrites the file, so bytes are still written;
+        and a guard's pattern list can change between runs even when upstream
+        has not.
+        """
+        written = _seed(tmp_path)
+        seen: list[str] = []
+
+        def record(content: str) -> str | None:
+            seen.append(content)
+            return None
+
+        refresh_document(written, fetch_fn=_fetch(_BODY), now=_LATER, content_guard=record)
+
+        assert seen, "an unchanged refresh skipped the guard entirely"
+
+    def test_no_guard_supplied_keeps_the_previous_behaviour(self, tmp_path: Path) -> None:
+        """The parameter is optional, exactly as it is on `write_capture`."""
+        written = _seed(tmp_path)
+
+        outcome = refresh_document(written, fetch_fn=_fetch(b"# Upstream\n\nNew.\n"), now=_LATER)
+
+        assert outcome is RefreshOutcome.UPDATED
+
+
 class TestRefresh:
     def test_unchanged_upstream_is_a_no_op_beyond_fetched_at(self, tmp_path: Path) -> None:
         written = _seed(tmp_path)
