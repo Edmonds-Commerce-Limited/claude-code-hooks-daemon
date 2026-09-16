@@ -487,3 +487,45 @@ the moment it fails to produce a path; nothing forwards it.
 
 Not owner-gated: a diagnostic that names a false cause is a defect, and both
 remedies are strictly additive to an error path.
+
+**Fixed** (RED first, 4 failed / 3 passed — the three that passed are the
+guards that had to hold before AND after: the happy path still prints the raw
+path, stdout stays EMPTY on failure, and unparseable output still fails rather
+than echoing `{}`). `print_worktree` now reports `systemMessage` (a crashed
+handler's exception) or `reason` (a deliberate refusal), and when neither is
+present says so and names the logs instead of guessing.
+
+The test extracts the function from `init.sh` and runs it in a SUBPROCESS,
+which pins the code that actually ships rather than a copy, and exercises the
+real stream separation — stdout is parsed by Claude Code as the worktree path,
+so a diagnostic leaking there would become a directory name.
+
+### N11 — the linter runs on gitignored scratch output
+
+Extracting the embedded python rung from `init.sh` into
+`untracked/scratch/rung.py` to compile-check it tripped `R-LINT-FAILURE` on
+`UP041` — in code that is not mine, in a file that is gitignored, disposable,
+and was never going to be committed.
+
+`untracked/` is the project's own sanctioned scratch location: `project_containment`
+actively pushes working notes there, and `pipe_blocker` names it as the
+supported way to capture output. So the guards disagree with each other about
+what that directory is for — one directs you to it, another lints what you put
+in it.
+
+**Why it is a niggle rather than a bug.** Nothing broke; the write landed and
+the report was accurate about the code it read. The cost is a false signal at
+the exact moment a scratch file is being used as a throwaway probe, which is
+when the reader is least interested in its style.
+
+**Candidate remedies**, cheapest first:
+
+1. Add `untracked/` to `lint_on_edit`'s `exclude_paths` (or the project-wide
+   `daemon.exclude_paths`). One line, and it matches how every other guard
+   already treats that directory.
+2. Nothing. Accept the noise on the grounds that a scratch file containing
+   real code is still code — which is the argument against, and it is weak
+   here, because the file is gitignored and cannot reach review.
+
+Not owner-gated: this is a scope question about one project's own exclude list,
+and remedy (1) turns nothing off for any file that can reach history.

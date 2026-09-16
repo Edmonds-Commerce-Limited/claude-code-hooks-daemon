@@ -1380,17 +1380,34 @@ def print_worktree(output):
     worktree PATH (not JSON), so print the raw .worktreePath the daemon returns.
     If the daemon produced no path (no handler / error), FAIL the creation
     cleanly with a non-zero exit rather than echoing '{}' — Claude Code would
-    take '{}' literally as the path '/<cwd>/{}' (the original Plan 00188 bug).'''
+    take '{}' literally as the path '/<cwd>/{}' (the original Plan 00188 bug).
+
+    On failure, report the daemon's OWN reason (Plan 00419 N10). A handler that
+    raises has its exception accumulated into the result context, which for this
+    event serialises as systemMessage — so the reason is already in these bytes.
+    Discarding it and guessing at a cause instead sent a real investigation to
+    check a handler registration that was never in doubt, and a message that
+    confidently names the wrong cause is worse than one that names none.'''
     try:
         data = json.loads(output)
     except Exception:
         data = None
-    path = data.get('worktreePath') if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        data = {}
+    path = data.get('worktreePath')
     if path:
         print(path)
         sys.exit(0)
-    print('HOOKS DAEMON: WorktreeCreate produced no worktree path '
-          '(is the worktree_create handler enabled?)', file=sys.stderr)
+    # systemMessage carries a crashed handler's exception; reason carries a
+    # deliberate refusal. Either is the daemon speaking for itself.
+    detail = data.get('systemMessage') or data.get('reason')
+    message = 'HOOKS DAEMON: WorktreeCreate produced no worktree path.'
+    if detail:
+        message = message + ' The daemon reported: ' + str(detail)
+    else:
+        message = message + (' No reason was returned — check the daemon logs '
+                             '(Skill tool: skill=hooks-daemon, args=logs).')
+    print(message, file=sys.stderr)
     sys.exit(1)
 
 # Read the raw hook_input payload from stdin (preserves control characters).
