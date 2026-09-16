@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
     SensitiveContentHandler,
 )
 from claude_code_hooks_daemon.utils import message_files as message_files_module
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.git_repo import run_git as unpatched_run_git
 
@@ -637,6 +638,46 @@ class TestStagedContentSurface:
         assert result.decision == Decision.DENY
         assert "vhosts-path" in (result.reason or "")
         assert "deploy.txt" in (result.reason or "")
+
+    def test_a_staged_protected_file_is_never_read_or_echoed(self, repo: Path) -> None:
+        """Plan 00412 class 9: the guard must not become the disclosure.
+
+        ``git add -A`` names no path, so ``secret_file_guard`` -- which keys on a
+        path appearing in a tool call -- is not on this route at all. Without a
+        protected-path check here the handler reads the file's added lines and,
+        on a public-pattern match, quotes the matched bytes back in its own deny
+        reason.
+
+        The filename is DERIVED from the configured patterns rather than written
+        as a literal, and not to dodge anything: `secret_file_guard` denies an
+        Edit that merely mentions a protected-shaped path, which is itself the
+        protection working. Deriving it also keeps the test honest if the
+        configured set changes.
+        """
+        patterns = sfm.resolve_configured_patterns()
+        assert patterns, "no protected patterns configured; this test proves nothing"
+        protected_name = patterns[0].replace("*", "x")
+        assert sfm.path_is_protected(protected_name, patterns)
+
+        handler = _handler_with_public_patterns(
+            [{"name": "vhosts-path", "pattern": "/var/www/vhosts", "description": "d"}]
+        )
+        _stage(repo, protected_name, "target /var/www/vhosts/site\n")
+
+        result = handler.handle(_commit_input(repo))
+
+        serialised = result.model_dump_json()
+        assert "/var/www/vhosts" not in serialised
+        assert protected_name not in serialised
+
+    def test_the_same_content_in_an_unprotected_file_is_still_denied(self, repo: Path) -> None:
+        """The control for the test above: the bound is the PATH, nothing else."""
+        handler = _handler_with_public_patterns(
+            [{"name": "vhosts-path", "pattern": "/var/www/vhosts", "description": "d"}]
+        )
+        _stage(repo, "deploy.txt", "target /var/www/vhosts/site\n")
+
+        assert handler.handle(_commit_input(repo)).decision == Decision.DENY
 
     def test_clean_staged_content_is_allowed(self, repo: Path, tmp_path: Path) -> None:
         handler = _wordlist(tmp_path, "alpha-term")

@@ -208,6 +208,33 @@ def _never_matches(_text: str, _term: str) -> bool:
     return False
 
 
+def _without_protected_paths(files: list[Path]) -> list[Path]:
+    """Drop protected files from the scan set before anything reads them.
+
+    This scanner echoes ``match.group(0)`` to stdout and into a JSON artefact
+    that ``llm_qa.py`` publishes for an agent to read as fact, so reading a
+    protected file here would make the check the thing that discloses it
+    (Plan 00412 class 9). The word list itself is already excluded above and is
+    gitignored; this covers every OTHER configured protected pattern, which
+    ``git ls-files`` will happily list when the path is tracked.
+
+    The import is deliberately NOT guarded. Every other import in this module
+    degrades on ``ImportError``, in two opposite directions that F-PRIV-4
+    records as a defect; a third direction is not the answer. If the matcher
+    cannot be loaded, this module cannot know what it must not read, and
+    stopping is the only safe outcome.
+    """
+    from claude_code_hooks_daemon.utils.secret_file_matching import (
+        path_is_protected,
+        resolve_configured_patterns,
+    )
+
+    patterns = resolve_configured_patterns()
+    if not patterns:
+        return files
+    return [f for f in files if not path_is_protected(str(f), patterns)]
+
+
 def resolve_term_matcher() -> Callable[[str, str], bool]:
     """The shared secret-term predicate from ``utils/secret_redaction``.
 
@@ -365,6 +392,8 @@ def main() -> int:
     if secret_word_list_file is not None:
         excluded.add(secret_word_list_file)
     files = [f for f in files if f.resolve() not in excluded]
+
+    files = _without_protected_paths(files)
 
     exclude_globs = load_exclude_paths(config_path)
     files = filter_excluded_files(files, exclude_globs, scan_root_for_terms)

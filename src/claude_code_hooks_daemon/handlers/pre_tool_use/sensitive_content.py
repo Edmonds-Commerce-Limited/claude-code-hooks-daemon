@@ -47,6 +47,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, git_subcommand_index
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
@@ -922,11 +923,23 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         paths: list[str] = []
         narrowable = True
         budget = 0
+        # Resolved once for the whole selection rather than per path: the
+        # pattern set is the same for every file in one commit.
+        protected_patterns = sfm.resolve_configured_patterns()
         for relpath, lines in _numstat_added_lines(result.stdout).items():
             if lines <= 0:
                 continue
             abs_path = str(repo_root / relpath)
             if self._is_excluded(abs_path) or self._is_secret_list_itself(abs_path):
+                continue
+            # A protected file must never have its content read here, let alone
+            # echoed. `git add -A` names no path, so nothing earlier in the
+            # chain saw one to object to, and this handler's own deny reason
+            # quotes the matched bytes -- so without this the guard would be the
+            # thing that discloses them (Plan 00412 class 9). Mirrors
+            # staged_lint_gate.py, which excludes the same set for the same
+            # reason.
+            if sfm.path_is_protected(abs_path, protected_patterns):
                 continue
             if lines > MAX_STAGED_FILE_BYTES:
                 _LOGGER.info(
