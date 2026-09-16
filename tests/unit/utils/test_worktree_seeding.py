@@ -173,9 +173,7 @@ class TestAnOptionalEntryMayBeAbsent:
                 root, [SeedEntry(path="linkdir/loot.txt", mode=SEED_MODE_COPY, optional=True)]
             )
 
-    def test_a_present_optional_entry_is_seeded_normally(
-        self, root: Path, worktree: Path
-    ) -> None:
+    def test_a_present_optional_entry_is_seeded_normally(self, root: Path, worktree: Path) -> None:
         """Optional describes the SOURCE's existence, not whether to bother."""
         placed = seed_worktree(
             root, worktree, [SeedEntry(path=".env.local", mode=SEED_MODE_SYMLINK, optional=True)]

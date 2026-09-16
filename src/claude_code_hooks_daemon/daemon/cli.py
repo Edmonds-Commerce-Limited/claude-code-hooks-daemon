@@ -7542,15 +7542,15 @@ def cmd_run_routine(args: argparse.Namespace) -> int:
         # interval out from the last recorded run. Stating it here is what keeps
         # that a derivation rather than a recollection: read it wrongly once and
         # the run records ground it did not cover, and no later run can tell.
-        from_ref = next_from_ref(events)
-        if from_ref is None:
+        derived_from_ref = next_from_ref(events)
+        if derived_from_ref is None:
             print(
                 "Interval: no recorded run has covered anything, so this run's `from` "
                 "is whatever the procedure below says a FIRST run uses.\n"
             )
         else:
             print(
-                f"Interval: this run's `from` is {from_ref} — the `to` of the last run "
+                f"Interval: this run's `from` is {derived_from_ref} — the `to` of the last run "
                 "that recorded covering anything, read out of RUNS/ with nothing "
                 "mutable consulted.\n"
             )

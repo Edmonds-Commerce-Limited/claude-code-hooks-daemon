@@ -110,7 +110,9 @@ class TestTheDaemonsOwnReasonIsSurfaced:
         result = _run(driver, json.dumps({"systemMessage": reason}))
 
         assert result.returncode == 1
-        assert result.stdout == "", "stdout is parsed as the worktree PATH; keep it empty on failure"
+        assert (
+            result.stdout == ""
+        ), "stdout is parsed as the worktree PATH; keep it empty on failure"
         assert reason in result.stderr
 
     def test_a_deny_reason_reaches_stderr(self, driver: Path) -> None:

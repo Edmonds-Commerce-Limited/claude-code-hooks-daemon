@@ -96,6 +96,10 @@ _CI_ROOTS: Final[tuple[str, ...]] = (".github", ".gitlab-ci", ".circleci")
 #: `tests` is the load-bearing one: a fixture legitimately passes
 #: `protocol.file.allow=always` so a local clone works, and reporting the
 #: harness for doing its job is how a check earns a reputation for noise.
+#: `worktrees` is the one that bites a CLIENT: a linked worktree is a second
+#: copy of the repository, so every file in it is already judged at its real
+#: path, and scanning it reports each one twice and fails the gate citing
+#: paths that vanish when the worktree does.
 _EXCLUDED_DIRS: Final[frozenset[str]] = frozenset(
     {
         ".git",
@@ -106,6 +110,7 @@ _EXCLUDED_DIRS: Final[frozenset[str]] = frozenset(
         "tests",
         "Tests",
         "untracked",
+        "worktrees",
         "vendor",
         "venv",
         ".venv",

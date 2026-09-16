@@ -585,6 +585,31 @@ class TestScope:
 
         assert checker.scan(tmp_path) == []
 
+    def test_a_linked_worktree_is_excluded(self, checker: ModuleType, tmp_path: Path) -> None:
+        """A worktree is a second copy of this repo, not more of this repo.
+
+        Found by dogfooding: four merged agent worktrees under
+        `.claude/worktrees/` put 28 violations into a full QA run and failed
+        `test_the_shipped_inventory_matches_the_shipped_tree`, every one of
+        them a file already recorded at its real path. The excluded-directory
+        set matches on a path COMPONENT, and a worktree's components are
+        `.claude`, `worktrees` and the agent's branch name — none of which it
+        carries, so the walk descends into a whole extra checkout.
+
+        This is not our local mess: the gate fails for ANY installing project
+        that happens to have a worktree open when QA runs, and it fails citing
+        files the project cannot fix at the paths named. Pruning our own
+        worktrees cleared the symptom, which is exactly why the exclusion has
+        to exist -- otherwise the next worktree brings it straight back.
+        """
+        _write(
+            tmp_path,
+            ".claude/worktrees/agent-deadbeef/install.sh",
+            "#!/usr/bin/env bash\ncurl -LsSf https://example.test/i.sh | sh\n",
+        )
+
+        assert checker.scan(tmp_path) == []
+
     def test_a_violation_names_its_file_and_line(self, checker: ModuleType, tmp_path: Path) -> None:
         """A finding a reader cannot navigate to is a finding nobody acts on."""
         _write(
