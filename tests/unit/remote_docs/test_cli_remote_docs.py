@@ -254,9 +254,7 @@ class TestListAndCheck:
 
         assert code == 0
 
-    def test_check_does_not_count_the_index_as_a_document(
-        self, tmp_path: Path, capsys
-    ) -> None:
+    def test_check_does_not_count_the_index_as_a_document(self, tmp_path: Path, capsys) -> None:
         """A summary line that miscounts the index is itself a lie about
         corpus health, which is the exact defect this feature fixes.
         """
