@@ -111,6 +111,20 @@
     file: src/claude_code_hooks_daemon/handlers/pre_tool_use/sudo_pip.py
     symbol: _SUDO_PIP_PATTERN
 
+- id: message-file-scanners-reach-the-shared-reader
+  relation: reaches
+  helper: read_message_files
+  reason: >
+    both judge text a command carries in a FILE rather than on the command
+    line, so a scanner that reads only the command judges `git commit -m
+    "<term>"` and misses `git commit -F msg.txt` carrying the same term.
+  left:
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/sensitive_content.py
+    function: _bash_haystacks
+  right:
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/github_auto_close_keywords.py
+    function: _message_file_texts
+
 - id: write-target-resolvers-reach-the-home-expander
   relation: reaches
   helper: expand_home
