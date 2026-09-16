@@ -286,8 +286,16 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         optional, and this handler's whole cost budget depends on staying on
         the cheap tier (Plan 00268 Task 3.1 decision).
         """
-        command = strategy.default_lint_command.replace("{file}", file_path)
-        parts = command.split()
+        # Split the TEMPLATE, then substitute the path as ONE element. Building
+        # the string first and splitting after re-tokenises the path, so
+        # `my file.py` lints two nonexistent files and a path carrying a flag
+        # appends that flag to the linter's own command line. The path here
+        # comes from the git index rather than a fresh Write, which narrows who
+        # can choose it but not what a chosen one does (Plan 00412 class 7).
+        parts = [
+            file_path if part == "{file}" else part
+            for part in strategy.default_lint_command.split()
+        ]
 
         resolved = self._resolve_executable(parts[0])
         if resolved is None:

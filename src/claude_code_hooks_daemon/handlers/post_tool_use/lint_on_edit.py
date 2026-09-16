@@ -5,6 +5,7 @@ implementations. The handler itself has ZERO language awareness.
 """
 
 import logging
+import shlex
 import shutil
 import subprocess  # nosec B404 - subprocess used for lint validation only (trusted tools)
 import sys
@@ -471,10 +472,22 @@ class LintOnEditHandler(PostToolUseHandlerBase):
             if pkg_dir.startswith(working_dir):
                 effective_path = "./" + pkg_dir[len(working_dir) :].lstrip("/") + "/"
 
-        command = command_template.replace(_FILE_PLACEHOLDER, effective_path)
-        # Split command into list for subprocess
-        # SECURITY: These are trusted lint tools defined in strategy constants
-        command_parts = command.split()
+        # Split the TEMPLATE, then substitute the path as ONE element.
+        #
+        # SECURITY: the tools are trusted strategy constants, but the PATH is
+        # not — it is whatever the agent just wrote. Substituting into the
+        # string and splitting afterwards re-tokenises the path: `my file.py`
+        # becomes two arguments that lint two files which do not exist, and a
+        # file named `x.py --config /tmp/evil.toml` appends a flag to the
+        # linter's own command line. No shell is involved, so the injection is
+        # into argv and no `shell=True` rule can see it (Plan 00412 class 7).
+        command_parts = [
+            effective_path if part == _FILE_PLACEHOLDER else part
+            for part in command_template.split()
+        ]
+        # Display only — never re-parsed. `shlex.join` quotes a path containing
+        # a space, so the reported command is one someone could actually paste.
+        command = shlex.join(command_parts)
 
         # Resolve the executable BEFORE running it. Strategies name their tools
         # bare (``ruff check {file}``) so they stay environment-independent; it
