@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00424: remote docs add overwrites existing capture](00424-remote-docs-add-overwrites-existing-capture/PLAN.md) - Not Started (from issue #42: `remote-docs add` replaces an existing capture of the same URL silently; reproduced. The catch is that `check` PRINTS plain `add` as the licence-drift remedy, so the refusal and that remedy line have to move together)
+
 - [00423: per handler scope main sub](00423-per-handler-scope-main-sub/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #40: a per-handler `scope: ALL|MAIN|SUB` key so the goal ledger and failsafe cron stop nudging subagents; symptom verified, but three decisions are the owner's)
 
 - [00422: niggles ledger fifteen](00422-niggles-ledger-fifteen/PLAN.md) - Not Started, the OPEN ledger (opens with four entries inherited from 00419 — N8/N11/N12/N13 — because an unresolved entry left inside an archived ledger is indistinguishable from a resolved one; three of them are one class in three costumes: a guard right about the state it judges and wrong about the moment it judges it)
@@ -258,11 +260,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 423 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 424 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 371 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 29 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 30 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
