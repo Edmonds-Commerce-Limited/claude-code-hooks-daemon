@@ -241,7 +241,47 @@ style is one that gets switched off.
 - Defence: `2696cffe`, committed deliberately red.
 - Fix: `8489b6dd`.
 
-Eleven further table rows are recorded in
+**The unread message file** —
+`handlers/pre_tool_use/sensitive_content.py`, `_bash_haystacks`, against
+`github_auto_close_keywords.py`'s `_message_file_texts`, on the helper
+`read_message_files`.
+
+What it allowed: `git commit -F msg.txt` carrying a blocked term was **never
+scanned** — the file was not opened — while `git commit -m "<term>"` was
+denied. The sibling handler had read git message files all along; this handler
+owned an equivalent reader and had wired it into its `gh` branch only.
+
+Probed through the haystack builder rather than through `matches()`, and the
+distinction mattered: a `matches()` False in a temp directory could equally
+mean "nothing is staged", which is a different fact. Asserting the wrong one
+would have put a false claim in this register.
+
+The fix is one call under the condition the handler **already computed** for
+both surfaces. That shape is what makes the row sound: a call placed inside the
+`gh` branch instead would satisfy a `reaches` row while leaving git unscanned.
+**Choose the fix shape that makes the row honest, rather than choosing a row to
+fit a fix** — that inversion is the transferable part.
+
+The reader stays scoped to the two surfaces that genuinely take a message or
+body file. Reading every `-F` on every command would start treating `gh api`'s
+`-F key=value` — a FIELD, on a surface this guard deliberately does not cover —
+as a filename.
+
+**Consolidating it produced a fresh instance of this very class, by my own
+hand.** The two copies were strict in DIFFERENT ways: `sensitive_content`
+caught a read that fails AFTER the stat, and the sibling only pre-checked with
+`os.access`. Keeping one and dropping the other lost the catch, and three
+existing tests failed with the lesson already in their docstring — *statting a
+file is not reading it, and the gap raises*. A file whose mode denies read
+stats perfectly well, and so does one unlinked between the check and the read.
+The catch now lives in the shared reader, so the sibling GAINED a protection it
+never had. Recorded because the failure mode is the point: deduplication is
+exactly when a site's hard-won extra care gets dropped.
+
+- Defence: `ab93117f`, committed deliberately red.
+- Fix: `1a74bf90`.
+
+Ten further table rows are recorded in
 [the consolidated worklist](../Plan/00412-jobs-recurring-work-and-security-review/subagent-reports/260915-consolidated-defence-worklist.md),
 with the registry's design notes in
 [DESIGN-declared-invariant-pairs.md](../Plan/00412-jobs-recurring-work-and-security-review/DESIGN-declared-invariant-pairs.md).
@@ -288,7 +328,7 @@ and telling those apart is the reading a registry exists to capture.
 - **Only declared pairs.** This is the defining limitation and it is
   structural, not an oversight. A divergence with no row in
   `scripts/qa/declared-invariant-pairs.yaml` is invisible, and the registry
-  currently holds five rows against thirteen known instances. **Read a green
+  currently holds six rows against thirteen known instances. **Read a green
   run as "every declared pair holds", never as "the class is clear."**
 
   The third instance above proves the point from inside: it is a real member of
@@ -338,9 +378,25 @@ and telling those apart is the reading a registry exists to capture.
   dispatch table, and a name-only match means a DIFFERENT function of the same
   name satisfies the row.
 
+  **It follows exactly ONE hop**, and both bounds were bought. Reading only the
+  named body called ordinary refactoring a violation — extracting the work into
+  a small helper method broke a row that the fix had satisfied — which would
+  push code to stay inline purely to satisfy a check, the rule dictating
+  structure. Repointing the row at the inner helper is worse: that helper
+  satisfies the row even when nothing calls it, so DEAD CODE turns it green.
+  Following arbitrarily far is the opposite failure, degrading the row into
+  "this function eventually reaches something". A test pins the two-hop bound
+  so the limit is stated rather than discovered.
+
 - **Still only declared pairs.** Rows cover `pipe_blocker`/`process_probe`,
-  the worktree verbs, the remote-docs writers, the write-target resolvers, and
-  the executable anchors.
+  the worktree verbs, the remote-docs writers, the write-target resolvers, the
+  executable anchors, and the message-file scanners.
+
+- **Deduplication is a way to CREATE a member of this class.** Consolidating
+  two copies of one concept drops whatever extra care the stricter copy had
+  learned, unless someone diffs them for behaviour rather than for shape. It
+  happened here while fixing D-PUB-2 and was caught only because the dropped
+  care had regression tests. Nothing mechanical watches for it.
 
 - **A proposed pair can be WRONG, and nothing mechanical says so.** The
   `path_is_protected` pair came from two independent checks and would have
