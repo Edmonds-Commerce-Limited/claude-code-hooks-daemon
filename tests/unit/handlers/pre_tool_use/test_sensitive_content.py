@@ -1221,6 +1221,22 @@ class TestGhBodySurface:
         assert result.decision == Decision.DENY
         assert "alpha-term" not in result.model_dump_json()
 
+    def test_a_body_flag_on_a_continuation_line_still_counts(self, tmp_path: Path) -> None:
+        """Requiring a body flag must not accidentally require it on ONE line.
+
+        The surface list is narrowed by a lookahead for a body flag, and a
+        lookahead written with `.` stops at a newline. A backslash-continued
+        `gh` command puts the flag on the next line, so the obvious spelling
+        would have let a multi-line publish escape a guard that catches the
+        identical single-line command — a narrowing by accident, in a guard
+        whose entire subject is an unretractable publication.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        command = 'gh issue comment 12 \\\n  --body "alpha-term"'
+
+        assert handler.matches(_bash_input(command)) is True
+        assert handler.handle(_bash_input(command)).decision == Decision.DENY
+
     @pytest.mark.parametrize(
         "command",
         [

@@ -251,8 +251,52 @@ _GH_EXECUTABLE: Final[str] = "gh"
 # retract. The LEFT boundary is kept rather than relaxed to `\b`: `\b` matches
 # inside `foo-gh`, which would have the guard judging a command that is not
 # `gh`. Path-qualified, not loosely-anchored.
+# The declared inventory of `gh` surfaces that PUBLISH a body, as
+# `<noun> <verb>` pairs. A hand-maintained list, and deliberately so: no rule
+# can read `gh`'s help and decide which verbs are irreversible, so the honest
+# form is a table a human owns. Plan 00412 class 10 —
+# `irreversible-publication-surface-inventory`.
+#
+# `release`/`gist`/`repo` were absent while `issue`/`pr` were covered, so
+# `gh release create --notes` published unscanned. Adding a publishing verb to
+# `gh` means adding it here; the pairing is asserted by
+# `TestGhBodySurface::test_every_irreversible_publication_surface_is_scanned`.
+#
+# `repo edit` is here for `--description`, and `pr review` for `--body`. Both
+# carry prose to a public page. The read-only verbs (`list`, `view`, `status`)
+# are absent by construction rather than by exclusion: reading is never blocked.
+_GH_PUBLISHING_SURFACES: Final[tuple[tuple[str, str], ...]] = (
+    ("issue", "comment"),
+    ("issue", "create"),
+    ("issue", "edit"),
+    ("pr", "comment"),
+    ("pr", "create"),
+    ("pr", "edit"),
+    ("pr", "review"),
+    ("release", "create"),
+    ("release", "edit"),
+    ("gist", "create"),
+    ("repo", "edit"),
+)
+
+#: The flags that carry the published prose. A surface invoked with NONE of
+#: them publishes no text — `gh pr review --approve` records an approval, and
+#: denying it would refuse a command that has nothing to leak.
+_GH_BODY_FLAGS: Final[str] = r"--body|-b\b|--notes|--desc(?:ription)?|--body-file|-F\b|--notes-file"
+
+_GH_SURFACE_ALTERNATION: Final[str] = "|".join(
+    noun + r"\s+" + verb for noun, verb in _GH_PUBLISHING_SURFACES
+)
+
 _GH_BODY_PATTERN: Final[re.Pattern[str]] = re.compile(
-    rf"(?:^|[\s;&|(]){OPTIONAL_PATH}gh\s+(?:issue|pr)\s+(?:comment|create|edit)\b"
+    rf"(?:^|[\s;&|(]){OPTIONAL_PATH}gh\s+"
+    rf"(?:{_GH_SURFACE_ALTERNATION})"
+    # `[\s\S]*` rather than `.*`: a backslash-continued `gh` command puts the
+    # body flag on the NEXT line, and `.` stops at a newline. Narrowing the
+    # surface list by requiring a body flag must not simultaneously narrow it
+    # by line — that would let a multi-line publish escape a guard the
+    # single-line form still trips.
+    rf"\b(?=[\s\S]*(?:{_GH_BODY_FLAGS}))"
 )
 # `--body-file <path>` / `--body-file=<path>` / `-F <path>`, bare or quoted.
 _GH_BODY_FILE_PATTERN: Final[re.Pattern[str]] = re.compile(
