@@ -319,7 +319,52 @@ written" (`strip_inert_spans`).
 
 - Fix: `e8683948`, verified 32/32.
 
-Ten further table rows are recorded in
+**The backup that `--force` skipped** — `install.py`, `create_daemon_config`,
+against `create_settings_json` sixty lines above it. **The purest instance in
+the corpus: the fix was already written down, in prose, in the same file.**
+
+What it allowed: `create_daemon_config` guarded its backup with
+`if config_file.exists() and not force`, while the write below it is
+unconditional. So `--force` replaced the client's `handlers:`, `exclude_paths`,
+`extra_whitelist` and `plugins:` with the installer's template, kept no copy,
+and printed `✅ Created`. What is destroyed is not a generated default — it is
+the entire record of how a client configured this daemon.
+
+The sibling had already fixed exactly this, and its comment states the
+reasoning: *"Backing up only when NOT forcing had it exactly backwards:
+`--force` reinstalls over an existing install, so it is the invocation most
+likely to be overwriting a customised file, and it was the one that overwrote
+with no copy at all."* The conclusion had been reached, written in full, and
+applied to one of the two files it governs.
+
+A second instance sat inside the same function: a bespoke timestamp branch that
+overwrote a prior backup taken in the same second, where `_free_backup_path`
+already existed and documents that precise collision. The first backup holds the
+client's ORIGINAL file, so that is the one the collision destroyed.
+
+The now-inert `force` parameter was removed rather than left ignored, following
+`create_settings_json(project_root: Path) -> None`, which dropped it for the
+same reason: a parameter that no longer changes anything is a trap, because the
+next reader assumes it still governs the backup.
+
+**Why a row, when the skills rmtree above has none**: here both sites discharge
+the duty the SAME way — resolve a non-colliding backup path through the shared
+helper — so `reaches` states the actual invariant rather than a coincidental
+similarity. A partial fix cannot satisfy it: restoring the backup but keeping a
+hand-rolled timestamp path leaves the row red.
+
+**On the evidence, stated precisely.** The row was added AFTER the fix, so
+there is no red-before-fix commit for it, and it should not be read as one. What
+was demonstrated instead is that the row CAN fire: driven against a doctored
+tree whose `create_daemon_config` hand-rolls `hooks-daemon.yaml.bak.{timestamp}`,
+it reports the violation; against the real tree it is green. A row that has only
+ever been green proves nothing about its ability to detect anything, and that
+property is worth establishing separately whenever the Defence lands after the
+fix rather than before it.
+
+- Fix: `cef01a69`, verified 32/32.
+
+Nine further table rows are recorded in
 [the consolidated worklist](../Plan/00412-jobs-recurring-work-and-security-review/subagent-reports/260915-consolidated-defence-worklist.md),
 with the registry's design notes in
 [DESIGN-declared-invariant-pairs.md](../Plan/00412-jobs-recurring-work-and-security-review/DESIGN-declared-invariant-pairs.md).
@@ -366,7 +411,7 @@ and telling those apart is the reading a registry exists to capture.
 - **Only declared pairs.** This is the defining limitation and it is
   structural, not an oversight. A divergence with no row in
   `scripts/qa/declared-invariant-pairs.yaml` is invisible, and the registry
-  currently holds six rows against thirteen known instances. **Read a green
+  currently holds seven rows against thirteen known instances. **Read a green
   run as "every declared pair holds", never as "the class is clear."**
 
   The third instance above proves the point from inside: it is a real member of

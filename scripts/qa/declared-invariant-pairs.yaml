@@ -125,6 +125,21 @@
     file: src/claude_code_hooks_daemon/handlers/pre_tool_use/github_auto_close_keywords.py
     function: _message_file_texts
 
+- id: installer-file-writers-reach-the-backup-helper
+  relation: reaches
+  helper: _free_backup_path
+  reason: >
+    both replace a file the CLIENT may have customised rather than one the
+    installer owns, so a writer that hand-rolls its backup path — or skips the
+    backup on the invocation most likely to be overwriting a customised file —
+    destroys the configuration its sibling preserves.
+  left:
+    file: install.py
+    function: create_settings_json
+  right:
+    file: install.py
+    function: create_daemon_config
+
 - id: write-target-resolvers-reach-the-home-expander
   relation: reaches
   helper: expand_home
