@@ -123,10 +123,28 @@ without opening it:
   replaying the real `Stop` through `find_missing_crons` now reports nothing
   missing. Daemon restarted with the fix live.
 
-- [ ] ⬜ **Task 1.5**: N3 — choose between the three candidate remedies and
-  build it. Owner-gated: (1) and (2) both relax a gate that currently blocks,
-  and relaxing a correct gate to fix a sequencing problem is the kind of change
-  that should be asked for rather than assumed.
+- [x] ✅ **Task 1.5**: N3 — none of the three candidates. The ruling
+  (`fable-niggle-remedies-decision.md`) took a fourth option: move the
+  `header-body-coherence` COMPLETION finding from BLOCK to ADVISE at EDIT, and
+  add a COMMIT registration at BLOCK. The `Not Started`-with-boxes-ticked
+  branch is untouched and still blocks at EDIT.
+
+  Not owner-gated after all, because the premise was wrong: this is not a
+  relaxation. The all-ticked-under-`In Progress` state is the MANDATORY
+  intermediate on the legal close path — the `Edit` tool replaces one
+  contiguous span, and the header and the Success Criteria are never one span
+  — so both orderings were denied and the only legal move left was a
+  whole-file `Write`. A gate no legal sequence of moves can satisfy is a
+  defect.
+
+  Net effect is a TIGHTENING: the check had NO commit registration, so a plan
+  committed in the violating state reached history unchallenged and waited for
+  the next session's sweep. The commit gate is scoped by Plan 00343's rule, so
+  a commit is blamed for incoherence it introduces, never for incoherence it
+  inherited — pinned by its own test.
+
+  RED first, 9 new tests. The registry catalogue guard caught the third
+  registration on its own (`COMMIT` 17→18), which is the guard working.
 
 - [x] ✅ **Task 1.8**: N6 fixed, RED first, in
   `tests/unit/handlers/test_tdd_enforcement.py`. Clean RED was 1 failed / 4

@@ -147,6 +147,29 @@ enforcement and therefore neither can be gamed into teeth.
   cost — the assertor stays unclassified while every other handler has a
   tier, which is the inconsistency this plan set out to remove.
 
+  **DECIDED — the recommendation is endorsed**
+  (`fable-cron-assertor-tier-decision.md`). The cron case stays OUT of the
+  computed tier; the `Stop` block carries it alone. Nothing is built, and that
+  is the deliverable: the review established that a session-start verifier for
+  this is **impossible within the mechanism as built**, not merely absent, so
+  the task closes on a determinate reading of `session_start_tiers.py` and
+  `session_action_items.py` rather than on an appetite for risk.
+
+  Not owner-gated after all. The owner's rulings — teeth not wording,
+  verification at `Stop`, `ACTION_REQUIRED` computed and never declared — were
+  already recorded, and this is their consequence. No installing project's
+  refusal surface changes: the assertor keeps emitting exactly what it emits
+  today, tagged `[INFO]`. The cost accepted is one of TIMING (the cron is
+  created when the Stop block forces it, not at session start), bounded by a
+  single turn, and paid to keep the tier honest — a directive that fires every
+  session over an item the agent cannot clear teaches the agent that the
+  directive lies, which is the failure Task 2.3 already pins a test against.
+
+  The plan's worry that the assertor "stays unclassified" is answered: it IS
+  classified — every handler without a verifier computes to `INFO`. An
+  `ACTION_SUGGESTED` floor is available for presentational consistency and is
+  author-chosen, so it cannot be gamed into teeth; it is not needed here.
+
 - [x] ✅ **Task 2.2**: Classify the remaining handlers. Both named candidates
   now carry real verifiers, RED first: `project_handler_load_checker` (guards
   the project declared are OFF) and `hook_registration_checker` (events never

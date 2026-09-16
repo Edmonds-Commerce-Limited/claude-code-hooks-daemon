@@ -29,3 +29,35 @@ truth_changes:
       outside this project's own QA checker, so nothing in shipped handler
       behaviour changed -- only what a handler AUTHOR should believe is
       possible changed.
+
+  - topic: plan-qa
+    id: header-body-coherence-completion-stage-move
+    was: >
+      The `header-body-coherence` check was registered at EDIT and SWEEP only,
+      both at BLOCK, and its completion branch ("header says In Progress /
+      Not Started but every box is ticked") denied the write at EDIT. It had
+      no COMMIT registration, so a plan COMMITTED in that state reached
+      history unchallenged and was reported only by the next session's sweep.
+    now: >
+      The completion branch is ADVISE at EDIT, and the check gains a COMMIT
+      registration at BLOCK. The `Not Started`-with-boxes-ticked branch is
+      unchanged and still BLOCKS at EDIT.
+
+      This is a defect fix, not a policy relaxation (Plan 00419 N3). Closing a
+      plan requires two changes to one PLAN.md -- tick the last Success
+      Criterion, and flip the status header -- and the `Edit` tool replaces one
+      contiguous span, which those two never share. Both orderings were denied:
+      ticking first hit this check, and flipping first hit a
+      completion-criteria gate. The only single-call move left was a whole-file
+      `Write`, the operation `R-WRITE-CLOBBER` exists to discourage. The
+      all-ticked-under-`In Progress` state is the MANDATORY intermediate on the
+      legal close path, and a gate no legal sequence of moves can satisfy is a
+      defect.
+
+      Net effect on enforcement is a TIGHTENING: the invariant moves from a
+      surface that sees a half-written document to the two that see a settled
+      one, and the commit gate it gains is a surface it never had. An agent
+      that ticks a plan's last box now gets an advisory instead of a denial;
+      the very next `git commit` denies the same state, scoped by Plan 00343's
+      rule so a commit is blamed only for incoherence it introduced, never for
+      incoherence it inherited.

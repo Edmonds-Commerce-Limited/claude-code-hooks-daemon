@@ -150,7 +150,11 @@ class TestRegistryCatalogue:
         # + plan-shrink-without-journal (Plan 00190) + index-row-length (Plan 00218)
         # + index-no-log + archived-status-coherence (Plan 00286)
         # + index-retention-window (Plan 00379 N1)
-        assert len(by_stage[Stage.COMMIT]) == 17
+        # + header-body-coherence (Plan 00419 N3) — its completion branch moved
+        #   OFF the edit gate, so the invariant needs a surface that sees a
+        #   settled document; without this registration the move would be a net
+        #   loosening rather than the tightening it is.
+        assert len(by_stage[Stage.COMMIT]) == 18
         # 3 sweep-only + 5 dual tree checks + 2 journal SWEEP checks (Plan 00163)
         # + index-row-length (Plan 00218) + index-no-log + 5 document-rule sweep
         # twins and the journal-dayfile-naming sweep twin (Plan 00230)
