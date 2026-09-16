@@ -5,7 +5,6 @@ When llm: commands do NOT exist, skips validation and advises about creating llm
 """
 
 import logging
-import os
 import subprocess  # nosec B404 - subprocess used for eslint validation only (trusted tool)
 from pathlib import Path
 from typing import Any, ClassVar, Final
@@ -42,8 +41,14 @@ from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Where a Node workspace keeps its tool binaries. Used as a FALLBACK when the
 # resolver yields no bin dirs (no manifest found), so a pinned workspace_root
-# without a package.json still gets `tsx` on PATH exactly as it always did.
+# without a package.json still resolves `tsx` exactly as it always did.
 _NODE_BIN_SUBPATH = ("node_modules", ".bin")
+
+#: The TypeScript runner, and the wrapper it is asked to run. The wrapper stays
+#: relative because ``cwd`` is the workspace root, so it already names exactly
+#: one file; spelling it absolutely would change no behaviour.
+_INTERPRETER_NAME: Final[str] = "tsx"
+_WRAPPER_RELATIVE_PATH: Final[str] = "scripts/eslint-wrapper.ts"
 
 #: Acceptance-test fixture directory for the Write-tool test, below the
 #: sanctioned scratch root. The sibling Bash-route test below uses its own
@@ -52,6 +57,40 @@ _NODE_BIN_SUBPATH = ("node_modules", ".bin")
 _FIXTURE_DIR: Final[str] = "acceptance-test-eslint"
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_interpreter(bin_dirs: tuple[Path, ...]) -> str:
+    """argv[0] for the TypeScript runner: an absolute path where one is known.
+
+    Plan 00412 class 3. This replaces a PATH prepend. The handler used to push
+    the GUARDED PROJECT's ``node_modules/.bin`` onto ``PATH`` and spawn a bare
+    ``tsx``, so any package able to drop a ``tsx`` shim into that directory got
+    code execution in a daemon subprocess on the next TypeScript write -- and
+    afterwards the daemon could not say which file it had run.
+
+    The workspace's own binary is still PREFERRED, because a project's linter
+    should run under the version that project pins; it is simply named outright
+    instead of being reached through a search order.
+
+    Falling back to the bare name is deliberate and is not the defect returning.
+    Bare ``tsx`` resolves from the environment the DAEMON was started in, which
+    the tree under review does not supply; the defect was specifically that a
+    directory belonging to that tree was prepended. A project relying on a
+    globally installed ``tsx`` therefore keeps working, and without that branch
+    this change would be a regression rather than a fix.
+
+    **This does not make the executed code trusted.** The chosen binary and the
+    wrapper it runs still come from the tree under review -- that is class 3's
+    general form, which remains open and owner-gated.
+    """
+    for bin_dir in bin_dirs:
+        candidate = bin_dir / _INTERPRETER_NAME
+        # eacces-safe-exempt: a workspace bin dir from config, not the file
+        # being checked.
+        if path_exists(candidate, unreadable_means=False):
+            return str(candidate)
+    return _INTERPRETER_NAME
+
 
 # 3 rules (Plan 00116): distinct failure shapes with distinct diagnostics --
 # reported errors, a timeout, and a failure to run ESLint at all.
@@ -291,11 +330,23 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
             for prefix in (ProjectPath.WORKTREES_DIR, ProjectPath.CLAUDE_WORKTREES_DIR)
         )
 
-        # Run ESLint using wrapper script
+        # Both halves of the command are NAMED, never resolved by PATH lookup
+        # (Plan 00412 class 3). Previously the workspace's own bin dirs were
+        # prepended to PATH and bare `tsx` was spawned, so any package able to
+        # drop a `tsx` shim into the GUARDED PROJECT's node_modules/.bin got
+        # code execution in a daemon subprocess on the next TypeScript write --
+        # and the daemon could not afterwards say which file it had run.
+        #
+        # This does NOT make the executed code trusted. The interpreter and the
+        # wrapper still come from the tree under review, which is class 3's
+        # general form and remains open; what changes is that the daemon now
+        # names exactly what it executes instead of letting PATH order decide.
+        interpreter = _resolve_interpreter(workspace_bin_dirs)
+
         try:
             command = [
-                "tsx",
-                "scripts/eslint-wrapper.ts",
+                interpreter,
+                _WRAPPER_RELATIVE_PATH,
                 file_path,
                 "--max-warnings",
                 "0",
@@ -303,29 +354,16 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
             ]
             cwd = str(workspace_root)
 
-            # Prepend the workspace's own bin dirs so tsx is resolvable even
-            # when the daemon runs with a restricted system PATH. In a monorepo
-            # these are the SIBLING workspace's binaries, not the repo root's.
-            env = os.environ.copy()
-            # eacces-safe-exempt: workspace bin dirs from config, used to build
-            # PATH for the linter -- not the file being checked.
-            existing = [bin_dir for bin_dir in workspace_bin_dirs if bin_dir.exists()]
-            if existing:
-                prefix = os.pathsep.join(str(bin_dir) for bin_dir in existing)
-                env["PATH"] = prefix + os.pathsep + env.get("PATH", "")
-
             if is_worktree:
                 logger.info("Detected worktree file - using ESLint wrapper for consistent config")
 
-            result = (
-                subprocess.run(  # nosec B603 - eslint/npx are trusted tools, file path validated
-                    command,
-                    cwd=cwd,
-                    capture_output=True,
-                    text=True,
-                    timeout=Timeout.ESLINT_CHECK,
-                    env=env,
-                )
+            logger.debug("Running ESLint via %s", interpreter)
+            result = subprocess.run(  # nosec B603 - no PATH is steered; see _resolve_interpreter
+                command,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=Timeout.ESLINT_CHECK,
             )
 
             if result.returncode != 0:

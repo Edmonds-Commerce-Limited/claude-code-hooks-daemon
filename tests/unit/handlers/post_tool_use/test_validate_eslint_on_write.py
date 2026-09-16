@@ -765,59 +765,78 @@ class TestNodeModulesBinPath:
     def handler(self, tmp_path: Path) -> ValidateEslintOnWriteHandler:
         return ValidateEslintOnWriteHandler(workspace_root=tmp_path)
 
-    @patch("subprocess.run")
-    def test_local_bin_prepended_to_path_when_exists(
-        self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
-    ) -> None:
-        """subprocess.run env must include node_modules/.bin when directory exists."""
+    def _seed(self, tmp_path: Path, *, with_tsx: bool) -> Path:
+        """A workspace, optionally carrying its own ``tsx`` binary."""
         bin_dir = tmp_path / "node_modules" / ".bin"
         bin_dir.mkdir(parents=True)
-
+        if with_tsx:
+            (bin_dir / "tsx").write_text("#!/bin/sh\n", encoding="utf-8")
         test_file = tmp_path / "test.ts"
         test_file.write_text("const x = 1;")
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        hook_input = {"tool_name": "Write", "tool_input": {"file_path": str(test_file)}}
-        handler.handle(hook_input)
-
-        call_kwargs = mock_run.call_args[1]
-        assert "env" in call_kwargs
-        assert str(bin_dir) in call_kwargs["env"]["PATH"]
+        return test_file
 
     @patch("subprocess.run")
-    def test_local_bin_first_in_path(
+    def test_the_local_interpreter_is_executed_by_absolute_path(
         self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
     ) -> None:
-        """node_modules/.bin must appear BEFORE other PATH entries."""
-        bin_dir = tmp_path / "node_modules" / ".bin"
-        bin_dir.mkdir(parents=True)
+        """Plan 00412 class 3: name the file, do not let PATH choose it.
 
-        test_file = tmp_path / "test.ts"
-        test_file.write_text("const x = 1;")
+        This replaces a PATH-prepending contract. The ORIGINAL purpose -- tsx
+        stays resolvable when the daemon runs with a restricted system PATH --
+        is served strictly better by an absolute path, which does not depend on
+        PATH at all.
+        """
+        test_file = self._seed(tmp_path, with_tsx=True)
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         hook_input = {"tool_name": "Write", "tool_input": {"file_path": str(test_file)}}
         handler.handle(hook_input)
 
-        env_path = mock_run.call_args[1]["env"]["PATH"]
-        entries = env_path.split(":")
-        assert entries[0] == str(bin_dir)
+        argv = mock_run.call_args[0][0]
+        assert argv[0] == str(tmp_path / "node_modules" / ".bin" / "tsx")
+        assert Path(argv[0]).is_absolute()
 
     @patch("subprocess.run")
-    def test_env_passed_even_without_node_modules(
+    def test_the_path_environment_is_no_longer_steered(
         self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
     ) -> None:
-        """env kwarg must be passed even when node_modules/.bin does not exist."""
-        # tmp_path has no node_modules
-        test_file = tmp_path / "test.ts"
-        test_file.write_text("const x = 1;")
+        """The defect itself: a prepended directory decided what `tsx` meant.
+
+        Any package able to drop a `tsx` shim into the guarded project's
+        node_modules/.bin got code execution in a daemon subprocess. Nothing is
+        prepended now, so PATH order cannot redirect the interpreter.
+        """
+        test_file = self._seed(tmp_path, with_tsx=True)
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         hook_input = {"tool_name": "Write", "tool_input": {"file_path": str(test_file)}}
         handler.handle(hook_input)
 
-        call_kwargs = mock_run.call_args[1]
-        assert "env" in call_kwargs
+        env = mock_run.call_args[1].get("env")
+        bin_dir = str(tmp_path / "node_modules" / ".bin")
+        assert env is None or bin_dir not in env.get("PATH", "")
+
+    @patch("subprocess.run")
+    def test_a_workspace_without_a_local_interpreter_still_runs(
+        self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        """Falling back to the bare name is not the defect returning.
+
+        Bare `tsx` resolves from the environment the DAEMON was started in,
+        which the tree under review does not supply. The defect was specifically
+        that a directory belonging to that tree was PREPENDED to PATH. Without
+        this branch a project relying on a globally installed tsx would stop
+        being linted, making the change a regression rather than a fix.
+        """
+        test_file = self._seed(tmp_path, with_tsx=False)
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        hook_input = {"tool_name": "Write", "tool_input": {"file_path": str(test_file)}}
+        handler.handle(hook_input)
+
+        assert mock_run.call_args[0][0][0] == "tsx"
+        env = mock_run.call_args[1].get("env")
+        assert env is None or str(tmp_path) not in env.get("PATH", "")
 
 
 class TestValidateEslintOnWriteGetRules:
@@ -1101,10 +1120,19 @@ class TestPerFileWorkspace:
         assert result.decision == Decision.ALLOW
         assert mock_run.call_count == 0, "advisory mode must not run ESLint"
 
-    def test_prepends_the_workspaces_own_node_modules_bin(self, tmp_path: Path) -> None:
+    def test_uses_the_workspaces_own_interpreter_not_the_repo_roots(self, tmp_path: Path) -> None:
+        """The SIBLING workspace's binary, named outright.
+
+        This asserted a PATH prepend until Plan 00412 class 3 removed the
+        steering. The property it was protecting is unchanged and still worth
+        pinning -- a monorepo file must be linted by its own workspace's tsx,
+        not the repo root's -- so it is re-expressed against argv[0] rather
+        than deleted.
+        """
         root = self._monorepo(tmp_path)
         bin_dir = root / "apps" / "web" / "node_modules" / ".bin"
         bin_dir.mkdir(parents=True)
+        (bin_dir / "tsx").write_text("#!/bin/sh\n", encoding="utf-8")
         edited = root / "apps" / "web" / "src" / "page.ts"
         edited.write_text("const x = 1;")
 
@@ -1115,7 +1143,7 @@ class TestPerFileWorkspace:
                 mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
                 handler.handle(self._hook_input(edited))
 
-        assert mock_run.call_args[1]["env"]["PATH"].startswith(str(bin_dir))
+        assert mock_run.call_args[0][0][0] == str(bin_dir / "tsx")
 
     def test_explicit_workspace_root_still_pins_every_file(self, tmp_path: Path) -> None:
         """The documented test seam survives: an explicit root wins outright.
