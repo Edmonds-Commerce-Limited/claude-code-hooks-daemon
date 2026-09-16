@@ -242,11 +242,28 @@ def build_relay_guard_block(
     """
     relay_binary = transport.relay_binary or _default_relay_binary_path(untracked_dir)
     timeout_ms = transport.timeout_seconds * 1000
+    # Escaped for the same reason `_escape_for_double_quotes` exists, and with
+    # more force: its docstring notes the CATALOGUE is an internal constant and
+    # escapes it anyway, because the failure is silent and remote -- a value
+    # carrying a backtick or `$` emits a forwarder that runs a command
+    # substitution every time the daemon is down. A path is not an internal
+    # constant; it is wherever the user cloned the repository.
+    #
+    # Both sites below are a plain double-quoted string, which is exactly the
+    # context this escaper is for. In the `==` comparison the path sits INSIDE
+    # the quotes and only the trailing `*` is a pattern, so glob characters in
+    # the path are already literal and need nothing further.
+    #
+    # The two `${VAR:-default}` interpolations further down are NOT escaped
+    # here: that context takes `}` as a terminator and this escaper has no rule
+    # for it, so applying it there would leave them broken while looking fixed.
+    # See DECISION-forwarder-interpolation-contexts.md.
     lines = [
         _GUARD_HEADER,
         'if [[ "${1:-}" != "--no-relay" && '
-        f'"${{BASH_SOURCE[0]}}" == "{deployed_hooks_dir(project_root)}"* ]]; then\n',
-        f'    _rl_dir="{untracked_dir}"\n',
+        f'"${{BASH_SOURCE[0]}}" == "{_escape_for_double_quotes(deployed_hooks_dir(project_root))}"'
+        "* ]]; then\n",
+        f'    _rl_dir="{_escape_for_double_quotes(str(untracked_dir))}"\n',
     ]
     if event_socket_dir_is_fallback(untracked_dir):
         resolved_events_dir = get_event_socket_dir_from_untracked(untracked_dir)

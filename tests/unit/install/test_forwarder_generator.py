@@ -339,6 +339,63 @@ def test_guard_block_uses_literal_untracked_dir() -> None:
     assert '_rl_dir="/some/project/untracked"' in block
 
 
+class TestTheGuardBlockEscapesWhatItInterpolates:
+    """Plan 00412: the escaper exists in this module and this site skipped it.
+
+    `_escape_for_double_quotes`'s own docstring makes the case: the catalogue
+    it is currently applied to is an internal constant and nothing there is
+    hostile, and it is escaped anyway because the failure would be silent and
+    remote — a value gaining a backtick or `$` emits a forwarder that runs a
+    command substitution every time the daemon is down.
+
+    A PATH is not an internal constant. It is wherever the user cloned the
+    repository, so the argument applies more strongly here than where the
+    helper is already used.
+
+    Scope is deliberate. These are the interpolations that land in a plain
+    double-quoted string, which is exactly what this escaper is for. The two
+    that land inside `${VAR:-default}` are NOT covered here: that context has
+    `}` as an additional terminator, which this escaper has no rule for, and
+    pretending otherwise would leave them broken while looking fixed. See
+    CLAUDE/Plan/00412-jobs-recurring-work-and-security-review/
+    DECISION-forwarder-interpolation-contexts.md.
+    """
+
+    def _block(self, untracked: Path, root: Path) -> str:
+        return build_relay_guard_block(
+            "pre-tool-use", TransportConfig(relay_enabled=True), untracked, root
+        )
+
+    def test_a_dollar_in_the_untracked_path_cannot_expand(self) -> None:
+        """Unescaped, `$USER` would expand when the forwarder runs."""
+        block = self._block(Path("/some/$USER/untracked"), Path("/some/$USER"))
+
+        assert '_rl_dir="/some/\\$USER/untracked"' in block
+        assert '_rl_dir="/some/$USER/untracked"' not in block
+
+    def test_a_backtick_in_the_untracked_path_cannot_substitute(self) -> None:
+        """This is the failure the escaper's docstring calls silent and remote."""
+        block = self._block(Path("/some/`id`/untracked"), Path("/some/`id`"))
+
+        assert "\\`id\\`" in block
+
+    def test_a_quote_in_the_checkout_path_cannot_break_the_condition(self) -> None:
+        block = self._block(Path('/some/pro"ject/untracked'), Path('/some/pro"ject'))
+
+        assert '\\"ject' in block
+
+    def test_an_ordinary_path_is_unchanged(self) -> None:
+        """Escaping must be a no-op for every normal install.
+
+        Without this, the fix would silently rewrite the generated forwarder
+        for every existing project.
+        """
+        block = self._block(Path("/some/project/untracked"), Path("/some/project"))
+
+        assert '_rl_dir="/some/project/untracked"' in block
+        assert "\\" not in block.split("_rl_dir=")[1].split("\n")[0]
+
+
 def test_guard_block_default_relay_binary_path() -> None:
     block = build_relay_guard_block(
         "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT

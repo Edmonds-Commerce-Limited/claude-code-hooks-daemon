@@ -139,6 +139,30 @@ the guard.
 - Defence: `5b6ac98b`, committed deliberately red.
 - Fix: `a6ce7bb7`.
 
+**The forwarder interpolations** — `install/forwarder_generator.py`,
+`build_relay_guard_block`, against `_escape_for_double_quotes` in the same
+module. **Partially fixed, and listed that way on purpose.**
+
+What it allowed: a checkout path carrying `$` or a backtick produced a forwarder
+that expanded a variable, or ran a command substitution, every time the daemon
+was down. The escaper's own docstring calls this failure "silent and remote" and
+escapes an internal CONSTANT for that reason — while the paths, which are
+wherever the user cloned, went in raw.
+
+Reading the site found the worklist's one defect to be **three quoting
+contexts**. Three sites are a plain double-quoted string, where the existing
+escaper is exactly right, and are fixed. Two sit inside `${VAR:-default}`,
+where `}` terminates the expansion and the escaper has no rule for it.
+
+**No registry row was added**, and the reason belongs in this register rather
+than only in the plan: a `reaches` row asserts the function CALLS the helper, so
+applying the escaper to all five sites would have turned the row green while two
+remained broken. A row satisfiable by a partial fix is worse than no row,
+because it converts an open defect into a closed one on paper.
+
+The remaining fork is an owner decision, written up with a recommendation in
+[DECISION-forwarder-interpolation-contexts.md](../Plan/00412-jobs-recurring-work-and-security-review/DECISION-forwarder-interpolation-contexts.md).
+
 Twelve further table rows are recorded in
 [the consolidated worklist](../Plan/00412-jobs-recurring-work-and-security-review/subagent-reports/260915-consolidated-defence-worklist.md),
 with the registry's design notes in
@@ -192,9 +216,14 @@ fail-closed on an oversized body file, and F-HYG-3's new deny in
   name satisfies the row.
 
 - **Still only declared pairs.** Rows cover `pipe_blocker`/`process_probe`,
-  the worktree verbs, and the remote-docs writers. Known instances needing
-  rows include `_escape_for_double_quotes` (drafted and withdrawn: the
-  function names had to be read, not guessed) and `path_is_protected`.
+  the worktree verbs, and the remote-docs writers. `path_is_protected` still
+  needs one.
+
+  `_escape_for_double_quotes` is the instructive absence. It has a recorded
+  instance, a partial fix, and deliberately **no row** — because the row would
+  be satisfied by the partial fix. Where a rule can be satisfied without the
+  defect being gone, writing the row down is worse than leaving it out, and the
+  register has to be able to say so.
 
 - **A row must name which MEMBERS participate.** This was bought the hard way.
   The first row drafted asserted a superset between two relocation-verb
