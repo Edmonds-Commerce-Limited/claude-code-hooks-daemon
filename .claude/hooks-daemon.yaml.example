@@ -892,10 +892,12 @@ pseudo_events:
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
 # Example:
 # plugins:
-#   - type: "file"
-#     path: ".claude/hooks/handlers/pre_tool_use/my_handler.py"
-#     class: "MyHandler"
-#     events: ["PreToolUse"]
+#   paths: []  # Optional: additional Python module search paths
+#   plugins:
+#     - path: ".claude/hooks/handlers/pre_tool_use/my_handler.py"
+#       event_type: pre_tool_use  # REQUIRED: the event this plugin handles
+#       handlers: ["MyHandler"]   # Optional: class names (null = load all)
+#       enabled: true
 
 # Plan workflow (single source of truth for plan tracking).
 # OPT-IN: disabled by default so a stock install does not scatter CLAUDE/Plan/
