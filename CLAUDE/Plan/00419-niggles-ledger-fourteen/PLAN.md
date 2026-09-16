@@ -50,6 +50,10 @@ without opening it:
   an agent running `ruff format`: an eight-file fix commit went in carrying 163.
   Documented in `CLAUDE/QA.md` and broken anyway, by the author, hours after
   reading it. Remedy owner-gated.
+- **N8** — the `Priority` constants are not the numbers a fresh install ships;
+  the whole `status_line` template diverges and one segment it references is
+  absent from it. Relative order holds, so nothing misbehaves and nothing can
+  detect it. Remedy owner-gated.
 
 ## Tasks
 

@@ -363,3 +363,57 @@ half of the trap in place.
 
 Verified live after a daemon restart, both directions: `ruff format --check src` denied with the Black/`run_autofix.sh` guidance, `python -m ruff check`
 still runs.
+
+### N8 — the `Priority` constants are not the numbers a fresh install ships
+
+**Found**: while preparing the v3.65.0 config-changes manifest. A sub-agent
+reported `Priority.HOST_HOSTNAME = 6` against a template shipping
+`priority: 7`, and called it a class-versus-template mismatch introduced by
+Plan 00411. Checking it rather than taking it at face value gave a different
+and larger answer: the whole `status_line` block diverges, and has for far
+longer than that handler has existed.
+
+| Segment                 | `constants/priority.py` | `daemon/init_config.py` template |
+| ----------------------- | ----------------------- | -------------------------------- |
+| `git_repo_name`         | 3                       | 5                                |
+| `environment_indicator` | 4                       | absent                           |
+| `account_display`       | 5                       | 6                                |
+| `host_hostname`         | 6                       | 7                                |
+| `model_context`         | 10                      | 10                               |
+
+**Nothing misbehaves today, and that is the trap.** Relative order is preserved
+across the divergence, so every segment renders where its author intended and
+no test, no QA check and no user report can see a problem. The defect is
+latent: `Priority.HOST_HOSTNAME`'s own comment states an intent ("beside the
+environment indicator"), and `environment_indicator` is not in the template at
+all, so the constant documents a relationship a fresh install cannot have.
+
+**Why it is a niggle.** A constant that the shipped default ignores is a
+constant that lies about its own authority. Someone re-ordering the status line
+by editing `priority.py` — the obvious place, and the place the comments invite
+you to reason in — changes nothing for any project that took the default
+config. The feedback arrives never, which is the worst latency a change can
+have.
+
+It is also an instance of a class this project already names: a second source
+of truth for one decision, with no check that they agree. The same shape as
+`RETIRED_HANDLERS` being duplicated into `init_config.py` (Plan 00420's
+Decision A), and as `get_default_enabled()` being duplicated there and welded
+by `test_default_enabled_template_consistency.py` — which is the precedent for
+the remedy, because that test exists precisely because the same duplication
+bit once already.
+
+**Candidate remedies**, cheapest first:
+
+1. Extend the existing `test_default_enabled_template_consistency.py` idea to
+   PRIORITIES: assert every handler the template names ships the priority its
+   `Priority` member declares. Cheap, and it fails red today.
+2. Generate the template's priority values from the constants, so the
+   duplication stops existing. Better, and larger — the template is a hand-
+   maintained string with comments per line.
+3. Nothing. The current state: the two agree by luck and stay agreeing only
+   while nobody edits either.
+
+Remedy owner-gated — (1) makes a currently-silent divergence loud across the
+whole template, which may surface more than the status-line block and is a
+scope decision rather than a bug fix.
