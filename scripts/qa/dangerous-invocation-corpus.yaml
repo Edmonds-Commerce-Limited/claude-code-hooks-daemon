@@ -30,22 +30,24 @@ rows:
   - id: worktree-checkout-force
     command: "git checkout -f"
     axis: working-tree-destruction
-    verdict: UNCOVERED-open
+    verdict: COVERED
     note: >-
-      F-BYPS-1 and F-GAP G5 found this independently and both probed it.
-      destructive_git already denies `git checkout -- <file>` and
-      `git checkout .`, so the outcome is judged worth guarding and this
-      spelling reaches it anyway. Low-noise: the worklist lists it among the
-      rows worth doing independently of the noisy ones.
+      Closed by destructive_git (R-GIT-CHECKOUT-FORCE). F-BYPS-1 and F-GAP G5
+      found this independently and both probed it; the handler already denied
+      `git checkout -- <file>`, so the outcome was judged worth guarding while
+      this spelling reached it anyway. `git checkout -b feature` and
+      `git checkout feature-fix` stay allowed — the rule keys on a flag token,
+      not on the letter `f`.
 
   - id: worktree-switch-force
     command: "git switch -f main"
     axis: working-tree-destruction
-    verdict: UNCOVERED-open
+    verdict: COVERED
     note: >-
-      The string `switch` occurs in exactly one handler in the tree, and there
-      as a branch-name surface. `git switch --discard-changes` is the same
-      outcome under a third spelling.
+      Closed by destructive_git (R-GIT-SWITCH-FORCE), together with the
+      `--discard-changes` spelling. Before that, the string `switch` occurred
+      in exactly one handler in the tree and there as a branch-name surface.
+      `git switch main` and `git switch -c feature` stay allowed.
 
   - id: worktree-reset-keep
     command: "git reset --keep HEAD~1"
@@ -80,28 +82,32 @@ rows:
   - id: recovery-reflog-expire
     command: "git reflog expire --expire=now --all"
     axis: recovery-net-destruction
-    verdict: UNCOVERED-open
+    verdict: COVERED
     note: >-
-      F-GAP G3, and sharp: destructive_git's own acceptance test justifies a
-      decision with "recoverable via reflog". The handler's safety reasoning
-      depends on a mechanism nothing protects.
+      Closed by destructive_git (R-GIT-REFLOG-EXPIRE). F-GAP G3, and the
+      sharpest of the group: this handler's own safety advice says "can
+      recover later", which assumes a reflog. The rule requires `=now` --
+      `--expire=90.days.ago` is routine housekeeping and stays allowed.
 
   - id: recovery-gc-prune
     command: "git gc --prune=now"
     axis: recovery-net-destruction
-    verdict: UNCOVERED-open
+    verdict: COVERED
     note: >-
-      The other half of G3: expiring the reflog and pruning now are the pair
-      that makes the loss unrecoverable.
+      Closed by destructive_git (R-GIT-GC-PRUNE-NOW). The other half of G3:
+      expiring the reflog and pruning now are the pair that makes the loss
+      unrecoverable. Plain `git gc`, `--auto` and a real prune window stay
+      allowed.
 
   # ------------------------------------------------------------ history rewrite
   - id: history-filter-branch
     command: "git filter-branch --force"
     axis: history-rewrite
-    verdict: UNCOVERED-open
+    verdict: COVERED
     note: >-
-      F-GAP G4. Low-noise -- nothing routine runs it -- so the worklist groups
-      it with the rows worth doing independently.
+      Closed by destructive_git (R-GIT-FILTER-HISTORY), covering both the
+      `filter-branch` and `filter-repo` spellings. F-GAP G4, and low-noise:
+      nothing routine runs it.
 
   - id: history-rebase
     command: "git rebase main"

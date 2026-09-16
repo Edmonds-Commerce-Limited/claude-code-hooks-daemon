@@ -28,7 +28,11 @@ class RuleID:
     """
 
     # ------------------------------------------------------------------
-    # destructive_git handler — 9 rules (Decision B: per-rule granularity)
+    # destructive_git handler — 14 rules (Decision B: per-rule granularity).
+    # The last five close spellings Plan 00412 class 6 measured as reachable:
+    # the handler already denied `git checkout -- <file>`, so discarding the
+    # working tree was judged worth guarding, and `git checkout -f` reached the
+    # same outcome untouched.
     # ------------------------------------------------------------------
 
     #: git reset --hard — permanently destroys all uncommitted changes.
@@ -57,6 +61,21 @@ class RuleID:
 
     #: git commit --amend — rewrites the previous commit.
     GIT_COMMIT_AMEND: str = "R-GIT-COMMIT-AMEND"
+
+    #: git checkout -f/--force — discards the working tree without naming a file.
+    GIT_CHECKOUT_FORCE: str = "R-GIT-CHECKOUT-FORCE"
+
+    #: git switch -f/--discard-changes — the `switch` spelling of the same loss.
+    GIT_SWITCH_FORCE: str = "R-GIT-SWITCH-FORCE"
+
+    #: git reflog expire --expire=now — cuts the recovery net other rules rely on.
+    GIT_REFLOG_EXPIRE: str = "R-GIT-REFLOG-EXPIRE"
+
+    #: git gc --prune=now — drops unreachable objects immediately.
+    GIT_GC_PRUNE_NOW: str = "R-GIT-GC-PRUNE-NOW"
+
+    #: git filter-branch / filter-repo — rewrites every commit in the history.
+    GIT_FILTER_HISTORY: str = "R-GIT-FILTER-HISTORY"
 
     # ------------------------------------------------------------------
     # sed_blocker handler

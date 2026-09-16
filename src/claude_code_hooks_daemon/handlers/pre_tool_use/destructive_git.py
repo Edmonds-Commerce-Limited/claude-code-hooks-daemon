@@ -159,6 +159,47 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
         "git commit --amend rewrites the previous commit, creating messy history "
         "and potential data loss — create a new commit instead",
     ),
+    # Plan 00412 class 6. `git checkout -- <file>` above is already denied, so
+    # discarding the working tree is judged worth guarding; `-f` reaches the
+    # same outcome and names no file at all.
+    #
+    # The force test mirrors the push-force sibling deliberately rather than
+    # re-deriving it: exact `--force` (never a prefix, so `--force-with-lease`
+    # and a hypothetical `--foo` stay out) or a short cluster containing `f`,
+    # because git groups short options. The negated class stops at a command
+    # separator so a later unrelated `-f` -- `git status && grep -f patterns
+    # notes` -- is not swept in.
+    (
+        rf"{_GIT_INVOCATION}checkout[ \t]+[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?"
+        r"(?:(?<!\S)--force(?!-)\b|(?<!\S)-(?!-)[A-Za-z0-9]*f[A-Za-z0-9]*\b)",
+        "git checkout -f discards every uncommitted change in the working tree",
+    ),
+    (
+        rf"{_GIT_INVOCATION}switch[ \t]+[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?"
+        r"(?:(?<!\S)--(?:force|discard-changes)\b"
+        r"|(?<!\S)-(?!-)[A-Za-z0-9]*f[A-Za-z0-9]*\b)",
+        "git switch -f/--discard-changes discards every uncommitted change — the "
+        "`switch` spelling of the same loss `git checkout -f` causes",
+    ),
+    # `=now` is load-bearing, not decoration: expiring entries older than ninety
+    # days is routine housekeeping, and only `now` cuts the net that this
+    # handler's OWN acceptance test leans on when it justifies a decision with
+    # "recoverable via reflog".
+    (
+        rf"{_GIT_INVOCATION}reflog[ \t]+expire[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?"
+        r"--expire(?:-unreachable)?=now\b",
+        "git reflog expire --expire=now destroys the reflog, which is the recovery "
+        "route every other rule in this handler assumes is still there",
+    ),
+    (
+        rf"{_GIT_INVOCATION}gc[ \t]+[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?--prune=now\b",
+        "git gc --prune=now drops unreachable objects immediately, making anything "
+        "only the reflog still referenced unrecoverable",
+    ),
+    (
+        rf"{_GIT_INVOCATION}filter-(?:branch|repo)\b",
+        "git filter-branch/filter-repo rewrites every commit in the history",
+    ),
 )
 
 # Parallel, index-aligned RuleID for each entry in _DESTRUCTIVE_PATTERN_REASONS
@@ -177,6 +218,11 @@ _PATTERN_RULE_IDS: tuple[str, ...] = (
     RuleID.GIT_BRANCH_FORCE_DELETE,
     RuleID.GIT_BRANCH_FORCE_DELETE,  # git update-ref -d refs/heads/<name> (Plan 00205)
     RuleID.GIT_COMMIT_AMEND,
+    RuleID.GIT_CHECKOUT_FORCE,
+    RuleID.GIT_SWITCH_FORCE,
+    RuleID.GIT_REFLOG_EXPIRE,
+    RuleID.GIT_GC_PRUNE_NOW,
+    RuleID.GIT_FILTER_HISTORY,
 )
 
 # Shared teaching content appended after the rule-specific "why" in every
@@ -255,6 +301,36 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
         "`git commit --amend`",
         "Rewrites the previous commit, creating messy history and potential data loss",
         "Create a new commit instead",
+    ),
+    (
+        RuleID.GIT_CHECKOUT_FORCE,
+        "`git checkout -f` / `git checkout --force`",
+        "Discards every uncommitted change in the working tree, naming no file",
+        "Commit or stash first; ask the user if the discard is genuinely wanted",
+    ),
+    (
+        RuleID.GIT_SWITCH_FORCE,
+        "`git switch -f` / `git switch --discard-changes`",
+        "Discards every uncommitted change — the `switch` spelling of `checkout -f`",
+        "Commit or stash first; `git switch <branch>` alone is never blocked",
+    ),
+    (
+        RuleID.GIT_REFLOG_EXPIRE,
+        "`git reflog expire --expire=now`",
+        "Destroys the reflog, which is the recovery route the other rules assume",
+        "Use a real expiry window (`--expire=90.days.ago`), which is not blocked",
+    ),
+    (
+        RuleID.GIT_GC_PRUNE_NOW,
+        "`git gc --prune=now`",
+        "Drops unreachable objects immediately, so reflog-only history is gone",
+        "Plain `git gc` and `git gc --auto` are not blocked; use a prune window",
+    ),
+    (
+        RuleID.GIT_FILTER_HISTORY,
+        "`git filter-branch` / `git filter-repo`",
+        "Rewrites every commit in the history",
+        "Ask the user to run it manually, on a fresh clone with a backup ref",
     ),
 )
 
@@ -360,7 +436,13 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         return self._match_reason(command) is not None
 
     def get_rules(self) -> list[Rule]:
-        """Return the 9 Rule objects backing this handler's blocking behaviour."""
+        """Return the Rule objects backing this handler's blocking behaviour.
+
+        Deliberately uncounted. The previous wording named a figure, and Plan
+        00412 class 6 made it false by adding five rules — a docstring that
+        states a count is a claim that rots the next time anyone extends the
+        single source of truth it describes.
+        """
         return list(self._rules)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
@@ -385,7 +467,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             # Defensive only: handle() is normally invoked exclusively after
             # matches() returned True, so this path is unreachable via the
             # daemon's dispatch. Kept for callers that invoke handle() directly
-            # with a command none of the 10 patterns matches.
+            # with a command none of the patterns matches.
             return GatingResult(
                 decision=Decision.DENY,
                 reason=f"BLOCKED: {_GENERIC_DESTRUCTIVE_REASON}",
@@ -423,7 +505,20 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "| Can overwrite remote history and destroy teammates' work |\n"
             "| `git branch -D` / `git update-ref -d refs/heads/<name>` "
             "| Force-deletes branch without checking if merged (lowercase `-d` is safe) |\n"
-            "| `git commit --amend` | Rewrites the previous commit — create a new commit instead |\n\n"
+            "| `git commit --amend` | Rewrites the previous commit — create a new commit instead |\n"
+            "| `git checkout -f` / `git switch -f` / `git switch --discard-changes` "
+            "| Discards every uncommitted change, naming no file |\n"
+            "| `git reflog expire --expire=now` "
+            "| Destroys the reflog — a real window such as `--expire=90.days.ago` is allowed |\n"
+            "| `git gc --prune=now` "
+            "| Drops unreachable objects at once; plain `git gc` and `--auto` are allowed |\n"
+            "| `git filter-branch` / `git filter-repo` | Rewrites every commit in the history |\n\n"
+            "The last four rows close spellings that reached an outcome this handler "
+            "already guarded: `git checkout -- <file>` was blocked while "
+            "`git checkout -f` was not, and the reflog rules matter because the "
+            "safety advice above ('can recover later') assumes a reflog still "
+            "exists. Branch-switching itself is never blocked — `git switch main`, "
+            "`git checkout -b feature` and `git gc --auto` all pass.\n\n"
             "If the user needs to run one of these, ask them to do it manually. "
             "Do not attempt to work around the block.\n\n"
             "**PROSE describing one of these is not one of these.** What bash hands "

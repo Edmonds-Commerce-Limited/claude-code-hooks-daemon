@@ -8,7 +8,30 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.disclosure_tracker import DisclosureTracker
 from claude_code_hooks_daemon.core.rule import Rule
-from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import DestructiveGitHandler
+from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import (
+    _PATTERN_RULE_IDS,
+    DestructiveGitHandler,
+)
+
+#: Every rule id destructive_git declares — exhaustive and explicit on purpose.
+#: Adding a rule means adding a line here, which is the point: the gate is a
+#: deliberate acknowledgement, not a number that quietly follows the code.
+_DECLARED_RULE_IDS = {
+    RuleID.GIT_RESET_HARD,
+    RuleID.GIT_CLEAN_FORCE,
+    RuleID.GIT_CHECKOUT_DISCARD,
+    RuleID.GIT_RESTORE,
+    RuleID.GIT_STASH_DROP,
+    RuleID.GIT_STASH_CLEAR,
+    RuleID.GIT_PUSH_FORCE,
+    RuleID.GIT_BRANCH_FORCE_DELETE,
+    RuleID.GIT_COMMIT_AMEND,
+    RuleID.GIT_CHECKOUT_FORCE,
+    RuleID.GIT_SWITCH_FORCE,
+    RuleID.GIT_REFLOG_EXPIRE,
+    RuleID.GIT_GC_PRUNE_NOW,
+    RuleID.GIT_FILTER_HISTORY,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -50,14 +73,19 @@ class TestDestructiveGitHandler:
     def test_init_creates_destructive_patterns_list(self, handler):
         """Handler exposes compiled destructive patterns derived from the single mapping.
 
-        The mapping is the single source of truth. Plan 00205 added one new pattern
-        entry (git update-ref -d refs/heads/<name>, sharing GIT_BRANCH_FORCE_DELETE's
-        rule_id) on top of the 10 pre-existing entries, so there are 11 patterns.
-        The +refspec push-force widening reuses the EXISTING push-force pattern slot
-        (Task 2.1: "Extend _GIT_PUSH_FORCE_PATTERN"), so it adds no new entry.
+        The mapping is the single source of truth, and what matters about it is
+        that the pattern list and the rule-id list stay INDEX-ALIGNED — a
+        pattern with no rule id would deny with no rule to explain it.
+
+        Asserting a literal count instead was the earlier form, and it rotted
+        on contact: Plan 00205 rewrote the number once, and Plan 00412 class 6
+        rewrote it again when five spellings were added. A count is a fact
+        about today's rule set, not an invariant, so the test now asserts the
+        invariant and the exhaustive rule-id set below carries the deliberate
+        "did you mean to add one?" gate.
         """
         assert hasattr(handler, "destructive_patterns")
-        assert len(handler.destructive_patterns) == 11
+        assert len(handler.destructive_patterns) == len(_PATTERN_RULE_IDS)
 
     def test_match_reason_and_matches_agree_for_each_command(self, handler):
         """matches() and _match_reason() (used by handle()) must agree on every command.
@@ -572,27 +600,22 @@ class TestDestructiveGitGetRules:
         """Create handler instance."""
         return DestructiveGitHandler()
 
-    def test_returns_nine_rules(self, handler):
-        """get_rules() returns exactly 9 Rule objects (Decision B)."""
+    def test_returns_one_rule_per_declared_rule_id(self, handler):
+        """Every declared rule id gets exactly one Rule object (Decision B).
+
+        Derived from _DECLARED_RULE_IDS rather than a literal, so extending the
+        handler updates one place. The set itself stays exhaustive and explicit
+        below — that is the deliberate "did you mean to add a rule?" gate, and
+        it is worth keeping even though this assertion no longer names a count.
+        """
         rules = handler.get_rules()
-        assert len(rules) == 9
+        assert len(rules) == len(_DECLARED_RULE_IDS)
         assert all(isinstance(rule, Rule) for rule in rules)
 
     def test_rule_ids_match_constants(self, handler):
-        """Every declared rule_id is one of the 9 destructive_git RuleID constants."""
-        expected = {
-            RuleID.GIT_RESET_HARD,
-            RuleID.GIT_CLEAN_FORCE,
-            RuleID.GIT_CHECKOUT_DISCARD,
-            RuleID.GIT_RESTORE,
-            RuleID.GIT_STASH_DROP,
-            RuleID.GIT_STASH_CLEAR,
-            RuleID.GIT_PUSH_FORCE,
-            RuleID.GIT_BRANCH_FORCE_DELETE,
-            RuleID.GIT_COMMIT_AMEND,
-        }
+        """Every declared rule_id is a destructive_git RuleID constant, and vice versa."""
         actual = {rule.rule_id for rule in handler.get_rules()}
-        assert actual == expected
+        assert actual == _DECLARED_RULE_IDS
 
     def test_no_duplicate_rule_ids(self, handler):
         """No two declared rules share a rule_id."""
