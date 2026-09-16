@@ -88,3 +88,17 @@
   right:
     file: src/claude_code_hooks_daemon/remote_docs/store.py
     function: refresh_document
+
+- id: write-target-resolvers-reach-the-home-expander
+  relation: reaches
+  helper: expand_home
+  reason: >
+    both resolve a write DESTINATION to an absolute path, so a resolver that
+    declines `~` disagrees with its sibling about where the same token lands,
+    and containment is then decided by the spelling rather than the location.
+  left:
+    file: src/claude_code_hooks_daemon/core/utils.py
+    function: _resolve_write_target
+  right:
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/project_containment.py
+    function: _resolve_against_cwd

@@ -554,8 +554,14 @@ def _collect_trailing_operands(
     return index
 
 
-def _expand_home(target: str) -> str | None:
+def expand_home(target: str) -> str | None:
     """A `~`-leading token as an absolute path, or None when it cannot be.
+
+    PUBLIC so that every route resolving a write destination expands `~` the
+    same way. A second resolver that declines `~` instead disagrees with this
+    one about where the same token lands, and the two verdicts are then decided
+    by which spelling the command happened to use rather than by where the
+    write goes (Plan 00412).
 
     Only the HOME-relative form (`~` alone, or `~/...`) is expanded. `~otheruser`
     is declined deliberately: resolving another account's home would name a file
@@ -615,7 +621,7 @@ def _resolve_write_target(target: str, cwd: Any) -> str | None:
     target = target.rstrip("/") or "/"
 
     if target.startswith(_HOME_PREFIX):
-        return _expand_home(target)
+        return expand_home(target)
 
     path = Path(target)
     if path.is_absolute():
