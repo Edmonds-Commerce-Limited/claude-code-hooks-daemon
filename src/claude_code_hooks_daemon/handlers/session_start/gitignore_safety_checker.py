@@ -14,6 +14,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.secret_file_matching import DEFAULT_PROTECTED_PATTERNS
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 # root_pattern   — substring to look for in root .gitignore lines
 # scoped_pattern — equivalent substring for .claude/.gitignore (relative, no .claude/ prefix)
 # description    — shown in advisory when entry is missing
-_REQUIRED_GITIGNORE_PATTERNS: tuple[tuple[str, str, str], ...] = (
+_STATIC_GITIGNORE_PATTERNS: tuple[tuple[str, str, str], ...] = (
     (
         ".claude/worktrees",
         "worktrees",
@@ -38,17 +39,38 @@ _REQUIRED_GITIGNORE_PATTERNS: tuple[tuple[str, str, str], ...] = (
         "scheduled_tasks.lock",
         ".claude/scheduled_tasks.lock (ScheduleWakeup/cron runtime lock — never commit)",
     ),
-    (
-        "*.secret",
-        "*.secret",
-        "*.secret (sensitive_content handler's secret word list — must never be committed)",
-    ),
-    (
-        "*.secrets",
-        "*.secrets",
-        "*.secrets (sensitive_content handler's secret word list — must never be committed)",
-    ),
 )
+
+
+def _protected_pattern_entries() -> tuple[tuple[str, str, str], ...]:
+    """One required gitignore entry per PROTECTED glob, derived not restated.
+
+    A file whose contents may never be read into context certainly may never
+    enter git history, so the never-commit list must cover the never-read one.
+
+    Derived rather than restated, because a hand-written approximation of a
+    glob is not the glob (Plan 00412, F-HYG-1): a gitignore line matching only
+    an exact suffix does not match a `.bak` beside it, so a project can satisfy
+    this advisory in full and still commit a file the daemon refuses to read.
+
+    `secret_file_guard` denies authoring these globs as literal text, which
+    makes the same point mechanically: there is one place they are allowed to
+    live, and this is not it.
+
+    A glob is not `.claude/`-scoped, so the scoped pattern is the root pattern.
+    """
+    return tuple(
+        (
+            pattern,
+            pattern,
+            f"{pattern} (a protected path — its contents may never be read, "
+            "so it must never be committed)",
+        )
+        for pattern in DEFAULT_PROTECTED_PATTERNS
+    )
+
+
+_REQUIRED_GITIGNORE_PATTERNS = _STATIC_GITIGNORE_PATTERNS + _protected_pattern_entries()
 
 _GITIGNORE_FILE = ".gitignore"
 _CLAUDE_GITIGNORE_FILE = ".claude/.gitignore"
