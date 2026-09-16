@@ -3197,6 +3197,7 @@ def _gh_ci_lookup(sha: str) -> "CiRunState | None":
         capture_output=True,
         text=True,
         check=True,
+        timeout=Timeout.GH_API_QUERY,
     ).stdout
     for run in json.loads(listing):
         if run.get("headSha") == sha:

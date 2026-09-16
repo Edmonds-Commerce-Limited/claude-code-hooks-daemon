@@ -95,6 +95,16 @@ class Timeout:
     GIT_BUNDLE_CREATE = 300
     VALIDATION_CHECK = 5  # 5 seconds (installation validation subprocess)
     VERSION_CHECK = 5  # 5 seconds (git ls-remote for version check)
+    # 10 seconds (`ps -eo ...` for the background harvester). A local process
+    # table read returns in milliseconds; the ceiling exists so a wedged `ps` on
+    # a loaded box cannot hang the hourly harvest tick rather than to model any
+    # expected duration.
+    PROCESS_SAMPLE = 10
+    # 30 seconds (`gh run list` for CI state). This one reaches the NETWORK,
+    # where slow is the normal weather rather than a fault, so it is the most
+    # generous of the short bounds — but bounded, because an unbounded network
+    # call in a CLI command is a hang with no error to read.
+    GH_API_QUERY = 30
 
     # QA runner timeouts (seconds)
     QA_TEST_TIMEOUT = 120  # 2 minutes (mypy, individual tool checks)

@@ -50,6 +50,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
+
 # A non-negative integer or simple decimal (for the %CPU column). Used to
 # validate ``ps`` columns up front so parsing skips the header/junk rows WITHOUT
 # exception-driven control flow.
@@ -346,5 +348,6 @@ def run_ps() -> str:
         capture_output=True,
         text=True,
         check=True,
+        timeout=Timeout.PROCESS_SAMPLE,
     )
     return completed.stdout
