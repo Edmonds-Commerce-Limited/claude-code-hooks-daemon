@@ -177,7 +177,7 @@ class TestDenominator:
 
         counts = checker.count_rows(corpus)
 
-        assert counts["total"] == 1
+        assert counts["rows_checked"] == 1
         assert counts["uncovered_open"] == 1
         assert counts["covered"] == 0
 

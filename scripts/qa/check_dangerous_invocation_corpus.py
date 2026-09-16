@@ -232,11 +232,17 @@ def scan(corpus_path: Path, verdict: VerdictFn) -> list[Violation]:
 
 
 def count_rows(corpus_path: Path) -> dict[str, int]:
-    """The denominator, split by verdict: what a clean run actually checked."""
+    """The denominator, split by verdict: what a clean run actually checked.
+
+    ``rows_checked`` carries the suffix the repo-wide denominator audit looks
+    for, and it is the more accurate name in any case: it counts rows driven
+    through the chain, not rows present in the file. A corpus that failed to
+    load would otherwise report zero violations and look clean.
+    """
     rows = load_corpus(corpus_path)
     verdicts = Counter(_text(row, "verdict") for row in rows)
     return {
-        "total": len(rows),
+        "rows_checked": len(rows),
         "covered": verdicts[_COVERED],
         "uncovered_accepted": verdicts[_UNCOVERED_ACCEPTED],
         "uncovered_open": verdicts[_UNCOVERED_OPEN],
@@ -258,9 +264,20 @@ def main() -> int:
     violations = scan(corpus_path, real_chain_verdict())
     counts = count_rows(corpus_path)
 
+    # Keys are spelled out rather than spread from `counts`: the repo-wide
+    # denominator audit reads this literal STATICALLY, and a `**counts` spread
+    # tells it nothing. That is the audit being right -- a reader cannot see
+    # what a spread contributes either.
     output = {
         "tool": "dangerous_invocation_corpus",
-        "summary": {"passed": len(violations) == 0, "total_violations": len(violations), **counts},
+        "summary": {
+            "passed": len(violations) == 0,
+            "total_violations": len(violations),
+            "rows_checked": counts["rows_checked"],
+            "covered": counts["covered"],
+            "uncovered_open": counts["uncovered_open"],
+            "uncovered_accepted": counts["uncovered_accepted"],
+        },
         "violations": [violation.to_dict() for violation in violations],
     }
 
@@ -269,14 +286,17 @@ def main() -> int:
         _OUTPUT_FILE.write_text(json.dumps(output, indent=2))
 
     if violations:
-        print(f"Found {len(violations)} stale verdict(s) across {counts['total']} corpus rows:")
+        print(
+            f"Found {len(violations)} stale verdict(s) across "
+            f"{counts['rows_checked']} corpus rows:"
+        )
         for violation in violations:
             print(f"  {violation.row_id}: {violation.command}")
             print(f"      {violation.detail}")
         print(f"\n{_REMEDIATION}")
     else:
         print(
-            f"Every recorded verdict holds ({counts['total']} rows: "
+            f"Every recorded verdict holds ({counts['rows_checked']} rows: "
             f"{counts['covered']} covered, {counts['uncovered_open']} open, "
             f"{counts['uncovered_accepted']} accepted)"
         )
