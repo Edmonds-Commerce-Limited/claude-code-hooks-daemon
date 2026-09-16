@@ -45,21 +45,15 @@ import ast
 from pathlib import Path
 from typing import Final, NamedTuple
 
-_SRC_ROOT: Final[Path] = Path(__file__).resolve().parents[2] / "src" / "claude_code_hooks_daemon"
+from tests.subprocess_ast import is_subprocess_spawn, subprocess_bindings
 
-#: `subprocess` entry points that start a process.
-_SPAWNING_CALLS: Final[frozenset[str]] = frozenset(
-    {"run", "Popen", "call", "check_call", "check_output"}
-)
+_SRC_ROOT: Final[Path] = Path(__file__).resolve().parents[2] / "src" / "claude_code_hooks_daemon"
 
 _GIT: Final[str] = "git"
 
 #: `subprocess.run`'s own name for its argv parameter, so a caller may pass argv
 #: as a keyword and still be making an entirely ordinary call.
 _ARGV_KEYWORD: Final[str] = "args"
-
-#: The module whose spawners this guard is about.
-_SUBPROCESS: Final[str] = "subprocess"
 
 #: Builtins that re-wrap a sequence without changing its elements. An argv held
 #: in a module constant is routinely passed as `list(_CMD)` to hand the callee a
@@ -239,51 +233,6 @@ def _argv_starts_with_git(
     return " ".join(word for word in words if word)
 
 
-class _SubprocessBindings(NamedTuple):
-    """The local names in one module that reach a `subprocess` spawner.
-
-    Resolved per module rather than assumed, because the first version of this
-    guard hard-coded the name `subprocess` and so missed every ordinary
-    alternative: `import subprocess as sp`, `from subprocess import run`, and
-    `from subprocess import run as launch` (Plan 00248 F5). Names are collected
-    from the module's own imports, so nothing is inferred from spelling alone —
-    a project-local `run` from elsewhere is still not a subprocess spawn.
-    """
-
-    #: Names bound to the `subprocess` MODULE — `subprocess`, `sp`, …
-    modules: frozenset[str]
-    #: Names bound directly to a spawner — `run`, `launch`, …
-    spawners: frozenset[str]
-
-
-def _subprocess_bindings(tree: ast.Module) -> _SubprocessBindings:
-    """Every local name in `tree` that leads to a `subprocess` spawner."""
-    modules: set[str] = set()
-    spawners: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == _SUBPROCESS:
-                    modules.add(alias.asname or alias.name)
-        elif isinstance(node, ast.ImportFrom) and node.module == _SUBPROCESS:
-            for alias in node.names:
-                if alias.name in _SPAWNING_CALLS:
-                    spawners.add(alias.asname or alias.name)
-    return _SubprocessBindings(frozenset(modules), frozenset(spawners))
-
-
-def _is_subprocess_spawn(call: ast.Call, bindings: _SubprocessBindings) -> bool:
-    """True for a call that reaches a `subprocess` spawner in this module."""
-    func = call.func
-    if isinstance(func, ast.Attribute):
-        return (
-            func.attr in _SPAWNING_CALLS
-            and isinstance(func.value, ast.Name)
-            and func.value.id in bindings.modules
-        )
-    return isinstance(func, ast.Name) and func.id in bindings.spawners
-
-
 def _direct_git_spawns(source_root: Path) -> list[_Spawn]:
     """Every direct git spawn in `source_root`, exemptions removed."""
     found: list[_Spawn] = []
@@ -292,11 +241,11 @@ def _direct_git_spawns(source_root: Path) -> list[_Spawn]:
         if relative in _EXEMPT:
             continue
         tree = ast.parse(module.read_text(encoding="utf-8"), filename=str(module))
-        bindings = _subprocess_bindings(tree)
+        bindings = subprocess_bindings(tree)
         constants = _module_string_constants(tree)
         sequences = _module_sequence_constants(tree)
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not _is_subprocess_spawn(node, bindings):
+            if not isinstance(node, ast.Call) or not is_subprocess_spawn(node, bindings):
                 continue
             argv_head = _argv_starts_with_git(node, constants, sequences)
             if argv_head is not None:
