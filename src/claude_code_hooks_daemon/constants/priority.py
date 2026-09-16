@@ -298,6 +298,11 @@ class Priority:
     # npm_command (50), a sibling gate on a disjoint tool shape (Task).
     DISPATCH_DECLARATION = 48
 
+    # Plan 00412 class 2a: the guard-config half of the commit gate. Shares the
+    # band with the other staged-tree gates and sits last among them -- it only
+    # ever adds context, so a gate that can DENY should have had its say first.
+    GUARD_CONFIG_COMMIT_GATE = 49
+
     NPM_COMMAND = 50
     VALIDATE_INSTRUCTION_CONTENT = 50
 

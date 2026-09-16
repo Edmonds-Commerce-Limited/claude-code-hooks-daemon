@@ -769,6 +769,18 @@ class HandlerID:
         display_name="guard-config-drift",
     )
 
+    # Guard config commit gate (PreToolUse handler) — Plan 00412 class 2(a):
+    # name a guard weakening at the moment it enters history, where the drift
+    # report's sibling names one already in the working tree. Reports, never
+    # denies: two message-content gate designs were measured against this
+    # repository's history and both misfired on commits that were already
+    # explaining themselves.
+    GUARD_CONFIG_COMMIT_GATE = HandlerIDMeta(
+        class_name="GuardConfigCommitGateHandler",
+        config_key="guard_config_commit_gate",
+        display_name="guard-config-commit-gate",
+    )
+
     # Project handler load checker (SessionStart handler) — Plan 00143:
     # loudly alert when project handlers failed to load (protection degraded)
     PROJECT_HANDLER_LOAD_CHECKER = HandlerIDMeta(

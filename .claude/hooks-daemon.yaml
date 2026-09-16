@@ -587,6 +587,10 @@ handlers:
       enabled: true        # Warn-first rollout (documentation.qa.commit_gate_mode: warn)
       priority: 47
 
+    guard_config_commit_gate:  # Guard weakenings named at commit time (Plan 00412 class 2a)
+      enabled: true        # Reports only -- never denies; see the module docstring for why
+      priority: 49
+
     npm_command:           # Restricts npm commands to approved list
       enabled: true        # Enable for strict npm usage control
       priority: 49

@@ -424,6 +424,17 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "preventive half -- stopping the weakening rather than reporting it -- is "
         "Plan 00412 class 2(a)'s commit-time gate, not resident text here"
     ),
+    "GuardConfigCommitGateHandler": (
+        "T4 fires at the moment of the commit, naming each weakened guard and "
+        "which version of the config it read. Resident text would be the WRONG "
+        "shape for this one: it reports rather than denies, so there is no rule "
+        "to learn in advance and nothing an agent could do differently having "
+        "read it. Two designs that WOULD need resident guidance -- a required "
+        "`RULE CHANGE:` marker, and a requirement to name the weakened handler "
+        "-- were both measured against this repository's history and both "
+        "misfired on the majority of commits that were already explaining "
+        "themselves, which is why neither shipped"
+    ),
     "GitignoreSafetyCheckerHandler": "T4 fires once at session start with the full remedy",
     "OptimalConfigCheckerHandler": "T4 fires once at session start with the full remedy",
     "SuggestStatusLineHandler": "T4 fires once at session start with the full remedy",

@@ -252,6 +252,49 @@ class TestTheOtherChangesCountIsNotInflated:
         assert report.other_changes == 1
 
 
+class TestAFindingDoesNotNameADocumentTheCallerMayNotHaveRead:
+    """Two callers now supply the "after" document, and they differ.
+
+    The session-start report compares the WORKING TREE against HEAD; the
+    commit gate compares the STAGED blob (or, for `git commit -a`, the working
+    tree). A detail hard-coding "in the working tree" was therefore printed
+    verbatim under a heading that said "per the staged config" -- a security
+    advisory naming the wrong document, which is worse than naming none.
+
+    Each caller already states which document it read, so the finding states
+    only what changed.
+    """
+
+    def test_a_disabled_finding_does_not_name_the_working_tree(self) -> None:
+        working = _COMMITTED.replace(
+            "    sed_blocker:\n      enabled: true",
+            "    sed_blocker:\n      enabled: false",
+        )
+
+        report = compare_guard_config(_COMMITTED, working)
+
+        assert "working tree" not in report.guard_changes[0].detail
+
+    def test_a_removed_finding_does_not_name_the_working_tree(self) -> None:
+        working = _COMMITTED.replace("    sed_blocker:\n      enabled: true\n", "")
+
+        report = compare_guard_config(_COMMITTED, working)
+
+        assert "working tree" not in report.guard_changes[0].detail
+
+    def test_a_finding_still_says_what_actually_changed(self) -> None:
+        """Removing the document name must not leave an empty statement."""
+        working = _COMMITTED.replace(
+            "    sed_blocker:\n      enabled: true",
+            "    sed_blocker:\n      enabled: false",
+        )
+
+        detail = compare_guard_config(_COMMITTED, working).guard_changes[0].detail
+
+        assert "enabled: false" in detail
+        assert "committed" in detail
+
+
 class TestMalformedInputFailsQuietlyRatherThanCryingWolf:
     """An advisory that fires wrongly every session gets switched off."""
 

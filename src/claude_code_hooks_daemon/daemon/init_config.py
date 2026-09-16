@@ -269,6 +269,7 @@ class ConfigTemplate:
             "    dispatch_declaration: {enabled: true, priority: 48}  # Advise/enforce a file-handoff declaration on Task dispatch\n"
             "    docs_qa_edit: {enabled: true, priority: 47}      # Docs QA lint on documentation writes (fires only when documentation.enabled)\n"
             "    docs_qa_commit_gate: {enabled: true, priority: 47}  # STAGED docs QA gate on git commit (fires only when documentation.enabled; warn-first)\n"
+            "    guard_config_commit_gate: {enabled: true, priority: 49}  # Report a commit whose hooks-daemon.yaml weakens a guard; reports only, never denies\n"
             "    npm_command: {enabled: true, priority: 50}       # Restrict npm commands to approved list\n"
             "    validate_instruction_content: {enabled: true, priority: 50}  # Block ephemeral content in CLAUDE.md/README.md\n"
             "    web_search_year: {enabled: true, priority: 55}   # Fix outdated years in searches\n"

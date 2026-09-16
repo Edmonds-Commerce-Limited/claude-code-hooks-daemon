@@ -157,7 +157,11 @@ def compare_guard_config(
 
     Args:
         committed: the config as recorded in git, empty when there is none.
-        working: the config the daemon will actually load.
+        working: the config being compared against it. The session-start report
+            supplies the working tree; the commit gate supplies the STAGED blob,
+            or the working tree for ``git commit -a``. Findings therefore never
+            name a document -- each caller states which one it read, and a
+            finding that named the wrong one would be worse than naming none.
         known_handlers: config keys of handlers that still exist. A removed
             block only disables something if the handler is still there to run;
             without it, a mass config reorganisation reads as twenty weakenings.
@@ -199,7 +203,7 @@ def compare_guard_config(
                     GuardChange(
                         handler=name,
                         kind=DriftKind.REMOVED,
-                        detail="the handler's config block is gone from the working tree",
+                        detail="the handler's config block is gone, and the handler still exists",
                     )
                 )
             else:
@@ -213,7 +217,7 @@ def compare_guard_config(
                 GuardChange(
                     handler=name,
                     kind=DriftKind.DISABLED,
-                    detail="`enabled: false` in the working tree, not in the committed config",
+                    detail="now `enabled: false`, which the committed config does not say",
                 )
             )
         added = [p for p in _exclusions(after_spec) if p not in _exclusions(before_spec)]
