@@ -8,7 +8,15 @@ handlers earn their keep?", "what is the real false-positive rate per
 handler?") is answerable only by anecdote.
 
 This module writes ``verdicts.jsonl``, one line per handler decision:
-``{ts, session, event, tool, handler, verdict, rule, mode, overridden}``.
+``{ts, session, event, tool, handler, verdict, rule, mode, overridden,
+synthetic}``.
+
+``synthetic`` (Plan 00418) names the harness that fabricated the event, or is
+``null`` for a real agent session — see ``daemon/synthetic_traffic.py``. It is
+written on every line because a log that cannot separate probe traffic from
+agent traffic is a record of neither: half of this project's own window was
+acceptance-playbook and socket-test fires, and every statistic quoted from it
+blended the two without anything flagging that it had.
 
 Design (Plan 00209 Task 2.1): the write happens ONCE, in the daemon
 controller, reading ``ChainExecutionResult.decisions`` (populated by
@@ -54,6 +62,11 @@ from typing import Any
 from claude_code_hooks_daemon.core.chain import HandlerVerdict
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    SYNTHETIC_SOURCE_FIELD,
+    VERDICT_SYNTHETIC_FIELD,
+    classify_synthetic,
+)
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.retention import cap_log_file
 
@@ -156,6 +169,13 @@ def build_verdict_lines(
         return []
 
     ts = (now or datetime.now(UTC)).isoformat()
+    # Plan 00418: written on EVERY line, present-and-null for real traffic.
+    # An absent key would be indistinguishable from a line written before the
+    # field existed, and the whole point is that the reader can tell.
+    synthetic = classify_synthetic(
+        marker=hook_input.get(SYNTHETIC_SOURCE_FIELD),
+        session_id=session_id,
+    )
     lines: list[dict[str, Any]] = [
         {
             "ts": ts,
@@ -167,6 +187,7 @@ def build_verdict_lines(
             "rule": decision.rule,
             "mode": _mode_for(decision.decision),
             "overridden": False,
+            VERDICT_SYNTHETIC_FIELD: synthetic,
         }
         for decision in decisions
     ]
@@ -183,6 +204,7 @@ def build_verdict_lines(
                 "rule": None,
                 "mode": None,
                 "overridden": True,
+                VERDICT_SYNTHETIC_FIELD: synthetic,
             }
         )
 

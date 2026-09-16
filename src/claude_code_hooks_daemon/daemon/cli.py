@@ -4295,7 +4295,11 @@ def cmd_verdicts(args: argparse.Namespace) -> int:
 
     records = read_verdict_records(log_path)
     all_handlers = _resolve_registered_handler_names(args, project_path)
-    aggregate = aggregate_verdicts(records, all_handlers=all_handlers)
+    aggregate = aggregate_verdicts(
+        records,
+        all_handlers=all_handlers,
+        include_synthetic=bool(getattr(args, "include_synthetic", False)),
+    )
 
     if args.json:
         print(json.dumps(aggregate, indent=2))
@@ -9416,6 +9420,15 @@ def main() -> int:
         "--json",
         action="store_true",
         help="Output machine-readable JSON instead of a text report",
+    )
+    parser_verdicts.add_argument(
+        "--include-synthetic",
+        dest="include_synthetic",
+        action="store_true",
+        help="Include test-harness records (acceptance playbook probes, the "
+        "forwarder socket test) in the figures. Excluded by default: they "
+        "were half this project's own log and blending them with agent "
+        "traffic makes every number describe neither",
     )
     parser_verdicts.set_defaults(func=cmd_verdicts)
 

@@ -163,3 +163,44 @@ def test_no_daemon_running_reports_never_fired_as_unavailable(tmp_path, capsys):
 
     assert rc == 0
     assert "Never-fired handlers: unavailable" in out
+
+
+def _mixed_traffic():
+    return [
+        {
+            "session": "9679b063-1111",
+            "handler": "pipe_blocker",
+            "verdict": "deny",
+            "overridden": False,
+        },
+        {
+            "session": "playbook-probe-r1-7",
+            "handler": "sed_blocker",
+            "verdict": "deny",
+            "overridden": False,
+        },
+    ]
+
+
+def test_probe_traffic_is_excluded_by_default(tmp_path, capsys):
+    """Plan 00418: the default view is REAL traffic. A report whose default
+    blends a harness with an agent is how 50%-synthetic figures reached a
+    plan document and were quoted as evidence."""
+    _write_verdicts(tmp_path / "verdicts.jsonl", _mixed_traffic())
+
+    rc = cli.cmd_verdicts(_args(tmp_path, json=True))
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert payload["handler_counts"] == {"pipe_blocker": 1}
+    assert payload["synthetic_records"] == 1
+
+
+def test_include_synthetic_flag_restores_the_blended_view(tmp_path, capsys):
+    _write_verdicts(tmp_path / "verdicts.jsonl", _mixed_traffic())
+
+    rc = cli.cmd_verdicts(_args(tmp_path, json=True, include_synthetic=True))
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert payload["handler_counts"] == {"pipe_blocker": 1, "sed_blocker": 1}

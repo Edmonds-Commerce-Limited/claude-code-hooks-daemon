@@ -19,7 +19,11 @@ blocking code path in this handler at all, so none can be reached by mistake
 
 from typing import Any
 
-from orchestrator_simulate import OrchestratorSimulateHandler
+from orchestrator_simulate import (
+    BLOCKING_ENABLED,
+    ORCHESTRATOR_WRITE_RULE_ID,
+    OrchestratorSimulateHandler,
+)
 
 from claude_code_hooks_daemon.core.hook_result import Decision
 
@@ -204,19 +208,24 @@ class TestHandleNeverDenies:
         result = self.handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
-    def test_handle_never_returns_deny_attribute_anywhere(self) -> None:
-        """Static property check: DENY is not reachable from this handler's code.
+    def test_handle_never_denies_anything_in_the_default_mode(self) -> None:
+        """The default is simulate, and simulate cannot deny ANY tool.
 
-        `handle()` is hand-read as having a single `return` statement — this
-        test pins the behavioural half of that claim so a future edit that
-        adds a second path is caught even if it forgets to re-read the source.
+        Phase 1 pinned this structurally (the module carried no DENY token at
+        all). Task 2.2 added an opt-in blocking mode, so the structural
+        version of the claim is gone and only the behavioural one is left —
+        which means it has to be asserted over the whole tool surface rather
+        than over the three shapes that happened to be convenient.
         """
-        import inspect
-
-        source = inspect.getsource(self.handler.handle)
-        assert "Decision.DENY" not in source
-        assert "GatingResult.deny" not in source
-        assert ".deny(" not in source
+        for tool_name, tool_input in (
+            ("Bash", {"command": "rm -rf /tmp/scratch"}),
+            ("Write", {"file_path": "/workspace/src/thing.py", "content": "x"}),
+            ("Edit", {"file_path": "/workspace/src/thing.py", "new_string": "x"}),
+            ("NotebookEdit", {"notebook_path": "/workspace/nb.ipynb"}),
+            ("SomeFutureTool", {}),
+        ):
+            hook_input = {"tool_name": tool_name, "tool_input": tool_input}
+            assert self.handler.handle(hook_input).decision == Decision.ALLOW, tool_name
 
     def test_handle_context_names_the_tool_and_says_simulated(self, bash_hook_input: Any) -> None:
         hook_input = bash_hook_input("rm -rf /tmp/scratch")
@@ -330,6 +339,258 @@ class TestAcceptanceTests:
         assert len(tests) >= 1
 
     def test_acceptance_tests_all_expect_allow(self) -> None:
-        """No acceptance test may expect DENY — this handler cannot produce one."""
-        tests = self.handler.get_acceptance_tests()
-        assert all(t.expected_decision == Decision.ALLOW for t in tests)
+        """No acceptance test may expect DENY, in EITHER mode.
+
+        Not because the handler cannot deny — since Task 2.2 it can — but
+        because the acceptance harness marks its own events synthetic and this
+        handler never denies a probe (see
+        `TestASyntheticProbeIsNeverDenied`). A DENY probe would therefore be a
+        test that is guaranteed to fail, asserting a denial the gate is
+        designed not to produce.
+        """
+        for handler in (OrchestratorSimulateHandler(), OrchestratorSimulateHandler(blocking=True)):
+            tests = handler.get_acceptance_tests()
+            assert all(t.expected_decision == Decision.ALLOW for t in tests)
+
+
+class TestBlockingIsOptInAndOffByDefault:
+    """Task 2.2a: blocking is a build, and it ships OFF.
+
+    PLAN.md's "Blocking by default, ever" non-goal is the thing under test.
+    The failure mode of a wrong answer here is an agent that cannot work at
+    all, so the default has to be provably simulate rather than
+    conventionally so.
+    """
+
+    def test_the_module_switch_is_off(self) -> None:
+        assert BLOCKING_ENABLED is False
+
+    def test_a_default_handler_allows_a_main_thread_implementation_write(
+        self, write_hook_input: Any
+    ) -> None:
+        handler = OrchestratorSimulateHandler()
+        result = handler.handle(write_hook_input("/workspace/src/thing.py", "x"))
+        assert result.decision == Decision.ALLOW
+
+    def test_a_default_handler_is_not_tagged_blocking(self) -> None:
+        """The generated CLAUDE.md groups by tag; a simulating handler that
+        advertised itself as blocking would teach the wrong rule."""
+        handler = OrchestratorSimulateHandler()
+        assert "blocking" not in handler.tags
+        assert "advisory" in handler.tags
+
+    def test_a_default_handler_declares_no_rule(self) -> None:
+        """A rule row in CLAUDE.md is a promise that the rule can fire."""
+        assert OrchestratorSimulateHandler().get_rules() == []
+
+    def test_a_blocking_handler_is_tagged_blocking_and_declares_its_rule(self) -> None:
+        handler = OrchestratorSimulateHandler(blocking=True)
+        assert "blocking" in handler.tags
+        rules = handler.get_rules()
+        assert [rule.rule_id for rule in rules] == [ORCHESTRATOR_WRITE_RULE_ID]
+
+
+class TestBlockingDeniesMainThreadFileMutation:
+    """Ruling 1: the boundary is drawn on tool identity, not on Bash.
+
+    73% of the real session's main-thread edits were implementation work —
+    exactly what the plan exists to push to subagents.
+    """
+
+    def setup_method(self) -> None:
+        self.handler = OrchestratorSimulateHandler(blocking=True)
+
+    def test_write_is_denied(self, write_hook_input: Any) -> None:
+        result = self.handler.handle(write_hook_input("/workspace/src/thing.py", "x"))
+        assert result.decision == Decision.DENY
+
+    def test_edit_is_denied(self, edit_hook_input: Any) -> None:
+        result = self.handler.handle(edit_hook_input("/workspace/src/thing.py", "old", "new"))
+        assert result.decision == Decision.DENY
+
+    def test_notebook_edit_is_denied(self) -> None:
+        hook_input = {
+            "tool_name": "NotebookEdit",
+            "tool_input": {"notebook_path": "/workspace/nb.ipynb"},
+        }
+        assert self.handler.handle(hook_input).decision == Decision.DENY
+
+    def test_the_deny_reason_carries_the_stable_rule_id(self, write_hook_input: Any) -> None:
+        """A rule ID is a public contract: it is what `explain-rule` resolves
+        and what an agent can search for. A deny with no identifier is a deny
+        nobody can look up."""
+        result = self.handler.handle(write_hook_input("/workspace/src/thing.py", "x"))
+        assert ORCHESTRATOR_WRITE_RULE_ID in (result.reason or "")
+
+    def test_the_deny_reason_says_how_to_proceed(self, write_hook_input: Any) -> None:
+        """A gate that says only "no" costs a turn to nothing."""
+        reason = self.handler.handle(write_hook_input("/workspace/src/thing.py", "x")).reason or ""
+        assert "Task" in reason
+
+    def test_an_unknown_future_tool_is_recorded_but_not_denied(self) -> None:
+        """Simulate flags everything it does not recognise; BLOCKING is scoped
+        to the three named file-mutating tools and nothing else. Denying an
+        unrecognised tool would be guessing about a capability that does not
+        exist yet, on a gate whose wrong answer stops all work."""
+        hook_input = {"tool_name": "SomeFutureTool", "tool_input": {}}
+        assert self.handler.matches(hook_input) is True
+        assert self.handler.handle(hook_input).decision == Decision.ALLOW
+
+
+class TestBashIsNeverDenied:
+    """Arithmetic, not taste, and NOT the owner's to re-decide.
+
+    93% of the real session's Bash calls run several commands at once and 22%
+    straddle the boundary WITHIN one invocation (`set+git add+git commit`), so
+    no per-call verdict on a Bash head can be right about both halves.
+    """
+
+    def setup_method(self) -> None:
+        self.handler = OrchestratorSimulateHandler(blocking=True)
+
+    def test_a_destructive_bash_call_is_still_allowed(self, bash_hook_input: Any) -> None:
+        result = self.handler.handle(bash_hook_input("rm -rf /tmp/scratch"))
+        assert result.decision == Decision.ALLOW
+
+    def test_a_bash_heredoc_write_is_allowed_even_though_it_evades_the_gate(
+        self, bash_hook_input: Any
+    ) -> None:
+        """The gate is porous by construction and that is accepted: it is a
+        BEHAVIOURAL gate for context hygiene, not a security one. The command
+        label is the instrument that would show evasion rising."""
+        result = self.handler.handle(bash_hook_input("cat > /workspace/src/thing.py <<'EOF'"))
+        assert result.decision == Decision.ALLOW
+        assert result.rule == "cat"
+
+    def test_a_compound_command_is_still_classified_while_blocking(
+        self, bash_hook_input: Any
+    ) -> None:
+        result = self.handler.handle(bash_hook_input("git status && git diff"))
+        assert result.rule == "git status+git diff"
+
+
+class TestThePlanDirectoryIsExempt:
+    """The lead owns its own plan folder, by this project's directory roles.
+
+    Denying these writes buys no context hygiene (a journal entry is small)
+    and pushes the lead into `cat >> JOURNAL` heredocs — the exact route this
+    project's CLAUDE.md says bypasses every content guard.
+    """
+
+    def setup_method(self) -> None:
+        self.handler = OrchestratorSimulateHandler(blocking=True)
+
+    def test_a_plan_document_is_allowed(self, write_hook_input: Any) -> None:
+        result = self.handler.handle(
+            write_hook_input("/workspace/CLAUDE/Plan/00418-orchestrator/PLAN.md", "x")
+        )
+        assert result.decision == Decision.ALLOW
+
+    def test_a_journal_day_file_is_allowed(self, write_hook_input: Any) -> None:
+        result = self.handler.handle(
+            write_hook_input("/workspace/CLAUDE/Plan/00418-x/JOURNAL/00418-Journal-26-09-16.md", "")
+        )
+        assert result.decision == Decision.ALLOW
+
+    def test_the_plan_index_is_allowed(self, edit_hook_input: Any) -> None:
+        result = self.handler.handle(
+            edit_hook_input("/workspace/CLAUDE/Plan/README.md", "old", "new")
+        )
+        assert result.decision == Decision.ALLOW
+
+    def test_an_archived_plan_is_allowed(self, edit_hook_input: Any) -> None:
+        result = self.handler.handle(
+            edit_hook_input("/workspace/CLAUDE/Plan/Completed/00001-x/PLAN.md", "o", "n")
+        )
+        assert result.decision == Decision.ALLOW
+
+    def test_the_exemption_survives_a_worktree_path(self, write_hook_input: Any) -> None:
+        """Every path this gate sees in practice is absolute and most are in a
+        worktree, so a repo-root-relative prefix test would exempt nothing."""
+        result = self.handler.handle(
+            write_hook_input(
+                "/workspace/.claude/worktrees/agent-abc/CLAUDE/Plan/00418-x/PLAN.md", "x"
+            )
+        )
+        assert result.decision == Decision.ALLOW
+
+    def test_a_plan_directory_elsewhere_in_the_tree_is_not_exempt(
+        self, write_hook_input: Any
+    ) -> None:
+        """`Plan` is exempt because `CLAUDE/Plan` is the declared plan root,
+        not because the word appears in the path."""
+        result = self.handler.handle(write_hook_input("/workspace/src/Plan/thing.py", "x"))
+        assert result.decision == Decision.DENY
+
+    def test_scratch_is_deliberately_not_exempt(self, write_hook_input: Any) -> None:
+        """Nothing designates the lead the author of a scratch file. Whether
+        that hurts is a question the blocking record answers."""
+        result = self.handler.handle(write_hook_input("/workspace/untracked/scratch/notes.md", "x"))
+        assert result.decision == Decision.DENY
+
+    def test_an_agent_docs_write_is_not_exempt(self, edit_hook_input: Any) -> None:
+        result = self.handler.handle(edit_hook_input("/workspace/CLAUDE/QA.md", "o", "n"))
+        assert result.decision == Decision.DENY
+
+
+class TestASubagentIsStillUnaffectedWhileBlocking:
+    """The exact failure that killed v1, re-asserted with teeth on.
+
+    Simulate could get this wrong at no cost. Blocking cannot: an `agent_id`
+    misread here makes agent teams unusable, which is precisely why the
+    original handler was deleted.
+    """
+
+    def setup_method(self) -> None:
+        self.handler = OrchestratorSimulateHandler(blocking=True)
+
+    def test_a_subagent_write_does_not_even_match(self, write_hook_input: Any) -> None:
+        hook_input = write_hook_input("/workspace/src/thing.py", "x")
+        hook_input["agent_id"] = "agent-abc123"
+        assert self.handler.matches(hook_input) is False
+
+    def test_a_subagent_write_is_allowed_if_handle_is_reached_anyway(
+        self, write_hook_input: Any
+    ) -> None:
+        """Defence in depth: `matches()` is the gate, but a caller that skips
+        it (a test, a future dispatch change) must not get a denial."""
+        hook_input = write_hook_input("/workspace/src/thing.py", "x")
+        hook_input["agent_id"] = "agent-abc123"
+        assert self.handler.handle(hook_input).decision == Decision.ALLOW
+
+
+class TestASyntheticProbeIsNeverDenied:
+    """Task 2.2a precondition 2, and it is not hypothetical.
+
+    The acceptance playbook builds events with no `agent_id`, so a naively
+    written blocking mode would deny every `Write`/`Edit` probe — 280 of them
+    at the snapshot — and, under most-restrictive-wins, turn other handlers'
+    expected ALLOW outcomes into failures. The acceptance harness would go red
+    on the day blocking was enabled.
+    """
+
+    def setup_method(self) -> None:
+        self.handler = OrchestratorSimulateHandler(blocking=True)
+
+    def test_a_marked_probe_is_allowed(self, write_hook_input: Any) -> None:
+        hook_input = write_hook_input("/workspace/src/thing.py", "x")
+        hook_input["synthetic_source"] = "playbook-probe"
+        assert self.handler.handle(hook_input).decision == Decision.ALLOW
+
+    def test_an_unmarked_probe_session_is_allowed(self, write_hook_input: Any) -> None:
+        """The session-shape fallback covers a producer this repo does not own."""
+        hook_input = write_hook_input("/workspace/src/thing.py", "x")
+        hook_input["session_id"] = "playbook-probe-r1-7"
+        assert self.handler.handle(hook_input).decision == Decision.ALLOW
+
+    def test_the_socket_integration_test_session_is_allowed(self, write_hook_input: Any) -> None:
+        hook_input = write_hook_input("/workspace/src/thing.py", "x")
+        hook_input["session_id"] = "socket-stdin-test"
+        assert self.handler.handle(hook_input).decision == Decision.ALLOW
+
+    def test_a_real_session_is_still_denied(self, write_hook_input: Any) -> None:
+        """The control: without it, "no probe was denied" is indistinguishable
+        from "nothing was denied at all"."""
+        hook_input = write_hook_input("/workspace/src/thing.py", "x")
+        hook_input["session_id"] = "9679b063-1111-2222"
+        assert self.handler.handle(hook_input).decision == Decision.DENY
