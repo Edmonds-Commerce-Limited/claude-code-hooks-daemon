@@ -90,27 +90,27 @@ without opening it:
   repointed (`../` to `../../` in `PLAN.md` and `NIGGLES.md`), and each verified
   to resolve on disk rather than by eye.
 
-- [ ] ⬜ **Task 1.4**: N2's remedy — build the resolver that knows a plan may
-  have moved to `Completed/`. The fork this task was opened to decide is now
-  settled by constraint rather than preference (see N2's new evidence): a
-  journal link cannot be repointed without violating append-only, so
-  "repoint at archival time" is not available. Still owner-gated, because it
-  changes what `--sweep` blocks on across every project.
+- [x] ✅ **Task 1.4**: N2's remedy built as UNCONDITIONAL behaviour, per
+  [the ruling](fable-niggle-remedies-decision.md); the default-off flag this
+  task floated is rejected. `plan_links.py` resolves a link by plan NUMBER
+  across the active root and every configured archive dir, only after the
+  literal path fails. `pointer-resolves` consumes it and is source-sensitive:
+  silent from an archived plan or a `JOURNAL/` day-file, silent from a live
+  `PLAN.md` (plan QA owns that one), ADVISE elsewhere — never BLOCK. New
+  plan-QA check `plan-link-resolves`, SWEEP-only at ADVISE. `docs_qa` now
+  learns the plan dir and archive names from `plan_workflow` config instead of
+  hardcoding `CLAUDE/Plan/Completed`; no new config key.
 
-  **The gating premise has a possible dissolution worth deciding on
-  explicitly**, by analogy with N7. That niggle was also recorded as
-  owner-gated "because it changes the gate surface in every installing
-  project", and that stopped being true once the remedy was scoped to a
-  PROJECT-level handler — the reasoning was sound, it just described a
-  different artefact from the one actually needed.
+  Clean RED was 6 failed / 222 passed plus 4 collection errors for the
+  not-yet-existing modules; GREEN is 5,258 passed across every touched area.
 
-  The same move is not available here, since a project handler cannot
-  override the library's plan-QA link resolution. The equivalent is a
-  DEFAULT-OFF config flag: no installing project's `--sweep` behaviour
-  changes until it opts in, so the premise that gates this task no longer
-  holds. That is a suggestion for the owner to accept or reject, not a
-  decision taken — it trades one real cost (a config surface that must be
-  documented and can drift out of step with the default) for another.
+  Verified on the REAL tree, not only fixtures: the shipped resolver replays
+  all 8 of N2's recorded dead links out of the archival commit `8b580808` —
+  8 resolve, 0 still dead, each with its literal path confirmed absent. A
+  whole-repo pass finds 19 relocated links (18 from archived sources, silent
+  by doctrine; 1 from a live doc) and leaves 16 genuinely dead links dead.
+  Both sweeps still report the real tree clean, so no false positive was
+  introduced.
 
 - [x] ✅ **Task 1.6**: N4 fixed, RED first, in
   `tests/unit/utils/test_cron_enforcement_whitespace.py`. Clean RED was 5

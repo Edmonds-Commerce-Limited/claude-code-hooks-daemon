@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
+from claude_code_hooks_daemon.plan_links import PlanTreeLayout
 from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 DEFAULT_AGENT_TREE = "CLAUDE"
@@ -89,6 +90,15 @@ class DocumentationPolicy:
     #: docs QA surface -- a fixture tree that must keep producing findings is
     #: declared by NOT listing it here, never by omission elsewhere.
     exclude_paths: tuple[str, ...] = ()
+    #: Where the plan tree lives and what its archive directories are called
+    #: (Plan 00419 N2). Sourced from ``plan_workflow``, which is its config
+    #: home, and travelling WITH the policy on the same argument as the two
+    #: fields above: docs QA's scope judgement and ``pointer-resolves`` both
+    #: read the POLICY, so a value injected only onto the handler instance
+    #: could reach neither. Two consumers need it -- the corpus's archive
+    #: exclusion, which previously hardcoded ``CLAUDE/Plan/Completed``, and
+    #: the archive-aware plan-link resolver.
+    plan_tree: PlanTreeLayout = field(default_factory=PlanTreeLayout)
 
 
 class TreesConfigProtocol(Protocol):
@@ -160,6 +170,7 @@ def policy_from_config(
     *,
     vendor_scopes: Sequence[VendorScope] | None = None,
     exclude_paths: Sequence[str] | None = None,
+    plan_tree: PlanTreeLayout | None = None,
 ) -> DocumentationPolicy:
     """Build a plain-values :class:`DocumentationPolicy` from the typed config.
 
@@ -167,6 +178,12 @@ def policy_from_config(
         config: The ``documentation:`` block, structurally typed.
         exclude_paths: The project-wide ``daemon.exclude_paths`` globs, as
             plain strings. ``None`` (or empty) excludes nothing.
+        plan_tree: The plan tree's shape, ordinarily built from
+            ``plan_workflow`` by :func:`plan_links.plan_tree_layout`. ``None``
+            means "no plan_workflow config available" and keeps the shipped
+            defaults, which are the config model's own defaults — emptying it
+            instead would silently switch off both the archive exclusion and
+            the link resolver for every caller that forgot the argument.
         vendor_scopes: One :class:`~utils.vendor_paths.VendorScope` per
             declared project, ordinarily built from
             ``ProjectRegistry.iter_layouts()``. Each scope's ``vendor_dirs``
@@ -187,6 +204,7 @@ def policy_from_config(
             DocumentationPolicy.vendor_scopes if vendor_scopes is None else tuple(vendor_scopes)
         ),
         exclude_paths=() if exclude_paths is None else tuple(exclude_paths),
+        plan_tree=PlanTreeLayout() if plan_tree is None else plan_tree,
         trees=DocumentationTreesPolicy(agent=config.trees.agent, human=config.trees.human),
         qa=DocumentationQaPolicy(
             edit_mode=qa.edit_mode,

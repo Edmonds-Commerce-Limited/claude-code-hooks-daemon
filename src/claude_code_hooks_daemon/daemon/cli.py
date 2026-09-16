@@ -6021,6 +6021,7 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.docs_qa.report import CLEAN_SCOPE_CORPUS, format_cli_report
     from claude_code_hooks_daemon.docs_qa.runner import run_stage
     from claude_code_hooks_daemon.docs_qa.types import CheckStage
+    from claude_code_hooks_daemon.plan_links import plan_tree_layout
 
     resolved_root = resolve_tree_root(args)
     if resolved_root is None:
@@ -6034,10 +6035,15 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     # findings the edit-time check has already agreed to skip. That argument
     # applies unchanged to a sub-project's declaration (Plan 00332), which is
     # why the scopes come from the registry rather than the root layout.
+    # The plan tree's shape travels with the policy for the same reason
+    # (Plan 00419 N2): the CLI is the surface a human runs by hand, so a
+    # resolver wired only at handler-dispatch time would disagree with the
+    # edit-time check about whether the same link is dead.
     policy = policy_from_config(
         config.documentation,
         vendor_scopes=ProjectRegistry.from_config(config, project_root).vendor_scopes(),
         exclude_paths=config.daemon.exclude_paths,
+        plan_tree=plan_tree_layout(config.plan_workflow),
     )
 
     if getattr(args, "check_staged", False):

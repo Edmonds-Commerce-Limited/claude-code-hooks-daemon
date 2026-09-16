@@ -61,3 +61,49 @@ truth_changes:
       the very next `git commit` denies the same state, scoped by Plan 00343's
       rule so a commit is blamed only for incoherence it introduced, never for
       incoherence it inherited.
+
+  - topic: docs-qa
+    id: pointer-resolves-archive-aware
+    was: >
+      `pointer-resolves` judged a markdown link by its LITERAL path only, so
+      archiving a plan made every `](../00NNN-y/PLAN.md)` it contained read as
+      a dead link -- the folder had moved one level deeper, not vanished. A
+      link that was NEW in the edit or commit was graded BLOCK, and the SWEEP
+      half reported the rest at ADVISE. Docs QA also hardcoded the plan tree's
+      shape (`CLAUDE/Plan`, `Completed`, `Cancelled`) when excluding the plan
+      archive from its corpus, so a project that configured
+      `plan_workflow.directory` or a renamed `qa.completed_dir` had its LIVE
+      plans excluded and its real archive indexed.
+    now: >
+      When the literal path fails, a target naming a plan folder is re-resolved
+      by plan NUMBER across the whole plan tree -- the active root and every
+      configured archive directory -- exactly as `hooks-daemon find-plan`
+      already resolves for humans. A link that resolves that way is never
+      reported as missing and never BLOCK: the edit under judgement did not
+      move the target. A link to a plan that never existed still reports dead.
+      What replaces the false positive is source-sensitive and ADVISE-only: an
+      ARCHIVED source and a `JOURNAL/` day-file say nothing at all (a record is
+      not rewritten, and a journal is append-only so the repoint is
+      structurally forbidden), a live `PLAN.md` defers to plan QA's new
+      `plan-link-resolves`, and every other live document gets an advisory
+      naming the path to repoint to. The plan tree's shape now travels with the
+      `DocumentationPolicy`, read from `plan_workflow` config, so both the
+      archive exclusion and the resolver honour a project's configured
+      directory and archive names. No new config key is introduced.
+  - topic: plan-qa
+    id: plan-link-resolves-added
+    was: >
+      No plan QA check resolved links at all, so `plan-qa --sweep` reported a
+      tree CLEAN with dead plan links in it -- verified twice on this
+      repository's own tree the day plan 00413 was archived, over eight of
+      them. `path-existence` looks only at inline-code spans, not links, and
+      exempts archived plans by design.
+    now: >
+      A new check `plan-link-resolves` runs at SWEEP only, at ADVISE only. It
+      reports a LIVE `PLAN.md` whose link names a plan that has since been
+      archived -- with the repointed path in the remediation -- and a link
+      whose target does not exist anywhere. Archived plans and journals are
+      exempt, which is the doctrine this remedy rests on rather than an
+      omission. It is deliberately NOT registered at EDIT or COMMIT: docs QA's
+      `pointer-resolves` already blocks a link that is NEW in an edit or a
+      commit, and a second blocking gate on the same fact is a double gate.

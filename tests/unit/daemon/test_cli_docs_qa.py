@@ -504,3 +504,53 @@ class TestProjectExcludePaths:
             "version: '2.0'\ndaemon:\n  exclude_paths:\n    - 'CLAUDE/Bar.md'\n"
         )
         assert cmd_docs_qa(_args(root, lint=root / "CLAUDE" / "Bar.md")) == 2
+
+
+class TestPlanTreeWiring:
+    """Plan 00419 N2: the CLI hands docs QA the CONFIGURED plan tree.
+
+    The CLI is the surface a human runs by hand, so a resolver wired only at
+    handler-dispatch time would disagree with the edit-time check about
+    whether the same link is dead.
+    """
+
+    def test_sweep_does_not_report_a_relocated_plan_link_as_dead(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        archived = root / "CLAUDE" / "Plan" / "Completed" / "00413-done"
+        archived.mkdir(parents=True)
+        (archived / "PLAN.md").write_text("# 413\n")
+        (root / "CLAUDE" / "Foo.md").write_text(
+            "# Foo\n\n[bar](Bar.md)\n[413](Plan/00413-done/PLAN.md)\n"
+        )
+
+        cmd_docs_qa(_args(root, sweep=True))
+        out = capsys.readouterr().out
+
+        assert "does not exist" not in out
+        assert "CLAUDE/Plan/Completed/00413-done/PLAN.md" in out
+
+    def test_a_configured_archive_name_reaches_the_sweep(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """With `Done` configured, the same link resolves the same way.
+
+        Hardcoding `Completed` would report this one dead.
+        """
+        root = _scaffold(tmp_path)
+        (root / ".claude" / "hooks-daemon.yaml").write_text(
+            "version: '2.0'\nplan_workflow:\n  qa:\n    completed_dir: Done\n"
+        )
+        archived = root / "CLAUDE" / "Plan" / "Done" / "00413-done"
+        archived.mkdir(parents=True)
+        (archived / "PLAN.md").write_text("# 413\n")
+        (root / "CLAUDE" / "Foo.md").write_text(
+            "# Foo\n\n[bar](Bar.md)\n[413](Plan/00413-done/PLAN.md)\n"
+        )
+
+        cmd_docs_qa(_args(root, sweep=True))
+        out = capsys.readouterr().out
+
+        assert "does not exist" not in out
+        assert "CLAUDE/Plan/Done/00413-done/PLAN.md" in out

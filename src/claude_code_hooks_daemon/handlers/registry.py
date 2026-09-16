@@ -658,6 +658,9 @@ class HandlerRegistry:
                                 from claude_code_hooks_daemon.docs_qa.policy import (
                                     policy_from_config,
                                 )
+                                from claude_code_hooks_daemon.plan_links import (
+                                    plan_tree_layout,
+                                )
 
                                 # The vendor truth travels WITH the policy
                                 # (Plan 00331). Injecting the two
@@ -697,6 +700,19 @@ class HandlerRegistry:
                                         # so `_project_exclude_paths` on the
                                         # instance alone could never reach it.
                                         exclude_paths=project_exclude_paths,
+                                        # The plan tree's shape (Plan 00419
+                                        # N2), for the corpus's archive
+                                        # exclusion and the archive-aware
+                                        # link resolver -- both of which read
+                                        # the policy, so the same argument
+                                        # applies a third time. No config
+                                        # means the shipped defaults, which
+                                        # are the config model's own.
+                                        plan_tree=(
+                                            plan_tree_layout(plan_workflow)
+                                            if plan_workflow is not None
+                                            else None
+                                        ),
                                     ),
                                 )
 
