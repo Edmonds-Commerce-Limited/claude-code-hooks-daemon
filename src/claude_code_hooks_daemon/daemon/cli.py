@@ -7484,6 +7484,7 @@ def cmd_run_routine(args: argparse.Namespace) -> int:
         RunEvent,
         RunState,
         append_event,
+        next_from_ref,
         next_run_id,
         read_events,
         run_states,
@@ -7536,7 +7537,23 @@ def cmd_run_routine(args: argparse.Namespace) -> int:
             return 1
         run_id = next_run_id(events, now)
         append_event(routine, RunEvent(run_id=run_id, event=LedgerEvent.STARTED, at=now))
-        print(f"Started run {run_id} of {routine.name}.\n")
+        print(f"Started run {run_id} of {routine.name}.")
+        # Every procedure in the tree opens by telling its reader to work the
+        # interval out from the last recorded run. Stating it here is what keeps
+        # that a derivation rather than a recollection: read it wrongly once and
+        # the run records ground it did not cover, and no later run can tell.
+        from_ref = next_from_ref(events)
+        if from_ref is None:
+            print(
+                "Interval: no recorded run has covered anything, so this run's `from` "
+                "is whatever the procedure below says a FIRST run uses.\n"
+            )
+        else:
+            print(
+                f"Interval: this run's `from` is {from_ref} — the `to` of the last run "
+                "that recorded covering anything, read out of RUNS/ with nothing "
+                "mutable consulted.\n"
+            )
         print(procedure)
         print(
             f"\nWhen the run ends, record it:\n"

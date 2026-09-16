@@ -45,11 +45,16 @@ CHECK_GAP: Final[str] = "routine-run-gap"
 CHECK_LEDGER_UNREADABLE: Final[str] = "routine-ledger-unreadable"
 CHECK_NOT_CONFIGURED: Final[str] = "routine-not-configured"
 
-#: Events that END a run. Only these prove coverage — a START proves somebody
-#: began, which is not the same claim and must never reset an overdue clock.
-_TERMINAL: Final[frozenset[LedgerEvent]] = frozenset(
-    {LedgerEvent.CLEAN, LedgerEvent.FINDINGS, LedgerEvent.SKIPPED}
-)
+#: Events that prove GROUND WAS COVERED — not merely that a run ended.
+#:
+#: The distinction is the whole of `routine-coverage-vs-interval-bearing-events`
+#: in `scripts/qa/declared-invariant-pairs.yaml`, which pins this set against
+#: `ledger._NEEDS_INTERVAL`: a state proves coverage exactly when the ledger
+#: refused to write it without the span it covered. A `started` proves somebody
+#: began and a `skipped` proves somebody decided not to, and letting either
+#: reset an overdue clock is the mutable pointer this design replaced, wearing
+#: a ledger row.
+_COVERING: Final[frozenset[LedgerEvent]] = frozenset({LedgerEvent.CLEAN, LedgerEvent.FINDINGS})
 
 
 @dataclass(frozen=True)
@@ -168,20 +173,34 @@ def _ledger_unreadable(doc: RoutineDoc) -> list[RoutineFinding]:
 
 
 def _never_run(doc: RoutineDoc, events: list[RunEvent]) -> list[RoutineFinding]:
-    """The dead-man's switch: no record at all.
+    """The dead-man's switch: nothing on record has covered anything.
 
     D6 keeps "never ran" out of the run-state vocabulary precisely so that it
     cannot be reported from the records. It has to be asserted from OUTSIDE
     them, by something that knows the routine exists — which is here.
+
+    The question is whether ground has been COVERED, not whether rows exist.
+    Asking the narrower one opened a hole between this check and the overdue
+    clock: a routine whose only rows are skips and unfinished starts answers
+    "yes, there are records" here and gives the clock no baseline to measure
+    from, so an obligation never once met was reported by neither.
     """
-    if doc.status is not RoutineStatus.ACTIVE or events:
+    if doc.status is not RoutineStatus.ACTIVE:
         return []
+    if any(event.event in _COVERING for event in events):
+        return []
+    message = (
+        "declared active and has run records, but not one of them covered "
+        "anything — every recorded run was skipped or left unfinished"
+        if events
+        else "declared active but has never run — no record exists at all"
+    )
     return [
         RoutineFinding(
             check_id=CHECK_NEVER_RUN,
             level=Level.ADVISE,
             routine=doc.folder.name,
-            message="declared active but has never run — no record exists at all",
+            message=message,
             remediation=(
                 f"Run it: `hooks-daemon run-routine {doc.folder.name}`. "
                 "If it is no longer an obligation, set Status to Retired."
@@ -191,18 +210,24 @@ def _never_run(doc: RoutineDoc, events: list[RunEvent]) -> list[RoutineFinding]:
 
 
 def _overdue(doc: RoutineDoc, events: list[RunEvent], today: date) -> list[RoutineFinding]:
-    """Past period PLUS grace since the last run that actually FINISHED."""
+    """Past period PLUS grace since the last run that COVERED ground.
+
+    A routine with no coverage at all is :func:`_never_run`'s to report, not
+    this one's: with no baseline there is no elapsed time to measure. Silence
+    here is safe only because that check speaks for any routine nothing has
+    covered, whether or not it has rows.
+    """
     if doc.status is not RoutineStatus.ACTIVE:
         return []
     due_after = doc.due_after_days
     if due_after is None:
         return []
 
-    finished = [event for event in events if event.event in _TERMINAL]
-    if not finished:
+    covered = [event for event in events if event.event in _COVERING]
+    if not covered:
         return []
 
-    last = max(event.at for event in finished).date()
+    last = max(event.at for event in covered).date()
     elapsed = (today - last).days
     if elapsed <= due_after:
         return []
@@ -212,8 +237,8 @@ def _overdue(doc: RoutineDoc, events: list[RunEvent], today: date) -> list[Routi
             level=Level.ADVISE,
             routine=doc.folder.name,
             message=(
-                f"overdue: last finished {elapsed} days ago, and its period plus "
-                f"grace is {due_after} days"
+                f"overdue: last covered ground {elapsed} days ago, and its period "
+                f"plus grace is {due_after} days"
             ),
             remediation=(
                 f"Run it: `hooks-daemon run-routine {doc.folder.name}`. "

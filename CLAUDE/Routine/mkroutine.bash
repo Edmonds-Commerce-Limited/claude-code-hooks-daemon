@@ -76,7 +76,7 @@ Environment:
                           Overrides self-location.
 
 Examples:
-  mkroutine.bash "security-review"
+  mkroutine.bash "backup-restore-drill"
   mkroutine.bash "Dependency audit"   # -> 000NN-Dependency-audit
 USAGE
 }

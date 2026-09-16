@@ -239,6 +239,35 @@ def next_run_id(events: list[RunEvent], now: datetime) -> str:
     return f"{now.year}-{started_this_year + 1:03d}"
 
 
+def next_from_ref(events: list[RunEvent]) -> str | None:
+    """Where the next run must start, derived from the records alone.
+
+    The interval model's promise made usable: the ground a run must cover is
+    not remembered by anybody and not held in a pointer anybody bumps — it is
+    the ``to`` of the last run that recorded covering something, and reading it
+    consults nothing mutable.
+
+    Only a row carrying an interval takes part, which is the same rule stated
+    two ways: a run records what it covered, or it covered nothing. A skip
+    therefore leaves the start where it was and WIDENS the next interval (D5),
+    rather than moving it.
+
+    Args:
+        events: Events as returned by :func:`read_events`.
+
+    Returns:
+        The ref the next run's ``from`` must be, or None when no recorded run
+        has covered anything. None is not "the root commit": which ref a FIRST
+        run starts from is the routine's own decision — the root for a full
+        sweep, the previous release tag for a delta — so answering it here
+        would give one routine another's answer.
+    """
+    covering = [(event.at, event.interval.to_ref) for event in events if event.interval is not None]
+    if not covering:
+        return None
+    return max(covering, key=lambda pair: pair[0])[1]
+
+
 def _render_row(event: RunEvent) -> str:
     """One markdown table row for ``event``."""
     from_ref = event.interval.from_ref if event.interval else _EMPTY

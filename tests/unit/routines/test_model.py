@@ -32,13 +32,13 @@ from claude_code_hooks_daemon.routines.model import (
 
 def _write(tmp_path: Path, body: str) -> Path:
     """A routine folder whose ROUTINE.md holds ``body``."""
-    routine = tmp_path / "00001-security-review"
+    routine = tmp_path / "00001-dependency-audit"
     routine.mkdir()
     (routine / "ROUTINE.md").write_text(body)
     return routine
 
 
-_SCHEDULED = """# Routine 00001: security review
+_SCHEDULED = """# Routine 00001: dependency audit
 
 **Status**: Active
 **Trigger**: schedule
@@ -91,7 +91,7 @@ class TestParsing:
         doc = parse_routine(
             _write(
                 tmp_path,
-                "# Routine 00002: security review delta\n\n"
+                "# Routine 00002: dependency audit delta\n\n"
                 "**Status**: Active\n**Trigger**: release\n\n## Procedure\n\n1. Go.\n",
             )
         )
@@ -234,7 +234,7 @@ class TestMalformedHeaders:
 
     def test_a_missing_document_is_an_error(self, tmp_path: Path) -> None:
         """A folder with no ROUTINE.md is not a routine to reason about."""
-        routine = tmp_path / "00001-security-review"
+        routine = tmp_path / "00001-dependency-audit"
         routine.mkdir()
 
         with pytest.raises(FileNotFoundError):

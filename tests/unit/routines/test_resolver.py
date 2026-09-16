@@ -27,7 +27,7 @@ from claude_code_hooks_daemon.routines.resolver import (
     routines_dir,
 )
 
-_ROUTINE_BODY = """# Routine 00001: security review
+_ROUTINE_BODY = """# Routine 00001: dependency audit
 
 **Status**: Active
 
@@ -50,7 +50,7 @@ Keep the repository reviewed.
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     """A project root with one scaffolded routine."""
-    target = tmp_path / "CLAUDE" / "Routine" / "00001-security-review"
+    target = tmp_path / "CLAUDE" / "Routine" / "00001-dependency-audit"
     (target / "RUNS").mkdir(parents=True)
     (target / "ROUTINE.md").write_text(_ROUTINE_BODY)
     return tmp_path
@@ -69,15 +69,15 @@ class TestFindRoutine:
 
     def test_finds_by_number(self, project: Path) -> None:
         """The number is the stable handle; the name can be renamed."""
-        assert find_routine(project, "00001").name == "00001-security-review"
+        assert find_routine(project, "00001").name == "00001-dependency-audit"
 
     def test_finds_by_unpadded_number(self, project: Path) -> None:
         """Nobody types the leading zeros, and a cron prompt should not have to."""
-        assert find_routine(project, "1").name == "00001-security-review"
+        assert find_routine(project, "1").name == "00001-dependency-audit"
 
     def test_finds_by_full_folder_name(self, project: Path) -> None:
         """Pasting the folder name back in is the obvious thing to try."""
-        assert find_routine(project, "00001-security-review").name == "00001-security-review"
+        assert find_routine(project, "00001-dependency-audit").name == "00001-dependency-audit"
 
     def test_unknown_id_raises(self, project: Path) -> None:
         """An error, never an empty result.
@@ -99,7 +99,7 @@ class TestFindRoutine:
         archived = project / "CLAUDE" / "Routine" / "Completed" / "00001-old-review"
         archived.mkdir(parents=True)
 
-        assert find_routine(project, "00001").name == "00001-security-review"
+        assert find_routine(project, "00001").name == "00001-dependency-audit"
 
     def test_finds_an_archived_routine_when_nothing_live_matches(self, project: Path) -> None:
         """An archived routine is still addressable — it is history, not deleted."""
@@ -114,7 +114,7 @@ class TestListRoutines:
 
     def test_lists_live_routines(self, project: Path) -> None:
         """The index a human asks for before naming one."""
-        assert [path.name for path in list_routines(project)] == ["00001-security-review"]
+        assert [path.name for path in list_routines(project)] == ["00001-dependency-audit"]
 
     def test_empty_project_lists_nothing(self, tmp_path: Path) -> None:
         """No tree is not an error here — nothing was named."""
@@ -124,7 +124,7 @@ class TestListRoutines:
         """The scaffolder's lock is a dotfile, and is not a routine."""
         (project / "CLAUDE" / "Routine" / ".mkroutine.lock").mkdir()
 
-        assert [path.name for path in list_routines(project)] == ["00001-security-review"]
+        assert [path.name for path in list_routines(project)] == ["00001-dependency-audit"]
 
 
 class TestReadProcedure:

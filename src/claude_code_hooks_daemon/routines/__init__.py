@@ -6,10 +6,13 @@ plan that is never finished sits in the Active list forever, which is how a
 recurring obligation becomes indistinguishable from a stalled one.
 
 A Routine is the second concept — a definition, plus a separate record per RUN
-rather than a completion. The first consumer is a security review, but the
-core is deliberately generic: this repository already has six recurring sweeps
-implemented as bespoke SessionStart handlers, each independently reinventing
-"run periodically, report findings, stay quiet when clean".
+rather than a completion. Nothing here knows what any routine is FOR, and that
+is a constraint rather than an omission: this repository already has six
+recurring sweeps implemented as bespoke SessionStart handlers, each
+independently reinventing "run periodically, report findings, stay quiet when
+clean". Anything that only makes sense for one kind of recurring work belongs
+in that routine's own definition document, where a reader looking for it will
+be, and not in this package.
 
 **This package is NOT a scheduler and must not become one.** The daemon cannot
 guarantee that anything ran: Claude Code crons live in session memory and the

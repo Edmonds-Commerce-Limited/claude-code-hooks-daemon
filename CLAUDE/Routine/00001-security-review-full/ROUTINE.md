@@ -46,15 +46,19 @@ full sweep for ever while every record read as healthy.
 
 ## Procedure
 
-1. Establish the interval. `from` is the `to` ref of this routine's last
-   recorded run (any outcome — a skipped run covered nothing, so the next run
-   inherits its ground, D5); `to` is the current release tag, or `HEAD` if
-   there is no tag since. A first run's `from` is the repository's root commit.
-
-2. Open the run: `bin/hooks-daemon run-routine 00001-security-review-full`.
+1. Open the run: `bin/hooks-daemon run-routine 00001-security-review-full`.
    This writes a `started` row. A run that dies from here on is derivable as
    `failed` — started and did not finish — which is a different fact from
    never having started.
+
+   It also **states the interval**, so `from` is derived rather than
+   remembered: it is the `to` of the last run that recorded COVERING
+   something, read out of `RUNS/`. A skipped run carries no `to` because it
+   covered nothing, so it leaves the start where it was and widens this run's
+   interval instead (D5). A first run's `from` is the repository's root commit,
+   which the ledger cannot know and will say so rather than guess.
+
+2. Choose `to`: the current release tag, or `HEAD` if there is no tag since.
 
 3. Dispatch the `security-reviewer` agent once per check in
    [CHECKS.md](CHECKS.md), giving it the interval and that check alone. One
@@ -66,6 +70,28 @@ full sweep for ever while every record read as healthy.
    to write its report. The agent reports; it never fixes. If it says a check
    was **not answerable**, that is not a clean result — record it as a check
    this run did not perform, exactly as a delta run records its full-only set.
+
+   **OPEN DEFECT — the reviewer cannot write the report this step demands.**
+   `.claude/agents/security-reviewer.md` declares `tools: Read, Grep, Glob, Bash`
+   and no `Write`, so the contract above and the agent's tool list disagree.
+
+   This is not theoretical and it is not cosmetic. Every dispatch in Routine
+   00002's run 2026-001 hit it: three reviewers independently reached for a Bash
+   heredoc — the one write path that the pre-write content guards never
+   inspect — and one lost its report entirely, surviving only because its
+   findings were transcribed from the returned message by the dispatching agent,
+   who could not verify them. **So the workaround this defect forces is
+   specifically the one that routes a security report around the guard that
+   would check it for disclosure, in a public repository.**
+
+   Until it is closed: after every run, READ each report before staging it, and
+   if any is missing, transcribe it from the returned message and mark the file
+   as recovered rather than authored.
+
+   Two candidate remedies, neither taken here because both change a contract on
+   the eve of a release: give `security-reviewer` the `Write` tool scoped to the
+   reports directory, or make the DISPATCHING agent write each report from the
+   returned summary. Nothing should be loosened to paper over it.
 
 4. Record every confirmed finding in the [security register](../../Security/README.md),
    under its category, naming its Defence. A category with no Defence yet is

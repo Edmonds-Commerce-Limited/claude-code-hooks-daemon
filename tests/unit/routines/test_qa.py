@@ -5,9 +5,11 @@ That is the through-line: a recurring obligation that stops being met produces
 no error, no failing test and no diff — just an absence, and an absence looks
 exactly like everything being fine.
 
-- ``routine-never-run`` — the dead-man's switch in its simplest form. No record
-  at all is not a state (D6), so something outside the records must notice.
-- ``routine-overdue`` — period PLUS grace (D11), never period alone.
+- ``routine-never-run`` — the dead-man's switch: nothing on record has covered
+  anything. No record at all is not a state (D6), so something outside the
+  records must notice — and neither is a pile of records that reviewed nothing.
+- ``routine-overdue`` — period PLUS grace (D11), never period alone, measured
+  from the last run that COVERED ground rather than the last row written.
 - ``routine-run-gap`` — the interval algebra's whole purpose: commits nobody
   covered, found by arithmetic rather than judgement.
 - ``routine-ledger-unreadable`` — a hand-edited row that cannot be read. Skip
@@ -55,7 +57,7 @@ class _ListAncestry:
 
 def _routine(
     project_root: Path,
-    name: str = "00001-security-review",
+    name: str = "00001-dependency-audit",
     *,
     status: str = "Active",
     trigger: str = "schedule",
@@ -86,6 +88,15 @@ def _completed_run(folder: Path, run_id: str, at: datetime, from_ref: str, to_re
             at=at,
             interval=RunInterval(from_ref=from_ref, to_ref=to_ref),
         ),
+    )
+
+
+def _skipped_run(folder: Path, run_id: str, at: datetime, reason: str) -> None:
+    """Append a started/skipped pair, which covers nothing by definition."""
+    append_event(folder, RunEvent(run_id=run_id, event=LedgerEvent.STARTED, at=at))
+    append_event(
+        folder,
+        RunEvent(run_id=run_id, event=LedgerEvent.SKIPPED, at=at, note=reason),
     )
 
 
@@ -290,6 +301,71 @@ class TestNotConfigured:
         assert "routine-overdue" not in _ids(tmp_path)
 
 
+class TestNonCoverageIsNotCoverage:
+    """A record saying nothing was reviewed must never read as a review.
+
+    ``skipped`` and an unfinished ``started`` are both records of NON-coverage:
+    the ledger states that exist precisely so an absence can be written down.
+    Counting either as coverage re-creates the mutable pointer this whole design
+    replaced — the obligation reads as met because something was WRITTEN, not
+    because anything was looked at.
+
+    The gap check already honours this (a skip leaves no hole, D5). These pin the
+    other two consumers, which did not.
+    """
+
+    def test_a_skip_does_not_reset_the_overdue_clock(self, tmp_path: Path) -> None:
+        """Otherwise a routine can be skipped for ever and never report late.
+
+        The failure is the quiet one: each skip buys another period plus grace
+        of silence, so a routine nobody ever performs reads exactly like one
+        performed on time.
+        """
+        folder = _routine(tmp_path)
+        _completed_run(folder, "2026-001", datetime(2026, 7, 1, tzinfo=UTC), "a", "b")
+        _skipped_run(folder, "2026-002", datetime(2026, 9, 14, tzinfo=UTC), "release frozen")
+
+        assert "routine-overdue" in _ids(tmp_path)
+
+    def test_a_routine_that_has_only_ever_been_skipped_is_reported(self, tmp_path: Path) -> None:
+        """The hole between two checks: records exist, coverage does not.
+
+        ``routine-never-run`` asks whether there are records and ``routine-overdue``
+        asks how long since one — so a routine whose only records are skips
+        answers yes to the first and gives the second no baseline, and both go
+        quiet about an obligation that has never once been met.
+        """
+        folder = _routine(tmp_path)
+        _skipped_run(folder, "2026-001", datetime(2026, 9, 14, tzinfo=UTC), "release frozen")
+
+        assert _ids(tmp_path) != []
+
+    def test_a_routine_with_only_an_unfinished_start_is_reported(self, tmp_path: Path) -> None:
+        """The same hole reached by the other non-coverage state.
+
+        ``test_an_unfinished_run_does_not_count_as_coverage`` proves a start does
+        not reset the clock, but only because a completed run before it supplies
+        the baseline. With no such run there is no baseline, and the start is the
+        only record — so nothing reports at all.
+        """
+        folder = _routine(tmp_path)
+        append_event(
+            folder,
+            RunEvent(
+                run_id="2026-001", event=LedgerEvent.STARTED, at=datetime(2026, 9, 14, tzinfo=UTC)
+            ),
+        )
+
+        assert _ids(tmp_path) != []
+
+    def test_a_retired_routine_with_only_skips_stays_quiet(self, tmp_path: Path) -> None:
+        """Retired means the obligation ended — reporting it for ever is noise."""
+        folder = _routine(tmp_path, status="Retired")
+        _skipped_run(folder, "2026-001", datetime(2026, 9, 14, tzinfo=UTC), "retired mid-cycle")
+
+        assert _ids(tmp_path) == []
+
+
 class TestSweepShape:
     """The sweep itself."""
 
@@ -303,7 +379,7 @@ class TestSweepShape:
 
         findings = sweep(tmp_path, today=_TODAY)
         assert findings
-        assert all(finding.routine == "00001-security-review" for finding in findings)
+        assert all(finding.routine == "00001-dependency-audit" for finding in findings)
 
     def test_every_finding_carries_a_remediation(self, tmp_path: Path) -> None:
         """Naming the problem without the fix is how a sweep gets ignored."""

@@ -153,3 +153,21 @@
   right:
     file: src/claude_code_hooks_daemon/handlers/pre_tool_use/project_containment.py
     function: _resolve_against_cwd
+
+- id: routine-coverage-vs-interval-bearing-events
+  relation: superset
+  reason: >
+    a run state proves coverage only if the ledger refused to write it without
+    the span it covered, so every state the overdue clock accepts as coverage
+    must be one that had to record an interval. `skipped` records that nothing
+    was reviewed, and counting it as coverage buys another period of silence
+    per skip — the mutable pointer this whole design replaced, wearing a
+    ledger row.
+  left:
+    file: src/claude_code_hooks_daemon/routines/ledger.py
+    symbol: _NEEDS_INTERVAL
+    extract: enum_members
+  right:
+    file: src/claude_code_hooks_daemon/routines/qa.py
+    symbol: _COVERING
+    extract: enum_members
