@@ -812,21 +812,27 @@ HOOKS_DAEMON_ROOT_DIR="{daemon_root}"
     print(f"✅ Created {env_file.relative_to(project_root)}")
 
 
-def create_daemon_config(
-    project_root: Path, force: bool = False, self_install: bool = False
-) -> None:
-    """Create .claude/hooks-daemon.yaml configuration."""
+def create_daemon_config(project_root: Path, self_install: bool = False) -> None:
+    """Create .claude/hooks-daemon.yaml configuration.
+
+    Takes no `force` flag, for the same reason `create_settings_json` above
+    does not: the template is written on every invocation regardless, so
+    forcing changed nothing about what gets written — it only ever skipped the
+    backup, which is the one thing --force most needs to keep.
+    """
     config_file = project_root / ".claude" / "hooks-daemon.yaml"
 
-    # Backup existing config if it exists
-    if config_file.exists() and not force:
-        backup_file = project_root / ".claude" / "hooks-daemon.yaml.bak"
-
-        # If backup already exists, add timestamp
-        if backup_file.exists():
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_file = project_root / ".claude" / f"hooks-daemon.yaml.bak.{timestamp}"
-
+    # Back up an existing config, INCLUDING under --force, for the reason
+    # `setup_claude_settings` already records above: --force reinstalls over an
+    # existing install, so it is the invocation most likely to be overwriting a
+    # customised file. What is lost here is not a generated default — it is the
+    # client's handlers, exclude_paths, extra_whitelist and plugins.
+    #
+    # `_free_backup_path` rather than a bespoke timestamp: its one-second
+    # resolution means two installs in the same second resolve to one name, and
+    # the second rename would destroy the copy holding the ORIGINAL file.
+    if config_file.exists():
+        backup_file = _free_backup_path(project_root / ".claude" / "hooks-daemon.yaml.bak")
         config_file.rename(backup_file)
         print(f"✅ Backed up existing hooks-daemon.yaml to {backup_file.relative_to(project_root)}")
 
@@ -1537,7 +1543,7 @@ def main() -> int:
     # Create configuration files
     print("\n📝 Creating configuration files...")
     create_settings_json(project_root)
-    create_daemon_config(project_root, force=args.force, self_install=self_install)
+    create_daemon_config(project_root, self_install=self_install)
 
     # Create daemon environment file for self-installation
     if self_install:

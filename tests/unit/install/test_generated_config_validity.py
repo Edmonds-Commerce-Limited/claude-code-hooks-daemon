@@ -20,6 +20,7 @@ however the template is later edited.
 
 from __future__ import annotations
 
+import inspect
 import shutil
 import sys
 from collections.abc import Callable
@@ -52,7 +53,7 @@ def _create_daemon_config() -> Callable[..., None]:
 def _generate_config(project_root: Path, *, self_install: bool) -> dict[str, Any]:
     """Run the real generator and load the result the way the daemon does."""
     (project_root / ".claude").mkdir(parents=True, exist_ok=True)
-    _create_daemon_config()(project_root, force=False, self_install=self_install)
+    _create_daemon_config()(project_root, self_install=self_install)
     loaded = ConfigLoader.load(project_root / ".claude" / "hooks-daemon.yaml")
     return dict(loaded)
 
@@ -110,7 +111,7 @@ class TestTheFixtureIsNotVacuous:
 
     def test_the_generator_actually_writes_a_file(self, tmp_path: Path) -> None:
         (tmp_path / ".claude").mkdir()
-        _create_daemon_config()(tmp_path, force=False, self_install=True)
+        _create_daemon_config()(tmp_path, self_install=True)
         written = tmp_path / ".claude" / "hooks-daemon.yaml"
         assert written.is_file()
         assert written.stat().st_size > 0
@@ -124,3 +125,78 @@ class TestTheFixtureIsNotVacuous:
         """The validator must actually report unknown handler fields."""
         bad: dict[str, Any] = {"handlers": {"session_start": {"version_check": {"not_a_field": 1}}}}
         assert ConfigValidator.validate(bad, validate_handler_names=False) != []
+
+
+class TestForceStillBacksUpTheConfig:
+    """Plan 00412 F-DEPL-4: the fix is written down sixty lines above the bug.
+
+    `setup_claude_settings` backs up `settings.json` INCLUDING under `--force`,
+    and its comment says exactly why: *"Backing up only when NOT forcing had it
+    exactly backwards: --force reinstalls over an existing install, so it is
+    the invocation most likely to be overwriting a customised file, and it was
+    the one that overwrote with no copy at all."*
+
+    `create_daemon_config` guarded its own backup with `and not force`. The
+    reasoning had been worked out, written down, and applied to one of the two
+    files it applies to.
+
+    What is destroyed is not a generated default: it is the client's
+    `handlers:`, `exclude_paths`, `extra_whitelist` and `plugins:` — the whole
+    record of how they configured this daemon.
+    """
+
+    @staticmethod
+    def _existing_config(project_root: Path) -> Path:
+        (project_root / ".claude").mkdir(parents=True, exist_ok=True)
+        config = project_root / ".claude" / "hooks-daemon.yaml"
+        config.write_text("daemon:\n  exclude_paths: ['vendor/**']\n")
+        return config
+
+    def test_an_existing_config_is_preserved(self, tmp_path: Path) -> None:
+        self._existing_config(tmp_path)
+
+        _create_daemon_config()(tmp_path, self_install=True)
+
+        backups = list((tmp_path / ".claude").glob("hooks-daemon.yaml.bak*"))
+        assert len(backups) == 1
+        assert "vendor/**" in backups[0].read_text()
+
+    def test_the_function_takes_no_force_flag(self) -> None:
+        """The flag is gone rather than ignored, which is the honest state.
+
+        A parameter that no longer changes anything is a trap: the next reader
+        assumes `force` still governs the backup. `create_settings_json` above
+        dropped it for exactly this reason when the same bug was fixed there.
+        """
+        assert "force" not in inspect.signature(_create_daemon_config()).parameters
+
+    def test_the_config_is_still_replaced(self, tmp_path: Path) -> None:
+        """Preserving the old copy must not mean declining to install."""
+        config = self._existing_config(tmp_path)
+
+        _create_daemon_config()(tmp_path, self_install=True)
+
+        assert "vendor/**" not in config.read_text()
+        assert config.stat().st_size > 0
+
+    def test_a_second_install_does_not_destroy_the_first_backup(self, tmp_path: Path) -> None:
+        """The first backup holds the client's ORIGINAL file — the one worth keeping.
+
+        `_free_backup_path` exists for this and documents the same-second
+        collision; the bespoke timestamp branch here did not use it.
+        """
+        self._existing_config(tmp_path)
+        _create_daemon_config()(tmp_path, self_install=True)
+        _create_daemon_config()(tmp_path, self_install=True)
+
+        backups = list((tmp_path / ".claude").glob("hooks-daemon.yaml.bak*"))
+        assert len(backups) == 2
+        assert any("vendor/**" in b.read_text() for b in backups)
+
+    def test_a_fresh_install_leaves_no_backup(self, tmp_path: Path) -> None:
+        """Nothing to preserve means nothing to clutter the directory with."""
+        (tmp_path / ".claude").mkdir(parents=True, exist_ok=True)
+
+        _create_daemon_config()(tmp_path, self_install=True)
+
+        assert list((tmp_path / ".claude").glob("hooks-daemon.yaml.bak*")) == []
