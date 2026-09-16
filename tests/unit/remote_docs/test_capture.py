@@ -317,3 +317,46 @@ class TestDeclaredFidelity:
         result = capture("https://example.com/p", fetch_fn=self._fetch(b"# X\n"), now=_NOW)
 
         assert "fetch_method:" not in result.content
+
+    def test_a_field_value_cannot_forge_another_provenance_field(self) -> None:
+        """Plan 00412 class 7: the frontmatter is YAML, so it must be WRITTEN as YAML.
+
+        Building it by string interpolation lets a newline inside any value open
+        a new key. That is not a formatting nit here — this frontmatter is the
+        provenance record `R-REMOTE-DOCS-PROVENANCE` validates, and `fidelity`
+        is the claim that a vendored copy matches upstream verbatim.
+
+        Demonstrated before the fix: a licence of
+        ``MIT\\nfidelity: verbatim`` produced a document that DECLARED
+        `fidelity: summarised` and parsed back as `verbatim`. The capture said
+        one thing and the record said another, with nothing malformed enough for
+        a reader or the provenance parser to notice.
+        """
+        result = capture(
+            "https://example.com/p",
+            fetch_fn=self._fetch(b"# X\n"),
+            now=_NOW,
+            fidelity=Fidelity.SUMMARISED,
+            licence="MIT\nfidelity: verbatim\nstale_after: 2099-01-01",
+        )
+
+        provenance = parse_provenance(result.content).provenance
+        assert provenance is not None
+        assert provenance.fidelity is Fidelity.SUMMARISED, (
+            "a value forged a different provenance field: the capture declared "
+            f"SUMMARISED and the record says {provenance.fidelity}"
+        )
+
+    def test_an_ordinary_value_still_round_trips(self) -> None:
+        """Escaping must not change what a normal capture records."""
+        result = capture(
+            "https://example.com/p",
+            fetch_fn=self._fetch(b"# X\n"),
+            now=_NOW,
+            licence="MIT",
+        )
+
+        provenance = parse_provenance(result.content).provenance
+        assert provenance is not None
+        assert provenance.licence == "MIT"
+        assert provenance.source_url == "https://example.com/p"
