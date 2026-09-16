@@ -376,6 +376,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="fail_open_inventory.json",
         jq_hint="jq '.violations[] | {surface, scope, construct, detail}'",
     ),
+    "dangerous_invocation_corpus": ToolConfig(
+        command=_python("check_dangerous_invocation_corpus.py", "--json"),
+        json_file="dangerous_invocation_corpus.json",
+        jq_hint="jq '.violations[] | {row, command, detail}'",
+    ),
     "semgrep": ToolConfig(
         command=_bash("run_semgrep_check.sh"),
         json_file="semgrep.json",
@@ -689,6 +694,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "authored_path_stat": _summarize_violations,
     "declared_invariant_pairs": _summarize_violations,
     "fail_open_inventory": _summarize_violations,
+    "dangerous_invocation_corpus": _summarize_violations,
     "smoke_test": _summarize_smoke_test,
     "repo_hygiene": _summarize_violations,
     "doc_truth": _summarize_violations,

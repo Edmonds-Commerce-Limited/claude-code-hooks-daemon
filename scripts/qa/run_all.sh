@@ -364,6 +364,16 @@ else
 fi
 echo ""
 
+echo "28. Running Dangerous-Invocation-Corpus Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_dangerous_invocation_corpus.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Dangerous-invocation-corpus check FAILED"
+else
+    echo "✅ Dangerous-invocation-corpus check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -405,6 +415,7 @@ results = {
     "Authored Path Stat": "untracked/qa/authored_path_stat.json",
     "Declared Invariant Pairs": "untracked/qa/declared_invariant_pairs.json",
     "Fail-Open Inventory": "untracked/qa/fail_open_inventory.json",
+    "Dangerous Invocation Corpus": "untracked/qa/dangerous_invocation_corpus.json",
 }
 
 all_passed = True

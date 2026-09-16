@@ -10,11 +10,12 @@ anyone about to change a guard.
 
 ## Categories
 
-| Category                                                        | Defence                                        | Detects                                                                                                                                                                                                                          |
-| --------------------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [authored path resolution](AuthoredPathResolution.md)           | `scripts/qa/check_authored_path_stat.py`       | A stat predicate on a joined path in the trees that resolve what an author wrote — `..` walked through the filesystem, so a missing intermediate directory reads as a missing target                                             |
-| [asymmetric sibling protection](AsymmetricSiblingProtection.md) | `scripts/qa/check_declared_invariant_pairs.py` | A site that re-derives, shortens or omits behaviour this codebase already implements correctly at a sibling site — asserted as a declared relation between the two, because neither side is wrong on its own                     |
-| [fail-open boundaries](FailOpenBoundaries.md)                   | `scripts/qa/check_fail_open_inventory.py`      | A place in the enforcement path where the guarded action proceeds because the guard could not reach a verdict — asserted as a declared inventory, because the discriminator is a property of the surface rather than of the code |
+| Category                                                        | Defence                                           | Detects                                                                                                                                                                                                                          |
+| --------------------------------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [authored path resolution](AuthoredPathResolution.md)           | `scripts/qa/check_authored_path_stat.py`          | A stat predicate on a joined path in the trees that resolve what an author wrote — `..` walked through the filesystem, so a missing intermediate directory reads as a missing target                                             |
+| [asymmetric sibling protection](AsymmetricSiblingProtection.md) | `scripts/qa/check_declared_invariant_pairs.py`    | A site that re-derives, shortens or omits behaviour this codebase already implements correctly at a sibling site — asserted as a declared relation between the two, because neither side is wrong on its own                     |
+| [fail-open boundaries](FailOpenBoundaries.md)                   | `scripts/qa/check_fail_open_inventory.py`         | A place in the enforcement path where the guarded action proceeds because the guard could not reach a verdict — asserted as a declared inventory, because the discriminator is a property of the surface rather than of the code |
+| [unenumerated spelling](UnenumeratedSpelling.md)                | `scripts/qa/check_dangerous_invocation_corpus.py` | A dangerous outcome reachable by a command or flag no guard's pattern names — asserted as a corpus of invocations driven through the real chain, because a match is not a denial and only the decision settles it                |
 
 **A category whose Defence cell is empty is the most important row in this
 table.** It says a class of defect is known and nothing is watching for it,
@@ -91,15 +92,15 @@ Every category in the table must name a Defence, and every Defence must be a
 Detector in `scripts/qa/` wired into `run_all.sh` like any other check — not a
 regression test, not a note, not a convention.
 
-All three categories honour it. `authored-path-stat` is check 25 in
-`run_all.sh`, `declared-invariant-pairs` is check 26 and `fail-open-inventory`
-is check 27; each is a Detector, each is also a step in `llm_qa.py`, and each
-fails rather than warns.
+All four categories honour it. `authored-path-stat` is check 25 in
+`run_all.sh`, `declared-invariant-pairs` is check 26, `fail-open-inventory` is
+check 27 and `dangerous-invocation-corpus` is check 28; each is a Detector,
+each is also a step in `llm_qa.py`, and each fails rather than warns.
 
-**Nothing yet enforces that the NEXT one will.** A fourth category could name a
+**Nothing yet enforces that the NEXT one will.** A fifth category could name a
 regression test as its Defence, or name nothing, and no gate would object. The
-third category honoured it by convention, not because anything checked. That is
-recorded here rather than left implicit because an unenforced invariant in a
+third and fourth honoured it by convention, not because anything checked. That
+is recorded here rather than left implicit because an unenforced invariant in a
 security register decays in exactly the way this whole plan exists to make
 visible — and the honest place to say so is beside the invariant, not in a
 backlog.
@@ -122,3 +123,19 @@ dropped. It is also the one category whose Detector cannot check that its own
 rows are TRUE: it asserts a row exists and is complete, never that the
 judgement in it is right. What that buys is a wrong answer being written down
 and attributable instead of absent.
+
+**The fourth category is the weakest in the register, and says so.** Its
+Detector reads no code: it drives a checked-in corpus of invocations through
+the real chain and asserts the recorded verdict still holds. That makes every
+row a measured fact rather than an opinion, and it makes the coverage exactly
+as good as someone's imagination — the corpus turns an invisible gap into a
+visible list without generating the list. Ranking it beside the code-reading
+Detectors would overstate it, which is why its page opens the blind-spot
+section with that sentence rather than closing with it.
+
+It is also the first category whose findings are **all** open: 14 of its 20
+rows record a dangerous outcome nothing denies, and none is fixed, because
+every fix is a new refusal surface in every installing project. A register row
+that reads "has a Defence" while 14 gaps stand is exactly the confusion the
+table's own warning is about — the Defence watches the gaps, it does not close
+them.
