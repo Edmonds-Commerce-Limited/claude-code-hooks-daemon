@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00424: remote docs add overwrites existing capture](00424-remote-docs-add-overwrites-existing-capture/PLAN.md) - Not Started (from issue #42: `remote-docs add` replaces an existing capture of the same URL silently; reproduced. The catch is that `check` PRINTS plain `add` as the licence-drift remedy, so the refusal and that remedy line have to move together)
-
 - [00423: per handler scope main sub](00423-per-handler-scope-main-sub/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #40: a per-handler `scope: ALL|MAIN|SUB` key so the goal ledger and failsafe cron stop nudging subagents; symptom verified, but three decisions are the owner's)
 
 - [00422: niggles ledger fifteen](00422-niggles-ledger-fifteen/PLAN.md) - Not Started, the OPEN ledger (opens with four entries inherited from 00419 — N8/N11/N12/N13 — because an unresolved entry left inside an archived ledger is indistinguishable from a resolved one; three of them are one class in three costumes: a guard right about the state it judges and wrong about the moment it judges it)
@@ -149,6 +147,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00424: remote docs add overwrites existing capture](Completed/00424-remote-docs-add-overwrites-existing-capture/PLAN.md) - Complete at `ad8e79b3`…`08f8b9c9` + the archiving commit (from issue #42: a second `add` of one URL silently replaced the first capture. The catch the report could not see is that `check` PRINTS plain `add` as the licence-drift remedy, so the refusal and that remedy moved together, welded by a test — nothing pinned that line before, in either direction)
+
 - [00419: niggles ledger fourteen](Completed/00419-niggles-ledger-fourteen/PLAN.md) - Complete at `6a6f9a43`…`2778206f` + the archiving commit (fifteen entries, eleven terminal; the four that were not are re-filed into 00422 rather than counted as closed, because nothing downstream re-reads a closed plan. N1: `debug_hooks.sh` could not run in the repository that dogfoods it)
 
 - [00418: orchestrator only mode greenfield](Completed/00418-orchestrator-only-mode-greenfield/PLAN.md) - Complete at `0f03ef83`…`8011858b` + the archiving commit (restrict the MAIN THREAD to coordination tools; built once and deleted because hooks could not tell which agent fired an event, and `agent_id` now can. Greenfield by ruling, project-level handler, simulate-only before ever blocking. From issue #14)
@@ -207,8 +207,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00382: push force guard misreads flag boundaries](Completed/00382-push-force-guard-misreads-flag-boundaries/PLAN.md) - Complete at `0edece84` + the archiving commit (GitHub #37 reported a branch named `...-f-...` denied as a force push; reproducing it exposed the opposite defect the reporter could not see — grouped short flags `-uf`/`-fu`/`-nf` are real force pushes that no release ever blocked. Long and short options now get separate rules: 14 cases, 6 wrong before, 0 after)
 
-- [00380: worktree reap jammed by daemon own output](Completed/00380-worktree-reap-jammed-by-daemon-own-output/PLAN.md) - Complete at `83fe7bf7`…`30583859` + the archiving commit (five worktrees sat unreapable for days with zero commits unmerged to main; four were held by the daemon's OWN generated advisory reading as unsaved work, and the refusal text said "needs a human" when no hook ever blocked `git worktree remove --force`)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -262,15 +260,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 424 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 371 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 372 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 30 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 29 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 30 + 371 + 13 = **414 folders**, spanning
+- **Folder-to-number reconciliation**: 29 + 372 + 13 = **414 folders**, spanning
   **411 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

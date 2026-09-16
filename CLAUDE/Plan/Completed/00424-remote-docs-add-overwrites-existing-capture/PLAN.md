@@ -1,6 +1,6 @@
 # Plan 00424: remote docs add overwrites existing capture
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-16
 **GitHub Issue**: #42
 **Owner**: dev
@@ -82,9 +82,31 @@ change.
 - [x] ✅ A second `add` without `--force` refuses and writes nothing.
 - [x] ✅ `--force` replaces the capture and prints both hashes.
 - [x] ✅ A first capture of a new URL is unchanged.
-- [ ] ⬜ `./scripts/qa/llm_qa.py all` is green in the worktree.
+- [x] ✅ Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/01-remote-docs-add-refuses-an-existing-capture.md`
+  — a behaviour change an operator will notice, including the licence-drift
+  remedy now needing `--force`.
+- [x] ✅ QA verified — but NOT by a green `llm_qa.py all` in the worktree, which
+  is unachievable there for reasons unrelated to this change (ledger
+  [00422 N6](../00422-niggles-ledger-fifteen/NIGGLES.md)). The run gave 24,894
+  tests, 24,884 passed, **0 failed**, with 10 setup ERRORS and `smoke_test` 0/3
+  — all of them the worktree's daemon socket path exceeding the 108-byte cap by
+  one byte. Every one of those 10 passes on `main`: the five stop-hook and
+  tool-use-error cases inside a 228-test run, and the five playbook cases in
+  14.3s. `lint`, `magic_values`, `pyright` (1754 files) and `type_check` (628
+  files) were green in the worktree; the single `format` violation was black
+  auto-fixing a test file, already applied.
 
 ## Delivery & Milestones
 
 - Filed by the issue-sdlc loop from issue #42, triaged actionable with a
   reproduction.
+- Implemented on `worktree-issue-42-remote-docs-add-overwrite` at `ad8e79b3`,
+  merged `--no-ff` at `08f8b9c9`, worktree and branch reaped.
+- `0fc8b17f` is not part of the fix: filing this plan left the plan index's
+  closing self-check disagreeing with its own bullets, which had been failing
+  `test_repo_hygiene_check` in CI. Counted from disk and corrected there.
+- Two findings recorded rather than carried: ledger
+  [00422 N6](../00422-niggles-ledger-fifteen/NIGGLES.md) at `c8336d8c`, the
+  worktree socket-path cap that makes the acceptance gates unrunnable and
+  misreport why.
