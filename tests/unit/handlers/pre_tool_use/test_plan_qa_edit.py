@@ -422,6 +422,17 @@ class TestHandleEdit:
         assert result.decision == Decision.ALLOW
 
     def test_replace_all_is_honoured(self, tmp_path: Path) -> None:
+        """`replace_all` must be applied before the content is judged.
+
+        The observable signal is `header-body-coherence`: replacing BOTH boxes
+        leaves every box ticked under `In Progress`, which the check reports.
+        Since Plan 00419 N3 that finding is ADVISE at edit time rather than a
+        denial — the all-ticked-under-`In Progress` state is the mandatory
+        intermediate on the legal plan-close path — so the signal is advisory
+        CONTEXT, not a refused write. What this test is about is unchanged:
+        that the handler judged the content `replace_all` would actually
+        produce.
+        """
         content = "# Plan 00042: W\n\n**Status**: In Progress\n\n- [ ] x1\n- [ ] x1\n"
         target = tmp_path / _PLAN_DIR_REL / "00042-widget" / "PLAN.md"
         target.parent.mkdir(parents=True)
@@ -429,9 +440,27 @@ class TestHandleEdit:
         hook_input = _edit_input(target, "- [ ] x1", "- [x] x1", replace_all=True)
         with _patched_root(tmp_path):
             result = _handler().handle(hook_input)
-        # Both boxes ticked while header stays In Progress → coherence block.
-        assert result.decision == Decision.DENY
-        assert "header-body-coherence" in (result.reason or "")
+
+        assert result.decision == Decision.ALLOW
+        assert "header-body-coherence" in "\n".join(result.context)
+
+    def test_replace_all_false_ticks_only_one_box_and_is_silent(self, tmp_path: Path) -> None:
+        """The matched pair, and what makes the test above about `replace_all`.
+
+        With one box ticked and one not, the plan is coherently in progress and
+        nothing is reported. If this ever started reporting too, the test above
+        would pass for a reason that has nothing to do with `replace_all`.
+        """
+        content = "# Plan 00042: W\n\n**Status**: In Progress\n\n- [ ] x1\n- [ ] x1\n"
+        target = tmp_path / _PLAN_DIR_REL / "00042-widget" / "PLAN.md"
+        target.parent.mkdir(parents=True)
+        target.write_text(content)
+        hook_input = _edit_input(target, "- [ ] x1", "- [x] x1", replace_all=False)
+        with _patched_root(tmp_path):
+            result = _handler().handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert "header-body-coherence" not in "\n".join(result.context)
 
 
 class TestGuidance:
