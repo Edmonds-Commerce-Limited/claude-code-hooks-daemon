@@ -27,6 +27,14 @@ pseudo-event) without proportional value.
 **Decision**: Defer Plan 00085 to a future release (v3.13.0 or later). The
 plan remains Active in the index and ready to execute in a dedicated session.
 
+**That deferral has EXPIRED and this plan is not release-gated.** The named
+window, v3.13.0, shipped around fifty releases ago; the tree is on v3.64.0.
+Nothing about a release blocks this work and nothing will unblock it —
+a plan waiting on a release is not a state that should persist, because a
+release is an event that happens rather than a decision that resolves. The
+real state is UNSCHEDULED: eight phases of greenfield TDD work that nobody has
+picked up. Resuming needs a scheduling decision, not a release.
+
 ## Context
 
 The pseudo-event system currently supports **fixed-frequency triggers** (N/D notation: "fire N times every D events"). The nitpick pseudo-event uses this to scan transcripts every 5th PreToolUse.
