@@ -364,6 +364,38 @@ fix rather than before it.
 
 - Fix: `cef01a69`, verified 32/32.
 
+**The skip that reset the clock** — `routines/qa.py`, `_TERMINAL`, against
+`routines/ledger.py`'s `_NEEDS_INTERVAL`. **The first instance found by RUNNING
+a routine end to end rather than by a security check**, and the only one so far
+inside the Routine machinery itself.
+
+What it allowed: `_TERMINAL` meant "the run ended" and the overdue clock needed
+"the run covered ground". The two differ by exactly `skipped` — the state that
+exists so an absence can be written down — so every deliberate skip bought
+another period plus grace of silence. A routine skipped on schedule, for ever,
+read exactly like one performed on schedule, which is the decay the whole
+Routine concept was built to make visible.
+
+The sibling had settled it in the same package. `_NEEDS_INTERVAL` refuses to
+write a terminal row without the span it covered, and `_gap` already excluded
+skips on the stated grounds that a skip "covered nothing by definition". Two of
+the three consumers held the right reading; the clock held the other.
+
+Narrowing the clock alone would have WIDENED the hole. `routine-never-run`
+asked whether rows exist, so a routine whose only rows were skips or unfinished
+starts would then have been reported by nothing at all — no baseline for the
+clock, and records enough to satisfy the dead-man's switch. Both checks had to
+move to the same question: has anything been COVERED.
+
+The row needed a fifth extractor. The four existing ones all read STRING
+literals, and both sides here are sets of enum references — the shape this
+codebase reaches for whenever the members are a closed vocabulary. **A relation
+that cannot be expressed is a relation nobody writes down**, which is its own
+quiet way for a registry to under-cover.
+
+- Defence: `0311a782`, committed deliberately red, naming `SKIPPED`.
+- Fix: `54368a76`.
+
 Nine further table rows are recorded in
 [the consolidated worklist](../Plan/00412-jobs-recurring-work-and-security-review/subagent-reports/260915-consolidated-defence-worklist.md),
 with the registry's design notes in
@@ -411,7 +443,7 @@ and telling those apart is the reading a registry exists to capture.
 - **Only declared pairs.** This is the defining limitation and it is
   structural, not an oversight. A divergence with no row in
   `scripts/qa/declared-invariant-pairs.yaml` is invisible, and the registry
-  currently holds seven rows against thirteen known instances. **Read a green
+  currently holds eight rows against fourteen known instances. **Read a green
   run as "every declared pair holds", never as "the class is clear."**
 
   The third instance above proves the point from inside: it is a real member of
@@ -423,10 +455,19 @@ and telling those apart is the reading a registry exists to capture.
   measured as noisy and deliberately does not gate a build. A noisy rule gets
   switched off, and a switched-off rule protects nothing.
 
-- **Two extractors, both shallow.** `dict_keys` reads the string keys of a
+- **Five extractors, all shallow.** `dict_keys` reads the string keys of a
   module-level dict literal; `regex_head_names` reads the `^name\b` head of each
-  literal pattern in a module-level tuple or list. A member computed at import
-  time, built by a comprehension, or assembled from another module is not seen.
+  literal pattern in a module-level tuple or list; `str_tuple` reads its string
+  members; `regex_alternation` reads the members of a grouped alternation; and
+  `enum_members` reads the attribute names of a set, tuple or list of enum
+  references. A member computed at import time, built by a comprehension, or
+  assembled from another module is not seen by any of them.
+
+  `enum_members` compares by ATTRIBUTE name, so two sets reaching the same
+  vocabulary under different aliases still compare — and, by the same token, two
+  DIFFERENT enums that happen to share a member name compare as though they
+  agreed. The rule cannot tell those apart; only the row's `reason` records
+  which enum was meant.
 
 - **A non-literal entry is SKIPPED, not guessed at.** The pipe whitelist mixes
   plain literals with f-strings built from the shared git grammar

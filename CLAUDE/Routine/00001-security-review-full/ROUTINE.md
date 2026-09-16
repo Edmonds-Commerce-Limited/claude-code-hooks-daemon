@@ -71,6 +71,28 @@ full sweep for ever while every record read as healthy.
    was **not answerable**, that is not a clean result — record it as a check
    this run did not perform, exactly as a delta run records its full-only set.
 
+   **OPEN DEFECT — the reviewer cannot write the report this step demands.**
+   `.claude/agents/security-reviewer.md` declares `tools: Read, Grep, Glob, Bash`
+   and no `Write`, so the contract above and the agent's tool list disagree.
+
+   This is not theoretical and it is not cosmetic. Every dispatch in Routine
+   00002's run 2026-001 hit it: three reviewers independently reached for a Bash
+   heredoc — the one write path that the pre-write content guards never
+   inspect — and one lost its report entirely, surviving only because its
+   findings were transcribed from the returned message by the dispatching agent,
+   who could not verify them. **So the workaround this defect forces is
+   specifically the one that routes a security report around the guard that
+   would check it for disclosure, in a public repository.**
+
+   Until it is closed: after every run, READ each report before staging it, and
+   if any is missing, transcribe it from the returned message and mark the file
+   as recovered rather than authored.
+
+   Two candidate remedies, neither taken here because both change a contract on
+   the eve of a release: give `security-reviewer` the `Write` tool scoped to the
+   reports directory, or make the DISPATCHING agent write each report from the
+   returned summary. Nothing should be loosened to paper over it.
+
 4. Record every confirmed finding in the [security register](../../Security/README.md),
    under its category, naming its Defence. A category with no Defence yet is
    written only once the Defence exists — the register must not claim coverage

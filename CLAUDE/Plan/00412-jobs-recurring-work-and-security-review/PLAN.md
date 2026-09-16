@@ -268,19 +268,78 @@ decisions it produced are in [DESIGN.md](DESIGN.md).
   to roughly seven classes, and building Defences per REPORT would produce
   overlapping Detectors for the same nets.
 
+  **The delta routine has now run too.** 00002's `2026-001` covered
+  `v3.63.0 -> v3.64.0`, all 8 delta-able checks, none unanswerable, 19 findings
+  — and it closed the live `routine-never-run` the sweep had been reporting
+  against it. It earned its keep on its first outing by **overturning a full
+  sweep verdict**: 00001 judged the sibling `--body-file` route "closed by
+  handler ORDER", and `core/chain.py` makes that termination conditional on
+  `collect_all_violations`, which `init_config.py` scaffolds into every config.
+  A whole-repository brief called it closed; one release's diff found the
+  condition that opens it. Every finding is already shipped in v3.64.0, so all
+  are recorded rather than patched, on the same owner-gated boundary as the
+  security-downgrade rows.
+
+  **Running the machinery found three defects that reading it had not**, all
+  one class — a record of NON-coverage read as coverage. A `skipped` run reset
+  the overdue clock, so a routine skipped for ever read as one performed on
+  time; a routine whose only rows were skips or unfinished starts was reported
+  by NO check, falling between "are there records" and "how long since one";
+  and both procedures derived `from` from "the last recorded run (any
+  outcome)", which is undefined after a skip because a skip records no `to`.
+  Defence first — `0311a782`, committed red, naming `SKIPPED` — then the fix
+  (`54368a76`), then the derivation moved out of prose into `run-routine`
+  itself. Recorded as an instance of `asymmetric sibling protection`, whose
+  registry needed a fifth extractor to express a relation between two enum sets.
+
+  **A fourth defect is open and recorded in the routine itself.** The
+  `security-reviewer` agent is declared without the `Write` tool while step 3
+  asks it for a report file. Every dispatch hit it: three reviewers fell back to
+  a Bash heredoc — the one write path the pre-write content guards never
+  inspect — and one lost its report entirely, surviving only as a transcription
+  its own author could not verify. The forced workaround is precisely the one
+  that routes a security report around the disclosure guard, in a public
+  repository. Two remedies are named in
+  [the routine](../../Routine/00001-security-review-full/ROUTINE.md); both change
+  a contract and neither was taken on the eve of a release.
+
 ## Success Criteria
 
-- [ ] ⬜ A second run of any routine can state, from the records alone, exactly
-  what interval it must cover, with no mutable pointer consulted.
+- [x] ✅ A second run of any routine can state, from the records alone, exactly
+  what interval it must cover, with no mutable pointer consulted. Demonstrated
+  rather than asserted: `run-routine 00001` over a copy of the real ledger
+  prints `this run's from is 5d59f7ff`, which is run `2026-001`'s recorded `to`.
+  `ledger.next_from_ref()` reads only rows that CARRIED an interval, and returns
+  None rather than guessing a first run's start — which ref that is belongs to
+  each routine, not to the ledger.
 
-- [ ] ⬜ A deliberately skipped run is detectable: the QA sweep reports the
-  gap rather than the records reading as continuous.
+- [x] ✅ A deliberately skipped run is detectable: the QA sweep reports the
+  gap rather than the records reading as continuous. It did not, and now does.
+  Shown both ways over one set of records: the pre-fix sweep said **nothing** at
+  all about a routine last covered 199 days ago and deliberately skipped today,
+  and said `last finished 107 days ago` about one that had never finished
+  anything. After the fix it reports `last covered ground 199 days ago` and
+  `has run records, but not one of them covered anything`.
+  `routine-run-gap` is deliberately NOT the check that fires — D5 says a skip
+  leaves no hole, it widens the next interval — so the gap surfaces on the
+  overdue clock and the dead-man's switch instead.
 
 - [ ] ⬜ The security routine has run once for real, its findings are recorded,
   and every confirmed defect has a BLOCKING Detector that was proved to fire
-  before its fix landed.
+  before its fix landed. **Two-thirds done, and left open for the last third.**
+  Both routines have now run for real and every finding is recorded — 00001's
+  `2026-001` (15/15 checks, 77 findings) and 00002's `2026-001` (8/8, 19). But
+  ~6 classes from the full sweep are still unfixed and several remedies are
+  owner-gated, so "every confirmed defect has a Detector" is not yet true.
 
-- [ ] ⬜ Nothing in the generic core mentions security.
+- [x] ✅ Nothing in the generic core mentions security. Audited and fixed: the
+  package docstring named security review as the first consumer, and
+  `mkroutine.bash` offered `"security-review"` as its worked example — a generic
+  scaffolder teaching every new routine what kind of thing a routine is. Their
+  test fixtures carried the name throughout and now scaffold a dependency audit.
+  `grep -i securit` over `routines/`, the sweep handler, the scaffolder and all
+  their tests returns nothing. `CLAUDE/Routine/README.md` still names the two
+  real routines, which is the index of what exists rather than the core.
 
 - [ ] ⬜ Full QA passes, the daemon is restarted, and CI is green.
 
