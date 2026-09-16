@@ -385,6 +385,13 @@ def main() -> int:
             "passed": len(violations) == 0,
             "total_violations": len(violations),
             "files_scanned": len(files),
+            # Two corpora, so two denominators. A healthy `files_scanned` says
+            # nothing about whether either corpus loaded: with zero terms the
+            # secret half of this scan is INERT and still reports clean, which
+            # is the defect Plan 00412 class 5 is named for. Reporting the
+            # counts is what makes a half-dead scan visible to a reader.
+            "secret_terms_loaded": len(secret_terms),
+            "public_patterns_compiled": len(compiled_patterns),
         },
         "violations": [v.to_dict() for v in violations],
     }
@@ -404,7 +411,11 @@ def main() -> int:
         for violation in violations:
             print(f"  {violation.file}:{violation.line} [{violation.rule}] {violation.message}")
     else:
-        print(f"No sensitive-content violations found ({len(files)} files scanned)")
+        print(
+            f"No sensitive-content violations found ({len(files)} files scanned, "
+            f"{len(secret_terms)} secret terms loaded, "
+            f"{len(compiled_patterns)} public patterns compiled)"
+        )
 
     return 1 if violations else 0
 

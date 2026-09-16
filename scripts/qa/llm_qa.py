@@ -635,8 +635,19 @@ def _summarize_corpus_qa(data: QaReport) -> str:
 
 
 def _summarize_sensitive_content(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
+    """Clean is reported WITH its denominators, or it is not a clean result.
+
+    This check reads two independent corpora, and either can resolve to nothing
+    while the other is healthy. A zero term count means the secret half of the
+    scan did not run — `0 violations` then says only that an inert check found
+    nothing (Plan 00412 class 5).
+    """
+    summary = data.get("summary", {})
+    total = summary.get("total_violations", 0)
+    files = summary.get("files_scanned", 0)
+    terms = summary.get("secret_terms_loaded", 0)
+    patterns = summary.get("public_patterns_compiled", 0)
+    return f"{total} violations ({files} files, {terms} terms, {patterns} patterns)"
 
 
 def _summarize_git_history(data: QaReport) -> str:
