@@ -107,4 +107,56 @@ issue found.
 
 ## Commit
 
-Committed in the worktree as a single commit; not merged, not pushed.
+Committed in the worktree as commit `edd91533`; not merged, not pushed.
+
+## Follow-up: two review findings fixed (commit `aede82dd`)
+
+Team-lead review (probe at `/workspace/untracked/scratch/probe43.py`) found
+two defects in `edd91533`, both confirmed against this branch and both fixed
+with a RED test written first.
+
+**1. Over-match on a never-used project.** With no tree and no index file,
+`check` printed `.claude/REMOTE-DOCS.md: out of date with the vendored tree`
+and exited 1, instead of the old clean `all vendored documents are fresh` /
+exit 0. Fixed: an index is only judged stale once it exists OR the tree
+holds documents — `list_documents(tree)` gates the comparison, so "never
+vendored" and "never generated" agree instead of one flagging the other.
+
+**2. The summary line counted the index as a document.** With only the
+index stale, `check` printed `remote-docs: 1 document(s) need attention` —
+a command built to stop the corpus lying about its health was itself lying
+in its own summary. Fixed: `document_count` now only counts `flagged` +
+`drifted`; the index gets its own clause (`"the generated index"`) joined
+in, so a document-only run, an index-only run, and a mixed run each read
+correctly.
+
+RED (before the fix, both new tests against the buggy code):
+
+```
+FAILED ...TestListAndCheck::test_check_stays_clean_for_a_project_that_never_used_remote_docs - assert 1 == 0
+FAILED ...TestListAndCheck::test_check_does_not_count_the_index_as_a_document - AssertionError: assert '1 document(...ed attention' not in 'captured ht... attention\n'
+2 failed, 35 deselected in 0.59s
+```
+
+Full stdout captured for the never-used-project case, showing the exact
+wrong output before the fix:
+
+```
+.claude/REMOTE-DOCS.md: out of date with the vendored tree
+  fix: bin/hooks-daemon remote-docs index
+
+remote-docs: 1 document(s) need attention
+```
+
+GREEN: `tests/unit/remote_docs/` — 230 passed (228 + 2 new), 0 failed.
+
+Also updated the release note to state plainly that the `_HEADER` text
+change means every existing project's index reads as stale once, on the
+first `check` after upgrading, with `remote-docs index` as the one-command
+fix.
+
+I have not re-run the full `./scripts/qa/llm_qa.py all` suite for this
+follow-up — only the targeted `tests/unit/remote_docs/` directory, which is
+the scope these two fixes touch. The daemon-staleness-caused failures noted
+above (acceptance/smoke tests against the live socket) are unrelated to this
+follow-up and unaffected by it.

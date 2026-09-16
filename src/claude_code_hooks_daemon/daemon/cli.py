@@ -6410,7 +6410,10 @@ def _remote_docs_check(
         parts.append(f"{document_count} document(s)")
     if index_stale:
         parts.append("the generated index")
-    print(f"\nremote-docs: {' and '.join(parts)} need attention")
+    # The index alone is a singular subject; `N document(s)` is plural either
+    # way, so only the index-only case takes `needs`.
+    verb = "needs" if parts == ["the generated index"] else "need"
+    print(f"\nremote-docs: {' and '.join(parts)} {verb} attention")
     return 1
 
 

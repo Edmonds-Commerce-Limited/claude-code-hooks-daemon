@@ -205,6 +205,42 @@ class TestListAndCheck:
 
         assert cmd_remote_docs(_args(tmp_path, "check")) == 1
 
+    def test_check_stays_quiet_for_a_project_that_vendors_nothing(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """A project with no corpus has no index, and needs none.
+
+        The stale-index finding must not fire here. Reporting one would exit
+        non-zero for every project that never uses remote-docs at all, turning
+        a previously-green CI red on upgrade — a worse defect than the missing
+        detection it came from.
+        """
+        code = cmd_remote_docs(_args(tmp_path, "check"))
+
+        assert code == 0
+        assert "all vendored documents are fresh" in capsys.readouterr().out
+
+    def test_the_summary_line_does_not_call_the_index_a_document(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """A stale index is not a document, and the count must not say it is.
+
+        This whole change exists because `check` reported corpus health
+        wrongly; its own summary line miscounting would be the same defect in
+        a new place.
+        """
+        from claude_code_hooks_daemon.remote_docs.index import INDEX_RELATIVE_PATH
+
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/a"))
+        (tmp_path / INDEX_RELATIVE_PATH).write_text("stale\n", encoding="utf-8")
+
+        code = cmd_remote_docs(_args(tmp_path, "check"))
+
+        out = capsys.readouterr().out
+        assert code == 1
+        assert "document(s) need attention" not in out
+        assert "the generated index needs attention" in out
+
     def test_check_stays_clean_for_a_project_that_never_used_remote_docs(
         self, tmp_path: Path
     ) -> None:
