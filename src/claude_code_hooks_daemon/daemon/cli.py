@@ -6183,10 +6183,15 @@ def cmd_remote_docs(args: argparse.Namespace) -> int:
     if action == "list":
         return _remote_docs_list(tree)
     if action == "check":
-        return _remote_docs_check(tree, now, _remote_docs_policy(resolved_root).known_sources)
+        return _remote_docs_check(
+            resolved_root, tree, now, _remote_docs_policy(resolved_root).known_sources
+        )
+    if action == "index":
+        _regenerate_remote_docs_index(resolved_root, tree)
+        return 0
 
-    # Only the fetching actions resolve a fetcher, so `list`/`check` never
-    # warn about a browser they were never going to use.
+    # Only the fetching actions resolve a fetcher, so `list`/`check`/`index`
+    # never warn about a browser they were never going to use.
     fetcher = _resolve_remote_docs_fetcher(args)
     if fetcher.warning:
         print(fetcher.warning, file=sys.stderr)
@@ -6329,8 +6334,15 @@ def _remote_docs_list(tree: Path) -> int:
     return 0
 
 
-def _remote_docs_check(tree: Path, now: Any, known_sources: Mapping[str, str] | None = None) -> int:
-    from claude_code_hooks_daemon.remote_docs.store import check_licence_drift, check_staleness
+def _remote_docs_check(
+    project_root: Path, tree: Path, now: Any, known_sources: Mapping[str, str] | None = None
+) -> int:
+    from claude_code_hooks_daemon.remote_docs.index import INDEX_RELATIVE_PATH, render_index
+    from claude_code_hooks_daemon.remote_docs.store import (
+        check_licence_drift,
+        check_staleness,
+        list_documents,
+    )
 
     today = now.date() if now is not None else None
     flagged = check_staleness(tree, today=today)
@@ -6339,7 +6351,22 @@ def _remote_docs_check(tree: Path, now: Any, known_sources: Mapping[str, str] | 
     # would leave the drift exactly as invisible as it already is.
     drifted = check_licence_drift(tree, known_sources or {})
 
-    if not flagged and not drifted:
+    # `rm` runs no command, so a deletion never regenerates the index --
+    # `render_index` is pure and path-ordered (`test_rewriting_is_idempotent`
+    # pins this), so an exact string compare is all a disagreement needs. A
+    # project that has never captured anything has neither an index nor a
+    # tree, and that agreement must stay quiet: only check once one of the
+    # two exists, so "never generated" is judged against "never vendored"
+    # rather than against a rendered-but-empty index nobody asked for.
+    index_path = project_root / INDEX_RELATIVE_PATH
+    index_exists = index_path.exists()
+    if index_exists or list_documents(tree):
+        current_index = index_path.read_text(encoding="utf-8") if index_exists else None
+        index_stale = current_index != render_index(tree)
+    else:
+        index_stale = False
+
+    if not flagged and not drifted and not index_stale:
         print("remote-docs: all vendored documents are fresh")
         return 0
 
@@ -6370,7 +6397,23 @@ def _remote_docs_check(tree: Path, now: Any, known_sources: Mapping[str, str] | 
             "(re-derives frontmatter)"
         )
 
-    print(f"\nremote-docs: {len(flagged) + len(drifted)} document(s) need attention")
+    if index_stale:
+        print(f"\n{INDEX_RELATIVE_PATH}: out of date with the vendored tree")
+        print("  fix: bin/hooks-daemon remote-docs index")
+
+    # The index is not a document, so it must never inflate this count --
+    # a summary line that miscounts it would itself be the same kind of lie
+    # about corpus health that this feature exists to catch.
+    document_count = len(flagged) + len(drifted)
+    parts = []
+    if document_count:
+        parts.append(f"{document_count} document(s)")
+    if index_stale:
+        parts.append("the generated index")
+    # The index alone is a singular subject; `N document(s)` is plural either
+    # way, so only the index-only case takes `needs`.
+    verb = "needs" if parts == ["the generated index"] else "need"
+    print(f"\nremote-docs: {' and '.join(parts)} {verb} attention")
     return 1
 
 
@@ -9107,9 +9150,10 @@ def main() -> int:
     )
     parser_remote_docs.add_argument(
         "remote_docs_action",
-        choices=["add", "list", "check", "refresh"],
+        choices=["add", "list", "check", "refresh", "index"],
         help="add: capture a URL; list: show the corpus; check: staleness "
-        "(exit 1 when any document needs attention); refresh: re-fetch",
+        "(exit 1 when any document needs attention); refresh: re-fetch; "
+        "index: re-render the corpus index without touching the network",
     )
     parser_remote_docs.add_argument(
         "url",

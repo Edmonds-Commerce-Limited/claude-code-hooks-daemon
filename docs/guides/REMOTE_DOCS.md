@@ -28,12 +28,17 @@ it stays fresh. You never write these files by hand — that is blocked.
 | `remote-docs check`                 | What is stale or unreadable (exit 1 if any)          |
 | `remote-docs refresh --path <file>` | Re-fetch one document                                |
 | `remote-docs refresh --all`         | Re-fetch everything                                  |
+| `remote-docs index`                 | Re-render the index without touching the network     |
 
 A refresh that finds upstream unchanged says `unchanged` and rewrites nothing
 but the dates.
 
 `.claude/REMOTE-DOCS.md` is regenerated on every capture and refresh — one
-grep there answers "do we already have docs for X?".
+grep there answers "do we already have docs for X?". Deleting a capture with
+`rm` does not regenerate it; `check` now reports that disagreement (exit 1),
+with `remote-docs index` as the fix — see
+[CLAUDE/RemoteDocs.md](../../CLAUDE/RemoteDocs.md) for how the comparison
+works.
 
 ## Configure it
 
