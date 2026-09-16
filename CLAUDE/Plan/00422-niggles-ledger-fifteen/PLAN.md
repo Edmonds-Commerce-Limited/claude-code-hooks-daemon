@@ -59,6 +59,7 @@ ledger's shape is readable without opening it:
 | N2  | the linter runs on gitignored scratch output                         | [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy chosen and un-gated, nobody built it   |
 | N3  | a committed future-dated entry makes the journal uncorrectable       | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedies recorded, none chosen; advisory live |
 | N4  | a cron cannot be both cancelled for a session and declared in config | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
+| N5  | the v3.65.0 release reviews' NON-defects had no durable home         | the v3.65.0 release reviews                                        | ⬜ Open — evidence now tracked, twelve rows unworked    |
 
 ## Tasks
 
@@ -91,6 +92,18 @@ ledger's shape is readable without opening it:
   about the moment. Write it up where a handler author will meet it — the
   candidate home is `CLAUDE/HANDLER_DEVELOPMENT.md`, beside the stage-selection
   guidance, since 00419 N3's remedy was a stage move and not a relaxation.
+
+### Phase 2: the release-review carry-over
+
+- [ ] ⬜ **Task 2.1**: N5 — work the twelve-row table in
+  [NIGGLES.md](NIGGLES.md). Rows (a), (d) and (f) are documentation or test
+  corrections needing no decision; (a) first, because it is a live trap for the
+  next person to add a Stop handler.
+
+- [ ] ⬜ **Task 2.2**: N5 remedy (2), owner-gated — decide whether a review
+  dispatch should default to a TRACKED report destination, so a reviewer's
+  evidence lands where git can see it without the coordinator remembering.
+  `dispatch_declaration` currently recommends the gitignored path.
 
 ## Success Criteria
 

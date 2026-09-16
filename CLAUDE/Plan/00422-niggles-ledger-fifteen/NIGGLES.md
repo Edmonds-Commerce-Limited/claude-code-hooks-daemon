@@ -246,3 +246,58 @@ Remedy owner-gated — (1) hands a session the ability to switch off a guard the
 project itself declared, which is a decision about that guard's authority rather
 than a bug fix, and the thing it would be overriding is the owner's own
 instruction.
+
+### N5 — the v3.65.0 release reviews' NON-defects had no durable home
+
+**Found**: after v3.65.0 shipped, while a later session was doing unrelated
+work. Four reviewer agents took the `v3.64.0..HEAD` diff apart by subsystem and
+returned 14 defects and roughly 20 non-defects. Every DEFECT was fixed before
+the tag, which is the rule working. The non-defects were reported inline to the
+coordinator and written to `untracked/agent-reports/` — and `untracked/` is
+gitignored (`.gitignore:200`), so `git ls-files untracked/agent-reports/`
+returns nothing. The container is ephemeral. The findings were one restart from
+gone, and nothing would have reported their absence.
+
+**The reports are now in `release-reviews/` beside this file**, verbatim, so the
+evidence survives without being re-derived. They are the primary record; the
+table below is an index, not a replacement. Their DEFECT sections are closed —
+all fourteen shipped fixed in v3.65.0 — so only the non-defect sections are
+live.
+
+| #   | Where                                            | The finding                                                                                                                                                                      |
+| --- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a   | `CLAUDE/HANDLER_DEVELOPMENT.md:506`              | The 0-9 band says no built-in ships there; four now do. An author following it puts a Stop handler at 10+, after the terminal catch-all, and it is silently unreachable          |
+| b   | `stop/cron_stop_enforcer.py`, subagent twin      | `matches()` and `handle()` each re-parse the whole config, uncached; measured 81.5 ms median per load, ~165 ms per Stop on this repo's config                                    |
+| c   | `stop/teammate_reap_advisor.py:59-62,137-147`    | `_should_advise` and its two constants are a verbatim copy of `background_process_tracker`'s; both share an unlocked eviction that can `KeyError` under the dispatch thread pool |
+| d   | `stop/__init__.py:11`                            | Names `cron_stop_enforcer` as priority 8; it is 7, and 8 is taken by `release_blocker`                                                                                           |
+| e   | `utils/host_identity.py:258-268`                 | The documented four-rung ladder short-circuits instead of falling through to `/etc/hosts`; defensible, but the code and the docstring disagree                                   |
+| f   | `tests/.../test_cron_stop_enforcer.py:201`, twin | Both assert against the SHIPPED priority, not the effective one, so a handler at 12 passes while being shadowed in this very repo                                                |
+| g   | `utils/cron_enforcement.py:147-165`              | A `session_crons` prompt that is nothing but a truncation marker matches any declared job on the same schedule; fails in the ALLOW direction                                     |
+| h   | `utils/markdown_links.py`                        | Imports `plan_qa.model`, contradicting its own docstring and making `docs_qa` transitively depend on `plan_qa`                                                                   |
+| i   | `daemon/background_harvester.py`                 | `tree_pgids` is not filtered against `exclude_pgids`, so a suggested `kill --` can name the protected group                                                                      |
+| j   | `docs_qa` `pointer_resolves._run_sweep`          | No dedupe — one repeated link prints five identical findings; the plan-QA twin dedupes                                                                                           |
+| k   | `plan_qa` relocation messages                    | Assert "archived" for any number-resolved target, including a LIVE plan reached by a wrong path                                                                                  |
+| l   | `plan_link_resolves` vs `pointer_resolves`       | Only one has the repo-root-relative fallback, so the two subsystems answer the same link two different ways                                                                      |
+
+**Why it is a niggle rather than a defect.** Nothing here is broken in a way a
+user hits today; (a), (f) and (g) are the ones with teeth, and each is a guard
+that would fail quietly rather than loudly. The finding that matters most is the
+PROCESS one: "Review Early, Never Drop Findings" was honoured for defects and
+not for non-defects, and the gap was invisible because the reports existed — on
+a path nothing durable reads.
+
+**Candidate remedies**, cheapest first:
+
+1. Work the table. Most rows are one-line fixes with an obvious owner; (a), (d)
+   and (f) are documentation or test corrections that need no decision at all.
+2. Make the loss impossible rather than noticed: have a review dispatch declare
+   a TRACKED report destination by default, so a reviewer's evidence lands
+   somewhere `git` can see without the coordinator remembering. The dispatch
+   contract already names `untracked/agent-reports/` as its fallback, which is
+   precisely the gitignored path this entry is about.
+3. Nothing for the table, on the grounds that a release that shipped with its
+   defects fixed did the important half. This loses (a), which is a live trap
+   for the next person to add a Stop handler.
+
+Remedy (2) is owner-gated — it changes what `dispatch_declaration` recommends
+to every client project, not just this one.
