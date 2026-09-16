@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.utils.path_predicates import (
     path_exists,
     path_is_dir,
     path_is_file,
+    read_text_or_reason,
 )
 
 _PREDICATES: Final[dict[str, tuple[Callable[..., Any], str]]] = {
@@ -233,3 +234,56 @@ class TestBothPathSpellingsWork:
         assert predicate(tmp_path, unreadable_means=None) is predicate(
             str(tmp_path), unreadable_means=None
         )
+
+
+class TestReadTextOrReason:
+    """Reading a file without letting "absent" and "unreadable" collapse.
+
+    The read counterpart of the predicates above, and the same thesis: a helper
+    that cannot raise and cannot silently pick a side. Returning a bare ``None``
+    conflated two different facts, so a silent handler could not be explained
+    afterwards -- and a `return None` inside an `except` body is error hiding,
+    which this project's own audit denies.
+
+    Promoted here (Plan 00412 class 2a) when the guard-config commit gate became
+    the second caller; it lived as a private in the session-start drift handler.
+    """
+
+    def test_a_readable_file_yields_its_text_and_no_reason(self, tmp_path: Path) -> None:
+        target = tmp_path / "config.yaml"
+        target.write_text("handlers: {}\n", encoding="utf-8")
+
+        attempt = read_text_or_reason(target)
+
+        assert attempt.text == "handlers: {}\n"
+        assert attempt.reason is None
+
+    def test_a_missing_file_yields_a_reason_and_no_text(self, tmp_path: Path) -> None:
+        attempt = read_text_or_reason(tmp_path / "absent.yaml")
+
+        assert attempt.text is None
+        assert attempt.reason, "an unexplained silence is the thing this prevents"
+
+    def test_a_directory_yields_a_reason_rather_than_raising(self, tmp_path: Path) -> None:
+        """A directory read raises IsADirectoryError, which is an OSError."""
+        attempt = read_text_or_reason(tmp_path)
+
+        assert attempt.text is None
+        assert attempt.reason is not None
+
+    def test_an_empty_file_is_not_confused_with_an_unreadable_one(self, tmp_path: Path) -> None:
+        """`text == ""` is falsy, so a caller testing truthiness would agree
+        with the unreadable case. The reason is what separates them."""
+        target = tmp_path / "empty.yaml"
+        target.write_text("", encoding="utf-8")
+
+        attempt = read_text_or_reason(target)
+
+        assert attempt.text == ""
+        assert attempt.reason is None
+
+    def test_both_path_spellings_work(self, tmp_path: Path) -> None:
+        target = tmp_path / "config.yaml"
+        target.write_text("x: 1\n", encoding="utf-8")
+
+        assert read_text_or_reason(str(target)).text == read_text_or_reason(target).text

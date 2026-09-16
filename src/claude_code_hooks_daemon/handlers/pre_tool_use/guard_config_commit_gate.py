@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.utils.guard_config_drift import (
     DriftReport,
     compare_guard_config,
 )
+from claude_code_hooks_daemon.utils.path_predicates import read_text_or_reason
 
 logger = logging.getLogger(__name__)
 
@@ -143,11 +144,11 @@ class GuardConfigCommitGateHandler(PreToolUseHandlerBase):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         if hook_input.get("tool_name") != ToolName.BASH:
             return False
-        command = get_bash_command(hook_input)
-        return bool(command) and _commit_subcommand_index(tokenise_command(command)) is not None
+        command = get_bash_command(hook_input) or ""
+        return _commit_subcommand_index(tokenise_command(command)) is not None
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        command = get_bash_command(hook_input)
+        command = get_bash_command(hook_input) or ""
         source = recorded_config_source(command, CONFIG_RELATIVE_PATH)
         if source is None:
             return GatingResult(decision=Decision.ALLOW, context=[])
@@ -192,12 +193,11 @@ class GuardConfigCommitGateHandler(PreToolUseHandlerBase):
         if root is None:
             return None
         if source is RecordedSource.WORKING_TREE:
-            path = root / CONFIG_RELATIVE_PATH
-            try:
-                return path.read_text(encoding="utf-8")
-            except OSError as exc:
-                logger.debug("guard_config_commit_gate: %s unreadable: %s", path, exc)
-                return None
+            # The reason is carried on the returned value rather than discarded,
+            # so "absent" and "unreadable" stay distinct to anyone debugging a
+            # silent gate -- and so this is not a `return None` from an except
+            # body, which is error hiding.
+            return read_text_or_reason(root / CONFIG_RELATIVE_PATH).text
         result = run_git(root, "show", _INDEX_REF)
         if result.returncode != 0:
             # The path is not in the index, so the commit records no config.

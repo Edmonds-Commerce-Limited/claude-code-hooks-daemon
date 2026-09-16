@@ -39,12 +39,43 @@ the choice, and the reasoning behind it, is visible in review at every site.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
 logger = logging.getLogger(__name__)
 
 _Fallback = TypeVar("_Fallback")
+
+
+@dataclass(frozen=True)
+class TextOrReason:
+    """A file's text, or the reason there is none -- never both, never neither.
+
+    ``text`` of ``""`` is a real answer (an empty file) and is NOT the same as
+    ``None``; callers testing truthiness would agree with the failure case, so
+    ``reason`` is what separates them.
+    """
+
+    text: str | None = None
+    reason: str | None = None
+
+
+def read_text_or_reason(path: str | Path, *, encoding: str = "utf-8") -> TextOrReason:
+    """Read ``path``, carrying any failure back as a reason rather than raising.
+
+    The read counterpart of the predicates below, for the same reason: a
+    handler that raises at session start or on a tool call costs the whole
+    response, and one that swallows the error cannot explain its own silence
+    afterwards. Returning a bare ``None`` collapsed "absent" and "unreadable"
+    into one fact, and a ``return None`` inside an ``except`` body is error
+    hiding, which this project's own audit denies.
+    """
+    try:
+        return TextOrReason(text=Path(path).read_text(encoding=encoding))
+    except OSError as exc:
+        logger.debug("read_text_or_reason: %s unreadable: %s", path, exc)
+        return TextOrReason(reason=str(exc))
 
 
 def _answer_or_fallback(

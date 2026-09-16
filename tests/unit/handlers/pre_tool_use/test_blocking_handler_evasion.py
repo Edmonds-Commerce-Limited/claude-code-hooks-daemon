@@ -500,6 +500,18 @@ _COMMAND_ANCHORED_NOT_UNIT_TESTABLE: dict[str, str] = {
     "RootRecursionGuardHandler": "matches the scan ROOT operand, not the binary name",
     "WorktreeFileCopyHandler": "matches worktree path operands, not the binary name",
     "GlobalNpmAdvisorHandler": "advisory only; never denies, so a bypass changes nothing",
+    "GuardConfigCommitGateHandler": (
+        "reports and never denies, so there is no block to respell around -- but "
+        "the evasion question is NOT vacuous here, because a respelling that made "
+        "it silent would hide a guard weakening just as effectively as bypassing "
+        "a deny. It locates the subcommand with git_subcommand_index, the same "
+        "evasion-hardened locator DestructiveGitHandler uses, and its own suite "
+        "asserts that `git -C <path> commit`, `git --no-pager commit` and an "
+        "absolute `/usr/bin/git commit` are all still judged: "
+        "tests/unit/handlers/pre_tool_use/test_guard_config_commit_gate.py. Not "
+        "unit-testable in THIS harness because handle() reads HEAD and the index, "
+        "so it needs a real repository"
+    ),
     "MergeToMainApprovalHandler": (
         "the command match (git merge / gh pr merge) already runs through "
         "GIT_INVOCATION, the same evasion-hardened fragment DestructiveGitHandler "

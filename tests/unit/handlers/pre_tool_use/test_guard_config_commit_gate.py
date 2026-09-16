@@ -97,6 +97,31 @@ class TestWhichVersionTheCommitRecords:
     def test_a_non_commit_command_is_not_judged(self) -> None:
         assert recorded_config_source("git status", CONFIG_RELATIVE_PATH) is None
 
+    def test_a_respelled_git_invocation_is_still_judged(self) -> None:
+        """`git -C <path> commit` must not walk past this gate.
+
+        Assuming a handler "is not a command handler" is what let `git -C`
+        bypass four handlers unnoticed, so the subcommand is located with the
+        evasion-hardened locator rather than by reading token 1. The gate never
+        denies, so there is no block to evade -- but a respelling that made it
+        SILENT would hide the weakening just as effectively.
+        """
+        command = "git -C /srv/project commit -am msg"
+
+        assert recorded_config_source(command, CONFIG_RELATIVE_PATH) is (
+            RecordedSource.WORKING_TREE
+        )
+
+    def test_a_no_pager_respelling_is_still_judged(self) -> None:
+        assert recorded_config_source("git --no-pager commit -m msg", CONFIG_RELATIVE_PATH) is (
+            RecordedSource.INDEX
+        )
+
+    def test_an_absolute_git_path_is_still_judged(self) -> None:
+        assert recorded_config_source("/usr/bin/git commit -m msg", CONFIG_RELATIVE_PATH) is (
+            RecordedSource.INDEX
+        )
+
     def test_the_a_in_a_quoted_message_does_not_select_the_working_tree(self) -> None:
         command = "git commit -m 'fix the -a flag handling'"
 
