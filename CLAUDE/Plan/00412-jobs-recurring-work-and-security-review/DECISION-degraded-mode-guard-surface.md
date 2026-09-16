@@ -1,6 +1,9 @@
 # Decision request: what should survive degraded mode
 
-**Status**: awaiting owner decision. Nothing here is implemented.
+**Status**: DECIDED — see
+[fable-degraded-mode-decision.md](fable-degraded-mode-decision.md): "B, then
+A", both narrowed, with the reporters' silence on an unparseable config fixed
+first. Nothing here is implemented.
 **Source**: Plan 00412, run `2026-001`, check `D-SEC` — the highest-value
 finding in the run, and the only one where three individually-sound decisions
 compose into something none of them intended.

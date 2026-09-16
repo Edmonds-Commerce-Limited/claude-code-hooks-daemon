@@ -1,7 +1,12 @@
 # Decision: where a Defence lives — `scripts/qa/` Detector or test?
 
-**Status**: open, owner-gated. Blocks nothing today; governs every remaining
-class in this plan.
+**Status**: DECIDED — ruling in
+[fable-defence-location-decision.md](fable-defence-location-decision.md).
+Option A endorsed in direction and corrected in letter: every Defence is a
+`scripts/qa/` Detector (method clause 3.2), bound by a `TOOL_REGISTRY` entry, a
+real-tree pytest assertion and one generic wiring test — not by a `run_all.sh`
+step, which neither the release gate nor CI runs. Governs every remaining class
+in this plan.
 
 **Raised by**: Plan 00412 class 15 (`unbounded-work-on-input-not-sized`),
 Defence landed as `tests/integration/test_subprocess_spawns_are_bounded.py`.

@@ -1,6 +1,10 @@
 # Decision needed: `secret_file_guard` matches dotted MODULE paths
 
-**Status**: open, owner decision. Blocks Plan 00412 worklist row **F-PRIV-4**.
+**Status**: DECIDED — see
+[fable-secret-guard-module-path-decision.md](fable-secret-guard-module-path-decision.md).
+The premise below is wrong: an import STATEMENT of the module has been exempt
+since `b149808f`; only a non-import spelling (string literal, docstring,
+comment) is denied, and that residual is accepted. **F-PRIV-4 is not blocked.**
 
 **Found by**: dogfooding, 2026-09-16, while writing the F-PRIV-4 regression
 test.

@@ -1,7 +1,10 @@
 # Decision request: the two `${VAR:-default}` interpolations
 
-**Status**: owner decision needed. Three of five sites are fixed; these two are
-not, deliberately.
+**Status**: DECIDED — option B endorsed, option C declined; ruling and the
+unbuilt work it implies in
+[fable-forwarder-interpolation-decision.md](fable-forwarder-interpolation-decision.md).
+Nothing is implemented yet: three sites are fixed; these two are not,
+deliberately.
 
 Context:
 [DESIGN-declared-invariant-pairs.md](DESIGN-declared-invariant-pairs.md),
