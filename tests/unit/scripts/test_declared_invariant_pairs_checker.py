@@ -475,6 +475,114 @@ _FRAGMENT_ROW = """
 """
 
 
+class TestReachesFollowsOneHop:
+    """A row names the function that OWNS the responsibility.
+
+    Extracting the work into a small helper method is ordinary refactoring,
+    and a rule that reads only the named body calls that a violation — which
+    would push code to stay inline purely to satisfy a check. That is the rule
+    dictating structure, and it is the wrong way round.
+
+    The alternative was to repoint the row at the inner helper, and that is
+    worse: the inner helper satisfies the row even if nobody calls it, so DEAD
+    CODE would turn the row green.
+
+    ONE hop, deliberately. Following arbitrarily far would make the row mean
+    "this function eventually reaches anything", which is not an invariant.
+    """
+
+    _ROW = _CALL_PATH_ROW
+
+    def _row(self, checker: ModuleType, tmp_path: Path) -> Any:
+        return checker.load_registry(_registry(tmp_path, self._ROW))[0]
+
+    def test_a_call_through_a_self_method_counts(self, checker: ModuleType, tmp_path: Path) -> None:
+        source = (
+            "class H:\n"
+            "    def write_capture(self, x):\n"
+            "        content_guard(x)\n"
+            "\n"
+            "    def refresh_document(self, x):\n"
+            "        return self._scan(x)\n"
+            "\n"
+            "    def _scan(self, x):\n"
+            "        return content_guard(x)\n"
+        )
+        _module(tmp_path, "a.py", source)
+        assert checker.check_row(tmp_path, self._row(checker, tmp_path)) == []
+
+    def test_a_call_through_a_module_level_function_counts(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        source = (
+            "def _scan(x):\n"
+            "    return content_guard(x)\n"
+            "\n"
+            "def write_capture(x):\n"
+            "    content_guard(x)\n"
+            "\n"
+            "def refresh_document(x):\n"
+            "    return _scan(x)\n"
+        )
+        _module(tmp_path, "a.py", source)
+        assert checker.check_row(tmp_path, self._row(checker, tmp_path)) == []
+
+    def test_two_hops_does_NOT_count_and_that_bound_is_the_point(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """Stated as a limit rather than left to be discovered."""
+        source = (
+            "def _inner(x):\n"
+            "    return content_guard(x)\n"
+            "\n"
+            "def _outer(x):\n"
+            "    return _inner(x)\n"
+            "\n"
+            "def write_capture(x):\n"
+            "    content_guard(x)\n"
+            "\n"
+            "def refresh_document(x):\n"
+            "    return _outer(x)\n"
+        )
+        _module(tmp_path, "a.py", source)
+        violations = checker.check_row(tmp_path, self._row(checker, tmp_path))
+        assert violations[0].members == ("refresh_document",)
+
+    def test_a_helper_nobody_reaches_is_still_a_violation(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """The whole point: an unreferenced helper must not satisfy the row."""
+        source = (
+            "def _scan(x):\n"
+            "    return content_guard(x)\n"
+            "\n"
+            "def write_capture(x):\n"
+            "    content_guard(x)\n"
+            "\n"
+            "def refresh_document(x):\n"
+            "    return x\n"
+        )
+        _module(tmp_path, "a.py", source)
+        violations = checker.check_row(tmp_path, self._row(checker, tmp_path))
+        assert violations[0].members == ("refresh_document",)
+
+    def test_a_recursive_helper_terminates(self, checker: ModuleType, tmp_path: Path) -> None:
+        """A cycle must not hang the Detector."""
+        source = (
+            "def _loop(x):\n"
+            "    return _loop(x)\n"
+            "\n"
+            "def write_capture(x):\n"
+            "    content_guard(x)\n"
+            "\n"
+            "def refresh_document(x):\n"
+            "    return _loop(x)\n"
+        )
+        _module(tmp_path, "a.py", source)
+        violations = checker.check_row(tmp_path, self._row(checker, tmp_path))
+        assert violations[0].members == ("refresh_document",)
+
+
 class TestTheFragmentRelation:
     """`interpolates` — Plan 00412 D-PUB-4.
 

@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use import (
 from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
     SensitiveContentHandler,
 )
+from claude_code_hooks_daemon.utils import message_files as message_files_module
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.git_repo import run_git as unpatched_run_git
 
@@ -1263,6 +1264,11 @@ class TestGhBodySurface:
         ``matches()``, where the chain catching it does not rescue this guard:
         with ``strict_mode: false`` it silently stops applying, and with
         ``strict_mode: true`` it denies legitimate work.
+
+        The catch now lives in ``utils.message_files``, so the log line does
+        too — one home for the concept means one place that reports a skip.
+        The sibling handler gained this protection by the same move; it had
+        pre-checked with ``os.access`` and never caught the read itself.
         """
         handler = _wordlist(tmp_path, "alpha-term")
         handler._secret_terms()  # cache the word list before read_bytes is broken
@@ -1270,7 +1276,7 @@ class TestGhBodySurface:
         body.write_text("alpha-term\n")
         hook_input = _bash_input(f"gh issue comment 12 --body-file {body}")
 
-        with caplog.at_level(logging.DEBUG, logger=sensitive_content_module.__name__):
+        with caplog.at_level(logging.DEBUG, logger=message_files_module.__name__):
             with patch.object(Path, "read_bytes", side_effect=failure(13, "denied")):
                 assert handler.matches(hook_input) is False
 
@@ -1289,6 +1295,65 @@ class TestGhBodySurface:
 
         with patch.object(Path, "read_bytes", side_effect=PermissionError(13, "denied")):
             assert handler.matches(_bash_input(command)) is True
+
+
+class TestAGitMessageFileIsScannedLikeAnInlineMessage:
+    """Plan 00412 D-PUB-2: the text is the text, wherever git reads it from.
+
+    `git commit -m "<term>"` was denied and `git commit -F msg.txt` carrying
+    the same term was not — the file was never opened. The sibling handler
+    `github_auto_close_keywords` had read git message files all along; this
+    handler had the same reader wired only into its `gh` branch.
+    """
+
+    @pytest.mark.parametrize("flag", ["-F", "--file"])
+    def test_a_term_in_a_commit_message_file_is_denied(self, tmp_path: Path, flag: str) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        message = tmp_path / "msg.txt"
+        message.write_text("summary\n\nthe host alpha-term is down\n")
+
+        hook_input = _bash_input(f"git commit {flag} {message}")
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert "alpha-term" not in result.model_dump_json()
+
+    def test_the_deny_names_the_file_and_never_the_line(self, tmp_path: Path) -> None:
+        """Same disclosure rule the staged-content surface already obeys."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        message = tmp_path / "msg.txt"
+        message.write_text("summary\n\nthe host alpha-term is down\n")
+
+        result = handler.handle(_bash_input(f"git commit -F {message}"))
+        assert str(message) in (result.reason or "")
+        assert "the host" not in (result.reason or "")
+
+    def test_a_relative_message_file_resolves_against_cwd(self, tmp_path: Path) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tmp_path / "msg.txt").write_text("alpha-term\n")
+
+        hook_input = _bash_input("git commit -F msg.txt")
+        hook_input["cwd"] = str(tmp_path)
+        assert handler.matches(hook_input) is True
+
+    def test_a_clean_message_file_is_not_denied(self, tmp_path: Path) -> None:
+        """The guard reads the file; it does not object to its existence."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        message = tmp_path / "msg.txt"
+        message.write_text("an ordinary commit message\n")
+
+        assert handler.matches(_bash_input(f"git commit -F {message}")) is False
+
+    def test_a_gh_api_field_is_not_treated_as_a_filename(self, tmp_path: Path) -> None:
+        """`-F` means a FIELD to `gh api`, a surface this guard does not cover.
+
+        Reading every `-F` on every command would start opening `key=value` as
+        a path. The reader stays scoped to the two surfaces that really take a
+        message or body file.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+
+        assert handler.matches(_bash_input("gh api repos/o/r -F key=value")) is False
 
 
 class TestAPathQualifiedGhIsStillGh:

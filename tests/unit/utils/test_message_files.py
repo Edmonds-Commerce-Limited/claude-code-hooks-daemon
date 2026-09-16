@@ -12,8 +12,13 @@ home and both callers reach it.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from unittest.mock import patch
 
+import pytest
+
+from claude_code_hooks_daemon.utils import message_files
 from claude_code_hooks_daemon.utils.message_files import (
     MAX_MESSAGE_FILE_BYTES,
     MessageFile,
@@ -96,6 +101,44 @@ class TestHowThePathIsResolved:
 
         found = read_message_files("git commit -F msg.txt", str(tmp_path))
         assert found == [MessageFile(path=tmp_path / "msg.txt", text="relative\n")]
+
+
+class TestAReadThatFailsAfterTheCheck:
+    """Statting a file is not reading it, and the gap raises.
+
+    `sensitive_content` had learned this and caught the failure; the sibling
+    copy pre-checked with `os.access` and did not. Both checks stat, and a
+    file whose mode denies read — or one unlinked between the check and the
+    read — stats perfectly well. Letting that escape takes the calling guard
+    down with it.
+    """
+
+    @pytest.mark.parametrize("failure", [PermissionError, FileNotFoundError])
+    def test_the_read_failure_is_skipped_and_logged_not_raised(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        failure: type[OSError],
+    ) -> None:
+        body = tmp_path / "msg.txt"
+        body.write_text("the payload\n")
+
+        with caplog.at_level(logging.DEBUG, logger=message_files.__name__):
+            with patch.object(Path, "read_bytes", side_effect=failure(13, "denied")):
+                assert read_message_files(f"git commit -F {body}", None) == []
+
+        assert str(body) in caplog.text
+
+    def test_one_unreadable_file_does_not_hide_a_readable_one(self, tmp_path: Path) -> None:
+        """The caller still needs every file it CAN judge."""
+        readable = tmp_path / "ok.txt"
+        readable.write_text("judged\n")
+        vanished = tmp_path / "gone.txt"
+        vanished.write_text("never read\n")
+        vanished.unlink()
+
+        found = read_message_files(f"git commit -F {vanished} --body-file {readable}", None)
+        assert [f.text for f in found] == ["judged\n"]
 
 
 class TestUndecodableBytes:

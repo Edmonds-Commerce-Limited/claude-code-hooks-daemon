@@ -50,11 +50,11 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, git_subcommand_index
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
+from claude_code_hooks_daemon.utils.message_files import read_message_files
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
-from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 _LOGGER = logging.getLogger(__name__)
@@ -771,38 +771,34 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             # just rewritten clean. A `gh` body inline on the command line
             # is judged the same way, as the command itself.
             haystacks.append(_Haystack(subject=command, text=command))
-        if _GH_BODY_PATTERN.search(command):
-            haystacks.extend(self._gh_body_file_haystacks(command, hook_input))
+            # Both surfaces can put the text in a FILE instead, and the file
+            # route is read under the SAME condition as the inline one. A
+            # reader placed under the `gh` branch alone is how `git commit -F`
+            # went unscanned while `git commit -m` was denied (Plan 00412,
+            # D-PUB-2).
+            haystacks.extend(self._message_file_haystacks(command, hook_input))
         is_commit, commits_all = _is_git_commit(command)
         if is_commit:
             haystacks.extend(self._staged_content_haystacks(hook_input, commits_all))
         return haystacks
 
-    def _gh_body_file_haystacks(self, command: str, hook_input: dict[str, Any]) -> list[_Haystack]:
-        """Content of every readable ``--body-file``/``-F`` named in ``command``.
+    def _message_file_haystacks(self, command: str, hook_input: dict[str, Any]) -> list[_Haystack]:
+        """Content of every readable message/body file named in ``command``.
 
         A missing, unreadable, stdin (``-``) or oversized file cannot be
-        judged and is skipped: ``gh`` fails on a missing file itself, and a
-        body that big is not a comment a human wrote.
+        judged and is skipped by the shared reader: ``git`` and ``gh`` each
+        fail on a missing file themselves, and a body that big is not a
+        message a human wrote.
+
+        The subject names the FILE and the reader hands back its path for
+        exactly that reason -- a deny reports which file carried a term, never
+        the line that did.
         """
-        haystacks: list[_Haystack] = []
-        for match in _GH_BODY_FILE_PATTERN.finditer(command):
-            raw = next(group for group in match.groups() if group)
-            if raw == _STDIN_BODY_FILE:
-                continue
-            path = Path(raw)
-            if not path.is_absolute():
-                cwd = hook_input.get(HookInputField.CWD)
-                if isinstance(cwd, str) and cwd:
-                    path = Path(cwd) / path
-            if not path_is_file(path, unreadable_means=False):
-                _LOGGER.debug("sensitive_content: skipping unreadable gh body file %s", path)
-                continue
-            body = self._read_body_file(path)
-            if not body:
-                continue
-            haystacks.append(_Haystack(subject=f"gh body file {path}", text=body))
-        return haystacks
+        cwd = hook_input.get(HookInputField.CWD)
+        return [
+            _Haystack(subject=f"message file {found.path}", text=found.text)
+            for found in read_message_files(command, cwd if isinstance(cwd, str) else None)
+        ]
 
     @staticmethod
     def _read_body_file(path: Path) -> str:

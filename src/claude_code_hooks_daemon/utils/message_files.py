@@ -20,6 +20,7 @@ treating `-F key=value` as a filename.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -27,6 +28,8 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
+
+_LOGGER = logging.getLogger(__name__)
 
 #: `git commit -F <file>` / `--file=<file>`, and `--body-file <file>`. The
 #: value may be bare, single- or double-quoted.
@@ -84,7 +87,17 @@ def read_message_files(command: str, cwd: str | None) -> list[MessageFile]:
             continue
         if path.stat().st_size > MAX_MESSAGE_FILE_BYTES:
             continue
+        try:
+            raw_bytes = path.read_bytes()
+        except OSError as failure:
+            # Statting a file is NOT reading it, and the gap raises. A file
+            # whose own mode denies read stats perfectly well, and so does one
+            # unlinked between the check above and this line. Letting that
+            # escape takes the calling guard down with it -- which is a guard
+            # that silently stops applying, or one that denies legitimate work.
+            _LOGGER.debug("Skipping unreadable message file %s: %s", path, failure)
+            continue
         found.append(
-            MessageFile(path=path, text=path.read_bytes().decode(_ENCODING, errors=_DECODE_ERRORS))
+            MessageFile(path=path, text=raw_bytes.decode(_ENCODING, errors=_DECODE_ERRORS))
         )
     return found

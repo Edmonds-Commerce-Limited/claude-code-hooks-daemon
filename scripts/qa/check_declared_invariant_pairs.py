@@ -396,8 +396,22 @@ def _function_body(repo_root: Path, side: Side) -> ast.FunctionDef | ast.AsyncFu
     raise RegistryRotError(f"{side.function} is not defined in {side.file}")
 
 
+def _called_names(body: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    """Every name this function calls, whether bare or through an attribute."""
+    names: set[str] = set()
+    for node in ast.walk(body):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name):
+            names.add(func.id)
+        elif isinstance(func, ast.Attribute):
+            names.add(func.attr)
+    return names
+
+
 def reaches_helper(repo_root: Path, side: Side, helper: str) -> bool:
-    """Whether ``side``'s function CALLS ``helper``.
+    """Whether ``side``'s function CALLS ``helper``, directly or one hop away.
 
     Calling, not naming. A function that accepts ``content_guard`` as a
     parameter and never invokes it has exactly the defect a call-path row
@@ -406,14 +420,26 @@ def reaches_helper(repo_root: Path, side: Side, helper: str) -> bool:
     An attribute call (``guards.content_guard(x)``) counts: reaching the helper
     through a module is still reaching it, and the row is about whether the
     protection runs.
+
+    **One hop is followed, and no further.** A row names the function that owns
+    the responsibility, and extracting the work into a small helper method is
+    ordinary refactoring -- a rule that read only the named body would call
+    that a violation and push code to stay inline just to satisfy a check.
+    Repointing the row at the inner helper instead is worse: the inner helper
+    then satisfies the row even when nothing calls it, so dead code turns it
+    green. Following arbitrarily far is the opposite failure, where the row
+    degrades into "this function eventually reaches something".
     """
-    for node in ast.walk(_function_body(repo_root, side)):
-        if not isinstance(node, ast.Call):
+    body = _function_body(repo_root, side)
+    called = _called_names(body)
+    if helper in called:
+        return True
+
+    tree = ast.parse((repo_root / side.file).read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
-        func = node.func
-        if isinstance(func, ast.Name) and func.id == helper:
-            return True
-        if isinstance(func, ast.Attribute) and func.attr == helper:
+        if node.name in called and node is not body and helper in _called_names(node):
             return True
     return False
 
