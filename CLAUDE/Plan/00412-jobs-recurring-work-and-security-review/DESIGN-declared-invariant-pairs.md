@@ -109,3 +109,42 @@ did not list, which surfaced only because a row was checked rather than trusted.
 Two fixes in this class are owner-gated and must not be built with the Detector:
 `D-PUB-3`'s fail-closed on an oversized body file, and `F-HYG-3`'s new deny in
 `staged_lint_gate`. Both add a refusal in installing projects.
+
+## Next row: the forwarder escaper (D-EXEC F3), verified
+
+Drafted once from guessed function names, both wrong, and withdrawn rather than
+patched. The real ones, read from the module:
+
+- `_escape_for_double_quotes` is defined at `forwarder_generator.py:90`.
+- It is applied at exactly one place, inside
+  `_render_raw_stdout_daemon_down_block`.
+- The unescaped interpolations are in `build_relay_guard_block`, which puts
+  `deployed_hooks_dir(project_root)`, `untracked_dir`, `relay_binary` and
+  `resolved_events_dir` into double-quoted shell strings.
+
+Expressible today as a `reaches` row on `_escape_for_double_quotes`.
+
+**The escaper's own docstring makes the case better than the worklist did.** It
+says the catalogue is an internal constant and nothing there is hostile, and
+that it is escaped anyway because "the failure would be silent and remote": an
+entry gaining a quote emits a forwarder that does not parse, and one gaining a
+backtick or `$` emits a forwarder that runs a command substitution every time
+the daemon is down.
+
+A PATH is not an internal constant. It is wherever the user cloned the
+repository, so the argument for escaping it is strictly stronger than the
+argument for escaping the catalogue — and it is the catalogue that gets
+escaped today.
+
+**A second asymmetry sits inside the escaping function itself**:
+`_render_raw_stdout_daemon_down_block` escapes `meta.daemon_down_stdout` and
+interpolates `meta.json_key` raw, from the same catalogue, into the same kind of
+double-quoted `echo`. A `reaches` row cannot see this one — the function does
+call the helper — which is the "proves a call, not an effect" limit in a live
+form.
+
+Escaping is a no-op for values with no special characters, so a normal install's
+generated forwarder stays byte-identical. One thing to check before building:
+`deployed_hooks_dir(project_root)` lands in a `==` glob comparison rather than a
+plain string, so glob metacharacters in a path are a separate question the
+escaper does not address and should not be quietly assumed to.
