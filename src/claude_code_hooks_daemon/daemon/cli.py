@@ -6338,7 +6338,11 @@ def _remote_docs_check(
     project_root: Path, tree: Path, now: Any, known_sources: Mapping[str, str] | None = None
 ) -> int:
     from claude_code_hooks_daemon.remote_docs.index import INDEX_RELATIVE_PATH, render_index
-    from claude_code_hooks_daemon.remote_docs.store import check_licence_drift, check_staleness
+    from claude_code_hooks_daemon.remote_docs.store import (
+        check_licence_drift,
+        check_staleness,
+        list_documents,
+    )
 
     today = now.date() if now is not None else None
     flagged = check_staleness(tree, today=today)
@@ -6350,11 +6354,17 @@ def _remote_docs_check(
     # `rm` runs no command, so a deletion never regenerates the index --
     # `render_index` is pure and path-ordered (`test_rewriting_is_idempotent`
     # pins this), so an exact string compare is all a disagreement needs. A
-    # missing index compares unequal to any rendered content, so "never
-    # generated" and "stale" take the same remedy without a special case.
+    # project that has never captured anything has neither an index nor a
+    # tree, and that agreement must stay quiet: only check once one of the
+    # two exists, so "never generated" is judged against "never vendored"
+    # rather than against a rendered-but-empty index nobody asked for.
     index_path = project_root / INDEX_RELATIVE_PATH
-    current_index = index_path.read_text(encoding="utf-8") if index_path.exists() else None
-    index_stale = current_index != render_index(tree)
+    index_exists = index_path.exists()
+    if index_exists or list_documents(tree):
+        current_index = index_path.read_text(encoding="utf-8") if index_exists else None
+        index_stale = current_index != render_index(tree)
+    else:
+        index_stale = False
 
     if not flagged and not drifted and not index_stale:
         print("remote-docs: all vendored documents are fresh")
@@ -6391,8 +6401,16 @@ def _remote_docs_check(
         print(f"\n{INDEX_RELATIVE_PATH}: out of date with the vendored tree")
         print("  fix: bin/hooks-daemon remote-docs index")
 
-    attention_count = len(flagged) + len(drifted) + (1 if index_stale else 0)
-    print(f"\nremote-docs: {attention_count} document(s) need attention")
+    # The index is not a document, so it must never inflate this count --
+    # a summary line that miscounts it would itself be the same kind of lie
+    # about corpus health that this feature exists to catch.
+    document_count = len(flagged) + len(drifted)
+    parts = []
+    if document_count:
+        parts.append(f"{document_count} document(s)")
+    if index_stale:
+        parts.append("the generated index")
+    print(f"\nremote-docs: {' and '.join(parts)} need attention")
     return 1
 
 

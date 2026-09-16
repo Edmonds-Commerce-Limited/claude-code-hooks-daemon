@@ -9,4 +9,10 @@ Deleting a vendored capture with `rm` never regenerated `.claude/REMOTE-DOCS.md`
 a finding, with exit `1`, the same as staleness and licence drift. This can
 turn a previously-green CI run red the first time it runs after a deletion.
 The fix is the new `remote-docs index` command, which re-renders the file
-without touching the network.
+without touching the network. Projects that have never vendored anything are
+unaffected — `check` still reports clean when there is no tree and no index.
+
+The generated index's own header text changed too (it now names `check` and
+`index` alongside `add`/`refresh`), so **every existing project's index will
+report as stale once**, on the first `check` after upgrading, even with no
+tree changes. Run `remote-docs index` once to clear it.

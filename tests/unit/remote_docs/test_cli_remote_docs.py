@@ -205,6 +205,37 @@ class TestListAndCheck:
 
         assert cmd_remote_docs(_args(tmp_path, "check")) == 1
 
+    def test_check_stays_clean_for_a_project_that_never_used_remote_docs(
+        self, tmp_path: Path
+    ) -> None:
+        """No tree, no index: nothing to be stale about.
+
+        A project that has never captured anything must not have `check`
+        turn red just because the index does not exist -- an absent index
+        agrees with an empty tree.
+        """
+        code = cmd_remote_docs(_args(tmp_path, "check"))
+
+        assert code == 0
+
+    def test_check_does_not_count_the_index_as_a_document(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """A summary line that miscounts the index is itself a lie about
+        corpus health, which is the exact defect this feature fixes.
+        """
+        from claude_code_hooks_daemon.remote_docs.index import INDEX_RELATIVE_PATH
+
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/a"))
+        (tmp_path / INDEX_RELATIVE_PATH).write_text("stale\n", encoding="utf-8")
+
+        code = cmd_remote_docs(_args(tmp_path, "check"))
+
+        assert code == 1
+        out = capsys.readouterr().out
+        assert "0 document(s) need attention" not in out
+        assert "1 document(s) need attention" not in out
+
 
 class TestRefresh:
     def test_refresh_all_succeeds_on_unchanged_upstream(self, tmp_path: Path) -> None:
