@@ -82,6 +82,12 @@ class HookInputField:
     # SESSION_CRONS means "no information", never "no crons exist" (Plan
     # 00416; contracts/claude-code-hooks/Stop.json).
     SESSION_CRONS = "session_crons"
+    # Same conditionality, same reading: an absent BACKGROUND_TASKS is
+    # "unknown", never "nothing is running" (Plan 00419 N5;
+    # contracts/claude-code-hooks/Stop.json). Entries carry id/type/status/
+    # description/command, and an in-process teammate that has gone IDLE is
+    # still listed with status "running".
+    BACKGROUND_TASKS = "background_tasks"
 
     # Notification fields
     NOTIFICATION_TYPE = "notification_type"

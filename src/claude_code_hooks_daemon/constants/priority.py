@@ -118,6 +118,14 @@ class Priority:
     CRON_STOP_ENFORCER = 7
     CRON_SUBAGENT_STOP_ENFORCER = 7
 
+    # Plan 00419 Task 1.7: the last free slot BELOW AUTO_CONTINUE_STOP's 10 in
+    # this project's config, for the same shadowing reason as the pair above.
+    # 9 rather than 6: this handler never denies, so it has no claim to run
+    # ahead of the two guards that do (cron_stop_enforcer at 7, the
+    # release_blocker project handler at 8) -- it only has to reach the chain
+    # before the terminal catch-all.
+    TEAMMATE_REAP_ADVISOR = 9
+
     TDD_ENFORCEMENT = 15
     DANGEROUS_PERMISSIONS = 15
     AUTO_CONTINUE_STOP = 15

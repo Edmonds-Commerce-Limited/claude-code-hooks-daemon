@@ -269,6 +269,8 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 - Stop parent daemon after merge to main succeeds
 - Remove parent worktree and branch immediately
 - Send shutdown requests to all agents (all 5 roles per task)
+- **`TaskStop` every teammate whose work you have harvested** — see
+  [Reaping Teammates](#reaping-teammates-taskstop) below
 - Use `TeamDelete` to clean up team resources
 - Update plan status to Complete with accurate completion percentage
 - Document any lessons learned from verification failures
@@ -276,9 +278,48 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 **Don't:**
 
 - Leave merged worktrees around
+- Leave harvested teammates registered and idle
 - Skip daemon shutdown (creates orphaned processes)
 - Update plan status before human verification of merge
 - Claim completion without evidence
+
+---
+
+## Reaping Teammates (`TaskStop`)
+
+**Canonical home for this rule.** A worktree is reaped with
+`bin/hooks-daemon worktree-reap`; a TEAMMATE is reaped with `TaskStop`, and
+until Plan 00419 only the first of those was written down anywhere.
+
+**The rule: once you have harvested a teammate's work, `TaskStop` it.** Not
+when the whole plan finishes — when that particular agent's branch is merged
+and its report is read. Confirm with `ListAgents`, which reports `idle` versus
+`running` correctly.
+
+**Why it is not merely tidiness.** An in-process teammate that has finished its
+work and gone idle is still REGISTERED, and Claude Code's `/goal` command — a
+session-scoped, prompt-based Stop hook — defers its evaluation whenever a
+subagent or background shell is still running. The `Stop` payload lists each
+registered teammate in `background_tasks` with `status: "running"` whether it is
+working or idle, so the evaluator reads idle as in-flight and refuses the stop.
+
+The consequence is perverse: **the natural end state of a CORRECT parallel
+workflow — every branch merged, every teammate finished — is a session `/goal`
+can never release.** Plan 00419's N5 cost four refused stops to diagnose, with
+`harvest-background`, `ps` and `ListAgents` all correctly reporting nothing
+running while the stop condition kept citing seven live tasks. `TaskStop` on
+each cleared the list, and the very next evaluation passed.
+
+Two further points worth keeping straight:
+
+- **This is not something the daemon can fix.** The evaluator is Claude Code's
+  own, not the ccy supervisor's and not this daemon's, so no handler here can
+  teach it that idle is not running. What the daemon does do is REPORT the
+  count: `teammate_reap_advisor` (Stop, advisory, rate-limited) names the number
+  of `background_tasks` the payload carries and points at `TaskStop`. It never
+  blocks, and it never changes whether a stop is allowed.
+- **An idle teammate also costs context** for no return, which is reason enough
+  to reap it even in a session with no `/goal` condition set.
 
 ---
 
@@ -1739,6 +1780,8 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] Stop child daemon BEFORE removing worktree
 - [ ] Run QA in parent after merge
 - [ ] Send shutdown to ALL 5 agents for that task
+- [ ] `TaskStop` each of those agents once its work is harvested
+  ([Reaping Teammates](#reaping-teammates-taskstop))
 
 **Final Integration (All Tasks Merged to Parent):**
 

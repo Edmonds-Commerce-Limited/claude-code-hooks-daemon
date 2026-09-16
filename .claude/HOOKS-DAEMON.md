@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (61 handlers)
+### PreToolUse (62 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -62,6 +62,7 @@
 | 47 | docs_qa_commit_gate | NON-TERMINAL | Warn-first STAGED docs QA gate on git commit |
 | 47 | docs_qa_edit | NON-TERMINAL | Blocking/advisory EDIT-time lint for documentation-scoped files |
 | 48 | dispatch_declaration | BLOCKING | Advise or (strict mode) require a file-handoff declaration on Task dispatch |
+| 49 | guard_config_commit_gate | ADVISORY | Report, at commit time, a config change that weakens this project's guards |
 | 49 | npm_command | ADVISORY | Enforce llm: prefixed npm commands and block direct npx tool usage |
 | 50 | markdown_organization | BLOCKING | Enforce markdown file organization rules |
 | 50 | validate_instruction_content | TERMINAL | Validates content being written to CLAUDE.md and README.md files |
@@ -144,11 +145,12 @@
 |----------|---------|----------|-------------|
 | 10 | auto_approve_reads | TERMINAL | Auto-approve read-only tool permission requests |
 
-### Stop (2 handlers)
+### Stop (3 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 7 | cron_stop_enforcer | BLOCKING | Block a Stop while a declared persistent cron was never created |
+| 9 | teammate_reap_advisor | ADVISORY | Report the Stop payload's ``background_tasks`` count and name ``TaskStop`` |
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |
 
 ### SubagentStop (2 handlers)

@@ -162,6 +162,9 @@ worktree (`Agent(isolation: "worktree")`) arrives with no venv at all; run
 
 - Agent team workflow, lessons from the Wave 1 proof-of-concept, and
   copy-paste agent prompts: [CLAUDE/AgentTeam.md](AgentTeam.md)
+- Reaping a TEAMMATE (`TaskStop`) is a separate act from reaping its worktree,
+  and an unreaped idle teammate blocks `/goal`:
+  [CLAUDE/AgentTeam.md](AgentTeam.md#reaping-teammates-taskstop)
 - Self-install mode and the venv fingerprint layout:
   [CLAUDE/SELF_INSTALL.md](SELF_INSTALL.md)
 - Plan workflow: [CLAUDE/PlanWorkflow.md](PlanWorkflow.md)
