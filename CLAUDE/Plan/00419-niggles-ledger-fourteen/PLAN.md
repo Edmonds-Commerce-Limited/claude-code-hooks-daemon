@@ -146,10 +146,30 @@ without opening it:
   what separated "the gate is too strict" from "declaring a layout disables an
   exclusion".
 
-- [ ] ⬜ **Task 1.7**: N5 — decide between teaching the goal check that `idle`
-  is not `running` (the fix) and documenting teammate reaping as the
-  counterpart to `worktree-reap` (worth doing regardless). Owner-gated: the
-  first changes when a stop is allowed, which is a safety control.
+- [x] ✅ **Task 1.7**: N5 — **remedy (1) is UPSTREAM and is not available
+  here.** The goal check is Claude Code's OWN `/goal` evaluator, a
+  session-scoped prompt-based Stop hook that "skips the evaluation for that
+  turn" while a subagent or background shell is running; nothing in this
+  repository can teach it that `idle` is not `running`. The owner-gate premise
+  ("changes when a stop is allowed") therefore dissolves — **the sole remaining
+  owner question is whether to file it with Anthropic**, and nothing was filed.
+
+  Two things WERE built, neither of which touches stop control. Teammate
+  reaping is now documented as the counterpart to `worktree-reap`, canonically
+  in `CLAUDE/AgentTeam.md` ("Reaping Teammates (`TaskStop`)"), with pointers
+  from the Cleanup Phase, the Team Lead Checklist and `CLAUDE/Worktree.md`.
+
+  And the payload shape was ESTABLISHED before a line of handler was written
+  (the N4 lesson, applied): the `/goal` evaluator is itself a Stop hook, and its
+  `goal_status` records in the session transcript quote the same payload on both
+  sides of the reap — seven entries with `status: "running"`, which it itself
+  classified as "'teammate' type tasks … not OS processes", then
+  `background_tasks: []` once each was `TaskStop`ped. So an idle teammate DOES
+  occupy the list. `teammate_reap_advisor` (Stop, priority 9, `terminal=False`)
+  reports the count and names `TaskStop`; it is an advisory with no deny path in
+  its source at all, silent when the list is absent or empty, and rate-limited
+  like `background_process_tracker`. Clean RED was 1 collection error — the 13
+  tests could not run because the module did not exist — then 13 passed.
 
 ## Success Criteria
 

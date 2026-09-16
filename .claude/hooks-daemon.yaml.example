@@ -716,6 +716,10 @@ handlers:
       enabled: true       # Silent unless persistent_crons.enabled AND a job is declared
       priority: 7
 
+    teammate_reap_advisor:  # Reports the Stop payload's background_tasks count and names TaskStop (Plan 00419 N5)
+      enabled: true          # Advisory only, rate-limited; silent when the list is absent or empty
+      priority: 9
+
     auto_continue_stop:  # Auto-continues after stop events based on criteria
       enabled: true
       priority: 10

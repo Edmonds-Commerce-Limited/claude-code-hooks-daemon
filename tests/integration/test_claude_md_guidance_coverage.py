@@ -466,6 +466,17 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "SkillOpportunityDetectorHandler": "T4 fires once per cadence with the full remedy",
     "ConfigOptimisationReminderHandler": "T4 fires once at session start with the full remedy",
     "CriticalThinkingAdvisoryHandler": "T4 the injected advisory IS the content",
+    "TeammateReapAdvisorHandler": (
+        "T4 never denies (T1 no), and the fire-time message carries the whole "
+        "of it: the count the payload reported, why an idle teammate still "
+        "reads as running, and the exact remedy (ListAgents, then TaskStop). "
+        "It also fires at precisely the moment the situation exists, so there "
+        "is nothing to hold in advance. The standing half -- reap a teammate "
+        "once its work is harvested -- is canonical in CLAUDE/AgentTeam.md "
+        "(Plan 00419 N5); a resident copy would be duplicated truth paid for "
+        "on every session by every project, most of which never register a "
+        "background task at all"
+    ),
     # -- Test handlers ---------------------------------------------------
 }
 

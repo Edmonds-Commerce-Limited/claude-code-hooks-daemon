@@ -851,6 +851,16 @@ class HandlerID:
         config_key="cron_subagent_stop_enforcer",
         display_name="cron-subagent-stop-enforcer",
     )
+    # Teammate reap advisor (Stop handler) -- Plan 00419 N5: Claude Code's own
+    # /goal evaluator defers its judgement while any background work is
+    # registered, and an in-process teammate that has finished and gone IDLE is
+    # still registered. This reports the count the Stop payload carries and
+    # names TaskStop. Advisory only -- it never denies.
+    TEAMMATE_REAP_ADVISOR = HandlerIDMeta(
+        class_name="TeammateReapAdvisorHandler",
+        config_key="teammate_reap_advisor",
+        display_name="teammate-reap-advisor",
+    )
     # Monorepo detector (SessionStart handler) -- Plan 00296 Task 3.4: manifests
     # below the repo root with none at it is the signature of an unconfigured
     # monorepo. Advises only -- never resolves a boundary itself.

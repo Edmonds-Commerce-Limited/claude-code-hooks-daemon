@@ -348,6 +348,7 @@ class ConfigTemplate:
             "  # deliberately, so it is not shadowed.\n"
             "  stop:\n"
             "    cron_stop_enforcer: {enabled: true, priority: 7}  # Block a stop while a declared persistent_crons job is verified missing. Inert until persistent_crons.enabled is true AND a job is declared\n"
+            "    teammate_reap_advisor: {enabled: true, priority: 9}  # Report the Stop payload's background_tasks count and name TaskStop. Advisory only, rate-limited; silent when the list is absent or empty\n"
             "    auto_continue_stop: {enabled: true, priority: 15}  # Auto-continue after stop events\n"
             "\n"
             "  # SubagentStop - Plan 00237 removed the only two handlers; Plan 00307\n"

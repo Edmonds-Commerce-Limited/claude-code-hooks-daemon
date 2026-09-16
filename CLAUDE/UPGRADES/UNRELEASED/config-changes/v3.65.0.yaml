@@ -52,6 +52,30 @@ config_changes:
       recommended: true
       dormant: false
 
+    - key: handlers.stop.teammate_reap_advisor
+      description: >-
+        Reports the `background_tasks` count the `Stop` payload carries and
+        names `TaskStop`. Claude Code's own `/goal` evaluator defers its
+        judgement while any background work is registered, and an in-process
+        teammate that has finished its work and gone IDLE is still registered —
+        it appears in that list with status `running` even though nothing is in
+        flight, so a session whose branches are all merged can be one `/goal`
+        never releases. Advisory only: it adds context and changes nothing about
+        whether the stop is allowed.
+      example_yaml: |
+        stop:
+          teammate_reap_advisor:
+            enabled: true
+            priority: 9
+      migration_note: >-
+        Silent when `background_tasks` is absent (which means "unknown", never
+        "nothing running") or empty, and rate-limited per session, so a project
+        that never registers background work sees nothing. Keep `priority` below
+        `auto_continue_stop`'s 10 — a Stop handler placed above it never runs on
+        the common stop.
+      recommended: true
+      dormant: false
+
     - key: handlers.subagent_stop.cron_subagent_stop_enforcer
       description: >-
         The `SubagentStop` twin of `handlers.stop.cron_stop_enforcer`, applying
