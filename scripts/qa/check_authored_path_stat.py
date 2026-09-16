@@ -269,6 +269,16 @@ def scan_tree(scan_root: Path) -> list[Violation]:
     return violations
 
 
+def count_py_files(scan_root: Path) -> int:
+    """Every Python file considered, in scope or not — the scan's denominator.
+
+    Counted independently of :func:`scan_tree` so a rule that went inert
+    (``_is_in_scope`` wrongly rejecting everything, say) still reports how much
+    it looked at rather than reading identically to a clean pass.
+    """
+    return sum(1 for _ in scan_root.rglob("*.py"))
+
+
 def main() -> int:
     args = sys.argv[1:]
     if "--help" in args or "-h" in args:
@@ -282,12 +292,14 @@ def main() -> int:
             scan_root = Path(args[index + 1]).resolve()
 
     violations = scan_tree(scan_root) if scan_root.is_dir() else []
+    files_scanned = count_py_files(scan_root) if scan_root.is_dir() else 0
 
     output = {
         "tool": "authored_path_stat",
         "summary": {
             "passed": len(violations) == 0,
             "total_violations": len(violations),
+            "files_scanned": files_scanned,
         },
         "violations": [v.to_dict() for v in violations],
     }
@@ -302,7 +314,7 @@ def main() -> int:
             print(f"  {violation.file}:{violation.line}  .{violation.predicate}()")
         print(f"\n{_REMEDIATION}")
     else:
-        print("No authored paths resolved by stat-ing a join")
+        print(f"No authored paths resolved by stat-ing a join ({files_scanned} files scanned)")
 
     return 1 if violations else 0
 

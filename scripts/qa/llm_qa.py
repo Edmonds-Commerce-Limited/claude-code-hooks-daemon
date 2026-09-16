@@ -472,11 +472,6 @@ ALL_TOOL_NAMES = list(TOOL_REGISTRY)
 # ── Summarizers ────────────────────────────────────────────────────
 
 
-def _summarize_magic_values(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
-
-
 def _summarize_format(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} files need reformatting"
@@ -548,26 +543,6 @@ def _summarize_dependencies(data: QaReport) -> str:
     return f"{total} issues"
 
 
-def _summarize_error_hiding(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
-
-
-def _summarize_shell_audit(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
-
-
-def _summarize_skill_refs(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
-
-
-def _summarize_github_urls(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
-
-
 def _summarize_smoke_test(data: QaReport) -> str:
     s = data.get("summary", {})
     passed = s.get("passed_probes", 0)
@@ -578,49 +553,52 @@ def _summarize_smoke_test(data: QaReport) -> str:
     return f"{passed}/{total} probes passed ({failed} failed)"
 
 
-def _summarize_canonical_callers(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
+#: Suffixes naming an INPUT count — what a check consumed, as opposed to what
+#: it found. Kept in step with the vocabulary the guard in
+#: `tests/integration/test_qa_checks_report_their_denominator.py` accepts: a
+#: check that adds a denominator the guard recognises is surfaced here with no
+#: further wiring.
+_INPUT_COUNT_SUFFIXES: Final[tuple[str, ...]] = (
+    "_scanned",
+    "_loaded",
+    "_compiled",
+    "_analysed",
+    "_analyzed",
+    "_swept",
+    "_checked",
+    "_considered",
+    "_read",
+)
 
 
-def _summarize_capture_corruption(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
+def _denominators(summary: dict[str, Any]) -> str:
+    """Every input count this summary carries, rendered for the one-line report.
+
+    Empty when a check reports none, so the line degrades to the bare count
+    rather than to a misleading `(0 files)`.
+    """
+    parts = [
+        f"{value} {key.replace('_', ' ')}"
+        for key, value in summary.items()
+        if key.endswith(_INPUT_COUNT_SUFFIXES)
+    ]
+    return f" ({', '.join(parts)})" if parts else ""
 
 
-def _summarize_python_var_guidance(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
+def _summarize_violations(data: QaReport, noun: str = "violations") -> str:
+    """A findings count, followed by whatever the check says it looked at.
 
-
-def _summarize_eacces_safe(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
-
-
-def _summarize_authored_path_stat(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
-
-
-def _summarize_declared_invariant_pairs(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
-
-
-def _summarize_repo_hygiene(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
-
-
-def _summarize_doc_truth(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
-
-
-def _summarize_doc_snippets(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
+    ONE renderer rather than one per check, and that is the point rather than
+    tidiness. Eighteen summarisers had byte-identical bodies that dropped the
+    denominator, so a check could publish `files_scanned` and no reader would
+    ever see it — the Plan 00244 failure of a verdict under a key nobody reads,
+    recurring in the layer that exists to be read. Surfacing counts generically
+    means the next check to add one is reported without anybody remembering to
+    wire it up (Plan 00412 class 5).
+    """
+    summary = data.get("summary", {})
+    total = summary.get("total_violations", 0)
+    return f"{total} {noun}{_denominators(summary)}"
 
 
 def _summarize_corpus_qa(data: QaReport) -> str:
@@ -658,21 +636,6 @@ def _summarize_git_history(data: QaReport) -> str:
     return f"{total} violations ({commits} commits, {refs} refs swept)"
 
 
-def _summarize_handler_reference(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
-
-
-def _summarize_british_english(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
-
-
-def _summarize_semgrep(data: QaReport) -> str:
-    total = data.get("summary", {}).get("total_violations", 0)
-    return f"{total} violations"
-
-
 def _summarize_project_handlers(data: QaReport) -> str:
     """Report the project-handler suite, distinguishing clean from absent.
 
@@ -702,7 +665,7 @@ def _summarize_hook_contract(data: QaReport) -> str:
 
 
 SUMMARIZERS: dict[str, Summarizer] = {
-    "magic_values": _summarize_magic_values,
+    "magic_values": _summarize_violations,
     "format": _summarize_format,
     "lint": _summarize_lint,
     "type_check": _summarize_type_check,
@@ -710,27 +673,27 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "tests": _summarize_tests,
     "security": _summarize_security,
     "dependencies": _summarize_dependencies,
-    "error_hiding": _summarize_error_hiding,
-    "shell_audit": _summarize_shell_audit,
-    "skill_refs": _summarize_skill_refs,
-    "github_urls": _summarize_github_urls,
-    "canonical_callers": _summarize_canonical_callers,
-    "capture_corruption": _summarize_capture_corruption,
-    "python_var_guidance": _summarize_python_var_guidance,
-    "eacces_safe": _summarize_eacces_safe,
-    "authored_path_stat": _summarize_authored_path_stat,
-    "declared_invariant_pairs": _summarize_declared_invariant_pairs,
+    "error_hiding": _summarize_violations,
+    "shell_audit": _summarize_violations,
+    "skill_refs": _summarize_violations,
+    "github_urls": _summarize_violations,
+    "canonical_callers": _summarize_violations,
+    "capture_corruption": _summarize_violations,
+    "python_var_guidance": _summarize_violations,
+    "eacces_safe": _summarize_violations,
+    "authored_path_stat": _summarize_violations,
+    "declared_invariant_pairs": _summarize_violations,
     "smoke_test": _summarize_smoke_test,
-    "repo_hygiene": _summarize_repo_hygiene,
-    "doc_truth": _summarize_doc_truth,
-    "doc_snippets": _summarize_doc_snippets,
+    "repo_hygiene": _summarize_violations,
+    "doc_truth": _summarize_violations,
+    "doc_snippets": _summarize_violations,
     "plan_qa": _summarize_corpus_qa,
     "docs_qa": _summarize_corpus_qa,
     "sensitive_content": _summarize_sensitive_content,
     "git_history": _summarize_git_history,
-    "handler_reference": _summarize_handler_reference,
-    "british_english": _summarize_british_english,
-    "semgrep": _summarize_semgrep,
+    "handler_reference": _summarize_violations,
+    "british_english": _summarize_violations,
+    "semgrep": _summarize_violations,
     "project_handlers": _summarize_project_handlers,
     "hook_contract": _summarize_hook_contract,
     "input_contract": _summarize_hook_contract,

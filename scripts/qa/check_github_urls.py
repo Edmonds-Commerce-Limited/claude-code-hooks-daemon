@@ -178,6 +178,7 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(args.path).resolve()
+    files_scanned = len(_candidate_files(root))
     unreadable: list[str] = []
     violations = find_violations(root, unreadable=unreadable)
 
@@ -193,6 +194,11 @@ def main() -> int:
                     "summary": {
                         "passed": not violations,
                         "total_violations": len(violations),
+                        # The input count: how many files were candidates for
+                        # scanning. Distinct from `unreadable_files`, which
+                        # counts a FAILURE MODE, not an input — a sweep that
+                        # scanned zero files would still report zero unreadable.
+                        "files_scanned": files_scanned,
                         # Reported, not hidden: a sweep that could not read a
                         # large part of the tree looks identical to a clean one.
                         "unreadable_files": len(unreadable),
@@ -207,7 +213,7 @@ def main() -> int:
     else:
         for item in violations:
             print(f"{item['file']}:{item['line']}  {item['message']}")
-        print(f"\n{len(violations)} violation(s)")
+        print(f"\n{len(violations)} violation(s) ({files_scanned} files scanned)")
         if unreadable:
             print(f"{len(unreadable)} file(s) could not be decoded and were not checked")
 

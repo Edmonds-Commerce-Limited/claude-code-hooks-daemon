@@ -546,6 +546,16 @@ def scan(repo_root: Path, registry_path: Path) -> list[Violation]:
     return violations
 
 
+def count_registry_rows(registry_path: Path) -> int:
+    """How many rows the registry loaded — the denominator ``scan`` checked.
+
+    If the YAML fails to load or resolves to an empty list, this is 0, and a
+    zero-violation result must not read the same as a healthy sweep of a
+    populated registry.
+    """
+    return len(load_registry(registry_path))
+
+
 def main() -> int:
     args = sys.argv[1:]
     if "--help" in args or "-h" in args:
@@ -559,12 +569,14 @@ def main() -> int:
             registry_path = Path(args[index + 1]).resolve()
 
     violations = scan(_REPO_ROOT, registry_path)
+    rows_loaded = count_registry_rows(registry_path)
 
     output = {
         "tool": "declared_invariant_pairs",
         "summary": {
             "passed": len(violations) == 0,
             "total_violations": len(violations),
+            "rows_loaded": rows_loaded,
         },
         "violations": [v.to_dict() for v in violations],
     }
@@ -579,7 +591,7 @@ def main() -> int:
             _print_violation(violation)
         print(f"\n{_REMEDIATION}")
     else:
-        print("Every declared invariant pair holds")
+        print(f"Every declared invariant pair holds ({rows_loaded} rows loaded)")
 
     return 1 if violations else 0
 

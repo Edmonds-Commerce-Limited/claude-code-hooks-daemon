@@ -416,6 +416,7 @@ class Report:
     """Accumulated findings for one repository."""
 
     violations: list[Violation] = field(default_factory=list)
+    paths_checked: int = 0
 
     @property
     def passed(self) -> bool:
@@ -429,6 +430,7 @@ class Report:
                 "passed": self.passed,
                 "total_violations": len(self.violations),
                 "by_rule": by_rule,
+                "paths_checked": self.paths_checked,
             },
             "violations": [v.to_dict() for v in self.violations],
         }
@@ -867,8 +869,9 @@ def _unreleased_manifest_date(root: Path, rel_path: str) -> str | None:
 
 def scan(root: Path) -> Report:
     """Check every tracked path in ``root`` against every rule family."""
-    report = Report()
-    for rel_path in tracked_files(root):
+    tracked = tracked_files(root)
+    report = Report(paths_checked=len(tracked))
+    for rel_path in tracked:
         reason = _is_build_artifact(rel_path)
         if reason is not None:
             report.violations.append(
@@ -1002,7 +1005,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [{violation.rule}] {violation.path}: {violation.message}")
             print(f"    Fix: {violation.remediation}")
     else:
-        print("No repo-hygiene violations found")
+        print(f"No repo-hygiene violations found ({report.paths_checked} paths checked)")
 
     return 1 if report.violations else 0
 

@@ -601,11 +601,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
+    # The denominator: every markdown file the shell-fence sweep walked. If
+    # `_iter_markdown` ever returned nothing (wrong root, a broken walk), every
+    # rule below would report clean over a tree it never looked at.
+    docs_scanned = len(_iter_markdown(root))
+
     payload: dict[str, object] = {
         "tool": _TOOL_NAME,
         "summary": {
             "passed": not violations,
             "total_violations": len(violations),
+            "docs_scanned": docs_scanned,
             "by_rule": {
                 rule: sum(1 for v in violations if v.rule == rule)
                 for rule in (
@@ -633,7 +639,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [{violation.rule}] {violation.file}:{violation.line}: {violation.message}")
             print(f"    Fix: {violation.remediation}")
     else:
-        print("No doc-truth violations found")
+        print(f"No doc-truth violations found ({docs_scanned} docs scanned)")
 
     return 1 if violations else 0
 

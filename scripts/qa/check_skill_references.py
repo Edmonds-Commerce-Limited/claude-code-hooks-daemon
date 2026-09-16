@@ -356,9 +356,16 @@ def _collect_files(directory: Path, include_filter: str | None = None) -> list[P
 def scan_directory(
     directory: Path,
     include_filter: str | None = None,
-) -> list[_Violation]:
-    """Scan a directory for skill-reference violations."""
+) -> tuple[list[_Violation], int]:
+    """Scan a directory for skill-reference violations.
+
+    Returns:
+        The violations found, and the count of files actually scanned — the
+        denominator that tells a genuinely clean sweep apart from one that
+        silently scanned nothing.
+    """
     violations: list[_Violation] = []
+    files_scanned = 0
 
     for filepath in _collect_files(directory, include_filter):
         scanner = _SCANNERS[filepath.suffix]
@@ -367,9 +374,10 @@ def scan_directory(
         except OSError:
             # Skip unreadable files (broken symlinks, permission errors)
             continue
+        files_scanned += 1
 
     violations.sort(key=lambda v: (v.file, v.line))
-    return violations
+    return violations, files_scanned
 
 
 # ── Main ──────────────────────────────────────────────────────────
@@ -395,7 +403,7 @@ def main() -> int:
         else:
             i += 1
 
-    violations = scan_directory(scan_path, include_filter)
+    violations, files_scanned = scan_directory(scan_path, include_filter)
 
     output = {
         "tool": "skill_references",
@@ -408,6 +416,7 @@ def main() -> int:
                     1 for v in violations if v.rule == "slash-command-syntax"
                 ),
             },
+            "files_scanned": files_scanned,
         },
         "violations": [v.to_dict() for v in violations],
     }
@@ -420,7 +429,7 @@ def main() -> int:
             for v in violations:
                 print(f"  {v.file}:{v.line}: [{v.rule}] {v.message}")
         else:
-            print("No skill-reference violations found")
+            print(f"No skill-reference violations found ({files_scanned} files scanned)")
     else:
         if violations:
             print(f"Found {len(violations)} skill-reference violations:\n")
@@ -429,7 +438,7 @@ def main() -> int:
                 print(f"    [{v.rule}] {v.message}")
                 print()
         else:
-            print("No skill-reference violations found")
+            print(f"No skill-reference violations found ({files_scanned} files scanned)")
 
     return 1 if violations else 0
 

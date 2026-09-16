@@ -274,6 +274,7 @@ class Report:
     """Accumulated findings for one repository."""
 
     violations: list[Violation] = field(default_factory=list)
+    handlers_checked: int = 0
 
     @property
     def passed(self) -> bool:
@@ -285,6 +286,10 @@ class Report:
             "summary": {
                 "passed": self.passed,
                 "total_violations": len(self.violations),
+                # The denominator: how many handlers ground truth resolved.
+                # If handler discovery broke and found zero, every rule here
+                # would report clean over nothing to check.
+                "handlers_checked": self.handlers_checked,
                 "by_rule": {
                     rule: sum(1 for v in self.violations if v.rule == rule) for rule in _ALL_RULES
                 },
@@ -589,6 +594,7 @@ def scan(root: Path) -> Report:
 
     truth = load_ground_truth()
     report = Report()
+    report.handlers_checked = len(truth.handler_keys)
     report.violations.extend(scan_reference_doc(doc_path, rel_file, truth))
 
     example_config = root.joinpath(*_EXAMPLE_CONFIG_PARTS)
@@ -652,7 +658,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [{violation.rule}] {violation.file}:{violation.line}: {violation.message}")
             print(f"    Fix: {violation.remediation}")
     else:
-        print("No handler-reference violations found")
+        print(f"No handler-reference violations found ({report.handlers_checked} handlers checked)")
 
     return 1 if report.violations else 0
 

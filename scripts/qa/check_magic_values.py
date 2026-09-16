@@ -584,6 +584,7 @@ def main() -> int:
         return 1
 
     violations: list[Violation] = []
+    files_scanned = 0
 
     # Check source files
     for pyfile in sorted(src_dir.rglob("*.py")):
@@ -591,6 +592,7 @@ def main() -> int:
         if "constants" in pyfile.parts:
             continue
         violations.extend(check_file(pyfile))
+        files_scanned += 1
 
     # Check test files (but skip test fixtures which are intentionally simplified)
     if tests_dir.exists():
@@ -612,6 +614,7 @@ def main() -> int:
             ):
                 continue
             violations.extend(check_file(pyfile))
+            files_scanned += 1
 
     violations.sort(key=lambda v: (v.file, v.line, v.column))
 
@@ -621,6 +624,7 @@ def main() -> int:
                 "passed": len(violations) == 0,
                 "total_violations": len(violations),
                 "by_rule": _count_by_rule(violations),
+                "files_scanned": files_scanned,
             },
             "violations": [asdict(v) for v in violations],
         }
@@ -640,7 +644,7 @@ def main() -> int:
             for rule, count in sorted(_count_by_rule(violations).items()):
                 print(f"  {rule}: {count}")
         else:
-            print("No magic value violations found.")
+            print(f"No magic value violations found ({files_scanned} files scanned).")
 
     return 1 if violations else 0
 

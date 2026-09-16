@@ -427,6 +427,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     root = args.root.resolve()
     violations = scan(root)
+    documents_scanned = len(_documents(root))
 
     if args.json:
         out_dir = root.joinpath(*_QA_OUTPUT_DIR_PARTS)
@@ -450,13 +451,17 @@ def main(argv: list[str] | None = None) -> int:
                 "passed": not violations,
                 "total_violations": len(violations),
                 "by_rule": by_rule,
+                "documents_scanned": documents_scanned,
             },
             "violations": [v.to_dict() for v in violations],
         }
         (out_dir / _OUTPUT_FILENAME).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     if not violations:
-        print("✅ Documented snippets: every example matches the real source")
+        print(
+            f"✅ Documented snippets: every example matches the real source "
+            f"({documents_scanned} documents scanned)"
+        )
         return 0
 
     print(f"❌ Documented snippets: {len(violations)} violation(s)")

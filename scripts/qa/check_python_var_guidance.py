@@ -282,14 +282,22 @@ def scan_file(path: Path) -> list[Violation]:
     return violations
 
 
-def scan_tree(root: Path) -> list[Violation]:
-    """Recursively scan ``root`` for banned occurrences."""
+def scan_tree(root: Path) -> tuple[list[Violation], int]:
+    """Recursively scan ``root`` for banned occurrences.
+
+    Returns:
+        The violations found, and the count of files actually scanned — the
+        denominator that tells a genuinely clean sweep apart from one that
+        silently scanned nothing.
+    """
     violations: list[Violation] = []
+    files_scanned = 0
     for path in sorted(root.rglob("*")):
         if not path.is_file() or path.suffix not in _SCANNED_SUFFIXES:
             continue
         violations.extend(scan_file(path))
-    return violations
+        files_scanned += 1
+    return violations, files_scanned
 
 
 def main() -> int:
@@ -303,18 +311,23 @@ def main() -> int:
             scan_files = ()
 
     violations: list[Violation] = []
+    files_scanned = 0
     for root in scan_roots:
         if root.is_dir():
-            violations.extend(scan_tree(root))
+            root_violations, root_files_scanned = scan_tree(root)
+            violations.extend(root_violations)
+            files_scanned += root_files_scanned
     for path in scan_files:
         if path.is_file():
             violations.extend(scan_file(path))
+            files_scanned += 1
 
     output = {
         "tool": "python_var_guidance",
         "summary": {
             "passed": len(violations) == 0,
             "total_violations": len(violations),
+            "files_scanned": files_scanned,
         },
         "violations": [v.to_dict() for v in violations],
     }
@@ -329,7 +342,7 @@ def main() -> int:
             print(f"  {violation.file}:{violation.line}")
         print(f"\n{_REMEDIATION}")
     else:
-        print("No $PYTHON guidance violations found")
+        print(f"No $PYTHON guidance violations found ({files_scanned} files scanned)")
 
     return 1 if violations else 0
 

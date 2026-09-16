@@ -124,6 +124,7 @@ class Report:
     """Accumulated findings for one repository."""
 
     violations: list[Violation] = field(default_factory=list)
+    files_scanned: int = 0
 
     @property
     def passed(self) -> bool:
@@ -135,6 +136,7 @@ class Report:
             "summary": {
                 "passed": self.passed,
                 "total_violations": len(self.violations),
+                "files_scanned": self.files_scanned,
             },
             "violations": [v.to_dict() for v in self.violations],
         }
@@ -252,6 +254,7 @@ def scan(root: Path) -> Report:
         # being silently counted as clean.
         if not target.is_file():
             continue
+        report.files_scanned += 1
         report.violations.extend(scan_content(rel_path, target.read_text(encoding="utf-8")))
     return report
 
@@ -294,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         print(f"\nFix: {_REMEDIATION}")
     else:
-        print("No American spellings found")
+        print(f"No American spellings found ({report.files_scanned} files scanned)")
 
     return 1 if report.violations else 0
 

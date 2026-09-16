@@ -195,6 +195,7 @@ def main() -> int:
         print(__doc__)
         return 0
 
+    files_scanned = len(list(scan_root.rglob("*.py"))) if scan_root.is_dir() else 0
     violations = scan_tree(scan_root) if scan_root.is_dir() else []
 
     output = {
@@ -202,6 +203,7 @@ def main() -> int:
         "summary": {
             "passed": len(violations) == 0,
             "total_violations": len(violations),
+            "files_scanned": files_scanned,
         },
         "violations": [v.to_dict() for v in violations],
     }
@@ -216,7 +218,10 @@ def main() -> int:
             print(f"  {violation.file}:{violation.line}  .{violation.predicate}()")
         print(f"\n{_REMEDIATION}")
     else:
-        print("No raw stat predicates on caller-supplied paths found")
+        print(
+            f"No raw stat predicates on caller-supplied paths found "
+            f"({files_scanned} files scanned)"
+        )
 
     return 1 if violations else 0
 
