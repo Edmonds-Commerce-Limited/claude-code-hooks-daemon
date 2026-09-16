@@ -67,6 +67,44 @@ _PATHSPEC_SEPARATOR: Final[str] = "--"
 _GIT_TOKEN: Final[str] = "git"
 _COMMIT_TOKEN: Final[str] = "commit"
 
+#: The ``-a``/``--all`` flag, which makes a commit record the WORKING TREE
+#: rather than the index.
+_ALL_LONG_FLAG: Final[str] = "--all"
+_ALL_SHORT_LETTER: Final[str] = "a"
+
+#: Short-flag letters taking a REQUIRED value: with nothing after them in the
+#: token, the value is the FOLLOWING token. A superset of _SHORT_VALUE_LETTERS
+#: above -- it also carries ``t`` (--template) -- and the two are deliberately
+#: not merged: widening the set used by :func:`extract_commit_message` and
+#: :func:`extract_commit_pathspecs` would change what two live commit gates
+#: parse, which is not a side effect class 2a should have.
+_REQUIRED_VALUE_LETTERS: Final[str] = "mcCFt"
+#: Short-flag letters taking an OPTIONAL value (``-S``, ``-Skeyid``). They end
+#: the cluster like any other value letter, but NEVER consume the following
+#: token -- treating ``-S -a`` as "sign with key -a" would lose the ``-a``.
+_OPTIONAL_VALUE_LETTERS: Final[str] = "Su"
+
+#: Long options whose value is a SEPARATE token -- the only places a leading
+#: dash can appear without being a flag of its own. Distinct from VALUE_FLAGS,
+#: which mixes long and short forms and does not record whether the value is
+#: required.
+_LONG_FLAGS_WITH_VALUE: Final[frozenset[str]] = frozenset(
+    {
+        "--message",
+        "--file",
+        "--template",
+        "--author",
+        "--date",
+        "--cleanup",
+        "--reuse-message",
+        "--reedit-message",
+        "--fixup",
+        "--squash",
+        "--trailer",
+        "--pathspec-from-file",
+    }
+)
+
 
 def tokenise_command(command: str) -> list[str]:
     """Shell-tokenise ``command``; empty list when unparseable."""
@@ -149,6 +187,65 @@ def extract_commit_message(tokens: list[str]) -> str | None:
             continue
         index += 1
     return MESSAGE_JOINER.join(parts) if parts else None
+
+
+def commits_working_tree(options: list[str]) -> bool:
+    """True when this ``git commit`` option run carries ``-a``/``--all``.
+
+    ``options`` are the tokens AFTER the ``commit`` subcommand. Locating the
+    subcommand is left to the caller so it can use the rigorous
+    ``git_subcommand_index`` (which reads ``git -C path commit``); taking a
+    whole command here would invite a weaker locator instead.
+
+    Walks the options rather than testing each token independently, because
+    whether a token IS an option depends on what came before it: an option's
+    value, and anything after ``--``, are operands. ``git commit -m 'fix the
+    -a flag handling'`` must not be read as committing the working tree.
+
+    Why it matters to a caller: ``-a`` means the commit records the working
+    tree, so a gate that inspects only the INDEX examines something the commit
+    will not contain.
+    """
+    index = 0
+    while index < len(options):
+        option = options[index]
+        index += 1
+        if option == _PATHSPEC_SEPARATOR:
+            return False
+        if option == _ALL_LONG_FLAG:
+            return True
+        if not option.startswith("-") or len(option) < 2:
+            continue
+        if option.startswith("--"):
+            # A value token is never scanned for flags: it is data, and the
+            # `-a` inside a commit message is prose.
+            if option in _LONG_FLAGS_WITH_VALUE:
+                index += 1
+            continue
+        carries_all, consumes_next = _read_all_cluster(option[1:])
+        if carries_all:
+            return True
+        if consumes_next:
+            index += 1
+    return False
+
+
+def _read_all_cluster(letters: str) -> tuple[bool, bool]:
+    """``(cluster carries -a, cluster consumes the next token)``.
+
+    A short cluster ends at the first letter that takes a value: everything
+    after it is that value. Reading straight through instead is how a
+    ``-m``-attached message gets mined for flags -- and how ``-ta`` (template
+    "a") and ``-Skeya`` (key id "keya") are misread as carrying ``-a``.
+    """
+    for position, letter in enumerate(letters):
+        if letter == _ALL_SHORT_LETTER:
+            return True, False
+        if letter in _OPTIONAL_VALUE_LETTERS:
+            return False, False
+        if letter in _REQUIRED_VALUE_LETTERS:
+            return False, position == len(letters) - 1
+    return False, False
 
 
 def extract_commit_pathspecs(tokens: list[str]) -> list[str]:

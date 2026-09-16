@@ -13,6 +13,7 @@ STAGED check silently passes on a commit it never actually examined.
 from __future__ import annotations
 
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
+    commits_working_tree,
     extract_commit_message,
     extract_commit_pathspecs,
     is_git_commit,
@@ -108,3 +109,119 @@ class TestExtractCommitPathspecs:
         real pathspec, unlike `-am` which consumes it as the message."""
         tokens = ["git", "commit", "-ma", "path.md"]
         assert extract_commit_pathspecs(tokens) == ["path.md"]
+
+
+class TestCommitsWorkingTree:
+    """Does this ``git commit`` record the WORKING TREE rather than the index?
+
+    Promoted here from ``sensitive_content`` (Plan 00412 class 2a) because a
+    second caller now needs it, and this module's own docstring records what
+    copying such a helper cost the last time: an identical bug in two gates at
+    once. A third copy of short-flag cluster parsing is that bug's next
+    instalment.
+
+    Load-bearing rather than cosmetic for the caller that prompted the move. A
+    guard-config commit gate that reads only the INDEX sees nothing when the
+    config is edited and committed with ``-a`` -- which is precisely the route
+    class 2 is about.
+
+    Takes the options AFTER the subcommand, not the whole command: callers
+    locate ``commit`` with the rigorous ``git_subcommand_index`` (which handles
+    ``git -C path commit``), and taking the full token list here would tempt a
+    caller into a weaker locator.
+    """
+
+    def test_bare_commit_records_the_index(self) -> None:
+        assert commits_working_tree(["-m", "msg"]) is False
+
+    def test_short_all_flag(self) -> None:
+        assert commits_working_tree(["-a", "-m", "msg"]) is True
+
+    def test_long_all_flag(self) -> None:
+        assert commits_working_tree(["--all", "-m", "msg"]) is True
+
+    def test_cluster_carrying_all_before_the_value_letter(self) -> None:
+        assert commits_working_tree(["-am", "msg"]) is True
+
+    def test_a_inside_an_attached_value_is_not_the_all_flag(self) -> None:
+        """`-ma` is a message whose attached value is "a" -- no ``-a`` flag.
+
+        The cluster ends at the first value-taking letter; reading straight
+        through the token instead mines the MESSAGE for flags.
+        """
+        assert commits_working_tree(["-ma", "path.md"]) is False
+
+    def test_the_letter_a_in_a_quoted_message_is_not_a_flag(self) -> None:
+        """The defect this parsing exists to prevent, at the helper level.
+
+        ``git commit -m 'fix the -a flag handling'`` must not be read as
+        committing the working tree: doing so diffed the whole dirty tree and
+        let an UNSTAGED file deny a commit that never included it.
+        """
+        assert commits_working_tree(["-m", "fix the -a flag handling"]) is False
+
+    def test_all_after_the_end_of_options_separator_is_a_pathspec(self) -> None:
+        """After ``--`` every token is an operand, including one spelled `-a`."""
+        assert commits_working_tree(["-m", "msg", "--", "-a"]) is False
+
+    def test_a_long_flags_value_is_not_scanned_for_flags(self) -> None:
+        assert commits_working_tree(["--author", "-a", "-m", "msg"]) is False
+
+    def test_a_trailer_value_is_not_scanned_for_flags(self) -> None:
+        """``--trailer`` and ``--pathspec-from-file`` take separate values too.
+
+        Both were in the handler's long-flag set and absent from the one this
+        function first used -- so a trailer value beginning with a dash was
+        walked as options and its leading ``a`` read as ``--all``.
+        """
+        assert commits_working_tree(["--trailer", "-ack: someone", "-m", "msg"]) is False
+
+    def test_a_pathspec_from_file_value_is_not_scanned_for_flags(self) -> None:
+        assert commits_working_tree(["--pathspec-from-file", "-argh.txt"]) is False
+
+    def test_untracked_files_flag_does_not_swallow_a_following_all(self) -> None:
+        """``-u`` takes an OPTIONAL value, so ``-a`` after it is a real flag.
+
+        ``VALUE_FLAGS`` lists ``-u`` because the pathspec reader must not file
+        its value as a path, but that set does not distinguish required from
+        optional values. Reusing it here consumed the next token and lost an
+        ``-a`` -- a commit recording the working tree read as recording the
+        index, which is the wrong direction for a guard.
+        """
+        assert commits_working_tree(["-u", "-a", "-m", "msg"]) is True
+
+    def test_no_options_at_all(self) -> None:
+        assert commits_working_tree([]) is False
+
+    def test_template_flags_attached_value_is_not_the_all_flag(self) -> None:
+        """`-ta` is ``--template a``, not ``-t -a``.
+
+        ``-t`` takes a REQUIRED value, so the ``a`` after it is the template
+        path. This is the divergence that made the promotion worth doing
+        carefully: the shared module's value-letter set did not carry ``t``,
+        so a straight lift would have read an ``-a`` flag here that the
+        handler's own copy correctly did not.
+        """
+        assert commits_working_tree(["-ta", "path.md"]) is False
+
+    def test_template_flag_consumes_its_separate_value(self) -> None:
+        assert commits_working_tree(["-t", "-a", "-m", "msg"]) is False
+
+    def test_gpg_sign_does_not_consume_the_following_token(self) -> None:
+        """``-S`` takes an OPTIONAL value, so the next token is NOT its value.
+
+        Treating it like a required-value flag would swallow the following
+        token -- and if that token were ``-a``, the commit would be read as
+        recording the index when it records the working tree.
+        """
+        assert commits_working_tree(["-S", "-a", "-m", "msg"]) is True
+
+    def test_gpg_sign_with_an_attached_key_still_ends_the_cluster(self) -> None:
+        """The key id deliberately CONTAINS an ``a``.
+
+        A key id without one passes whether or not the cluster is terminated
+        correctly, so it proves nothing -- the first version of this test used
+        ``keyid`` and was green against an implementation that scans the whole
+        token.
+        """
+        assert commits_working_tree(["-Skeya", "-m", "msg"]) is False
