@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00420: dangerous command rule modes and config migration](00420-dangerous-command-rule-modes-and-config-migration/PLAN.md) - Not Started (per-rule-ID `block`/`warn`/`off` across the dangerous-command handlers, plus the loud, migrating config upgrade that a moved key requires)
+
 - [00419: niggles ledger fourteen](00419-niggles-ledger-fourteen/PLAN.md) - In Progress, the OPEN ledger (N1: `debug_hooks.sh` could not work in the repository that dogfoods it — it searched only the client-install layout, and died under `set -e` before reaching its own documented fallback. Three documents route agents there instead of guessing at payload shapes)
 
 - [00418: orchestrator only mode greenfield](00418-orchestrator-only-mode-greenfield/PLAN.md) - In Progress (restrict the MAIN THREAD to coordination tools; built once and deleted because hooks could not tell which agent fired an event, and `agent_id` now can. Greenfield by ruling, project-level handler, warn/simulate before ever blocking. From issue #14)
