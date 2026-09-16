@@ -172,6 +172,39 @@ owner-gated, because both add a refusal in installing projects: D-PUB-3's
 fail-closed on an oversized body file, and F-HYG-3's new deny in
 `staged_lint_gate`.
 
+## Rejected rows
+
+A row is a human claim that two sites must agree. Some proposed pairs turn out
+to be **correctly different**, and recording those is as much a part of the
+category as recording the instances — otherwise the same pair gets re-proposed
+by the next reviewer and eventually written.
+
+**`sensitive_content` vs `staged_lint_gate` on `path_is_protected`** — proposed
+by two independent checks (`D-SEC-1`, `F-HYG-3`) as "one excludes protected
+paths and the other does not". Rejected after reading both.
+
+`staged_lint_gate` skips a protected file because a lint diagnostic can quote
+the offending source line verbatim, so scanning one would leak its content into
+a deny message. `sensitive_content` has no such vector by construction: its deny
+names the file path and a pattern name or entry index, **never the line**.
+
+So the exclusion that is right in one is wrong in the other. Adding
+`path_is_protected` to `sensitive_content` would stop it scanning staged
+protected files — and a protected file staged *with a secret term in it* would
+then commit silently. The row would have removed protection in the name of
+consistency.
+
+**The real defect under `F-HYG-3` points the other way**: `staged_lint_gate`
+silently `continue`s past a staged protected file. A protected file reaching the
+index is itself the alarming event and nothing says so. That fix is a new deny
+in installing projects and is therefore owner-gated, which is how the
+consolidated worklist already classified it.
+
+The generalisable point: **two guards touching the same concept are not
+obliged to agree — only guards with the same DISCLOSURE behaviour are.** The
+asymmetry is a defect when one site is wrong, not whenever the sites differ,
+and telling those apart is the reading a registry exists to capture.
+
 ## What the Defence does not catch
 
 - **Only declared pairs.** This is the defining limitation and it is
@@ -216,8 +249,17 @@ fail-closed on an oversized body file, and F-HYG-3's new deny in
   name satisfies the row.
 
 - **Still only declared pairs.** Rows cover `pipe_blocker`/`process_probe`,
-  the worktree verbs, and the remote-docs writers. `path_is_protected` still
-  needs one.
+  the worktree verbs, and the remote-docs writers.
+
+- **A proposed pair can be WRONG, and nothing mechanical says so.** The
+  `path_is_protected` pair came from two independent checks and would have
+  weakened a guard had it been written (see Rejected rows). The Detector
+  asserts whatever a row claims — it has no opinion on whether the claim is
+  correct, so a badly-read row turns into enforced damage.
+
+  This is the real cost of "near-zero false positives by construction": the
+  construction is a human reading both sides, and the rule inherits that
+  reading rather than checking it.
 
   `_escape_for_double_quotes` is the instructive absence. It has a recorded
   instance, a partial fix, and deliberately **no row** — because the row would
