@@ -485,8 +485,13 @@ def main() -> int:
         if arg == "--root" and index + 1 < len(args):
             root = Path(args[index + 1]).resolve()
 
-    violations = scan(root)
+    # The GATE is "is every instance recorded", not "are there zero instances".
+    # Eight are known, each with a verdict and a note; failing on those would
+    # make this permanently red, and a permanently-red gate is one nobody
+    # reads. A NEW instance, or a recorded one that has gone, fails.
+    violations = unrecorded(root, DEFAULT_INVENTORY)
     files_checked = len(candidate_files(root))
+    instances_recorded = len(scan(root))
 
     output = {
         "tool": "security_downgrade_flags",
@@ -494,6 +499,7 @@ def main() -> int:
             "passed": len(violations) == 0,
             "total_violations": len(violations),
             "files_checked": files_checked,
+            "instances_recorded": instances_recorded,
         },
         "violations": [violation.to_dict() for violation in violations],
     }
@@ -503,13 +509,19 @@ def main() -> int:
         _OUTPUT_FILE.write_text(json.dumps(output, indent=2))
 
     if violations:
-        print(f"Found {len(violations)} violation(s) across {files_checked} scanned files:")
+        print(f"Found {len(violations)} unrecorded finding(s) across {files_checked} files:")
         for violation in violations:
-            print(f"  {violation.path}:{violation.line} [{violation.rule}]")
+            print(f"  {violation.path} [{violation.rule}]")
             print(f"      {violation.detail}")
         print(f"\n{_REMEDIATION}")
     else:
-        print(f"No unpinned fetch and no disabled protection ({files_checked} files checked)")
+        # The count is stated on the CLEAN path too, deliberately: "passed" here
+        # means every instance is accounted for, NOT that there are none, and a
+        # gate that prints only "OK" would let a reader believe the second.
+        print(
+            f"Every instance is recorded ({instances_recorded} across "
+            f"{files_checked} files checked)"
+        )
 
     return 1 if violations else 0
 

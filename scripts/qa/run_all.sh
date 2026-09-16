@@ -374,6 +374,16 @@ else
 fi
 echo ""
 
+echo "29. Running Security-Downgrade-Flags Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_security_downgrade_flags.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Security-downgrade-flags check FAILED"
+else
+    echo "✅ Security-downgrade-flags check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -416,6 +426,7 @@ results = {
     "Declared Invariant Pairs": "untracked/qa/declared_invariant_pairs.json",
     "Fail-Open Inventory": "untracked/qa/fail_open_inventory.json",
     "Dangerous Invocation Corpus": "untracked/qa/dangerous_invocation_corpus.json",
+    "Security Downgrade Flags": "untracked/qa/security_downgrade_flags.json",
 }
 
 all_passed = True
