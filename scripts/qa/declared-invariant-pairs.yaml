@@ -169,5 +169,5 @@
     extract: enum_members
   right:
     file: src/claude_code_hooks_daemon/routines/qa.py
-    symbol: _TERMINAL
+    symbol: _COVERING
     extract: enum_members

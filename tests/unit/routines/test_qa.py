@@ -5,9 +5,11 @@ That is the through-line: a recurring obligation that stops being met produces
 no error, no failing test and no diff — just an absence, and an absence looks
 exactly like everything being fine.
 
-- ``routine-never-run`` — the dead-man's switch in its simplest form. No record
-  at all is not a state (D6), so something outside the records must notice.
-- ``routine-overdue`` — period PLUS grace (D11), never period alone.
+- ``routine-never-run`` — the dead-man's switch: nothing on record has covered
+  anything. No record at all is not a state (D6), so something outside the
+  records must notice — and neither is a pile of records that reviewed nothing.
+- ``routine-overdue`` — period PLUS grace (D11), never period alone, measured
+  from the last run that COVERED ground rather than the last row written.
 - ``routine-run-gap`` — the interval algebra's whole purpose: commits nobody
   covered, found by arithmetic rather than judgement.
 - ``routine-ledger-unreadable`` — a hand-edited row that cannot be read. Skip
