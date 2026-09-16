@@ -114,16 +114,30 @@ class _Violation(NamedTuple):
         return f"{self.relative_path}:{self.line} — git {self.subcommand}"
 
 
+def _constant_strings(elements: list[ast.expr]) -> list[str]:
+    """The string constants among ``elements``, narrowed at the point of use.
+
+    Filtering here rather than at the end keeps the declared `list[str]` honest:
+    `ast.Constant.value` is untyped, so collecting first and filtering later
+    type-checks as a list of anything.
+    """
+    return [
+        element.value
+        for element in elements
+        if isinstance(element, ast.Constant) and isinstance(element.value, str)
+    ]
+
+
 def _list_literals(tree: ast.Module) -> dict[str, list[str]]:
     """Names bound to a list/tuple of string constants, for splatted argv."""
     bound: dict[str, list[str]] = {}
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.List | ast.Tuple)):
             continue
-        strings = [e.value for e in node.value.elts if isinstance(e, ast.Constant)]
+        strings = _constant_strings(node.value.elts)
         for target in node.targets:
             if isinstance(target, ast.Name):
-                bound[target.id] = [s for s in strings if isinstance(s, str)]
+                bound[target.id] = strings
     return bound
 
 
@@ -134,10 +148,10 @@ def _call_strings(call: ast.Call, literals: dict[str, list[str]]) -> list[str]:
         if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
             strings.append(arg.value)
         elif isinstance(arg, ast.List | ast.Tuple):
-            strings += [e.value for e in arg.elts if isinstance(e, ast.Constant)]
+            strings += _constant_strings(arg.elts)
         elif isinstance(arg, ast.Starred) and isinstance(arg.value, ast.Name):
             strings += literals.get(arg.value.id, [])
-    return [s for s in strings if isinstance(s, str)]
+    return strings
 
 
 def _is_git_call(call: ast.Call, strings: list[str]) -> bool:
