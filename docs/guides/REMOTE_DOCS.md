@@ -19,14 +19,15 @@ it stays fresh. You never write these files by hand — that is blocked.
 
 ## The everyday commands
 
-| Command                             | What it does                                   |
-| ----------------------------------- | ---------------------------------------------- |
-| `remote-docs add <url>`             | Capture a page                                 |
-| `remote-docs add <url> --verbatim`  | Store the raw response body, not an extraction |
-| `remote-docs list`                  | What is vendored                               |
-| `remote-docs check`                 | What is stale or unreadable (exit 1 if any)    |
-| `remote-docs refresh --path <file>` | Re-fetch one document                          |
-| `remote-docs refresh --all`         | Re-fetch everything                            |
+| Command                             | What it does                                         |
+| ----------------------------------- | ---------------------------------------------------- |
+| `remote-docs add <url>`             | Capture a page                                       |
+| `remote-docs add <url> --verbatim`  | Store the raw response body, not an extraction       |
+| `remote-docs add <url> --force`     | Replace an existing capture, re-deriving frontmatter |
+| `remote-docs list`                  | What is vendored                                     |
+| `remote-docs check`                 | What is stale or unreadable (exit 1 if any)          |
+| `remote-docs refresh --path <file>` | Re-fetch one document                                |
+| `remote-docs refresh --all`         | Re-fetch everything                                  |
 
 A refresh that finds upstream unchanged says `unchanged` and rewrites nothing
 but the dates.
