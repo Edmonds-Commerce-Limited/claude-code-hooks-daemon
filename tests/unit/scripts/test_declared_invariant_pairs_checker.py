@@ -303,6 +303,137 @@ class TestTheNewExtractors:
         assert checker.extract_members(tmp_path, side) == frozenset({"cp", "mv"})
 
 
+_CALL_PATH_ROW = """
+- id: demo-call-path
+  relation: reaches
+  reason: the guard exists and both writers must go through it.
+  helper: content_guard
+  left:
+    file: a.py
+    function: write_capture
+  right:
+    file: a.py
+    function: refresh_document
+"""
+
+
+class TestTheCallPathRelation:
+    """The rule kind for "a helper exists and this site does not reach it".
+
+    Several known instances of the class are this shape rather than two
+    constants — an escaper applied at one interpolation and not its sibling, a
+    content guard on one writer and not the other. The member sets are empty
+    here; what is asserted is that a NAME is called.
+    """
+
+    def _row(self, checker: ModuleType, tmp_path: Path, body: str = _CALL_PATH_ROW) -> object:
+        return checker.load_registry(_registry(tmp_path, body))[0]
+
+    _BOTH_REACH = (
+        "def write_capture(x):\n"
+        "    content_guard(x)\n"
+        "\n"
+        "def refresh_document(x):\n"
+        "    content_guard(x)\n"
+    )
+    _ONLY_LEFT_REACHES = (
+        "def write_capture(x):\n"
+        "    content_guard(x)\n"
+        "\n"
+        "def refresh_document(x):\n"
+        "    return x\n"
+    )
+
+    def test_a_site_that_does_not_reach_the_helper_is_reported(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _module(tmp_path, "a.py", self._ONLY_LEFT_REACHES)
+        violations = checker.check_row(tmp_path, self._row(checker, tmp_path))
+        assert len(violations) == 1
+        assert violations[0].members == ("refresh_document",)
+
+    def test_both_sites_reaching_it_is_silent(self, checker: ModuleType, tmp_path: Path) -> None:
+        _module(tmp_path, "a.py", self._BOTH_REACH)
+        assert checker.check_row(tmp_path, self._row(checker, tmp_path)) == []
+
+    def test_a_helper_reached_via_attribute_access_counts(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """`guards.content_guard(x)` reaches it as surely as a bare call."""
+        source = (
+            "def write_capture(x):\n"
+            "    content_guard(x)\n"
+            "\n"
+            "def refresh_document(x):\n"
+            "    guards.content_guard(x)\n"
+        )
+        _module(tmp_path, "a.py", source)
+        assert checker.check_row(tmp_path, self._row(checker, tmp_path)) == []
+
+    def test_a_helper_merely_passed_by_name_does_not_count_as_reaching_it(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """Naming the helper is not calling it.
+
+        A site that accepts `content_guard` as a parameter and never invokes it
+        has exactly the defect this row exists to catch, so a NAME-mention test
+        would report the bug as fixed.
+        """
+        source = (
+            "def write_capture(x):\n"
+            "    content_guard(x)\n"
+            "\n"
+            "def refresh_document(x, content_guard=None):\n"
+            "    return x\n"
+        )
+        _module(tmp_path, "a.py", source)
+        violations = checker.check_row(tmp_path, self._row(checker, tmp_path))
+        assert violations[0].members == ("refresh_document",)
+
+    def test_the_left_site_is_checked_too(self, checker: ModuleType, tmp_path: Path) -> None:
+        """A row is a claim about BOTH sites, not a one-way comparison.
+
+        If the reference site stops reaching the helper, the relation has
+        stopped holding and saying so is the point.
+        """
+        source = "def write_capture(x):\n    return x\n\ndef refresh_document(x):\n    return x\n"
+        _module(tmp_path, "a.py", source)
+        violations = checker.check_row(tmp_path, self._row(checker, tmp_path))
+        assert violations[0].members == ("refresh_document", "write_capture")
+
+    def test_a_missing_function_is_registry_rot_not_a_pass(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _module(tmp_path, "a.py", "def write_capture(x):\n    content_guard(x)\n")
+        with pytest.raises(checker.RegistryRotError, match="refresh_document"):
+            checker.check_row(tmp_path, self._row(checker, tmp_path))
+
+    def test_a_row_across_two_files_resolves_each_side_separately(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        body = _CALL_PATH_ROW.replace(
+            "    file: a.py\n    function: refresh_document",
+            "    file: b.py\n    function: refresh_document",
+        )
+        _module(tmp_path, "a.py", "def write_capture(x):\n    content_guard(x)\n")
+        _module(tmp_path, "b.py", "def refresh_document(x):\n    return x\n")
+        violations = checker.check_row(tmp_path, self._row(checker, tmp_path, body))
+        assert violations[0].members == ("refresh_document",)
+
+    def test_a_call_path_row_requires_a_helper(self, checker: ModuleType, tmp_path: Path) -> None:
+        body = _CALL_PATH_ROW.replace("  helper: content_guard\n", "")
+        with pytest.raises(ValueError, match="helper"):
+            checker.load_registry(_registry(tmp_path, body))
+
+    def test_the_message_names_the_helper_and_the_site(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _module(tmp_path, "a.py", self._ONLY_LEFT_REACHES)
+        payload = checker.check_row(tmp_path, self._row(checker, tmp_path))[0].to_dict()
+        assert "content_guard" in payload["message"]
+        assert "refresh_document" in payload["message"]
+
+
 class TestTheViolation:
     def test_it_carries_the_rows_reason_so_the_message_explains_itself(
         self, checker: ModuleType, tmp_path: Path
@@ -349,7 +480,12 @@ class TestTheLiveRegistry:
         """
         for row in checker.load_registry(_REGISTRY):
             for side in (row.left, row.right):
-                assert checker.extract_members(_REPO_ROOT, side)
+                if side.function:
+                    # A call-path side names a FUNCTION; resolving it at all is
+                    # the rot check, and `reaches_helper` raises if it is gone.
+                    checker.reaches_helper(_REPO_ROOT, side, row.helper)
+                else:
+                    assert checker.extract_members(_REPO_ROOT, side)
 
 
 class TestMain:

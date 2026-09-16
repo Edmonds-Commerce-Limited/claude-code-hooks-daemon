@@ -73,3 +73,18 @@
     # also drag in a verb the left side has no business carrying, and the row
     # would report a defect that is not one.
     only: [cp, mv, install, dd]
+
+# --- call-path rows: a helper exists, and both sites must REACH it ------------
+
+- id: remote-docs-writers-reach-the-content-guard
+  relation: reaches
+  helper: content_guard
+  reason: >
+    both functions write fetched remote content to disk, so the writer that
+    skips the sensitive-content scan is the one that lands unscanned bytes.
+  left:
+    file: src/claude_code_hooks_daemon/remote_docs/store.py
+    function: write_capture
+  right:
+    file: src/claude_code_hooks_daemon/remote_docs/store.py
+    function: refresh_document

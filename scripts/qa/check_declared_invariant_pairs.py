@@ -71,7 +71,13 @@ _RULE: Final[str] = "declared-invariant-pairs"
 #:
 #: ``disjoint`` -- the two member sets must not overlap.
 #: ``superset``  -- every member of the RIGHT side must appear on the LEFT.
-_RELATIONS: Final[frozenset[str]] = frozenset({"disjoint", "superset"})
+#: ``reaches``   -- both sites must CALL the row's ``helper``.
+_RELATIONS: Final[frozenset[str]] = frozenset({"disjoint", "superset", "reaches"})
+
+#: Relations whose sides name a FUNCTION and a helper rather than a symbol
+#: holding a member set. The class's instances split roughly evenly between the
+#: two shapes, and a constant-only registry could express only half of them.
+_CALL_PATH_RELATIONS: Final[frozenset[str]] = frozenset({"reaches"})
 
 #: Ways of reading a member set out of a module-level symbol.
 _EXTRACTORS: Final[frozenset[str]] = frozenset(
@@ -127,13 +133,15 @@ class Side:
     """
 
     file: str
-    symbol: str
-    extract: str
+    symbol: str = ""
+    extract: str = ""
     only: frozenset[str] = field(default_factory=frozenset)
+    #: For a call-path relation, the FUNCTION whose body must reach the helper.
+    function: str = ""
 
     @property
     def label(self) -> str:
-        return f"{self.file}::{self.symbol}"
+        return f"{self.file}::{self.symbol or self.function}"
 
 
 @dataclass(frozen=True)
@@ -146,6 +154,8 @@ class Row:
     left: Side
     right: Side
     allow: frozenset[str] = field(default_factory=frozenset)
+    #: For a call-path relation, the helper both sites must call.
+    helper: str = ""
 
 
 @dataclass(frozen=True)
@@ -159,10 +169,13 @@ class Violation:
     right: str
     members: tuple[str, ...]
     rule: str = _RULE
+    helper: str = ""
 
     def to_dict(self) -> dict[str, object]:
         named = ", ".join(f"`{m}`" for m in self.members)
-        if self.relation == "disjoint":
+        if self.relation == "reaches":
+            complaint = f"must both call `{self.helper}`, but {named} does not"
+        elif self.relation == "disjoint":
             complaint = f"must be disjoint, but both carry {named}"
         else:
             complaint = f"must cover {self.right}, but {named} is missing from it"
@@ -176,10 +189,18 @@ class Violation:
         }
 
 
-def _side(raw: object, row_id: str) -> Side:
+def _side(raw: object, row_id: str, relation: str) -> Side:
     if not isinstance(raw, dict):
         raise ValueError(f"row `{row_id}`: each side must be a mapping")
-    for key in ("file", "symbol", "extract"):
+    if "file" not in raw:
+        raise ValueError(f"row `{row_id}`: side is missing `file`")
+
+    if relation in _CALL_PATH_RELATIONS:
+        if "function" not in raw:
+            raise ValueError(f"row `{row_id}`: a `{relation}` side needs a `function`")
+        return Side(file=str(raw["file"]), function=str(raw["function"]))
+
+    for key in ("symbol", "extract"):
         if key not in raw:
             raise ValueError(f"row `{row_id}`: side is missing `{key}`")
     extract = str(raw["extract"])
@@ -226,14 +247,18 @@ def load_registry(path: Path) -> list[Row]:
         allow = entry.get("allow") or []
         if not isinstance(allow, list):
             raise ValueError(f"row `{row_id}`: `allow` must be a list")
+        helper = str(entry.get("helper", "")).strip()
+        if relation in _CALL_PATH_RELATIONS and not helper:
+            raise ValueError(f"row `{row_id}`: a `{relation}` row needs a `helper`")
         rows.append(
             Row(
                 row_id=row_id,
                 relation=relation,
                 reason=str(entry.get("reason", "")).strip(),
-                left=_side(entry.get("left"), row_id),
-                right=_side(entry.get("right"), row_id),
+                left=_side(entry.get("left"), row_id, relation),
+                right=_side(entry.get("right"), row_id, relation),
                 allow=frozenset(str(a) for a in allow),
+                helper=helper,
             )
         )
     return rows
@@ -340,6 +365,40 @@ def extract_members(repo_root: Path, side: Side) -> frozenset[str]:
     return members
 
 
+def _function_body(repo_root: Path, side: Side) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    """The named function's definition, wherever it sits in the module."""
+    path = repo_root / side.file
+    if not path.is_file():
+        raise RegistryRotError(f"{side.file} does not exist")
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == side.function:
+            return node
+    raise RegistryRotError(f"{side.function} is not defined in {side.file}")
+
+
+def reaches_helper(repo_root: Path, side: Side, helper: str) -> bool:
+    """Whether ``side``'s function CALLS ``helper``.
+
+    Calling, not naming. A function that accepts ``content_guard`` as a
+    parameter and never invokes it has exactly the defect a call-path row
+    exists to catch, so a name-mention test would report the bug as fixed.
+
+    An attribute call (``guards.content_guard(x)``) counts: reaching the helper
+    through a module is still reaching it, and the row is about whether the
+    protection runs.
+    """
+    for node in ast.walk(_function_body(repo_root, side)):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id == helper:
+            return True
+        if isinstance(func, ast.Attribute) and func.attr == helper:
+            return True
+    return False
+
+
 def check_row(repo_root: Path, row: Row) -> list[Violation]:
     """Every way ``row``'s declared relation fails to hold.
 
@@ -347,6 +406,30 @@ def check_row(repo_root: Path, row: Row) -> list[Violation]:
     relation false", so the deny message reads the same whichever relation the
     row declared.
     """
+    if row.relation in _CALL_PATH_RELATIONS:
+        # BOTH sides are checked. A row is a claim about the pair, so a
+        # reference site that stops reaching the helper has broken the relation
+        # just as surely as the site the row was written about.
+        missing = {
+            side.function
+            for side in (row.left, row.right)
+            if not reaches_helper(repo_root, side, row.helper)
+        }
+        offending = missing - row.allow
+        if not offending:
+            return []
+        return [
+            Violation(
+                row_id=row.row_id,
+                relation=row.relation,
+                reason=row.reason,
+                left=row.left.label,
+                right=row.right.label,
+                members=tuple(sorted(offending)),
+                helper=row.helper,
+            )
+        ]
+
     left = extract_members(repo_root, row.left)
     right = extract_members(repo_root, row.right)
 
@@ -407,7 +490,12 @@ def main() -> int:
     if violations:
         print(f"Found {len(violations)} declared invariant pair(s) that do not hold:")
         for violation in violations:
-            label = "shared" if violation.relation == "disjoint" else "missing from left"
+            labels = {
+                "disjoint": "shared",
+                "superset": "missing from left",
+                "reaches": f"does not call {violation.helper}",
+            }
+            label = labels[violation.relation]
             print(f"  [{violation.row_id}] {violation.left}  vs  {violation.right}")
             print(f"      {label}: {', '.join(violation.members)}")
         print(f"\n{_REMEDIATION}")
