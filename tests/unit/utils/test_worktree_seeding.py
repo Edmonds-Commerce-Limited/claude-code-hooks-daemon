@@ -115,6 +115,100 @@ class TestValidateSeedSources:
         assert "/etc/passwd" in message
 
 
+class TestAnOptionalEntryMayBeAbsent:
+    """Plan 00419 N9 — "seed this" and "seed this if it exists" are two intentions.
+
+    Seeding had ONE policy for an absent source: fatal. That is right for a
+    typo, and wrong for a source that is legitimately optional — and this
+    project's own config carried the proof. Its seed list names the gitignored
+    secret word list, with a comment saying that ``sensitive_content`` "does
+    not fail without it, it goes silently INERT". The file is absent here, so
+    every ``WorktreeCreate`` in this repository raised, and the agent was told
+    only that no path was produced.
+
+    Absence is the ONLY thing an optional entry excuses. A shape or safety
+    error in an optional entry is still a misconfiguration and still fatal:
+    the point is to express an intention the config could not previously
+    state, not to create a way to opt out of validation.
+    """
+
+    def test_an_absent_optional_entry_is_not_an_error(self, root: Path) -> None:
+        validate_seed_sources(
+            root, [SeedEntry(path=".env.missing", mode=SEED_MODE_SYMLINK, optional=True)]
+        )
+
+    def test_an_absent_required_entry_still_raises(self, root: Path) -> None:
+        """The matched pair. Without this, the fix is just "stop checking"."""
+        with pytest.raises(WorktreeSeedError, match=r"\.env\.missing"):
+            validate_seed_sources(
+                root, [SeedEntry(path=".env.missing", mode=SEED_MODE_SYMLINK, optional=False)]
+            )
+
+    def test_entries_default_to_required(self, root: Path) -> None:
+        """An unmarked entry keeps today's fail-fast behaviour."""
+        assert SeedEntry(path=".env.local", mode=SEED_MODE_SYMLINK).optional is False
+
+    def test_an_optional_entry_that_is_absolute_still_raises(self, root: Path) -> None:
+        with pytest.raises(WorktreeSeedError, match="absolute"):
+            validate_seed_sources(
+                root, [SeedEntry(path="/etc/passwd", mode=SEED_MODE_COPY, optional=True)]
+            )
+
+    def test_an_optional_entry_that_traverses_upwards_still_raises(self, root: Path) -> None:
+        with pytest.raises(WorktreeSeedError, match=r"\.\."):
+            validate_seed_sources(
+                root, [SeedEntry(path="../outside.env", mode=SEED_MODE_SYMLINK, optional=True)]
+            )
+
+    def test_an_optional_entry_that_escapes_the_root_still_raises(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "loot.txt").write_text("stolen\n", encoding="utf-8")
+        (root / "linkdir").symlink_to(outside)
+
+        with pytest.raises(WorktreeSeedError, match="outside the repository"):
+            validate_seed_sources(
+                root, [SeedEntry(path="linkdir/loot.txt", mode=SEED_MODE_COPY, optional=True)]
+            )
+
+    def test_a_present_optional_entry_is_seeded_normally(
+        self, root: Path, worktree: Path
+    ) -> None:
+        """Optional describes the SOURCE's existence, not whether to bother."""
+        placed = seed_worktree(
+            root, worktree, [SeedEntry(path=".env.local", mode=SEED_MODE_SYMLINK, optional=True)]
+        )
+
+        assert placed == [worktree / ".env.local"]
+        assert (worktree / ".env.local").read_text(encoding="utf-8") == "SECRET=canonical\n"
+
+    def test_an_absent_optional_entry_places_nothing_and_does_not_raise(
+        self, root: Path, worktree: Path
+    ) -> None:
+        """The executor half. Validation passing it is no use if placement dies."""
+        placed = seed_worktree(
+            root, worktree, [SeedEntry(path=".env.missing", mode=SEED_MODE_SYMLINK, optional=True)]
+        )
+
+        assert placed == []
+        assert not (worktree / ".env.missing").exists()
+
+    def test_a_good_neighbour_is_still_seeded(self, root: Path, worktree: Path) -> None:
+        """An absent optional entry must not cost the entries around it."""
+        placed = seed_worktree(
+            root,
+            worktree,
+            [
+                SeedEntry(path=".env.missing", mode=SEED_MODE_SYMLINK, optional=True),
+                SeedEntry(path=".env.local", mode=SEED_MODE_SYMLINK),
+            ],
+        )
+
+        assert placed == [worktree / ".env.local"]
+
+
 class TestSeedSymlinkMode:
     def test_creates_a_link_to_the_canonical_file(self, root: Path, worktree: Path) -> None:
         seed_worktree(root, worktree, [SeedEntry(path=".env.local", mode=SEED_MODE_SYMLINK)])

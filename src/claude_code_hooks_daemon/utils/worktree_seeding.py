@@ -64,6 +64,12 @@ def _describe_problem(root: Path, entry: SeedEntry) -> str | None:
 
     source = root / candidate
     if not source.exists():
+        # An OPTIONAL entry says "seed this if it exists", which is a different
+        # intention from "seed this" and the only one that tolerates absence.
+        # The safety checks above are deliberately ahead of this return, so
+        # optional never becomes a way to skip validation — see SeedEntry.
+        if entry.optional:
+            return None
         return f"{entry.path!r}: no such file or directory at the repository root"
 
     # The checks above bound where a link is WRITTEN. This bounds where it
@@ -119,7 +125,10 @@ def seed_worktree(root: Path, worktree: Path, entries: list[SeedEntry]) -> list[
     """Place each entry into ``worktree``, skipping destinations already present.
 
     Call :func:`validate_seed_sources` first — this function assumes its
-    entries are already known to be safe and present.
+    entries are already known to be safe. "Present" is the one thing it does
+    NOT assume: validation passes an absent ``optional`` entry, so placement
+    has to skip the same entry rather than dying on it. Splitting that
+    judgement across the two functions is how the pair would fall out of step.
 
     An existing destination is never overwritten. The check tests
     ``is_symlink()`` before ``exists()`` because ``exists()`` follows links and
@@ -144,6 +153,13 @@ def seed_worktree(root: Path, worktree: Path, entries: list[SeedEntry]) -> list[
         if dest.is_symlink() or dest.exists():
             logger.debug(
                 "worktree seed: %s already exists in the worktree; left untouched", entry.path
+            )
+            continue
+
+        if entry.optional and not source.exists():
+            logger.debug(
+                "worktree seed: optional entry %s is absent from the main checkout; skipped",
+                entry.path,
             )
             continue
 

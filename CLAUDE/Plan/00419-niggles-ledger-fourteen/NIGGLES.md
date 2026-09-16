@@ -417,3 +417,73 @@ bit once already.
 Remedy owner-gated — (1) makes a currently-silent divergence loud across the
 whole template, which may surface more than the status-line block and is a
 scope decision rather than a bug fix.
+
+### N9 — worktree creation was dead in this repository, and the seed list said why
+
+Every `WorktreeCreate` in this checkout failed. Four `isolation: "worktree"`
+agents were dispatched at once and all four came back with the same line:
+
+```
+HOOKS DAEMON: WorktreeCreate produced no worktree path
+(is the worktree_create handler enabled?)
+```
+
+The handler was enabled, at priority 50, and had matched the event. It ran and
+RAISED:
+
+```
+WorktreeSeedError: Cannot seed worktree — 1 configured entry is unusable:
+  '.claude/block-words.secret': no such file or directory at the repository root
+```
+
+**The config comment sitting directly above that entry states the exact reason
+the failure is wrong**: "Gitignored, so a worktree lacks it — and
+`sensitive_content` does not fail without it, it goes silently INERT."
+`secret-meta` confirms `exists: false`. So one subsystem's *legitimately
+absent* was another subsystem's *fatal*, and the seed config had no vocabulary
+to say which it meant.
+
+Seeding had ONE policy for an absent source, and the fail-fast rationale in
+`worktree_seeding.py` is sound for the case it was written for: a typo'd path
+that silently seeds nothing is the failure the feature exists to prevent. What
+was missing is that "seed this" and "seed this if it exists" are two different
+intentions, and only one of them was expressible.
+
+**Fixed** (RED first, 9 failed / 24 passed): `SeedEntry` gains `optional`,
+defaulting to `False` so an unmarked entry keeps today's behaviour. It excuses
+ABSENCE ONLY — an optional entry that is absolute, traverses upwards or
+resolves outside the repository is still fatal, each pinned by its own test.
+A non-boolean `optional:` is warned about and treated as REQUIRED, because the
+loose coercion would only ever fail in the weakening direction.
+
+**Why nobody noticed.** Nothing exercises `WorktreeCreate` until an agent needs
+a worktree, so the break was invisible from the day the secret file stopped
+existing. This is the class the niggles ledger keeps meeting: a guard whose
+failure mode is silence until the moment you depend on it.
+
+### N10 — a handler exception is reported as a configuration question
+
+The transport turned the traceback above into "is the `worktree_create`
+handler enabled?" — naming the one cause that was provably false, and omitting
+the real error text, which the daemon had already logged in full.
+
+The cost is not hypothetical: it sent the first diagnostic step to
+`hooks-daemon handlers` to check a registration that was never in doubt. A
+message that confidently names the wrong cause is worse than one that names
+none, because it is actionable in the wrong direction.
+
+**The rule this breaks.** A hook whose stdout is parsed as a VALUE cannot print
+JSON, so the diagnostic goes to stderr — and that is exactly where the
+handler's own exception message could have gone. The daemon HAS the reason at
+the moment it fails to produce a path; nothing forwards it.
+
+**Candidate remedies**, cheapest first:
+
+1. Have the WorktreeCreate response carry the handler's failure reason, and
+   the forwarder print it on stderr. The agent then reads the seeding error
+   directly instead of a guess about config.
+2. Failing that, drop the parenthetical. "Produced no worktree path" alone is
+   less useful but not misleading.
+
+Not owner-gated: a diagnostic that names a false cause is a defect, and both
+remedies are strictly additive to an error path.

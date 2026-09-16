@@ -1084,7 +1084,14 @@ handlers:
             # sensitive_content does not fail without it, it goes silently
             # INERT. Symlinked so an update to the list reaches every worktree
             # at once; nothing writes to it.
-            - .claude/block-words.secret
+            #
+            # `optional` because a checkout that never configured a word list
+            # legitimately has no such file, and seeding used to treat that as
+            # fatal — which took EVERY WorktreeCreate in this repository down
+            # (Plan 00419 N9). The comment above already said this source may
+            # be absent; the config just had no way to say it.
+            - path: .claude/block-words.secret
+              optional: true
             # Sets HOOKS_DAEMON_ROOT_DIR. The value is resolved at runtime
             # rather than baked in, so it is identical for every worktree and
             # sharing one copy is correct.

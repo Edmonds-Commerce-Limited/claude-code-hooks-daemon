@@ -67,9 +67,10 @@ _KEY_DEFAULT_MODE: Final = "default_mode"
 _KEY_ENTRIES: Final = "entries"
 _KEY_PATH: Final = "path"
 _KEY_MODE: Final = "mode"
+_KEY_OPTIONAL: Final = "optional"
 
 _TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset({_KEY_DEFAULT_MODE, _KEY_ENTRIES})
-_ENTRY_KEYS: Final[frozenset[str]] = frozenset({_KEY_PATH, _KEY_MODE})
+_ENTRY_KEYS: Final[frozenset[str]] = frozenset({_KEY_PATH, _KEY_MODE, _KEY_OPTIONAL})
 
 _LOG_PREFIX: Final = "worktree seed"
 
@@ -84,6 +85,16 @@ class SeedEntry:
             that is a content concern the executor fails fast on, with the repo
             root in hand. This type only guarantees a non-empty path string.
         mode: One of :data:`VALID_SEED_MODES`.
+        optional: Whether an ABSENT source is acceptable. ``False`` — the
+            default, and what an unmarked entry gets — keeps the fail-fast
+            contract: a named path that is not there is a typo, and seeding
+            nothing silently is the failure this feature exists to prevent.
+            ``True`` states the different intention "seed this if it exists",
+            which a project needs for a git-ignored file that its own tooling
+            treats as legitimately absent. It excuses ABSENCE ONLY; an
+            optional entry that is absolute, traverses upwards, or resolves
+            outside the repository is still a misconfiguration and still
+            fatal.
 
     Raises:
         ValueError: if a field fails validation. This is FAIL FAST defence for
@@ -94,6 +105,7 @@ class SeedEntry:
 
     path: str
     mode: str
+    optional: bool = False
 
     def __post_init__(self) -> None:
         if not self.path.strip():
@@ -101,22 +113,29 @@ class SeedEntry:
         if self.mode not in VALID_SEED_MODES:
             raise ValueError(f"SeedEntry.mode must be one of {VALID_SEED_MODES}; got {self.mode!r}")
 
-    def to_config(self, default_mode: str = DEFAULT_SEED_MODE) -> str | dict[str, str]:
+    def to_config(self, default_mode: str = DEFAULT_SEED_MODE) -> str | dict[str, str | bool]:
         """Render this entry as the YAML value a project would write.
 
         The bare-string form is used whenever the mode already matches
-        ``default_mode``, because a suggestion should read like the config a
-        human would have written rather than restating a default on every line.
+        ``default_mode`` and the entry is required, because a suggestion should
+        read like the config a human would have written rather than restating a
+        default on every line.
 
         Args:
             default_mode: The mode the surrounding block already establishes.
 
         Returns:
-            The path alone, or a ``path``/``mode`` mapping when the mode differs.
+            The path alone, or a mapping carrying whichever of ``mode`` and
+            ``optional`` differs from the default.
         """
-        if self.mode == default_mode:
+        if self.mode == default_mode and not self.optional:
             return self.path
-        return {_KEY_PATH: self.path, _KEY_MODE: self.mode}
+        rendered: dict[str, str | bool] = {_KEY_PATH: self.path}
+        if self.mode != default_mode:
+            rendered[_KEY_MODE] = self.mode
+        if self.optional:
+            rendered[_KEY_OPTIONAL] = True
+        return rendered
 
 
 def _resolve_default_mode(raw: dict[str, Any]) -> str:
@@ -137,6 +156,7 @@ def _resolve_default_mode(raw: dict[str, Any]) -> str:
 
 def _parse_entry(entry: Any, index: int, default_mode: str) -> SeedEntry | None:
     """Parse one ``entries[index]`` value, or return ``None`` if unusable."""
+    optional = False
     if isinstance(entry, str):
         path, mode = entry.strip(), default_mode
     elif isinstance(entry, dict):
@@ -151,6 +171,22 @@ def _parse_entry(entry: Any, index: int, default_mode: str) -> SeedEntry | None:
             return None
         path = str(entry.get(_KEY_PATH, "") or "").strip()
         mode = str(entry.get(_KEY_MODE, default_mode))
+        # Only a real YAML boolean counts. A string such as "false" is truthy
+        # in Python, so coercing loosely here would turn a project's attempt to
+        # say "required" into "optional" — the one direction that silently
+        # weakens the guard.
+        raw_optional = entry.get(_KEY_OPTIONAL, False)
+        if isinstance(raw_optional, bool):
+            optional = raw_optional
+        else:
+            logger.warning(
+                "%s: entries[%d] (%s) has %s %r, expected true or false; treating as required",
+                _LOG_PREFIX,
+                index,
+                path,
+                _KEY_OPTIONAL,
+                raw_optional,
+            )
     else:
         logger.warning(
             "%s: entries[%d] must be a path string or a mapping; got %s — skipped",
@@ -175,7 +211,7 @@ def _parse_entry(entry: Any, index: int, default_mode: str) -> SeedEntry | None:
         )
         return None
 
-    return SeedEntry(path=path, mode=mode)
+    return SeedEntry(path=path, mode=mode, optional=optional)
 
 
 def build_seed_config(
